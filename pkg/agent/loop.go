@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +39,7 @@ type AgentLoop struct {
 	summarizing    sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
+	subagents      map[string]*tools.SubagentManager
 }
 
 // processOptions configures how a message is processed
@@ -55,7 +58,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	registry := NewAgentRegistry(cfg, provider)
 
 	// Register shared tools to all agents
-	registerSharedTools(cfg, msgBus, registry, provider)
+	subagents := registerSharedTools(cfg, msgBus, registry, provider)
 
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
@@ -75,11 +78,13 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		state:       stateManager,
 		summarizing: sync.Map{},
 		fallback:    fallbackChain,
+		subagents:   subagents,
 	}
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider) {
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider) map[string]*tools.SubagentManager {
+	subagents := make(map[string]*tools.SubagentManager)
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
 		if !ok {
@@ -121,6 +126,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 		spawnTool := tools.NewSpawnTool(subagentManager)
+		subagents[agentID] = subagentManager
 		currentAgentID := agentID
 		spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
 			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
@@ -130,6 +136,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		// Update context builder with the complete tools registry
 		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
 	}
+	return subagents
 }
 
 func (al *AgentLoop) Run(ctx context.Context) error {
@@ -975,8 +982,90 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 
 	cmd := parts[0]
 	args := parts[1:]
+	route := al.registry.ResolveRoute(routing.RouteInput{
+		Channel:    msg.Channel,
+		AccountID:  msg.Metadata["account_id"],
+		Peer:       extractPeer(msg),
+		ParentPeer: extractParentPeer(msg),
+		GuildID:    msg.Metadata["guild_id"],
+		TeamID:     msg.Metadata["team_id"],
+	})
+	agent, ok := al.registry.GetAgent(route.AgentID)
+	if !ok {
+		agent = al.registry.GetDefaultAgent()
+	}
+	sessionKey := route.SessionKey
+	if msg.SessionKey != "" && strings.HasPrefix(msg.SessionKey, "agent:") {
+		sessionKey = msg.SessionKey
+	}
 
 	switch cmd {
+	case "/new":
+		if agent == nil {
+			return "No default agent configured", true
+		}
+		agent.Sessions.TruncateHistory(sessionKey, 0)
+		agent.Sessions.SetSummary(sessionKey, "")
+		_ = agent.Sessions.Save(sessionKey)
+		return "New conversation started.", true
+
+	case "/stop":
+		al.Stop()
+		return "Agent stopped.", true
+
+	case "/model":
+		defaultAgent := al.registry.GetDefaultAgent()
+		if defaultAgent == nil {
+			return "No default agent configured", true
+		}
+		if len(args) == 0 {
+			models := make([]string, 0)
+			if provider, ok := al.cfg.Providers.GetNamed(al.cfg.Agents.Defaults.Provider); ok {
+				for alias := range provider.Models {
+					models = append(models, alias)
+				}
+				sort.Strings(models)
+			}
+			if len(models) == 0 {
+				return fmt.Sprintf("Current model: %s", defaultAgent.Model), true
+			}
+			return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", defaultAgent.Model, strings.Join(models, ", ")), true
+		}
+		old := defaultAgent.Model
+		defaultAgent.Model = al.cfg.Providers.ResolveModelAlias(args[0], al.cfg.Agents.Defaults.Provider)
+		return fmt.Sprintf("Model changed: %s -> %s", old, defaultAgent.Model), true
+
+	case "/status":
+		if agent == nil {
+			return "No default agent configured", true
+		}
+		history := agent.Sessions.GetHistory(sessionKey)
+		return fmt.Sprintf("Model: %s\nTokens: %d\nGateway version: %s", agent.Model, al.estimateTokens(history), gatewayVersion()), true
+
+	case "/subagents":
+		if len(args) >= 2 && args[0] == "info" {
+			task, ok := al.getSubagentTask(args[1])
+			if !ok {
+				return fmt.Sprintf("Subagent task not found: %s", args[1]), true
+			}
+			return fmt.Sprintf("Task %s\nStatus: %s\nAgent: %s\nLabel: %s", task.ID, task.Status, task.AgentID, task.Label), true
+		}
+		if len(args) >= 2 && args[0] == "stop" {
+			if al.stopSubagentTask(args[1]) {
+				return fmt.Sprintf("Stopping subagent task: %s", args[1]), true
+			}
+			return fmt.Sprintf("Subagent task not running: %s", args[1]), true
+		}
+		running := al.listRunningSubagentTasks()
+		if len(running) == 0 {
+			return "No running subagents.\nUse /subagents info <task_id> or /subagents stop <task_id>.", true
+		}
+		lines := make([]string, 0, len(running))
+		for _, task := range running {
+			lines = append(lines, fmt.Sprintf("- %s (%s)", task.ID, task.Label))
+		}
+		return fmt.Sprintf("Running subagents:\n%s\nUse /subagents info <task_id> or /subagents stop <task_id>.", strings.Join(lines, "\n")), true
+
 	case "/show":
 		if len(args) < 1 {
 			return "Usage: /show [model|channel|agents]", true
@@ -1050,6 +1139,47 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 	}
 
 	return "", false
+}
+
+func gatewayVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info == nil || info.Main.Version == "" {
+		return "dev"
+	}
+	if info.Main.Version == "(devel)" {
+		return "dev"
+	}
+	return info.Main.Version
+}
+
+func (al *AgentLoop) listRunningSubagentTasks() []*tools.SubagentTask {
+	tasks := make([]*tools.SubagentTask, 0)
+	for _, manager := range al.subagents {
+		for _, task := range manager.ListTasks() {
+			if task.Status == "running" {
+				tasks = append(tasks, task)
+			}
+		}
+	}
+	return tasks
+}
+
+func (al *AgentLoop) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
+	for _, manager := range al.subagents {
+		if task, ok := manager.GetTask(taskID); ok {
+			return task, true
+		}
+	}
+	return nil, false
+}
+
+func (al *AgentLoop) stopSubagentTask(taskID string) bool {
+	for _, manager := range al.subagents {
+		if manager.StopTask(taskID) {
+			return true
+		}
+	}
+	return false
 }
 
 // extractPeer extracts the routing peer from inbound message metadata.

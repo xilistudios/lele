@@ -24,6 +24,7 @@ type SubagentTask struct {
 
 type SubagentManager struct {
 	tasks          map[string]*SubagentTask
+	cancels        map[string]context.CancelFunc
 	mu             sync.RWMutex
 	provider       providers.LLMProvider
 	defaultModel   string
@@ -41,6 +42,7 @@ type SubagentManager struct {
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus) *SubagentManager {
 	return &SubagentManager{
 		tasks:         make(map[string]*SubagentTask),
+		cancels:       make(map[string]context.CancelFunc),
 		provider:      provider,
 		defaultModel:  defaultModel,
 		bus:           bus,
@@ -96,7 +98,9 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	sm.tasks[taskID] = subagentTask
 
 	// Start task in background with context cancellation support
-	go sm.runTask(ctx, subagentTask, callback)
+	taskCtx, cancel := context.WithCancel(ctx)
+	sm.cancels[taskID] = cancel
+	go sm.runTask(taskCtx, subagentTask, callback)
 
 	if label != "" {
 		return fmt.Sprintf("Spawned subagent '%s' for task: %s", label, task), nil
@@ -168,6 +172,7 @@ After completing the task, provide a clear summary of what was done.`
 	var result *ToolResult
 	defer func() {
 		sm.mu.Unlock()
+		delete(sm.cancels, task.ID)
 		// Call callback if provided and result is set
 		if callback != nil && result != nil {
 			callback(ctx, result)
@@ -231,6 +236,17 @@ func (sm *SubagentManager) ListTasks() []*SubagentTask {
 		tasks = append(tasks, task)
 	}
 	return tasks
+}
+
+func (sm *SubagentManager) StopTask(taskID string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	cancel, ok := sm.cancels[taskID]
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
 }
 
 // SubagentTool executes a subagent task synchronously and returns the result.

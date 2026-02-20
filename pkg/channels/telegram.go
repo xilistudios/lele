@@ -115,6 +115,21 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		return c.commands.List(ctx, message)
 	}, th.CommandEqual("list"))
 
+	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
+		Commands: []telego.BotCommand{
+			{Command: "new", Description: "Start a new conversation"},
+			{Command: "stop", Description: "Stop the agent"},
+			{Command: "model", Description: "Show models and change current model"},
+			{Command: "status", Description: "Show model, tokens and gateway version"},
+			{Command: "subagents", Description: "List and manage running subagents"},
+		},
+	})
+	if err != nil {
+		logger.WarnCF("telegram", "Failed to set Telegram command menu", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleMessage(ctx, &message)
 	}, th.AnyMessage())
