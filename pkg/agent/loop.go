@@ -517,7 +517,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 			if len(candidates) > 1 && al.fallback != nil {
 				fbResult, fbErr := al.fallback.Execute(ctx, candidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						return agent.Provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
+						return agent.Provider.Chat(ctx, messages, providerToolDefs, formatProviderModel(provider, model), map[string]interface{}{
 							"max_tokens":  agent.MaxTokens,
 							"temperature": agent.Temperature,
 						})
@@ -1224,6 +1224,18 @@ func (al *AgentLoop) modelForSession(agent *AgentInstance, sessionKey string) st
 		}
 	}
 	return agent.Model
+}
+
+func formatProviderModel(provider, model string) string {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if provider == "" {
+		return model
+	}
+	if strings.HasPrefix(model, provider+"/") {
+		return model
+	}
+	return provider + "/" + model
 }
 
 // extractPeer extracts the routing peer from inbound message metadata.

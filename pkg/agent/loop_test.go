@@ -776,3 +776,24 @@ func TestHandleCommand_NewSaveFailure(t *testing.T) {
 		t.Fatal("Expected summary rollback on save failure")
 	}
 }
+
+func TestFormatProviderModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+		want     string
+	}{
+		{name: "provider and model", provider: "moonshotai", model: "Kimi-K2.5-TEE", want: "moonshotai/Kimi-K2.5-TEE"},
+		{name: "already prefixed", provider: "moonshotai", model: "moonshotai/Kimi-K2.5-TEE", want: "moonshotai/Kimi-K2.5-TEE"},
+		{name: "no provider", provider: "", model: "Kimi-K2.5-TEE", want: "Kimi-K2.5-TEE"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatProviderModel(tt.provider, tt.model); got != tt.want {
+				t.Fatalf("formatProviderModel(%q,%q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+			}
+		})
+	}
+}
