@@ -35,6 +35,121 @@ type providerSelection struct {
 	enableWebSearch bool
 }
 
+func defaultAPIBaseByType(providerType string) string {
+	switch providerType {
+	case "groq":
+		return "https://api.groq.com/openai/v1"
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "anthropic":
+		return defaultAnthropicAPIBase
+	case "openrouter":
+		return "https://openrouter.ai/api/v1"
+	case "zhipu":
+		return "https://open.bigmodel.cn/api/paas/v4"
+	case "gemini":
+		return "https://generativelanguage.googleapis.com/v1beta"
+	case "shengsuanyun":
+		return "https://router.shengsuanyun.com/api/v1"
+	case "nvidia":
+		return "https://integrate.api.nvidia.com/v1"
+	case "moonshot":
+		return "https://api.moonshot.cn/v1"
+	case "ollama":
+		return "http://localhost:11434/v1"
+	case "deepseek":
+		return "https://api.deepseek.com/v1"
+	case "github_copilot":
+		return "localhost:4321"
+	default:
+		return ""
+	}
+}
+
+func selectionFromNamedProvider(cfg *config.Config, providerName, model string, named config.NamedProviderConfig) (providerSelection, error) {
+	typ := strings.ToLower(strings.TrimSpace(named.Type))
+	if typ == "" {
+		typ = strings.ToLower(strings.TrimSpace(providerName))
+	}
+	sel := providerSelection{
+		providerType: providerTypeHTTPCompat,
+		apiKey:       named.APIKey,
+		apiBase:      named.APIBase,
+		proxy:        named.Proxy,
+		model:        model,
+		connectMode:  named.ConnectMode,
+	}
+
+	if mc, ok := named.Models[model]; ok {
+		if strings.TrimSpace(mc.Model) != "" {
+			sel.model = strings.TrimSpace(mc.Model)
+		}
+	}
+	if sel.apiBase == "" {
+		sel.apiBase = defaultAPIBaseByType(typ)
+	}
+
+	switch typ {
+	case "openai", "gpt":
+		sel.enableWebSearch = true
+		if named.WebSearch != nil {
+			sel.enableWebSearch = *named.WebSearch
+		}
+		switch named.AuthMethod {
+		case "codex-cli":
+			sel.providerType = providerTypeCodexCLIToken
+			return sel, nil
+		case "oauth", "token":
+			sel.providerType = providerTypeCodexAuth
+			return sel, nil
+		}
+	case "anthropic", "claude":
+		if named.AuthMethod == "oauth" || named.AuthMethod == "token" {
+			if sel.apiBase == "" {
+				sel.apiBase = defaultAnthropicAPIBase
+			}
+			sel.providerType = providerTypeClaudeAuth
+			return sel, nil
+		}
+	case "claude-cli", "claude-code", "claudecode":
+		workspace := cfg.WorkspacePath()
+		if workspace == "" {
+			workspace = "."
+		}
+		sel.providerType = providerTypeClaudeCLI
+		sel.workspace = workspace
+		return sel, nil
+	case "codex-cli", "codex-code":
+		workspace := cfg.WorkspacePath()
+		if workspace == "" {
+			workspace = "."
+		}
+		sel.providerType = providerTypeCodexCLI
+		sel.workspace = workspace
+		return sel, nil
+	case "deepseek":
+		if sel.model != "deepseek-chat" && sel.model != "deepseek-reasoner" {
+			sel.model = "deepseek-chat"
+		}
+	case "github_copilot", "copilot":
+		sel.providerType = providerTypeGitHubCopilot
+		if sel.apiBase == "" {
+			sel.apiBase = "localhost:4321"
+		}
+		return sel, nil
+	}
+
+	if sel.providerType == providerTypeHTTPCompat {
+		if sel.apiKey == "" && !strings.HasPrefix(sel.model, "bedrock/") {
+			return providerSelection{}, fmt.Errorf("no API key configured for provider (model: %s)", model)
+		}
+		if sel.apiBase == "" {
+			return providerSelection{}, fmt.Errorf("no API base configured for provider (model: %s)", model)
+		}
+	}
+	return sel, nil
+}
+
 func createClaudeAuthProvider(apiBase string) (LLMProvider, error) {
 	if apiBase == "" {
 		apiBase = defaultAnthropicAPIBase
@@ -63,8 +178,15 @@ func createCodexAuthProvider(enableWebSearch bool) (LLMProvider, error) {
 }
 
 func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
-	model := cfg.Agents.Defaults.Model
+	rawModel := cfg.Agents.Defaults.Model
+	model := rawModel
 	providerName := strings.ToLower(cfg.Agents.Defaults.Provider)
+	if ref := ParseModelRef(rawModel, providerName); ref != nil {
+		model = ref.Model
+		if providerName == "" {
+			providerName = ref.Provider
+		}
+	}
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{
@@ -74,6 +196,9 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 
 	// First, prefer explicit provider configuration.
 	if providerName != "" {
+		if named, ok := cfg.Providers.GetNamed(providerName); ok {
+			return selectionFromNamedProvider(cfg, providerName, model, named)
+		}
 		switch providerName {
 		case "groq":
 			if cfg.Providers.Groq.APIKey != "" {
@@ -213,6 +338,11 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 
 	// Fallback: infer provider from model and configured keys.
 	if sel.apiKey == "" && sel.apiBase == "" {
+		if ref := ParseModelRef(rawModel, ""); ref != nil {
+			if named, ok := cfg.Providers.GetNamed(ref.Provider); ok {
+				return selectionFromNamedProvider(cfg, ref.Provider, ref.Model, named)
+			}
+		}
 		switch {
 		case (strings.Contains(lowerModel, "kimi") || strings.Contains(lowerModel, "moonshot") || strings.HasPrefix(model, "moonshot/")) && cfg.Providers.Moonshot.APIKey != "":
 			sel.apiKey = cfg.Providers.Moonshot.APIKey
