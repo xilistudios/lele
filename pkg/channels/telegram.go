@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -553,10 +554,30 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 	switch parts[1] {
 	case "provider":
 		provider := parts[2]
-		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider); err != nil {
+		page := 0
+		if len(parts) >= 4 {
+			if p, err := strconv.Atoi(parts[3]); err == nil {
+				page = p
+			}
+		}
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider, page); err != nil {
 			return err
 		}
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Provider selected"))
+	case "page":
+		if len(parts) < 4 {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid page action"))
+			return nil
+		}
+		provider := parts[2]
+		page, err := strconv.Atoi(parts[3])
+		if err != nil {
+			page = 0
+		}
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider, page); err != nil {
+			return err
+		}
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Page updated"))
 	case "model":
 		if len(parts) < 4 {
 			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid model action"))
@@ -574,7 +595,7 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 	return nil
 }
 
-func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, provider string) error {
+func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, provider string, page int) error {
 	named, ok := c.config.Providers.GetNamed(provider)
 	if !ok || len(named.Models) == 0 {
 		_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "No models configured for this provider."))
@@ -585,15 +606,53 @@ func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int
 		models = append(models, name)
 	}
 	sort.Strings(models)
-	rows := make([][]telego.InlineKeyboardButton, 0, len(models))
-	for _, model := range models {
+	start, end, currentPage, totalPages := modelPageBounds(len(models), page, 6)
+	rows := make([][]telego.InlineKeyboardButton, 0, end-start)
+	for _, model := range models[start:end] {
 		rows = append(rows, tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(model).WithCallbackData(fmt.Sprintf("models:model:%s:%s", provider, model)),
 		))
 	}
-	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), fmt.Sprintf("Provider: %s\nSelect a model:", provider)).
+	if totalPages > 1 {
+		nav := make([]telego.InlineKeyboardButton, 0, 2)
+		if currentPage > 0 {
+			nav = append(nav, tu.InlineKeyboardButton("⬅️ Previous Page").
+				WithCallbackData(fmt.Sprintf("models:page:%s:%d", provider, currentPage-1)))
+		}
+		if currentPage < totalPages-1 {
+			nav = append(nav, tu.InlineKeyboardButton("➡️ Next Page").
+				WithCallbackData(fmt.Sprintf("models:page:%s:%d", provider, currentPage+1)))
+		}
+		if len(nav) > 0 {
+			rows = append(rows, tu.InlineKeyboardRow(nav...))
+		}
+	}
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID),
+		fmt.Sprintf("Provider: %s\nSelect a model (page %d/%d):", provider, currentPage+1, totalPages)).
 		WithReplyMarkup(tu.InlineKeyboard(rows...)))
 	return err
+}
+
+func modelPageBounds(total, page, perPage int) (start, end, currentPage, totalPages int) {
+	if perPage <= 0 {
+		perPage = 6
+	}
+	if total <= 0 {
+		return 0, 0, 0, 1
+	}
+	totalPages = (total + perPage - 1) / perPage
+	if page < 0 {
+		page = 0
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	start = page * perPage
+	end = start + perPage
+	if end > total {
+		end = total
+	}
+	return start, end, page, totalPages
 }
 
 func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provider, model string) bool {

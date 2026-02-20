@@ -174,8 +174,10 @@ func (c *cmd) Models(ctx context.Context, message telego.Message) error {
 
 	rows := make([][]telego.InlineKeyboardButton, 0, len(providers))
 	for _, provider := range providers {
+		named := c.config.Providers.Named[provider]
+		label := fmt.Sprintf("%s (%d)", provider, len(named.Models))
 		rows = append(rows, tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(provider).WithCallbackData("models:provider:"+provider),
+			tu.InlineKeyboardButton(label).WithCallbackData("models:provider:"+provider),
 		))
 	}
 
