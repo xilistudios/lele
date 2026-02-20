@@ -689,11 +689,25 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 	c.HandleMessage(
 		fmt.Sprintf("%d", query.From.ID),
 		fmt.Sprintf("%d", chatID),
-		fmt.Sprintf("/model %s/%s", provider, model),
+		selectedModelCommand(provider, model),
 		nil,
 		metadata,
 	)
 	return true
+}
+
+func selectedModelCommand(provider, model string) string {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if isModelReference(model) || provider == "" {
+		return "/model " + model
+	}
+	return fmt.Sprintf("/model %s/%s", provider, model)
+}
+
+func isModelReference(model string) bool {
+	idx := strings.Index(model, "/")
+	return idx > 0 && idx < len(model)-1
 }
 
 func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.CallbackQuery) error {

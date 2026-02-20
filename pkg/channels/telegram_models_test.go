@@ -18,3 +18,33 @@ func TestModelPageBounds(t *testing.T) {
 		t.Fatalf("unexpected last page bounds: %d,%d,%d,%d", start, end, page, total)
 	}
 }
+
+func TestSelectedModelCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+		want     string
+	}{
+		{
+			name:     "provider and plain model",
+			provider: "nanogpt",
+			model:    "minimax-m2.5",
+			want:     "/model nanogpt/minimax-m2.5",
+		},
+		{
+			name:     "already prefixed model",
+			provider: "nanogpt",
+			model:    "minimax/minimax-m2.5",
+			want:     "/model minimax/minimax-m2.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectedModelCommand(tt.provider, tt.model); got != tt.want {
+				t.Fatalf("selectedModelCommand(%q, %q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+			}
+		})
+	}
+}
