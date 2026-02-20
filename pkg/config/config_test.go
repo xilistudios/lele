@@ -422,3 +422,22 @@ func TestProvidersConfig_SupportsNamedProvidersAndModels(t *testing.T) {
 		t.Fatalf("model alias = %q, want gpt-4o-mini", named.Models["fast"].Model)
 	}
 }
+
+func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers.Named = map[string]NamedProviderConfig{
+		"chutes": {
+			Type: "openai",
+			Models: map[string]ProviderModelConfig{
+				"minimax": {Model: "minimax_m2.5"},
+			},
+		},
+	}
+
+	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(chutes/minimax) = %q, want %q", got, "chutes/minimax_m2.5")
+	}
+	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "minimax_m2.5")
+	}
+}

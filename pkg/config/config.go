@@ -407,6 +407,42 @@ func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
 	return cfg, ok
 }
 
+func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) string {
+	rawModel = strings.TrimSpace(rawModel)
+	if rawModel == "" {
+		return rawModel
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(defaultProvider))
+	model := rawModel
+	hadProviderPrefix := false
+	if idx := strings.Index(rawModel, "/"); idx > 0 {
+		hadProviderPrefix = true
+		provider = strings.ToLower(strings.TrimSpace(rawModel[:idx]))
+		model = strings.TrimSpace(rawModel[idx+1:])
+		if model == "" {
+			return rawModel
+		}
+	}
+
+	if provider == "" {
+		return rawModel
+	}
+	named, ok := p.GetNamed(provider)
+	if !ok || named.Models == nil {
+		return rawModel
+	}
+	aliasCfg, ok := named.Models[model]
+	if !ok || strings.TrimSpace(aliasCfg.Model) == "" {
+		return rawModel
+	}
+	resolved := strings.TrimSpace(aliasCfg.Model)
+	if hadProviderPrefix {
+		return provider + "/" + resolved
+	}
+	return resolved
+}
+
 type GatewayConfig struct {
 	Host string `json:"host" env:"PICOCLAW_GATEWAY_HOST"`
 	Port int    `json:"port" env:"PICOCLAW_GATEWAY_PORT"`
