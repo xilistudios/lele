@@ -67,9 +67,9 @@ func defaultAPIBaseByType(providerType string) string {
 }
 
 func selectionFromNamedProvider(cfg *config.Config, providerName, model string, named config.NamedProviderConfig) (providerSelection, error) {
-	typ := strings.ToLower(strings.TrimSpace(named.Type))
+	typ := named.Type
 	if typ == "" {
-		typ = strings.ToLower(strings.TrimSpace(providerName))
+		typ = providerName
 	}
 	sel := providerSelection{
 		providerType: providerTypeHTTPCompat,

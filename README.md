@@ -253,7 +253,7 @@ picoclaw agent -m "What is 2+2?"
 
 That's it! You have a working AI assistant in 2 minutes.
 
-> Modelos de agente: usa el formato `provider_name/model_name` (por ejemplo: `openrouter/auto` o `my-openai-compatible/fast`).
+> Agent models: use `provider_name/model_name` (for example: `openrouter/auto` or `my-openai-compatible/fast`).
 
 ---
 

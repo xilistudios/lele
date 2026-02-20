@@ -312,7 +312,7 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 		name := strings.ToLower(strings.TrimSpace(key))
 		named := NamedProviderConfig{}
 		if err := json.Unmarshal(val, &named); err != nil {
-			continue
+			return fmt.Errorf("invalid provider config %q: %w", key, err)
 		}
 		if named.Type == "" {
 			named.Type = name
@@ -324,7 +324,7 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (p ProvidersConfig) MarshalJSON() ([]byte, error) {
+func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	out := map[string]NamedProviderConfig{}
 	for k, v := range p.Named {
 		key := strings.ToLower(strings.TrimSpace(k))
