@@ -413,12 +413,12 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		return rawModel
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(defaultProvider))
+	provider := normalizeProviderKey(defaultProvider)
 	model := rawModel
 	hadProviderPrefix := false
 	if idx := strings.Index(rawModel, "/"); idx > 0 {
 		hadProviderPrefix = true
-		provider = strings.ToLower(strings.TrimSpace(rawModel[:idx]))
+		provider = normalizeProviderKey(rawModel[:idx])
 		model = strings.TrimSpace(rawModel[idx+1:])
 		if model == "" {
 			return rawModel
@@ -444,6 +444,29 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		return provider + "/" + resolved
 	}
 	return resolved
+}
+
+func normalizeProviderKey(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	switch p {
+	case "z.ai", "z-ai":
+		return "zai"
+	case "opencode-zen":
+		return "opencode"
+	case "qwen":
+		return "qwen-portal"
+	case "kimi-code":
+		return "kimi-coding"
+	case "gpt":
+		return "openai"
+	case "claude":
+		return "anthropic"
+	case "glm":
+		return "zhipu"
+	case "google":
+		return "gemini"
+	}
+	return p
 }
 
 type GatewayConfig struct {

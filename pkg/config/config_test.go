@@ -438,6 +438,12 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 				"kimi": {Model: "moonshotai/kimi-k2.5:thinking"},
 			},
 		},
+		"qwen-portal": {
+			Type: "openai",
+			Models: map[string]ProviderModelConfig{
+				"qwen3.5-397b-a17b-thinking": {Model: "Qwen/Qwen3.5-397B-A17B-Thinking-2507"},
+			},
+		},
 	}
 
 	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
@@ -448,5 +454,8 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 	}
 	if got := cfg.Providers.ResolveModelAlias("nanogpt/kimi", "nanogpt"); got != "moonshotai/kimi-k2.5:thinking" {
 		t.Fatalf("ResolveModelAlias(nanogpt/kimi, default nanogpt) = %q, want %q", got, "moonshotai/kimi-k2.5:thinking")
+	}
+	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
 }
