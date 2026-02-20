@@ -560,7 +560,7 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 				page = p
 			}
 		}
-		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider, page); err != nil {
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, query.Message.GetMessageID(), provider, page); err != nil {
 			return err
 		}
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Provider selected"))
@@ -574,7 +574,7 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 		if err != nil {
 			page = 0
 		}
-		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider, page); err != nil {
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, query.Message.GetMessageID(), provider, page); err != nil {
 			return err
 		}
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Page updated"))
@@ -600,9 +600,14 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 	return nil
 }
 
-func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, provider string, page int) error {
+func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, messageID int, provider string, page int) error {
+	isEdit := messageID > 0
 	named, ok := c.config.Providers.GetNamed(provider)
 	if !ok || len(named.Models) == 0 {
+		if isEdit {
+			_, err := c.bot.EditMessageText(ctx, tu.EditMessageText(tu.ID(chatID), messageID, "No models configured for this provider."))
+			return err
+		}
 		_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "No models configured for this provider."))
 		return err
 	}
@@ -632,9 +637,15 @@ func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int
 			rows = append(rows, tu.InlineKeyboardRow(nav...))
 		}
 	}
-	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID),
-		fmt.Sprintf("Provider: %s\nSelect a model (page %d/%d):", provider, currentPage+1, totalPages)).
-		WithReplyMarkup(tu.InlineKeyboard(rows...)))
+	text := fmt.Sprintf("Provider: %s\nSelect a model (page %d/%d):", provider, currentPage+1, totalPages)
+	markup := tu.InlineKeyboard(rows...)
+	if isEdit {
+		edit := tu.EditMessageText(tu.ID(chatID), messageID, text)
+		edit.ReplyMarkup = markup
+		_, err := c.bot.EditMessageText(ctx, edit)
+		return err
+	}
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), text).WithReplyMarkup(markup))
 	return err
 }
 

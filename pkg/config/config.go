@@ -438,6 +438,9 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	}
 	resolved := strings.TrimSpace(aliasCfg.Model)
 	if hadProviderPrefix {
+		if strings.Contains(resolved, "/") {
+			return resolved
+		}
 		return provider + "/" + resolved
 	}
 	return resolved

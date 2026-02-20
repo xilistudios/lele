@@ -432,6 +432,12 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 				"minimax": {Model: "minimax_m2.5"},
 			},
 		},
+		"nanogpt": {
+			Type: "openai",
+			Models: map[string]ProviderModelConfig{
+				"kimi": {Model: "moonshotai/kimi-k2.5:thinking"},
+			},
+		},
 	}
 
 	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
@@ -439,5 +445,8 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 	}
 	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "minimax_m2.5" {
 		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "minimax_m2.5")
+	}
+	if got := cfg.Providers.ResolveModelAlias("nanogpt/kimi", "nanogpt"); got != "moonshotai/kimi-k2.5:thinking" {
+		t.Fatalf("ResolveModelAlias(nanogpt/kimi, default nanogpt) = %q, want %q", got, "moonshotai/kimi-k2.5:thinking")
 	}
 }
