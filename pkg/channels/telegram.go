@@ -586,6 +586,11 @@ func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego
 		provider := parts[2]
 		model := parts[3]
 		if c.applySelectedModel(query, provider, model) {
+			if err := c.collapseModelsMenu(ctx, query); err != nil {
+				logger.WarnCF("telegram", "Failed to collapse /models keyboard", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
 			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model selected"))
 		} else {
 			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model not applied"))
@@ -689,4 +694,16 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 		metadata,
 	)
 	return true
+}
+
+func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+	_, err := c.bot.EditMessageReplyMarkup(ctx, tu.EditMessageReplyMarkup(
+		tu.ID(query.Message.GetChat().ID),
+		query.Message.GetMessageID(),
+		nil,
+	))
+	return err
 }
