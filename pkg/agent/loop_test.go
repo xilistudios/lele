@@ -686,14 +686,19 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 	}
 
 	_, handled := al.handleCommand(context.Background(), bus.InboundMessage{
-		Channel: "telegram",
-		Content: "/model test-model-v2",
+		Channel:    "telegram",
+		ChatID:     "1",
+		SessionKey: "agent:main:test:direct:user1",
+		Content:    "/model test-model-v2",
 	})
 	if !handled {
 		t.Fatal("Expected /model to be handled")
 	}
-	if defaultAgent.Model != "test-model-v2" {
-		t.Fatalf("Expected model to change, got %s", defaultAgent.Model)
+	if defaultAgent.Model != "test-model" {
+		t.Fatalf("Expected default model unchanged, got %s", defaultAgent.Model)
+	}
+	if selected, ok := al.sessionModels.Load("agent:main:test:direct:user1"); !ok || selected.(string) != "test-model-v2" {
+		t.Fatalf("Expected session model override test-model-v2, got %v", selected)
 	}
 
 	status, handled := al.handleCommand(context.Background(), bus.InboundMessage{
@@ -710,6 +715,19 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 	}
 	if !strings.Contains(status, "Gateway version:") {
 		t.Fatalf("Expected gateway version in status response: %s", status)
+	}
+
+	otherStatus, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		ChatID:     "2",
+		SessionKey: "agent:main:test:direct:user2",
+		Content:    "/status",
+	})
+	if !handled {
+		t.Fatal("Expected /status to be handled for second session")
+	}
+	if !strings.Contains(otherStatus, "Model: test-model") {
+		t.Fatalf("Unexpected second session status response: %s", otherStatus)
 	}
 }
 

@@ -37,6 +37,7 @@ type AgentLoop struct {
 	state          *state.Manager
 	running        atomic.Bool
 	summarizing    sync.Map
+	sessionModels  sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
 	subagents      map[string]*tools.SubagentManager
@@ -456,6 +457,23 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	model := al.modelForSession(agent, opts.SessionKey)
+	candidates := agent.Candidates
+	if model != agent.Model {
+		if ref := providers.ParseModelRef(model, al.cfg.Agents.Defaults.Provider); ref != nil {
+			candidates = make([]providers.FallbackCandidate, 0, len(agent.Candidates)+1)
+			candidates = append(candidates, providers.FallbackCandidate{
+				Provider: ref.Provider,
+				Model:    ref.Model,
+			})
+			for _, candidate := range agent.Candidates {
+				if candidate.Provider == ref.Provider && candidate.Model == ref.Model {
+					continue
+				}
+				candidates = append(candidates, candidate)
+			}
+		}
+	}
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -475,7 +493,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 			map[string]interface{}{
 				"agent_id":          agent.ID,
 				"iteration":         iteration,
-				"model":             agent.Model,
+				"model":             model,
 				"messages_count":    len(messages),
 				"tools_count":       len(providerToolDefs),
 				"max_tokens":        agent.MaxTokens,
@@ -496,8 +514,8 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 		var err error
 
 		callLLM := func() (*providers.LLMResponse, error) {
-			if len(agent.Candidates) > 1 && al.fallback != nil {
-				fbResult, fbErr := al.fallback.Execute(ctx, agent.Candidates,
+			if len(candidates) > 1 && al.fallback != nil {
+				fbResult, fbErr := al.fallback.Execute(ctx, candidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
 						return agent.Provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
 							"max_tokens":  agent.MaxTokens,
@@ -515,7 +533,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				}
 				return fbResult.Response, nil
 			}
-			return agent.Provider.Chat(ctx, messages, providerToolDefs, agent.Model, map[string]interface{}{
+			return agent.Provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
 				"max_tokens":  agent.MaxTokens,
 				"temperature": agent.Temperature,
 			})
@@ -1028,6 +1046,7 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		if defaultAgent == nil {
 			return "No default agent configured", true
 		}
+		currentModel := al.modelForSession(defaultAgent, sessionKey)
 		if len(args) == 0 {
 			var models []string
 			if provider, ok := al.cfg.Providers.GetNamed(al.cfg.Agents.Defaults.Provider); ok {
@@ -1038,20 +1057,23 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 				sort.Strings(models)
 			}
 			if len(models) == 0 {
-				return fmt.Sprintf("Current model: %s", defaultAgent.Model), true
+				return fmt.Sprintf("Current model: %s", currentModel), true
 			}
-			return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", defaultAgent.Model, strings.Join(models, ", ")), true
+			return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", currentModel, strings.Join(models, ", ")), true
 		}
-		old := defaultAgent.Model
-		defaultAgent.Model = al.cfg.Providers.ResolveModelAlias(args[0], al.cfg.Agents.Defaults.Provider)
-		return fmt.Sprintf("Model changed: %s -> %s", old, defaultAgent.Model), true
+		next := al.cfg.Providers.ResolveModelAlias(args[0], al.cfg.Agents.Defaults.Provider)
+		if sessionKey == "" {
+			return "Model switching requires a session context. Please start a conversation first.", true
+		}
+		al.sessionModels.Store(sessionKey, next)
+		return fmt.Sprintf("Model changed for this chat: %s -> %s", currentModel, next), true
 
 	case "/status":
 		if agent == nil {
 			return "No default agent configured", true
 		}
 		history := agent.Sessions.GetHistory(sessionKey)
-		return fmt.Sprintf("Model: %s\nTokens: %d\nGateway version: %s", agent.Model, al.estimateTokens(history), gatewayVersion()), true
+		return fmt.Sprintf("Model: %s\nTokens: %d\nGateway version: %s", al.modelForSession(agent, sessionKey), al.estimateTokens(history), gatewayVersion()), true
 
 	case "/subagents":
 		if len(args) >= 2 && args[0] == "info" {
@@ -1191,6 +1213,17 @@ func (al *AgentLoop) stopSubagentTask(taskID string) bool {
 		}
 	}
 	return false
+}
+
+func (al *AgentLoop) modelForSession(agent *AgentInstance, sessionKey string) string {
+	if sessionKey != "" {
+		if model, ok := al.sessionModels.Load(sessionKey); ok {
+			if selected, ok := model.(string); ok && selected != "" {
+				return selected
+			}
+		}
+	}
+	return agent.Model
 }
 
 // extractPeer extracts the routing peer from inbound message metadata.

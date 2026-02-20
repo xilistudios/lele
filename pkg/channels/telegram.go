@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -114,12 +115,19 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.commands.List(ctx, message)
 	}, th.CommandEqual("list"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.commands.Models(ctx, message)
+	}, th.CommandEqual("models"))
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleModelsCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
 
 	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: []telego.BotCommand{
 			{Command: "new", Description: "Start a new conversation"},
 			{Command: "stop", Description: "Stop the agent"},
 			{Command: "model", Description: "Show models and change current model"},
+			{Command: "models", Description: "Select provider/model from UI"},
 			{Command: "status", Description: "Show model, tokens and gateway version"},
 			{Command: "subagents", Description: "List and manage running subagents"},
 		},
@@ -530,4 +538,96 @@ func escapeHTML(text string) string {
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	return text
+}
+
+func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+	parts := strings.SplitN(query.Data, ":", 4)
+	if len(parts) < 3 {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid action"))
+		return nil
+	}
+
+	switch parts[1] {
+	case "provider":
+		provider := parts[2]
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, provider); err != nil {
+			return err
+		}
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Provider selected"))
+	case "model":
+		if len(parts) < 4 {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid model action"))
+			return nil
+		}
+		provider := parts[2]
+		model := parts[3]
+		if c.applySelectedModel(query, provider, model) {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model selected"))
+		} else {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model not applied"))
+		}
+	}
+
+	return nil
+}
+
+func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, provider string) error {
+	named, ok := c.config.Providers.GetNamed(provider)
+	if !ok || len(named.Models) == 0 {
+		_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "No models configured for this provider."))
+		return err
+	}
+	models := make([]string, 0, len(named.Models))
+	for name := range named.Models {
+		models = append(models, name)
+	}
+	sort.Strings(models)
+	rows := make([][]telego.InlineKeyboardButton, 0, len(models))
+	for _, model := range models {
+		rows = append(rows, tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(model).WithCallbackData(fmt.Sprintf("models:model:%s:%s", provider, model)),
+		))
+	}
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), fmt.Sprintf("Provider: %s\nSelect a model:", provider)).
+		WithReplyMarkup(tu.InlineKeyboard(rows...)))
+	return err
+}
+
+func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provider, model string) bool {
+	if query.Message == nil {
+		return false
+	}
+	senderID := fmt.Sprintf("%d", query.From.ID)
+	if query.From.Username != "" {
+		senderID = fmt.Sprintf("%d|%s", query.From.ID, query.From.Username)
+	}
+	if !c.IsAllowed(senderID) {
+		return false
+	}
+	chat := query.Message.GetChat()
+	chatID := chat.ID
+	peerKind := "direct"
+	peerID := fmt.Sprintf("%d", query.From.ID)
+	if chat.Type != "private" {
+		peerKind = "group"
+		peerID = fmt.Sprintf("%d", chatID)
+	}
+	metadata := map[string]string{
+		"user_id":   fmt.Sprintf("%d", query.From.ID),
+		"username":  query.From.Username,
+		"is_group":  fmt.Sprintf("%t", chat.Type != "private"),
+		"peer_kind": peerKind,
+		"peer_id":   peerID,
+	}
+	c.HandleMessage(
+		fmt.Sprintf("%d", query.From.ID),
+		fmt.Sprintf("%d", chatID),
+		fmt.Sprintf("/model %s/%s", provider, model),
+		nil,
+		metadata,
+	)
+	return true
 }
