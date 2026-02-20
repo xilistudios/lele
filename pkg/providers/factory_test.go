@@ -297,3 +297,31 @@ func TestCreateProviderReturnsCodexProviderForOpenAIOAuth(t *testing.T) {
 		t.Fatalf("provider type = %T, want *CodexProvider", provider)
 	}
 }
+
+func TestResolveProviderSelection_UsesNamedProviderAndModelAlias(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "my-openai-compatible/fast"
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"my-openai-compatible": {
+			Type: "openai",
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  "sk-test",
+				APIBase: "https://example.test/v1",
+			},
+			Models: map[string]config.ProviderModelConfig{
+				"fast": {Model: "gpt-4o-mini"},
+			},
+		},
+	}
+
+	got, err := resolveProviderSelection(cfg)
+	if err != nil {
+		t.Fatalf("resolveProviderSelection() error = %v", err)
+	}
+	if got.apiBase != "https://example.test/v1" {
+		t.Fatalf("apiBase = %q, want https://example.test/v1", got.apiBase)
+	}
+	if got.model != "gpt-4o-mini" {
+		t.Fatalf("model = %q, want gpt-4o-mini", got.model)
+	}
+}

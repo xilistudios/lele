@@ -74,44 +74,69 @@
   },
   "providers": {
     "anthropic": {
+      "type": "anthropic",
       "api_key": "",
-      "api_base": ""
+      "api_base": "",
+      "models": {
+        "claude-sonnet": {
+          "model": "claude-sonnet-4-5"
+        }
+      }
     },
     "openai": {
+      "type": "openai",
       "api_key": "",
       "api_base": "",
       "web_search": true
     },
+    "my-openai-compatible": {
+      "type": "openai",
+      "api_key": "sk-xxx",
+      "api_base": "https://example.com/v1",
+      "models": {
+        "fast": {
+          "model": "gpt-4o-mini"
+        }
+      }
+    },
     "openrouter": {
+      "type": "openrouter",
       "api_key": "sk-or-v1-xxx",
       "api_base": ""
     },
     "groq": {
+      "type": "groq",
       "api_key": "gsk_xxx",
       "api_base": ""
     },
     "zhipu": {
+      "type": "zhipu",
       "api_key": "YOUR_ZHIPU_API_KEY",
       "api_base": ""
     },
     "gemini": {
+      "type": "gemini",
       "api_key": "",
       "api_base": ""
     },
     "vllm": {
+      "type": "vllm",
       "api_key": "",
       "api_base": ""
     },
     "nvidia": {
+      "type": "nvidia",
       "api_key": "nvapi-xxx",
       "api_base": "",
       "proxy": "http://127.0.0.1:7890"
     },
     "moonshot": {
+      "type": "moonshot",
       "api_key": "sk-xxx",
       "api_base": ""
     },
     "ollama": {
+      "type": "ollama",
       "api_key": "",
       "api_base": "http://localhost:11434/v1"
     }

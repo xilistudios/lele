@@ -392,3 +392,52 @@ func TestLoadConfig_OpenAIWebSearchCanBeDisabled(t *testing.T) {
 		t.Fatal("OpenAI codex web search should be false when disabled in config file")
 	}
 }
+
+func TestProvidersConfig_SupportsNamedProvidersAndModels(t *testing.T) {
+	cfg := DefaultConfig()
+	data := []byte(`{
+		"providers": {
+			"my-openai-compatible": {
+				"type": "openai",
+				"api_key": "sk-test",
+				"api_base": "https://example.test/v1",
+				"models": {
+					"fast": {"model": "gpt-4o-mini"}
+				}
+			}
+		}
+	}`)
+	if err := json.Unmarshal(data, cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	named, ok := cfg.Providers.GetNamed("my-openai-compatible")
+	if !ok {
+		t.Fatal("expected named provider")
+	}
+	if named.Type != "openai" {
+		t.Fatalf("type = %q, want openai", named.Type)
+	}
+	if named.Models["fast"].Model != "gpt-4o-mini" {
+		t.Fatalf("model alias = %q, want gpt-4o-mini", named.Models["fast"].Model)
+	}
+}
+
+func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers.Named = map[string]NamedProviderConfig{
+		"chutes": {
+			Type: "openai",
+			Models: map[string]ProviderModelConfig{
+				"minimax": {Model: "minimax_m2.5"},
+			},
+		},
+	}
+
+	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(chutes/minimax) = %q, want %q", got, "chutes/minimax_m2.5")
+	}
+	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "minimax_m2.5")
+	}
+}

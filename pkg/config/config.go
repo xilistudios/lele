@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/caarlos0/env/v11"
@@ -250,19 +251,20 @@ type DevicesConfig struct {
 }
 
 type ProvidersConfig struct {
-	Anthropic     ProviderConfig       `json:"anthropic"`
-	OpenAI        OpenAIProviderConfig `json:"openai"`
-	OpenRouter    ProviderConfig       `json:"openrouter"`
-	Groq          ProviderConfig       `json:"groq"`
-	Zhipu         ProviderConfig       `json:"zhipu"`
-	VLLM          ProviderConfig       `json:"vllm"`
-	Gemini        ProviderConfig       `json:"gemini"`
-	Nvidia        ProviderConfig       `json:"nvidia"`
-	Ollama        ProviderConfig       `json:"ollama"`
-	Moonshot      ProviderConfig       `json:"moonshot"`
-	ShengSuanYun  ProviderConfig       `json:"shengsuanyun"`
-	DeepSeek      ProviderConfig       `json:"deepseek"`
-	GitHubCopilot ProviderConfig       `json:"github_copilot"`
+	Anthropic     ProviderConfig                 `json:"anthropic"`
+	OpenAI        OpenAIProviderConfig           `json:"openai"`
+	OpenRouter    ProviderConfig                 `json:"openrouter"`
+	Groq          ProviderConfig                 `json:"groq"`
+	Zhipu         ProviderConfig                 `json:"zhipu"`
+	VLLM          ProviderConfig                 `json:"vllm"`
+	Gemini        ProviderConfig                 `json:"gemini"`
+	Nvidia        ProviderConfig                 `json:"nvidia"`
+	Ollama        ProviderConfig                 `json:"ollama"`
+	Moonshot      ProviderConfig                 `json:"moonshot"`
+	ShengSuanYun  ProviderConfig                 `json:"shengsuanyun"`
+	DeepSeek      ProviderConfig                 `json:"deepseek"`
+	GitHubCopilot ProviderConfig                 `json:"github_copilot"`
+	Named         map[string]NamedProviderConfig `json:"-"`
 }
 
 type ProviderConfig struct {
@@ -276,6 +278,169 @@ type ProviderConfig struct {
 type OpenAIProviderConfig struct {
 	ProviderConfig
 	WebSearch bool `json:"web_search" env:"PICOCLAW_PROVIDERS_OPENAI_WEB_SEARCH"`
+}
+
+type ProviderModelConfig struct {
+	Model       string   `json:"model,omitempty"`
+	MaxTokens   int      `json:"max_tokens,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+}
+
+type NamedProviderConfig struct {
+	Type string `json:"type,omitempty"`
+	ProviderConfig
+	WebSearch *bool                          `json:"web_search,omitempty"`
+	Models    map[string]ProviderModelConfig `json:"models,omitempty"`
+}
+
+func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
+	type alias ProvidersConfig
+	aux := (*alias)(p)
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if p.Named == nil {
+		p.Named = map[string]NamedProviderConfig{}
+	}
+	for key, val := range raw {
+		name := strings.ToLower(strings.TrimSpace(key))
+		named := NamedProviderConfig{}
+		if err := json.Unmarshal(val, &named); err != nil {
+			return fmt.Errorf("invalid provider config %q: %w", key, err)
+		}
+		if named.Type == "" {
+			named.Type = name
+		}
+		p.Named[name] = named
+	}
+
+	p.ensureNamedDefaults()
+	return nil
+}
+
+func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
+	out := map[string]NamedProviderConfig{}
+	for k, v := range p.Named {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if key == "" {
+			continue
+		}
+		if v.Type == "" {
+			v.Type = key
+		}
+		out[key] = v
+	}
+
+	put := func(name string, cfg NamedProviderConfig) {
+		key := strings.ToLower(name)
+		if _, exists := out[key]; exists {
+			return
+		}
+		if cfg.Type == "" {
+			cfg.Type = key
+		}
+		out[key] = cfg
+	}
+
+	ws := p.OpenAI.WebSearch
+	put("anthropic", NamedProviderConfig{Type: "anthropic", ProviderConfig: p.Anthropic})
+	put("openai", NamedProviderConfig{Type: "openai", ProviderConfig: p.OpenAI.ProviderConfig, WebSearch: &ws})
+	put("openrouter", NamedProviderConfig{Type: "openrouter", ProviderConfig: p.OpenRouter})
+	put("groq", NamedProviderConfig{Type: "groq", ProviderConfig: p.Groq})
+	put("zhipu", NamedProviderConfig{Type: "zhipu", ProviderConfig: p.Zhipu})
+	put("vllm", NamedProviderConfig{Type: "vllm", ProviderConfig: p.VLLM})
+	put("gemini", NamedProviderConfig{Type: "gemini", ProviderConfig: p.Gemini})
+	put("nvidia", NamedProviderConfig{Type: "nvidia", ProviderConfig: p.Nvidia})
+	put("ollama", NamedProviderConfig{Type: "ollama", ProviderConfig: p.Ollama})
+	put("moonshot", NamedProviderConfig{Type: "moonshot", ProviderConfig: p.Moonshot})
+	put("shengsuanyun", NamedProviderConfig{Type: "shengsuanyun", ProviderConfig: p.ShengSuanYun})
+	put("deepseek", NamedProviderConfig{Type: "deepseek", ProviderConfig: p.DeepSeek})
+	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
+
+	return json.Marshal(out)
+}
+
+func (p *ProvidersConfig) ensureNamedDefaults() {
+	if p.Named == nil {
+		p.Named = map[string]NamedProviderConfig{}
+	}
+	put := func(name string, cfg NamedProviderConfig) {
+		key := strings.ToLower(name)
+		if existing, ok := p.Named[key]; ok {
+			if existing.Type == "" {
+				existing.Type = key
+				p.Named[key] = existing
+			}
+			return
+		}
+		if cfg.Type == "" {
+			cfg.Type = key
+		}
+		p.Named[key] = cfg
+	}
+
+	ws := p.OpenAI.WebSearch
+	put("anthropic", NamedProviderConfig{Type: "anthropic", ProviderConfig: p.Anthropic})
+	put("openai", NamedProviderConfig{Type: "openai", ProviderConfig: p.OpenAI.ProviderConfig, WebSearch: &ws})
+	put("openrouter", NamedProviderConfig{Type: "openrouter", ProviderConfig: p.OpenRouter})
+	put("groq", NamedProviderConfig{Type: "groq", ProviderConfig: p.Groq})
+	put("zhipu", NamedProviderConfig{Type: "zhipu", ProviderConfig: p.Zhipu})
+	put("vllm", NamedProviderConfig{Type: "vllm", ProviderConfig: p.VLLM})
+	put("gemini", NamedProviderConfig{Type: "gemini", ProviderConfig: p.Gemini})
+	put("nvidia", NamedProviderConfig{Type: "nvidia", ProviderConfig: p.Nvidia})
+	put("ollama", NamedProviderConfig{Type: "ollama", ProviderConfig: p.Ollama})
+	put("moonshot", NamedProviderConfig{Type: "moonshot", ProviderConfig: p.Moonshot})
+	put("shengsuanyun", NamedProviderConfig{Type: "shengsuanyun", ProviderConfig: p.ShengSuanYun})
+	put("deepseek", NamedProviderConfig{Type: "deepseek", ProviderConfig: p.DeepSeek})
+	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
+}
+
+func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
+	p.ensureNamedDefaults()
+	cfg, ok := p.Named[strings.ToLower(strings.TrimSpace(name))]
+	return cfg, ok
+}
+
+func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) string {
+	rawModel = strings.TrimSpace(rawModel)
+	if rawModel == "" {
+		return rawModel
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(defaultProvider))
+	model := rawModel
+	hadProviderPrefix := false
+	if idx := strings.Index(rawModel, "/"); idx > 0 {
+		hadProviderPrefix = true
+		provider = strings.ToLower(strings.TrimSpace(rawModel[:idx]))
+		model = strings.TrimSpace(rawModel[idx+1:])
+		if model == "" {
+			return rawModel
+		}
+	}
+
+	if provider == "" {
+		return rawModel
+	}
+	named, ok := p.GetNamed(provider)
+	if !ok || named.Models == nil {
+		return rawModel
+	}
+	aliasCfg, ok := named.Models[model]
+	if !ok || strings.TrimSpace(aliasCfg.Model) == "" {
+		return rawModel
+	}
+	resolved := strings.TrimSpace(aliasCfg.Model)
+	if hadProviderPrefix {
+		return provider + "/" + resolved
+	}
+	return resolved
 }
 
 type GatewayConfig struct {

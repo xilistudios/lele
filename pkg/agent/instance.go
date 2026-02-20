@@ -43,8 +43,8 @@ func NewAgentInstance(
 	workspace := resolveAgentWorkspace(agentCfg, defaults)
 	os.MkdirAll(workspace, 0755)
 
-	model := resolveAgentModel(agentCfg, defaults)
-	fallbacks := resolveAgentFallbacks(agentCfg, defaults)
+	model := resolveAgentModel(agentCfg, defaults, cfg)
+	fallbacks := resolveAgentFallbacks(agentCfg, defaults, cfg)
 
 	restrict := defaults.RestrictToWorkspace
 	toolsRegistry := tools.NewToolRegistry()
@@ -129,19 +129,29 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 }
 
 // resolveAgentModel resolves the primary model for an agent.
-func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
+func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) string {
 	if agentCfg != nil && agentCfg.Model != nil && strings.TrimSpace(agentCfg.Model.Primary) != "" {
-		return strings.TrimSpace(agentCfg.Model.Primary)
+		return cfg.Providers.ResolveModelAlias(strings.TrimSpace(agentCfg.Model.Primary), defaults.Provider)
 	}
-	return defaults.Model
+	return cfg.Providers.ResolveModelAlias(defaults.Model, defaults.Provider)
 }
 
 // resolveAgentFallbacks resolves the fallback models for an agent.
-func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) []string {
-	if agentCfg != nil && agentCfg.Model != nil && agentCfg.Model.Fallbacks != nil {
-		return agentCfg.Model.Fallbacks
+func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) []string {
+	resolve := func(in []string) []string {
+		if in == nil {
+			return nil
+		}
+		out := make([]string, 0, len(in))
+		for _, model := range in {
+			out = append(out, cfg.Providers.ResolveModelAlias(model, defaults.Provider))
+		}
+		return out
 	}
-	return defaults.ModelFallbacks
+	if agentCfg != nil && agentCfg.Model != nil && agentCfg.Model.Fallbacks != nil {
+		return resolve(agentCfg.Model.Fallbacks)
+	}
+	return resolve(defaults.ModelFallbacks)
 }
 
 func expandHome(path string) string {

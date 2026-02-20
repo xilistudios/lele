@@ -217,6 +217,7 @@ picoclaw onboard
   },
   "providers": {
     "openrouter": {
+      "type": "openrouter",
       "api_key": "xxx",
       "api_base": "https://openrouter.ai/api/v1"
     }
@@ -251,6 +252,8 @@ picoclaw agent -m "What is 2+2?"
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+
+> Agent models: use `provider_name/model_name` (for example: `openrouter/auto` or `my-openai-compatible/fast`).
 
 ---
 
@@ -711,6 +714,7 @@ This keeps the runtime lightweight while making new OpenAI-compatible backends m
   },
   "providers": {
     "zhipu": {
+      "type": "zhipu",
       "api_key": "Your API Key",
       "api_base": "https://open.bigmodel.cn/api/paas/v4"
     }
@@ -738,9 +742,11 @@ picoclaw agent -m "Hello"
   },
   "providers": {
     "openrouter": {
+      "type": "openrouter",
       "api_key": "sk-or-v1-xxx"
     },
     "groq": {
+      "type": "groq",
       "api_key": "gsk_xxx"
     }
   },

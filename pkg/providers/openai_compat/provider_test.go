@@ -271,6 +271,9 @@ func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
 		t.Fatalf("normalizeModel(deepseek) = %q, want %q", got, "deepseek-chat")
 	}
+	if got := normalizeModel("chutes/minimax-m2.5", "https://llm.chutes.ai/v1"); got != "minimax-m2.5" {
+		t.Fatalf("normalizeModel(chutes) = %q, want %q", got, "minimax-m2.5")
+	}
 	if got := normalizeModel("openrouter/auto", "https://openrouter.ai/api/v1"); got != "openrouter/auto" {
 		t.Fatalf("normalizeModel(openrouter) = %q, want %q", got, "openrouter/auto")
 	}
