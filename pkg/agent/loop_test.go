@@ -712,3 +712,49 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 		t.Fatalf("Expected gateway version in status response: %s", status)
 	}
 }
+
+func TestHandleCommand_NewSaveFailure(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	sessionKey := "agent:main:/invalid"
+	agent.Sessions.AddMessage(sessionKey, "user", "hello")
+	agent.Sessions.SetSummary(sessionKey, "summary")
+
+	response, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		ChatID:     "1",
+		SessionKey: sessionKey,
+		Content:    "/new",
+	})
+	if !handled {
+		t.Fatal("Expected /new to be handled")
+	}
+	if !strings.Contains(response, "failed to persist") {
+		t.Fatalf("Expected persist failure response, got: %s", response)
+	}
+	if got := len(agent.Sessions.GetHistory(sessionKey)); got == 0 {
+		t.Fatal("Expected history rollback on save failure")
+	}
+	if got := agent.Sessions.GetSummary(sessionKey); got == "" {
+		t.Fatal("Expected summary rollback on save failure")
+	}
+}

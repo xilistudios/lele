@@ -171,8 +171,15 @@ After completing the task, provide a clear summary of what was done.`
 	sm.mu.Lock()
 	var result *ToolResult
 	defer func() {
+		var cancel context.CancelFunc
+		if c, ok := sm.cancels[task.ID]; ok {
+			cancel = c
+			delete(sm.cancels, task.ID)
+		}
 		sm.mu.Unlock()
-		delete(sm.cancels, task.ID)
+		if cancel != nil {
+			cancel()
+		}
 		// Call callback if provided and result is set
 		if callback != nil && result != nil {
 			callback(ctx, result)
@@ -240,13 +247,12 @@ func (sm *SubagentManager) ListTasks() []*SubagentTask {
 
 func (sm *SubagentManager) StopTask(taskID string) bool {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 	cancel, ok := sm.cancels[taskID]
-	if !ok {
-		return false
+	sm.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
 	}
-	cancel()
-	return true
+	return ok
 }
 
 // SubagentTool executes a subagent task synchronously and returns the result.

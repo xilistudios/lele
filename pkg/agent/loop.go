@@ -1004,9 +1004,19 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		if agent == nil {
 			return "No default agent configured", true
 		}
+		previousHistory := agent.Sessions.GetHistory(sessionKey)
+		previousSummary := agent.Sessions.GetSummary(sessionKey)
 		agent.Sessions.TruncateHistory(sessionKey, 0)
 		agent.Sessions.SetSummary(sessionKey, "")
-		_ = agent.Sessions.Save(sessionKey)
+		if err := agent.Sessions.Save(sessionKey); err != nil {
+			agent.Sessions.SetHistory(sessionKey, previousHistory)
+			agent.Sessions.SetSummary(sessionKey, previousSummary)
+			logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+			return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err), true
+		}
 		return "New conversation started.", true
 
 	case "/stop":
@@ -1019,8 +1029,9 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 			return "No default agent configured", true
 		}
 		if len(args) == 0 {
-			models := make([]string, 0)
+			var models []string
 			if provider, ok := al.cfg.Providers.GetNamed(al.cfg.Agents.Defaults.Provider); ok {
+				models = make([]string, 0, len(provider.Models))
 				for alias := range provider.Models {
 					models = append(models, alias)
 				}
