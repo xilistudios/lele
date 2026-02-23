@@ -56,6 +56,13 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 
+	// Fmod tools
+	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewPreviewTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
+
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
 
