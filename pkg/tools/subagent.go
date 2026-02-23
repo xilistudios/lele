@@ -1,4 +1,4 @@
-package tools
+﻿package tools
 
 import (
 	"context"
@@ -269,6 +269,22 @@ func (sm *SubagentManager) StopAll() int {
 		delete(sm.cancels, taskID)
 	}
 	return stoppedCount
+}
+
+// GetToolRegistry returns the tool registry available to subagents.
+// This allows tests and callers to inspect what tools subagents can use.
+func (sm *SubagentManager) GetToolRegistry() *ToolRegistry {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.tools
+}
+
+// HasTool checks if a tool with the given name is available to subagents.
+func (sm *SubagentManager) HasTool(name string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	_, ok := sm.tools.Get(name)
+	return ok
 }
 
 // SubagentTool executes a subagent task synchronously and returns the result.

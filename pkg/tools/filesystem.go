@@ -102,6 +102,14 @@ func (t *ReadFileTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "Path to the file to read",
 			},
+			"from": map[string]interface{}{
+				"type":        "integer",
+				"description": "Start line (1-indexed, inclusive). Omit to start from line 1.",
+			},
+			"to": map[string]interface{}{
+				"type":        "integer",
+				"description": "End line (1-indexed, inclusive). Omit to read until end.",
+			},
 		},
 		"required": []string{"path"},
 	}
