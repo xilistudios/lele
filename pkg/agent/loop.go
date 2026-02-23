@@ -1107,16 +1107,17 @@ func formatToolsForLog(tools []providers.ToolDefinition) string {
 }
 
 // summarizeSession summarizes the conversation history for a session.
+// Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
 // Returns statistics about the operation.
 func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	history := agent.Sessions.GetHistory(sessionKey)
-	summary := agent.Sessions.GetSummary(sessionKey)
+	existingSummary := agent.Sessions.GetSummary(sessionKey)
 
-	// Keep last 4 messages for continuity
-	if len(history) <= 4 {
+	// Need at least system prompt + 3 messages to summarize (keep last 2 exchanges)
+	if len(history) <= 3 {
 		return nil
 	}
 
@@ -1124,62 +1125,57 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) *
 	beforeMessages := len(history)
 	beforeTokens := al.estimateTokens(history)
 
-	toSummarize := history[:len(history)-4]
+	// Keep system prompt [0] and last 2 messages for continuity
+	toSummarize := history[1 : len(history)-2] // Everything between system and last 2
 
-	// Oversized Message Guard
-	maxMessageTokens := agent.ContextWindow / 2
-	validMessages := make([]providers.Message, 0)
-	omitted := false
-
-	for _, m := range toSummarize {
-		if m.Role != "user" && m.Role != "assistant" {
-			continue
-		}
-		msgTokens := len(m.Content) / 2
-		if msgTokens > maxMessageTokens {
-			omitted = true
-			continue
-		}
-		validMessages = append(validMessages, m)
-	}
-
-	if len(validMessages) == 0 {
+	if len(toSummarize) == 0 {
 		return nil
 	}
 
-	// Multi-Part Summarization
-	var finalSummary string
-	if len(validMessages) > 10 {
-		mid := len(validMessages) / 2
-		part1 := validMessages[:mid]
-		part2 := validMessages[mid:]
+	// Build comprehensive summary prompt with ALL old messages
+	prompt := "Please provide a comprehensive summary of the following conversation. " +
+		"Capture all important context, decisions, facts, and action items so that " +
+		"someone reading just this summary would understand what happened.\n\n"
 
-		s1, _ := al.summarizeBatch(ctx, agent, part1, "")
-		s2, _ := al.summarizeBatch(ctx, agent, part2, "")
+	if existingSummary != "" {
+		prompt += "=== PREVIOUS SUMMARY ===\n" + existingSummary + "\n\n"
+	}
 
-		mergePrompt := fmt.Sprintf("Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s", s1, s2)
-		resp, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: mergePrompt}}, nil, agent.Model, map[string]interface{}{
-			"max_tokens":  1024,
-			"temperature": 0.3,
-		})
-		if err == nil {
-			finalSummary = resp.Content
-		} else {
-			finalSummary = s1 + " " + s2
+	prompt += "=== CONVERSATION TO SUMMARIZE ===\n"
+	for _, m := range toSummarize {
+		role := strings.ToUpper(m.Role)
+		content := m.Content
+		// Truncate very long messages for the summary prompt
+		if len(content) > 4000 {
+			content = content[:4000] + "\n[Content truncated...]"
 		}
-	} else {
-		finalSummary, _ = al.summarizeBatch(ctx, agent, validMessages, summary)
+		prompt += fmt.Sprintf("%s: %s\n\n", role, content)
 	}
 
-	if omitted && finalSummary != "" {
-		finalSummary += "\n[Note: Some oversized messages were omitted from this summary for efficiency.]"
+	prompt += "=== END OF CONVERSATION ===\n\n" +
+		"Now provide a detailed summary that preserves all critical context."
+
+	// Call LLM to summarize everything
+	resp, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, agent.Model, map[string]interface{}{
+		"max_tokens":  2048,
+		"temperature": 0.3,
+	})
+
+	var finalSummary string
+	if err == nil && resp != nil {
+		finalSummary = resp.Content
+	} else if existingSummary != "" {
+		// Fall back to existing summary
+		finalSummary = existingSummary + "\n[Update: Additional conversation not summarized due to error]"
 	}
 
-	if finalSummary != "" {
-		agent.Sessions.SetSummary(sessionKey, finalSummary)
-		agent.Sessions.TruncateHistory(sessionKey, 4)
-		agent.Sessions.Save(sessionKey)
+	if finalSummary == "" {
+		return nil
 	}
+
+	agent.Sessions.SetSummary(sessionKey, finalSummary)
+	agent.Sessions.TruncateHistory(sessionKey, 4)
+	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
