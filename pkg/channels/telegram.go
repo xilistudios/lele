@@ -481,6 +481,7 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 	}
 	
 	if cmd == "stop" {
+		// Send system message to agent loop - response will come via bus
 		systemMsg := bus.InboundMessage{
 			Channel:    "system",
 			SenderID:   senderID,
@@ -492,15 +493,8 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 			},
 		}
 		c.bus.PublishInbound(systemMsg)
-		
-		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "⏹️ Agente detenido.",
-			ReplyParameters: &telego.ReplyParameters{
-				MessageID: message.MessageID,
-			},
-		})
-		return err
+		// Response will be sent by agent loop via bus
+		return nil
 	}
 	
 	if cmd == "model" {

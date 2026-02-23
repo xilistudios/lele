@@ -44,6 +44,7 @@ type AgentLoop struct {
 	channelManager  *channels.Manager
 	subagents       map[string]*tools.SubagentManager
 	verboseManager  *session.VerboseManager
+	sessionCancels  sync.Map // sessionKey -> context.CancelFunc
 }
 
 // processOptions configures how a message is processed
@@ -192,6 +193,28 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+}
+
+// stopAllSubagents stops all running subagents and returns the count of stopped tasks.
+func (al *AgentLoop) stopAllSubagents() int {
+	totalStopped := 0
+	for _, manager := range al.subagents {
+		if manager != nil {
+			stopped := manager.StopAll()
+			totalStopped += stopped
+		}
+	}
+	return totalStopped
+}
+
+// cancelSession cancels any active processing for a specific session
+func (al *AgentLoop) cancelSession(sessionKey string) {
+	if cancel, ok := al.sessionCancels.Load(sessionKey); ok {
+		if cf, ok := cancel.(context.CancelFunc); ok && cf != nil {
+			cf()
+		}
+		al.sessionCancels.Delete(sessionKey)
+	}
 }
 
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
@@ -417,11 +440,18 @@ func (al *AgentLoop) processSystemMessage(ctx context.Context, msg bus.InboundMe
 		return "", nil
 
 	case "/stop":
-		al.Stop()
+		// Stop all subagents first
+		subagentCount := al.stopAllSubagents()
+		// Cancel any active session processing
+		al.cancelSession(sessionKey)
+		response := "Agente detenido."
+		if subagentCount > 0 {
+			response = fmt.Sprintf("Agente detenido (incluye %d subagente(s)).", subagentCount)
+		}
 		al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
-			Content:   "Agent stopped.",
+			Content:   response,
 			ReplyTo:   replyToMessageID,
 			MessageID: replyToMessageID,
 		})

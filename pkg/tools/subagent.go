@@ -255,6 +255,22 @@ func (sm *SubagentManager) StopTask(taskID string) bool {
 	return ok
 }
 
+// StopAll stops all running subagent tasks.
+func (sm *SubagentManager) StopAll() int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	
+	stoppedCount := 0
+	for taskID, cancel := range sm.cancels {
+		if cancel != nil {
+			cancel()
+			stoppedCount++
+		}
+		delete(sm.cancels, taskID)
+	}
+	return stoppedCount
+}
+
 // SubagentTool executes a subagent task synchronously and returns the result.
 // Unlike SpawnTool which runs tasks asynchronously, SubagentTool waits for completion
 // and returns the result directly in the ToolResult.
