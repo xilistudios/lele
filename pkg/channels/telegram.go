@@ -45,6 +45,37 @@ func (c *thinkingCancel) Cancel() {
 	}
 }
 
+// startTypingIndicator starts a persistent typing indicator that updates every 4 seconds
+func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	ticker := time.NewTicker(4 * time.Second)
+
+	// Send initial typing action
+	if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
+		logger.ErrorCF("telegram", "Failed to send initial chat action", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
+					logger.DebugCF("telegram", "Failed to send chat action", map[string]interface{}{
+						"error": err.Error(),
+					})
+				}
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+
+	return cancel
+}
+
 func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChannel, error) {
 	var opts []telego.BotOption
 	telegramCfg := cfg.Channels.Telegram
@@ -389,15 +420,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		"preview":   utils.Truncate(content, 50),
 	})
 
-	// Thinking indicator
-	err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping))
-	if err != nil {
-		logger.ErrorCF("telegram", "Failed to send chat action", map[string]interface{}{
-			"error": err.Error(),
-		})
-	}
-
-	// Stop any previous thinking animation
+	// Stop any previous thinking animation and start new one
 	chatIDStr := fmt.Sprintf("%d", chatID)
 	if prevStop, ok := c.stopThinking.Load(chatIDStr); ok {
 		if cf, ok := prevStop.(*thinkingCancel); ok && cf != nil {
@@ -405,9 +428,9 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		}
 	}
 
-	// Create cancel function for thinking state
-	_, thinkCancel := context.WithTimeout(ctx, 5*time.Minute)
-	c.stopThinking.Store(chatIDStr, &thinkingCancel{fn: thinkCancel})
+	// Start persistent typing indicator that updates every 4 seconds
+	typingCancel := c.startTypingIndicator(chatID)
+	c.stopThinking.Store(chatIDStr, &thinkingCancel{fn: typingCancel})
 
 	pMsg, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "Thinking... 💭"))
 	if err == nil {
