@@ -72,8 +72,16 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	// Create state manager using default agent's workspace for channel recording
 	defaultAgent := registry.GetDefaultAgent()
 	var stateManager *state.Manager
+	var sessionManager *session.SessionManager
 	if defaultAgent != nil {
 		stateManager = state.NewManager(defaultAgent.Workspace)
+		sessionManager = defaultAgent.Sessions
+	}
+
+	// Create verbose manager with session persistence
+	verboseManager := session.NewVerboseManager()
+	if sessionManager != nil {
+		verboseManager.SetSessionManager(sessionManager)
 	}
 
 	return &AgentLoop{
@@ -84,7 +92,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		summarizing:    sync.Map{},
 		fallback:       fallbackChain,
 		subagents:      subagents,
-		verboseManager: session.NewVerboseManager(),
+		verboseManager: verboseManager,
 	}
 }
 
@@ -517,6 +525,18 @@ func (al *AgentLoop) processSystemMessage(ctx context.Context, msg bus.InboundMe
 			MessageID: replyToMessageID,
 		})
 		return "", nil
+
+	// Handle subagent completion messages - show result directly to user
+	case "Task":
+		// Subagent task completion message - display directly to user
+		al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   content,
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+		return "", nil
 	}
 
 	// For non-command messages, run through LLM
@@ -553,6 +573,8 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *AgentInstance, opt
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		// Initialize verbose mode from persistent storage
+		al.verboseManager.InitializeFromSession(opts.SessionKey)
 	}
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
