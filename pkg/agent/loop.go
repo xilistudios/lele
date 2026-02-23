@@ -131,6 +131,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		// Spawn tool with allowlist checker
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+		subagentManager.SetTools(agent.Tools) // Pass parent agent's tools to subagent
 		spawnTool := tools.NewSpawnTool(subagentManager)
 		subagents[agentID] = subagentManager
 		currentAgentID := agentID
@@ -713,12 +714,24 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 
 			errMsg := strings.ToLower(err.Error())
 			isContextError := strings.Contains(errMsg, "token") ||
-				strings.Contains(errMsg, "context") ||
 				strings.Contains(errMsg, "invalidparameter") ||
 				strings.Contains(errMsg, "length")
+			isNetworkTimeout := strings.Contains(errMsg, "context deadline exceeded") ||
+				strings.Contains(errMsg, "timeout") ||
+				strings.Contains(errMsg, "client.timeout")
+
+			if isNetworkTimeout {
+				logger.WarnCF("agent", "Network timeout, retrying without compression", map[string]interface{}{
+					"error": err.Error(),
+					"retry": retry,
+				})
+				// Wait a bit before retrying
+				time.Sleep(time.Duration(retry+1) * 2 * time.Second)
+				continue
+			}
 
 			if isContextError && retry < maxRetries {
-				logger.WarnCF("agent", "Context window error detected, attempting compression", map[string]interface{}{
+				logger.WarnCF("agent", "Context window error detected, attempting summarization", map[string]interface{}{
 					"error": err.Error(),
 					"retry": retry,
 				})
@@ -727,11 +740,16 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 					al.bus.PublishOutbound(bus.OutboundMessage{
 						Channel: opts.Channel,
 						ChatID:  opts.ChatID,
-						Content: "Context window exceeded. Compressing history and retrying...",
+						Content: "Context window exceeded. Summarizing history and retrying...",
 					})
 				}
 
-				al.forceCompression(agent, opts.SessionKey)
+				// Use summarizeSession instead of forceCompression to preserve context
+				stats := al.summarizeSession(agent, opts.SessionKey)
+				if stats == nil {
+					logger.ErrorCF("agent", "Summarization failed, falling back to compression", nil)
+					al.forceCompression(agent, opts.SessionKey)
+				}
 				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
 				messages = agent.ContextBuilder.BuildMessages(
