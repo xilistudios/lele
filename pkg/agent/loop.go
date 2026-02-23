@@ -762,6 +762,19 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 					"iteration":     iteration,
 					"content_chars": len(finalContent),
 				})
+			// If response is empty, retry by prompting the model again
+			if len(strings.TrimSpace(finalContent)) == 0 && iteration < agent.MaxIterations-2 {
+				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
+					map[string]interface{}{
+						"agent_id":  agent.ID,
+						"iteration": iteration,
+					})
+				messages = append(messages, providers.Message{
+					Role:    "user",
+					Content: "Your previous response was empty. Please provide a helpful response to my request.",
+				})
+				continue
+			}
 			break
 		}
 
