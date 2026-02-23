@@ -2,6 +2,7 @@ package providers
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/auth"
@@ -11,6 +12,13 @@ import (
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"
 
 var getCredential = auth.GetCredential
+
+func maskKey(key string) string {
+	if len(key) < 8 {
+		return "***"
+	}
+	return key[:4] + "..." + key[len(key)-4:]
+}
 
 type providerType int
 
@@ -85,9 +93,25 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 			sel.model = strings.TrimSpace(mc.Model)
 		}
 	}
+	// If not found by exact key, try matching against model values
+	if sel.model == model {
+		lowerModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
+		for _, aliasVal := range named.Models {
+			resolvedVal := strings.ToLower(strings.TrimSpace(aliasVal.Model))
+			if resolvedVal == lowerModel || strings.HasSuffix(resolvedVal, "/"+lowerModel) {
+				if strings.TrimSpace(aliasVal.Model) != "" {
+					sel.model = strings.TrimSpace(aliasVal.Model)
+				}
+				break
+			}
+		}
+	}
 	if sel.apiBase == "" {
 		sel.apiBase = defaultAPIBaseByType(typ)
 	}
+
+	log.Printf("[DEBUG] selectionFromNamedProvider: provider=%s, type=%s, apiBase=%s, model=%s, apiKey=%s", 
+		providerName, typ, sel.apiBase, sel.model, maskKey(sel.apiKey))
 
 	switch typ {
 	case "openai", "gpt":
@@ -187,6 +211,15 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 			providerName = ref.Provider
 		}
 	}
+	return resolveProviderSelectionByName(cfg, providerName, model)
+}
+
+// resolveProviderSelectionForProvider resolves provider selection for a specific provider name
+func resolveProviderSelectionForProvider(cfg *config.Config, providerName string) (providerSelection, error) {
+	return resolveProviderSelectionByName(cfg, providerName, "")
+}
+
+func resolveProviderSelectionByName(cfg *config.Config, providerName string, model string) (providerSelection, error) {
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{
@@ -338,7 +371,7 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 
 	// Fallback: infer provider from model and configured keys.
 	if sel.apiKey == "" && sel.apiBase == "" {
-		if ref := ParseModelRef(rawModel, ""); ref != nil {
+		if ref := ParseModelRef(model, ""); ref != nil {
 			if named, ok := cfg.Providers.GetNamed(ref.Provider); ok {
 				return selectionFromNamedProvider(cfg, ref.Provider, ref.Model, named)
 			}
@@ -469,6 +502,21 @@ func CreateProvider(cfg *config.Config) (LLMProvider, error) {
 		return nil, err
 	}
 
+	log.Printf("[DEBUG] CreateProvider: providerType=%d, apiBase=%s, model=%s", sel.providerType, sel.apiBase, sel.model)
+	return createProviderFromSelection(&sel)
+}
+
+// CreateProviderForCandidate creates a provider for a specific fallback candidate
+func CreateProviderForCandidate(cfg *config.Config, providerName string) (LLMProvider, error) {
+	sel, err := resolveProviderSelectionForProvider(cfg, providerName)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[DEBUG] CreateProviderForCandidate: provider=%s, apiBase=%s, model=%s", providerName, sel.apiBase, sel.model)
+	return createProviderFromSelection(&sel)
+}
+
+func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 	switch sel.providerType {
 	case providerTypeClaudeAuth:
 		return createClaudeAuthProvider(sel.apiBase)

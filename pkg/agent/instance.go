@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,10 +131,15 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 
 // resolveAgentModel resolves the primary model for an agent.
 func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) string {
+	log.Printf("[DEBUG] resolveAgentModel: defaults.Model=%s, defaults.Provider=%s", defaults.Model, defaults.Provider)
 	if agentCfg != nil && agentCfg.Model != nil && strings.TrimSpace(agentCfg.Model.Primary) != "" {
-		return cfg.Providers.ResolveModelAlias(strings.TrimSpace(agentCfg.Model.Primary), defaults.Provider)
+		resolved := cfg.Providers.ResolveModelAlias(strings.TrimSpace(agentCfg.Model.Primary), defaults.Provider)
+		log.Printf("[DEBUG] resolveAgentModel: resolved=%s", resolved)
+		return resolved
 	}
-	return cfg.Providers.ResolveModelAlias(defaults.Model, defaults.Provider)
+	resolved := cfg.Providers.ResolveModelAlias(defaults.Model, defaults.Provider)
+	log.Printf("[DEBUG] resolveAgentModel: resolved=%s", resolved)
+	return resolved
 }
 
 // resolveAgentFallbacks resolves the fallback models for an agent.
