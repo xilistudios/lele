@@ -7,14 +7,14 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	th "github.com/mymmrac/telego/telegohandler"
-
 	"github.com/mymmrac/telego"
-	"github.com/mymmrac/telego/telegohandler"
+	th "github.com/mymmrac/telego/telegohandler"
 	tu "github.com/mymmrac/telego/telegoutil"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -94,26 +94,70 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start long polling: %w", err)
 	}
 
-	bh, err := telegohandler.NewBotHandler(c.bot, updates)
+	bh, err := th.NewBotHandler(c.bot, updates)
 	if err != nil {
 		return fmt.Errorf("failed to create bot handler: %w", err)
 	}
 
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
-		c.commands.Help(ctx, message)
-		return nil
+		return c.handleCommandWithSession(ctx, &message, "help")
 	}, th.CommandEqual("help"))
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
-		return c.commands.Start(ctx, message)
+		return c.handleCommandWithSession(ctx, &message, "start")
 	}, th.CommandEqual("start"))
 
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
-		return c.commands.Show(ctx, message)
+		return c.handleCommandWithSession(ctx, &message, "show")
 	}, th.CommandEqual("show"))
 
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
-		return c.commands.List(ctx, message)
+		return c.handleCommandWithSession(ctx, &message, "list")
 	}, th.CommandEqual("list"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "models")
+	}, th.CommandEqual("models"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "new")
+	}, th.CommandEqual("new"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "stop")
+	}, th.CommandEqual("stop"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "model")
+	}, th.CommandEqual("model"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "status")
+	}, th.CommandEqual("status"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "compact")
+	}, th.CommandEqual("compact"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "subagents")
+	}, th.CommandEqual("subagents"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "verbose")
+	}, th.CommandEqual("verbose"))
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleModelsCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
+
+	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
+		Commands: []telego.BotCommand{
+			{Command: "new", Description: "Start a new conversation"},
+			{Command: "stop", Description: "Stop the agent"},
+			{Command: "model", Description: "Show models and change current model"},
+			{Command: "models", Description: "Select provider/model from UI"},
+			{Command: "status", Description: "Show model, tokens and gateway version"},
+			{Command: "compact", Description: "Compact conversation history and save tokens"},
+			{Command: "subagents", Description: "List and manage running subagents"},
+			{Command: "verbose", Description: "Toggle verbose mode for tool execution"},
+		},
+	})
+	if err != nil {
+		logger.WarnCF("telegram", "Failed to set Telegram command menu", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleMessage(ctx, &message)
@@ -174,6 +218,15 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	tgMsg := tu.Message(tu.ID(chatID), htmlContent)
 	tgMsg.ParseMode = telego.ModeHTML
 
+	// Set reply parameters if we have a message to reply to
+	if msg.ReplyTo != "" {
+		if replyMsgID, parseErr := strconv.Atoi(msg.ReplyTo); parseErr == nil {
+			tgMsg.ReplyParameters = &telego.ReplyParameters{
+				MessageID: replyMsgID,
+			}
+		}
+	}
+
 	if _, err = c.bot.SendMessage(ctx, tgMsg); err != nil {
 		logger.ErrorCF("telegram", "HTML parse failed, falling back to plain text", map[string]interface{}{
 			"error": err.Error(),
@@ -189,6 +242,21 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Message) error {
 	if message == nil {
 		return fmt.Errorf("message is nil")
+	}
+
+	// Check if this is a command message
+	if message.Text != "" && strings.HasPrefix(message.Text, "/") {
+		// Extract command name (first word, without /)
+		text := strings.TrimPrefix(message.Text, "/")
+		parts := strings.Fields(text)
+		if len(parts) > 0 {
+			cmd := parts[0]
+			// Handle known commands
+			switch cmd {
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose":
+				return c.handleCommandWithSession(ctx, message, cmd)
+			}
+		}
 	}
 
 	user := message.From
@@ -364,7 +432,166 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		"peer_id":    peerID,
 	}
 
-	c.HandleMessage(fmt.Sprintf("%d", user.ID), fmt.Sprintf("%d", chatID), content, mediaPaths, metadata)
+	// Generate session key based on chat (unique per chat)
+	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+
+	c.HandleMessageWithSession(fmt.Sprintf("%d", user.ID), fmt.Sprintf("%d", chatID), content, mediaPaths, metadata, sessionKey)
+	return nil
+}
+
+// handleCommandWithSession handles Telegram commands with session context
+func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message *telego.Message, cmd string) error {
+	if message == nil {
+		return fmt.Errorf("message is nil")
+	}
+
+	user := message.From
+	if user == nil {
+		return fmt.Errorf("message sender (user) is nil")
+	}
+
+	senderID := fmt.Sprintf("%d", user.ID)
+	chatID := message.Chat.ID
+	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+	messageID := fmt.Sprintf("%d", message.MessageID)
+
+	// For commands that change state, send system message to agent loop
+	if cmd == "new" {
+		// Send system message to clear session
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/clear",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   "🔄 Nueva conversación iniciada. Historial limpiado.",
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+	}
+	
+	if cmd == "stop" {
+		// Send system message to agent loop - response will come via bus
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/stop",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		// Response will be sent by agent loop via bus
+		return nil
+	}
+	
+	if cmd == "model" {
+		// Extract model argument and send to agent loop
+		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/model"))
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/model " + args,
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil // Agent loop will respond
+	}
+	
+	if cmd == "status" {
+		// Send to agent loop for detailed status
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/status",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil
+	}
+
+	if cmd == "compact" {
+		// Send to agent loop for manual compaction
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/compact",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil
+	}
+	
+	if cmd == "subagents" {
+		// Send to agent loop for subagent status
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/subagents",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil
+	}
+
+	if cmd == "verbose" {
+		// Send to agent loop to toggle verbose mode
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/verbose",
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
+			},
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil
+	}
+
+	// For other commands (help, start, show, list, models), use direct response
+	switch cmd {
+	case "help":
+		return c.commands.Help(ctx, *message)
+	case "start":
+		return c.commands.Start(ctx, *message)
+	case "show":
+		return c.commands.Show(ctx, *message)
+	case "list":
+		return c.commands.List(ctx, *message)
+	case "models":
+		return c.commands.Models(ctx, *message)
+	}
+
 	return nil
 }
 
@@ -515,4 +742,196 @@ func escapeHTML(text string) string {
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	return text
+}
+
+func (c *TelegramChannel) handleModelsCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+	parts := strings.SplitN(query.Data, ":", 4)
+	if len(parts) < 3 {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid action"))
+		return nil
+	}
+
+	switch parts[1] {
+	case "provider":
+		provider := parts[2]
+		page := 0
+		if len(parts) >= 4 {
+			if p, err := strconv.Atoi(parts[3]); err == nil {
+				page = p
+			}
+		}
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, query.Message.GetMessageID(), provider, page); err != nil {
+			return err
+		}
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Provider selected"))
+	case "page":
+		if len(parts) < 4 {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid page action"))
+			return nil
+		}
+		provider := parts[2]
+		page, err := strconv.Atoi(parts[3])
+		if err != nil {
+			page = 0
+		}
+		if err := c.sendProviderModelsMenu(ctx, query.Message.GetChat().ID, query.Message.GetMessageID(), provider, page); err != nil {
+			return err
+		}
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Page updated"))
+	case "model":
+		if len(parts) < 4 {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid model action"))
+			return nil
+		}
+		provider := parts[2]
+		model := parts[3]
+		if c.applySelectedModel(query, provider, model) {
+			if err := c.collapseModelsMenu(ctx, query); err != nil {
+				logger.WarnCF("telegram", "Failed to collapse /models keyboard", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model selected"))
+		} else {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Model not applied"))
+		}
+	}
+
+	return nil
+}
+
+func (c *TelegramChannel) sendProviderModelsMenu(ctx context.Context, chatID int64, messageID int, provider string, page int) error {
+	isEdit := messageID > 0
+	named, ok := c.config.Providers.GetNamed(provider)
+	if !ok || len(named.Models) == 0 {
+		if isEdit {
+			_, err := c.bot.EditMessageText(ctx, tu.EditMessageText(tu.ID(chatID), messageID, "No models configured for this provider."))
+			return err
+		}
+		_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "No models configured for this provider."))
+		return err
+	}
+	models := make([]string, 0, len(named.Models))
+	for name := range named.Models {
+		models = append(models, name)
+	}
+	sort.Strings(models)
+	start, end, currentPage, totalPages := modelPageBounds(len(models), page, 6)
+	rows := make([][]telego.InlineKeyboardButton, 0, end-start)
+	for _, model := range models[start:end] {
+		rows = append(rows, tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(model).WithCallbackData(fmt.Sprintf("models:model:%s:%s", provider, model)),
+		))
+	}
+	if totalPages > 1 {
+		nav := make([]telego.InlineKeyboardButton, 0, 2)
+		if currentPage > 0 {
+			nav = append(nav, tu.InlineKeyboardButton("⬅️ Previous Page").
+				WithCallbackData(fmt.Sprintf("models:page:%s:%d", provider, currentPage-1)))
+		}
+		if currentPage < totalPages-1 {
+			nav = append(nav, tu.InlineKeyboardButton("➡️ Next Page").
+				WithCallbackData(fmt.Sprintf("models:page:%s:%d", provider, currentPage+1)))
+		}
+		if len(nav) > 0 {
+			rows = append(rows, tu.InlineKeyboardRow(nav...))
+		}
+	}
+	text := fmt.Sprintf("Provider: %s\nSelect a model (page %d/%d):", provider, currentPage+1, totalPages)
+	markup := tu.InlineKeyboard(rows...)
+	if isEdit {
+		edit := tu.EditMessageText(tu.ID(chatID), messageID, text)
+		edit.ReplyMarkup = markup
+		_, err := c.bot.EditMessageText(ctx, edit)
+		return err
+	}
+	_, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), text).WithReplyMarkup(markup))
+	return err
+}
+
+func modelPageBounds(total, page, perPage int) (start, end, currentPage, totalPages int) {
+	if perPage <= 0 {
+		perPage = 6
+	}
+	if total <= 0 {
+		return 0, 0, 0, 1
+	}
+	totalPages = (total + perPage - 1) / perPage
+	if page < 0 {
+		page = 0
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	start = page * perPage
+	end = start + perPage
+	if end > total {
+		end = total
+	}
+	return start, end, page, totalPages
+}
+
+func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provider, model string) bool {
+	if query.Message == nil {
+		return false
+	}
+	senderID := fmt.Sprintf("%d", query.From.ID)
+	if query.From.Username != "" {
+		senderID = fmt.Sprintf("%d|%s", query.From.ID, query.From.Username)
+	}
+	if !c.IsAllowed(senderID) {
+		return false
+	}
+	chat := query.Message.GetChat()
+	chatID := chat.ID
+	peerKind := "direct"
+	peerID := fmt.Sprintf("%d", query.From.ID)
+	if chat.Type != "private" {
+		peerKind = "group"
+		peerID = fmt.Sprintf("%d", chatID)
+	}
+	metadata := map[string]string{
+		"user_id":   fmt.Sprintf("%d", query.From.ID),
+		"username":  query.From.Username,
+		"is_group":  fmt.Sprintf("%t", chat.Type != "private"),
+		"peer_kind": peerKind,
+		"peer_id":   peerID,
+	}
+	c.HandleMessage(
+		fmt.Sprintf("%d", query.From.ID),
+		fmt.Sprintf("%d", chatID),
+		selectedModelCommand(provider, model),
+		nil,
+		metadata,
+	)
+	return true
+}
+
+func selectedModelCommand(provider, model string) string {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if isModelReference(model) || provider == "" {
+		return "/model " + model
+	}
+	return fmt.Sprintf("/model %s/%s", provider, model)
+}
+
+func isModelReference(model string) bool {
+	idx := strings.Index(model, "/")
+	return idx > 0 && idx < len(model)-1
+}
+
+func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+	_, err := c.bot.EditMessageReplyMarkup(ctx, tu.EditMessageReplyMarkup(
+		tu.ID(query.Message.GetChat().ID),
+		query.Message.GetMessageID(),
+		nil,
+	))
+	return err
 }

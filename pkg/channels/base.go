@@ -82,17 +82,22 @@ func (c *BaseChannel) IsAllowed(senderID string) bool {
 }
 
 func (c *BaseChannel) HandleMessage(senderID, chatID, content string, media []string, metadata map[string]string) {
+	c.HandleMessageWithSession(senderID, chatID, content, media, metadata, "")
+}
+
+func (c *BaseChannel) HandleMessageWithSession(senderID, chatID, content string, media []string, metadata map[string]string, sessionKey string) {
 	if !c.IsAllowed(senderID) {
 		return
 	}
 
 	msg := bus.InboundMessage{
-		Channel:  c.name,
-		SenderID: senderID,
-		ChatID:   chatID,
-		Content:  content,
-		Media:    media,
-		Metadata: metadata,
+		Channel:    c.name,
+		SenderID:   senderID,
+		ChatID:     chatID,
+		Content:    content,
+		Media:      media,
+		SessionKey: sessionKey,
+		Metadata:   metadata,
 	}
 
 	c.bus.PublishInbound(msg)

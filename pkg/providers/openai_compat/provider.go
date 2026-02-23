@@ -18,6 +18,13 @@ import (
 type ToolCall = protocoltypes.ToolCall
 type FunctionCall = protocoltypes.FunctionCall
 type LLMResponse = protocoltypes.LLMResponse
+
+func maskAPIKey(key string) string {
+	if len(key) < 8 {
+		return "***"
+	}
+	return key[:4] + "..." + key[len(key)-4:]
+}
 type UsageInfo = protocoltypes.UsageInfo
 type Message = protocoltypes.Message
 type ToolDefinition = protocoltypes.ToolDefinition
@@ -93,6 +100,9 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	modelStr, _ := requestBody["model"].(string)
+	log.Printf("[DEBUG] OpenAICompat ChatCompletion: apiBase=%s, model=%s, apiKey=%s", p.apiBase, modelStr, maskAPIKey(p.apiKey))
+	
 	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

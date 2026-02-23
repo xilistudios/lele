@@ -11,6 +11,8 @@ type ModelRef struct {
 // ParseModelRef parses "anthropic/claude-opus" into {Provider: "anthropic", Model: "claude-opus"}.
 // If no slash present, uses defaultProvider.
 // Returns nil for empty input.
+// Note: Does NOT normalize the provider when explicitly specified (has slash),
+// normalization happens later when looking up the provider in config.
 func ParseModelRef(raw string, defaultProvider string) *ModelRef {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -18,7 +20,7 @@ func ParseModelRef(raw string, defaultProvider string) *ModelRef {
 	}
 
 	if idx := strings.Index(raw, "/"); idx > 0 {
-		provider := NormalizeProvider(raw[:idx])
+		provider := raw[:idx]
 		model := strings.TrimSpace(raw[idx+1:])
 		if model == "" {
 			return nil

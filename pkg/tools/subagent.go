@@ -24,6 +24,7 @@ type SubagentTask struct {
 
 type SubagentManager struct {
 	tasks          map[string]*SubagentTask
+	cancels        map[string]context.CancelFunc
 	mu             sync.RWMutex
 	provider       providers.LLMProvider
 	defaultModel   string
@@ -41,6 +42,7 @@ type SubagentManager struct {
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus) *SubagentManager {
 	return &SubagentManager{
 		tasks:         make(map[string]*SubagentTask),
+		cancels:       make(map[string]context.CancelFunc),
 		provider:      provider,
 		defaultModel:  defaultModel,
 		bus:           bus,
@@ -96,7 +98,9 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	sm.tasks[taskID] = subagentTask
 
 	// Start task in background with context cancellation support
-	go sm.runTask(ctx, subagentTask, callback)
+	taskCtx, cancel := context.WithCancel(ctx)
+	sm.cancels[taskID] = cancel
+	go sm.runTask(taskCtx, subagentTask, callback)
 
 	if label != "" {
 		return fmt.Sprintf("Spawned subagent '%s' for task: %s", label, task), nil
@@ -167,7 +171,15 @@ After completing the task, provide a clear summary of what was done.`
 	sm.mu.Lock()
 	var result *ToolResult
 	defer func() {
+		var cancel context.CancelFunc
+		if c, ok := sm.cancels[task.ID]; ok {
+			cancel = c
+			delete(sm.cancels, task.ID)
+		}
 		sm.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		// Call callback if provided and result is set
 		if callback != nil && result != nil {
 			callback(ctx, result)
@@ -231,6 +243,32 @@ func (sm *SubagentManager) ListTasks() []*SubagentTask {
 		tasks = append(tasks, task)
 	}
 	return tasks
+}
+
+func (sm *SubagentManager) StopTask(taskID string) bool {
+	sm.mu.Lock()
+	cancel, ok := sm.cancels[taskID]
+	sm.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
+	return ok
+}
+
+// StopAll stops all running subagent tasks.
+func (sm *SubagentManager) StopAll() int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	
+	stoppedCount := 0
+	for taskID, cancel := range sm.cancels {
+		if cancel != nil {
+			cancel()
+			stoppedCount++
+		}
+		delete(sm.cancels, taskID)
+	}
+	return stoppedCount
 }
 
 // SubagentTool executes a subagent task synchronously and returns the result.

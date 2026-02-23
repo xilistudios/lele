@@ -3,9 +3,11 @@ package channels
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mymmrac/telego"
+	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
@@ -14,6 +16,12 @@ type TelegramCommander interface {
 	Start(ctx context.Context, message telego.Message) error
 	Show(ctx context.Context, message telego.Message) error
 	List(ctx context.Context, message telego.Message) error
+	Models(ctx context.Context, message telego.Message) error
+	New(ctx context.Context, message telego.Message) error
+	Stop(ctx context.Context, message telego.Message) error
+	Model(ctx context.Context, message telego.Message) error
+	Status(ctx context.Context, message telego.Message) error
+	Subagents(ctx context.Context, message telego.Message) error
 }
 
 type cmd struct {
@@ -40,6 +48,7 @@ func (c *cmd) Help(ctx context.Context, message telego.Message) error {
 /help - Show this help message
 /show [model|channel] - Show current configuration
 /list [models|channels] - List available options
+/models - Show providers and models
 	`
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
@@ -145,6 +154,110 @@ func (c *cmd) List(ctx context.Context, message telego.Message) error {
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
 		Text:   response,
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Models(ctx context.Context, message telego.Message) error {
+	providers := make([]string, 0, len(c.config.Providers.Named))
+	for name, provider := range c.config.Providers.Named {
+		if len(provider.Models) > 0 {
+			providers = append(providers, name)
+		}
+	}
+	sort.Strings(providers)
+	if len(providers) == 0 {
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   "No providers with configured models found.",
+		})
+		return err
+	}
+
+	rows := make([][]telego.InlineKeyboardButton, 0, len(providers))
+	for _, provider := range providers {
+		named := c.config.Providers.Named[provider]
+		label := fmt.Sprintf("%s (%d)", provider, len(named.Models))
+		rows = append(rows, tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(label).WithCallbackData("models:provider:"+provider),
+		))
+	}
+
+	msg := tu.Message(tu.ID(message.Chat.ID), "Select a provider.").WithReplyMarkup(tu.InlineKeyboard(rows...))
+	_, err := c.bot.SendMessage(ctx, msg)
+	return err
+}
+
+func (c *cmd) New(ctx context.Context, message telego.Message) error {
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   "🔄 Nueva conversación iniciada. Historial limpiado.",
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Stop(ctx context.Context, message telego.Message) error {
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   "⏹️ Agente detenido.",
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Model(ctx context.Context, message telego.Message) error {
+	args := commandArgs(message.Text)
+	if args == "" {
+		response := fmt.Sprintf("Modelo actual: %s\nProveedor: %s\n\nUsa /model <nombre> para cambiar",
+			c.config.Agents.Defaults.Model,
+			c.config.Agents.Defaults.Provider)
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+	}
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   fmt.Sprintf("Cambiando modelo a: %s\n(Nota: este comando aún no cambia el modelo en runtime)", args),
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Status(ctx context.Context, message telego.Message) error {
+	response := fmt.Sprintf("📊 Estado del Gateway\n\nModelo: %s\nProveedor: %s\nToken máximo: %d\nTemperatura: %.1f",
+		c.config.Agents.Defaults.Model,
+		c.config.Agents.Defaults.Provider,
+		c.config.Agents.Defaults.MaxTokens,
+		*c.config.Agents.Defaults.Temperature)
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   response,
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Subagents(ctx context.Context, message telego.Message) error {
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   "🤖 Subagentes: No hay subagentes activos actualmente.",
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},
