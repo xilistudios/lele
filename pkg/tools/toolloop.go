@@ -16,13 +16,17 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+// VerboseCallback is called when verbose mode is enabled to notify about tool execution progress.
+type VerboseCallback func(iteration int, toolName string, args map[string]interface{}, result *ToolResult)
+
 // ToolLoopConfig configures the tool execution loop.
 type ToolLoopConfig struct {
-	Provider      providers.LLMProvider
-	Model         string
-	Tools         *ToolRegistry
-	MaxIterations int
-	LLMOptions    map[string]any
+	Provider        providers.LLMProvider
+	Model           string
+	Tools           *ToolRegistry
+	MaxIterations   int
+	LLMOptions      map[string]any
+	VerboseCallback VerboseCallback // Called when a tool is executed (if verbose mode is enabled)
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -126,6 +130,11 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
 			} else {
 				toolResult = ErrorResult("No tools available")
+			}
+
+			// Call verbose callback if provided
+			if config.VerboseCallback != nil {
+				config.VerboseCallback(iteration, tc.Name, tc.Arguments, toolResult)
 			}
 
 			// Determine content for LLM
