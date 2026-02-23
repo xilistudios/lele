@@ -1,5 +1,7 @@
 package bus
 
+import "time"
+
 type InboundMessage struct {
 	Channel    string            `json:"channel"`
 	SenderID   string            `json:"sender_id"`
@@ -11,11 +13,33 @@ type InboundMessage struct {
 }
 
 type OutboundMessage struct {
-	Channel   string `json:"channel"`
-	ChatID    string `json:"chat_id"`
-	Content   string `json:"content"`
-	ReplyTo   string `json:"reply_to,omitempty"`   // Message ID to reply to
-	MessageID string `json:"message_id,omitempty"` // Original command message ID
+	Channel    string      `json:"channel"`
+	ChatID     string      `json:"chat_id"`
+	Content    string      `json:"content"`
+	ReplyTo    string      `json:"reply_to,omitempty"`   // Message ID to reply to
+	MessageID  string      `json:"message_id,omitempty"` // Original command message ID
+	ReplyMarkup interface{} `json:"reply_markup,omitempty"` // Optional inline keyboard markup for Telegram
 }
 
+// MessageHandler is a function that handles incoming messages
 type MessageHandler func(InboundMessage) error
+
+// ApprovalStatus represents the current status of an approval request
+type ApprovalStatus string
+
+const (
+	ApprovalPending  ApprovalStatus = "pending"
+	ApprovalApproved ApprovalStatus = "approved"
+	ApprovalRejected ApprovalStatus = "rejected"
+	ApprovalExpired  ApprovalStatus = "expired"
+)
+
+// ApprovalRequest represents a request for command approval
+type ApprovalRequest struct {
+	ID          string         `json:"id"`
+	SessionKey  string         `json:"session_key"`
+	Command     string         `json:"command"`
+	Reason      string         `json:"reason,omitempty"`
+	Status      ApprovalStatus `json:"status"`
+	RequestedAt time.Time      `json:"requested_at"`
+}
