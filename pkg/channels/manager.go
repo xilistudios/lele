@@ -1,4 +1,4 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+﻿// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -21,6 +21,7 @@ type Manager struct {
 	channels     map[string]Channel
 	bus          *bus.MessageBus
 	config       *config.Config
+	agentLoop    AgentProvidable
 	dispatchTask *asyncTask
 	mu           sync.RWMutex
 }
@@ -29,11 +30,12 @@ type asyncTask struct {
 	cancel context.CancelFunc
 }
 
-func NewManager(cfg *config.Config, messageBus *bus.MessageBus) (*Manager, error) {
+func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable) (*Manager, error) {
 	m := &Manager{
-		channels: make(map[string]Channel),
-		bus:      messageBus,
-		config:   cfg,
+		channels:  make(map[string]Channel),
+		bus:       messageBus,
+		config:    cfg,
+		agentLoop: agentLoop,
 	}
 
 	if err := m.initChannels(); err != nil {
@@ -48,7 +50,7 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
 		logger.DebugC("channels", "Attempting to initialize Telegram channel")
-		telegram, err := NewTelegramChannel(m.config, m.bus)
+		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Telegram channel", map[string]interface{}{
 				"error": err.Error(),
