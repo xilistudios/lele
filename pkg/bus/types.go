@@ -1,4 +1,4 @@
-package bus
+﻿package bus
 
 import "time"
 
@@ -13,12 +13,13 @@ type InboundMessage struct {
 }
 
 type OutboundMessage struct {
-	Channel    string      `json:"channel"`
-	ChatID     string      `json:"chat_id"`
-	Content    string      `json:"content"`
-	ReplyTo    string      `json:"reply_to,omitempty"`   // Message ID to reply to
-	MessageID  string      `json:"message_id,omitempty"` // Original command message ID
-	ReplyMarkup interface{} `json:"reply_markup,omitempty"` // Optional inline keyboard markup for Telegram
+	Channel        string      `json:"channel"`
+	ChatID         string      `json:"chat_id"`
+	Content        string      `json:"content"`
+	ReplyTo        string      `json:"reply_to,omitempty"`   // Message ID to reply to
+	MessageID      string      `json:"message_id,omitempty"` // Original command message ID
+	ReplyMarkup    interface{} `json:"reply_markup,omitempty"` // Optional inline keyboard markup for Telegram
+	IsIntermediate bool        `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
 }
 
 // MessageHandler is a function that handles incoming messages

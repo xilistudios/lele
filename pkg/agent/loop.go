@@ -891,12 +891,12 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				} else {
 					// Basic mode: simplified description
 					verboseMsg = formatBasicToolMessage(tc.Name, tc.Arguments)
-				}
-				al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
-					Content: verboseMsg,
-				})
+				}			al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel:        opts.Channel,
+				ChatID:         opts.ChatID,
+				Content:        verboseMsg,
+				IsIntermediate: true, // Don't stop typing indicator for verbose notifications
+			})
 			}
 
 			var toolResult *tools.ToolResult
@@ -999,12 +999,12 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				if len(resultPreview) > 300 {
 					resultPreview = resultPreview[:300] + "..."
 				}
-				verboseResult := fmt.Sprintf("%s **Result:** `%s`\n```\n%s\n```", status, tc.Name, resultPreview)
-				al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
-					Content: verboseResult,
-				})
+				verboseResult := fmt.Sprintf("%s **Result:** `%s`\n```\n%s\n```", status, tc.Name, resultPreview)			al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel:        opts.Channel,
+				ChatID:         opts.ChatID,
+				Content:        verboseResult,
+				IsIntermediate: true, // Don't stop typing indicator for verbose result notifications
+			})
 			}
 
 			// Send ForUser content to user immediately if not Silent

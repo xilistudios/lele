@@ -300,12 +300,14 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		return fmt.Errorf("invalid chat ID: %w", err)
 	}
 
-	// Stop thinking animation
-	if stop, ok := c.stopThinking.Load(msg.ChatID); ok {
-		if cf, ok := stop.(*thinkingCancel); ok && cf != nil {
-			cf.Cancel()
+	// Stop thinking animation ONLY for non-intermediate messages
+	if !msg.IsIntermediate {
+		if stop, ok := c.stopThinking.Load(msg.ChatID); ok {
+			if cf, ok := stop.(*thinkingCancel); ok && cf != nil {
+				cf.Cancel()
+			}
+			c.stopThinking.Delete(msg.ChatID)
 		}
-		c.stopThinking.Delete(msg.ChatID)
 	}
 
 	htmlContent := markdownToTelegramHTML(msg.Content)
