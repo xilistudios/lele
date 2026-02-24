@@ -336,6 +336,13 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		}
 	}
 
+	// Set inline keyboard markup if provided (for approval buttons, etc.)
+	if msg.ReplyMarkup != nil {
+		if markup, ok := msg.ReplyMarkup.(*telego.InlineKeyboardMarkup); ok {
+			tgMsg.ReplyMarkup = markup
+		}
+	}
+
 	if _, err = c.bot.SendMessage(ctx, tgMsg); err != nil {
 		logger.ErrorCF("telegram", "HTML parse failed, falling back to plain text", map[string]interface{}{
 			"error": err.Error(),
