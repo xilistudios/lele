@@ -986,26 +986,42 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 	}
 	chat := query.Message.GetChat()
 	chatID := chat.ID
+	
+	// Build session key (same as handleMessage)
+	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+	
 	peerKind := "direct"
 	peerID := fmt.Sprintf("%d", query.From.ID)
 	if chat.Type != "private" {
 		peerKind = "group"
 		peerID = fmt.Sprintf("%d", chatID)
 	}
-	metadata := map[string]string{
-		"user_id":   fmt.Sprintf("%d", query.From.ID),
-		"username":  query.From.Username,
-		"is_group":  fmt.Sprintf("%t", chat.Type != "private"),
-		"peer_kind": peerKind,
-		"peer_id":   peerID,
+	
+	// Check if user is allowed before sending
+	if !c.IsAllowed(senderID) {
+		return false
 	}
-	c.HandleMessage(
-		fmt.Sprintf("%d", query.From.ID),
-		fmt.Sprintf("%d", chatID),
-		selectedModelCommand(provider, model),
-		nil,
-		metadata,
-	)
+	
+	// Send system message directly to agent loop (like handleCommandWithSession does for /model)
+	msg := bus.InboundMessage{
+		Channel:    "system",
+		SenderID:   senderID,
+		ChatID:     sessionKey,
+		Content:    selectedModelCommand(provider, model),
+		SessionKey: sessionKey,
+		Metadata: map[string]string{
+			"message_id": fmt.Sprintf("%d", query.Message.GetMessageID()),
+			"user_id":    fmt.Sprintf("%d", query.From.ID),
+			"username":   query.From.Username,
+			"is_group":   fmt.Sprintf("%t", chat.Type != "private"),
+			"peer_kind":  peerKind,
+			"peer_id":    peerID,
+		},
+	}
+	
+	if c.BaseChannel.bus != nil {
+		c.BaseChannel.bus.PublishInbound(msg)
+	}
 	return true
 }
 
