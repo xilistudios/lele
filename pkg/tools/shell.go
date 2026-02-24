@@ -157,8 +157,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
 	if guardMsg != "" {
-		// Si está en modo aprobación y hay un callback configurado
-		if t.approvalMode && isBlockable && t.approvalCallback != nil {
+		// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
+		if t.approvalMode && isBlockable {
 			// Retornar resultado especial indicando que se necesita aprobación
 			return &ToolResult{
 				ForLLM:  fmt.Sprintf("Command '%s' requires user approval. Reason: %s", command, guardMsg),
