@@ -1,4 +1,4 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+﻿// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -45,6 +45,7 @@ type AgentLoop struct {
 	subagents       map[string]*tools.SubagentManager
 	verboseManager  *session.VerboseManager
 	sessionCancels  sync.Map // sessionKey -> context.CancelFunc
+	approvalManager *channels.ApprovalManager // Manager for command approvals
 }
 
 // processOptions configures how a message is processed
@@ -62,8 +63,8 @@ type processOptions struct {
 func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
 	registry := NewAgentRegistry(cfg, provider)
 
-	// Register shared tools to all agents
-	subagents := registerSharedTools(cfg, msgBus, registry, provider)
+	// Register shared tools to all agents (pass nil approvalManager initially, will be set later)
+	subagents := registerSharedTools(cfg, msgBus, registry, provider, nil)
 
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
@@ -97,7 +98,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider) map[string]*tools.SubagentManager {
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
 	subagents := make(map[string]*tools.SubagentManager)
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
@@ -135,6 +136,14 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			return nil
 		})
 		agent.Tools.Register(messageTool)
+		
+		// Shell/Exec tool with approval support
+		// Create ExecTool with proper configuration from agent/workspace
+		execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
+		if approvalManager != nil {
+			execTool.SetApprovalMode(true)
+		}
+		agent.Tools.Register(execTool)
 
 		// Spawn tool with allowlist checker
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
@@ -236,6 +245,11 @@ func (al *AgentLoop) RegisterTool(tool tools.Tool) {
 
 func (al *AgentLoop) SetChannelManager(cm *channels.Manager) {
 	al.channelManager = cm
+}
+
+// SetApprovalManager configures the approval manager for command approvals
+func (al *AgentLoop) SetApprovalManager(am *channels.ApprovalManager) {
+	al.approvalManager = am
 }
 
 // RecordLastChannel records the last active channel for this workspace.
@@ -877,6 +891,8 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				})
 			}
 
+			var toolResult *tools.ToolResult
+			
 			// Create async callback for tools that implement AsyncTool
 			// NOTE: Following openclaw's design, async tools do NOT send results directly to users.
 			// Instead, they notify the agent via PublishInbound, and the agent decides
@@ -892,8 +908,78 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 						})
 				}
 			}
-
-			toolResult := agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+			
+			// Special handling for exec tool with approval
+			if tc.Name == "exec" && al.approvalManager != nil {
+				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+				
+				// Check if approval is required
+				if toolResult.ApprovalRequired != nil {
+					// Send approval request to user
+					approvalMsg := fmt.Sprintf("⚠️ **Se requiere aprobación**\n\n"+
+						"El siguiente comando puede ser peligroso:\n"+
+						"`%s`\n\n"+
+						"Razón: %s", 
+						toolResult.ApprovalRequired.Command,
+						toolResult.ApprovalRequired.Reason)
+					
+					// Parse chatID as int64 for approval manager
+					var chatIDInt int64
+					fmt.Sscanf(opts.ChatID, "%d", &chatIDInt)
+					
+					// Create approval request
+					approval := al.approvalManager.CreateApproval(
+						opts.SessionKey,
+						toolResult.ApprovalRequired.Command,
+						toolResult.ApprovalRequired.Reason,
+						chatIDInt,
+					)
+					
+					// Build inline keyboard
+					keyboard := al.approvalManager.BuildApprovalKeyboard(approval.ID)
+					
+					// Send message with keyboard
+					al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel:     opts.Channel,
+						ChatID:      opts.ChatID,
+						Content:     approvalMsg,
+						ReplyMarkup: keyboard,
+					})
+					
+					// Wait for user response
+					approved, err := approval.WaitForResponse(al.approvalManager.GetTimeout())
+					if err != nil {
+						toolResult = &tools.ToolResult{
+							IsError: true,
+							ForLLM:  "Error: timeout esperando aprobación del usuario",
+						}
+					} else if approved {
+						// User approved - execute the command directly
+						// We need to get the exec tool and set it to bypass guard
+						if execTool, ok := agent.Tools.Get("exec"); ok {
+							if et, ok := execTool.(*tools.ExecTool); ok {
+								// Temporarily disable approval mode to bypass guard
+								et.SetApprovalMode(false)
+								toolResult = et.Execute(ctx, tc.Arguments)
+								// Re-enable approval mode
+								et.SetApprovalMode(true)
+							}
+						}
+						// If tool execution failed or tool not found, use error result
+						if toolResult == nil {
+							toolResult = tools.ErrorResult("Failed to execute approved command")
+						}
+					} else {
+						// User rejected
+						toolResult = &tools.ToolResult{
+							IsError: true,
+							ForLLM:  "El comando fue rechazado por el usuario por razones de seguridad.",
+						}
+					}
+				}
+			} else {
+				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+			}
 
 			// Verbose mode: send result notification
 			if al.verboseManager.IsVerbose(opts.SessionKey) {

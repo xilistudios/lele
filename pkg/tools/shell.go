@@ -1,4 +1,4 @@
-package tools
+﻿package tools
 
 import (
 	"bytes"
@@ -21,6 +21,8 @@ type ExecTool struct {
 	denyPatterns        []*regexp.Regexp
 	allowPatterns       []*regexp.Regexp
 	restrictToWorkspace bool
+	approvalMode        bool                    // Activa modo aprobación
+	approvalCallback    func(cmd string) (bool, error) // Callback para solicitar aprobación
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{
@@ -153,8 +155,22 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	if guardError := t.guardCommand(command, cwd); guardError != "" {
-		return ErrorResult(guardError)
+	guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
+	if guardMsg != "" {
+		// Si está en modo aprobación y hay un callback configurado
+		if t.approvalMode && isBlockable && t.approvalCallback != nil {
+			// Retornar resultado especial indicando que se necesita aprobación
+			return &ToolResult{
+				ForLLM:  fmt.Sprintf("Command '%s' requires user approval. Reason: %s", command, guardMsg),
+				ForUser: "",
+				IsError: false,
+				ApprovalRequired: &ApprovalInfo{
+					Command: command,
+					Reason:  guardMsg,
+				},
+			}
+		}
+		return ErrorResult(guardMsg)
 	}
 
 	// timeout == 0 means no timeout
@@ -279,6 +295,62 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 	return ""
 }
 
+func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
+	cmd := strings.TrimSpace(command)
+	lower := strings.ToLower(cmd)
+
+	for _, pattern := range t.denyPatterns {
+		if pattern.MatchString(lower) {
+			return "Command blocked by safety guard (dangerous pattern detected)", true
+		}
+	}
+
+	if len(t.allowPatterns) > 0 {
+		allowed := false
+		for _, pattern := range t.allowPatterns {
+			if pattern.MatchString(lower) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "Command blocked by safety guard (not in allowlist)", false
+		}
+	}
+
+	if t.restrictToWorkspace {
+		if strings.Contains(cmd, "..\\") || strings.Contains(cmd, "../") {
+			return "Command blocked by safety guard (path traversal detected)", false
+		}
+
+		cwdPath, err := filepath.Abs(cwd)
+		if err != nil {
+			return "", false
+		}
+
+		pathPattern := regexp.MustCompile(`[A-Za-z]:\\[^\\"']+|/[^\s"']+`)
+		matches := pathPattern.FindAllString(cmd, -1)
+
+		for _, raw := range matches {
+			p, err := filepath.Abs(raw)
+			if err != nil {
+				continue
+			}
+
+			rel, err := filepath.Rel(cwdPath, p)
+			if err != nil {
+				continue
+			}
+
+			if strings.HasPrefix(rel, "..") {
+				return "Command blocked by safety guard (path outside working dir)", false
+			}
+		}
+	}
+
+	return "", false
+}
+
 func (t *ExecTool) SetTimeout(timeout time.Duration) {
 	t.timeout = timeout
 }
@@ -297,4 +369,14 @@ func (t *ExecTool) SetAllowPatterns(patterns []string) error {
 		t.allowPatterns = append(t.allowPatterns, re)
 	}
 	return nil
+}
+
+// SetApprovalMode activa/desactiva el modo de aprobación para comandos peligrosos
+func (t *ExecTool) SetApprovalMode(enabled bool) {
+	t.approvalMode = enabled
+}
+
+// SetApprovalCallback configura la función de callback para solicitar aprobación
+func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) {
+	t.approvalCallback = callback
 }

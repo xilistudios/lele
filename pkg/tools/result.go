@@ -30,6 +30,10 @@ type ToolResult struct {
 	// Err is the underlying error (not JSON serialized).
 	// Used for internal error handling and logging.
 	Err error `json:"-"`
+
+	// ApprovalRequired indicates that the tool execution requires user approval.
+	// When set, contains information about the command that needs approval.
+	ApprovalRequired *ApprovalInfo `json:"approval_required,omitempty"`
 }
 
 // NewToolResult creates a basic ToolResult with content for the LLM.

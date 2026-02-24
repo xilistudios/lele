@@ -1,0 +1,26 @@
+--- a/pkg/agent/loop.go
++++ b/pkg/agent/loop.go
+@@ -977,20 +977,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, agent *agent.AgentInstanc
+ 					}
+ 				}
+ 			} else {
+-				// Create async callback for tools that implement AsyncTool
+-				// NOTE: Following openclaw's design, async tools do NOT send results directly to users.
+-				// Instead, they notify the agent via PublishInbound, and the agent decides
+-				// whether to forward the result to the user (in processSystemMessage).
+-				asyncCallback := func(callbackCtx context.Context, result *tools.ToolResult) {
+-					// Log the async completion but don't send directly to user
+-					// The agent will handle user notification via processSystemMessage
+-					if !result.Silent && result.ForUser != "" {
+-						logger.InfoCF("agent", "Async tool completed, agent will handle notification",
+-							map[string]interface{}{
+-								"tool":        tc.Name,
+-								"content_len": len(result.ForUser),
+-							})
+-					}
+-				}
+-
+ 				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+ 			}
+ 
+ 			// Verbose mode: send result notification

@@ -1,4 +1,4 @@
-package channels
+﻿package channels
 
 import (
 	"context"
@@ -26,13 +26,14 @@ import (
 
 type TelegramChannel struct {
 	*BaseChannel
-	bot          *telego.Bot
-	commands     TelegramCommander
-	config       *config.Config
-	chatIDs      map[string]int64
-	transcriber  *voice.GroqTranscriber
-	placeholders sync.Map // chatID -> messageID
-	stopThinking sync.Map // chatID -> thinkingCancel
+	bot             *telego.Bot
+	commands        TelegramCommander
+	config          *config.Config
+	chatIDs         map[string]int64
+	transcriber     *voice.GroqTranscriber
+	placeholders    sync.Map // chatID -> messageID
+	stopThinking    sync.Map // chatID -> thinkingCancel
+	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
 }
 
 type thinkingCancel struct {
@@ -115,6 +116,76 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
+// SetApprovalManager configures the approval manager for handling command approvals
+func (c *TelegramChannel) SetApprovalManager(am *ApprovalManager) {
+	c.approvalManager = am
+}
+
+// handleApprovalCallback processes callback queries from approval inline keyboards
+func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if c.approvalManager == nil {
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval system not available"))
+	}
+
+	// Parse callback data: approval:action:approvalID
+	parts := strings.SplitN(query.Data, ":", 3)
+	if len(parts) != 3 || parts[0] != "approval" {
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid callback data"))
+	}
+
+	action := parts[1]
+	approvalID := parts[2]
+
+	var approved bool
+	switch action {
+	case "approve":
+		approved = true
+	case "reject":
+		approved = false
+	default:
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
+	}
+
+	// Handle the approval
+	approval, err := c.approvalManager.HandleApproval(approvalID, approved)
+	if err != nil {
+		logger.WarnCF("telegram", "Failed to handle approval", map[string]interface{}{
+			"error":       err.Error(),
+			"approval_id": approvalID,
+		})
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request expired or not found"))
+	}
+
+	// Update the message to show the decision
+	chatID := query.Message.GetChat().ID
+	messageID := query.Message.GetMessageID()
+
+	var statusEmoji, statusText string
+	if approved {
+		statusEmoji = "✅"
+		statusText = "APROBADO"
+	} else {
+		statusEmoji = "❌"
+		statusText = "RECHAZADO"
+	}
+
+	updatedText := fmt.Sprintf("%s **Comando %s**\n`%s`", statusEmoji, statusText, approval.Command)
+
+	// Edit message to remove keyboard and show decision
+	editMsg := tu.EditMessageText(tu.ID(chatID), messageID, markdownToTelegramHTML(updatedText))
+	editMsg.ParseMode = telego.ModeHTML
+
+	if _, editErr := c.bot.EditMessageText(ctx, editMsg); editErr != nil {
+		logger.DebugCF("telegram", "Failed to edit approval message", map[string]interface{}{
+			"error": editErr.Error(),
+		})
+	}
+
+	// Answer the callback query
+	feedback := fmt.Sprintf("Command %s", strings.ToLower(statusText))
+	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(feedback))
+}
+
 func (c *TelegramChannel) Start(ctx context.Context) error {
 	logger.InfoC("telegram", "Starting Telegram bot (polling mode)...")
 
@@ -171,6 +242,11 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
+	
+	// Register approval callback handler
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleApprovalCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("approval:"))
 
 	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: []telego.BotCommand{

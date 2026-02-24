@@ -1,4 +1,4 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+﻿// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -561,6 +561,10 @@ func gatewayCmd() {
 			"skills_available": skillsInfo["available"],
 		})
 
+	// Setup approval manager for dangerous command approval
+	approvalManager := channels.NewApprovalManager()
+	agentLoop.SetApprovalManager(approvalManager)
+
 	// Setup cron tool and service
 	execTimeout := time.Duration(cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
 	cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)
@@ -608,7 +612,8 @@ func gatewayCmd() {
 		if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
 			if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
 				tc.SetTranscriber(transcriber)
-				logger.InfoC("voice", "Groq transcription attached to Telegram channel")
+				tc.SetApprovalManager(approvalManager)
+				logger.InfoC("voice", "Groq transcription and approval system attached to Telegram channel")
 			}
 		}
 		if discordChannel, ok := channelManager.GetChannel("discord"); ok {
