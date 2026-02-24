@@ -1,4 +1,4 @@
-package channels
+﻿package channels
 
 import (
 	"context"
@@ -22,6 +22,7 @@ type TelegramCommander interface {
 	Model(ctx context.Context, message telego.Message) error
 	Status(ctx context.Context, message telego.Message) error
 	Subagents(ctx context.Context, message telego.Message) error
+	Agent(ctx context.Context, message telego.Message) error
 }
 
 type cmd struct {
@@ -47,8 +48,9 @@ func (c *cmd) Help(ctx context.Context, message telego.Message) error {
 	msg := `/start - Start the bot
 /help - Show this help message
 /show [model|channel] - Show current configuration
-/list [models|channels] - List available options
+/list [models|channels|agents] - List available options
 /models - Show providers and models
+/agent - Select or change current agent
 	`
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
@@ -258,6 +260,54 @@ func (c *cmd) Subagents(ctx context.Context, message telego.Message) error {
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
 		Text:   "🤖 Subagentes: No hay subagentes activos actualmente.",
+		ReplyParameters: &telego.ReplyParameters{
+			MessageID: message.MessageID,
+		},
+	})
+	return err
+}
+
+func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
+	args := commandArgs(message.Text)
+	if args == "" {
+		// Verificar si hay agentes configurados
+		agents := c.config.Agents.List
+		if len(agents) == 0 {
+			_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+				ChatID: telego.ChatID{ID: message.Chat.ID},
+				Text:   "No hay agentes configurados.",
+				ReplyParameters: &telego.ReplyParameters{
+					MessageID: message.MessageID,
+				},
+			})
+			return err
+		}
+
+		// Crear botones para cada agente
+		rows := make([][]telego.InlineKeyboardButton, 0, len(agents))
+		for _, agent := range agents {
+			label := agent.Name
+			if label == "" {
+				label = agent.ID
+			}
+			label = fmt.Sprintf("🤖 %s", label)
+			rows = append(rows, tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(label).WithCallbackData("agent:select:"+agent.ID),
+			))
+		}
+
+		msg := tu.Message(tu.ID(message.Chat.ID), 
+			"🤖 *Selecciona un agente*\n\n"+
+			"El agente determina el modelo, workspace y habilidades disponibles.").WithReplyMarkup(tu.InlineKeyboard(rows...))
+		msg.ParseMode = telego.ModeMarkdown
+		_, err := c.bot.SendMessage(ctx, msg)
+		return err
+	}
+
+	// Cambio directo de agente
+	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID: telego.ChatID{ID: message.Chat.ID},
+		Text:   fmt.Sprintf("Cambiando al agente: %s", args),
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},

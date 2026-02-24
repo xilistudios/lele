@@ -34,6 +34,7 @@ type TelegramChannel struct {
 	placeholders    sync.Map // chatID -> messageID
 	stopThinking    sync.Map // chatID -> thinkingCancel
 	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
+	agentLoop       AgentProvidable // Reference to agent loop for session agent management
 }
 
 type thinkingCancel struct {
@@ -77,7 +78,7 @@ func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc 
 	return cancel
 }
 
-func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChannel, error) {
+func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop AgentProvidable) (*TelegramChannel, error) {
 	var opts []telego.BotOption
 	telegramCfg := cfg.Channels.Telegram
 
@@ -109,6 +110,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus) (*TelegramChann
 		transcriber:  nil,
 		placeholders: sync.Map{},
 		stopThinking: sync.Map{},
+		agentLoop:    agentLoop,
 	}, nil
 }
 
@@ -270,6 +272,9 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleCommandWithSession(ctx, &message, "verbose")
 	}, th.CommandEqual("verbose"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "agent")
+	}, th.CommandEqual("agent"))
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
@@ -278,6 +283,11 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleApprovalCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("approval:"))
+	
+	// Register agent callback handler
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleAgentCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("agent:"))
 
 	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: []telego.BotCommand{
@@ -285,6 +295,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 			{Command: "stop", Description: "Stop the agent"},
 			{Command: "model", Description: "Show models and change current model"},
 			{Command: "models", Description: "Select provider/model from UI"},
+			{Command: "agent", Description: "Select or change current agent"},
 			{Command: "status", Description: "Show model, tokens and gateway version"},
 			{Command: "compact", Description: "Compact conversation history and save tokens"},
 			{Command: "subagents", Description: "List and manage running subagents"},
@@ -400,7 +411,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 			cmd := parts[0]
 			// Handle known commands
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose":
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -717,7 +728,7 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return nil
 	}
 
-	// For other commands (help, start, show, list, models), use direct response
+	// For other commands (help, start, show, list, models, agent), use direct response
 	switch cmd {
 	case "help":
 		return c.commands.Help(ctx, *message)
@@ -729,6 +740,25 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return c.commands.List(ctx, *message)
 	case "models":
 		return c.commands.Models(ctx, *message)
+	case "agent":
+		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/agent"))
+		if args != "" {
+			// Direct agent change - send system message
+			systemMsg := bus.InboundMessage{
+				Channel:    "system",
+				SenderID:   senderID,
+				ChatID:     sessionKey,
+				Content:    "/agent " + args,
+				SessionKey: sessionKey,
+				Metadata: map[string]string{
+					"message_id": messageID,
+				},
+			}
+			c.bus.PublishInbound(systemMsg)
+			return nil
+		}
+		// Show agent selection UI
+		return c.commands.Agent(ctx, *message)
 	}
 
 	return nil
@@ -1089,4 +1119,98 @@ func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.C
 		nil,
 	))
 	return err
+}
+
+
+// handleAgentCallback processes callback queries for agent selection
+func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+
+	// Check agentLoop is available
+	if c.agentLoop == nil {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Agent management not available"))
+		return nil
+	}
+
+	parts := strings.SplitN(query.Data, ":", 3)
+	if len(parts) < 3 || parts[0] != "agent" {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid action"))
+		return nil
+	}
+
+	action := parts[1]
+	agentID := parts[2]
+
+	switch action {
+	case "select":
+		// Validate agent exists using agentLoop interface
+		agentInfo, agentExists := c.agentLoop.GetAgentInfo(agentID)
+		if !agentExists {
+			_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Agent not found"))
+			return nil
+		}
+
+		agentName := agentInfo.Name
+		if agentName == "" {
+			agentName = agentID
+		}
+
+		// Send system message to change agent
+		senderID := fmt.Sprintf("%d", query.From.ID)
+		if query.From.Username != "" {
+			senderID = fmt.Sprintf("%d|%s", query.From.ID, query.From.Username)
+		}
+		chatID := query.Message.GetChat().ID
+		sessionKey := fmt.Sprintf("telegram:%d", chatID)
+
+		msg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/agent " + agentID,
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": fmt.Sprintf("%d", query.Message.GetMessageID()),
+				"user_id":    fmt.Sprintf("%d", query.From.ID),
+				"username":   query.From.Username,
+			},
+		}
+
+		if c.BaseChannel.bus != nil {
+			c.BaseChannel.bus.PublishInbound(msg)
+		}
+
+		// Update message with detailed agent info
+		chat := query.Message.GetChat()
+		messageID := query.Message.GetMessageID()
+		text := formatAgentSelectedMessage(agentInfo, agentID)
+		editMsg := tu.EditMessageText(tu.ID(chat.ID), messageID, text)
+		editMsg.ParseMode = telego.ModeMarkdown
+		_, _ = c.bot.EditMessageText(ctx, editMsg)
+
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Agent selected: "+agentName))
+	default:
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
+	}
+
+	return nil
+}
+
+// formatAgentSelectedMessage formats a message when an agent is selected
+func formatAgentSelectedMessage(agent AgentBasicInfo, agentID string) string {
+	var parts []string
+	parts = append(parts, "✅ *Agente seleccionado*")
+	parts = append(parts, "")
+	parts = append(parts, fmt.Sprintf("*Nombre:* %s", agent.Name))
+	parts = append(parts, fmt.Sprintf("*ID:* `%s`", agentID))
+	parts = append(parts, fmt.Sprintf("*Modelo:* `%s`", agent.Model))
+	if agent.Workspace != "" && agent.Workspace != "workspace" {
+		parts = append(parts, fmt.Sprintf("*Workspace:* `%s`", agent.Workspace))
+	}
+	if len(agent.SkillsFilter) > 0 {
+		parts = append(parts, fmt.Sprintf("*Skills:* %s", strings.Join(agent.SkillsFilter, ", ")))
+	}
+	return strings.Join(parts, "\n")
 }

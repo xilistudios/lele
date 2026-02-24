@@ -239,6 +239,56 @@ func (al *AgentLoop) cancelSession(sessionKey string) {
 	}
 }
 
+// GetAgentInfo devuelve información básica de un agente para la UI
+// GetAgentInfo devuelve información básica de un agente (implementa AgentProvidable)
+func (al *AgentLoop) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool) {
+	agent, ok := al.registry.GetAgent(agentID)
+	if !ok {
+		return channels.AgentBasicInfo{}, false
+	}
+	return channels.AgentBasicInfo{
+		ID:            agent.ID,
+		Name:          agent.Name,
+		Model:         agent.Model,
+		Workspace:     agent.Workspace,
+		MaxIterations: agent.MaxIterations,
+		MaxTokens:     agent.MaxTokens,
+		Temperature:   agent.Temperature,
+		Fallbacks:     agent.Fallbacks,
+		SkillsFilter:  agent.SkillsFilter,
+	}, true
+}
+
+// ListAvailableAgentIDs devuelve la lista de IDs de agentes disponibles (implementa AgentProvidable)
+func (al *AgentLoop) ListAvailableAgentIDs() []string {
+	return al.registry.ListAgentIDs()
+}
+
+// SetSessionAgent establece el agente activo para una sesión específica (implementa AgentProvidable)
+func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
+	al.sessionModels.Store(sessionKey, agentID)
+}
+
+// GetSessionAgent obtiene el agente activo de una sesión (implementa AgentProvidable)
+func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
+	if agentID, ok := al.sessionModels.Load(sessionKey); ok {
+		return agentID.(string)
+	}
+	// Retornar el agente default
+	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
+		return defaultAgent.ID
+	}
+	return "main"
+}
+
+// GetDefaultAgentID devuelve el ID del agente por defecto (implementa AgentProvidable)
+func (al *AgentLoop) GetDefaultAgentID() string {
+	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
+		return defaultAgent.ID
+	}
+	return "main"
+}
+
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
 	for _, agentID := range al.registry.ListAgentIDs() {
 		if agent, ok := al.registry.GetAgent(agentID); ok {
@@ -535,6 +585,17 @@ func (al *AgentLoop) processSystemMessage(ctx context.Context, msg bus.InboundMe
 
 	case "/verbose":
 		response := al.handleVerboseCommand(sessionKey)
+		al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   response,
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+		return "", nil
+
+	case "/agent":
+		response := al.handleAgentCommand(sessionKey, args)
 		al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -1710,4 +1771,58 @@ func (al *AgentLoop) handleVerboseCommand(sessionKey string) string {
 		return "📋 Verbose mode **FULL**\nYou will see detailed tool execution and results."
 	}
 	return "Unknown verbose level"
+}
+
+
+func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string {
+	if sessionKey == "" {
+		return "Agent switching requires a session context. Please start a conversation first."
+	}
+
+	// List available agents if no argument provided
+	if len(args) == 0 {
+		agentList := al.registry.ListAgentIDs()
+		if len(agentList) == 0 {
+			return "No agents configured."
+		}
+		
+		var lines []string
+		lines = append(lines, "🤖 Available agents:")
+		for _, id := range agentList {
+					if agent, ok := al.registry.GetAgent(id); ok {
+			name := agent.Name
+			if name == "" {
+				name = id
+			}
+			lines = append(lines, fmt.Sprintf("- %s (%s)", id, name))
+		}
+		}
+		lines = append(lines, "")
+		lines = append(lines, "Use /agent <agent_id> to switch.")
+		return strings.Join(lines, "\n")
+	}
+
+	agentID := args[0]
+	
+	// Validate agent exists
+	agent, ok := al.registry.GetAgent(agentID)
+	if !ok {
+		return fmt.Sprintf("❌ Agent not found: %s", agentID)
+	}
+	
+	// Get agent model
+	agentModel := agent.Model
+	if agentModel == "" {
+		agentModel = al.cfg.Agents.Defaults.Model
+	}
+	
+	// Store the model for this session (similar to how /model works)
+	al.sessionModels.Store(sessionKey, agentModel)
+	
+	agentName := agent.Name
+	if agentName == "" {
+		agentName = agentID
+	}
+	
+	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
