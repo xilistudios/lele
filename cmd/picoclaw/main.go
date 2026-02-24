@@ -602,6 +602,14 @@ func gatewayCmd() {
 	// Inject channel manager into agent loop for command handling
 	agentLoop.SetChannelManager(channelManager)
 
+	// Set up approval manager for all channels that need it
+	if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
+		if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
+			tc.SetApprovalManager(approvalManager)
+			logger.InfoC("telegram", "Approval system attached to Telegram channel")
+		}
+	}
+
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {
 		transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
@@ -612,8 +620,7 @@ func gatewayCmd() {
 		if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
 			if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
 				tc.SetTranscriber(transcriber)
-				tc.SetApprovalManager(approvalManager)
-				logger.InfoC("voice", "Groq transcription and approval system attached to Telegram channel")
+				logger.InfoC("voice", "Groq transcription attached to Telegram channel")
 			}
 		}
 		if discordChannel, ok := channelManager.GetChannel("discord"); ok {

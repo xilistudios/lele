@@ -5,8 +5,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BINARY_NAME="picoclaw"
-BUILD_DIR="$SCRIPT_DIR/build"
+BUILD_DIR="$PROJECT_ROOT/build"
 INSTALL_PATH="/usr/local/bin/$BINARY_NAME"
 SERVICE_NAME="picoclaw"
 
@@ -28,7 +29,7 @@ echo "✓ Go version: $(go version)"
 # Build
 echo ""
 echo "📦 Building..."
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 go build -o "$BUILD_DIR/$BINARY_NAME" ./cmd/picoclaw
 
 if [ $? -eq 0 ]; then

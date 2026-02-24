@@ -123,7 +123,13 @@ func (c *TelegramChannel) SetApprovalManager(am *ApprovalManager) {
 
 // handleApprovalCallback processes callback queries from approval inline keyboards
 func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query telego.CallbackQuery) error {
+	logger.DebugCF("telegram", "handleApprovalCallback called", map[string]interface{}{
+		"data":       query.Data,
+		"approval_manager_nil": c.approvalManager == nil,
+	})
+
 	if c.approvalManager == nil {
+		logger.ErrorC("telegram", "handleApprovalCallback: approval manager is nil")
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval system not available"))
 	}
 
@@ -136,15 +142,28 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 	action := parts[1]
 	approvalID := parts[2]
 
+	logger.DebugCF("telegram", "handleApprovalCallback parsed", map[string]interface{}{
+		"action":      action,
+		"approval_id": approvalID,
+	})
+
 	var approved bool
 	switch action {
 	case "approve":
 		approved = true
 	case "reject":
 		approved = false
+	case "view":
+		// Handle view action - show full command
+		return c.handleApprovalView(ctx, query, approvalID)
 	default:
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
 	}
+
+	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApproval", map[string]interface{}{
+		"approval_id": approvalID,
+		"approved":    approved,
+	})
 
 	// Handle the approval
 	approval, err := c.approvalManager.HandleApproval(approvalID, approved)
@@ -184,6 +203,18 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 	// Answer the callback query
 	feedback := fmt.Sprintf("Command %s", strings.ToLower(statusText))
 	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(feedback))
+}
+
+// handleApprovalView handles the "view" action to show the full command
+func (c *TelegramChannel) handleApprovalView(ctx context.Context, query telego.CallbackQuery, approvalID string) error {
+	approval := c.approvalManager.GetApproval(approvalID)
+	if approval == nil {
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not found or expired"))
+	}
+
+	// Show the full command in a popup
+	text := fmt.Sprintf("Comando:\n`%s`\n\nRazón: %s", approval.Command, approval.Reason)
+	return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText(text))
 }
 
 func (c *TelegramChannel) Start(ctx context.Context) error {
