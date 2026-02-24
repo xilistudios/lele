@@ -23,6 +23,7 @@ type ExecTool struct {
 	restrictToWorkspace bool
 	approvalMode        bool                    // Activa modo aprobación
 	approvalCallback    func(cmd string) (bool, error) // Callback para solicitar aprobación
+	bypassGuard         bool                    // Bypass all safety guards when command is approved
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{
@@ -155,22 +156,25 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
-	if guardMsg != "" {
-		// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
-		if t.approvalMode && isBlockable {
-			// Retornar resultado especial indicando que se necesita aprobación
-			return &ToolResult{
-				ForLLM:  fmt.Sprintf("Command '%s' requires user approval. Reason: %s", command, guardMsg),
-				ForUser: "",
-				IsError: false,
-				ApprovalRequired: &ApprovalInfo{
-					Command: command,
-					Reason:  guardMsg,
-				},
+	// Check safety guards unless bypass is enabled (for approved commands)
+	if !t.bypassGuard {
+		guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
+		if guardMsg != "" {
+			// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
+			if t.approvalMode && isBlockable {
+				// Retornar resultado especial indicando que se necesita aprobación
+				return &ToolResult{
+					ForLLM:  fmt.Sprintf("Command '%s' requires user approval. Reason: %s", command, guardMsg),
+					ForUser: "",
+					IsError: false,
+					ApprovalRequired: &ApprovalInfo{
+						Command: command,
+						Reason:  guardMsg,
+					},
+				}
 			}
+			return ErrorResult(guardMsg)
 		}
-		return ErrorResult(guardMsg)
 	}
 
 	// timeout == 0 means no timeout
@@ -379,4 +383,9 @@ func (t *ExecTool) SetApprovalMode(enabled bool) {
 // SetApprovalCallback configura la función de callback para solicitar aprobación
 func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) {
 	t.approvalCallback = callback
+}
+
+// SetBypassGuard activa/desactiva el bypass de seguridad para comandos aprobados
+func (t *ExecTool) SetBypassGuard(enabled bool) {
+	t.bypassGuard = enabled
 }

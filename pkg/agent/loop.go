@@ -1032,11 +1032,11 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 						// We need to get the exec tool and set it to bypass guard
 						if execTool, ok := agent.Tools.Get("exec"); ok {
 							if et, ok := execTool.(*tools.ExecTool); ok {
-								// Temporarily disable approval mode to bypass guard
-								et.SetApprovalMode(false)
+								// Temporarily bypass all security guards for approved command
+								et.SetBypassGuard(true)
 								toolResult = et.Execute(ctx, tc.Arguments)
 								// Re-enable approval mode
-								et.SetApprovalMode(true)
+								et.SetBypassGuard(false)
 							}
 						}
 						// If tool execution failed or tool not found, use error result
