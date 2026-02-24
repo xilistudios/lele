@@ -879,10 +879,18 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				})
 
 			// Verbose mode: send notification before executing tool
-			if al.verboseManager.IsVerbose(opts.SessionKey) {
-				verboseMsg := fmt.Sprintf("🔧 **Tool Call (%d):** `%s`", iteration, tc.Name)
-				if argsPreview != "" && argsPreview != "{}" {
-					verboseMsg += fmt.Sprintf("\n```json\n%s\n```", argsPreview)
+			level := al.verboseManager.GetLevel(opts.SessionKey)
+			if level != session.VerboseOff {
+				var verboseMsg string
+				if level == session.VerboseFull {
+					// Full mode: detailed tool call with JSON args
+					verboseMsg = fmt.Sprintf("🔧 **Tool Call (%d):** `%s`", iteration, tc.Name)
+					if argsPreview != "" && argsPreview != "{}" {
+						verboseMsg += fmt.Sprintf("\n```json\n%s\n```", argsPreview)
+					}
+				} else {
+					// Basic mode: simplified description
+					verboseMsg = formatBasicToolMessage(tc.Name, tc.Arguments)
 				}
 				al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
@@ -981,8 +989,8 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
 			}
 
-			// Verbose mode: send result notification
-			if al.verboseManager.IsVerbose(opts.SessionKey) {
+			// Verbose mode: send result notification (only in Full mode)
+			if al.verboseManager.IsFull(opts.SessionKey) {
 				status := "✅"
 				if toolResult.IsError {
 					status = "❌"
@@ -1686,9 +1694,14 @@ func (al *AgentLoop) handleVerboseCommand(sessionKey string) string {
 	if sessionKey == "" {
 		return "Verbose mode requires a session context. Please start a conversation first."
 	}
-	newState := al.verboseManager.Toggle(sessionKey)
-	if newState {
-		return "🔊 Verbose mode **ENABLED**\nYou will now see real-time tool execution notifications."
+	newLevel := al.verboseManager.CycleLevel(sessionKey)
+	switch newLevel {
+	case session.VerboseOff:
+		return "🔇 Verbose mode **OFF**\nTool execution notifications are hidden."
+	case session.VerboseBasic:
+		return "🛠️ Verbose mode **BASIC**\nYou will see simplified tool execution notifications."
+	case session.VerboseFull:
+		return "📋 Verbose mode **FULL**\nYou will see detailed tool execution and results."
 	}
-	return "🔇 Verbose mode **DISABLED**\nTool execution notifications are now hidden."
+	return "Unknown verbose level"
 }

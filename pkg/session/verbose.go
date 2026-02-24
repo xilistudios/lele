@@ -5,14 +5,47 @@ import (
 	"sync"
 )
 
+// VerboseLevel represents the verbosity level for tool execution notifications
+type VerboseLevel string
+
+const (
+	// VerboseOff disables all tool execution notifications
+	VerboseOff VerboseLevel = "off"
+	// VerboseBasic shows simplified action descriptions only
+	VerboseBasic VerboseLevel = "basic"
+	// VerboseFull shows detailed tool calls and results (legacy behavior)
+	VerboseFull VerboseLevel = "full"
+)
+
+// IsValidVerboseLevel checks if a string is a valid verbose level
+func IsValidVerboseLevel(level string) bool {
+	switch VerboseLevel(level) {
+	case VerboseOff, VerboseBasic, VerboseFull:
+		return true
+	}
+	return false
+}
+
+// VerboseLevelFromString converts a string to VerboseLevel (defaults to off)
+func VerboseLevelFromString(s string) VerboseLevel {
+	switch s {
+	case "basic":
+		return VerboseBasic
+	case "full":
+		return VerboseFull
+	default:
+		return VerboseOff
+	}
+}
+
 // VerboseManager manages verbose mode state per session.
 // When verbose is enabled, the agent sends real-time notifications
 // for each tool execution to the user.
 // The state is persisted through the SessionManager to survive restarts.
 type VerboseManager struct {
 	mu       sync.RWMutex
-	cache    map[string]bool // In-memory cache for performance
-	sessions *SessionManager // Optional: for persistence
+	cache    map[string]VerboseLevel // In-memory cache for performance
+	sessions *SessionManager         // Optional: for persistence
 }
 
 // NewVerboseManager creates a new VerboseManager.
@@ -24,7 +57,7 @@ func NewVerboseManager(sessions ...*SessionManager) *VerboseManager {
 		sm = sessions[0]
 	}
 	return &VerboseManager{
-		cache:    make(map[string]bool),
+		cache:    make(map[string]VerboseLevel),
 		sessions: sm,
 	}
 }
@@ -37,52 +70,101 @@ func (vm *VerboseManager) SetSessionManager(sm *SessionManager) {
 	vm.sessions = sm
 }
 
-// IsVerbose returns true if verbose mode is enabled for the given session.
+// IsVerbose returns true if verbose mode is enabled (not off) for the given session.
 // It first checks the in-memory cache, then falls back to the persistent store.
 func (vm *VerboseManager) IsVerbose(sessionKey string) bool {
+	return vm.GetLevel(sessionKey) != VerboseOff
+}
+
+// GetLevel returns the verbose level for a session.
+// It first checks the in-memory cache, then falls back to the persistent store.
+func (vm *VerboseManager) GetLevel(sessionKey string) VerboseLevel {
 	vm.mu.RLock()
-	if state, ok := vm.cache[sessionKey]; ok {
+	if level, ok := vm.cache[sessionKey]; ok {
 		vm.mu.RUnlock()
-		return state
+		return level
 	}
 	sessions := vm.sessions
 	vm.mu.RUnlock()
 
 	// If we have a session manager, load from persistent storage
 	if sessions != nil {
-		state := sessions.GetVerboseMode(sessionKey)
+		levelStr := sessions.GetVerboseLevel(sessionKey)
+		level := VerboseLevelFromString(levelStr)
 		vm.mu.Lock()
-		vm.cache[sessionKey] = state
+		vm.cache[sessionKey] = level
 		vm.mu.Unlock()
-		return state
+		return level
 	}
 
-	return false
+	return VerboseOff
 }
 
-// SetVerbose sets the verbose mode for a session.
+// SetLevel sets the verbose level for a session.
 // If a SessionManager is configured, the state is persisted immediately.
-func (vm *VerboseManager) SetVerbose(sessionKey string, enabled bool) {
+func (vm *VerboseManager) SetLevel(sessionKey string, level VerboseLevel) {
 	vm.mu.Lock()
-	vm.cache[sessionKey] = enabled
+	vm.cache[sessionKey] = level
 	sessions := vm.sessions
 	vm.mu.Unlock()
 
 	// Persist if we have a session manager
 	if sessions != nil {
-		if err := sessions.SetVerboseMode(sessionKey, enabled); err != nil {
-			log.Printf("[WARN] Failed to persist verbose mode for session %s: %v", sessionKey, err)
+		if err := sessions.SetVerboseLevel(sessionKey, string(level)); err != nil {
+			log.Printf("[WARN] Failed to persist verbose level for session %s: %v", sessionKey, err)
 		}
 	}
 }
 
-// Toggle toggles verbose mode for a session and returns the new state.
+// CycleLevel cycles through verbosity levels: off -> basic -> full -> off
+// Returns the new level.
+func (vm *VerboseManager) CycleLevel(sessionKey string) VerboseLevel {
+	current := vm.GetLevel(sessionKey)
+	var next VerboseLevel
+	switch current {
+	case VerboseOff:
+		next = VerboseBasic
+	case VerboseBasic:
+		next = VerboseFull
+	case VerboseFull:
+		next = VerboseOff
+	default:
+		next = VerboseOff
+	}
+	vm.SetLevel(sessionKey, next)
+	return next
+}
+
+// IsBasic returns true if verbose level is basic
+func (vm *VerboseManager) IsBasic(sessionKey string) bool {
+	return vm.GetLevel(sessionKey) == VerboseBasic
+}
+
+// IsFull returns true if verbose level is full
+func (vm *VerboseManager) IsFull(sessionKey string) bool {
+	return vm.GetLevel(sessionKey) == VerboseFull
+}
+
+// IsOff returns true if verbose level is off
+func (vm *VerboseManager) IsOff(sessionKey string) bool {
+	return vm.GetLevel(sessionKey) == VerboseOff
+}
+
+// Toggle toggles verbose mode on/off (legacy compatibility, cycles off->basic->full->off)
 // The change is persisted if a SessionManager is configured.
+// Returns true if the new state is not off (backwards compatibility).
 func (vm *VerboseManager) Toggle(sessionKey string) bool {
-	current := vm.IsVerbose(sessionKey)
-	newState := !current
-	vm.SetVerbose(sessionKey, newState)
-	return newState
+	return vm.CycleLevel(sessionKey) != VerboseOff
+}
+
+// SetVerbose sets the verbose mode for a session (legacy compatibility).
+// If enabled, sets to full; if disabled, sets to off.
+func (vm *VerboseManager) SetVerbose(sessionKey string, enabled bool) {
+	if enabled {
+		vm.SetLevel(sessionKey, VerboseFull)
+	} else {
+		vm.SetLevel(sessionKey, VerboseOff)
+	}
 }
 
 // Clear removes the verbose state from cache for a session.
@@ -101,9 +183,10 @@ func (vm *VerboseManager) InitializeFromSession(sessionKey string) {
 	vm.mu.RUnlock()
 
 	if sessions != nil {
-		state := sessions.GetVerboseMode(sessionKey)
+		levelStr := sessions.GetVerboseLevel(sessionKey)
+		level := VerboseLevelFromString(levelStr)
 		vm.mu.Lock()
-		vm.cache[sessionKey] = state
+		vm.cache[sessionKey] = level
 		vm.mu.Unlock()
 	}
 }

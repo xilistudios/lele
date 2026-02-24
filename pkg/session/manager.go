@@ -12,12 +12,13 @@ import (
 )
 
 type Session struct {
-	Key         string              `json:"key"`
-	Messages    []providers.Message `json:"messages"`
-	Summary     string              `json:"summary,omitempty"`
-	VerboseMode bool                `json:"verbose_mode,omitempty"`
-	Created     time.Time           `json:"created"`
-	Updated     time.Time           `json:"updated"`
+	Key          string              `json:"key"`
+	Messages     []providers.Message `json:"messages"`
+	Summary      string              `json:"summary,omitempty"`
+	VerboseMode  bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
+	VerboseLevel string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
+	Created      time.Time           `json:"created"`
+	Updated      time.Time           `json:"updated"`
 }
 
 type SessionManager struct {
@@ -209,7 +210,7 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	}
 }
 
-// GetVerboseMode returns the verbose mode setting for a session.
+// GetVerboseMode returns the verbose mode setting for a session (legacy compatibility).
 func (sm *SessionManager) GetVerboseMode(key string) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -221,7 +222,7 @@ func (sm *SessionManager) GetVerboseMode(key string) bool {
 	return session.VerboseMode
 }
 
-// SetVerboseMode sets the verbose mode for a session and persists it.
+// SetVerboseMode sets the verbose mode for a session and persists it (legacy compatibility).
 func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -238,6 +239,50 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	}
 
 	session.VerboseMode = enabled
+	session.Updated = time.Now()
+
+	// Persist immediately
+	return sm.saveUnlocked(key)
+}
+
+// GetVerboseLevel returns the verbose level for a session ("off", "basic", or "full").
+// Migration: if VerboseMode is true but VerboseLevel is empty, returns "full".
+func (sm *SessionManager) GetVerboseLevel(key string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return "off"
+	}
+
+	// Migration: handle legacy VerboseMode field
+	if session.VerboseLevel == "" && session.VerboseMode {
+		return "full"
+	}
+	if session.VerboseLevel == "" {
+		return "off"
+	}
+	return session.VerboseLevel
+}
+
+// SetVerboseLevel sets the verbose level for a session and persists it.
+func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		// Create session if it doesn't exist
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	session.VerboseLevel = level
 	session.Updated = time.Now()
 
 	// Persist immediately
