@@ -303,6 +303,12 @@ func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
 	cmd := strings.TrimSpace(command)
 	lower := strings.ToLower(cmd)
 
+	// Block docker ps specifically - it's often auto-executed in heartbeats
+	// Users can check docker status with "systemctl is-active docker" instead
+	if strings.HasPrefix(lower, "docker ps") {
+		return "Command blocked by safety guard: 'docker ps' is not allowed. Use 'systemctl is-active docker' to check Docker status.", false
+	}
+
 	for _, pattern := range t.denyPatterns {
 		if pattern.MatchString(lower) {
 			return "Command blocked by safety guard (dangerous pattern detected)", true
