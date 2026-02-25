@@ -26,6 +26,8 @@ type AgentProvidable interface {
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión
 	ClearSession(sessionKey string) string
+	// ClearCooldowns limpia todos los cooldowns de proveedores LLM
+	ClearCooldowns()
 }
 
 // AgentBasicInfo contiene información pública de un agente

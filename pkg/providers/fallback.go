@@ -41,6 +41,13 @@ func NewFallbackChain(cooldown *CooldownTracker) *FallbackChain {
 	return &FallbackChain{cooldown: cooldown}
 }
 
+// ClearCooldowns resets all provider cooldowns.
+func (fc *FallbackChain) ClearCooldowns() {
+	if fc.cooldown != nil {
+		fc.cooldown.ClearAll()
+	}
+}
+
 // ResolveCandidates parses model config into a deduplicated candidate list.
 func ResolveCandidates(cfg ModelConfig, defaultProvider string) []FallbackCandidate {
 	seen := make(map[string]bool)

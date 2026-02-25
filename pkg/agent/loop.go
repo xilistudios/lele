@@ -1876,3 +1876,10 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	agent := al.registry.GetDefaultAgent()
 	return al.handleNewCommand(agent, sessionKey)
 }
+
+// ClearCooldowns clears all provider cooldowns (implements AgentProvidable interface)
+func (al *AgentLoop) ClearCooldowns() {
+	if al.fallback != nil {
+		al.fallback.ClearCooldowns()
+	}
+}
