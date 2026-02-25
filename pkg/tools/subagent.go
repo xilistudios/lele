@@ -264,17 +264,10 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		}
 	}
 
-	// Send announce message back to main agent
-	if sm.bus != nil {
-		announceContent := fmt.Sprintf("Task '%s' completed.\n\nResult:\n%s", task.Label, task.Result)
-		sm.bus.PublishInbound(bus.InboundMessage{
-			Channel:  "system",
-			SenderID: fmt.Sprintf("subagent:%s", task.ID),
-			// Format: "original_channel:original_chat_id" for routing back
-			ChatID:  fmt.Sprintf("%s:%s", task.OriginChannel, task.OriginChatID),
-			Content: announceContent,
-		})
-	}
+	// NOTE: Subagents do NOT send messages directly to users.
+	// The result is returned via callback to the parent agent, which decides
+	// what to do with the result (e.g., display it, use it for further processing,
+	// or send a message to the user if appropriate).
 }
 
 func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
