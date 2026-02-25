@@ -154,12 +154,20 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 		subagentManager.SetTools(agent.Tools) // Pass parent agent's tools to subagent
 		// Set callback to get context for specific agent types (each agent loads its own SOUL.md, AGENTS.md, etc.)
-		subagentManager.SetAgentContextCallback(func(agentID string) string {
+		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
 			if targetAgent, ok := registry.GetAgent(agentID); ok {
-				return targetAgent.ContextBuilder.GetInitialContext()
+				return tools.AgentContextInfo{
+					Context:   targetAgent.ContextBuilder.GetInitialContext(),
+					Workspace: targetAgent.Workspace,
+					Name:      targetAgent.Name,
+				}
 			}
 			// Fallback: use parent agent's context if agent not found
-			return agent.ContextBuilder.GetInitialContext()
+			return tools.AgentContextInfo{
+				Context:   agent.ContextBuilder.GetInitialContext(),
+				Workspace: agent.Workspace,
+				Name:      agent.Name,
+			}
 		})
 		spawnTool := tools.NewSpawnTool(subagentManager)
 		subagents[agentID] = subagentManager

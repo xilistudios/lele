@@ -22,6 +22,13 @@ type SubagentTask struct {
 	Created       int64
 }
 
+// AgentContextInfo holds the context and workspace info for a subagent
+type AgentContextInfo struct {
+	Context   string // Full context (SOUL.md, AGENTS.md, etc.)
+	Workspace string // Agent's workspace path
+	Name      string // Agent display name
+}
+
 type SubagentManager struct {
 	tasks           map[string]*SubagentTask
 	cancels         map[string]context.CancelFunc
@@ -31,7 +38,7 @@ type SubagentManager struct {
 	bus             *bus.MessageBus
 	workspace       string
 	tools           *ToolRegistry
-	getAgentContext func(agentID string) string // Callback to get context for specific agent
+	getAgentContext func(agentID string) AgentContextInfo // Callback to get context info for specific agent
 	maxIterations   int
 	maxTokens       int
 	temperature     float64
@@ -72,9 +79,9 @@ func (sm *SubagentManager) SetTools(tools *ToolRegistry) {
 	sm.tools = tools
 }
 
-// SetAgentContextCallback sets a callback function that returns the initial context
-// for a specific agent ID. Each subagent type gets its own context from its workspace.
-func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string) string) {
+// SetAgentContextCallback sets a callback function that returns the context info
+// for a specific agent ID. Each subagent type gets its own context, workspace, and name.
+func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string) AgentContextInfo) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.getAgentContext = callback
@@ -121,19 +128,31 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Status = "running"
 	task.Created = time.Now().UnixMilli()
 
-	// Get the specific agent's initial context (SOUL.md, AGENTS.md, etc. from its workspace)
+	// Get the specific agent's context info (SOUL.md, AGENTS.md, workspace, name from its workspace)
 	sm.mu.RLock()
-	getContext := sm.getAgentContext
+	getContextInfo := sm.getAgentContext
 	agentID := task.AgentID
 	sm.mu.RUnlock()
 
 	// Build system prompt for subagent using its own context
 	var systemPrompt string
-	if getContext != nil {
-		agentContext := getContext(agentID)
-		if agentContext != "" {
-			systemPrompt = agentContext + "\n\n---\n\n## Subagent Mission\n\n" +
-				"You are a focused subagent spawned to complete a specific task. You have your own workspace and configuration from above.\n\n" +
+	var agentWorkspace string
+	var agentName string
+
+	if getContextInfo != nil {
+		ctxInfo := getContextInfo(agentID)
+		if ctxInfo.Context != "" {
+			agentWorkspace = ctxInfo.Workspace
+			agentName = ctxInfo.Name
+			if agentName == "" {
+				agentName = agentID
+			}
+			systemPrompt = ctxInfo.Context + "\n\n---\n\n## Subagent Identity\n\n" +
+				"**Agent Type:** " + agentName + " (" + agentID + ")\n" +
+				"**Workspace:** " + agentWorkspace + "\n\n" +
+				"## Mission\n\n" +
+				"You are a focused " + agentName + " subagent spawned to complete a specific task. " +
+				"Use your specialized configuration, tools, and workspace above.\n\n" +
 				"Your task: Complete the given objective independently and report back the result.\n" +
 				"You have access to tools - use them as needed.\n" +
 				"Be thorough but concise. After completing the task, provide a clear summary of what was done."
@@ -141,8 +160,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	if systemPrompt == "" {
-		systemPrompt = "You are a subagent. Complete the given task independently and provide a clear, concise result.\n" +
+		systemPrompt = "You are a " + agentID + " subagent. " +
+			"Complete the given task independently and provide a clear, concise result.\n" +
 			"You have access to tools - use them as needed to complete your task."
+		agentWorkspace = "unknown"
+		agentName = agentID
 	}
 
 	messages := []providers.Message{
