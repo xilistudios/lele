@@ -14,6 +14,8 @@ type AgentProvidable interface {
 	AgentSessionManager
 	// GetAgentInfo devuelve información básica de un agente
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
+	// ClearCooldowns limpia todos los cooldowns de proveedores LLM
+	ClearCooldowns()
 }
 
 // AgentBasicInfo contiene información pública de un agente

@@ -23,6 +23,7 @@ type TelegramCommander interface {
 	Status(ctx context.Context, message telego.Message) error
 	Subagents(ctx context.Context, message telego.Message) error
 	Agent(ctx context.Context, message telego.Message) error
+	ClearCooldowns(ctx context.Context, message telego.Message) error
 }
 
 type cmd struct {
@@ -313,4 +314,10 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 		},
 	})
 	return err
+}
+
+func (c *cmd) ClearCooldowns(ctx context.Context, message telego.Message) error {
+	// This is handled directly in telegram.go via agentLoop
+	// This stub satisfies the interface
+	return nil
 }

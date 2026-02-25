@@ -275,6 +275,9 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleCommandWithSession(ctx, &message, "agent")
 	}, th.CommandEqual("agent"))
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		return c.handleCommandWithSession(ctx, &message, "clearcooldown")
+	}, th.CommandEqual("clearcooldown"))
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
@@ -300,6 +303,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 			{Command: "compact", Description: "Compact conversation history and save tokens"},
 			{Command: "subagents", Description: "List and manage running subagents"},
 			{Command: "verbose", Description: "Toggle verbose mode for tool execution"},
+			{Command: "clearcooldown", Description: "Clear LLM provider cooldowns"},
 		},
 	})
 	if err != nil {
@@ -411,7 +415,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 			cmd := parts[0]
 			// Handle known commands
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent":
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent", "clearcooldown":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -759,6 +763,29 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		}
 		// Show agent selection UI
 		return c.commands.Agent(ctx, *message)
+	}
+
+	if cmd == "clearcooldown" {
+		// Clear all LLM provider cooldowns
+		if c.agentLoop != nil {
+			c.agentLoop.ClearCooldowns()
+			_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+				ChatID: telego.ChatID{ID: message.Chat.ID},
+				Text:   "🧹 Cooldowns cleared. All LLM providers are now available.",
+				ReplyParameters: &telego.ReplyParameters{
+					MessageID: message.MessageID,
+				},
+			})
+			return err
+		}
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   "⚠️ Agent loop not available.",
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
 	}
 
 	return nil

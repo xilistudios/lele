@@ -1826,3 +1826,10 @@ func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string
 	
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
+
+// ClearCooldowns clears all provider cooldowns (implements AgentProvidable interface)
+func (al *AgentLoop) ClearCooldowns() {
+	if al.fallback != nil {
+		al.fallback.ClearCooldowns()
+	}
+}
