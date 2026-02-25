@@ -48,6 +48,40 @@ func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 	cb.tools = registry
 }
 
+// GetInitialContext returns the initial context files (SOUL.md, AGENTS.md, etc.)
+// to be loaded at session start. This ensures consistent context across /new and subagents.
+func (cb *ContextBuilder) GetInitialContext() string {
+	parts := []string{}
+
+	// Core identity section
+	parts = append(parts, cb.getIdentity())
+
+	// Bootstrap files - ALWAYS included for consistent context
+	bootstrapContent := cb.LoadBootstrapFiles()
+	if bootstrapContent != "" {
+		parts = append(parts, bootstrapContent)
+	}
+
+	// Skills summary
+	skillsSummary := cb.skillsLoader.BuildSkillsSummary()
+	if skillsSummary != "" {
+		parts = append(parts, fmt.Sprintf(`# Skills
+
+The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
+
+%s`, skillsSummary))
+	}
+
+	// Memory context
+	memoryContext := cb.memory.GetMemoryContext()
+	if memoryContext != "" {
+		parts = append(parts, "# Memory\n\n"+memoryContext)
+	}
+
+	// Join with "---" separator
+	return strings.Join(parts, "\n\n---\n\n")
+}
+
 func (cb *ContextBuilder) getIdentity() string {
 	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
@@ -107,35 +141,15 @@ func (cb *ContextBuilder) buildToolsSection() string {
 }
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {
-	parts := []string{}
+	return cb.GetInitialContext()
+}
 
-	// Core identity section
-	parts = append(parts, cb.getIdentity())
-
-	// Bootstrap files
-	bootstrapContent := cb.LoadBootstrapFiles()
-	if bootstrapContent != "" {
-		parts = append(parts, bootstrapContent)
-	}
-
-	// Skills - show summary, AI can read full content with read_file tool
-	skillsSummary := cb.skillsLoader.BuildSkillsSummary()
-	if skillsSummary != "" {
-		parts = append(parts, fmt.Sprintf(`# Skills
-
-The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
-
-%s`, skillsSummary))
-	}
-
-	// Memory context
-	memoryContext := cb.memory.GetMemoryContext()
-	if memoryContext != "" {
-		parts = append(parts, "# Memory\n\n"+memoryContext)
-	}
-
-	// Join with "---" separator
-	return strings.Join(parts, "\n\n---\n\n")
+// ResetMemoryContext clears the in-memory cache of the memory store
+// to force a fresh reload of memory files on next access.
+// Used when creating a new session with /new.
+func (cb *ContextBuilder) ResetMemoryContext() {
+	// Memory store reads from disk each time, so no cache to clear
+	// But we could add caching here in the future if needed
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {

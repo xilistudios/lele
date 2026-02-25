@@ -153,6 +153,8 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 		subagentManager.SetTools(agent.Tools) // Pass parent agent's tools to subagent
+		// Pass parent agent's initial context (SOUL.md, AGENTS.md, MEMORY.md, etc.) to subagents
+		subagentManager.SetInitialContext(agent.ContextBuilder.GetInitialContext())
 		spawnTool := tools.NewSpawnTool(subagentManager)
 		subagents[agentID] = subagentManager
 		currentAgentID := agentID
@@ -1718,6 +1720,8 @@ func (al *AgentLoop) handleNewCommand(agent *AgentInstance, sessionKey string) s
 	previousSummary := agent.Sessions.GetSummary(sessionKey)
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
+	// Reset memory context to ensure fresh reload of MEMORY.md and daily notes
+	agent.ContextBuilder.ResetMemoryContext()
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		agent.Sessions.SetHistory(sessionKey, previousHistory)
 		agent.Sessions.SetSummary(sessionKey, previousSummary)
@@ -1727,7 +1731,7 @@ func (al *AgentLoop) handleNewCommand(agent *AgentInstance, sessionKey string) s
 		})
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
 	}
-	return "New conversation started."
+	return "🔄 New conversation started. Context refreshed from SOUL.md, AGENTS.md, and MEMORY.md."
 }
 
 func (al *AgentLoop) handleModelCommand(agent *AgentInstance, sessionKey string, args []string) string {

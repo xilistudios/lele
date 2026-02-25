@@ -31,6 +31,7 @@ type SubagentManager struct {
 	bus            *bus.MessageBus
 	workspace      string
 	tools          *ToolRegistry
+	initialContext string // Parent agent's initial context (SOUL.md, AGENTS.md, etc.)
 	maxIterations  int
 	maxTokens      int
 	temperature    float64
@@ -69,6 +70,14 @@ func (sm *SubagentManager) SetTools(tools *ToolRegistry) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.tools = tools
+}
+
+// SetInitialContext sets the parent agent's initial context (SOUL.md, AGENTS.md, etc.)
+// to be inherited by all subagents spawned by this manager.
+func (sm *SubagentManager) SetInitialContext(context string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.initialContext = context
 }
 
 // RegisterTool registers a tool for subagent execution.
@@ -112,10 +121,24 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Status = "running"
 	task.Created = time.Now().UnixMilli()
 
-	// Build system prompt for subagent
-	systemPrompt := `You are a subagent. Complete the given task independently and report the result.
-You have access to tools - use them as needed to complete your task.
-After completing the task, provide a clear summary of what was done.`
+	// Get the parent agent's initial context (SOUL.md, AGENTS.md, etc.)
+	sm.mu.RLock()
+	initialContext := sm.initialContext
+	sm.mu.RUnlock()
+
+	// Build system prompt for subagent - inherit parent agent's context
+	var systemPrompt string
+	if initialContext != "" {
+		systemPrompt = initialContext + "\n\n---\n\n## Subagent Mission\n\n" +
+			"You are a focused subagent spawned to complete a specific task. You inherit the context and knowledge from the parent agent above.\n\n" +
+			"Your task: Complete the given objective independently and report back the result.\n" +
+			"You have access to the same tools as the parent agent - use them as needed.\n" +
+			"Be thorough but concise. After completing the task, provide a clear summary of what was done."
+	} else {
+		systemPrompt = "You are a subagent. Complete the given task independently and report the result.\n" +
+			"You have access to tools - use them as needed to complete your task.\n" +
+			"After completing the task, provide a clear summary of what was done."
+	}
 
 	messages := []providers.Message{
 		{
