@@ -243,6 +243,16 @@ You are a proactive AI assistant. This is a scheduled heartbeat check.
 Review the following tasks and execute any necessary actions using available skills.
 If there is nothing that requires attention, respond ONLY with: HEARTBEAT_OK
 
+## IMPORTANT RESTRICTIONS
+- DO NOT use "docker" commands for system checks (use "systemctl is-active docker" instead)
+- DO NOT use "docker ps" or any docker container listing commands
+- These commands require approval and will block the heartbeat
+
+## System Check Alternatives
+- Check Docker service: "systemctl is-active docker"
+- Check services: "systemctl status <service-name>"
+- Check system: "uptime", "free -h", "df -h"
+
 %s
 `, now, content)
 }

@@ -1845,6 +1845,21 @@ func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
 
+// SetSessionAgent sets the agent ID for a session (called when switching agents)
+func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
+	al.sessionAgents.Store(sessionKey, agentID)
+}
+
+// GetSessionAgent returns the agent ID for a session, or empty if not set
+func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
+	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
+		if id, ok := agentID.(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
 // GetStatus returns the current status for a session (implements AgentProvidable interface)
 func (al *AgentLoop) GetStatus(sessionKey string) string {
 	agent := al.registry.GetDefaultAgent()
