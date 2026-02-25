@@ -275,9 +275,6 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleCommandWithSession(ctx, &message, "agent")
 	}, th.CommandEqual("agent"))
-	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
-		return c.handleCommandWithSession(ctx, &message, "clearcooldown")
-	}, th.CommandEqual("clearcooldown"))
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
@@ -303,7 +300,6 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 			{Command: "compact", Description: "Compact conversation history and save tokens"},
 			{Command: "subagents", Description: "List and manage running subagents"},
 			{Command: "verbose", Description: "Toggle verbose mode for tool execution"},
-			{Command: "clearcooldown", Description: "Clear LLM provider cooldowns"},
 		},
 	})
 	if err != nil {
@@ -415,7 +411,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 			cmd := parts[0]
 			// Handle known commands
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent", "clearcooldown":
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -609,49 +605,105 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 	sessionKey := fmt.Sprintf("telegram:%d", chatID)
 	messageID := fmt.Sprintf("%d", message.MessageID)
 
-	// For commands that change state, send system message to agent loop
-	if cmd == "new" {
-		// Send system message to clear session
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/clear",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
+	// Execute commands directly via agentLoop (async - doesn't wait for agent processing)
+	switch cmd {
+	case "new":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.ClearSession(sessionKey)
+		} else {
+			response = "🔄 Nueva conversación iniciada. Historial limpiado."
 		}
-		c.bus.PublishInbound(systemMsg)
-		
 		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "🔄 Nueva conversación iniciada. Historial limpiado.",
+			Text:   response,
 			ReplyParameters: &telego.ReplyParameters{
 				MessageID: message.MessageID,
 			},
 		})
 		return err
-	}
-	
-	if cmd == "stop" {
-		// Send system message to agent loop - response will come via bus
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/stop",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
+
+	case "stop":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.StopAgent(sessionKey)
+		} else {
+			response = "⏹️ Agente detenido."
 		}
-		c.bus.PublishInbound(systemMsg)
-		// Response will be sent by agent loop via bus
-		return nil
-	}
-	
-	if cmd == "model" {
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+
+	case "status":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.GetStatus(sessionKey)
+		} else {
+			response = "⚠️ Agent loop not available."
+		}
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+
+	case "compact":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.CompactSession(sessionKey)
+		} else {
+			response = "⚠️ Agent loop not available."
+		}
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+
+	case "subagents":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.GetSubagents()
+		} else {
+			response = "🤖 No subagents running."
+		}
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+
+	case "verbose":
+		var response string
+		if c.agentLoop != nil {
+			response = c.agentLoop.ToggleVerbose(sessionKey)
+		} else {
+			response = "⚠️ Agent loop not available."
+		}
+		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+			ChatID: telego.ChatID{ID: message.Chat.ID},
+			Text:   response,
+			ReplyParameters: &telego.ReplyParameters{
+				MessageID: message.MessageID,
+			},
+		})
+		return err
+
+	case "model":
 		// Extract model argument and send to agent loop
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/model"))
 		systemMsg := bus.InboundMessage{
@@ -666,70 +718,6 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		}
 		c.bus.PublishInbound(systemMsg)
 		return nil // Agent loop will respond
-	}
-	
-	if cmd == "status" {
-		// Send to agent loop for detailed status
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/status",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
-		}
-		c.bus.PublishInbound(systemMsg)
-		return nil
-	}
-
-	if cmd == "compact" {
-		// Send to agent loop for manual compaction
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/compact",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
-		}
-		c.bus.PublishInbound(systemMsg)
-		return nil
-	}
-	
-	if cmd == "subagents" {
-		// Send to agent loop for subagent status
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/subagents",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
-		}
-		c.bus.PublishInbound(systemMsg)
-		return nil
-	}
-
-	if cmd == "verbose" {
-		// Send to agent loop to toggle verbose mode
-		systemMsg := bus.InboundMessage{
-			Channel:    "system",
-			SenderID:   senderID,
-			ChatID:     sessionKey,
-			Content:    "/verbose",
-			SessionKey: sessionKey,
-			Metadata: map[string]string{
-				"message_id": messageID,
-			},
-		}
-		c.bus.PublishInbound(systemMsg)
-		return nil
 	}
 
 	// For other commands (help, start, show, list, models, agent), use direct response
@@ -763,29 +751,6 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		}
 		// Show agent selection UI
 		return c.commands.Agent(ctx, *message)
-	}
-
-	if cmd == "clearcooldown" {
-		// Clear all LLM provider cooldowns
-		if c.agentLoop != nil {
-			c.agentLoop.ClearCooldowns()
-			_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-				ChatID: telego.ChatID{ID: message.Chat.ID},
-				Text:   "🧹 Cooldowns cleared. All LLM providers are now available.",
-				ReplyParameters: &telego.ReplyParameters{
-					MessageID: message.MessageID,
-				},
-			})
-			return err
-		}
-		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   "⚠️ Agent loop not available.",
-			ReplyParameters: &telego.ReplyParameters{
-				MessageID: message.MessageID,
-			},
-		})
-		return err
 	}
 
 	return nil

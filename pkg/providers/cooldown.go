@@ -82,14 +82,6 @@ func (ct *CooldownTracker) MarkSuccess(provider string) {
 	entry.DisabledReason = ""
 }
 
-// ClearAll resets all cooldowns and error counts for all providers.
-func (ct *CooldownTracker) ClearAll() {
-	ct.mu.Lock()
-	defer ct.mu.Unlock()
-
-	ct.entries = make(map[string]*cooldownEntry)
-}
-
 // IsAvailable returns true if the provider is not in cooldown or disabled.
 func (ct *CooldownTracker) IsAvailable(provider string) bool {
 	ct.mu.RLock()

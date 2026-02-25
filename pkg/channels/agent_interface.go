@@ -14,8 +14,18 @@ type AgentProvidable interface {
 	AgentSessionManager
 	// GetAgentInfo devuelve información básica de un agente
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
-	// ClearCooldowns limpia todos los cooldowns de proveedores LLM
-	ClearCooldowns()
+	// GetStatus devuelve el estado actual del agente para una sesión
+	GetStatus(sessionKey string) string
+	// StopAgent detiene el procesamiento del agente para una sesión
+	StopAgent(sessionKey string) string
+	// CompactSession compacta la sesión para ahorrar tokens
+	CompactSession(sessionKey string) string
+	// ToggleVerbose cambia el modo verbose para una sesión
+	ToggleVerbose(sessionKey string) string
+	// GetSubagents list los subagentes activos
+	GetSubagents() string
+	// ClearSession limpia el historial de una sesión
+	ClearSession(sessionKey string) string
 }
 
 // AgentBasicInfo contiene información pública de un agente
