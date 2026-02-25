@@ -1827,6 +1827,56 @@ func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
 }
 
+// GetStatus returns the current status for a session (implements AgentProvidable interface)
+func (al *AgentLoop) GetStatus(sessionKey string) string {
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		return "No default agent configured."
+	}
+	return al.formatStatusResponse(agent, sessionKey, "telegram")
+}
+
+// StopAgent stops the agent processing for a session (implements AgentProvidable interface)
+func (al *AgentLoop) StopAgent(sessionKey string) string {
+	// Cancel the current context if there's an active session
+	if cancel, ok := al.sessionCancels.Load(sessionKey); ok {
+		if cf, ok := cancel.(context.CancelFunc); ok {
+			cf()
+		}
+	}
+	return "⏹️ Agent signaled to stop."
+}
+
+// CompactSession compacts the session history (implements AgentProvidable interface)
+func (al *AgentLoop) CompactSession(sessionKey string) string {
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		return "No default agent configured."
+	}
+	stats := al.maybeSummarize(agent, sessionKey, "telegram", "")
+	if stats == nil {
+		return "✅ Session is already compact."
+	}
+	return fmt.Sprintf("✅ Compacted session: %d messages → %d messages (%d tokens saved)",
+		stats.BeforeMessages, stats.AfterMessages, stats.SavedTokens)
+}
+
+// ToggleVerbose toggles verbose mode for a session (implements AgentProvidable interface)
+func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
+	return al.handleVerboseCommand(sessionKey)
+}
+
+// GetSubagents lists running subagents (implements AgentProvidable interface)
+func (al *AgentLoop) GetSubagents() string {
+	return al.formatSubagentsResponse(nil)
+}
+
+// ClearSession clears the session history (implements AgentProvidable interface)
+func (al *AgentLoop) ClearSession(sessionKey string) string {
+	agent := al.registry.GetDefaultAgent()
+	return al.handleNewCommand(agent, sessionKey)
+}
+
 // ClearCooldowns clears all provider cooldowns (implements AgentProvidable interface)
 func (al *AgentLoop) ClearCooldowns() {
 	if al.fallback != nil {
