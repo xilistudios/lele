@@ -40,6 +40,7 @@ type AgentLoop struct {
 	running         atomic.Bool
 	summarizing     sync.Map
 	sessionModels   sync.Map
+	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
 	fallback        *providers.FallbackChain
 	channelManager  *channels.Manager
 	subagents       map[string]*tools.SubagentManager
@@ -419,6 +420,13 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	if msg.SessionKey != "" {
 		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
 			sessionKey = msg.SessionKey
+		}
+	}
+
+	// Check if a session-specific agent is set (e.g., via /agent command)
+	if sessionAgentID := al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+		if sessionAgent, ok := al.registry.GetAgent(sessionAgentID); ok {
+			agent = sessionAgent
 		}
 	}
 
@@ -1843,21 +1851,6 @@ func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string
 	}
 	
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
-}
-
-// SetSessionAgent sets the agent ID for a session (called when switching agents)
-func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
-	al.sessionAgents.Store(sessionKey, agentID)
-}
-
-// GetSessionAgent returns the agent ID for a session, or empty if not set
-func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
-	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
-		if id, ok := agentID.(string); ok {
-			return id
-		}
-	}
-	return ""
 }
 
 // GetStatus returns the current status for a session (implements AgentProvidable interface)
