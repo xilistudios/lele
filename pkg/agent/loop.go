@@ -283,12 +283,12 @@ func (al *AgentLoop) ListAvailableAgentIDs() []string {
 
 // SetSessionAgent establece el agente activo para una sesión específica (implementa AgentProvidable)
 func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
-	al.sessionModels.Store(sessionKey, agentID)
+	al.sessionAgents.Store(sessionKey, agentID)
 }
 
 // GetSessionAgent obtiene el agente activo de una sesión (implementa AgentProvidable)
 func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
-	if agentID, ok := al.sessionModels.Load(sessionKey); ok {
+	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
 		return agentID.(string)
 	}
 	// Retornar el agente default
@@ -430,6 +430,16 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		}
 	}
 
+	// Keep session model in sync with the active/session-selected agent unless user
+	// explicitly changed model with /model.
+	if _, hasSessionModel := al.sessionModels.Load(sessionKey); !hasSessionModel && agent != nil {
+		if agent.Model != "" {
+			al.sessionModels.Store(sessionKey, agent.Model)
+		} else {
+			al.sessionModels.Store(sessionKey, al.cfg.Agents.Defaults.Model)
+		}
+	}
+
 	logger.InfoCF("agent", "Routed message",
 		map[string]interface{}{
 			"agent_id":    agent.ID,
@@ -477,16 +487,16 @@ func (al *AgentLoop) processSystemMessage(ctx context.Context, msg bus.InboundMe
 
 	// Parse command from content
 	content := msg.Content
-	logger.InfoCF("agent", "System message content", map[string]interface{}{
-		"content": content,
-		"cmd":     strings.Fields(content)[0],
-	})
 	parts := strings.Fields(content)
 	if len(parts) == 0 {
 		return "", nil
 	}
 	cmd := parts[0]
 	args := parts[1:]
+	logger.InfoCF("agent", "System message content", map[string]interface{}{
+		"content": content,
+		"cmd":     cmd,
+	})
 
 	// Use default agent for system messages
 	agent := al.registry.GetDefaultAgent()
@@ -495,6 +505,13 @@ func (al *AgentLoop) processSystemMessage(ctx context.Context, msg bus.InboundMe
 	sessionKey := msg.SessionKey
 	if sessionKey == "" {
 		sessionKey = routing.BuildAgentMainSessionKey(agent.ID)
+	}
+
+	// Honor session-selected agent for command/system handling as well.
+	if sessionAgentID := al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+		if sessionAgent, ok := al.registry.GetAgent(sessionAgentID); ok {
+			agent = sessionAgent
+		}
 	}
 
 	// Handle commands directly without LLM
@@ -992,18 +1009,29 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, agent *AgentInstance, 
 			var toolResult *tools.ToolResult
 			
 			// Create async callback for tools that implement AsyncTool
-			// NOTE: Following openclaw's design, async tools do NOT send results directly to users.
-			// Instead, they notify the agent via PublishInbound, and the agent decides
-			// whether to forward the result to the user (in processSystemMessage).
+			// Async completion is routed back as a system inbound event so the
+			// parent agent loop can notify the original chat reliably.
 			asyncCallback := func(callbackCtx context.Context, result *tools.ToolResult) {
-				// Log the async completion but don't send directly to user
-				// The agent will handle user notification via processSystemMessage
+				if result == nil {
+					return
+				}
+
 				if !result.Silent && result.ForUser != "" {
-					logger.InfoCF("agent", "Async tool completed, agent will handle notification",
+					logger.InfoCF("agent", "Async tool completed",
 						map[string]interface{}{
 							"tool":        tc.Name,
 							"content_len": len(result.ForUser),
 						})
+				}
+
+				if al.bus != nil && strings.TrimSpace(result.ForUser) != "" {
+					al.bus.PublishInbound(bus.InboundMessage{
+						Channel:    "system",
+						SenderID:   "subagent",
+						ChatID:     fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+						Content:    result.ForUser,
+						SessionKey: opts.SessionKey,
+					})
 				}
 			}
 			
@@ -1471,8 +1499,50 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		GuildID:    msg.Metadata["guild_id"],
 		TeamID:     msg.Metadata["team_id"],
 	})
-	_ = route // Keep for future use
+
+	agent, ok := al.registry.GetAgent(route.AgentID)
+	if !ok {
+		agent = al.registry.GetDefaultAgent()
+	}
+	sessionKey := route.SessionKey
+	if msg.SessionKey != "" {
+		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
+			sessionKey = msg.SessionKey
+		}
+	}
+	if sessionAgentID := al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+		if sessionAgent, ok := al.registry.GetAgent(sessionAgentID); ok {
+			agent = sessionAgent
+		}
+	}
+
 	switch cmd {
+	case "/new":
+		return al.handleNewCommand(agent, sessionKey), true
+	case "/clear":
+		if agent != nil {
+			agent.Sessions.TruncateHistory(sessionKey, 0)
+			agent.Sessions.SetSummary(sessionKey, "")
+			agent.Sessions.Save(sessionKey)
+		}
+		return "✅ Conversation cleared.", true
+	case "/status":
+		return al.formatStatusResponse(agent, sessionKey, msg.Channel), true
+	case "/model":
+		return al.handleModelCommand(agent, sessionKey, args), true
+	case "/verbose":
+		return al.handleVerboseCommand(sessionKey), true
+	case "/agent":
+		return al.handleAgentCommand(sessionKey, args), true
+	case "/subagents":
+		return al.formatSubagentsResponse(args), true
+	case "/stop":
+		subagentCount := al.stopAllSubagents()
+		al.cancelSession(sessionKey)
+		if subagentCount > 0 {
+			return fmt.Sprintf("Agente detenido (incluye %d subagente(s)).", subagentCount), true
+		}
+		return "Agente detenido.", true
 	case "/show":
 		if len(args) < 1 {
 			return "Usage: /show [model|channel|agents]", true
@@ -1492,7 +1562,6 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		default:
 			return fmt.Sprintf("Unknown show target: %s", args[0]), true
 		}
-
 	case "/list":
 		if len(args) < 1 {
 			return "Usage: /list [models|channels|agents]", true
@@ -1515,14 +1584,12 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		default:
 			return fmt.Sprintf("Unknown list target: %s", args[0]), true
 		}
-
 	case "/switch":
 		if len(args) < 3 || args[1] != "to" {
 			return "Usage: /switch [model|channel] to <name>", true
 		}
 		target := args[0]
 		value := args[2]
-
 		switch target {
 		case "model":
 			defaultAgent := al.registry.GetDefaultAgent()
@@ -1543,43 +1610,18 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 		default:
 			return fmt.Sprintf("Unknown switch target: %s", target), true
 		}
-
 	case "/compact":
-		// Find the agent and session for this message
-		route := al.registry.ResolveRoute(routing.RouteInput{
-			Channel:    msg.Channel,
-			AccountID:  msg.Metadata["account_id"],
-			Peer:       extractPeer(msg),
-			ParentPeer: extractParentPeer(msg),
-			GuildID:    msg.Metadata["guild_id"],
-			TeamID:     msg.Metadata["team_id"],
-		})
-		agent, ok := al.registry.GetAgent(route.AgentID)
-		if !ok {
-			agent = al.registry.GetDefaultAgent()
-		}
 		if agent == nil {
 			return "No agent available for compaction", true
 		}
-
-		sessionKey := route.SessionKey
-		if msg.SessionKey != "" {
-			if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
-				sessionKey = msg.SessionKey
-			}
-		}
-
-		// Force compaction by temporarily lowering threshold
 		history := agent.Sessions.GetHistory(sessionKey)
 		if len(history) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
-
 		stats := al.summarizeSession(agent, sessionKey)
 		if stats == nil {
 			return "❌ Compaction failed or nothing to compact.", true
 		}
-
 		return fmt.Sprintf("📊 Memory compacted:\n• Messages: %d → %d (dropped %d)\n• Tokens: ~%d → ~%d (saved ~%d)",
 			stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 			stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens), true
@@ -1705,8 +1747,8 @@ func (al *AgentLoop) formatStatusResponse(agent *AgentInstance, sessionKey, orig
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
-	return fmt.Sprintf("🦞 picoclaw %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
-		gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
+	return fmt.Sprintf("🦞 picoclaw %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
+		gatewayVersion(), gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
 }
 
 func (al *AgentLoop) formatSubagentsResponse(args []string) string {
@@ -1842,7 +1884,8 @@ func (al *AgentLoop) handleAgentCommand(sessionKey string, args []string) string
 		agentModel = al.cfg.Agents.Defaults.Model
 	}
 	
-	// Store the model for this session (similar to how /model works)
+	// Store selected agent and its model for this session
+	al.sessionAgents.Store(sessionKey, agentID)
 	al.sessionModels.Store(sessionKey, agentModel)
 	
 	agentName := agent.Name
@@ -1876,13 +1919,25 @@ func (al *AgentLoop) StopAgent(sessionKey string) string {
 // CompactSession compacts the session history (implements AgentProvidable interface)
 func (al *AgentLoop) CompactSession(sessionKey string) string {
 	agent := al.registry.GetDefaultAgent()
+	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
+		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
+			agent = selectedAgent
+		}
+	}
 	if agent == nil {
 		return "No default agent configured."
 	}
-	stats := al.maybeSummarize(agent, sessionKey, "telegram", "")
-	if stats == nil {
-		return "✅ Session is already compact."
+
+	history := agent.Sessions.GetHistory(sessionKey)
+	if len(history) <= 4 {
+		return "📭 Not enough messages to compact (need 5+)."
 	}
+
+	stats := al.summarizeSession(agent, sessionKey)
+	if stats == nil {
+		return "❌ Compaction failed or nothing to compact."
+	}
+
 	return fmt.Sprintf("✅ Compacted session: %d messages → %d messages (%d tokens saved)",
 		stats.BeforeMessages, stats.AfterMessages, stats.SavedTokens)
 }
