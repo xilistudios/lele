@@ -55,7 +55,7 @@ func DetectEncoding(buffer []byte) (string, []byte) {
 	if len(buffer) >= 3 {
 		// UTF-8 BOM: EF BB BF
 		if buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF {
-			return "UTF-8", buffer[3:]
+			return "UTF-8-BOM", buffer[3:]
 		}
 	}
 	
@@ -66,7 +66,7 @@ func DetectEncoding(buffer []byte) (string, []byte) {
 // GetBOM returns the BOM bytes for a given encoding
 func GetBOM(encoding string) []byte {
 	switch strings.ToUpper(encoding) {
-	case "UTF-8":
+	case "UTF-8-BOM":
 		return []byte{0xEF, 0xBB, 0xBF}
 	case "UTF-16BE":
 		return []byte{0xFE, 0xFF}

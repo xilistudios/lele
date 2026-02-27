@@ -20,7 +20,7 @@ func TestDetectEncoding(t *testing.T) {
 		{
 			name:          "UTF-8 with BOM",
 			input:        append([]byte{0xEF, 0xBB, 0xBF}, []byte("Hello World")...),
-			wantEncoding: "UTF-8",
+			wantEncoding: "UTF-8-BOM",
 			wantContent:  "Hello World",
 		},
 		{
@@ -240,9 +240,10 @@ func TestGetBOM(t *testing.T) {
 		encoding string
 		expected []byte
 	}{
-		{"UTF-8", []byte{0xEF, 0xBB, 0xBF}},
-		{"utf-8", []byte{0xEF, 0xBB, 0xBF}},
-		{"UTF-8", []byte{0xEF, 0xBB, 0xBF}},
+		{"UTF-8", nil},                    // UTF-8 without BOM should return nil
+		{"utf-8", nil},                    // UTF-8 lowercase without BOM should return nil
+		{"UTF-8-BOM", []byte{0xEF, 0xBB, 0xBF}}, // UTF-8-BOM should return BOM
+		{"UTF-8-bom", []byte{0xEF, 0xBB, 0xBF}}, // UTF-8-bom lowercase should return BOM
 		{"UTF-16BE", []byte{0xFE, 0xFF}},
 		{"UTF-16LE", []byte{0xFF, 0xFE}},
 		{"UTF-32BE", []byte{0x00, 0x00, 0xFE, 0xFF}},
