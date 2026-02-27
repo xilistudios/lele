@@ -1,0 +1,162 @@
+From: Code Review Fixes
+Date: Wed, 25 Feb 2026
+Subject: [PATCH] Fix fmod BOM handling, atomic apply, and permissions
+
+---
+ pkg/tools/fmod.go     |  6 ++++--
+ pkg/tools/apply.go    | 55 +++++++++++++++++++++++++++++++------------
+ pkg/agent/instance.go |  6 +++---
+ 3 files changed, 47 insertions(+), 20 deletions(-)
+
+diff --git a/pkg/tools/fmod.go b/pkg/tools/fmod.go
+--- a/pkg/tools/fmod.go
++++ b/pkg/tools/fmod.go
+@@ -52,7 +52,8 @@ type EncodingInfo struct {
+ 	BOM      []byte
+ }
+ 
+-// DetectEncoding detects encoding from BOM and removes it if present
++// DetectEncoding detects encoding from BOM and removes it if present
++// Returns "UTF-8-BOM" if BOM was present, "UTF-8" otherwise
+ func DetectEncoding(buffer []byte) (string, []byte) {
+ 	if len(buffer) >= 4 {
+ 		// UTF-32 BE: 00 00 FE FF
+@@ -79,7 +80,7 @@ func DetectEncoding(buffer []byte) (string, []byte) {
+ 	if len(buffer) >= 3 {
+ 		// UTF-8 BOM: EF BB BF
+ 		if buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF {
+-			return "UTF-8", buffer[3:]
++			return "UTF-8-BOM", buffer[3:]
+ 		}
+ 	}
+ 	
+@@ -88,8 +89,8 @@ func DetectEncoding(buffer []byte) (string, []byte) {
+ }
+ 
+ // GetBOM returns the BOM bytes for a given encoding
+ func GetBOM(encoding string) []byte {
+ 	switch strings.ToUpper(encoding) {
+-	case "UTF-8":
++	case "UTF-8-BOM":
+ 		return []byte{0xEF, 0xBB, 0xBF}
+ 	case "UTF-16BE":
+ 		return []byte{0xFE, 0xFF}
+
+diff --git a/pkg/tools/apply.go b/pkg/tools/apply.go
+--- a/pkg/tools/apply.go
++++ b/pkg/tools/apply.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 	"os"
+ 	"path/filepath"
++	"runtime"
+ 
+ 	"github.com/sipeed/picoclaw/pkg/logger"
+ )
+@@ -74,35 +75,59 @@ func (t *ApplyTool) Execute(ctx context.Context, args map[string]interface{}) *T
+ 			"temp":     tempPath,
+ 		})
+ 
+-	// Use atomic rename for safety
+-	// Windows requires special handling - rename can't overwrite
+-	// Use a 2-step process: temp -> backup, temp_copy -> original
++	// Get original file info to preserve permissions
++	origInfo, err := os.Stat(resolvedPath)
++	if err != nil {
++		return ErrorResult(fmt.Sprintf("failed to stat original file: %v", err))
++	}
++	origMode := origInfo.Mode().Perm()
++	
+ 	backupPath := resolvedPath + ".fmod.bak"
+ 	
+-	// Create backup of original
+-	originalContent, err := os.ReadFile(resolvedPath)
+-	if err != nil {
+-		return ErrorResult(fmt.Sprintf("failed to read original file: %v", err))
+-	}
+-	
+-	if err := os.WriteFile(backupPath, originalContent, 0644); err != nil {
+-		return ErrorResult(fmt.Sprintf("failed to create backup: %v", err))
+-	}
+-
+-	// Read temp file
+-	tempContent, err := os.ReadFile(tempPath)
+-	if err != nil {
+-		return ErrorResult(fmt.Sprintf("failed to read temp file: %v", err))
+-	}
+-
+-	// Write temp content to original (atomic-ish on most systems)
+-	if err := os.WriteFile(resolvedPath, tempContent, 0644); err != nil {
+-		// Restore backup on failure
+-		os.WriteFile(resolvedPath, originalContent, 0644)
+-		os.Remove(backupPath)
+-		return ErrorResult(fmt.Sprintf("failed to write original file: %v", err))
++	// Atomic apply using rename
++	// Strategy: move temp to staged, set permissions, then swap original with staged
++	// On any failure: restore original state
++	
++	// Step 1: Move temp to a staging file
++	stagePath := resolvedPath + ".fmod.stage"
++	if err := os.Rename(tempPath, stagePath); err != nil {
++		return ErrorResult(fmt.Sprintf("failed to stage temp file: %v", err))
++	}
++	
++	// Step 2: Preserve original permissions on staged file
++	if err := os.Chmod(stagePath, origMode); err != nil {
++		// Restore temp and fail
++		os.Rename(stagePath, tempPath)
++		return ErrorResult(fmt.Sprintf("failed to set permissions on staged file: %v", err))
++	}
++	
++	// Step 3: Move original to backup (atomic on POSIX)
++	if err := os.Rename(resolvedPath, backupPath); err != nil {
++		// Restore temp and fail
++		os.Rename(stagePath, tempPath)
++		return ErrorResult(fmt.Sprintf("failed to create backup: %v", err))
++	}
++	
++	// Step 4: Move staged to original (atomic commit)
++	if err := os.Rename(stagePath, resolvedPath); err != nil {
++		// Restore backup to original and staged to temp
++		os.Rename(backupPath, resolvedPath)
++		os.Rename(stagePath, tempPath)
++		return ErrorResult(fmt.Sprintf("failed to apply changes: %v", err))
+ 	}
+ 
+-	// Success - remove temp and backup files
+-	if err := os.Remove(tempPath); err != nil {
+-		logger.WarnCF("apply", "Failed to remove temp file",
+-			map[string]interface{}{"path": tempPath, "error": err.Error()})
++	// Success - remove backup file
++	// Keep backup until here in case something goes wrong after commit
++	if err := os.Remove(backupPath); err != nil {
++		logger.WarnCF("apply", "Failed to remove backup file",
++			map[string]interface{}{"path": backupPath, "error": err.Error()})
+ 	}
+ 	-if err := os.Remove(backupPath); err != nil {
+-		logger.WarnCF("apply", "Failed to remove backup file",
+-			map[string]interface{}{"path": backupPath, "error": err.Error()})
++	// Windows cleanup: if temp still exists (shouldn't happen), try to remove
++	if runtime.GOOS == "windows" {
++		os.Remove(tempPath)
++		os.Remove(stagePath)
+ 	}
+ 
+ 	logger.InfoCF("apply", "Changes applied successfully",
+
+diff --git a/pkg/agent/instance.go b/pkg/agent/instance.go
+--- a/pkg/agent/instance.go
++++ b/pkg/agent/instance.go
+@@ -49,11 +49,11 @@ func NewAgentInstance(
+ 	restrict := defaults.RestrictToWorkspace
+ 	toolsRegistry := tools.NewToolRegistry()
+ 	toolsRegistry.Register(tools.NewReadFileTool(workspace, restrict))
+-	toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict))
+-	toolsRegistry.Register(tools.NewListDirTool(workspace, restrict))
++\t// toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict)) // Deprecated: use fmod tools\n+\t// toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))   // Deprecated: use smart_edit\n+\ttoolsRegistry.Register(tools.NewListDirTool(workspace, restrict))\n \ttoolsRegistry.Register(tools.NewExecToolWithConfig(workspace, restrict, cfg))
+-\ttoolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
+ \ttoolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
+ 
+ \t// Fmod tools
+--
+2.34.1

@@ -74,45 +74,40 @@ func (t *ApplyTool) Execute(ctx context.Context, args map[string]interface{}) *T
 			"temp":     tempPath,
 		})
 
-	// Use atomic rename for safety
-	// Windows requires special handling - rename can't overwrite
-	// Use a 2-step process: temp -> backup, temp_copy -> original
-	
-	backupPath := resolvedPath + ".fmod.bak"
-	
-	// Create backup of original
-	originalContent, err := os.ReadFile(resolvedPath)
+	// Get original file permissions to preserve them
+	originalInfo, err := os.Stat(resolvedPath)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to read original file: %v", err))
+		return ErrorResult(fmt.Sprintf("failed to stat original file: %v", err))
 	}
-	
-	if err := os.WriteFile(backupPath, originalContent, 0644); err != nil {
-		return ErrorResult(fmt.Sprintf("failed to create backup: %v", err))
-	}
+	originalMode := originalInfo.Mode()
 
-	// Read temp file
+	// Read temp file content
 	tempContent, err := os.ReadFile(tempPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read temp file: %v", err))
 	}
 
-	// Write temp content to original (atomic-ish on most systems)
-	if err := os.WriteFile(resolvedPath, tempContent, 0644); err != nil {
-		// Restore backup on failure
-		os.WriteFile(resolvedPath, originalContent, 0644)
-		os.Remove(backupPath)
-		return ErrorResult(fmt.Sprintf("failed to write original file: %v", err))
+	// Atomic write: write to temp file first, then rename
+	// This ensures the original file is never in an inconsistent state
+	tempFinalPath := resolvedPath + ".fmod.tmp.final"
+	
+	// Write to temporary final file with original permissions
+	if err := os.WriteFile(tempFinalPath, tempContent, originalMode); err != nil {
+		return ErrorResult(fmt.Sprintf("failed to write temp file: %v", err))
 	}
 
-	// Success - remove temp and backup files
+	// Atomic rename: temp -> original
+	// This is atomic on POSIX systems and most Windows scenarios
+	if err := os.Rename(tempFinalPath, resolvedPath); err != nil {
+		// Clean up temp file on failure
+		os.Remove(tempFinalPath)
+		return ErrorResult(fmt.Sprintf("failed to rename temp file to original: %v", err))
+	}
+
+	// Success - remove old temp file
 	if err := os.Remove(tempPath); err != nil {
 		logger.WarnCF("apply", "Failed to remove temp file",
 			map[string]interface{}{"path": tempPath, "error": err.Error()})
-	}
-	
-	if err := os.Remove(backupPath); err != nil {
-		logger.WarnCF("apply", "Failed to remove backup file",
-			map[string]interface{}{"path": backupPath, "error": err.Error()})
 	}
 
 	logger.InfoCF("apply", "Changes applied successfully",
