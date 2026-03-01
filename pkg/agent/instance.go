@@ -35,6 +35,28 @@ type AgentInstance struct {
 }
 
 // NewAgentInstance creates an agent instance from config.
+
+// getContextWindow returns the context window for a model from provider config
+func getContextWindow(cfg *config.Config, model string, provider string) int {
+	// Extract provider name and model name from full model path (e.g., "chutes/qwen3-5-397b-a17b-tee")
+	parts := strings.Split(model, "/")
+	if len(parts) >= 2 {
+		providerName := strings.ToLower(parts[0])
+		modelName := strings.Join(parts[1:], "/")
+		
+		// Try to get context window from provider config
+		if prov, ok := cfg.Providers.GetNamed(providerName); ok {
+			if modelCfg, exists := prov.Models[modelName]; exists {
+				if modelCfg.ContextWindow > 0 {
+					return modelCfg.ContextWindow
+				}
+			}
+		}
+	}
+	// Fallback to default
+	return 128000
+}
+
 func NewAgentInstance(
 	agentCfg *config.AgentConfig,
 	defaults *config.AgentDefaults,
@@ -112,7 +134,7 @@ func NewAgentInstance(
 		MaxIterations:  maxIter,
 		MaxTokens:      maxTokens,
 		Temperature:    temperature,
-		ContextWindow:  maxTokens,
+		ContextWindow:  getContextWindow(cfg, model, defaults.Provider),
 		Provider:       provider,
 		Sessions:       sessionsManager,
 		ContextBuilder: contextBuilder,

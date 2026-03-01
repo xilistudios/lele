@@ -282,6 +282,7 @@ type OpenAIProviderConfig struct {
 }
 
 type ProviderModelConfig struct {
+	ContextWindow int     `json:"context_window,omitempty"`
 	Model       string   `json:"model,omitempty"`
 	MaxTokens   int      `json:"max_tokens,omitempty"`
 	Temperature *float64 `json:"temperature,omitempty"`
