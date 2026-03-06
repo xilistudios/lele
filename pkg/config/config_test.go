@@ -449,13 +449,13 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
 		t.Fatalf("ResolveModelAlias(chutes/minimax) = %q, want %q", got, "chutes/minimax_m2.5")
 	}
-	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "minimax_m2.5" {
-		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "minimax_m2.5")
+	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "chutes/minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "chutes/minimax_m2.5")
 	}
-	if got := cfg.Providers.ResolveModelAlias("nanogpt/kimi", "nanogpt"); got != "moonshotai/kimi-k2.5:thinking" {
-		t.Fatalf("ResolveModelAlias(nanogpt/kimi, default nanogpt) = %q, want %q", got, "moonshotai/kimi-k2.5:thinking")
+	if got := cfg.Providers.ResolveModelAlias("nanogpt/kimi", "nanogpt"); got != "nanogpt/moonshotai/kimi-k2.5:thinking" {
+		t.Fatalf("ResolveModelAlias(nanogpt/kimi, default nanogpt) = %q, want %q", got, "nanogpt/moonshotai/kimi-k2.5:thinking")
 	}
-	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
-		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "qwen/qwen3.5-397b-a17b-thinking" {
+		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen/qwen3.5-397b-a17b-thinking")
 	}
 }
