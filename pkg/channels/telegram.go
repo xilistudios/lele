@@ -289,6 +289,11 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		return c.handleAgentCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("agent:"))
 
+	// Register verbose callback handler
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleVerboseCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("verbose:"))
+
 	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: []telego.BotCommand{
 			{Command: "new", Description: "Start a new conversation"},
@@ -1198,4 +1203,75 @@ func formatAgentSelectedMessage(agent AgentBasicInfo, agentID string) string {
 		parts = append(parts, fmt.Sprintf("*Skills:* %s", strings.Join(agent.SkillsFilter, ", ")))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// handleVerboseCallback processes callback queries for verbose level selection
+func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+
+	// Check agentLoop is available
+	if c.agentLoop == nil {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Agent management not available"))
+		return nil
+	}
+
+	parts := strings.SplitN(query.Data, ":", 3)
+	if len(parts) < 3 || parts[0] != "verbose" {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid action"))
+		return nil
+	}
+
+	action := parts[1]
+	level := parts[2]
+
+	if action != "set" {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
+		return nil
+	}
+
+	// Get session key
+	chatID := query.Message.GetChat().ID
+	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+
+	// Set the verbose level
+	if !c.agentLoop.SetVerboseLevel(sessionKey, level) {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to set verbose level"))
+		return nil
+	}
+
+	// Get emoji for the level
+	var emoji string
+	switch level {
+	case "off":
+		emoji = "🔇"
+	case "basic":
+		emoji = "🛠️"
+	case "full":
+		emoji = "📋"
+	default:
+		emoji = "🔇"
+	}
+
+	// Update the message to show the new level
+	messageID := query.Message.GetMessageID()
+	updatedText := fmt.Sprintf(
+		"*Verbose Mode Settings*\n\n"+
+			"Current level: %s *%s*\n\n"+
+			"*Available options:*\n"+
+			"🔇 *off* - No tool execution notifications\n"+
+			"🛠️ *basic* - Simplified tool descriptions\n"+
+			"📋 *full* - Detailed tool calls and results\n\n"+
+			"Use /verbose to cycle through levels.",
+		emoji, level)
+
+	editMsg := tu.EditMessageText(tu.ID(chatID), messageID, updatedText)
+	editMsg.ParseMode = telego.ModeMarkdown
+	_, _ = c.bot.EditMessageText(ctx, editMsg)
+
+	// Answer the callback query with confirmation
+	_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Verbose level set to "+level))
+
+	return nil
 }

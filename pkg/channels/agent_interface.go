@@ -24,6 +24,8 @@ type AgentProvidable interface {
 	ToggleVerbose(sessionKey string) string
 	// GetVerboseLevel devuelve el nivel de verbose actual para una sesión
 	GetVerboseLevel(sessionKey string) string
+	// SetVerboseLevel establece el nivel de verbose para una sesión
+	SetVerboseLevel(sessionKey string, level string) bool
 	// GetSubagents list los subagentes activos
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión
