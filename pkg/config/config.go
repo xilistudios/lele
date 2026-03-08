@@ -409,6 +409,49 @@ func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
 	return cfg, ok
 }
 
+func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, preferExact bool) (string, bool) {
+	if provider == "" {
+		return "", false
+	}
+
+	named, ok := p.GetNamed(provider)
+	if !ok || named.Models == nil {
+		return "", false
+	}
+
+	if preferExact {
+		if aliasCfg, found := named.Models[model]; found {
+			resolved := strings.TrimSpace(aliasCfg.Model)
+			if resolved != "" {
+				return resolved, true
+			}
+		}
+	}
+
+	normalizedModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
+	aliasCfg, found := named.Models[normalizedModel]
+	if !found || strings.TrimSpace(aliasCfg.Model) == "" {
+		for _, aliasVal := range named.Models {
+			resolvedVal := strings.ToLower(strings.TrimSpace(aliasVal.Model))
+			if resolvedVal == normalizedModel || strings.HasSuffix(resolvedVal, "/"+normalizedModel) {
+				aliasCfg = aliasVal
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return "", false
+	}
+
+	resolved := strings.TrimSpace(aliasCfg.Model)
+	if resolved == "" {
+		return "", false
+	}
+	return resolved, true
+}
+
 func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) string {
 	rawModel = strings.TrimSpace(rawModel)
 	if rawModel == "" {
@@ -416,6 +459,13 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	}
 
 	provider := normalizeProviderKey(defaultProvider)
+	if provider != "" && strings.Contains(rawModel, "/") {
+		if resolved, found := p.resolveModelAliasInProvider(provider, rawModel, true); found {
+			log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provider, resolved, provider)
+			return provider + "/" + resolved
+		}
+	}
+
 	model := rawModel
 	if idx := strings.Index(rawModel, "/"); idx > 0 {
 		provider = normalizeProviderKey(rawModel[:idx])
@@ -428,35 +478,18 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	if provider == "" {
 		return rawModel
 	}
-	
+
 	// Normalize model name for comparison (lowercase, replace . with -)
 	normalizedModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
-	
-	// Try to find model in the specified provider first
-	named, ok := p.GetNamed(provider)
-	if ok && named.Models != nil {
-		// Try exact match first
-		aliasCfg, found := named.Models[normalizedModel]
-		if !found || strings.TrimSpace(aliasCfg.Model) == "" {
-			// Try matching against the resolved model values (for models like mistralai/xxx)
-			for _, aliasVal := range named.Models {
-				resolvedVal := strings.ToLower(strings.TrimSpace(aliasVal.Model))
-				if resolvedVal == normalizedModel || strings.HasSuffix(resolvedVal, "/"+normalizedModel) {
-					aliasCfg = aliasVal
-					found = true
-					break
-				}
-			}
-		}
-		if found && strings.TrimSpace(aliasCfg.Model) != "" {
-			resolved := strings.TrimSpace(aliasCfg.Model)
-			// Always return with the provider from config
-			// Format: provider/resolved_model (e.g., chutes/Qwen/Qwen3-Coder-Next)
-			log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provider, resolved, provider)
-			return provider + "/" + resolved
-		}
+
+	// Try to find model in the specified provider first.
+	if resolved, found := p.resolveModelAliasInProvider(provider, model, strings.Contains(model, "/")); found {
+		// Always return with the provider from config
+		// Format: provider/resolved_model (e.g., chutes/Qwen/Qwen3-Coder-Next)
+		log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provider, resolved, provider)
+		return provider + "/" + resolved
 	}
-	
+
 	// If not found in specified provider (or provider doesn't exist),
 	// search across all providers for the model alias
 	p.ensureNamedDefaults()
