@@ -324,6 +324,24 @@ func TestSaveConfig_FilePermissions(t *testing.T) {
 	}
 }
 
+func TestConfig_PersistTelegramVerbose(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	cfg := DefaultConfig()
+	if err := cfg.PersistTelegramVerbose(path, VerboseBasic); err != nil {
+		t.Fatalf("PersistTelegramVerbose failed: %v", err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.Channels.Telegram.Verbose != VerboseBasic {
+		t.Fatalf("telegram verbose = %q, want %q", loaded.Channels.Telegram.Verbose, VerboseBasic)
+	}
+}
+
 // TestConfig_Complete verifies all config fields are set
 func TestConfig_Complete(t *testing.T) {
 	cfg := DefaultConfig()
@@ -435,7 +453,7 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 		"nanogpt": {
 			Type: "openai",
 			Models: map[string]ProviderModelConfig{
-				"kimi": {Model: "moonshotai/kimi-k2.5:thinking"},
+				"kimi":                            {Model: "moonshotai/kimi-k2.5:thinking"},
 				"qwen/qwen3.5-397b-a17b-thinking": {Model: "Qwen/Qwen3.5-397B-A17B-Thinking-2507"},
 			},
 		},

@@ -1,4 +1,4 @@
-﻿// PicoClaw - Ultra-lightweight personal AI agent
+// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -1002,8 +1002,7 @@ func authStatusCmd() {
 }
 
 func getConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".picoclaw", "config.json")
+	return config.DefaultConfigPath()
 }
 
 func setupCronTool(agentLoop *agent.AgentLoop, msgBus *bus.MessageBus, workspace string, restrict bool, execTimeout time.Duration, config *config.Config) *cron.CronService {

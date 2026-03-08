@@ -31,10 +31,10 @@ type TelegramChannel struct {
 	config          *config.Config
 	chatIDs         map[string]int64
 	transcriber     *voice.GroqTranscriber
-	placeholders    sync.Map // chatID -> messageID
-	stopThinking    sync.Map // chatID -> thinkingCancel
+	placeholders    sync.Map         // chatID -> messageID
+	stopThinking    sync.Map         // chatID -> thinkingCancel
 	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
-	agentLoop       AgentProvidable // Reference to agent loop for session agent management
+	agentLoop       AgentProvidable  // Reference to agent loop for session agent management
 }
 
 type thinkingCancel struct {
@@ -126,7 +126,7 @@ func (c *TelegramChannel) SetApprovalManager(am *ApprovalManager) {
 // handleApprovalCallback processes callback queries from approval inline keyboards
 func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query telego.CallbackQuery) error {
 	logger.DebugCF("telegram", "handleApprovalCallback called", map[string]interface{}{
-		"data":       query.Data,
+		"data":                 query.Data,
 		"approval_manager_nil": c.approvalManager == nil,
 	})
 
@@ -1111,7 +1111,6 @@ func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.C
 	return err
 }
 
-
 // handleAgentCallback processes callback queries for agent selection
 func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.CallbackQuery) error {
 	if query.Message == nil {
@@ -1234,10 +1233,16 @@ func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query teleg
 	// Get session key
 	chatID := query.Message.GetChat().ID
 	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+	previousLevel := c.agentLoop.GetVerboseLevel(sessionKey)
 
 	// Set the verbose level
 	if !c.agentLoop.SetVerboseLevel(sessionKey, level) {
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to set verbose level"))
+		return nil
+	}
+	if err := c.config.PersistTelegramVerbose(config.DefaultConfigPath(), config.VerboseLevel(level)); err != nil {
+		_ = c.agentLoop.SetVerboseLevel(sessionKey, previousLevel)
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to update config.json"))
 		return nil
 	}
 

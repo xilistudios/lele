@@ -295,10 +295,10 @@ type OpenAIProviderConfig struct {
 }
 
 type ProviderModelConfig struct {
-	ContextWindow int     `json:"context_window,omitempty"`
-	Model       string   `json:"model,omitempty"`
-	MaxTokens   int      `json:"max_tokens,omitempty"`
-	Temperature *float64 `json:"temperature,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	MaxTokens     int      `json:"max_tokens,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
 }
 
 type NamedProviderConfig struct {
@@ -531,7 +531,7 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 			return provName + "/" + resolved
 		}
 	}
-	
+
 	// Model not found anywhere, return original
 	log.Printf("[DEBUG] ResolveModelAlias: %s -> %s (NOT FOUND)\n", rawModel, rawModel)
 	return rawModel
@@ -755,6 +755,11 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+func DefaultConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".picoclaw", "config.json")
+}
+
 func SaveConfig(path string, cfg *Config) error {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
@@ -770,6 +775,26 @@ func SaveConfig(path string, cfg *Config) error {
 	}
 
 	return os.WriteFile(path, data, 0600)
+}
+
+func (c *Config) TelegramVerbose() VerboseLevel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Channels.Telegram.Verbose
+}
+
+func (c *Config) SetTelegramVerbose(level VerboseLevel) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Channels.Telegram.Verbose = level
+}
+
+func (c *Config) PersistTelegramVerbose(path string, level VerboseLevel) error {
+	if path == "" {
+		path = DefaultConfigPath()
+	}
+	c.SetTelegramVerbose(level)
+	return SaveConfig(path, c)
 }
 
 func (c *Config) WorkspacePath() string {
