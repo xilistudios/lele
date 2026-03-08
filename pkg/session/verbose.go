@@ -8,6 +8,8 @@ import (
 // VerboseLevel represents the verbosity level for tool execution notifications
 type VerboseLevel string
 
+type DefaultLevelResolver func(sessionKey string) (VerboseLevel, bool)
+
 const (
 	// VerboseOff disables all tool execution notifications
 	VerboseOff VerboseLevel = "off"
@@ -43,9 +45,10 @@ func VerboseLevelFromString(s string) VerboseLevel {
 // for each tool execution to the user.
 // The state is persisted through the SessionManager to survive restarts.
 type VerboseManager struct {
-	mu       sync.RWMutex
-	cache    map[string]VerboseLevel // In-memory cache for performance
-	sessions *SessionManager         // Optional: for persistence
+	mu                   sync.RWMutex
+	cache                map[string]VerboseLevel // In-memory cache for performance
+	sessions             *SessionManager         // Optional: for persistence
+	defaultLevelResolver DefaultLevelResolver
 }
 
 // NewVerboseManager creates a new VerboseManager.
@@ -70,6 +73,12 @@ func (vm *VerboseManager) SetSessionManager(sm *SessionManager) {
 	vm.sessions = sm
 }
 
+func (vm *VerboseManager) SetDefaultLevelResolver(resolver DefaultLevelResolver) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	vm.defaultLevelResolver = resolver
+}
+
 // IsVerbose returns true if verbose mode is enabled (not off) for the given session.
 // It first checks the in-memory cache, then falls back to the persistent store.
 func (vm *VerboseManager) IsVerbose(sessionKey string) bool {
@@ -85,16 +94,23 @@ func (vm *VerboseManager) GetLevel(sessionKey string) VerboseLevel {
 		return level
 	}
 	sessions := vm.sessions
+	resolver := vm.defaultLevelResolver
 	vm.mu.RUnlock()
 
 	// If we have a session manager, load from persistent storage
-	if sessions != nil {
+	if sessions != nil && sessions.HasVerbosePreference(sessionKey) {
 		levelStr := sessions.GetVerboseLevel(sessionKey)
 		level := VerboseLevelFromString(levelStr)
 		vm.mu.Lock()
 		vm.cache[sessionKey] = level
 		vm.mu.Unlock()
 		return level
+	}
+
+	if resolver != nil {
+		if level, ok := resolver(sessionKey); ok {
+			return level
+		}
 	}
 
 	return VerboseOff
@@ -182,11 +198,14 @@ func (vm *VerboseManager) InitializeFromSession(sessionKey string) {
 	sessions := vm.sessions
 	vm.mu.RUnlock()
 
-	if sessions != nil {
+	if sessions != nil && sessions.HasVerbosePreference(sessionKey) {
 		levelStr := sessions.GetVerboseLevel(sessionKey)
 		level := VerboseLevelFromString(levelStr)
 		vm.mu.Lock()
 		vm.cache[sessionKey] = level
 		vm.mu.Unlock()
+		return
 	}
+
+	vm.Clear(sessionKey)
 }

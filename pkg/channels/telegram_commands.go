@@ -23,6 +23,7 @@ type TelegramCommander interface {
 	Status(ctx context.Context, message telego.Message) error
 	Subagents(ctx context.Context, message telego.Message) error
 	Agent(ctx context.Context, message telego.Message) error
+	Verbose(ctx context.Context, message telego.Message, currentLevel string) error
 }
 
 type cmd struct {
@@ -296,7 +297,7 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 			))
 		}
 
-		msg := tu.Message(tu.ID(message.Chat.ID), 
+		msg := tu.Message(tu.ID(message.Chat.ID),
 			"🤖 *Selecciona un agente*\n\n"+
 			"El agente determina el modelo, workspace y habilidades disponibles.").WithReplyMarkup(tu.InlineKeyboard(rows...))
 		msg.ParseMode = telego.ModeMarkdown
@@ -312,5 +313,45 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 			MessageID: message.MessageID,
 		},
 	})
+	return err
+}
+
+func (c *cmd) Verbose(ctx context.Context, message telego.Message, currentLevel string) error {
+	// Build the message showing current level and available options
+	var currentEmoji string
+	switch currentLevel {
+	case "off":
+		currentEmoji = "🔇"
+	case "basic":
+		currentEmoji = "🛠️"
+	case "full":
+		currentEmoji = "📋"
+	default:
+		currentEmoji = "🔇"
+	}
+
+	response := fmt.Sprintf(
+		"*Verbose Mode Settings*\n\n"+
+			"Current level: %s *%s*\n\n"+
+			"*Available options:*\n"+
+			"🔇 *off* - No tool execution notifications\n"+
+			"🛠️ *basic* - Simplified tool descriptions\n"+
+			"📋 *full* - Detailed tool calls and results\n\n"+
+			"Use /verbose to cycle through levels.",
+		currentEmoji, currentLevel)
+
+	// Create inline keyboard with the three options
+	rows := [][]telego.InlineKeyboardButton{
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("🔇 off").WithCallbackData("verbose:set:off"),
+			tu.InlineKeyboardButton("🛠️ basic").WithCallbackData("verbose:set:basic"),
+			tu.InlineKeyboardButton("📋 full").WithCallbackData("verbose:set:full"),
+		),
+	}
+
+	msg := tu.Message(tu.ID(message.Chat.ID), response).WithReplyMarkup(tu.InlineKeyboard(rows...))
+	msg.ParseMode = telego.ModeMarkdown
+
+	_, err := c.bot.SendMessage(ctx, msg)
 	return err
 }

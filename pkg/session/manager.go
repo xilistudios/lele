@@ -210,6 +210,18 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	}
 }
 
+func (sm *SessionManager) HasVerbosePreference(key string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return false
+	}
+
+	return session.VerboseLevel != "" || session.VerboseMode
+}
+
 // GetVerboseMode returns the verbose mode setting for a session (legacy compatibility).
 func (sm *SessionManager) GetVerboseMode(key string) bool {
 	sm.mu.RLock()

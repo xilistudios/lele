@@ -1,4 +1,4 @@
-﻿package agent
+package agent
 
 import (
 	"context"
@@ -139,6 +139,45 @@ func TestNewAgentLoop_StateInitialized(t *testing.T) {
 	stateDir := filepath.Join(tmpDir, "state")
 	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
 		t.Error("Expected state directory to exist")
+	}
+}
+
+func TestAgentLoop_GetVerboseLevel_UsesTelegramConfigDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Channels: config.ChannelsConfig{
+			Telegram: config.TelegramConfig{Verbose: config.VerboseBasic},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+
+	if got := al.GetVerboseLevel("telegram:123"); got != "basic" {
+		t.Fatalf("GetVerboseLevel(telegram) = %q, want %q", got, "basic")
+	}
+	if got := al.GetVerboseLevel("discord:123"); got != "off" {
+		t.Fatalf("GetVerboseLevel(discord) = %q, want %q", got, "off")
+	}
+
+	cfg.SetTelegramVerbose(config.VerboseFull)
+	if got := al.GetVerboseLevel("telegram:123"); got != "full" {
+		t.Fatalf("GetVerboseLevel(telegram) after config update = %q, want %q", got, "full")
+	}
+
+	if !al.SetVerboseLevel("telegram:123", "off") {
+		t.Fatal("SetVerboseLevel returned false")
+	}
+	cfg.SetTelegramVerbose(config.VerboseBasic)
+	if got := al.GetVerboseLevel("telegram:123"); got != "off" {
+		t.Fatalf("explicit session verbose should win over config default, got %q", got)
 	}
 }
 
@@ -813,7 +852,6 @@ func TestFormatProviderModel(t *testing.T) {
 		})
 	}
 }
-
 
 // ============================================
 // Tests de Subagentes con Acceso a Tools

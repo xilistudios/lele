@@ -172,11 +172,24 @@ type WhatsAppConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_WHATSAPP_ALLOW_FROM"`
 }
 
+// VerboseLevel represents the verbosity level for tool execution notifications
+type VerboseLevel string
+
+const (
+	// VerboseOff disables all tool execution notifications
+	VerboseOff VerboseLevel = "off"
+	// VerboseBasic shows simplified action descriptions only
+	VerboseBasic VerboseLevel = "basic"
+	// VerboseFull shows detailed tool calls and results
+	VerboseFull VerboseLevel = "full"
+)
+
 type TelegramConfig struct {
 	Enabled   bool                `json:"enabled" env:"PICOCLAW_CHANNELS_TELEGRAM_ENABLED"`
 	Token     string              `json:"token" env:"PICOCLAW_CHANNELS_TELEGRAM_TOKEN"`
 	Proxy     string              `json:"proxy" env:"PICOCLAW_CHANNELS_TELEGRAM_PROXY"`
 	AllowFrom FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_TELEGRAM_ALLOW_FROM"`
+	Verbose   VerboseLevel        `json:"verbose,omitempty" env:"PICOCLAW_CHANNELS_TELEGRAM_VERBOSE"`
 }
 
 type FeishuConfig struct {
@@ -282,10 +295,10 @@ type OpenAIProviderConfig struct {
 }
 
 type ProviderModelConfig struct {
-	ContextWindow int     `json:"context_window,omitempty"`
-	Model       string   `json:"model,omitempty"`
-	MaxTokens   int      `json:"max_tokens,omitempty"`
-	Temperature *float64 `json:"temperature,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	MaxTokens     int      `json:"max_tokens,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
 }
 
 type NamedProviderConfig struct {
@@ -518,7 +531,7 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 			return provName + "/" + resolved
 		}
 	}
-	
+
 	// Model not found anywhere, return original
 	log.Printf("[DEBUG] ResolveModelAlias: %s -> %s (NOT FOUND)\n", rawModel, rawModel)
 	return rawModel
@@ -612,6 +625,7 @@ func DefaultConfig() *Config {
 				Enabled:   false,
 				Token:     "",
 				AllowFrom: FlexibleStringSlice{},
+				Verbose:   VerboseOff,
 			},
 			Feishu: FeishuConfig{
 				Enabled:           false,
@@ -741,6 +755,11 @@ func LoadConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+func DefaultConfigPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".picoclaw", "config.json")
+}
+
 func SaveConfig(path string, cfg *Config) error {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
@@ -756,6 +775,26 @@ func SaveConfig(path string, cfg *Config) error {
 	}
 
 	return os.WriteFile(path, data, 0600)
+}
+
+func (c *Config) TelegramVerbose() VerboseLevel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Channels.Telegram.Verbose
+}
+
+func (c *Config) SetTelegramVerbose(level VerboseLevel) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Channels.Telegram.Verbose = level
+}
+
+func (c *Config) PersistTelegramVerbose(path string, level VerboseLevel) error {
+	if path == "" {
+		path = DefaultConfigPath()
+	}
+	c.SetTelegramVerbose(level)
+	return SaveConfig(path, c)
 }
 
 func (c *Config) WorkspacePath() string {

@@ -31,10 +31,10 @@ type TelegramChannel struct {
 	config          *config.Config
 	chatIDs         map[string]int64
 	transcriber     *voice.GroqTranscriber
-	placeholders    sync.Map // chatID -> messageID
-	stopThinking    sync.Map // chatID -> thinkingCancel
+	placeholders    sync.Map         // chatID -> messageID
+	stopThinking    sync.Map         // chatID -> thinkingCancel
 	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
-	agentLoop       AgentProvidable // Reference to agent loop for session agent management
+	agentLoop       AgentProvidable  // Reference to agent loop for session agent management
 }
 
 type thinkingCancel struct {
@@ -126,7 +126,7 @@ func (c *TelegramChannel) SetApprovalManager(am *ApprovalManager) {
 // handleApprovalCallback processes callback queries from approval inline keyboards
 func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query telego.CallbackQuery) error {
 	logger.DebugCF("telegram", "handleApprovalCallback called", map[string]interface{}{
-		"data":       query.Data,
+		"data":                 query.Data,
 		"approval_manager_nil": c.approvalManager == nil,
 	})
 
@@ -278,16 +278,21 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
-	
+
 	// Register approval callback handler
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleApprovalCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("approval:"))
-	
+
 	// Register agent callback handler
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleAgentCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("agent:"))
+
+	// Register verbose callback handler
+	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
+		return c.handleVerboseCallback(ctx, query)
+	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("verbose:"))
 
 	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
 		Commands: []telego.BotCommand{
@@ -688,20 +693,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return err
 
 	case "verbose":
-		var response string
+		var currentLevel string
 		if c.agentLoop != nil {
-			response = c.agentLoop.ToggleVerbose(sessionKey)
+			currentLevel = c.agentLoop.GetVerboseLevel(sessionKey)
 		} else {
-			response = "⚠️ Agent loop not available."
+			currentLevel = "off"
 		}
-		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   response,
-			ReplyParameters: &telego.ReplyParameters{
-				MessageID: message.MessageID,
-			},
-		})
-		return err
+		return c.commands.Verbose(ctx, *message, currentLevel)
 
 	case "model":
 		// Extract model argument and send to agent loop
@@ -1048,22 +1046,22 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 	}
 	chat := query.Message.GetChat()
 	chatID := chat.ID
-	
+
 	// Build session key (same as handleMessage)
 	sessionKey := fmt.Sprintf("telegram:%d", chatID)
-	
+
 	peerKind := "direct"
 	peerID := fmt.Sprintf("%d", query.From.ID)
 	if chat.Type != "private" {
 		peerKind = "group"
 		peerID = fmt.Sprintf("%d", chatID)
 	}
-	
+
 	// Check if user is allowed before sending
 	if !c.IsAllowed(senderID) {
 		return false
 	}
-	
+
 	// Send system message directly to agent loop (like handleCommandWithSession does for /model)
 	msg := bus.InboundMessage{
 		Channel:    "system",
@@ -1080,7 +1078,7 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 			"peer_id":    peerID,
 		},
 	}
-	
+
 	if c.BaseChannel.bus != nil {
 		c.BaseChannel.bus.PublishInbound(msg)
 	}
@@ -1112,7 +1110,6 @@ func (c *TelegramChannel) collapseModelsMenu(ctx context.Context, query telego.C
 	))
 	return err
 }
-
 
 // handleAgentCallback processes callback queries for agent selection
 func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.CallbackQuery) error {
@@ -1205,4 +1202,81 @@ func formatAgentSelectedMessage(agent AgentBasicInfo, agentID string) string {
 		parts = append(parts, fmt.Sprintf("*Skills:* %s", strings.Join(agent.SkillsFilter, ", ")))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// handleVerboseCallback processes callback queries for verbose level selection
+func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query telego.CallbackQuery) error {
+	if query.Message == nil {
+		return nil
+	}
+
+	// Check agentLoop is available
+	if c.agentLoop == nil {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Agent management not available"))
+		return nil
+	}
+
+	parts := strings.SplitN(query.Data, ":", 3)
+	if len(parts) < 3 || parts[0] != "verbose" {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Invalid action"))
+		return nil
+	}
+
+	action := parts[1]
+	level := parts[2]
+
+	if action != "set" {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
+		return nil
+	}
+
+	// Get session key
+	chatID := query.Message.GetChat().ID
+	sessionKey := fmt.Sprintf("telegram:%d", chatID)
+	previousLevel := c.agentLoop.GetVerboseLevel(sessionKey)
+
+	// Set the verbose level
+	if !c.agentLoop.SetVerboseLevel(sessionKey, level) {
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to set verbose level"))
+		return nil
+	}
+	if err := c.config.PersistTelegramVerbose(config.DefaultConfigPath(), config.VerboseLevel(level)); err != nil {
+		_ = c.agentLoop.SetVerboseLevel(sessionKey, previousLevel)
+		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to update config.json"))
+		return nil
+	}
+
+	// Get emoji for the level
+	var emoji string
+	switch level {
+	case "off":
+		emoji = "🔇"
+	case "basic":
+		emoji = "🛠️"
+	case "full":
+		emoji = "📋"
+	default:
+		emoji = "🔇"
+	}
+
+	// Update the message to show the new level
+	messageID := query.Message.GetMessageID()
+	updatedText := fmt.Sprintf(
+		"*Verbose Mode Settings*\n\n"+
+			"Current level: %s *%s*\n\n"+
+			"*Available options:*\n"+
+			"🔇 *off* - No tool execution notifications\n"+
+			"🛠️ *basic* - Simplified tool descriptions\n"+
+			"📋 *full* - Detailed tool calls and results\n\n"+
+			"Use /verbose to cycle through levels.",
+		emoji, level)
+
+	editMsg := tu.EditMessageText(tu.ID(chatID), messageID, updatedText)
+	editMsg.ParseMode = telego.ModeMarkdown
+	_, _ = c.bot.EditMessageText(ctx, editMsg)
+
+	// Answer the callback query with confirmation
+	_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Verbose level set to "+level))
+
+	return nil
 }

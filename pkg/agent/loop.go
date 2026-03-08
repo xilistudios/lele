@@ -1,4 +1,4 @@
-﻿// PicoClaw - Ultra-lightweight personal AI agent
+// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -37,7 +37,7 @@ type AgentLoop struct {
 	channelManager  *channels.Manager
 	subagents       map[string]*tools.SubagentManager
 	verboseManager  *session.VerboseManager
-	sessionCancels  sync.Map // sessionKey -> context.CancelFunc
+	sessionCancels  sync.Map                  // sessionKey -> context.CancelFunc
 	approvalManager *channels.ApprovalManager // Manager for command approvals
 
 	// Internal components (delegated operations)
@@ -98,6 +98,22 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	if sessionManager != nil {
 		verboseManager.SetSessionManager(sessionManager)
 	}
+	verboseManager.SetDefaultLevelResolver(func(sessionKey string) (session.VerboseLevel, bool) {
+		if !strings.HasPrefix(sessionKey, "telegram:") {
+			return session.VerboseOff, false
+		}
+
+		switch cfg.TelegramVerbose() {
+		case config.VerboseBasic:
+			return session.VerboseBasic, true
+		case config.VerboseFull:
+			return session.VerboseFull, true
+		case config.VerboseOff:
+			return session.VerboseOff, true
+		default:
+			return session.VerboseOff, false
+		}
+	})
 
 	loop := &AgentLoop{
 		bus:             msgBus,
@@ -409,6 +425,26 @@ func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
 		return "📋 Verbose mode **FULL**\nYou will see detailed tool execution and results."
 	}
 	return "Unknown verbose level"
+}
+
+// GetVerboseLevel returns the current verbose level for a session (implements AgentProvidable).
+func (al *AgentLoop) GetVerboseLevel(sessionKey string) string {
+	if sessionKey == "" {
+		return "off"
+	}
+	return string(al.verboseManager.GetLevel(sessionKey))
+}
+
+// SetVerboseLevel sets the verbose level for a session (implements AgentProvidable).
+func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
+	if sessionKey == "" {
+		return false
+	}
+	if !session.IsValidVerboseLevel(level) {
+		return false
+	}
+	al.verboseManager.SetLevel(sessionKey, session.VerboseLevel(level))
+	return true
 }
 
 // GetSubagents lists running subagents (implements AgentProvidable).
