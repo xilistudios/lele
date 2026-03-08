@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 type SpawnTool struct {
@@ -31,27 +32,34 @@ func (t *SpawnTool) Name() string {
 }
 
 func (t *SpawnTool) Description() string {
-	return "Spawn a subagent to handle a task in the background. Use this for complex or time-consuming tasks that can run independently. The subagent will complete the task and report back when done."
+	return "Spawn a subagent to handle a task in the background, or continue a paused subagent that is waiting for context. The subagent reports its status back to the parent agent instead of messaging users directly."
 }
 
 func (t *SpawnTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
+			"task_id": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional existing subagent task ID to continue",
+			},
 			"task": map[string]interface{}{
 				"type":        "string",
-				"description": "The task for subagent to complete",
+				"description": "The task for a new subagent to complete",
 			},
 			"label": map[string]interface{}{
 				"type":        "string",
 				"description": "Optional short label for the task (for display)",
+			},
+			"guidance": map[string]interface{}{
+				"type":        "string",
+				"description": "Additional guidance when continuing a paused subagent",
 			},
 			"agent_id": map[string]interface{}{
 				"type":        "string",
 				"description": "Optional target agent ID to delegate the task to",
 			},
 		},
-		"required": []string{"task"},
 	}
 }
 
@@ -65,13 +73,15 @@ func (t *SpawnTool) SetAllowlistChecker(check func(targetAgentID string) bool) {
 }
 
 func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
-	task, ok := args["task"].(string)
-	if !ok {
-		return ErrorResult("task is required")
-	}
-
+	task, _ := args["task"].(string)
 	label, _ := args["label"].(string)
+	taskID, _ := args["task_id"].(string)
+	guidance, _ := args["guidance"].(string)
 	agentID, _ := args["agent_id"].(string)
+
+	if strings.TrimSpace(taskID) == "" && strings.TrimSpace(task) == "" {
+		return ErrorResult("task is required when task_id is not provided")
+	}
 
 	// Check allowlist if targeting a specific agent
 	if agentID != "" && t.allowlistCheck != nil {
@@ -84,10 +94,18 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult("Subagent manager not configured")
 	}
 
-	// Pass callback to manager for async completion notification
-	result, err := t.manager.Spawn(ctx, task, label, agentID, t.originChannel, t.originChatID, t.callback)
+	var (
+		result string
+		err    error
+	)
+
+	if strings.TrimSpace(taskID) != "" {
+		result, err = t.manager.ContinueTask(ctx, taskID, guidance, t.callback)
+	} else {
+		result, err = t.manager.Spawn(ctx, task, label, agentID, t.originChannel, t.originChatID, t.callback)
+	}
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to spawn subagent: %v", err))
+		return ErrorResult(fmt.Sprintf("failed to manage subagent: %v", err))
 	}
 
 	// Return AsyncResult since the task runs in background

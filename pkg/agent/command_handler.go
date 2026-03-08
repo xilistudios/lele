@@ -92,7 +92,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	case "/agent":
 		return ch.handleAgentCommand(sessionKey, args), true
 	case "/subagents":
-		return ch.formatSubagentsResponse(args), true
+		return formatSubagentsCommand(ctx, ch.al.toolCoordinator, sessionKey, args), true
 	case "/stop":
 		subagentCount := ch.al.toolCoordinator.stopAllSubagents()
 		ch.al.toolCoordinator.cancelSession(sessionKey)
@@ -339,32 +339,6 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	}
 	return fmt.Sprintf("🦞 picoclaw %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
-}
-
-// formatSubagentsResponse formats subagent info.
-func (ch *commandHandlerImpl) formatSubagentsResponse(args []string) string {
-	if len(args) >= 2 && args[0] == "info" {
-		task, ok := ch.al.toolCoordinator.getSubagentTask(args[1])
-		if !ok {
-			return fmt.Sprintf("Subagent task not found: %s", args[1])
-		}
-		return fmt.Sprintf("Task %s\nStatus: %s\nAgent: %s\nLabel: %s", task.ID, task.Status, task.AgentID, task.Label)
-	}
-	if len(args) >= 2 && args[0] == "stop" {
-		if ch.al.toolCoordinator.stopSubagentTask(args[1]) {
-			return fmt.Sprintf("Stopping subagent task: %s", args[1])
-		}
-		return fmt.Sprintf("Subagent task not running: %s", args[1])
-	}
-	running := ch.al.toolCoordinator.listRunningSubagentTasks()
-	if len(running) == 0 {
-		return "No running subagents.\nUse /subagents info <task_id> or /subagents stop <task_id>."
-	}
-	lines := make([]string, 0, len(running))
-	for _, task := range running {
-		lines = append(lines, fmt.Sprintf("- %s (%s)", task.ID, task.Label))
-	}
-	return fmt.Sprintf("Running subagents:\n%s\nUse /subagents info <task_id> or /subagents stop <task_id>.", strings.Join(lines, "\n"))
 }
 
 // gatewayVersion returns the gateway version from build info.

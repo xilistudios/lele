@@ -1,4 +1,4 @@
-﻿package channels
+package channels
 
 import (
 	"context"
@@ -677,20 +677,22 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return err
 
 	case "subagents":
-		var response string
-		if c.agentLoop != nil {
-			response = c.agentLoop.GetSubagents()
-		} else {
-			response = "🤖 No subagents running."
-		}
-		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   response,
-			ReplyParameters: &telego.ReplyParameters{
-				MessageID: message.MessageID,
+		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/subagents"))
+		systemMsg := bus.InboundMessage{
+			Channel:    "system",
+			SenderID:   senderID,
+			ChatID:     sessionKey,
+			Content:    "/subagents " + args,
+			SessionKey: sessionKey,
+			Metadata: map[string]string{
+				"message_id": messageID,
 			},
-		})
-		return err
+		}
+		if strings.TrimSpace(args) == "" {
+			systemMsg.Content = "/subagents"
+		}
+		c.bus.PublishInbound(systemMsg)
+		return nil
 
 	case "verbose":
 		var currentLevel string

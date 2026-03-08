@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
@@ -20,6 +21,7 @@ type toolCoordinator interface {
 	listRunningSubagentTasks() []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
 	stopSubagentTask(taskID string) bool
+	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
 	GetStartupInfo() map[string]interface{}
 }
 
@@ -83,7 +85,7 @@ func (tc *toolCoordinatorImpl) listRunningSubagentTasks() []*tools.SubagentTask 
 	tasks := make([]*tools.SubagentTask, 0)
 	for _, manager := range tc.al.subagents {
 		for _, task := range manager.ListTasks() {
-			if task.Status == "running" {
+			if task.Status == tools.SubagentStatusRunning || task.Status == tools.SubagentStatusNeedsContext {
 				tasks = append(tasks, task)
 			}
 		}
@@ -109,6 +111,24 @@ func (tc *toolCoordinatorImpl) stopSubagentTask(taskID string) bool {
 		}
 	}
 	return false
+}
+
+// continueSubagentTask continues a paused subagent with fresh guidance.
+func (tc *toolCoordinatorImpl) continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error) {
+	for _, manager := range tc.al.subagents {
+		task, ok := manager.GetTask(taskID)
+		if !ok {
+			continue
+		}
+
+		callback := func(callbackCtx context.Context, result *tools.ToolResult) {
+			publishSubagentAsyncResult(tc.al, sessionKey, task.OriginChannel, task.OriginChatID, result)
+		}
+
+		return manager.ContinueTask(ctx, taskID, guidance, callback)
+	}
+
+	return "", fmt.Errorf("subagent task not found: %s", taskID)
 }
 
 // GetStartupInfo returns information about loaded tools and skills for logging.

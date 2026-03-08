@@ -187,7 +187,6 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		// Spawn tool with allowlist checker
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-		subagentManager.SetTools(agent.Tools) // Pass parent agent's tools to subagent
 		// Set callback to get context for specific agent types (each agent loads its own SOUL.md, AGENTS.md, etc.)
 		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
 			if targetAgent, ok := registry.GetAgent(agentID); ok {
@@ -211,6 +210,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 		})
 		agent.Tools.Register(spawnTool)
+		subagentManager.SetTools(agent.Tools.CloneWithout("message")) // Subagents inherit all parent tools except direct external messaging
 
 		// Update context builder with the complete tools registry
 		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
@@ -449,15 +449,7 @@ func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
 
 // GetSubagents lists running subagents (implements AgentProvidable).
 func (al *AgentLoop) GetSubagents() string {
-	running := al.toolCoordinator.listRunningSubagentTasks()
-	if len(running) == 0 {
-		return "No running subagents.\nUse /subagents info <task_id> or /subagents stop <task_id>."
-	}
-	lines := make([]string, 0, len(running))
-	for _, task := range running {
-		lines = append(lines, fmt.Sprintf("- %s (%s)", task.ID, task.Label))
-	}
-	return fmt.Sprintf("Running subagents:\n%s\nUse /subagents info <task_id> or /subagents stop <task_id>.", strings.Join(lines, "\n"))
+	return formatSubagentTaskList(al.toolCoordinator.listRunningSubagentTasks())
 }
 
 // ClearSession clears the session history (implements AgentProvidable).
