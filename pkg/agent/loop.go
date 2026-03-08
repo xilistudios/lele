@@ -411,6 +411,14 @@ func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
+// GetVerboseLevel returns the current verbose level for a session (implements AgentProvidable).
+func (al *AgentLoop) GetVerboseLevel(sessionKey string) string {
+	if sessionKey == "" {
+		return "off"
+	}
+	return string(al.verboseManager.GetLevel(sessionKey))
+}
+
 // GetSubagents lists running subagents (implements AgentProvidable).
 func (al *AgentLoop) GetSubagents() string {
 	running := al.toolCoordinator.listRunningSubagentTasks()

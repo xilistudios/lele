@@ -172,11 +172,24 @@ type WhatsAppConfig struct {
 	AllowFrom FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_WHATSAPP_ALLOW_FROM"`
 }
 
+// VerboseLevel represents the verbosity level for tool execution notifications
+type VerboseLevel string
+
+const (
+	// VerboseOff disables all tool execution notifications
+	VerboseOff VerboseLevel = "off"
+	// VerboseBasic shows simplified action descriptions only
+	VerboseBasic VerboseLevel = "basic"
+	// VerboseFull shows detailed tool calls and results
+	VerboseFull VerboseLevel = "full"
+)
+
 type TelegramConfig struct {
 	Enabled   bool                `json:"enabled" env:"PICOCLAW_CHANNELS_TELEGRAM_ENABLED"`
 	Token     string              `json:"token" env:"PICOCLAW_CHANNELS_TELEGRAM_TOKEN"`
 	Proxy     string              `json:"proxy" env:"PICOCLAW_CHANNELS_TELEGRAM_PROXY"`
 	AllowFrom FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_TELEGRAM_ALLOW_FROM"`
+	Verbose   VerboseLevel        `json:"verbose,omitempty" env:"PICOCLAW_CHANNELS_TELEGRAM_VERBOSE"`
 }
 
 type FeishuConfig struct {
@@ -612,6 +625,7 @@ func DefaultConfig() *Config {
 				Enabled:   false,
 				Token:     "",
 				AllowFrom: FlexibleStringSlice{},
+				Verbose:   VerboseOff,
 			},
 			Feishu: FeishuConfig{
 				Enabled:           false,

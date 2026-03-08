@@ -278,12 +278,12 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleModelsCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("models:"))
-	
+
 	// Register approval callback handler
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleApprovalCallback(ctx, query)
 	}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix("approval:"))
-	
+
 	// Register agent callback handler
 	bh.HandleCallbackQuery(func(ctx *th.Context, query telego.CallbackQuery) error {
 		return c.handleAgentCallback(ctx, query)
@@ -688,20 +688,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		return err
 
 	case "verbose":
-		var response string
+		var currentLevel string
 		if c.agentLoop != nil {
-			response = c.agentLoop.ToggleVerbose(sessionKey)
+			currentLevel = c.agentLoop.GetVerboseLevel(sessionKey)
 		} else {
-			response = "⚠️ Agent loop not available."
+			currentLevel = "off"
 		}
-		_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-			ChatID: telego.ChatID{ID: message.Chat.ID},
-			Text:   response,
-			ReplyParameters: &telego.ReplyParameters{
-				MessageID: message.MessageID,
-			},
-		})
-		return err
+		return c.commands.Verbose(ctx, *message, currentLevel)
 
 	case "model":
 		// Extract model argument and send to agent loop
@@ -1048,22 +1041,22 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 	}
 	chat := query.Message.GetChat()
 	chatID := chat.ID
-	
+
 	// Build session key (same as handleMessage)
 	sessionKey := fmt.Sprintf("telegram:%d", chatID)
-	
+
 	peerKind := "direct"
 	peerID := fmt.Sprintf("%d", query.From.ID)
 	if chat.Type != "private" {
 		peerKind = "group"
 		peerID = fmt.Sprintf("%d", chatID)
 	}
-	
+
 	// Check if user is allowed before sending
 	if !c.IsAllowed(senderID) {
 		return false
 	}
-	
+
 	// Send system message directly to agent loop (like handleCommandWithSession does for /model)
 	msg := bus.InboundMessage{
 		Channel:    "system",
@@ -1080,7 +1073,7 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 			"peer_id":    peerID,
 		},
 	}
-	
+
 	if c.BaseChannel.bus != nil {
 		c.BaseChannel.bus.PublishInbound(msg)
 	}

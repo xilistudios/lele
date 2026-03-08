@@ -22,6 +22,8 @@ type AgentProvidable interface {
 	CompactSession(sessionKey string) string
 	// ToggleVerbose cambia el modo verbose para una sesión
 	ToggleVerbose(sessionKey string) string
+	// GetVerboseLevel devuelve el nivel de verbose actual para una sesión
+	GetVerboseLevel(sessionKey string) string
 	// GetSubagents list los subagentes activos
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión
