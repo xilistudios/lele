@@ -423,7 +423,11 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 	timeoutCtx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
 
-	response, err := h.al.processMessage(timeoutCtx, msg)
+	mp, ok := h.al.messageProcessor.(*messageProcessorImpl)
+	if !ok {
+		tb.Fatalf("message processor is not *messageProcessorImpl")
+	}
+	response, err := mp.processMessage(timeoutCtx, msg)
 	if err != nil {
 		tb.Fatalf("processMessage failed: %v", err)
 	}
@@ -642,7 +646,11 @@ func TestHandleCommand_NewClearsSession(t *testing.T) {
 	agent.Sessions.AddMessage(sessionKey, "user", "hello")
 	agent.Sessions.SetSummary(sessionKey, "old summary")
 
-	response, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+	ch, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		t.Fatal("command handler is not *commandHandlerImpl")
+	}
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "1",
 		SessionKey: sessionKey,
@@ -685,7 +693,11 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	_, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+	ch, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		t.Fatal("command handler is not *commandHandlerImpl")
+	}
+	_, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "1",
 		SessionKey: "agent:main:test:direct:user1",
@@ -701,7 +713,7 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 		t.Fatalf("Expected session model override test-model-v2, got %v", selected)
 	}
 
-	status, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+	status, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "1",
 		SessionKey: "agent:main:test:direct:user1",
@@ -717,7 +729,7 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 		t.Fatalf("Expected gateway version in status response: %s", status)
 	}
 
-	otherStatus, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+	otherStatus, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "2",
 		SessionKey: "agent:main:test:direct:user2",
@@ -757,7 +769,11 @@ func TestHandleCommand_NewSaveFailure(t *testing.T) {
 	agent.Sessions.AddMessage(sessionKey, "user", "hello")
 	agent.Sessions.SetSummary(sessionKey, "summary")
 
-	response, handled := al.handleCommand(context.Background(), bus.InboundMessage{
+	ch, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		t.Fatal("command handler is not *commandHandlerImpl")
+	}
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "1",
 		SessionKey: sessionKey,
@@ -791,8 +807,8 @@ func TestFormatProviderModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatProviderModel(tt.provider, tt.model); got != tt.want {
-				t.Fatalf("formatProviderModel(%q,%q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+			if got := FormatProviderModel(tt.provider, tt.model); got != tt.want {
+				t.Fatalf("FormatProviderModel(%q,%q) = %q, want %q", tt.provider, tt.model, got, tt.want)
 			}
 		})
 	}
@@ -825,7 +841,7 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	// Crear AgentLoop - esto registra las tools y configura subagents
 	al := NewAgentLoop(cfg, msgBus, provider)
 
@@ -893,7 +909,7 @@ func TestSubagentManager_ToolExecution(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 
 	defaultAgent := al.registry.GetDefaultAgent()
@@ -959,7 +975,7 @@ func TestSubagentManager_WebTools(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
@@ -1003,7 +1019,7 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
@@ -1042,7 +1058,7 @@ func TestSubagentManager_FmodTools(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
@@ -1081,7 +1097,7 @@ func TestSubagentManager_NestedSpawn(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
@@ -1118,7 +1134,7 @@ func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {
@@ -1171,7 +1187,7 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	provider := &mockProvider{}
-	
+
 	al := NewAgentLoop(cfg, msgBus, provider)
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {

@@ -120,3 +120,30 @@ func TestNewAgentInstance_ResolvesNamedProviderModelAlias(t *testing.T) {
 		t.Fatalf("Model = %q, want %q", agent.Model, "chutes/minimax_m2.5")
 	}
 }
+
+func TestNewAgentInstance_ResolvesSlashModelAliasOnDefaultProvider(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Workspace = tmpDir
+	cfg.Agents.Defaults.Provider = "nanogpt"
+	cfg.Agents.Defaults.Model = "qwen/qwen3.5-397b-a17b-thinking"
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"nanogpt": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"qwen/qwen3.5-397b-a17b-thinking": {Model: "Qwen/Qwen3.5-397B-A17B-Thinking-2507"},
+			},
+		},
+	}
+
+	provider := &mockProvider{}
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	if agent.Model != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("Model = %q, want %q", agent.Model, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	}
+}

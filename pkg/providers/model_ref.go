@@ -20,12 +20,12 @@ func ParseModelRef(raw string, defaultProvider string) *ModelRef {
 	}
 
 	if idx := strings.Index(raw, "/"); idx > 0 {
-		provider := raw[:idx]
+		provider := strings.TrimSpace(raw[:idx])
 		model := strings.TrimSpace(raw[idx+1:])
 		if model == "" {
 			return nil
 		}
-		return &ModelRef{Provider: provider, Model: model}
+		return &ModelRef{Provider: NormalizeProvider(provider), Model: model}
 	}
 
 	return &ModelRef{
