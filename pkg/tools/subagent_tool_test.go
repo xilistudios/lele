@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -12,6 +14,53 @@ import (
 // MockLLMProvider is a test implementation of LLMProvider
 type MockLLMProvider struct {
 	lastOptions map[string]interface{}
+}
+
+type scriptedSubagentProvider struct {
+	mu        sync.Mutex
+	responses []string
+	calls     int
+}
+
+func (m *scriptedSubagentProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, options map[string]interface{}) (*providers.LLMResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	response := "STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted"
+	if len(m.responses) > 0 {
+		if m.calls < len(m.responses) {
+			response = m.responses[m.calls]
+		} else {
+			response = m.responses[len(m.responses)-1]
+		}
+	}
+	m.calls++
+
+	return &providers.LLMResponse{Content: response}, nil
+}
+
+func (m *scriptedSubagentProvider) GetDefaultModel() string {
+	return "test-model"
+}
+
+func (m *scriptedSubagentProvider) SupportsTools() bool {
+	return false
+}
+
+func (m *scriptedSubagentProvider) GetContextWindow() int {
+	return 4096
+}
+
+func waitForSubagentCallback(t *testing.T, ch <-chan *ToolResult) *ToolResult {
+	t.Helper()
+
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subagent callback")
+		return nil
+	}
 }
 
 func (m *MockLLMProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, options map[string]interface{}) (*providers.LLMResponse, error) {
@@ -340,5 +389,100 @@ func TestSubagentTool_ForUserTruncation(t *testing.T) {
 	// ForLLM should have full content
 	if !strings.Contains(result.ForLLM, longTask[:50]) {
 		t.Error("ForLLM should contain reference to original task")
+	}
+}
+
+func TestSubagentManager_ContinueTask(t *testing.T) {
+	provider := &scriptedSubagentProvider{responses: []string{
+		"STATUS: needs_context\nSUMMARY: Missing repository target\nCONTEXT_NEEDED: Which repository should I inspect?\nDETAILS:\nI need the repository path before I can continue.",
+		"STATUS: completed\nSUMMARY: Repository inspected\nDETAILS:\nI used the supplied repository path and completed the task.",
+	}}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	resultCh := make(chan *ToolResult, 2)
+
+	spawned, err := manager.Spawn(context.Background(), "Inspect the repository", "repo-inspect", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("Spawn returned error: %v", err)
+	}
+	if !strings.Contains(spawned, "subagent-1") {
+		t.Fatalf("Spawn response should include task ID, got: %s", spawned)
+	}
+
+	first := waitForSubagentCallback(t, resultCh)
+	if first == nil {
+		t.Fatal("Expected first callback result")
+	}
+	if !strings.Contains(first.ForLLM, "Status: needs_context") {
+		t.Fatalf("Expected needs_context status, got: %s", first.ForLLM)
+	}
+
+	task, ok := manager.GetTask("subagent-1")
+	if !ok {
+		t.Fatal("Expected subagent task to exist")
+	}
+	if task.Status != SubagentStatusNeedsContext {
+		t.Fatalf("Expected task status %q, got %q", SubagentStatusNeedsContext, task.Status)
+	}
+	if task.ContextRequest != "Which repository should I inspect?" {
+		t.Fatalf("Unexpected context request: %s", task.ContextRequest)
+	}
+
+	continued, err := manager.ContinueTask(context.Background(), task.ID, "Use repository /tmp/picoclaw", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("ContinueTask returned error: %v", err)
+	}
+	if !strings.Contains(continued, task.ID) {
+		t.Fatalf("ContinueTask response should include task ID, got: %s", continued)
+	}
+
+	second := waitForSubagentCallback(t, resultCh)
+	if second == nil {
+		t.Fatal("Expected second callback result")
+	}
+	if !strings.Contains(second.ForLLM, "Status: completed") {
+		t.Fatalf("Expected completed status, got: %s", second.ForLLM)
+	}
+
+	task, ok = manager.GetTask(task.ID)
+	if !ok {
+		t.Fatal("Expected subagent task after continuation")
+	}
+	if task.Status != SubagentStatusCompleted {
+		t.Fatalf("Expected task status %q, got %q", SubagentStatusCompleted, task.Status)
+	}
+	if len(task.Guidance) != 1 || task.Guidance[0] != "Use repository /tmp/picoclaw" {
+		t.Fatalf("Expected stored guidance, got: %#v", task.Guidance)
+	}
+}
+
+func TestSubagentManager_StopPausedTask(t *testing.T) {
+	provider := &scriptedSubagentProvider{responses: []string{
+		"STATUS: needs_context\nSUMMARY: Missing target\nCONTEXT_NEEDED: Which file should I open?\nDETAILS:\nI need the target file.",
+	}}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	resultCh := make(chan *ToolResult, 1)
+
+	_, err := manager.Spawn(context.Background(), "Open the file", "file-task", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("Spawn returned error: %v", err)
+	}
+	waitForSubagentCallback(t, resultCh)
+
+	if !manager.StopTask("subagent-1") {
+		t.Fatal("Expected StopTask to succeed for paused task")
+	}
+
+	task, ok := manager.GetTask("subagent-1")
+	if !ok {
+		t.Fatal("Expected paused task to remain addressable")
+	}
+	if task.Status != SubagentStatusCancelled {
+		t.Fatalf("Expected paused task to become %q, got %q", SubagentStatusCancelled, task.Status)
 	}
 }

@@ -313,6 +313,10 @@ func (m *llmRunnerMockToolCoordinator) getSubagentTask(taskID string) (*tools.Su
 
 func (m *llmRunnerMockToolCoordinator) stopSubagentTask(taskID string) bool { return false }
 
+func (m *llmRunnerMockToolCoordinator) continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error) {
+	return "", nil
+}
+
 func (m *llmRunnerMockToolCoordinator) GetStartupInfo() map[string]interface{} {
 	return map[string]interface{}{}
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/tools"
 )
 
 // TestHandleCommand_NotACommand verifies that messages not starting with "/" are not handled
@@ -775,8 +776,134 @@ func TestHandleSubagentsCommand_NoRunning(t *testing.T) {
 	if !handled {
 		t.Error("Expected /subagents to be handled")
 	}
-	if !strings.Contains(result, "No running subagents") {
-		t.Errorf("Expected no running subagents message, got: %s", result)
+	if !strings.Contains(result, "No active or waiting subagents") {
+		t.Errorf("Expected no active subagents message, got: %s", result)
+	}
+}
+
+type commandHandlerSubagentCoordinatorStub struct {
+	lastSessionKey string
+	lastTaskID     string
+	lastGuidance   string
+	response       string
+	err            error
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) stopAllSubagents() int { return 0 }
+
+func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
+
+func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*tools.SubagentTask {
+	return nil
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
+	return nil, false
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) stopSubagentTask(taskID string) bool { return false }
+
+func (m *commandHandlerSubagentCoordinatorStub) continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error) {
+	m.lastSessionKey = sessionKey
+	m.lastTaskID = taskID
+	m.lastGuidance = guidance
+	return m.response, m.err
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) GetStartupInfo() map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+func TestHandleSubagentsCommand_Continue(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	stub := &commandHandlerSubagentCoordinatorStub{response: "Continuing subagent task subagent-9 with new guidance."}
+	al.toolCoordinator = stub
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/subagents continue subagent-9 use the main workspace",
+		SessionKey: "telegram:chat1",
+	})
+
+	if !handled {
+		t.Error("Expected /subagents continue to be handled")
+	}
+	if result != stub.response {
+		t.Fatalf("Unexpected response: %s", result)
+	}
+	if stub.lastSessionKey != "telegram:chat1" {
+		t.Fatalf("Expected session key telegram:chat1, got %s", stub.lastSessionKey)
+	}
+	if stub.lastTaskID != "subagent-9" {
+		t.Fatalf("Expected task id subagent-9, got %s", stub.lastTaskID)
+	}
+	if stub.lastGuidance != "use the main workspace" {
+		t.Fatalf("Unexpected guidance: %s", stub.lastGuidance)
+	}
+}
+
+func TestHandleSubagentsCommand_ContinueUsage(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+	al.toolCoordinator = &commandHandlerSubagentCoordinatorStub{}
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/subagents continue subagent-9",
+		SessionKey: "telegram:chat1",
+	})
+
+	if !handled {
+		t.Error("Expected /subagents continue to be handled")
+	}
+	if result != "Usage: /subagents continue <task_id> <guidance>" {
+		t.Fatalf("Unexpected usage response: %s", result)
 	}
 }
 

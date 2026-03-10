@@ -163,6 +163,28 @@ func (r *ToolRegistry) Count() int {
 	return len(r.tools)
 }
 
+// CloneWithout returns a shallow clone of the registry excluding the named tools.
+// Tool instances are shared with the original registry.
+func (r *ToolRegistry) CloneWithout(excluded ...string) *ToolRegistry {
+	excludedSet := make(map[string]struct{}, len(excluded))
+	for _, name := range excluded {
+		excludedSet[name] = struct{}{}
+	}
+
+	clone := NewToolRegistry()
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for name, tool := range r.tools {
+		if _, skip := excludedSet[name]; skip {
+			continue
+		}
+		clone.tools[name] = tool
+	}
+
+	return clone
+}
+
 // GetSummaries returns human-readable summaries of all registered tools.
 // Returns a slice of "name - description" strings.
 func (r *ToolRegistry) GetSummaries() []string {

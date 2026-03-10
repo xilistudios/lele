@@ -383,23 +383,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					return
 				}
 
-				if !result.Silent && result.ForUser != "" {
-					logger.InfoCF("agent", "Async tool completed",
-						map[string]interface{}{
-							"tool":        tc.Name,
-							"content_len": len(result.ForUser),
-						})
-				}
-
-				if lr.al.bus != nil && strings.TrimSpace(result.ForUser) != "" {
-					lr.al.bus.PublishInbound(bus.InboundMessage{
-						Channel:    "system",
-						SenderID:   "subagent",
-						ChatID:     fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
-						Content:    result.ForUser,
-						SessionKey: opts.SessionKey,
+				logger.InfoCF("agent", "Async tool completed",
+					map[string]interface{}{
+						"tool": tc.Name,
 					})
-				}
+
+				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, result)
 			}
 
 			// Special handling for exec tool with approval

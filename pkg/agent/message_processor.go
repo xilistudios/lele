@@ -16,7 +16,6 @@ import (
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
-	"github.com/sipeed/picoclaw/pkg/tools"
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
@@ -197,7 +196,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/subagents":
-		response := mp.formatSubagentsResponse(args)
+		response := formatSubagentsCommand(ctx, mp.al.toolCoordinator, sessionKey, args)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -315,17 +314,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		})
 		return "", nil
 
-	// Handle subagent completion messages - show result directly to user
-	case "Task":
-		// Subagent task completion message - display directly to user
-		mp.al.bus.PublishOutbound(bus.OutboundMessage{
-			Channel:   originChannel,
-			ChatID:    originChatID,
-			Content:   content,
-			ReplyTo:   replyToMessageID,
-			MessageID: replyToMessageID,
-		})
-		return "", nil
 	}
 
 	// For non-command messages, run through LLM
@@ -407,32 +395,6 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	}
 	return fmt.Sprintf("🦞 picoclaw %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
-}
-
-// formatSubagentsResponse formats the subagents list response.
-func (mp *messageProcessorImpl) formatSubagentsResponse(args []string) string {
-	if len(args) >= 2 && args[0] == "info" {
-		task, ok := mp.getSubagentTask(args[1])
-		if !ok {
-			return fmt.Sprintf("Subagent task not found: %s", args[1])
-		}
-		return fmt.Sprintf("Task %s\nStatus: %s\nAgent: %s\nLabel: %s", task.ID, task.Status, task.AgentID, task.Label)
-	}
-	if len(args) >= 2 && args[0] == "stop" {
-		if mp.stopSubagentTask(args[1]) {
-			return fmt.Sprintf("Stopping subagent task: %s", args[1])
-		}
-		return fmt.Sprintf("Subagent task not running: %s", args[1])
-	}
-	running := mp.listRunningSubagentTasks()
-	if len(running) == 0 {
-		return "No running subagents.\nUse /subagents info <task_id> or /subagents stop <task_id>."
-	}
-	lines := make([]string, 0, len(running))
-	for _, task := range running {
-		lines = append(lines, fmt.Sprintf("- %s (%s)", task.ID, task.Label))
-	}
-	return fmt.Sprintf("Running subagents:\n%s\nUse /subagents info <task_id> or /subagents stop <task_id>.", strings.Join(lines, "\n"))
 }
 
 // handleNewCommand handles the /new command.
@@ -563,25 +525,6 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 	}
 
 	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
-}
-
-// ============================================================================
-// Subagent management (delegated to toolCoordinator)
-// ============================================================================
-
-// listRunningSubagentTasks lists all running subagent tasks.
-func (mp *messageProcessorImpl) listRunningSubagentTasks() []*tools.SubagentTask {
-	return mp.al.toolCoordinator.listRunningSubagentTasks()
-}
-
-// getSubagentTask gets a specific subagent task by ID.
-func (mp *messageProcessorImpl) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
-	return mp.al.toolCoordinator.getSubagentTask(taskID)
-}
-
-// stopSubagentTask stops a specific subagent task.
-func (mp *messageProcessorImpl) stopSubagentTask(taskID string) bool {
-	return mp.al.toolCoordinator.stopSubagentTask(taskID)
 }
 
 // ============================================================================

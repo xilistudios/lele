@@ -858,7 +858,7 @@ func TestFormatProviderModel(t *testing.T) {
 // Plan 2: Herramientas del Sistema para Subagentes
 // ============================================
 
-// TestSubagentManager_InheritsParentTools verifica que los subagentes heredan las tools del agente padre
+// TestSubagentManager_InheritsParentTools verifica que los subagentes heredan las tools del agente padre salvo message
 func TestSubagentManager_InheritsParentTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-test-*")
 	if err != nil {
@@ -903,14 +903,25 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		t.Fatal("Parent agent should have tools registered")
 	}
 
-	if len(subagentTools) != len(parentTools) {
-		t.Errorf("Subagent should inherit all parent tools. Expected %d, got %d",
-			len(parentTools), len(subagentTools))
+	expectedTools := len(parentTools)
+	if defaultAgent.Tools != nil {
+		if _, ok := defaultAgent.Tools.Get("message"); ok {
+			expectedTools--
+		}
+	}
+
+	if len(subagentTools) != expectedTools {
+		t.Errorf("Subagent should inherit all allowed parent tools. Expected %d, got %d",
+			expectedTools, len(subagentTools))
+	}
+
+	if subagentManager.HasTool("message") {
+		t.Error("Subagent should not have the message tool")
 	}
 
 	// Verificar herramientas específicas que debe tener el subagente
 	// Nota: Algunas requieren configuración, verificamos las base disponibles
-	baseTools := []string{"read_file", "write_file", "list_dir", "message"}
+	baseTools := []string{"read_file", "write_file", "list_dir"}
 	for _, toolName := range baseTools {
 		if !subagentManager.HasTool(toolName) {
 			t.Errorf("Subagent missing required tool: %s", toolName)
