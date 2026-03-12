@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -404,9 +405,17 @@ func createMockCodexCLI(t *testing.T, events []string) string {
 	scriptPath := filepath.Join(tmpDir, "codex")
 
 	var sb strings.Builder
-	sb.WriteString("#!/bin/bash\n")
-	for _, event := range events {
-		sb.WriteString(fmt.Sprintf("echo '%s'\n", event))
+	if runtime.GOOS == "windows" {
+		scriptPath += ".cmd"
+		sb.WriteString("@echo off\r\n")
+		for _, event := range events {
+			sb.WriteString(fmt.Sprintf("echo %s\r\n", event))
+		}
+	} else {
+		sb.WriteString("#!/bin/sh\n")
+		for _, event := range events {
+			sb.WriteString(fmt.Sprintf("echo '%s'\n", event))
+		}
 	}
 
 	if err := os.WriteFile(scriptPath, []byte(sb.String()), 0755); err != nil {
@@ -474,19 +483,34 @@ func TestCodexCliProvider_MockCLI_WithModel(t *testing.T) {
 	// Mock script that captures args to verify model flag is passed
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "codex")
-	script := `#!/bin/bash
+	argsFile := filepath.Join(tmpDir, "args.txt")
+	var script string
+	if runtime.GOOS == "windows" {
+		scriptPath += ".cmd"
+		script = "@echo off\r\n" +
+			"echo %* > \"" + argsFile + "\"\r\n" +
+			"echo {\"type\":\"item.completed\",\"item\":{\"id\":\"1\",\"type\":\"agent_message\",\"text\":\"ok\"}}\r\n" +
+			"echo {\"type\":\"turn.completed\"}\r\n"
+	} else {
+		script = `#!/bin/sh
 # Write args to a file for verification
-echo "$@" > "` + filepath.Join(tmpDir, "args.txt") + `"
+echo "$@" > "` + argsFile + `"
 echo '{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"ok"}}'
 echo '{"type":"turn.completed"}'`
+	}
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 
+	workspace := "/tmp/test-workspace"
+	if runtime.GOOS == "windows" {
+		workspace = `C:\\tmp\\test-workspace`
+	}
+
 	p := &CodexCliProvider{
 		command:   scriptPath,
-		workspace: "/tmp/test-workspace",
+		workspace: workspace,
 	}
 
 	messages := []Message{{Role: "user", Content: "test"}}
@@ -505,7 +529,7 @@ echo '{"type":"turn.completed"}'`
 	if !strings.Contains(args, "-m gpt-5.2-codex") {
 		t.Errorf("args should contain model flag, got: %s", args)
 	}
-	if !strings.Contains(args, "-C /tmp/test-workspace") {
+	if !strings.Contains(args, "-C "+workspace) {
 		t.Errorf("args should contain workspace flag, got: %s", args)
 	}
 	if !strings.Contains(args, "--json") {
@@ -520,7 +544,11 @@ func TestCodexCliProvider_MockCLI_ContextCancel(t *testing.T) {
 	// Script that sleeps forever
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "codex")
-	script := "#!/bin/bash\nsleep 60"
+	script := "#!/bin/sh\nsleep 60"
+	if runtime.GOOS == "windows" {
+		scriptPath += ".cmd"
+		script = "@echo off\r\ntimeout /t 60 /nobreak > NUL\r\n"
+	}
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -91,6 +92,18 @@ func (c *WhatsAppChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		"to":      msg.ChatID,
 		"content": msg.Content,
 	}
+	if len(msg.Attachments) > 0 {
+		attachments := make([]map[string]interface{}, 0, len(msg.Attachments))
+		for _, attachment := range msg.Attachments {
+			attachments = append(attachments, map[string]interface{}{
+				"name":      whatsappAttachmentName(attachment),
+				"path":      attachment.Path,
+				"mime_type": attachment.MIMEType,
+				"kind":      attachment.Kind,
+			})
+		}
+		payload["attachments"] = attachments
+	}
 
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -160,13 +173,39 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]interface{}) {
 		content = ""
 	}
 
-	var mediaPaths []string
+	attachments := make([]bus.FileAttachment, 0)
 	if mediaData, ok := msg["media"].([]interface{}); ok {
-		mediaPaths = make([]string, 0, len(mediaData))
 		for _, m := range mediaData {
 			if path, ok := m.(string); ok {
-				mediaPaths = append(mediaPaths, path)
+				attachments = append(attachments, bus.FileAttachment{
+					Name: filepath.Base(path),
+					Path: path,
+					Kind: "file",
+				})
 			}
+		}
+	}
+	if attachmentData, ok := msg["attachments"].([]interface{}); ok {
+		for _, item := range attachmentData {
+			attachmentMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			path, _ := attachmentMap["path"].(string)
+			if path == "" {
+				continue
+			}
+			name, _ := attachmentMap["name"].(string)
+			mimeType, _ := attachmentMap["mime_type"].(string)
+			kind, _ := attachmentMap["kind"].(string)
+			caption, _ := attachmentMap["caption"].(string)
+			attachments = append(attachments, bus.FileAttachment{
+				Name:     name,
+				Path:     path,
+				MIMEType: mimeType,
+				Kind:     kind,
+				Caption:  caption,
+			})
 		}
 	}
 
@@ -180,5 +219,15 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]interface{}) {
 
 	log.Printf("WhatsApp message from %s: %s...", senderID, utils.Truncate(content, 50))
 
-	c.HandleMessage(senderID, chatID, content, mediaPaths, metadata)
+	c.HandleMessageWithAttachments(senderID, chatID, content, attachments, metadata, "")
+}
+
+func whatsappAttachmentName(attachment bus.FileAttachment) string {
+	if attachment.Name != "" {
+		return attachment.Name
+	}
+	if attachment.Path != "" {
+		return filepath.Base(attachment.Path)
+	}
+	return "attachment"
 }

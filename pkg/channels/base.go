@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	"github.com/sipeed/picoclaw/pkg/bus"
@@ -86,18 +87,38 @@ func (c *BaseChannel) HandleMessage(senderID, chatID, content string, media []st
 }
 
 func (c *BaseChannel) HandleMessageWithSession(senderID, chatID, content string, media []string, metadata map[string]string, sessionKey string) {
+	attachments := make([]bus.FileAttachment, 0, len(media))
+	for _, path := range media {
+		attachments = append(attachments, bus.FileAttachment{
+			Name: filepath.Base(path),
+			Path: path,
+			Kind: "file",
+		})
+	}
+	c.HandleMessageWithAttachments(senderID, chatID, content, attachments, metadata, sessionKey)
+}
+
+func (c *BaseChannel) HandleMessageWithAttachments(senderID, chatID, content string, attachments []bus.FileAttachment, metadata map[string]string, sessionKey string) {
 	if !c.IsAllowed(senderID) {
 		return
 	}
 
+	media := make([]string, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.Path != "" {
+			media = append(media, attachment.Path)
+		}
+	}
+
 	msg := bus.InboundMessage{
-		Channel:    c.name,
-		SenderID:   senderID,
-		ChatID:     chatID,
-		Content:    content,
-		Media:      media,
-		SessionKey: sessionKey,
-		Metadata:   metadata,
+		Channel:     c.name,
+		SenderID:    senderID,
+		ChatID:      chatID,
+		Content:     content,
+		Media:       media,
+		Attachments: attachments,
+		SessionKey:  sessionKey,
+		Metadata:    metadata,
 	}
 
 	c.bus.PublishInbound(msg)

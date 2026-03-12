@@ -63,17 +63,23 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		// Initialize verbose mode from persistent storage
 		lr.al.verboseManager.InitializeFromSession(opts.SessionKey)
 	}
+	persistedAttachments, err := utils.PersistAttachmentsToWorkspace(agent.Workspace, opts.Attachments)
+	if err != nil {
+		logger.WarnCF("agent", "Failed to persist attachments to workspace", map[string]interface{}{"error": err.Error()})
+		persistedAttachments = opts.Attachments
+	}
+	renderedUserMessage := agent.ContextBuilder.RenderUserMessage(opts.UserMessage, persistedAttachments)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
 		summary,
 		opts.UserMessage,
-		nil,
+		persistedAttachments,
 		opts.Channel,
 		opts.ChatID,
 	)
 
 	// 3. Save user message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
+	agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(ctx, agent, messages, opts)

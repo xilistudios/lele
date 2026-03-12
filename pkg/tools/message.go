@@ -3,9 +3,20 @@ package tools
 import (
 	"context"
 	"fmt"
+	"mime"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/bus"
 )
 
-type SendCallback func(channel, chatID, content string) error
+type MessagePayload struct {
+	Content     string
+	Attachments []bus.FileAttachment
+}
+
+type SendCallback func(channel, chatID string, payload MessagePayload) error
 
 type MessageTool struct {
 	sendCallback   SendCallback
@@ -23,7 +34,7 @@ func (t *MessageTool) Name() string {
 }
 
 func (t *MessageTool) Description() string {
-	return "Send a message to user on a chat channel. Use this when you want to communicate something."
+	return "Send a message or file attachments to the user on a chat channel. Use this when you want to communicate something or deliver a generated file."
 }
 
 func (t *MessageTool) Parameters() map[string]interface{} {
@@ -32,7 +43,14 @@ func (t *MessageTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"content": map[string]interface{}{
 				"type":        "string",
-				"description": "The message content to send",
+				"description": "Optional text content to send. If file_paths is present, this text is used as message body or caption.",
+			},
+			"file_paths": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "string",
+				},
+				"description": "Optional local file paths to send back to the user.",
 			},
 			"channel": map[string]interface{}{
 				"type":        "string",
@@ -43,7 +61,7 @@ func (t *MessageTool) Parameters() map[string]interface{} {
 				"description": "Optional: target chat/user ID",
 			},
 		},
-		"required": []string{"content"},
+		"required": []string{},
 	}
 }
 
@@ -63,9 +81,13 @@ func (t *MessageTool) SetSendCallback(callback SendCallback) {
 }
 
 func (t *MessageTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
-	content, ok := args["content"].(string)
-	if !ok {
-		return &ToolResult{ForLLM: "content is required", IsError: true}
+	content, _ := args["content"].(string)
+	attachments, err := parseMessageAttachments(args["file_paths"])
+	if err != nil {
+		return &ToolResult{ForLLM: err.Error(), IsError: true}
+	}
+	if strings.TrimSpace(content) == "" && len(attachments) == 0 {
+		return &ToolResult{ForLLM: "content or file_paths is required", IsError: true}
 	}
 
 	channel, _ := args["channel"].(string)
@@ -86,7 +108,7 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]interface{}) 
 		return &ToolResult{ForLLM: "Message sending not configured", IsError: true}
 	}
 
-	if err := t.sendCallback(channel, chatID, content); err != nil {
+	if err := t.sendCallback(channel, chatID, MessagePayload{Content: content, Attachments: attachments}); err != nil {
 		return &ToolResult{
 			ForLLM:  fmt.Sprintf("sending message: %v", err),
 			IsError: true,
@@ -100,4 +122,57 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]interface{}) 
 		ForLLM: fmt.Sprintf("Message sent to %s:%s", channel, chatID),
 		Silent: true,
 	}
+}
+
+func parseMessageAttachments(raw interface{}) ([]bus.FileAttachment, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	var paths []string
+	switch values := raw.(type) {
+	case []string:
+		paths = values
+	case []interface{}:
+		paths = make([]string, 0, len(values))
+		for _, value := range values {
+			path, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("file_paths must contain only strings")
+			}
+			paths = append(paths, path)
+		}
+	default:
+		return nil, fmt.Errorf("file_paths must be an array of strings")
+	}
+
+	attachments := make([]bus.FileAttachment, 0, len(paths))
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("cannot access file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("file path %s is a directory", path)
+		}
+		attachments = append(attachments, bus.FileAttachment{
+			Name:     filepath.Base(path),
+			Path:     path,
+			MIMEType: mimeTypeForPath(path),
+			Kind:     "file",
+		})
+	}
+
+	return attachments, nil
+}
+
+func mimeTypeForPath(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == "" {
+		return "application/octet-stream"
+	}
+	if mimeType := mime.TypeByExtension(ext); mimeType != "" {
+		return mimeType
+	}
+	return "application/octet-stream"
 }

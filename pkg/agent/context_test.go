@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/tools"
 )
@@ -1004,7 +1005,7 @@ func TestLoadBootstrapFiles_InvalidPath(t *testing.T) {
 	}
 }
 
-// TestBuildMessages_NilMedia tests BuildMessages with nil media parameter
+// TestBuildMessages_NilMedia tests BuildMessages with nil attachment parameter
 func TestBuildMessages_NilMedia(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
@@ -1014,7 +1015,7 @@ func TestBuildMessages_NilMedia(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	// Should not panic with nil media
+	// Should not panic with nil attachments
 	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "")
 
 	if len(messages) != 2 {
@@ -1022,7 +1023,7 @@ func TestBuildMessages_NilMedia(t *testing.T) {
 	}
 }
 
-// TestBuildMessages_EmptyMedia tests BuildMessages with empty media slice
+// TestBuildMessages_EmptyMedia tests BuildMessages with empty attachment slice
 func TestBuildMessages_EmptyMedia(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
@@ -1032,11 +1033,30 @@ func TestBuildMessages_EmptyMedia(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	// Should work with empty media slice
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []string{}, "", "")
+	// Should work with empty attachment slice
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []bus.FileAttachment{}, "", "")
 
 	if len(messages) != 2 {
 		t.Errorf("Expected 2 messages, got %d", len(messages))
+	}
+}
+
+func TestRenderUserMessage_AttachmentsShowOnlyStoredPath(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	attachmentPath := filepath.Join(tmpDir, "attachments", "20260312", "abc_report.txt")
+	rendered := cb.RenderUserMessage("Procesa este archivo", []bus.FileAttachment{{Path: attachmentPath}})
+
+	if !strings.Contains(rendered, attachmentPath) {
+		t.Fatalf("expected rendered message to contain attachment path %q, got %q", attachmentPath, rendered)
+	}
+	if strings.Contains(rendered, "secret-content") {
+		t.Fatalf("rendered message should not contain attachment contents")
 	}
 }
 

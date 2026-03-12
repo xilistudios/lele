@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -11,10 +13,10 @@ func TestMessageTool_Execute_Success(t *testing.T) {
 	tool.SetContext("test-channel", "test-chat-id")
 
 	var sentChannel, sentChatID, sentContent string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
 		sentChannel = channel
 		sentChatID = chatID
-		sentContent = content
+		sentContent = payload.Content
 		return nil
 	})
 
@@ -63,7 +65,7 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	tool.SetContext("default-channel", "default-chat-id")
 
 	var sentChannel, sentChatID string
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
 		sentChannel = channel
 		sentChatID = chatID
 		return nil
@@ -99,7 +101,7 @@ func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	tool.SetContext("test-channel", "test-chat-id")
 
 	sendErr := errors.New("network error")
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
 		return sendErr
 	})
 
@@ -144,8 +146,8 @@ func TestMessageTool_Execute_MissingContent(t *testing.T) {
 	if !result.IsError {
 		t.Error("Expected IsError=true for missing content")
 	}
-	if result.ForLLM != "content is required" {
-		t.Errorf("Expected ForLLM 'content is required', got '%s'", result.ForLLM)
+	if result.ForLLM != "content or file_paths is required" {
+		t.Errorf("Expected ForLLM 'content or file_paths is required', got '%s'", result.ForLLM)
 	}
 }
 
@@ -153,7 +155,7 @@ func TestMessageTool_Execute_NoTargetChannel(t *testing.T) {
 	tool := NewMessageTool()
 	// No SetContext called, so defaultChannel and defaultChatID are empty
 
-	tool.SetSendCallback(func(channel, chatID, content string) error {
+	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
 		return nil
 	})
 
@@ -209,6 +211,38 @@ func TestMessageTool_Description(t *testing.T) {
 	}
 }
 
+func TestMessageTool_Execute_WithAttachments(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "report.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0600); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+
+	tool := NewMessageTool()
+	tool.SetContext("test-channel", "test-chat-id")
+
+	var payload MessagePayload
+	tool.SetSendCallback(func(channel, chatID string, sent MessagePayload) error {
+		payload = sent
+		return nil
+	})
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"content":    "Adjunto listo",
+		"file_paths": []interface{}{filePath},
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+	if len(payload.Attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(payload.Attachments))
+	}
+	if payload.Attachments[0].Path != filePath {
+		t.Errorf("expected attachment path %q, got %q", filePath, payload.Attachments[0].Path)
+	}
+}
+
 func TestMessageTool_Parameters(t *testing.T) {
 	tool := NewMessageTool()
 	params := tool.Parameters()
@@ -224,10 +258,9 @@ func TestMessageTool_Parameters(t *testing.T) {
 		t.Fatal("Expected properties to be a map")
 	}
 
-	// Check required properties
 	required, ok := params["required"].([]string)
-	if !ok || len(required) != 1 || required[0] != "content" {
-		t.Error("Expected 'content' to be required")
+	if !ok || len(required) != 0 {
+		t.Error("Expected no hard-required fields")
 	}
 
 	// Check content property
@@ -237,6 +270,14 @@ func TestMessageTool_Parameters(t *testing.T) {
 	}
 	if contentProp["type"] != "string" {
 		t.Error("Expected content type to be 'string'")
+	}
+
+	filePathsProp, ok := props["file_paths"].(map[string]interface{})
+	if !ok {
+		t.Error("Expected 'file_paths' property")
+	}
+	if filePathsProp["type"] != "array" {
+		t.Error("Expected file_paths type to be 'array'")
 	}
 
 	// Check channel property (optional)
