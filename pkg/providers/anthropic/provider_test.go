@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
 )
 
 func TestBuildParams_BasicMessage(t *testing.T) {
@@ -100,6 +102,30 @@ func TestBuildParams_WithTools(t *testing.T) {
 	}
 	if len(params.Tools) != 1 {
 		t.Fatalf("len(Tools) = %d, want 1", len(params.Tools))
+	}
+}
+
+func TestBuildParams_WithVisionImage(t *testing.T) {
+	params, err := buildParams([]Message{{
+		Role: "user",
+		ContentParts: []protocoltypes.ContentPart{
+			{Type: "text", Text: "Describe this image"},
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,abcd"}},
+		},
+	}}, nil, "claude-sonnet-4-5-20250929", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+	data, err := json.Marshal(params.Messages)
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	jsonBody := string(data)
+	if !strings.Contains(jsonBody, `"type":"image"`) {
+		t.Fatalf("expected image block in anthropic payload: %s", jsonBody)
+	}
+	if !strings.Contains(jsonBody, `"media_type":"image/png"`) {
+		t.Fatalf("expected image/png media type in payload: %s", jsonBody)
 	}
 }
 

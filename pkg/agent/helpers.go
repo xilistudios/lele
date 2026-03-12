@@ -40,6 +40,21 @@ func FormatMessagesForLog(messages []providers.Message) string {
 			content := utils.Truncate(msg.Content, 200)
 			result += fmt.Sprintf("  Content: %s\n", content)
 		}
+		if len(msg.ContentParts) > 0 {
+			result += fmt.Sprintf("  ContentParts: %d\n", len(msg.ContentParts))
+			for _, part := range msg.ContentParts {
+				switch part.Type {
+				case "text":
+					result += fmt.Sprintf("    - text: %s\n", utils.Truncate(part.Text, 120))
+				case "image_url":
+					imageRef := ""
+					if part.ImageURL != nil {
+						imageRef = utils.Truncate(part.ImageURL.URL, 120)
+					}
+					result += fmt.Sprintf("    - image_url: %s\n", imageRef)
+				}
+			}
+		}
 		if msg.ToolCallID != "" {
 			result += fmt.Sprintf("  ToolCallID: %s\n", msg.ToolCallID)
 		}

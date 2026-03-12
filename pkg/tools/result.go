@@ -1,6 +1,10 @@
 package tools
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/sipeed/picoclaw/pkg/providers"
+)
 
 // ToolResult represents the structured return value from tool execution.
 // It provides clear semantics for different types of results and supports
@@ -30,6 +34,10 @@ type ToolResult struct {
 	// Err is the underlying error (not JSON serialized).
 	// Used for internal error handling and logging.
 	Err error `json:"-"`
+
+	// ContextMessages are injected into the next LLM turn but are not shown directly to the user.
+	// This is used for structured multimodal context such as image content parts.
+	ContextMessages []providers.Message `json:"-"`
 
 	// ApprovalRequired indicates that the tool execution requires user approval.
 	// When set, contains information about the command that needs approval.

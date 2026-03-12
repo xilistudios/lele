@@ -1,4 +1,4 @@
-﻿package agent
+package agent
 
 import (
 	"log"
@@ -25,6 +25,7 @@ type AgentInstance struct {
 	MaxTokens      int
 	Temperature    float64
 	ContextWindow  int
+	SupportsImages bool
 	Provider       providers.LLMProvider
 	Sessions       *session.SessionManager
 	ContextBuilder *ContextBuilder
@@ -36,25 +37,37 @@ type AgentInstance struct {
 
 // NewAgentInstance creates an agent instance from config.
 
-// getContextWindow returns the context window for a model from provider config
-func getContextWindow(cfg *config.Config, model string, provider string) int {
-	// Extract provider name and model name from full model path (e.g., "chutes/qwen3-5-397b-a17b-tee")
-	parts := strings.Split(model, "/")
-	if len(parts) >= 2 {
-		providerName := strings.ToLower(parts[0])
-		modelName := strings.Join(parts[1:], "/")
-		
-		// Try to get context window from provider config
-		if prov, ok := cfg.Providers.GetNamed(providerName); ok {
-			if modelCfg, exists := prov.Models[modelName]; exists {
-				if modelCfg.ContextWindow > 0 {
-					return modelCfg.ContextWindow
-				}
-			}
+func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
+	resolvedModel := strings.TrimSpace(cfg.Providers.ResolveModelAlias(model, defaultProvider))
+	parts := strings.Split(resolvedModel, "/")
+	if len(parts) < 2 {
+		return config.ProviderModelConfig{}, false
+	}
+
+	providerName := strings.ToLower(parts[0])
+	modelName := strings.Join(parts[1:], "/")
+	if prov, ok := cfg.Providers.GetNamed(providerName); ok {
+		if modelCfg, exists := prov.Models[modelName]; exists {
+			return modelCfg, true
 		}
 	}
-	// Fallback to default
+
+	return config.ProviderModelConfig{}, false
+}
+
+// getContextWindow returns the context window for a model from provider config.
+func getContextWindow(cfg *config.Config, model string, provider string) int {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.ContextWindow > 0 {
+		return modelCfg.ContextWindow
+	}
 	return 128000
+}
+
+func getSupportsImages(cfg *config.Config, model string, provider string) bool {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok {
+		return modelCfg.Vision
+	}
+	return false
 }
 
 func NewAgentInstance(
@@ -84,6 +97,9 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
+	if getSupportsImages(cfg, model, defaults.Provider) {
+		toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
@@ -135,6 +151,7 @@ func NewAgentInstance(
 		MaxTokens:      maxTokens,
 		Temperature:    temperature,
 		ContextWindow:  getContextWindow(cfg, model, defaults.Provider),
+		SupportsImages: getSupportsImages(cfg, model, defaults.Provider),
 		Provider:       provider,
 		Sessions:       sessionsManager,
 		ContextBuilder: contextBuilder,

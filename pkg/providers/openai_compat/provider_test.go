@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
 )
 
 func TestProviderChat_UsesMaxCompletionTokensForGLM(t *testing.T) {
@@ -264,6 +266,58 @@ func TestProviderChat_AcceptsNumericOptionTypes(t *testing.T) {
 	}
 	if requestBody["temperature"] != float64(1) {
 		t.Fatalf("temperature = %v, want 1", requestBody["temperature"])
+	}
+}
+
+func TestProviderChat_SendsMultimodalContentParts(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"message":       map[string]interface{}{"content": "ok"},
+				"finish_reason": "stop",
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(t.Context(), []Message{{
+		Role: "user",
+		ContentParts: []protocoltypes.ContentPart{
+			{Type: "text", Text: "Describe this image"},
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,abcd", Detail: "high"}},
+		},
+	}}, nil, "gpt-4o", nil)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	messages, ok := requestBody["messages"].([]interface{})
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v", requestBody["messages"])
+	}
+	msg, ok := messages[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("message[0] type = %T", messages[0])
+	}
+	content, ok := msg["content"].([]interface{})
+	if !ok || len(content) != 2 {
+		t.Fatalf("content = %#v", msg["content"])
+	}
+	imagePart, ok := content[1].(map[string]interface{})
+	if !ok {
+		t.Fatalf("image part type = %T", content[1])
+	}
+	if imagePart["type"] != "image_url" {
+		t.Fatalf("image part type = %v, want image_url", imagePart["type"])
 	}
 }
 

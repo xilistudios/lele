@@ -12,6 +12,8 @@ type FunctionCall = protocoltypes.FunctionCall
 type LLMResponse = protocoltypes.LLMResponse
 type UsageInfo = protocoltypes.UsageInfo
 type Message = protocoltypes.Message
+type ContentPart = protocoltypes.ContentPart
+type ImageURL = protocoltypes.ImageURL
 type ToolDefinition = protocoltypes.ToolDefinition
 type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 
