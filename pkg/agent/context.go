@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/logger"
 	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/skills"
 	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
 type ContextBuilder struct {
@@ -171,8 +173,9 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	return result
 }
 
-func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, media []string, channel, chatID string) []providers.Message {
+func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID string) []providers.Message {
 	messages := []providers.Message{}
+	renderedUserMessage := cb.RenderUserMessage(currentMessage, attachments)
 
 	systemPrompt := cb.BuildSystemPrompt()
 
@@ -223,10 +226,22 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 
 	messages = append(messages, providers.Message{
 		Role:    "user",
-		Content: currentMessage,
+		Content: renderedUserMessage,
 	})
 
 	return messages
+}
+
+func (cb *ContextBuilder) RenderUserMessage(currentMessage string, attachments []bus.FileAttachment) string {
+	content := strings.TrimSpace(currentMessage)
+	attachmentContext := utils.BuildAttachmentContext(attachments)
+	if attachmentContext == "" {
+		return content
+	}
+	if content == "" {
+		return attachmentContext
+	}
+	return content + "\n\n" + attachmentContext
 }
 
 func (cb *ContextBuilder) AddToolResult(messages []providers.Message, toolCallID, toolName, result string) []providers.Message {

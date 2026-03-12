@@ -1,25 +1,36 @@
-﻿package bus
+package bus
 
 import "time"
 
+type FileAttachment struct {
+	Name      string `json:"name,omitempty"`
+	Path      string `json:"path,omitempty"`
+	MIMEType  string `json:"mime_type,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Caption   string `json:"caption,omitempty"`
+	Temporary bool   `json:"temporary,omitempty"`
+}
+
 type InboundMessage struct {
-	Channel    string            `json:"channel"`
-	SenderID   string            `json:"sender_id"`
-	ChatID     string            `json:"chat_id"`
-	Content    string            `json:"content"`
-	Media      []string          `json:"media,omitempty"`
-	SessionKey string            `json:"session_key"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
+	Channel     string            `json:"channel"`
+	SenderID    string            `json:"sender_id"`
+	ChatID      string            `json:"chat_id"`
+	Content     string            `json:"content"`
+	Media       []string          `json:"media,omitempty"`
+	Attachments []FileAttachment  `json:"attachments,omitempty"`
+	SessionKey  string            `json:"session_key"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type OutboundMessage struct {
-	Channel        string      `json:"channel"`
-	ChatID         string      `json:"chat_id"`
-	Content        string      `json:"content"`
-	ReplyTo        string      `json:"reply_to,omitempty"`   // Message ID to reply to
-	MessageID      string      `json:"message_id,omitempty"` // Original command message ID
-	ReplyMarkup    interface{} `json:"reply_markup,omitempty"` // Optional inline keyboard markup for Telegram
-	IsIntermediate bool        `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
+	Channel        string           `json:"channel"`
+	ChatID         string           `json:"chat_id"`
+	Content        string           `json:"content"`
+	Attachments    []FileAttachment `json:"attachments,omitempty"`
+	ReplyTo        string           `json:"reply_to,omitempty"`        // Message ID to reply to
+	MessageID      string           `json:"message_id,omitempty"`      // Original command message ID
+	ReplyMarkup    interface{}      `json:"reply_markup,omitempty"`    // Optional inline keyboard markup for Telegram
+	IsIntermediate bool             `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
 }
 
 // MessageHandler is a function that handles incoming messages

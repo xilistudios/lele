@@ -1,4 +1,4 @@
-﻿// PicoClaw - Ultra-lightweight personal AI agent
+// PicoClaw - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
@@ -54,6 +54,7 @@ type processOptions struct {
 	Channel         string // Target channel for tool execution
 	ChatID          string // Target chat ID for tool execution
 	UserMessage     string // User message content (may include prefix)
+	Attachments     []bus.FileAttachment
 	DefaultResponse string // Response when LLM returns empty
 	EnableSummary   bool   // Whether to trigger summarization
 	SendResponse    bool   // Whether to send response via bus
@@ -167,11 +168,12 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 
 		// Message tool
 		messageTool := tools.NewMessageTool()
-		messageTool.SetSendCallback(func(channel, chatID, content string) error {
+		messageTool.SetSendCallback(func(channel, chatID string, payload tools.MessagePayload) error {
 			msgBus.PublishOutbound(bus.OutboundMessage{
-				Channel: channel,
-				ChatID:  chatID,
-				Content: content,
+				Channel:     channel,
+				ChatID:      chatID,
+				Content:     payload.Content,
+				Attachments: payload.Attachments,
 			})
 			return nil
 		})
