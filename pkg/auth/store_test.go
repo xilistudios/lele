@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -106,6 +107,12 @@ func TestStoreFilePermissions(t *testing.T) {
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat() error: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if info.IsDir() {
+			t.Fatal("expected auth path to be a file")
+		}
+		return
 	}
 	perm := info.Mode().Perm()
 	if perm != 0600 {
