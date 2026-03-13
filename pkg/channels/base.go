@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/xilistudios/lele/pkg/bus"
 )
 
 type Channel interface {

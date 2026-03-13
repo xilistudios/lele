@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 // PatchTool applies a unified diff to a file.
@@ -53,11 +53,11 @@ func (t *PatchTool) Parameters() map[string]interface{} {
 
 // Hunk represents a single hunk in a unified diff
 type Hunk struct {
-	OldStart   int
-	OldCount   int
-	NewStart   int
-	NewCount   int
-	Lines      []string // Lines with prefix (+, -, space)
+	OldStart int
+	OldCount int
+	NewStart int
+	NewCount int
+	Lines    []string // Lines with prefix (+, -, space)
 }
 
 // DiffInfo represents a parsed unified diff
@@ -93,12 +93,12 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	if strings.HasPrefix(diffContent, "@") {
 		diffPath := strings.TrimPrefix(diffContent, "@")
 		diffPath = strings.TrimSpace(diffPath)
-		
+
 		resolvedDiffPath, err := validatePath(diffPath, t.workspace, t.restrict)
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("invalid diff file path: %v", err))
 		}
-		
+
 		data, err := os.ReadFile(resolvedDiffPath)
 		if err != nil {
 			return ErrorResult(fmt.Sprintf("failed to read diff file: %v", err))
@@ -237,7 +237,7 @@ func parseUnifiedDiff(diff string) (*DiffInfo, error) {
 // applyDiff applies a diff to content and returns the new content
 func applyDiff(content string, diff *DiffInfo) (string, error) {
 	lines := strings.Split(content, "\n")
-	
+
 	// Convert 1-indexed to 0-indexed
 	for _, hunk := range diff.Hunks {
 		hunk.OldStart--
@@ -246,11 +246,11 @@ func applyDiff(content string, diff *DiffInfo) (string, error) {
 	// Validate and apply from bottom to top to maintain line numbers
 	for i := len(diff.Hunks) - 1; i >= 0; i-- {
 		hunk := diff.Hunks[i]
-		
+
 		if err := applyHunk(lines, hunk); err != nil {
 			return "", fmt.Errorf("hunk at line %d: %v", hunk.OldStart+1, err)
 		}
-		
+
 		lines = rebuildLines(lines, hunk)
 	}
 
@@ -277,14 +277,14 @@ func applyHunk(lines []string, hunk *Hunk) error {
 			} else {
 				removalCount++
 			}
-			
+
 			expectedLine := line[1:]
 			lineIdx := start + contextCount + removalCount - 1
-			
+
 			if lineIdx >= len(lines) {
 				return fmt.Errorf("expected line %d but file has only %d lines", lineIdx+1, len(lines))
 			}
-			
+
 			if lines[lineIdx] != expectedLine {
 				return fmt.Errorf("context mismatch at line %d:\n  expected: %s\n  actual:   %s",
 					lineIdx+1, expectedLine, lines[lineIdx])
@@ -298,7 +298,7 @@ func applyHunk(lines []string, hunk *Hunk) error {
 // rebuildLines rebuilds the lines array after applying a hunk
 func rebuildLines(lines []string, hunk *Hunk) []string {
 	start := hunk.OldStart
-	
+
 	var newLines []string
 	newLines = append(newLines, lines[:start]...)
 

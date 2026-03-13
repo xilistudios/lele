@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 // PreviewTool previews a temp file (.fmod.tmp) with optional line range.
@@ -83,7 +83,7 @@ func (t *PreviewTool) Execute(ctx context.Context, args map[string]interface{}) 
 
 	// Read temp file
 	tempPath := GetTempPath(resolvedPath)
-	
+
 	if _, err := os.Stat(tempPath); os.IsNotExist(err) {
 		return ErrorResult(fmt.Sprintf("temp file not found: %s. Use 'smart_edit' first to create it.", tempPath))
 	}

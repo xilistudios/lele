@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 // SmartEditTool edits a file using intelligent fallback strategies.
@@ -121,7 +121,7 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		strategy := &RegexMatchStrategy{Flags: flags}
 		matches = strategy.FindMatches(content, oldText)
 		strategyName = "regex"
-		
+
 		// If no match, fail immediately (no fallback for regex)
 		if len(matches) == 0 {
 			logger.ErrorCF("smart_edit", "Regex match failed",
@@ -133,13 +133,13 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 		exactStrategy := &ExactMatchStrategy{}
 		matches = exactStrategy.FindMatches(content, oldText)
 		strategyName = "exact"
-		
+
 		if len(matches) == 0 {
 			// Fallback to whitespace-tolerant
 			wsStrategy := &WhitespaceTolerantStrategy{}
 			matches = wsStrategy.FindMatches(content, oldText)
 			strategyName = "whitespace-tolerant"
-			
+
 			if len(matches) == 0 {
 				logger.ErrorCF("smart_edit", "Match failed",
 					map[string]interface{}{"strategy": "all", "old_text": oldText})

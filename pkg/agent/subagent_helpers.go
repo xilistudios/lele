@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID string, result *tools.ToolResult) {

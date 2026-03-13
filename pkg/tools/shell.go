@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type ExecTool struct {
@@ -21,9 +21,9 @@ type ExecTool struct {
 	denyPatterns        []*regexp.Regexp
 	allowPatterns       []*regexp.Regexp
 	restrictToWorkspace bool
-	approvalMode        bool                    // Activa modo aprobación
+	approvalMode        bool                           // Activa modo aprobación
 	approvalCallback    func(cmd string) (bool, error) // Callback para solicitar aprobación
-	bypassGuard         bool                    // Bypass all safety guards when command is approved
+	bypassGuard         bool                           // Bypass all safety guards when command is approved
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{

@@ -37,10 +37,10 @@ func (c *AuthCredential) NeedsRefresh() bool {
 
 func authFilePath() string {
 	if home, ok := os.LookupEnv("HOME"); ok && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".picoclaw", "auth.json")
+		return filepath.Join(home, ".lele", "auth.json")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".picoclaw", "auth.json")
+	return filepath.Join(home, ".lele", "auth.json")
 }
 
 func LoadStore() (*AuthStore, error) {

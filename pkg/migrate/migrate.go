@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type ActionType int
@@ -337,7 +337,7 @@ func resolvePicoClawHome(override string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
-	return filepath.Join(home, ".picoclaw"), nil
+	return filepath.Join(home, ".lele"), nil
 }
 
 func resolveWorkspace(homeDir string) string {

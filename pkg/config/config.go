@@ -607,7 +607,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Workspace:           "~/.picoclaw/workspace",
+				Workspace:           "~/.lele/workspace",
 				RestrictToWorkspace: true,
 				Provider:            "",
 				Model:               "glm-4.7",
@@ -757,7 +757,7 @@ func LoadConfig(path string) (*Config, error) {
 
 func DefaultConfigPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".picoclaw", "config.json")
+	return filepath.Join(home, ".lele", "config.json")
 }
 
 func SaveConfig(path string, cfg *Config) error {

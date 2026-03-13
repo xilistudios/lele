@@ -105,7 +105,7 @@ Give your decade-old phone a second life! Turn it into a smart AI Assistant with
 2. **Execute cmds**
 ```bash
 # Note: Replace v0.1.1 with the latest version from the Releases page
-wget https://github.com/sipeed/picoclaw/releases/download/v0.1.1/picoclaw-linux-arm64
+wget https://github.com/xilistudios/lele/releases/download/v0.1.1/picoclaw-linux-arm64
 chmod +x picoclaw-linux-arm64
 pkg install proot
 termux-chroot ./picoclaw-linux-arm64 onboard
@@ -129,12 +129,12 @@ PicoClaw can be deployed on almost any Linux device!
 
 ### Install with precompiled binary
 
-Download the firmware for your platform from the [release](https://github.com/sipeed/picoclaw/releases) page.
+Download the firmware for your platform from the [release](https://github.com/xilistudios/lele/releases) page.
 
 ### Install from source (latest features, recommended for development)
 
 ```bash
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 
 cd picoclaw
 make deps
@@ -155,7 +155,7 @@ You can also run PicoClaw using Docker Compose without installing anything local
 
 ```bash
 # 1. Clone this repo
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 cd picoclaw
 
 # 2. Set your API keys
@@ -192,7 +192,7 @@ docker compose --profile gateway up -d
 ### 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.picoclaw/config.json`.
+> Set your API key in `~/.lele/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM)
 > Web search is **optional** - get free [Brave Search API](https://brave.com/search/api) (2000 free queries/month) or use built-in auto fallback.
 
@@ -202,13 +202,13 @@ docker compose --profile gateway up -d
 picoclaw onboard
 ```
 
-**2. Configure** (`~/.picoclaw/config.json`)
+**2. Configure** (`~/.lele/config.json`)
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -475,14 +475,14 @@ Connect Picoclaw to the Agent Social Network simply by sending a single message 
 
 ## ⚙️ Configuration
 
-Config file: `~/.picoclaw/config.json`
+Config file: `~/.lele/config.json`
 
 ### Workspace Layout
 
-PicoClaw stores data in your configured workspace (default: `~/.picoclaw/workspace`):
+PicoClaw stores data in your configured workspace (default: `~/.lele/workspace`):
 
 ```
-~/.picoclaw/workspace/
+~/.lele/workspace/
 ├── sessions/          # Conversation sessions and history
 ├── memory/           # Long-term memory (MEMORY.md)
 ├── state/            # Persistent state (last channel, etc.)
@@ -506,7 +506,7 @@ PicoClaw runs in a sandboxed environment by default. The agent can only access f
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "restrict_to_workspace": true
     }
   }
@@ -515,7 +515,7 @@ PicoClaw runs in a sandboxed environment by default. The agent can only access f
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `workspace` | `~/.picoclaw/workspace` | Working directory for the agent |
+| `workspace` | `~/.lele/workspace` | Working directory for the agent |
 | `restrict_to_workspace` | `true` | Restrict file/command access to workspace |
 
 #### Protected Tools
@@ -705,7 +705,7 @@ This keeps the runtime lightweight while making new OpenAI-compatible backends m
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -824,7 +824,7 @@ PicoClaw supports scheduled reminders and recurring tasks through the `cron` too
 * **Recurring tasks**: "Remind me every 2 hours" → triggers every 2 hours
 * **Cron expressions**: "Remind me at 9am daily" → uses cron expression
 
-Jobs are stored in `~/.picoclaw/workspace/cron/` and processed automatically.
+Jobs are stored in `~/.lele/workspace/cron/` and processed automatically.
 
 ## 🤝 Contribute & Roadmap
 
@@ -834,11 +834,6 @@ Roadmap coming soon...
 
 Developer group building, Entry Requirement: At least 1 Merged PR.
 
-User Groups:
-
-discord:  <https://discord.gg/V4sAZ9XWpN>
-
-<img src="assets/wechat.png" alt="PicoClaw" width="512">
 
 ## 🐛 Troubleshooting
 
@@ -851,7 +846,7 @@ To enable web search:
 1. **Option 1 (Recommended)**: Get a free API key at [https://brave.com/search/api](https://brave.com/search/api) (2000 free queries/month) for the best results.
 2. **Option 2 (No Credit Card)**: If you don't have a key, we automatically fall back to **DuckDuckGo** (no key required).
 
-Add the key to `~/.picoclaw/config.json` if using Brave:
+Add the key to `~/.lele/config.json` if using Brave:
 
 ```json
 {

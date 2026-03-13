@@ -116,12 +116,12 @@ https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6
 
 ### Cài đặt bằng binary biên dịch sẵn
 
-Tải file binary cho nền tảng của bạn từ [trang Release](https://github.com/sipeed/picoclaw/releases).
+Tải file binary cho nền tảng của bạn từ [trang Release](https://github.com/xilistudios/lele/releases).
 
 ### Cài đặt từ mã nguồn (có tính năng mới nhất, khuyên dùng cho phát triển)
 
 ```bash
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 
 cd picoclaw
 make deps
@@ -142,7 +142,7 @@ Bạn cũng có thể chạy PicoClaw bằng Docker Compose mà không cần cà
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 cd picoclaw
 
 # 2. Thiết lập API Key
@@ -179,7 +179,7 @@ docker compose --profile gateway up -d
 ### 🚀 Bắt đầu nhanh
 
 > [!TIP]
-> Thiết lập API key trong `~/.picoclaw/config.json`.
+> Thiết lập API key trong `~/.lele/config.json`.
 > Lấy API key: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM)
 > Tìm kiếm web là **tùy chọn** — lấy [Brave Search API](https://brave.com/search/api) miễn phí (2000 truy vấn/tháng) hoặc dùng tính năng auto fallback tích hợp sẵn.
 
@@ -189,13 +189,13 @@ docker compose --profile gateway up -d
 picoclaw onboard
 ```
 
-**2. Cấu hình** (`~/.picoclaw/config.json`)
+**2. Cấu hình** (`~/.lele/config.json`)
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -459,14 +459,14 @@ Kết nối PicoClaw với Mạng xã hội Agent chỉ bằng cách gửi một
 
 ## ⚙️ Cấu hình chi tiết
 
-File cấu hình: `~/.picoclaw/config.json`
+File cấu hình: `~/.lele/config.json`
 
 ### Cấu trúc Workspace
 
-PicoClaw lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/.picoclaw/workspace`):
+PicoClaw lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/.lele/workspace`):
 
 ```
-~/.picoclaw/workspace/
+~/.lele/workspace/
 ├── sessions/          # Phiên hội thoại và lịch sử
 ├── memory/           # Bộ nhớ dài hạn (MEMORY.md)
 ├── state/            # Trạng thái lưu trữ (kênh cuối cùng, v.v.)
@@ -490,7 +490,7 @@ PicoClaw chạy trong môi trường sandbox theo mặc định. Agent chỉ có
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "restrict_to_workspace": true
     }
   }
@@ -499,7 +499,7 @@ PicoClaw chạy trong môi trường sandbox theo mặc định. Agent chỉ có
 
 | Tùy chọn | Mặc định | Mô tả |
 |----------|---------|-------|
-| `workspace` | `~/.picoclaw/workspace` | Thư mục làm việc của agent |
+| `workspace` | `~/.lele/workspace` | Thư mục làm việc của agent |
 | `restrict_to_workspace` | `true` | Giới hạn truy cập file/lệnh trong workspace |
 
 #### Công cụ được bảo vệ
@@ -679,7 +679,7 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -792,7 +792,7 @@ PicoClaw hỗ trợ nhắc nhở theo lịch và tác vụ lặp lại thông qu
 * **Tác vụ lặp lại**: "Remind me every 2 hours" (Nhắc tôi mỗi 2 giờ) → kích hoạt mỗi 2 giờ
 * **Biểu thức Cron**: "Remind me at 9am daily" (Nhắc tôi lúc 9 giờ sáng mỗi ngày) → sử dụng biểu thức cron
 
-Các tác vụ được lưu trong `~/.picoclaw/workspace/cron/` và được xử lý tự động.
+Các tác vụ được lưu trong `~/.lele/workspace/cron/` và được xử lý tự động.
 
 ## 🤝 Đóng góp & Lộ trình
 
@@ -819,7 +819,7 @@ Discord: <https://discord.gg/V4sAZ9XWpN>
 1. **Tùy chọn 1 (Khuyên dùng)**: Lấy API key miễn phí tại [https://brave.com/search/api](https://brave.com/search/api) (2000 truy vấn miễn phí/tháng) để có kết quả tốt nhất.
 2. **Tùy chọn 2 (Không cần thẻ tín dụng)**: Nếu không có key, hệ thống tự động chuyển sang dùng **DuckDuckGo** (không cần key).
 
-Thêm key vào `~/.picoclaw/config.json` nếu dùng Brave:
+Thêm key vào `~/.lele/config.json` nếu dùng Brave:
 
 ```json
 {

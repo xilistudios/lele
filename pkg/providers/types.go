@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
 type ToolCall = protocoltypes.ToolCall

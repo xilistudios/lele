@@ -109,7 +109,7 @@ Donnez une seconde vie à votre téléphone d'il y a dix ans ! Transformez-le en
 
 ```bash
 # Note : Remplacez v0.1.1 par la dernière version depuis la page des Releases
-wget https://github.com/sipeed/picoclaw/releases/download/v0.1.1/picoclaw-linux-arm64
+wget https://github.com/xilistudios/lele/releases/download/v0.1.1/picoclaw-linux-arm64
 chmod +x picoclaw-linux-arm64
 pkg install proot
 termux-chroot ./picoclaw-linux-arm64 onboard
@@ -135,12 +135,12 @@ PicoClaw peut être déployé sur pratiquement n'importe quel appareil Linux !
 
 ### Installer avec un binaire précompilé
 
-Téléchargez le binaire pour votre plateforme depuis la page des [releases](https://github.com/sipeed/picoclaw/releases).
+Téléchargez le binaire pour votre plateforme depuis la page des [releases](https://github.com/xilistudios/lele/releases).
 
 ### Installer depuis les sources (dernières fonctionnalités, recommandé pour le développement)
 
 ```bash
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 
 cd picoclaw
 make deps
@@ -161,7 +161,7 @@ Vous pouvez également exécuter PicoClaw avec Docker Compose sans rien installe
 
 ```bash
 # 1. Clonez ce dépôt
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 cd picoclaw
 
 # 2. Configurez vos clés API
@@ -198,7 +198,7 @@ docker compose --profile gateway up -d
 ### 🚀 Démarrage Rapide
 
 > [!TIP]
-> Configurez votre clé API dans `~/.picoclaw/config.json`.
+> Configurez votre clé API dans `~/.lele/config.json`.
 > Obtenir des clés API : [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM)
 > La recherche web est **optionnelle** — obtenez gratuitement l'[API Brave Search](https://brave.com/search/api) (2000 requêtes gratuites/mois) ou utilisez le repli automatique intégré.
 
@@ -208,13 +208,13 @@ docker compose --profile gateway up -d
 picoclaw onboard
 ```
 
-**2. Configurer** (`~/.picoclaw/config.json`)
+**2. Configurer** (`~/.lele/config.json`)
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -478,14 +478,14 @@ Connectez PicoClaw au Réseau Social d'Agents simplement en envoyant un seul mes
 
 ## ⚙️ Configuration
 
-Fichier de configuration : `~/.picoclaw/config.json`
+Fichier de configuration : `~/.lele/config.json`
 
 ### Structure du Workspace
 
-PicoClaw stocke les données dans votre workspace configuré (par défaut : `~/.picoclaw/workspace`) :
+PicoClaw stocke les données dans votre workspace configuré (par défaut : `~/.lele/workspace`) :
 
 ```
-~/.picoclaw/workspace/
+~/.lele/workspace/
 ├── sessions/          # Sessions de conversation et historique
 ├── memory/           # Mémoire à long terme (MEMORY.md)
 ├── state/            # État persistant (dernier canal, etc.)
@@ -509,7 +509,7 @@ PicoClaw s'exécute dans un environnement sandboxé par défaut. L'agent ne peut
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "restrict_to_workspace": true
     }
   }
@@ -518,7 +518,7 @@ PicoClaw s'exécute dans un environnement sandboxé par défaut. L'agent ne peut
 
 | Option | Par défaut | Description |
 |--------|------------|-------------|
-| `workspace` | `~/.picoclaw/workspace` | Répertoire de travail de l'agent |
+| `workspace` | `~/.lele/workspace` | Répertoire de travail de l'agent |
 | `restrict_to_workspace` | `true` | Restreindre l'accès fichiers/commandes au workspace |
 
 #### Outils Protégés
@@ -698,7 +698,7 @@ Le sous-agent a accès aux outils (message, web_search, etc.) et peut communique
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -814,7 +814,7 @@ PicoClaw prend en charge les rappels planifiés et les tâches récurrentes via 
 * **Tâches récurrentes** : « Rappelle-moi toutes les 2 heures » → se déclenche toutes les 2 heures
 * **Expressions Cron** : « Rappelle-moi à 9h tous les jours » → utilise une expression cron
 
-Les tâches sont stockées dans `~/.picoclaw/workspace/cron/` et traitées automatiquement.
+Les tâches sont stockées dans `~/.lele/workspace/cron/` et traitées automatiquement.
 
 ## 🤝 Contribuer & Feuille de Route
 
@@ -841,7 +841,7 @@ Pour activer la recherche web :
 1. **Option 1 (Recommandé)** : Obtenez une clé API gratuite sur [https://brave.com/search/api](https://brave.com/search/api) (2000 requêtes gratuites/mois) pour les meilleurs résultats.
 2. **Option 2 (Sans carte bancaire)** : Si vous n'avez pas de clé, le système bascule automatiquement sur **DuckDuckGo** (aucune clé requise).
 
-Ajoutez la clé dans `~/.picoclaw/config.json` si vous utilisez Brave :
+Ajoutez la clé dans `~/.lele/config.json` si vous utilisez Brave :
 
 ```json
 {

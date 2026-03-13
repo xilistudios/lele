@@ -11,10 +11,10 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/routing"
-	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
+	"github.com/xilistudios/lele/pkg/utils"
 )
 
 // FormatMessagesForLog formats messages for logging

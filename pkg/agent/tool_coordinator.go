@@ -10,7 +10,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // toolCoordinator is an internal interface for tool coordination operations.

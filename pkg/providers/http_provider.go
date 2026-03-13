@@ -9,7 +9,7 @@ package providers
 import (
 	"context"
 
-	"github.com/sipeed/picoclaw/pkg/providers/openai_compat"
+	"github.com/xilistudios/lele/pkg/providers/openai_compat"
 )
 
 type HTTPProvider struct {

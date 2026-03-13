@@ -5,8 +5,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/auth"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/xilistudios/lele/pkg/auth"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"
@@ -110,7 +110,7 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 		sel.apiBase = defaultAPIBaseByType(typ)
 	}
 
-	log.Printf("[DEBUG] selectionFromNamedProvider: provider=%s, type=%s, apiBase=%s, model=%s, apiKey=%s", 
+	log.Printf("[DEBUG] selectionFromNamedProvider: provider=%s, type=%s, apiBase=%s, model=%s, apiKey=%s",
 		providerName, typ, sel.apiBase, sel.model, maskKey(sel.apiKey))
 
 	switch typ {

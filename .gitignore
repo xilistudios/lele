@@ -15,7 +15,7 @@ cmd/picoclaw/workspace
 # Picoclaw specific
 
 # PicoClaw
-.picoclaw/
+.lele/
 config.json
 sessions/
 build/

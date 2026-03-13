@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 var supportedProviders = map[string]bool{
@@ -326,7 +326,7 @@ func convertKeysToSnake(data interface{}) interface{} {
 }
 
 func rewriteWorkspacePath(path string) string {
-	path = strings.Replace(path, ".openclaw", ".picoclaw", 1)
+	path = strings.Replace(path, ".openclaw", ".lele", 1)
 	return path
 }
 

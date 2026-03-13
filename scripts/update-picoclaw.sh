@@ -7,11 +7,11 @@
 set -euo pipefail
 
 # Configuración
-PROJECT_DIR="/home/alfredo/.picoclaw/workspace-coder/picoclaw"
+PROJECT_DIR="/home/alfredo/.lele/workspace-coder/picoclaw"
 BINARY_NAME="picoclaw"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_NAME="picoclaw"
-BACKUP_DIR="/home/alfredo/.picoclaw/backups"
+BACKUP_DIR="/home/alfredo/.lele/backups"
 LOG_FILE="/var/log/picoclaw-update.log"
 
 # Colores para output

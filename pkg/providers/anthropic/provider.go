@@ -9,7 +9,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
 type ToolCall = protocoltypes.ToolCall

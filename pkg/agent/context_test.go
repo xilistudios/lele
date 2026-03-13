@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // TestGetGlobalConfigDir_NormalCase tests getGlobalConfigDir with normal home directory
@@ -29,9 +29,9 @@ func TestGetGlobalConfigDir_NormalCase(t *testing.T) {
 		t.Error("Expected non-empty config dir, got empty string")
 	}
 
-	// Should end with .picoclaw
-	if !strings.HasSuffix(dir, ".picoclaw") {
-		t.Errorf("Expected path to end with .picoclaw, got: %s", dir)
+	// Should end with .lele
+	if !strings.HasSuffix(dir, ".lele") {
+		t.Errorf("Expected path to end with .lele, got: %s", dir)
 	}
 
 	// Should contain the home directory
