@@ -10,7 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
+	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
 func TestBuildParams_BasicMessage(t *testing.T) {

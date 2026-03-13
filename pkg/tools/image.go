@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 const maxImageReadSize = 20 << 20
