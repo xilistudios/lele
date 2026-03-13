@@ -99,35 +99,42 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 	for _, msg := range messages {
 		switch msg.Role {
 		case "system":
-			system = append(system, anthropic.TextBlockParam{Text: msg.Content})
+			text := msg.TextContent()
+			if text != "" {
+				system = append(system, anthropic.TextBlockParam{Text: text})
+			}
 		case "user":
 			if msg.ToolCallID != "" {
 				anthropicMessages = append(anthropicMessages,
-					anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.Content, false)),
+					anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.TextContent(), false)),
 				)
 			} else {
-				anthropicMessages = append(anthropicMessages,
-					anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)),
-				)
+				blocks := buildAnthropicContentBlocks(msg)
+				if len(blocks) > 0 {
+					anthropicMessages = append(anthropicMessages, anthropic.NewUserMessage(blocks...))
+				}
 			}
 		case "assistant":
 			if len(msg.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion
-				if msg.Content != "" {
-					blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+				if text := msg.TextContent(); text != "" {
+					blocks = append(blocks, anthropic.NewTextBlock(text))
 				}
 				for _, tc := range msg.ToolCalls {
 					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, tc.Arguments, tc.Name))
 				}
 				anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 			} else {
-				anthropicMessages = append(anthropicMessages,
-					anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)),
-				)
+				text := msg.TextContent()
+				if text != "" {
+					anthropicMessages = append(anthropicMessages,
+						anthropic.NewAssistantMessage(anthropic.NewTextBlock(text)),
+					)
+				}
 			}
 		case "tool":
 			anthropicMessages = append(anthropicMessages,
-				anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.Content, false)),
+				anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.TextContent(), false)),
 			)
 		}
 	}
@@ -156,6 +163,58 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 	}
 
 	return params, nil
+}
+
+func buildAnthropicContentBlocks(msg Message) []anthropic.ContentBlockParamUnion {
+	if len(msg.ContentParts) == 0 {
+		text := msg.TextContent()
+		if text == "" {
+			return nil
+		}
+		return []anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(text)}
+	}
+
+	blocks := make([]anthropic.ContentBlockParamUnion, 0, len(msg.ContentParts))
+	for _, part := range msg.ContentParts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(part.Text))
+			}
+		case "image_url":
+			if part.ImageURL == nil {
+				continue
+			}
+			mediaType, encoded, ok := splitDataURL(part.ImageURL.URL)
+			if !ok {
+				continue
+			}
+			blocks = append(blocks, anthropic.NewImageBlockBase64(mediaType, encoded))
+		}
+	}
+
+	return blocks
+}
+
+func splitDataURL(raw string) (mediaType string, encoded string, ok bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "data:") {
+		return "", "", false
+	}
+	comma := strings.Index(trimmed, ",")
+	if comma < 0 {
+		return "", "", false
+	}
+	header := trimmed[5:comma]
+	if !strings.HasSuffix(strings.ToLower(header), ";base64") {
+		return "", "", false
+	}
+	mediaType = strings.TrimSuffix(header, ";base64")
+	encoded = trimmed[comma+1:]
+	if mediaType == "" || encoded == "" {
+		return "", "", false
+	}
+	return mediaType, encoded, true
 }
 
 func translateTools(tools []ToolDefinition) []anthropic.ToolUnionParam {

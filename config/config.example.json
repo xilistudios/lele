@@ -79,7 +79,8 @@
       "api_base": "",
       "models": {
         "claude-sonnet": {
-          "model": "claude-sonnet-4-5"
+          "model": "claude-sonnet-4-5",
+          "vision": true
         }
       }
     },
@@ -95,7 +96,8 @@
       "api_base": "https://example.com/v1",
       "models": {
         "fast": {
-          "model": "gpt-4o-mini"
+          "model": "gpt-4o-mini",
+          "vision": true
         }
       }
     },

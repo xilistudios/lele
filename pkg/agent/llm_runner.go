@@ -517,6 +517,13 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
+
+			if len(toolResult.ContextMessages) > 0 {
+				messages = append(messages, toolResult.ContextMessages...)
+				for _, contextMsg := range toolResult.ContextMessages {
+					agent.Sessions.AddFullMessage(opts.SessionKey, contextMsg)
+				}
+			}
 		}
 	}
 
