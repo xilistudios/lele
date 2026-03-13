@@ -38,12 +38,13 @@ type AgentInstance struct {
 // NewAgentInstance creates an agent instance from config.
 
 func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
-	// The model parameter can be either:
-	// 1. An alias like "myprovider/vision-model" (before resolution)
-	// 2. A resolved model like "myprovider/gpt-4o-vision" (after resolution)
-	// We need to handle both cases by:
-	// - First trying to look up by alias (exact match or normalized)
-	// - If not found, searching for an entry where the Model field matches
+	// The model parameter is the raw model specification which may be:
+	// 1. An alias like "myprovider/vision-model" that maps to a different resolved model
+	// 2. A direct model reference like "myprovider/gpt-4o-vision"
+	// We handle both by attempting multiple lookup strategies:
+	// - First: exact alias match
+	// - Second: normalized alias match (lowercase, dots replaced with dashes)
+	// - Third: search by resolved model name in the Model field
 	model = strings.TrimSpace(model)
 
 	// Extract provider and model name from the model string
