@@ -299,6 +299,7 @@ type ProviderModelConfig struct {
 	Model         string   `json:"model,omitempty"`
 	MaxTokens     int      `json:"max_tokens,omitempty"`
 	Temperature   *float64 `json:"temperature,omitempty"`
+	Vision        bool     `json:"vision,omitempty"`
 }
 
 type NamedProviderConfig struct {

@@ -62,6 +62,16 @@ func TestAgentModelConfig_MarshalObject(t *testing.T) {
 	}
 }
 
+func TestProviderModelConfig_UnmarshalVision(t *testing.T) {
+	var modelCfg ProviderModelConfig
+	if err := json.Unmarshal([]byte(`{"vision":true}`), &modelCfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !modelCfg.Vision {
+		t.Fatal("expected Vision to be true")
+	}
+}
+
 func TestAgentConfig_FullParse(t *testing.T) {
 	jsonData := `{
 		"agents": {

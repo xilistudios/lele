@@ -1,4 +1,4 @@
-﻿package agent
+package agent
 
 import (
 	"log"
@@ -25,6 +25,7 @@ type AgentInstance struct {
 	MaxTokens      int
 	Temperature    float64
 	ContextWindow  int
+	SupportsImages bool
 	Provider       providers.LLMProvider
 	Sessions       *session.SessionManager
 	ContextBuilder *ContextBuilder
@@ -36,25 +37,74 @@ type AgentInstance struct {
 
 // NewAgentInstance creates an agent instance from config.
 
-// getContextWindow returns the context window for a model from provider config
-func getContextWindow(cfg *config.Config, model string, provider string) int {
-	// Extract provider name and model name from full model path (e.g., "chutes/qwen3-5-397b-a17b-tee")
-	parts := strings.Split(model, "/")
-	if len(parts) >= 2 {
-		providerName := strings.ToLower(parts[0])
-		modelName := strings.Join(parts[1:], "/")
-		
-		// Try to get context window from provider config
-		if prov, ok := cfg.Providers.GetNamed(providerName); ok {
-			if modelCfg, exists := prov.Models[modelName]; exists {
-				if modelCfg.ContextWindow > 0 {
-					return modelCfg.ContextWindow
-				}
+func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
+	// The model parameter is the raw model specification which may be:
+	// 1. An alias like "myprovider/vision-model" that maps to a different resolved model
+	// 2. A direct model reference like "myprovider/gpt-4o-vision"
+	// We handle both by attempting multiple lookup strategies:
+	// - First: exact alias match
+	// - Second: normalized alias match (lowercase, dots replaced with dashes)
+	// - Third: search by resolved model name in the Model field
+	model = strings.TrimSpace(model)
+
+	// Extract provider and model name from the model string
+	var providerName, modelName string
+	if idx := strings.Index(model, "/"); idx > 0 {
+		providerName = strings.ToLower(strings.TrimSpace(model[:idx]))
+		modelName = strings.TrimSpace(model[idx+1:])
+	} else {
+		providerName = strings.ToLower(strings.TrimSpace(defaultProvider))
+		modelName = model
+	}
+
+	if providerName == "" || modelName == "" {
+		return config.ProviderModelConfig{}, false
+	}
+
+	if prov, ok := cfg.Providers.GetNamed(providerName); ok {
+		// Case 1: Try lookup by alias (exact match)
+		if modelCfg, exists := prov.Models[modelName]; exists {
+			return modelCfg, true
+		}
+
+		// Case 2: Try lookup by normalized alias (lowercase, replace . with -)
+		normalizedAlias := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
+		if modelCfg, exists := prov.Models[normalizedAlias]; exists {
+			return modelCfg, true
+		}
+
+		// Case 3: The modelName might be a resolved model name (e.g., "gpt-4o-vision")
+		// Search for an entry where the Model field matches
+		normalizedModelName := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
+		for alias, modelCfg := range prov.Models {
+			resolvedModel := strings.TrimSpace(modelCfg.Model)
+			if resolvedModel == "" {
+				// If Model field is empty, treat the alias as the resolved name
+				resolvedModel = alias
+			}
+			normalizedResolved := strings.ToLower(strings.ReplaceAll(resolvedModel, ".", "-"))
+			if normalizedResolved == normalizedModelName {
+				return modelCfg, true
 			}
 		}
 	}
-	// Fallback to default
+
+	return config.ProviderModelConfig{}, false
+}
+
+// getContextWindow returns the context window for a model from provider config.
+func getContextWindow(cfg *config.Config, model string, provider string) int {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.ContextWindow > 0 {
+		return modelCfg.ContextWindow
+	}
 	return 128000
+}
+
+func getSupportsImages(cfg *config.Config, model string, provider string) bool {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok {
+		return modelCfg.Vision
+	}
+	return false
 }
 
 func NewAgentInstance(
@@ -84,6 +134,9 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
+	if getSupportsImages(cfg, model, defaults.Provider) {
+		toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
+	}
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
@@ -135,6 +188,7 @@ func NewAgentInstance(
 		MaxTokens:      maxTokens,
 		Temperature:    temperature,
 		ContextWindow:  getContextWindow(cfg, model, defaults.Provider),
+		SupportsImages: getSupportsImages(cfg, model, defaults.Provider),
 		Provider:       provider,
 		Sessions:       sessionsManager,
 		ContextBuilder: contextBuilder,

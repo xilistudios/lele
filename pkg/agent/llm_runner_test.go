@@ -869,6 +869,87 @@ func TestRunLLMIteration_WithToolCalls(t *testing.T) {
 	}
 }
 
+func TestRunLLMIteration_AppendsToolContextMessages(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	callCount := 0
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return &providers.LLMResponse{
+					Content: "",
+					ToolCalls: []providers.ToolCall{{
+						ID:   "call_1",
+						Name: "read_image",
+						Arguments: map[string]interface{}{
+							"path": "tiny.png",
+						},
+					}},
+				}, nil
+			}
+
+			foundImage := false
+			for _, msg := range messages {
+				if len(msg.ContentParts) == 2 && msg.ContentParts[1].ImageURL != nil {
+					foundImage = true
+					break
+				}
+			}
+			if !foundImage {
+				t.Fatal("expected image content parts in second LLM call")
+			}
+
+			return &providers.LLMResponse{Content: "done"}, nil
+		},
+	}
+
+	agent.Tools.Register(&llmRunnerMockCustomTool{
+		name: "read_image",
+		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
+			return &tools.ToolResult{
+				ForLLM: "Image loaded into context",
+				Silent: true,
+				ContextMessages: []providers.Message{{
+					Role: "user",
+					ContentParts: []providers.ContentPart{
+						{Type: "text", Text: "Analyze this image"},
+						{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,abcd", Detail: "auto"}},
+					},
+				}},
+			}
+		},
+	})
+
+	messages := []providers.Message{{Role: "system", Content: "System prompt"}, {Role: "user", Content: "Read image"}}
+	content, iterations, err := runner.runLLMIteration(context.Background(), agent, messages, processOptions{SessionKey: "test-session"})
+	if err != nil {
+		t.Fatalf("runLLMIteration error: %v", err)
+	}
+	if content != "done" {
+		t.Fatalf("content = %q, want done", content)
+	}
+	if iterations != 2 {
+		t.Fatalf("iterations = %d, want 2", iterations)
+	}
+
+	history := agent.Sessions.GetHistory("test-session")
+	foundImage := false
+	for _, msg := range history {
+		if len(msg.ContentParts) == 2 && msg.ContentParts[1].ImageURL != nil {
+			foundImage = true
+			break
+		}
+	}
+	if !foundImage {
+		t.Fatal("expected image context message to be saved in session history")
+	}
+}
+
 func TestRunLLMIteration_MaxIterations(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
