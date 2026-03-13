@@ -38,17 +38,53 @@ type AgentInstance struct {
 // NewAgentInstance creates an agent instance from config.
 
 func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
-	resolvedModel := strings.TrimSpace(cfg.Providers.ResolveModelAlias(model, defaultProvider))
-	parts := strings.Split(resolvedModel, "/")
-	if len(parts) < 2 {
+	// The model parameter can be either:
+	// 1. An alias like "myprovider/vision-model" (before resolution)
+	// 2. A resolved model like "myprovider/gpt-4o-vision" (after resolution)
+	// We need to handle both cases by:
+	// - First trying to look up by alias (exact match or normalized)
+	// - If not found, searching for an entry where the Model field matches
+	model = strings.TrimSpace(model)
+
+	// Extract provider and model name from the model string
+	var providerName, modelName string
+	if idx := strings.Index(model, "/"); idx > 0 {
+		providerName = strings.ToLower(strings.TrimSpace(model[:idx]))
+		modelName = strings.TrimSpace(model[idx+1:])
+	} else {
+		providerName = strings.ToLower(strings.TrimSpace(defaultProvider))
+		modelName = model
+	}
+
+	if providerName == "" || modelName == "" {
 		return config.ProviderModelConfig{}, false
 	}
 
-	providerName := strings.ToLower(parts[0])
-	modelName := strings.Join(parts[1:], "/")
 	if prov, ok := cfg.Providers.GetNamed(providerName); ok {
+		// Case 1: Try lookup by alias (exact match)
 		if modelCfg, exists := prov.Models[modelName]; exists {
 			return modelCfg, true
+		}
+
+		// Case 2: Try lookup by normalized alias (lowercase, replace . with -)
+		normalizedAlias := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
+		if modelCfg, exists := prov.Models[normalizedAlias]; exists {
+			return modelCfg, true
+		}
+
+		// Case 3: The modelName might be a resolved model name (e.g., "gpt-4o-vision")
+		// Search for an entry where the Model field matches
+		normalizedModelName := strings.ToLower(strings.ReplaceAll(modelName, ".", "-"))
+		for alias, modelCfg := range prov.Models {
+			resolvedModel := strings.TrimSpace(modelCfg.Model)
+			if resolvedModel == "" {
+				// If Model field is empty, treat the alias as the resolved name
+				resolvedModel = alias
+			}
+			normalizedResolved := strings.ToLower(strings.ReplaceAll(resolvedModel, ".", "-"))
+			if normalizedResolved == normalizedModelName {
+				return modelCfg, true
+			}
 		}
 	}
 
