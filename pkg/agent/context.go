@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/skills"
-	"github.com/sipeed/picoclaw/pkg/tools"
-	"github.com/sipeed/picoclaw/pkg/utils"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/skills"
+	"github.com/xilistudios/lele/pkg/tools"
+	"github.com/xilistudios/lele/pkg/utils"
 )
 
 type ContextBuilder struct {
@@ -28,7 +28,7 @@ func getGlobalConfigDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".picoclaw")
+	return filepath.Join(home, ".lele")
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
@@ -92,9 +92,9 @@ func (cb *ContextBuilder) getIdentity() string {
 	// Build tools section dynamically
 	toolsSection := cb.buildToolsSection()
 
-	return fmt.Sprintf(`# picoclaw 🦞
+	return fmt.Sprintf(`# lele 🦞
 
-You are picoclaw, a helpful AI assistant.
+You are lele, a helpful AI assistant.
 
 ## Current Time
 %s

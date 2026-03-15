@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/channels"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/session"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // ============================================================================

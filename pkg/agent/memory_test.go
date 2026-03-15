@@ -1,8 +1,8 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package agent
 
@@ -21,7 +21,7 @@ import (
 
 // TestNewMemoryStore_CreatesMemoryDir tests that NewMemoryStore creates the memory directory
 func TestNewMemoryStore_CreatesMemoryDir(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestNewMemoryStore_CreatesMemoryDir(t *testing.T) {
 
 // TestNewMemoryStore_ExistingDir tests that NewMemoryStore works with existing memory directory
 func TestNewMemoryStore_ExistingDir(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestNewMemoryStore_ExistingDir(t *testing.T) {
 
 // TestGetTodayFile_ReturnsCorrectPath tests that getTodayFile returns the correct path format
 func TestGetTodayFile_ReturnsCorrectPath(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestGetTodayFile_ReturnsCorrectPath(t *testing.T) {
 
 // TestReadLongTerm_ExistingFile tests reading from an existing MEMORY.md file
 func TestReadLongTerm_ExistingFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestReadLongTerm_ExistingFile(t *testing.T) {
 
 // TestReadLongTerm_MissingFile tests reading when MEMORY.md doesn't exist
 func TestReadLongTerm_MissingFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestReadLongTerm_MissingFile(t *testing.T) {
 
 // TestReadLongTerm_EmptyFile tests reading from an empty MEMORY.md file
 func TestReadLongTerm_EmptyFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestReadLongTerm_EmptyFile(t *testing.T) {
 
 // TestWriteLongTerm_CreatesFile tests writing long-term memory creates the file
 func TestWriteLongTerm_CreatesFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestWriteLongTerm_CreatesFile(t *testing.T) {
 
 // TestWriteLongTerm_OverwritesExisting tests that WriteLongTerm overwrites existing content
 func TestWriteLongTerm_OverwritesExisting(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestWriteLongTerm_OverwritesExisting(t *testing.T) {
 
 // TestWriteLongTerm_EmptyContent tests writing empty content
 func TestWriteLongTerm_EmptyContent(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestWriteLongTerm_EmptyContent(t *testing.T) {
 
 // TestReadToday_ExistingFile tests reading today's note when file exists
 func TestReadToday_ExistingFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestReadToday_ExistingFile(t *testing.T) {
 
 // TestReadToday_MissingFile tests reading today's note when file doesn't exist
 func TestReadToday_MissingFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestReadToday_MissingFile(t *testing.T) {
 
 // TestReadToday_EmptyFile tests reading from an empty today's file
 func TestReadToday_EmptyFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestReadToday_EmptyFile(t *testing.T) {
 
 // TestAppendToday_NewFile tests appending to a new daily note file
 func TestAppendToday_NewFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestAppendToday_NewFile(t *testing.T) {
 
 // TestAppendToday_ExistingFile tests appending to an existing daily note file
 func TestAppendToday_ExistingFile(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestAppendToday_ExistingFile(t *testing.T) {
 
 // TestAppendToday_CreatesMonthDir tests that AppendToday creates the month directory
 func TestAppendToday_CreatesMonthDir(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestAppendToday_CreatesMonthDir(t *testing.T) {
 
 // TestAppendToday_MultipleAppends tests multiple appends to the same day
 func TestAppendToday_MultipleAppends(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestAppendToday_MultipleAppends(t *testing.T) {
 
 // TestGetRecentDailyNotes_NoFiles tests when no daily notes exist
 func TestGetRecentDailyNotes_NoFiles(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestGetRecentDailyNotes_NoFiles(t *testing.T) {
 
 // TestGetRecentDailyNotes_TodayOnly tests with only today's note
 func TestGetRecentDailyNotes_TodayOnly(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestGetRecentDailyNotes_TodayOnly(t *testing.T) {
 
 // TestGetRecentDailyNotes_MultipleDays tests with multiple days of notes
 func TestGetRecentDailyNotes_MultipleDays(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestGetRecentDailyNotes_MultipleDays(t *testing.T) {
 
 // TestGetRecentDailyNotes_PartialDays tests when some days have notes and some don't
 func TestGetRecentDailyNotes_PartialDays(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestGetRecentDailyNotes_PartialDays(t *testing.T) {
 
 // TestGetRecentDailyNotes_ZeroDays tests with days=0
 func TestGetRecentDailyNotes_ZeroDays(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestGetRecentDailyNotes_ZeroDays(t *testing.T) {
 
 // TestGetRecentDailyNotes_CrossMonth tests notes that cross month boundaries
 func TestGetRecentDailyNotes_CrossMonth(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestGetRecentDailyNotes_CrossMonth(t *testing.T) {
 
 // TestGetMemoryContext_NoMemory tests when no memory exists
 func TestGetMemoryContext_NoMemory(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestGetMemoryContext_NoMemory(t *testing.T) {
 
 // TestGetMemoryContext_OnlyLongTerm tests with only long-term memory
 func TestGetMemoryContext_OnlyLongTerm(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -747,7 +747,7 @@ func TestGetMemoryContext_OnlyLongTerm(t *testing.T) {
 
 // TestGetMemoryContext_OnlyDailyNotes tests with only daily notes
 func TestGetMemoryContext_OnlyDailyNotes(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -780,7 +780,7 @@ func TestGetMemoryContext_OnlyDailyNotes(t *testing.T) {
 
 // TestGetMemoryContext_BothMemories tests with both long-term and daily notes
 func TestGetMemoryContext_BothMemories(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -822,7 +822,7 @@ func TestGetMemoryContext_BothMemories(t *testing.T) {
 
 // TestGetMemoryContext_EmptyLongTerm tests with empty long-term memory file
 func TestGetMemoryContext_EmptyLongTerm(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestGetMemoryContext_EmptyLongTerm(t *testing.T) {
 
 // TestMemoryStore_FullWorkflow tests a complete workflow of memory operations
 func TestMemoryStore_FullWorkflow(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -915,7 +915,7 @@ func TestMemoryStore_FullWorkflow(t *testing.T) {
 
 // TestMemoryStore_ConcurrentAccess tests concurrent access to memory store
 func TestMemoryStore_ConcurrentAccess(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "picoclaw-test-*")
+	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

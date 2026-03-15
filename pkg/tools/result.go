@@ -3,11 +3,10 @@ package tools
 import (
 	"encoding/json"
 
-	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // ToolResult represents the structured return value from tool execution.
-// It provides clear semantics for different types of results and supports
 // async operations, user-facing messages, and error handling.
 type ToolResult struct {
 	// ForLLM is the content sent to the LLM for context.

@@ -8,7 +8,7 @@ import (
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
-	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type TelegramCommander interface {
@@ -66,7 +66,7 @@ func (c *cmd) Help(ctx context.Context, message telego.Message) error {
 func (c *cmd) Start(ctx context.Context, message telego.Message) error {
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   "Hello! I am PicoClaw 🦞",
+		Text:   "Hello! I am Lele 🦞",
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},
@@ -299,7 +299,7 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 
 		msg := tu.Message(tu.ID(message.Chat.ID),
 			"🤖 *Selecciona un agente*\n\n"+
-			"El agente determina el modelo, workspace y habilidades disponibles.").WithReplyMarkup(tu.InlineKeyboard(rows...))
+				"El agente determina el modelo, workspace y habilidades disponibles.").WithReplyMarkup(tu.InlineKeyboard(rows...))
 		msg.ParseMode = telego.ModeMarkdown
 		_, err := c.bot.SendMessage(ctx, msg)
 		return err

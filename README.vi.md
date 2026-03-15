@@ -1,7 +1,7 @@
 <div align="center">
-<img src="assets/logo.jpg" alt="PicoClaw" width="512">
+<img src="assets/logo.jpg" alt="Lele" width="512">
 
-<h1>PicoClaw: Trợ lý AI Siêu Nhẹ viết bằng Go</h1>
+<h1>Lele: Trợ lý AI Siêu Nhẹ viết bằng Go</h1>
 
 <h3>Phần cứng $10 · RAM 10MB · Khởi động 1 giây · 皮皮虾，我们走！</h3>
 
@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20RISC--V-blue" alt="Hardware">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <br>
-    <a href="https://picoclaw.io"><img src="https://img.shields.io/badge/Website-picoclaw.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
+    <a href="https://lele.io"><img src="https://img.shields.io/badge/Website-lele.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
     <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
   </p>
 
@@ -19,7 +19,7 @@
 
 ---
 
-🦐 **PicoClaw** là trợ lý AI cá nhân siêu nhẹ, lấy cảm hứng từ [nanobot](https://github.com/HKUDS/nanobot), được viết lại hoàn toàn bằng **Go** thông qua quá trình "tự khởi tạo" (self-bootstrapping) — nơi chính AI Agent đã tự dẫn dắt toàn bộ quá trình chuyển đổi kiến trúc và tối ưu hóa mã nguồn.
+🦐 **Lele** là trợ lý AI cá nhân siêu nhẹ, lấy cảm hứng từ [nanobot](https://github.com/HKUDS/nanobot), được viết lại hoàn toàn bằng **Go** thông qua quá trình "tự khởi tạo" (self-bootstrapping) — nơi chính AI Agent đã tự dẫn dắt toàn bộ quá trình chuyển đổi kiến trúc và tối ưu hóa mã nguồn.
 
 ⚡️ **Cực kỳ nhẹ:** Chạy trên phần cứng chỉ **$10** với RAM **<10MB**. Tiết kiệm 99% bộ nhớ so với OpenClaw và rẻ hơn 98% so với Mac mini!
 
@@ -27,7 +27,7 @@
 <tr align="center">
 <td align="center" valign="top">
 <p align="center">
-<img src="assets/picoclaw_mem.gif" width="360" height="240">
+<img src="assets/lele_mem.gif" width="360" height="240">
 </p>
 </td>
 <td align="center" valign="top">
@@ -41,21 +41,21 @@
 > [!CAUTION]
 > **🚨 TUYÊN BỐ BẢO MẬT & KÊNH CHÍNH THỨC**
 >
-> * **KHÔNG CÓ CRYPTO:** PicoClaw **KHÔNG** có bất kỳ token/coin chính thức nào. Mọi thông tin trên `pump.fun` hoặc các sàn giao dịch khác đều là **LỪA ĐẢO**.
-> * **DOMAIN CHÍNH THỨC:** Website chính thức **DUY NHẤT** là **[picoclaw.io](https://picoclaw.io)**, website công ty là **[sipeed.com](https://sipeed.com)**.
+> * **KHÔNG CÓ CRYPTO:** Lele **KHÔNG** có bất kỳ token/coin chính thức nào. Mọi thông tin trên `pump.fun` hoặc các sàn giao dịch khác đều là **LỪA ĐẢO**.
+> * **DOMAIN CHÍNH THỨC:** Website chính thức **DUY NHẤT** là **[lele.io](https://lele.io)**, website công ty là **[sipeed.com](https://sipeed.com)**.
 > * **Cảnh báo:** Nhiều tên miền `.ai/.org/.com/.net/...` đã bị bên thứ ba đăng ký, không phải của chúng tôi.
-> * **Cảnh báo:** PicoClaw đang trong giai đoạn phát triển sớm và có thể còn các vấn đề bảo mật mạng chưa được giải quyết. Không nên triển khai lên môi trường production trước phiên bản v1.0.
-> * **Lưu ý:** PicoClaw gần đây đã merge nhiều PR, dẫn đến bộ nhớ sử dụng có thể lớn hơn (10–20MB) ở các phiên bản mới nhất. Chúng tôi sẽ ưu tiên tối ưu tài nguyên khi bộ tính năng đã ổn định.
+> * **Cảnh báo:** Lele đang trong giai đoạn phát triển sớm và có thể còn các vấn đề bảo mật mạng chưa được giải quyết. Không nên triển khai lên môi trường production trước phiên bản v1.0.
+> * **Lưu ý:** Lele gần đây đã merge nhiều PR, dẫn đến bộ nhớ sử dụng có thể lớn hơn (10–20MB) ở các phiên bản mới nhất. Chúng tôi sẽ ưu tiên tối ưu tài nguyên khi bộ tính năng đã ổn định.
 
 
 ## 📢 Tin tức
 
-2026-02-16 🎉 PicoClaw đạt 12K stars chỉ trong một tuần! Cảm ơn tất cả mọi người! PicoClaw đang phát triển nhanh hơn chúng tôi tưởng tượng. Do số lượng PR tăng cao, chúng tôi cấp thiết cần maintainer từ cộng đồng. Các vai trò tình nguyện viên và roadmap đã được công bố [tại đây](docs/picoclaw_community_roadmap_260216.md) — rất mong đón nhận sự tham gia của bạn!
+2026-02-16 🎉 Lele đạt 12K stars chỉ trong một tuần! Cảm ơn tất cả mọi người! Lele đang phát triển nhanh hơn chúng tôi tưởng tượng. Do số lượng PR tăng cao, chúng tôi cấp thiết cần maintainer từ cộng đồng. Các vai trò tình nguyện viên và roadmap đã được công bố [tại đây](docs/lele_community_roadmap_260216.md) — rất mong đón nhận sự tham gia của bạn!
 
-2026-02-13 🎉 PicoClaw đạt 5000 stars trong 4 ngày! Cảm ơn cộng đồng! Chúng tôi đang hoàn thiện **Lộ trình dự án (Roadmap)** và thiết lập **Nhóm phát triển** để đẩy nhanh tốc độ phát triển PicoClaw.  
+2026-02-13 🎉 Lele đạt 5000 stars trong 4 ngày! Cảm ơn cộng đồng! Chúng tôi đang hoàn thiện **Lộ trình dự án (Roadmap)** và thiết lập **Nhóm phát triển** để đẩy nhanh tốc độ phát triển Lele.  
 🚀 **Kêu gọi hành động:** Vui lòng gửi yêu cầu tính năng tại GitHub Discussions. Chúng tôi sẽ xem xét và ưu tiên trong cuộc họp hàng tuần.
 
-2026-02-09 🎉 PicoClaw chính thức ra mắt! Được xây dựng trong 1 ngày để mang AI Agent đến phần cứng $10 với RAM <10MB. 🦐 PicoClaw, Lên Đường!
+2026-02-09 🎉 Lele chính thức ra mắt! Được xây dựng trong 1 ngày để mang AI Agent đến phần cứng $10 với RAM <10MB. 🦐 Lele, Lên Đường!
 
 ## ✨ Tính năng nổi bật
 
@@ -69,14 +69,14 @@
 
 🤖 **AI tự xây dựng**: Triển khai Go-native tự động — 95% mã nguồn cốt lõi được Agent tạo ra, với sự tinh chỉnh của con người.
 
-|                               | OpenClaw      | NanoBot                  | **PicoClaw**                              |
+|                               | OpenClaw      | NanoBot                  | **Lele**                              |
 | ----------------------------- | ------------- | ------------------------ | ----------------------------------------- |
 | **Ngôn ngữ**                  | TypeScript    | Python                   | **Go**                                    |
 | **RAM**                       | >1GB          | >100MB                   | **< 10MB**                                |
 | **Thời gian khởi động**</br>(CPU 0.8GHz) | >500s         | >30s                     | **<1s**                                   |
 | **Chi phí**                   | Mac Mini $599 | Hầu hết SBC Linux ~$50  | **Mọi bo mạch Linux**</br>**Chỉ từ $10** |
 
-<img src="assets/compare.jpg" alt="PicoClaw" width="512">
+<img src="assets/compare.jpg" alt="Lele" width="512">
 
 ## 🦾 Demo
 
@@ -89,9 +89,9 @@
 <th><p align="center">🔎 Tìm kiếm Web & Học hỏi</p></th>
 </tr>
 <tr>
-<td align="center"><p align="center"><img src="assets/picoclaw_code.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/picoclaw_memory.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/picoclaw_search.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_code.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_memory.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_search.gif" width="240" height="180"></p></td>
 </tr>
 <tr>
 <td align="center">Phát triển • Triển khai • Mở rộng</td>
@@ -102,7 +102,7 @@
 
 ### 🐜 Triển khai sáng tạo trên phần cứng tối thiểu
 
-PicoClaw có thể triển khai trên hầu hết mọi thiết bị Linux!
+Lele có thể triển khai trên hầu hết mọi thiết bị Linux!
 
 * $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) phiên bản E (Ethernet) hoặc W (WiFi6), dùng làm Trợ lý Gia đình tối giản.
 * $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), hoặc $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html), dùng cho quản trị Server tự động.
@@ -116,14 +116,14 @@ https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6
 
 ### Cài đặt bằng binary biên dịch sẵn
 
-Tải file binary cho nền tảng của bạn từ [trang Release](https://github.com/sipeed/picoclaw/releases).
+Tải file binary cho nền tảng của bạn từ [trang Release](https://github.com/xilistudios/lele/releases).
 
 ### Cài đặt từ mã nguồn (có tính năng mới nhất, khuyên dùng cho phát triển)
 
 ```bash
-git clone https://github.com/sipeed/picoclaw.git
+git clone https://github.com/xilistudios/lele.git
 
-cd picoclaw
+cd lele
 make deps
 
 # Build (không cần cài đặt)
@@ -138,12 +138,12 @@ make install
 
 ## 🐳 Docker Compose
 
-Bạn cũng có thể chạy PicoClaw bằng Docker Compose mà không cần cài đặt gì trên máy.
+Bạn cũng có thể chạy Lele bằng Docker Compose mà không cần cài đặt gì trên máy.
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/sipeed/picoclaw.git
-cd picoclaw
+git clone https://github.com/xilistudios/lele.git
+cd lele
 
 # 2. Thiết lập API Key
 cp config/config.example.json config/config.json
@@ -153,7 +153,7 @@ vim config/config.json      # Thiết lập DISCORD_BOT_TOKEN, API keys, v.v.
 docker compose --profile gateway up -d
 
 # 4. Xem logs
-docker compose logs -f picoclaw-gateway
+docker compose logs -f lele-gateway
 
 # 5. Dừng
 docker compose --profile gateway down
@@ -163,10 +163,10 @@ docker compose --profile gateway down
 
 ```bash
 # Đặt câu hỏi
-docker compose run --rm picoclaw-agent -m "2+2 bằng mấy?"
+docker compose run --rm lele-agent -m "2+2 bằng mấy?"
 
 # Chế độ tương tác
-docker compose run --rm picoclaw-agent
+docker compose run --rm lele-agent
 ```
 
 ### Build lại
@@ -179,23 +179,23 @@ docker compose --profile gateway up -d
 ### 🚀 Bắt đầu nhanh
 
 > [!TIP]
-> Thiết lập API key trong `~/.picoclaw/config.json`.
+> Thiết lập API key trong `~/.lele/config.json`.
 > Lấy API key: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM)
 > Tìm kiếm web là **tùy chọn** — lấy [Brave Search API](https://brave.com/search/api) miễn phí (2000 truy vấn/tháng) hoặc dùng tính năng auto fallback tích hợp sẵn.
 
 **1. Khởi tạo**
 
 ```bash
-picoclaw onboard
+lele onboard
 ```
 
-**2. Cấu hình** (`~/.picoclaw/config.json`)
+**2. Cấu hình** (`~/.lele/config.json`)
 
 ```json
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -234,7 +234,7 @@ picoclaw onboard
 **4. Trò chuyện**
 
 ```bash
-picoclaw agent -m "Xin chào, bạn là ai?"
+lele agent -m "Xin chào, bạn là ai?"
 ```
 
 Vậy là xong! Bạn đã có một trợ lý AI hoạt động chỉ trong 2 phút.
@@ -243,7 +243,7 @@ Vậy là xong! Bạn đã có một trợ lý AI hoạt động chỉ trong 2 p
 
 ## 💬 Tích hợp ứng dụng Chat
 
-Trò chuyện với PicoClaw qua Telegram, Discord, DingTalk hoặc LINE.
+Trò chuyện với Lele qua Telegram, Discord, DingTalk hoặc LINE.
 
 | Kênh | Mức độ thiết lập |
 | --- | --- |
@@ -281,7 +281,7 @@ Trò chuyện với PicoClaw qua Telegram, Discord, DingTalk hoặc LINE.
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -329,7 +329,7 @@ picoclaw gateway
 **6. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -362,7 +362,7 @@ picoclaw gateway
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -396,7 +396,7 @@ picoclaw gateway
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -442,31 +442,31 @@ Sau đó cài đặt Webhook URL trong LINE Developers Console thành `https://y
 **4. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 > Trong nhóm chat, bot chỉ phản hồi khi được @mention. Các câu trả lời sẽ trích dẫn tin nhắn gốc.
 
-> **Docker Compose**: Thêm `ports: ["18791:18791"]` vào service `picoclaw-gateway` để mở port webhook.
+> **Docker Compose**: Thêm `ports: ["18791:18791"]` vào service `lele-gateway` để mở port webhook.
 
 </details>
 
 ## <img src="assets/clawdchat-icon.png" width="24" height="24" alt="ClawdChat"> Tham gia Mạng xã hội Agent
 
-Kết nối PicoClaw với Mạng xã hội Agent chỉ bằng cách gửi một tin nhắn qua CLI hoặc bất kỳ ứng dụng Chat nào đã tích hợp.
+Kết nối Lele với Mạng xã hội Agent chỉ bằng cách gửi một tin nhắn qua CLI hoặc bất kỳ ứng dụng Chat nào đã tích hợp.
 
 **Đọc `https://clawdchat.ai/skill.md` và làm theo hướng dẫn để tham gia [ClawdChat.ai](https://clawdchat.ai)**
 
 ## ⚙️ Cấu hình chi tiết
 
-File cấu hình: `~/.picoclaw/config.json`
+File cấu hình: `~/.lele/config.json`
 
 ### Cấu trúc Workspace
 
-PicoClaw lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/.picoclaw/workspace`):
+Lele lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/.lele/workspace`):
 
 ```
-~/.picoclaw/workspace/
+~/.lele/workspace/
 ├── sessions/          # Phiên hội thoại và lịch sử
 ├── memory/           # Bộ nhớ dài hạn (MEMORY.md)
 ├── state/            # Trạng thái lưu trữ (kênh cuối cùng, v.v.)
@@ -482,7 +482,7 @@ PicoClaw lưu trữ dữ liệu trong workspace đã cấu hình (mặc định:
 
 ### 🔒 Hộp cát bảo mật (Security Sandbox)
 
-PicoClaw chạy trong môi trường sandbox theo mặc định. Agent chỉ có thể truy cập file và thực thi lệnh trong phạm vi workspace.
+Lele chạy trong môi trường sandbox theo mặc định. Agent chỉ có thể truy cập file và thực thi lệnh trong phạm vi workspace.
 
 #### Cấu hình mặc định
 
@@ -490,7 +490,7 @@ PicoClaw chạy trong môi trường sandbox theo mặc định. Agent chỉ có
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "restrict_to_workspace": true
     }
   }
@@ -499,7 +499,7 @@ PicoClaw chạy trong môi trường sandbox theo mặc định. Agent chỉ có
 
 | Tùy chọn | Mặc định | Mô tả |
 |----------|---------|-------|
-| `workspace` | `~/.picoclaw/workspace` | Thư mục làm việc của agent |
+| `workspace` | `~/.lele/workspace` | Thư mục làm việc của agent |
 | `restrict_to_workspace` | `true` | Giới hạn truy cập file/lệnh trong workspace |
 
 #### Công cụ được bảo vệ
@@ -557,7 +557,7 @@ Nếu bạn cần agent truy cập đường dẫn ngoài workspace:
 **Cách 2: Biến môi trường**
 
 ```bash
-export PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
+export LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
 ```
 
 > ⚠️ **Cảnh báo**: Tắt giới hạn này cho phép agent truy cập mọi đường dẫn trên hệ thống. Chỉ sử dụng cẩn thận trong môi trường được kiểm soát.
@@ -576,7 +576,7 @@ Tất cả đường thực thi chia sẻ cùng giới hạn workspace — khôn
 
 ### Heartbeat (Tác vụ định kỳ)
 
-PicoClaw có thể tự động thực hiện các tác vụ định kỳ. Tạo file `HEARTBEAT.md` trong workspace:
+Lele có thể tự động thực hiện các tác vụ định kỳ. Tạo file `HEARTBEAT.md` trong workspace:
 
 ```markdown
 # Tác vụ định kỳ
@@ -648,8 +648,8 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 
 **Biến môi trường:**
 
-* `PICOCLAW_HEARTBEAT_ENABLED=false` để tắt
-* `PICOCLAW_HEARTBEAT_INTERVAL=60` để thay đổi khoảng thời gian
+* `LELE_HEARTBEAT_ENABLED=false` để tắt
+* `LELE_HEARTBEAT_INTERVAL=60` để thay đổi khoảng thời gian
 
 ### Nhà cung cấp (Providers)
 
@@ -679,7 +679,7 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picoclaw/workspace",
+      "workspace": "~/.lele/workspace",
       "model": "glm-4.7",
       "max_tokens": 8192,
       "temperature": 0.7,
@@ -698,7 +698,7 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 **3. Chạy**
 
 ```bash
-picoclaw agent -m "Xin chào"
+lele agent -m "Xin chào"
 ```
 
 </details>
@@ -776,23 +776,23 @@ picoclaw agent -m "Xin chào"
 
 | Lệnh | Mô tả |
 | --- | --- |
-| `picoclaw onboard` | Khởi tạo cấu hình & workspace |
-| `picoclaw agent -m "..."` | Trò chuyện với agent |
-| `picoclaw agent` | Chế độ chat tương tác |
-| `picoclaw gateway` | Khởi động gateway (cho bot chat) |
-| `picoclaw status` | Hiển thị trạng thái |
-| `picoclaw cron list` | Liệt kê tất cả tác vụ định kỳ |
-| `picoclaw cron add ...` | Thêm tác vụ định kỳ |
+| `lele onboard` | Khởi tạo cấu hình & workspace |
+| `lele agent -m "..."` | Trò chuyện với agent |
+| `lele agent` | Chế độ chat tương tác |
+| `lele gateway` | Khởi động gateway (cho bot chat) |
+| `lele status` | Hiển thị trạng thái |
+| `lele cron list` | Liệt kê tất cả tác vụ định kỳ |
+| `lele cron add ...` | Thêm tác vụ định kỳ |
 
 ### Tác vụ định kỳ / Nhắc nhở
 
-PicoClaw hỗ trợ nhắc nhở theo lịch và tác vụ lặp lại thông qua công cụ `cron`:
+Lele hỗ trợ nhắc nhở theo lịch và tác vụ lặp lại thông qua công cụ `cron`:
 
 * **Nhắc nhở một lần**: "Remind me in 10 minutes" (Nhắc tôi sau 10 phút) → kích hoạt một lần sau 10 phút
 * **Tác vụ lặp lại**: "Remind me every 2 hours" (Nhắc tôi mỗi 2 giờ) → kích hoạt mỗi 2 giờ
 * **Biểu thức Cron**: "Remind me at 9am daily" (Nhắc tôi lúc 9 giờ sáng mỗi ngày) → sử dụng biểu thức cron
 
-Các tác vụ được lưu trong `~/.picoclaw/workspace/cron/` và được xử lý tự động.
+Các tác vụ được lưu trong `~/.lele/workspace/cron/` và được xử lý tự động.
 
 ## 🤝 Đóng góp & Lộ trình
 
@@ -806,20 +806,20 @@ Nhóm người dùng:
 
 Discord: <https://discord.gg/V4sAZ9XWpN>
 
-<img src="assets/wechat.png" alt="PicoClaw" width="512">
+<img src="assets/wechat.png" alt="Lele" width="512">
 
 ## 🐛 Xử lý sự cố
 
 ### Tìm kiếm web hiện "API 配置问题"
 
-Điều này là bình thường nếu bạn chưa cấu hình API key cho tìm kiếm. PicoClaw sẽ cung cấp các liên kết hữu ích để tìm kiếm thủ công.
+Điều này là bình thường nếu bạn chưa cấu hình API key cho tìm kiếm. Lele sẽ cung cấp các liên kết hữu ích để tìm kiếm thủ công.
 
 Để bật tìm kiếm web:
 
 1. **Tùy chọn 1 (Khuyên dùng)**: Lấy API key miễn phí tại [https://brave.com/search/api](https://brave.com/search/api) (2000 truy vấn miễn phí/tháng) để có kết quả tốt nhất.
 2. **Tùy chọn 2 (Không cần thẻ tín dụng)**: Nếu không có key, hệ thống tự động chuyển sang dùng **DuckDuckGo** (không cần key).
 
-Thêm key vào `~/.picoclaw/config.json` nếu dùng Brave:
+Thêm key vào `~/.lele/config.json` nếu dùng Brave:
 
 ```json
 {
@@ -845,7 +845,7 @@ Một số nhà cung cấp (như Zhipu) có bộ lọc nội dung nghiêm ngặt
 
 ### Telegram bot báo "Conflict: terminated by other getUpdates"
 
-Điều này xảy ra khi có một instance bot khác đang chạy. Đảm bảo chỉ có một tiến trình `picoclaw gateway` chạy tại một thời điểm.
+Điều này xảy ra khi có một instance bot khác đang chạy. Đảm bảo chỉ có một tiến trình `lele gateway` chạy tại một thời điểm.
 
 ---
 

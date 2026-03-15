@@ -1,6 +1,6 @@
 # Tools Configuration
 
-PicoClaw's tools configuration is located in the `tools` field of `config.json`.
+Lele's tools configuration is located in the `tools` field of `config.json`.
 
 ## Directory Structure
 
@@ -58,7 +58,7 @@ The exec tool is used to execute shell commands.
 
 ### Default Blocked Command Patterns
 
-By default, PicoClaw blocks the following dangerous commands:
+By default, Lele blocks the following dangerous commands:
 
 - Delete commands: `rm -rf`, `del /f/q`, `rmdir /s`
 - Disk operations: `format`, `mkfs`, `diskpart`, `dd if=`, writing to `/dev/sd*`
@@ -112,11 +112,11 @@ The cron tool is used for scheduling periodic tasks.
 
 ## Environment Variables
 
-All configuration options can be overridden via environment variables with the format `PICOCLAW_TOOLS_<SECTION>_<KEY>`:
+All configuration options can be overridden via environment variables with the format `LELE_TOOLS_<SECTION>_<KEY>`:
 
 For example:
-- `PICOCLAW_TOOLS_WEB_BRAVE_ENABLED=true`
-- `PICOCLAW_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
-- `PICOCLAW_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
+- `LELE_TOOLS_WEB_BRAVE_ENABLED=true`
+- `LELE_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
+- `LELE_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
 
 Note: Array-type environment variables are not currently supported and must be set via the config file.

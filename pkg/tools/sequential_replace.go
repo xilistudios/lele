@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 // SequentialReplaceTool performs multiple replacements in a single operation.
@@ -114,10 +114,10 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 
 	logger.InfoCF("sequential_replace", "Starting replacements",
 		map[string]interface{}{
-			"path":         path,
-			"pair_count":   len(pairs),
-			"regex":        useRegex,
-			"flags":        flags,
+			"path":       path,
+			"pair_count": len(pairs),
+			"regex":      useRegex,
+			"flags":      flags,
 		})
 
 	// Create matching strategy

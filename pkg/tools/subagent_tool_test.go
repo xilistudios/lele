@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // MockLLMProvider is a test implementation of LLMProvider
@@ -429,7 +429,7 @@ func TestSubagentManager_ContinueTask(t *testing.T) {
 		t.Fatalf("Unexpected context request: %s", task.ContextRequest)
 	}
 
-	continued, err := manager.ContinueTask(context.Background(), task.ID, "Use repository /tmp/picoclaw", func(ctx context.Context, result *ToolResult) {
+	continued, err := manager.ContinueTask(context.Background(), task.ID, "Use repository /tmp/lele", func(ctx context.Context, result *ToolResult) {
 		resultCh <- result
 	})
 	if err != nil {
@@ -454,7 +454,7 @@ func TestSubagentManager_ContinueTask(t *testing.T) {
 	if task.Status != SubagentStatusCompleted {
 		t.Fatalf("Expected task status %q, got %q", SubagentStatusCompleted, task.Status)
 	}
-	if len(task.Guidance) != 1 || task.Guidance[0] != "Use repository /tmp/picoclaw" {
+	if len(task.Guidance) != 1 || task.Guidance[0] != "Use repository /tmp/lele" {
 		t.Fatalf("Expected stored guidance, got: %#v", task.Guidance)
 	}
 }

@@ -1,15 +1,15 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package providers
 
 import (
 	"context"
 
-	"github.com/sipeed/picoclaw/pkg/providers/openai_compat"
+	"github.com/xilistudios/lele/pkg/providers/openai_compat"
 )
 
 type HTTPProvider struct {

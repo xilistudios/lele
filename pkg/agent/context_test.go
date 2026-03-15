@@ -1,8 +1,8 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package agent
 
@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // TestGetGlobalConfigDir_NormalCase tests getGlobalConfigDir with normal home directory
@@ -29,9 +29,9 @@ func TestGetGlobalConfigDir_NormalCase(t *testing.T) {
 		t.Error("Expected non-empty config dir, got empty string")
 	}
 
-	// Should end with .picoclaw
-	if !strings.HasSuffix(dir, ".picoclaw") {
-		t.Errorf("Expected path to end with .picoclaw, got: %s", dir)
+	// Should end with .lele
+	if !strings.HasSuffix(dir, ".lele") {
+		t.Errorf("Expected path to end with .lele, got: %s", dir)
 	}
 
 	// Should contain the home directory
@@ -140,8 +140,8 @@ func TestGetIdentity_ContentVerification(t *testing.T) {
 
 	// Check for expected sections
 	expectedSections := []string{
-		"# picoclaw",
-		"You are picoclaw",
+		"# lele",
+		"You are lele",
 		"## Current Time",
 		"## Runtime",
 		"## Workspace",
@@ -273,8 +273,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 	prompt := cb.BuildSystemPrompt()
 
 	// Should contain identity
-	if !strings.Contains(prompt, "# picoclaw") {
-		t.Error("Expected prompt to contain picoclaw header")
+	if !strings.Contains(prompt, "# lele") {
+		t.Error("Expected prompt to contain lele header")
 	}
 
 	// Should be non-empty
@@ -396,8 +396,8 @@ func TestGetInitialContext_NoFiles(t *testing.T) {
 	context := cb.GetInitialContext()
 
 	// Should contain identity
-	if !strings.Contains(context, "# picoclaw") {
-		t.Error("Expected context to contain picoclaw header")
+	if !strings.Contains(context, "# lele") {
+		t.Error("Expected context to contain lele header")
 	}
 
 	// When there's only identity (no bootstrap files, skills, or memory),
@@ -423,8 +423,8 @@ func TestGetInitialContext_WithBootstrapFiles(t *testing.T) {
 	context := cb.GetInitialContext()
 
 	// Should contain identity
-	if !strings.Contains(context, "# picoclaw") {
-		t.Error("Expected context to contain picoclaw header")
+	if !strings.Contains(context, "# lele") {
+		t.Error("Expected context to contain lele header")
 	}
 
 	// Should contain bootstrap content

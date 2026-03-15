@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // Mock provider for testing
@@ -25,7 +25,7 @@ func (m *MockProvider) GetContextWindow() int   { return 4096 }
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║         COMPREHENSIVE SUBAGENT TEST - PICOCLAW             ║")
+	fmt.Println("║         COMPREHENSIVE SUBAGENT TEST - LELE             ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 
 	// Setup

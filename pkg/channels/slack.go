@@ -12,11 +12,11 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/logger"
-	"github.com/sipeed/picoclaw/pkg/utils"
-	"github.com/sipeed/picoclaw/pkg/voice"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/utils"
+	"github.com/xilistudios/lele/pkg/voice"
 )
 
 type SlackChannel struct {

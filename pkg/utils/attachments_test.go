@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/bus"
+	"github.com/xilistudios/lele/pkg/bus"
 )
 
 func TestPersistAttachmentsToWorkspace_MovesTemporaryFile(t *testing.T) {

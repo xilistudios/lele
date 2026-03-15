@@ -1,4 +1,4 @@
-# Skill: Subagentes en picoclaw
+# Skill: Subagentes en lele
 
 ## Descripción
 
