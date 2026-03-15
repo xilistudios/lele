@@ -128,10 +128,10 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 
-	// Fmod tools
+	// Fmod tools - DEPRECATED: Use git worktree instead
 	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))
-	toolsRegistry.Register(tools.NewPreviewTool(workspace, restrict))
-	toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))
+	// toolsRegistry.Register(tools.NewPreviewTool(workspace, restrict))     // DEPRECATED
+	// toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))        // DEPRECATED
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
 	if getSupportsImages(cfg, model, defaults.Provider) {
