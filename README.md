@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="assets/logo.jpg" alt="PicoClaw" width="512">
+  <img src="assets/logo.png" alt="Lele" width="512">
 
-  <h1>PicoClaw: Ultra-Efficient AI Assistant in Go</h1>
+  <h1>Lele: Ultra-Efficient AI Assistant in Go</h1>
 
   <h3>$10 Hardware · 10MB RAM · 1s Boot · 皮皮虾，我们走！</h3>
 
@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20RISC--V-blue" alt="Hardware">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <br>
-    <a href="https://picoclaw.io"><img src="https://img.shields.io/badge/Website-picoclaw.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
+    <a href="https://lele.io"><img src="https://img.shields.io/badge/Website-lele.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
     <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
   </p>
 
@@ -19,42 +19,9 @@
 
 ---
 
-🦐 PicoClaw is an ultra-lightweight personal AI Assistant inspired by [nanobot](https://github.com/HKUDS/nanobot), refactored from the ground up in Go through a self-bootstrapping process, where the AI agent itself drove the entire architectural migration and code optimization.
+🦐 Lele is an ultra-lightweight personal AI Assistant inspired by [picoclaw](https://github.com/sipeed/picoclaw), refactored from the ground up in Go through a self-bootstrapping process, where the AI agent itself drove the entire architectural migration and code optimization.
 
 ⚡️ Runs on $10 hardware with <10MB RAM: That's 99% less memory than OpenClaw and 98% cheaper than a Mac mini!
-
-<table align="center">
-  <tr align="center">
-    <td align="center" valign="top">
-      <p align="center">
-        <img src="assets/picoclaw_mem.gif" width="360" height="240">
-      </p>
-    </td>
-    <td align="center" valign="top">
-      <p align="center">
-        <img src="assets/licheervnano.png" width="400" height="240">
-      </p>
-    </td>
-  </tr>
-</table>
-
-> [!CAUTION]
-> **🚨 SECURITY & OFFICIAL CHANNELS / 安全声明**
->
-> * **NO CRYPTO:** PicoClaw has **NO** official token/coin. All claims on `pump.fun` or other trading platforms are **SCAMS**.
-> * **OFFICIAL DOMAIN:** The **ONLY** official website is **[picoclaw.io](https://picoclaw.io)**, and company website is **[sipeed.com](https://sipeed.com)**
-> * **Warning:** Many `.ai/.org/.com/.net/...` domains are registered by third parties.
-> * **Warning:** picoclaw is in early development now and may have unresolved network security issues. Do not deploy to production environments before the v1.0 release.
-> * **Note:** picoclaw has recently merged a lot of PRs, which may result in a larger memory footprint (10–20MB) in the latest versions. We plan to prioritize resource optimization as soon as the current feature set reaches a stable state.
-
-
-## 📢 News
-2026-02-16 🎉 PicoClaw hit 12K stars in one week! Thank you all for your support! PicoClaw is growing faster than we ever imagined. Given the high volume of PRs, we urgently need community maintainers. Our volunteer roles and roadmap are officially posted [here](docs/picoclaw_community_roadmap_260216.md) —we can’t wait to have you on board!
-
-2026-02-13 🎉 PicoClaw hit 5000 stars in 4days! Thank you for the community! There are so many PRs&issues come in (during Chinese New Year holidays), we are finalizing the Project Roadmap and setting up the Developer Group to accelerate PicoClaw's development.  
-🚀 Call to Action: Please submit your feature requests in GitHub Discussions. We will review and prioritize them during our upcoming weekly meeting.
-
-2026-02-09 🎉 PicoClaw Launched! Built in 1 day to bring AI Agents to $10 hardware with <10MB RAM. 🦐 PicoClaw，Let's Go！
 
 ## ✨ Features
 
@@ -68,14 +35,14 @@
 
 🤖 **AI-Bootstrapped**: Autonomous Go-native implementation — 95% Agent-generated core with human-in-the-loop refinement.
 
-|                               | OpenClaw      | NanoBot                  | **PicoClaw**                              |
+|                               | OpenClaw      | NanoBot                  | **Lele**                              |
 | ----------------------------- | ------------- | ------------------------ | ----------------------------------------- |
 | **Language**                  | TypeScript    | Python                   | **Go**                                    |
 | **RAM**                       | >1GB          | >100MB                   | **< 10MB**                                |
 | **Startup**</br>(0.8GHz core) | >500s         | >30s                     | **<1s**                                   |
 | **Cost**                      | Mac Mini 599$ | Most Linux SBC </br>~50$ | **Any Linux Board**</br>**As low as 10$** |
 
-<img src="assets/compare.jpg" alt="PicoClaw" width="512">
+<img src="assets/compare.jpg" alt="Lele" width="512">
 
 ## 🦾 Demonstration
 
@@ -100,7 +67,7 @@
 </table>
 
 ### 📱 Run on old Android Phones
-Give your decade-old phone a second life! Turn it into a smart AI Assistant with PicoClaw. Quick Start:
+Give your decade-old phone a second life! Turn it into a smart AI Assistant with Lele. Quick Start:
 1. **Install Termux** (Available on F-Droid or Google Play).
 2. **Execute cmds**
 ```bash
@@ -111,11 +78,11 @@ pkg install proot
 termux-chroot ./picoclaw-linux-arm64 onboard
 ```
 And then follow the instructions in the "Quick Start" section to complete the configuration!
-<img src="assets/termux.jpg" alt="PicoClaw" width="512">
+<img src="assets/termux.jpg" alt="Lele" width="512">
 
 ### 🐜 Innovative Low-Footprint Deploy
 
-PicoClaw can be deployed on almost any Linux device!
+Lele can be deployed on almost any Linux device!
 
 - $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) E(Ethernet) or W(WiFi6) version, for Minimal Home Assistant
 - $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), or $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html) for Automated Server Maintenance
@@ -136,7 +103,7 @@ Download the firmware for your platform from the [release](https://github.com/xi
 ```bash
 git clone https://github.com/xilistudios/lele.git
 
-cd picoclaw
+cd lele
 make deps
 
 # Build, no need to install
@@ -151,12 +118,12 @@ make install
 
 ## 🐳 Docker Compose
 
-You can also run PicoClaw using Docker Compose without installing anything locally.
+You can also run Lele using Docker Compose without installing anything locally.
 
 ```bash
 # 1. Clone this repo
 git clone https://github.com/xilistudios/lele.git
-cd picoclaw
+cd lele
 
 # 2. Set your API keys
 cp config/config.example.json config/config.json
@@ -259,7 +226,7 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
 
-Talk to your picoclaw through Telegram, Discord, DingTalk, or LINE
+Talk to your lele through Telegram, Discord, DingTalk, or LINE
 
 | Channel      | Setup                              |
 | ------------ | ---------------------------------- |
@@ -469,7 +436,7 @@ picoclaw gateway
 
 ## <img src="assets/clawdchat-icon.png" width="24" height="24" alt="ClawdChat"> Join the Agent Social Network
 
-Connect Picoclaw to the Agent Social Network simply by sending a single message via the CLI or any integrated Chat App.
+Connect Lele to the Agent Social Network simply by sending a single message via the CLI or any integrated Chat App.
 
 **Read `https://clawdchat.ai/skill.md` and follow the instructions to join [ClawdChat.ai](https://clawdchat.ai)**
 
@@ -479,7 +446,7 @@ Config file: `~/.lele/config.json`
 
 ### Workspace Layout
 
-PicoClaw stores data in your configured workspace (default: `~/.lele/workspace`):
+Lele stores data in your configured workspace (default: `~/.lele/workspace`):
 
 ```
 ~/.lele/workspace/
@@ -498,7 +465,7 @@ PicoClaw stores data in your configured workspace (default: `~/.lele/workspace`)
 
 ### 🔒 Security Sandbox
 
-PicoClaw runs in a sandboxed environment by default. The agent can only access files and execute commands within the configured workspace.
+Lele runs in a sandboxed environment by default. The agent can only access files and execute commands within the configured workspace.
 
 #### Default Configuration
 
@@ -592,7 +559,7 @@ All paths share the same workspace restriction — there's no way to bypass the 
 
 ### Heartbeat (Periodic Tasks)
 
-PicoClaw can perform periodic tasks automatically. Create a `HEARTBEAT.md` file in your workspace:
+Lele can perform periodic tasks automatically. Create a `HEARTBEAT.md` file in your workspace:
 
 ```markdown
 # Periodic Tasks
@@ -684,7 +651,7 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 
 ### Provider Architecture
 
-PicoClaw routes providers by protocol family:
+Lele routes providers by protocol family:
 
 - OpenAI-compatible protocol: OpenRouter, OpenAI-compatible gateways, Groq, Zhipu, and vLLM-style endpoints.
 - Anthropic protocol: Claude-native API behavior.
@@ -818,7 +785,7 @@ picoclaw agent -m "Hello"
 
 ### Scheduled Tasks / Reminders
 
-PicoClaw supports scheduled reminders and recurring tasks through the `cron` tool:
+Lele supports scheduled reminders and recurring tasks through the `cron` tool:
 
 * **One-time reminders**: "Remind me in 10 minutes" → triggers once after 10min
 * **Recurring tasks**: "Remind me every 2 hours" → triggers every 2 hours
@@ -839,7 +806,7 @@ Developer group building, Entry Requirement: At least 1 Merged PR.
 
 ### Web search says "API 配置问题"
 
-This is normal if you haven't configured a search API key yet. PicoClaw will provide helpful links for manual searching.
+This is normal if you haven't configured a search API key yet. Lele will provide helpful links for manual searching.
 
 To enable web search:
 

@@ -1,7 +1,7 @@
 <div align="center">
-<img src="assets/logo.jpg" alt="PicoClaw" width="512">
+<img src="assets/logo.jpg" alt="Lele" width="512">
 
-<h1>PicoClaw: Assistente de IA Ultra-Eficiente em Go</h1>
+<h1>Lele: Assistente de IA Ultra-Eficiente em Go</h1>
 
 <h3>Hardware de $10 · 10MB de RAM · Boot em 1s · 皮皮虾，我们走！</h3>
 
@@ -10,7 +10,7 @@
     <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20RISC--V-blue" alt="Hardware">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <br>
-    <a href="https://picoclaw.io"><img src="https://img.shields.io/badge/Website-picoclaw.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
+    <a href="https://lele.io"><img src="https://img.shields.io/badge/Website-lele.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
     <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
   </p>
 
@@ -19,7 +19,7 @@
 
 ---
 
-🦐 **PicoClaw** é um assistente pessoal de IA ultra-leve inspirado no [nanobot](https://github.com/HKUDS/nanobot), reescrito do zero em **Go** por meio de um processo de "auto-inicialização" (self-bootstrapping) — onde o próprio agente de IA conduziu toda a migração de arquitetura e otimização de código.
+🦐 **Lele** é um assistente pessoal de IA ultra-leve inspirado no [nanobot](https://github.com/HKUDS/nanobot), reescrito do zero em **Go** por meio de um processo de "auto-inicialização" (self-bootstrapping) — onde o próprio agente de IA conduziu toda a migração de arquitetura e otimização de código.
 
 ⚡️ **Extremamente leve:** Roda em hardware de apenas **$10** com **<10MB** de RAM. Isso é 99% menos memória que o OpenClaw e 98% mais barato que um Mac mini!
 
@@ -41,22 +41,22 @@
 > [!CAUTION]
 > **🚨 DECLARAÇÃO DE SEGURANÇA & CANAIS OFICIAIS**
 >
-> * **SEM CRIPTOMOEDAS:** O PicoClaw **NÃO** possui nenhum token/moeda oficial. Todas as alegações no `pump.fun` ou outras plataformas de negociação são **GOLPES**.
-> * **DOMÍNIO OFICIAL:** O **ÚNICO** site oficial é o **[picoclaw.io](https://picoclaw.io)**, e o site da empresa é o **[sipeed.com](https://sipeed.com)**.
+> * **SEM CRIPTOMOEDAS:** O Lele **NÃO** possui nenhum token/moeda oficial. Todas as alegações no `pump.fun` ou outras plataformas de negociação são **GOLPES**.
+> * **DOMÍNIO OFICIAL:** O **ÚNICO** site oficial é o **[lele.io](https://lele.io)**, e o site da empresa é o **[sipeed.com](https://sipeed.com)**.
 > * **Aviso:** Muitos domínios `.ai/.org/.com/.net/...` foram registrados por terceiros, não são nossos.
-> * **Aviso:** O PicoClaw está em fase inicial de desenvolvimento e pode ter problemas de segurança de rede não resolvidos. Não implante em ambientes de produção antes da versão v1.0.
-> * **Nota:** O PicoClaw recentemente fez merge de muitos PRs, o que pode resultar em maior consumo de memória (10-20MB) nas versões mais recentes. Planejamos priorizar a otimização de recursos assim que o conjunto de funcionalidades estiver estável.
+> * **Aviso:** O Lele está em fase inicial de desenvolvimento e pode ter problemas de segurança de rede não resolvidos. Não implante em ambientes de produção antes da versão v1.0.
+> * **Nota:** O Lele recentemente fez merge de muitos PRs, o que pode resultar em maior consumo de memória (10-20MB) nas versões mais recentes. Planejamos priorizar a otimização de recursos assim que o conjunto de funcionalidades estiver estável.
 
 
 ## 📢 Novidades
 
-2026-02-16 🎉 PicoClaw atingiu 12K stars em uma semana! Obrigado a todos pelo apoio! O PicoClaw está crescendo mais rápido do que jamais imaginamos. Dado o alto volume de PRs, precisamos urgentemente de maintainers da comunidade. Nossos papéis de voluntários e roadmap foram publicados oficialmente [aqui](docs/picoclaw_community_roadmap_260216.md) — estamos ansiosos para ter você a bordo!
+2026-02-16 🎉 Lele atingiu 12K stars em uma semana! Obrigado a todos pelo apoio! O Lele está crescendo mais rápido do que jamais imaginamos. Dado o alto volume de PRs, precisamos urgentemente de maintainers da comunidade. Nossos papéis de voluntários e roadmap foram publicados oficialmente [aqui](docs/lele_community_roadmap_260216.md) — estamos ansiosos para ter você a bordo!
 
-2026-02-13 🎉 PicoClaw atingiu 5000 stars em 4 dias! Obrigado à comunidade! Estamos finalizando o **Roadmap do Projeto** e configurando o **Grupo de Desenvolvedores** para acelerar o desenvolvimento do PicoClaw.
+2026-02-13 🎉 Lele atingiu 5000 stars em 4 dias! Obrigado à comunidade! Estamos finalizando o **Roadmap do Projeto** e configurando o **Grupo de Desenvolvedores** para acelerar o desenvolvimento do Lele.
 
 🚀 **Chamada para Ação:** Envie suas solicitações de funcionalidades nas GitHub Discussions. Revisaremos e priorizaremos na próxima reunião semanal.
 
-2026-02-09 🎉 PicoClaw lançado oficialmente! Construído em 1 dia para trazer Agentes de IA para hardware de $10 com <10MB de RAM. 🦐 PicoClaw, Partiu!
+2026-02-09 🎉 Lele lançado oficialmente! Construído em 1 dia para trazer Agentes de IA para hardware de $10 com <10MB de RAM. 🦐 Lele, Partiu!
 
 ## ✨ Funcionalidades
 
@@ -70,14 +70,14 @@
 
 🤖 **Auto-Construído por IA**: Implementação nativa em Go de forma autônoma — 95% do núcleo gerado pelo Agente com refinamento humano no loop.
 
-|                               | OpenClaw      | NanoBot                  | **PicoClaw**                              |
+|                               | OpenClaw      | NanoBot                  | **Lele**                              |
 | ----------------------------- | ------------- | ------------------------ | ----------------------------------------- |
 | **Linguagem**                 | TypeScript    | Python                   | **Go**                                    |
 | **RAM**                       | >1GB          | >100MB                   | **< 10MB**                                |
 | **Inicialização**</br>(CPU 0.8GHz) | >500s         | >30s                     | **<1s**                                   |
 | **Custo**                     | Mac Mini $599 | Maioria dos SBC Linux </br>~$50 | **Qualquer placa Linux**</br>**A partir de $10** |
 
-<img src="assets/compare.jpg" alt="PicoClaw" width="512">
+<img src="assets/compare.jpg" alt="Lele" width="512">
 
 ## 🦾 Demonstração
 
@@ -103,7 +103,7 @@
 
 ### 📱 Rode em celulares Android antigos
 
-Dê uma segunda vida ao seu celular de dez anos atrás! Transforme-o em um assistente de IA inteligente com o PicoClaw. Início rápido:
+Dê uma segunda vida ao seu celular de dez anos atrás! Transforme-o em um assistente de IA inteligente com o Lele. Início rápido:
 
 1. **Instale o Termux** (Disponível no F-Droid ou Google Play).
 2. **Execute os comandos**
@@ -118,11 +118,11 @@ termux-chroot ./picoclaw-linux-arm64 onboard
 
 Depois siga as instruções na seção "Início Rápido" para completar a configuração!
 
-<img src="assets/termux.jpg" alt="PicoClaw" width="512">
+<img src="assets/termux.jpg" alt="Lele" width="512">
 
 ### 🐜 Implantação Inovadora com Baixo Consumo
 
-O PicoClaw pode ser implantado em praticamente qualquer dispositivo Linux!
+O Lele pode ser implantado em praticamente qualquer dispositivo Linux!
 
 - $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) versão E (Ethernet) ou W (WiFi6), para Assistente Doméstico Minimalista
 - $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), ou $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html) para Manutenção Automatizada de Servidores
@@ -143,7 +143,7 @@ Baixe o binário para sua plataforma na página de [releases](https://github.com
 ```bash
 git clone https://github.com/xilistudios/lele.git
 
-cd picoclaw
+cd lele
 make deps
 
 # Build, sem necessidade de instalar
@@ -158,12 +158,12 @@ make install
 
 ## 🐳 Docker Compose
 
-Você tambêm pode rodar o PicoClaw usando Docker Compose sem instalar nada localmente.
+Você tambêm pode rodar o Lele usando Docker Compose sem instalar nada localmente.
 
 ```bash
 # 1. Clone este repositorio
 git clone https://github.com/xilistudios/lele.git
-cd picoclaw
+cd lele
 
 # 2. Configure suas API keys
 cp config/config.example.json config/config.json
@@ -263,7 +263,7 @@ Pronto! Você tem um assistente de IA funcionando em 2 minutos.
 
 ## 💬 Integração com Apps de Chat
 
-Converse com seu PicoClaw via Telegram, Discord, DingTalk ou LINE.
+Converse com seu Lele via Telegram, Discord, DingTalk ou LINE.
 
 | Canal | Nível de Configuração |
 | --- | --- |
@@ -473,7 +473,7 @@ picoclaw gateway
 
 ## <img src="assets/clawdchat-icon.png" width="24" height="24" alt="ClawdChat"> Junte-se a Rede Social de Agentes
 
-Conecte o PicoClaw a Rede Social de Agentes simplesmente enviando uma única mensagem via CLI ou qualquer App de Chat integrado.
+Conecte o Lele a Rede Social de Agentes simplesmente enviando uma única mensagem via CLI ou qualquer App de Chat integrado.
 
 **Leia `https://clawdchat.ai/skill.md` e siga as instruções para entrar no [ClawdChat.ai](https://clawdchat.ai)**
 
@@ -483,7 +483,7 @@ Arquivo de configuração: `~/.lele/config.json`
 
 ### Estrutura do Workspace
 
-O PicoClaw armazena dados no workspace configurado (padrão: `~/.lele/workspace`):
+O Lele armazena dados no workspace configurado (padrão: `~/.lele/workspace`):
 
 ```
 ~/.lele/workspace/
@@ -502,7 +502,7 @@ O PicoClaw armazena dados no workspace configurado (padrão: `~/.lele/workspace`
 
 ### 🔒 Sandbox de Segurança
 
-O PicoClaw roda em um ambiente sandbox por padrão. O agente so pode acessar arquivos e executar comandos dentro do workspace configurado.
+O Lele roda em um ambiente sandbox por padrão. O agente so pode acessar arquivos e executar comandos dentro do workspace configurado.
 
 #### Configuração Padrão
 
@@ -596,7 +596,7 @@ Todos os caminhos compartilham a mesma restrição de workspace — nao há como
 
 ### Heartbeat (Tarefas Periódicas)
 
-O PicoClaw pode executar tarefas periódicas automaticamente. Crie um arquivo `HEARTBEAT.md` no seu workspace:
+O Lele pode executar tarefas periódicas automaticamente. Crie um arquivo `HEARTBEAT.md` no seu workspace:
 
 ```markdown
 # Tarefas Periodicas
@@ -809,7 +809,7 @@ picoclaw agent -m "Ola, como vai?"
 
 ### Tarefas Agendadas / Lembretes
 
-O PicoClaw suporta lembretes agendados e tarefas recorrentes por meio da ferramenta `cron`:
+O Lele suporta lembretes agendados e tarefas recorrentes por meio da ferramenta `cron`:
 
 * **Lembretes únicos**: "Remind me in 10 minutes" (Me lembre em 10 minutos) → dispara uma vez após 10min
 * **Tarefas recorrentes**: "Remind me every 2 hours" (Me lembre a cada 2 horas) → dispara a cada 2 horas
@@ -829,13 +829,13 @@ Grupos de usuários:
 
 Discord: <https://discord.gg/V4sAZ9XWpN>
 
-<img src="assets/wechat.png" alt="PicoClaw" width="512">
+<img src="assets/wechat.png" alt="Lele" width="512">
 
 ## 🐛 Solução de Problemas
 
 ### Busca web mostra "API 配置问题"
 
-Isso é normal se você ainda não configurou uma API key de busca. O PicoClaw fornecerá links úteis para busca manual.
+Isso é normal se você ainda não configurou uma API key de busca. O Lele fornecerá links úteis para busca manual.
 
 Para habilitar a busca web:
 
