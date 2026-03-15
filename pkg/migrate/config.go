@@ -98,7 +98,7 @@ func ConvertConfig(data map[string]interface{}) (*config.Config, []string, error
 
 			if !supportedProviders[name] {
 				if apiKey != "" || apiBase != "" {
-					warnings = append(warnings, fmt.Sprintf("Provider '%s' not supported in PicoClaw, skipping", name))
+					warnings = append(warnings, fmt.Sprintf("Provider '%s' not supported in Lele, skipping", name))
 				}
 				continue
 			}
@@ -133,7 +133,7 @@ func ConvertConfig(data map[string]interface{}) (*config.Config, []string, error
 				continue
 			}
 			if !supportedChannels[name] {
-				warnings = append(warnings, fmt.Sprintf("Channel '%s' not supported in PicoClaw, skipping", name))
+				warnings = append(warnings, fmt.Sprintf("Channel '%s' not supported in Lele, skipping", name))
 				continue
 			}
 			enabled, _ := getBool(cMap, "enabled")

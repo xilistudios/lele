@@ -25,7 +25,7 @@ func (m *MockProvider) GetContextWindow() int   { return 4096 }
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║         COMPREHENSIVE SUBAGENT TEST - PICOCLAW             ║")
+	fmt.Println("║         COMPREHENSIVE SUBAGENT TEST - LELE             ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 
 	// Setup

@@ -55,9 +55,9 @@
     <th><p align="center">🔎 Web Search & Learning</p></th>
   </tr>
   <tr>
-    <td align="center"><p align="center"><img src="assets/picoclaw_code.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/picoclaw_memory.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/picoclaw_search.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_code.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_memory.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_search.gif" width="240" height="180"></p></td>
   </tr>
   <tr>
     <td align="center">Develop • Deploy • Scale</td>
@@ -72,10 +72,10 @@ Give your decade-old phone a second life! Turn it into a smart AI Assistant with
 2. **Execute cmds**
 ```bash
 # Note: Replace v0.1.1 with the latest version from the Releases page
-wget https://github.com/xilistudios/lele/releases/download/v0.1.1/picoclaw-linux-arm64
-chmod +x picoclaw-linux-arm64
+wget https://github.com/xilistudios/lele/releases/download/v0.1.1/lele-linux-arm64
+chmod +x lele-linux-arm64
 pkg install proot
-termux-chroot ./picoclaw-linux-arm64 onboard
+termux-chroot ./lele-linux-arm64 onboard
 ```
 And then follow the instructions in the "Quick Start" section to complete the configuration!
 <img src="assets/termux.jpg" alt="Lele" width="512">
@@ -133,7 +133,7 @@ vim config/config.json      # Set DISCORD_BOT_TOKEN, API keys, etc.
 docker compose --profile gateway up -d
 
 # 4. Check logs
-docker compose logs -f picoclaw-gateway
+docker compose logs -f lele-gateway
 
 # 5. Stop
 docker compose --profile gateway down
@@ -143,10 +143,10 @@ docker compose --profile gateway down
 
 ```bash
 # Ask a question
-docker compose run --rm picoclaw-agent -m "What is 2+2?"
+docker compose run --rm lele-agent -m "What is 2+2?"
 
 # Interactive mode
-docker compose run --rm picoclaw-agent
+docker compose run --rm lele-agent
 ```
 
 ### Rebuild
@@ -166,7 +166,7 @@ docker compose --profile gateway up -d
 **1. Initialize**
 
 ```bash
-picoclaw onboard
+lele onboard
 ```
 
 **2. Configure** (`~/.lele/config.json`)
@@ -215,7 +215,7 @@ picoclaw onboard
 **4. Chat**
 
 ```bash
-picoclaw agent -m "What is 2+2?"
+lele agent -m "What is 2+2?"
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
@@ -264,7 +264,7 @@ Talk to your lele through Telegram, Discord, DingTalk, or LINE
 **3. Run**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -312,7 +312,7 @@ picoclaw gateway
 **6. Run**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -345,7 +345,7 @@ picoclaw gateway
 **3. Run**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -379,7 +379,7 @@ picoclaw gateway
 **3. Run**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -425,12 +425,12 @@ Then set the Webhook URL in LINE Developers Console to `https://your-domain/webh
 **4. Run**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 > In group chats, the bot responds only when @mentioned. Replies quote the original message.
 
-> **Docker Compose**: Add `ports: ["18791:18791"]` to the `picoclaw-gateway` service to expose the webhook port.
+> **Docker Compose**: Add `ports: ["18791:18791"]` to the `lele-gateway` service to expose the webhook port.
 
 </details>
 
@@ -540,7 +540,7 @@ If you need the agent to access paths outside the workspace:
 **Method 2: Environment variable**
 
 ```bash
-export PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
+export LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
 ```
 
 > ⚠️ **Warning**: Disabling this restriction allows the agent to access any path on your system. Use with caution in controlled environments only.
@@ -631,8 +631,8 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 
 **Environment variables:**
 
-* `PICOCLAW_HEARTBEAT_ENABLED=false` to disable
-* `PICOCLAW_HEARTBEAT_INTERVAL=60` to change interval
+* `LELE_HEARTBEAT_ENABLED=false` to disable
+* `LELE_HEARTBEAT_INTERVAL=60` to change interval
 
 ### Providers
 
@@ -692,7 +692,7 @@ This keeps the runtime lightweight while making new OpenAI-compatible backends m
 **3. Run**
 
 ```bash
-picoclaw agent -m "Hello"
+lele agent -m "Hello"
 ```
 
 </details>
@@ -775,13 +775,13 @@ picoclaw agent -m "Hello"
 
 | Command                   | Description                   |
 | ------------------------- | ----------------------------- |
-| `picoclaw onboard`        | Initialize config & workspace |
-| `picoclaw agent -m "..."` | Chat with the agent           |
-| `picoclaw agent`          | Interactive chat mode         |
-| `picoclaw gateway`        | Start the gateway             |
-| `picoclaw status`         | Show status                   |
-| `picoclaw cron list`      | List all scheduled jobs       |
-| `picoclaw cron add ...`   | Add a scheduled job           |
+| `lele onboard`        | Initialize config & workspace |
+| `lele agent -m "..."` | Chat with the agent           |
+| `lele agent`          | Interactive chat mode         |
+| `lele gateway`        | Start the gateway             |
+| `lele status`         | Show status                   |
+| `lele cron list`      | List all scheduled jobs       |
+| `lele cron add ...`   | Add a scheduled job           |
 
 ### Scheduled Tasks / Reminders
 
@@ -839,7 +839,7 @@ Some providers (like Zhipu) have content filtering. Try rephrasing your query or
 
 ### Telegram bot says "Conflict: terminated by other getUpdates"
 
-This happens when another instance of the bot is running. Make sure only one `picoclaw gateway` is running at a time.
+This happens when another instance of the bot is running. Make sure only one `lele gateway` is running at a time.
 
 ---
 

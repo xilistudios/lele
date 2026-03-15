@@ -28,7 +28,7 @@ type Options struct {
 	Force         bool
 	Refresh       bool
 	OpenClawHome  string
-	PicoClawHome  string
+	LeleHome      string
 }
 
 type Action struct {
@@ -62,7 +62,7 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	picoClawHome, err := resolvePicoClawHome(opts.PicoClawHome)
+	picoClawHome, err := resolveLeleHome(opts.LeleHome)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	fmt.Println("Migrating from OpenClaw to PicoClaw")
+	fmt.Println("Migrating from OpenClaw to Lele")
 	fmt.Printf("  Source:      %s\n", openclawHome)
 	fmt.Printf("  Destination: %s\n", picoClawHome)
 	fmt.Println()
@@ -118,7 +118,7 @@ func Plan(opts Options, openclawHome, picoClawHome string) ([]Action, []string, 
 				Type:        ActionConvertConfig,
 				Source:      configPath,
 				Destination: filepath.Join(picoClawHome, "config.json"),
-				Description: "convert OpenClaw config to PicoClaw format",
+				Description: "convert OpenClaw config to Lele format",
 			})
 
 			data, err := LoadOpenClawConfig(configPath)
@@ -221,7 +221,7 @@ func executeConfigMigration(srcConfigPath, dstConfigPath, picoClawHome string) e
 	if _, err := os.Stat(dstConfigPath); err == nil {
 		existing, err := config.LoadConfig(dstConfigPath)
 		if err != nil {
-			return fmt.Errorf("loading existing PicoClaw config: %w", err)
+			return fmt.Errorf("loading existing Lele config: %w", err)
 		}
 		incoming = MergeConfig(existing, incoming)
 	}
@@ -326,11 +326,11 @@ func resolveOpenClawHome(override string) (string, error) {
 	return filepath.Join(home, ".openclaw"), nil
 }
 
-func resolvePicoClawHome(override string) (string, error) {
+func resolveLeleHome(override string) (string, error) {
 	if override != "" {
 		return expandHome(override), nil
 	}
-	if envHome := os.Getenv("PICOCLAW_HOME"); envHome != "" {
+	if envHome := os.Getenv("LELE_HOME"); envHome != "" {
 		return expandHome(envHome), nil
 	}
 	home, err := os.UserHomeDir()

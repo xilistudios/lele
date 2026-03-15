@@ -27,7 +27,7 @@
   <tr align="center">
     <td align="center" valign="top">
       <p align="center">
-        <img src="assets/picoclaw_mem.gif" width="360" height="240">
+        <img src="assets/lele_mem.gif" width="360" height="240">
       </p>
     </td>
     <td align="center" valign="top">
@@ -89,9 +89,9 @@
     <th><p align="center">🔎 Recherche Web & Apprentissage</p></th>
   </tr>
   <tr>
-    <td align="center"><p align="center"><img src="assets/picoclaw_code.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/picoclaw_memory.gif" width="240" height="180"></p></td>
-    <td align="center"><p align="center"><img src="assets/picoclaw_search.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_code.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_memory.gif" width="240" height="180"></p></td>
+    <td align="center"><p align="center"><img src="assets/lele_search.gif" width="240" height="180"></p></td>
   </tr>
   <tr>
     <td align="center">Développer • Déployer • Mettre à l'échelle</td>
@@ -109,10 +109,10 @@ Donnez une seconde vie à votre téléphone d'il y a dix ans ! Transformez-le en
 
 ```bash
 # Note : Remplacez v0.1.1 par la dernière version depuis la page des Releases
-wget https://github.com/xilistudios/lele/releases/download/v0.1.1/picoclaw-linux-arm64
-chmod +x picoclaw-linux-arm64
+wget https://github.com/xilistudios/lele/releases/download/v0.1.1/lele-linux-arm64
+chmod +x lele-linux-arm64
 pkg install proot
-termux-chroot ./picoclaw-linux-arm64 onboard
+termux-chroot ./lele-linux-arm64 onboard
 ```
 
 Puis suivez les instructions de la section « Démarrage Rapide » pour terminer la configuration !
@@ -172,7 +172,7 @@ vim config/config.json      # Configurez DISCORD_BOT_TOKEN, clés API, etc.
 docker compose --profile gateway up -d
 
 # 4. Voir les logs
-docker compose logs -f picoclaw-gateway
+docker compose logs -f lele-gateway
 
 # 5. Arrêter
 docker compose --profile gateway down
@@ -182,10 +182,10 @@ docker compose --profile gateway down
 
 ```bash
 # Poser une question
-docker compose run --rm picoclaw-agent -m "Combien font 2+2 ?"
+docker compose run --rm lele-agent -m "Combien font 2+2 ?"
 
 # Mode interactif
-docker compose run --rm picoclaw-agent
+docker compose run --rm lele-agent
 ```
 
 ### Recompiler
@@ -205,7 +205,7 @@ docker compose --profile gateway up -d
 **1. Initialiser**
 
 ```bash
-picoclaw onboard
+lele onboard
 ```
 
 **2. Configurer** (`~/.lele/config.json`)
@@ -253,7 +253,7 @@ picoclaw onboard
 **4. Discuter**
 
 ```bash
-picoclaw agent -m "Combien font 2+2 ?"
+lele agent -m "Combien font 2+2 ?"
 ```
 
 Et voilà ! Vous avez un assistant IA fonctionnel en 2 minutes.
@@ -300,7 +300,7 @@ Discutez avec votre Lele via Telegram, Discord, DingTalk ou LINE
 **3. Lancer**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -348,7 +348,7 @@ picoclaw gateway
 **6. Lancer**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -381,7 +381,7 @@ picoclaw gateway
 **3. Lancer**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -415,7 +415,7 @@ picoclaw gateway
 **3. Lancer**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -461,12 +461,12 @@ Puis configurez l'URL du Webhook dans la LINE Developers Console sur `https://vo
 **4. Lancer**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 > Dans les discussions de groupe, le bot répond uniquement lorsqu'il est mentionné avec @. Les réponses citent le message original.
 
-> **Docker Compose** : Ajoutez `ports: ["18791:18791"]` au service `picoclaw-gateway` pour exposer le port du webhook.
+> **Docker Compose** : Ajoutez `ports: ["18791:18791"]` au service `lele-gateway` pour exposer le port du webhook.
 
 </details>
 
@@ -576,7 +576,7 @@ Si vous avez besoin que l'agent accède à des chemins en dehors du workspace :
 **Méthode 2 : Variable d'environnement**
 
 ```bash
-export PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
+export LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
 ```
 
 > ⚠️ **Attention** : Désactiver cette restriction permet à l'agent d'accéder à n'importe quel chemin sur votre système. À utiliser avec précaution uniquement dans des environnements contrôlés.
@@ -667,8 +667,8 @@ Le sous-agent a accès aux outils (message, web_search, etc.) et peut communique
 
 **Variables d'environnement :**
 
-* `PICOCLAW_HEARTBEAT_ENABLED=false` pour désactiver
-* `PICOCLAW_HEARTBEAT_INTERVAL=60` pour modifier l'intervalle
+* `LELE_HEARTBEAT_ENABLED=false` pour désactiver
+* `LELE_HEARTBEAT_INTERVAL=60` pour modifier l'intervalle
 
 ### Fournisseurs
 
@@ -717,7 +717,7 @@ Le sous-agent a accès aux outils (message, web_search, etc.) et peut communique
 **3. Lancer**
 
 ```bash
-picoclaw agent -m "Bonjour, comment ça va ?"
+lele agent -m "Bonjour, comment ça va ?"
 ```
 
 </details>
@@ -798,13 +798,13 @@ picoclaw agent -m "Bonjour, comment ça va ?"
 
 | Commande                  | Description                           |
 | ------------------------- | ------------------------------------- |
-| `picoclaw onboard`        | Initialiser la configuration & le workspace |
-| `picoclaw agent -m "..."` | Discuter avec l'agent                 |
-| `picoclaw agent`          | Mode de discussion interactif         |
-| `picoclaw gateway`        | Démarrer la passerelle                |
-| `picoclaw status`         | Afficher le statut                    |
-| `picoclaw cron list`      | Lister toutes les tâches planifiées   |
-| `picoclaw cron add ...`   | Ajouter une tâche planifiée           |
+| `lele onboard`        | Initialiser la configuration & le workspace |
+| `lele agent -m "..."` | Discuter avec l'agent                 |
+| `lele agent`          | Mode de discussion interactif         |
+| `lele gateway`        | Démarrer la passerelle                |
+| `lele status`         | Afficher le statut                    |
+| `lele cron list`      | Lister toutes les tâches planifiées   |
+| `lele cron add ...`   | Ajouter une tâche planifiée           |
 
 ### Tâches Planifiées / Rappels
 
@@ -867,7 +867,7 @@ Certains fournisseurs (comme Zhipu) disposent d'un filtrage de contenu. Essayez 
 
 ### Le bot Telegram affiche « Conflict: terminated by other getUpdates »
 
-Cela se produit lorsqu'une autre instance du bot est en cours d'exécution. Assurez-vous qu'un seul `picoclaw gateway` fonctionne à la fois.
+Cela se produit lorsqu'une autre instance du bot est en cours d'exécution. Assurez-vous qu'un seul `lele gateway` fonctionne à la fois.
 
 ---
 

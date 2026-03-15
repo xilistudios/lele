@@ -53,6 +53,8 @@ func defaultAPIBaseByType(providerType string) string {
 		return defaultAnthropicAPIBase
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
+	case "nanogpt":
+		return "https://nano-gpt.com/api/v1"
 	case "zhipu":
 		return "https://open.bigmodel.cn/api/paas/v4"
 	case "gemini":
@@ -183,7 +185,7 @@ func createClaudeAuthProvider(apiBase string) (LLMProvider, error) {
 		return nil, fmt.Errorf("loading auth credentials: %w", err)
 	}
 	if cred == nil {
-		return nil, fmt.Errorf("no credentials for anthropic. Run: picoclaw auth login --provider anthropic")
+		return nil, fmt.Errorf("no credentials for anthropic. Run: lele auth login --provider anthropic")
 	}
 	return NewClaudeProviderWithTokenSourceAndBaseURL(cred.AccessToken, createClaudeTokenSource(), apiBase), nil
 }
@@ -194,7 +196,7 @@ func createCodexAuthProvider(enableWebSearch bool) (LLMProvider, error) {
 		return nil, fmt.Errorf("loading auth credentials: %w", err)
 	}
 	if cred == nil {
-		return nil, fmt.Errorf("no credentials for openai. Run: picoclaw auth login --provider openai")
+		return nil, fmt.Errorf("no credentials for openai. Run: lele auth login --provider openai")
 	}
 	p := NewCodexProviderWithTokenSource(cred.AccessToken, cred.AccountID, createCodexTokenSource())
 	p.enableWebSearch = enableWebSearch
@@ -285,6 +287,17 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 					sel.apiBase = cfg.Providers.OpenRouter.APIBase
 				} else {
 					sel.apiBase = "https://openrouter.ai/api/v1"
+				}
+			}
+		case "nanogpt":
+			if cfg.Providers.Named != nil {
+				if named, ok := cfg.Providers.GetNamed("nanogpt"); ok && named.APIKey != "" {
+					sel.apiKey = named.APIKey
+					sel.apiBase = named.APIBase
+					sel.proxy = named.Proxy
+					if sel.apiBase == "" {
+						sel.apiBase = "https://nano-gpt.com/api/v1"
+					}
 				}
 			}
 		case "zhipu", "glm":

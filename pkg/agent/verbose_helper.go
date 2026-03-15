@@ -8,7 +8,7 @@ import (
 )
 
 // formatBasicToolMessage genera un mensaje simplificado para verbose basic
-// Ejemplo: "🛠️ Exec: push git changes (in ~/.openclaw/workspace/picoclaw)"
+// Ejemplo: "🛠️ Exec: push git changes (in ~/.openclaw/workspace/lele)"
 func formatBasicToolMessage(toolName string, args map[string]interface{}) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("🛠️ %s", strings.Title(toolName)))
@@ -147,7 +147,7 @@ func formatBasicListDir(args map[string]interface{}) string {
 }
 
 // extractCommandDescription extrae una descripción legible de un comando
-// Ej: "cd ~/.openclaw/workspace/picoclaw && git push" → "push git changes"
+// Ej: "cd ~/.openclaw/workspace/lele && git push" → "push git changes"
 func extractCommandDescription(cmd string) string {
 	cmd = strings.TrimSpace(cmd)
 	lower := strings.ToLower(cmd)

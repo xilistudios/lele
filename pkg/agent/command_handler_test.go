@@ -1,8 +1,8 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // Inspired by and based on nanobot: https://github.com/HKUDS/nanobot
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package agent
 
@@ -298,8 +298,8 @@ func TestHandleStatusCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /status to be handled")
 	}
-	if !strings.Contains(result, "picoclaw") {
-		t.Errorf("Expected picoclaw in status, got: %s", result)
+	if !strings.Contains(result, "lele") {
+		t.Errorf("Expected lele in status, got: %s", result)
 	}
 	if !strings.Contains(result, "Model:") {
 		t.Errorf("Expected model info in status, got: %s", result)
@@ -1584,7 +1584,7 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 	if !handled {
 		t.Error("Expected /status to be handled")
 	}
-	if !strings.Contains(result, "picoclaw") {
+	if !strings.Contains(result, "lele") {
 		t.Errorf("Expected status response, got: %s", result)
 	}
 }

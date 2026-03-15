@@ -27,7 +27,7 @@
 <tr align="center">
 <td align="center" valign="top">
 <p align="center">
-<img src="assets/picoclaw_mem.gif" width="360" height="240">
+<img src="assets/lele_mem.gif" width="360" height="240">
 </p>
 </td>
 <td align="center" valign="top">
@@ -89,9 +89,9 @@
 <th><p align="center">🔎 Tìm kiếm Web & Học hỏi</p></th>
 </tr>
 <tr>
-<td align="center"><p align="center"><img src="assets/picoclaw_code.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/picoclaw_memory.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/picoclaw_search.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_code.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_memory.gif" width="240" height="180"></p></td>
+<td align="center"><p align="center"><img src="assets/lele_search.gif" width="240" height="180"></p></td>
 </tr>
 <tr>
 <td align="center">Phát triển • Triển khai • Mở rộng</td>
@@ -153,7 +153,7 @@ vim config/config.json      # Thiết lập DISCORD_BOT_TOKEN, API keys, v.v.
 docker compose --profile gateway up -d
 
 # 4. Xem logs
-docker compose logs -f picoclaw-gateway
+docker compose logs -f lele-gateway
 
 # 5. Dừng
 docker compose --profile gateway down
@@ -163,10 +163,10 @@ docker compose --profile gateway down
 
 ```bash
 # Đặt câu hỏi
-docker compose run --rm picoclaw-agent -m "2+2 bằng mấy?"
+docker compose run --rm lele-agent -m "2+2 bằng mấy?"
 
 # Chế độ tương tác
-docker compose run --rm picoclaw-agent
+docker compose run --rm lele-agent
 ```
 
 ### Build lại
@@ -186,7 +186,7 @@ docker compose --profile gateway up -d
 **1. Khởi tạo**
 
 ```bash
-picoclaw onboard
+lele onboard
 ```
 
 **2. Cấu hình** (`~/.lele/config.json`)
@@ -234,7 +234,7 @@ picoclaw onboard
 **4. Trò chuyện**
 
 ```bash
-picoclaw agent -m "Xin chào, bạn là ai?"
+lele agent -m "Xin chào, bạn là ai?"
 ```
 
 Vậy là xong! Bạn đã có một trợ lý AI hoạt động chỉ trong 2 phút.
@@ -281,7 +281,7 @@ Trò chuyện với Lele qua Telegram, Discord, DingTalk hoặc LINE.
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -329,7 +329,7 @@ picoclaw gateway
 **6. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -362,7 +362,7 @@ picoclaw gateway
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -396,7 +396,7 @@ picoclaw gateway
 **3. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 </details>
@@ -442,12 +442,12 @@ Sau đó cài đặt Webhook URL trong LINE Developers Console thành `https://y
 **4. Chạy**
 
 ```bash
-picoclaw gateway
+lele gateway
 ```
 
 > Trong nhóm chat, bot chỉ phản hồi khi được @mention. Các câu trả lời sẽ trích dẫn tin nhắn gốc.
 
-> **Docker Compose**: Thêm `ports: ["18791:18791"]` vào service `picoclaw-gateway` để mở port webhook.
+> **Docker Compose**: Thêm `ports: ["18791:18791"]` vào service `lele-gateway` để mở port webhook.
 
 </details>
 
@@ -557,7 +557,7 @@ Nếu bạn cần agent truy cập đường dẫn ngoài workspace:
 **Cách 2: Biến môi trường**
 
 ```bash
-export PICOCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
+export LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
 ```
 
 > ⚠️ **Cảnh báo**: Tắt giới hạn này cho phép agent truy cập mọi đường dẫn trên hệ thống. Chỉ sử dụng cẩn thận trong môi trường được kiểm soát.
@@ -648,8 +648,8 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 
 **Biến môi trường:**
 
-* `PICOCLAW_HEARTBEAT_ENABLED=false` để tắt
-* `PICOCLAW_HEARTBEAT_INTERVAL=60` để thay đổi khoảng thời gian
+* `LELE_HEARTBEAT_ENABLED=false` để tắt
+* `LELE_HEARTBEAT_INTERVAL=60` để thay đổi khoảng thời gian
 
 ### Nhà cung cấp (Providers)
 
@@ -698,7 +698,7 @@ Subagent có quyền truy cập các công cụ (message, web_search, v.v.) và 
 **3. Chạy**
 
 ```bash
-picoclaw agent -m "Xin chào"
+lele agent -m "Xin chào"
 ```
 
 </details>
@@ -776,13 +776,13 @@ picoclaw agent -m "Xin chào"
 
 | Lệnh | Mô tả |
 | --- | --- |
-| `picoclaw onboard` | Khởi tạo cấu hình & workspace |
-| `picoclaw agent -m "..."` | Trò chuyện với agent |
-| `picoclaw agent` | Chế độ chat tương tác |
-| `picoclaw gateway` | Khởi động gateway (cho bot chat) |
-| `picoclaw status` | Hiển thị trạng thái |
-| `picoclaw cron list` | Liệt kê tất cả tác vụ định kỳ |
-| `picoclaw cron add ...` | Thêm tác vụ định kỳ |
+| `lele onboard` | Khởi tạo cấu hình & workspace |
+| `lele agent -m "..."` | Trò chuyện với agent |
+| `lele agent` | Chế độ chat tương tác |
+| `lele gateway` | Khởi động gateway (cho bot chat) |
+| `lele status` | Hiển thị trạng thái |
+| `lele cron list` | Liệt kê tất cả tác vụ định kỳ |
+| `lele cron add ...` | Thêm tác vụ định kỳ |
 
 ### Tác vụ định kỳ / Nhắc nhở
 
@@ -845,7 +845,7 @@ Một số nhà cung cấp (như Zhipu) có bộ lọc nội dung nghiêm ngặt
 
 ### Telegram bot báo "Conflict: terminated by other getUpdates"
 
-Điều này xảy ra khi có một instance bot khác đang chạy. Đảm bảo chỉ có một tiến trình `picoclaw gateway` chạy tại một thời điểm.
+Điều này xảy ra khi có một instance bot khác đang chạy. Đảm bảo chỉ có một tiến trình `lele gateway` chạy tại một thời điểm.
 
 ---
 
