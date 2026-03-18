@@ -567,6 +567,25 @@ type failFirstMockProvider struct {
 	successResp string
 }
 
+type blockingMockProvider struct {
+	started chan struct{}
+}
+
+func (m *blockingMockProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+	select {
+	case <-m.started:
+	default:
+		close(m.started)
+	}
+
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (m *blockingMockProvider) GetDefaultModel() string {
+	return "mock-blocking-model"
+}
+
 func (m *failFirstMockProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 	m.currentCall++
 	if m.currentCall <= m.failures {
@@ -655,6 +674,73 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	// Without compression: 6 + 1 (new user msg) + 1 (assistant msg) = 8
 	if len(finalHistory) >= 8 {
 		t.Errorf("Expected history to be compressed (len < 8), got %d", len(finalHistory))
+	}
+}
+
+func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &blockingMockProvider{started: make(chan struct{})}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- al.Run(runCtx)
+	}()
+
+	msgBus.PublishInbound(bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "123",
+		Content:    "Hello",
+		SessionKey: "telegram:123",
+		Metadata:   map[string]string{},
+	})
+
+	select {
+	case <-provider.started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("provider did not start processing")
+	}
+
+	response := al.StopAgent("telegram:123")
+	if !strings.Contains(response, "Agente detenido") {
+		t.Fatalf("unexpected stop response: %s", response)
+	}
+
+	outboundCtx, cancelOutbound := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancelOutbound()
+	if outbound, ok := msgBus.SubscribeOutbound(outboundCtx); ok {
+		t.Fatalf("expected no outbound response after session cancellation, got %+v", outbound)
+	}
+
+	cancelRun()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("agent loop returned error: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("agent loop did not stop")
 	}
 }
 

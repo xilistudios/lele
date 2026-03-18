@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,20 +26,21 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus             *bus.MessageBus
-	cfg             *config.Config
-	registry        *AgentRegistry
-	state           *state.Manager
-	running         atomic.Bool
-	summarizing     sync.Map
-	sessionModels   sync.Map
-	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
-	fallback        *providers.FallbackChain
-	channelManager  *channels.Manager
-	subagents       map[string]*tools.SubagentManager
-	verboseManager  *session.VerboseManager
-	sessionCancels  sync.Map                  // sessionKey -> context.CancelFunc
-	approvalManager *channels.ApprovalManager // Manager for command approvals
+	bus              *bus.MessageBus
+	cfg              *config.Config
+	registry         *AgentRegistry
+	state            *state.Manager
+	running          atomic.Bool
+	summarizing      sync.Map
+	sessionModels    sync.Map
+	sessionAgents    sync.Map // sessionKey -> agentID for agent switching
+	fallback         *providers.FallbackChain
+	channelManager   *channels.Manager
+	subagents        map[string]*tools.SubagentManager
+	verboseManager   *session.VerboseManager
+	sessionCancels   sync.Map // sessionKey -> context.CancelFunc
+	sessionCancelSeq atomic.Uint64
+	approvalManager  *channels.ApprovalManager // Manager for command approvals
 
 	// Internal components (delegated operations)
 	messageProcessor messageProcessor
@@ -59,6 +61,48 @@ type processOptions struct {
 	EnableSummary   bool   // Whether to trigger summarization
 	SendResponse    bool   // Whether to send response via bus
 	NoHistory       bool   // If true, don't load session history (for heartbeat)
+}
+
+type sessionCancelGroup struct {
+	mu      sync.Mutex
+	cancels map[uint64]context.CancelFunc
+}
+
+func newSessionCancelGroup() *sessionCancelGroup {
+	return &sessionCancelGroup{
+		cancels: make(map[uint64]context.CancelFunc),
+	}
+}
+
+func (scg *sessionCancelGroup) add(id uint64, cancel context.CancelFunc) {
+	scg.mu.Lock()
+	defer scg.mu.Unlock()
+	scg.cancels[id] = cancel
+}
+
+func (scg *sessionCancelGroup) remove(id uint64) bool {
+	scg.mu.Lock()
+	defer scg.mu.Unlock()
+	delete(scg.cancels, id)
+	return len(scg.cancels) == 0
+}
+
+func (scg *sessionCancelGroup) cancelAll() int {
+	scg.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(scg.cancels))
+	for id, cancel := range scg.cancels {
+		delete(scg.cancels, id)
+		if cancel != nil {
+			cancels = append(cancels, cancel)
+		}
+	}
+	scg.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+
+	return len(cancels)
 }
 
 // SummarizeStats contains statistics about a summarization operation.
@@ -136,6 +180,58 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	loop.toolCoordinator = newToolCoordinator(loop)
 
 	return loop
+}
+
+func (al *AgentLoop) registerSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
+	if sessionKey == "" || cancel == nil {
+		return func() {}
+	}
+
+	id := al.sessionCancelSeq.Add(1)
+	rawGroup, _ := al.sessionCancels.LoadOrStore(sessionKey, newSessionCancelGroup())
+	group, ok := rawGroup.(*sessionCancelGroup)
+	if !ok || group == nil {
+		group = newSessionCancelGroup()
+		al.sessionCancels.Store(sessionKey, group)
+	}
+	group.add(id, cancel)
+
+	return func() {
+		cancel()
+		if !group.remove(id) {
+			return
+		}
+		if current, ok := al.sessionCancels.Load(sessionKey); ok && current == group {
+			al.sessionCancels.Delete(sessionKey)
+		}
+	}
+}
+
+func (al *AgentLoop) cancelSession(sessionKey string) int {
+	if sessionKey == "" {
+		return 0
+	}
+
+	rawGroup, ok := al.sessionCancels.Load(sessionKey)
+	if !ok {
+		return 0
+	}
+
+	switch entry := rawGroup.(type) {
+	case *sessionCancelGroup:
+		stopped := entry.cancelAll()
+		al.sessionCancels.Delete(sessionKey)
+		return stopped
+	case context.CancelFunc:
+		if entry != nil {
+			entry()
+		}
+		al.sessionCancels.Delete(sessionKey)
+		return 1
+	default:
+		al.sessionCancels.Delete(sessionKey)
+		return 0
+	}
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -236,6 +332,15 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 			response, err := al.messageProcessor.processMessage(ctx, msg)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					logger.InfoCF("agent", "Message processing canceled",
+						map[string]interface{}{
+							"channel":     msg.Channel,
+							"chat_id":     msg.ChatID,
+							"session_key": msg.SessionKey,
+						})
+					continue
+				}
 				response = fmt.Sprintf("Error processing message: %v", err)
 			}
 
@@ -377,13 +482,15 @@ func (al *AgentLoop) GetStatus(sessionKey string) string {
 
 // StopAgent stops the agent processing for a session (implements AgentProvidable).
 func (al *AgentLoop) StopAgent(sessionKey string) string {
-	// Cancel the current context if there's an active session
-	if cancel, ok := al.sessionCancels.Load(sessionKey); ok {
-		if cf, ok := cancel.(context.CancelFunc); ok {
-			cf()
-		}
+	subagentCount := 0
+	if al.toolCoordinator != nil {
+		subagentCount = al.toolCoordinator.stopAllSubagents()
 	}
-	return "⏹️ Agent signaled to stop."
+	al.cancelSession(sessionKey)
+	if subagentCount > 0 {
+		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
+	}
+	return "⏹️ Agente detenido."
 }
 
 // CompactSession compacts the session history (implements AgentProvidable).
