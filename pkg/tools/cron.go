@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,6 +89,29 @@ func (t *CronTool) Parameters() map[string]interface{} {
 			"deliver": map[string]interface{}{
 				"type":        "boolean",
 				"description": "If true, send message directly to channel. If false, let agent process message (for complex tasks). Default: true",
+			},
+			"spawn": map[string]interface{}{
+				"type":        "object",
+				"description": "Optional: Configuration to spawn a subagent for this task. When set, the job will execute via a spawned subagent instead of processing directly.",
+				"properties": map[string]interface{}{
+					"task": map[string]interface{}{
+						"type":        "string",
+						"description": "The task description for the subagent",
+					},
+					"label": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional short label for the task (for display)",
+					},
+					"agent_id": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional target agent ID to delegate the task to",
+					},
+					"guidance": map[string]interface{}{
+						"type":        "string",
+						"description": "Additional guidance for the subagent",
+					},
+				},
+				"required": []string{"task"},
 			},
 		},
 		"required": []string{"action"},
@@ -184,6 +208,26 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 		deliver = false
 	}
 
+	// Parse spawn configuration if present
+	var spawnConfig *cron.SpawnConfig
+	if spawnRaw, ok := args["spawn"].(map[string]interface{}); ok && spawnRaw != nil {
+		spawnConfig = &cron.SpawnConfig{}
+		if task, ok := spawnRaw["task"].(string); ok {
+			spawnConfig.Task = task
+		}
+		if label, ok := spawnRaw["label"].(string); ok {
+			spawnConfig.Label = label
+		}
+		if agentID, ok := spawnRaw["agent_id"].(string); ok {
+			spawnConfig.AgentID = agentID
+		}
+		if guidance, ok := spawnRaw["guidance"].(string); ok {
+			spawnConfig.Guidance = guidance
+		}
+		// When spawn is configured, deliver must be false
+		deliver = false
+	}
+
 	// Truncate message for job name (max 30 chars)
 	messagePreview := utils.Truncate(message, 30)
 
@@ -202,6 +246,11 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 	if command != "" {
 		job.Payload.Command = command
 		// Need to save the updated payload
+		t.cronService.UpdateJob(job)
+	}
+
+	if spawnConfig != nil {
+		job.Payload.Spawn = spawnConfig
 		t.cronService.UpdateJob(job)
 	}
 
@@ -309,6 +358,27 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		return "ok"
 	}
 
+	// If spawn config is present, generate SYSTEM_SPAWN: message
+	if job.Payload.Spawn != nil {
+		spawnMsg := formatSystemSpawnMessage(job)
+		sessionKey := fmt.Sprintf("cron-spawn-%s", job.ID)
+
+		response, err := t.executor.ProcessDirectWithChannel(
+			ctx,
+			spawnMsg,
+			sessionKey,
+			channel,
+			chatID,
+		)
+
+		if err != nil {
+			return fmt.Sprintf("Error: %v", err)
+		}
+
+		_ = response
+		return "ok"
+	}
+
 	// For deliver=false, process through agent (for complex tasks)
 	sessionKey := fmt.Sprintf("cron-%s", job.ID)
 
@@ -328,4 +398,35 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	// Response is automatically sent via MessageBus by AgentLoop
 	_ = response // Will be sent by AgentLoop
 	return "ok"
+}
+
+// formatSystemSpawnMessage formats a SYSTEM_SPAWN: message from spawn config
+func formatSystemSpawnMessage(job *cron.CronJob) string {
+	spawn := job.Payload.Spawn
+	if spawn == nil {
+		return job.Payload.Message
+	}
+
+	var parts []string
+	parts = append(parts, "SYSTEM_SPAWN:")
+	parts = append(parts, fmt.Sprintf("TASK: %s", spawn.Task))
+
+	if spawn.Label != "" {
+		parts = append(parts, fmt.Sprintf("LABEL: %s", spawn.Label))
+	}
+
+	if spawn.AgentID != "" {
+		parts = append(parts, fmt.Sprintf("AGENT_ID: %s", spawn.AgentID))
+	}
+
+	if spawn.Guidance != "" {
+		parts = append(parts, fmt.Sprintf("GUIDANCE: %s", spawn.Guidance))
+	}
+
+	// Add original job message as context if different from task
+	if job.Payload.Message != spawn.Task && job.Payload.Message != "" {
+		parts = append(parts, fmt.Sprintf("CONTEXT: %s", job.Payload.Message))
+	}
+
+	return strings.Join(parts, "\n")
 }
