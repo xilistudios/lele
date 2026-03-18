@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	discordTextChunkMaxLen  = 2000
 	telegramTextChunkMaxLen = 3800
 	whatsappTextChunkMaxLen = 4000
 	lineTextChunkMaxLen     = 5000
@@ -53,6 +54,8 @@ func splitOutboundMessage(msg bus.OutboundMessage) []bus.OutboundMessage {
 
 func outboundTextChunkMaxLen(channel string) int {
 	switch channel {
+	case "discord":
+		return discordTextChunkMaxLen
 	case "telegram":
 		return telegramTextChunkMaxLen
 	case "whatsapp":

@@ -193,6 +193,28 @@ func TestSplitOutboundMessage_SlackLongMessageUsesSlackLimit(t *testing.T) {
 	}
 }
 
+func TestSplitOutboundMessage_DiscordLongMessageUsesSharedLimit(t *testing.T) {
+	content := strings.Repeat("d", discordTextChunkMaxLen+220)
+	msg := bus.OutboundMessage{
+		Channel: "discord",
+		ChatID:  "123456789012345678",
+		Content: content,
+	}
+
+	got := splitOutboundMessage(msg)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 discord chunks, got %d", len(got))
+	}
+	if strings.Join([]string{got[0].Content, got[1].Content}, "") != content {
+		t.Fatal("discord chunks did not reconstruct the original message")
+	}
+	for index, chunk := range got {
+		if len(chunk.Content) > discordTextChunkMaxLen {
+			t.Fatalf("discord chunk %d exceeded max len: %d", index, len(chunk.Content))
+		}
+	}
+}
+
 func TestSendOutboundMessage_SendsExpandedChunksInOrder(t *testing.T) {
 	channel := &recordingChannel{}
 	msg := bus.OutboundMessage{
