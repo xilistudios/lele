@@ -10,11 +10,14 @@ import (
 const (
 	telegramTextChunkMaxLen = 3800
 	whatsappTextChunkMaxLen = 4000
+	lineTextChunkMaxLen     = 5000
+	slackTextChunkMaxLen    = 40000
 )
 
 // splitOutboundMessage expands a single outbound message into multiple sends when a
-// channel has strict text limits. Text chunks are sent first; attachments, when
-// present, are sent as a final attachment-only message to avoid duplication.
+// channel has strict text limits. Text chunks are sent first; for channels with
+// outbound attachment support, attachments are sent as a final attachment-only
+// message to avoid duplication.
 func splitOutboundMessage(msg bus.OutboundMessage) []bus.OutboundMessage {
 	maxLen := outboundTextChunkMaxLen(msg.Channel)
 	if maxLen <= 0 || msg.Content == "" {
@@ -38,7 +41,7 @@ func splitOutboundMessage(msg bus.OutboundMessage) []bus.OutboundMessage {
 		expanded = append(expanded, chunkMsg)
 	}
 
-	if len(msg.Attachments) > 0 {
+	if len(msg.Attachments) > 0 && outboundChannelSeparatesAttachments(msg.Channel) {
 		attachmentMsg := msg
 		attachmentMsg.Content = ""
 		attachmentMsg.ReplyMarkup = nil
@@ -54,8 +57,21 @@ func outboundTextChunkMaxLen(channel string) int {
 		return telegramTextChunkMaxLen
 	case "whatsapp":
 		return whatsappTextChunkMaxLen
+	case "line":
+		return lineTextChunkMaxLen
+	case "slack":
+		return slackTextChunkMaxLen
 	default:
 		return 0
+	}
+}
+
+func outboundChannelSeparatesAttachments(channel string) bool {
+	switch channel {
+	case "telegram", "whatsapp":
+		return true
+	default:
+		return false
 	}
 }
 

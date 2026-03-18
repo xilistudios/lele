@@ -142,6 +142,57 @@ func TestSplitOutboundMessage_WhatsAppLongMessageMovesAttachmentsToFinalSend(t *
 	}
 }
 
+func TestSplitOutboundMessage_LINELongMessageUsesLineLimitWithoutAttachmentFollowUp(t *testing.T) {
+	content := strings.Repeat("l", lineTextChunkMaxLen+200)
+	msg := bus.OutboundMessage{
+		Channel:     "line",
+		ChatID:      "U123",
+		Content:     content,
+		Attachments: []bus.FileAttachment{{Name: "ignored.txt", Path: "/tmp/ignored.txt"}},
+	}
+
+	got := splitOutboundMessage(msg)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 line chunks, got %d", len(got))
+	}
+	if strings.Join([]string{got[0].Content, got[1].Content}, "") != content {
+		t.Fatal("line chunks did not reconstruct the original message")
+	}
+	for index, chunk := range got {
+		if len(chunk.Content) > lineTextChunkMaxLen {
+			t.Fatalf("line chunk %d exceeded max len: %d", index, len(chunk.Content))
+		}
+		if len(chunk.Attachments) != 0 {
+			t.Fatalf("line chunk %d unexpectedly retained attachments", index)
+		}
+	}
+}
+
+func TestSplitOutboundMessage_SlackLongMessageUsesSlackLimit(t *testing.T) {
+	content := strings.Repeat("s", slackTextChunkMaxLen+150)
+	msg := bus.OutboundMessage{
+		Channel: "slack",
+		ChatID:  "C123456/1234567890.123456",
+		Content: content,
+	}
+
+	got := splitOutboundMessage(msg)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 slack chunks, got %d", len(got))
+	}
+	if got[0].ChatID != msg.ChatID || got[1].ChatID != msg.ChatID {
+		t.Fatal("slack chunks should preserve thread-aware chat ID")
+	}
+	if strings.Join([]string{got[0].Content, got[1].Content}, "") != content {
+		t.Fatal("slack chunks did not reconstruct the original message")
+	}
+	for index, chunk := range got {
+		if len(chunk.Content) > slackTextChunkMaxLen {
+			t.Fatalf("slack chunk %d exceeded max len: %d", index, len(chunk.Content))
+		}
+	}
+}
+
 func TestSendOutboundMessage_SendsExpandedChunksInOrder(t *testing.T) {
 	channel := &recordingChannel{}
 	msg := bus.OutboundMessage{
