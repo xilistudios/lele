@@ -437,12 +437,11 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 		return "", false
 	}
 
-	if preferExact {
-		if aliasCfg, found := named.Models[model]; found {
-			resolved := strings.TrimSpace(aliasCfg.Model)
-			if resolved != "" {
-				return resolved, true
-			}
+	// Always try exact match first, regardless of preferExact
+	if aliasCfg, found := named.Models[model]; found {
+		resolved := strings.TrimSpace(aliasCfg.Model)
+		if resolved != "" {
+			return resolved, true
 		}
 	}
 

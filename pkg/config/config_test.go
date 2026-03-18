@@ -548,7 +548,7 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 	if got := cfg.Providers.ResolveModelAlias("nanogpt/qwen/qwen3.5-397b-a17b-thinking", ""); got != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
 		t.Fatalf("ResolveModelAlias(nanogpt/qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
-	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "qwen/qwen3.5-397b-a17b-thinking" {
-		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen/qwen3.5-397b-a17b-thinking")
+	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "qwen-portal/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen-portal/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
 }
