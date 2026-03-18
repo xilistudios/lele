@@ -1,4 +1,4 @@
-﻿package channels
+package channels
 
 import (
 	"context"
@@ -52,6 +52,7 @@ func (c *cmd) Help(ctx context.Context, message telego.Message) error {
 /list [models|channels|agents] - List available options
 /models - Show providers and models
 /agent - Select or change current agent
+/toggle ephemeral - Toggle ephemeral session mode
 	`
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},

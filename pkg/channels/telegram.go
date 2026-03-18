@@ -51,6 +51,7 @@ var telegramCommandRegistry = []telegramCommandSpec{
 	{name: "status", description: "Show model, tokens and gateway version"},
 	{name: "compact", description: "Compact conversation history and save tokens"},
 	{name: "subagents", description: "List and manage running subagents"},
+	{name: "toggle", description: "Toggle runtime features like ephemeral sessions"},
 	{name: "verbose", description: "Toggle verbose mode for tool execution"},
 	{name: "agent", description: "Select or change current agent"},
 }

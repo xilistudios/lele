@@ -9,6 +9,10 @@
       "max_tool_iterations": 20
     }
   },
+  "session": {
+    "ephemeral": true,
+    "ephemeral_threshold": 560
+  },
   "channels": {
     "telegram": {
       "enabled": false,

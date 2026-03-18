@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/logger"
@@ -114,7 +115,8 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		})
 
 	// Delegate to llmRunner for processing
-	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
+	ephemeralNotice := mp.maybeStartEphemeralSession(agent, sessionKey)
+	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
 		ChatID:          msg.ChatID,
@@ -124,6 +126,16 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		EnableSummary:   true,
 		SendResponse:    false,
 	})
+	if err != nil {
+		return "", err
+	}
+	if ephemeralNotice == "" {
+		return response, nil
+	}
+	if strings.TrimSpace(response) == "" {
+		return ephemeralNotice, nil
+	}
+	return ephemeralNotice + "\n\n" + response, nil
 }
 
 // processSystemMessage handles messages from the system channel.
@@ -209,6 +221,17 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	case "/new":
 		response := mp.handleNewCommand(agent, sessionKey)
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   response,
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+		return "", nil
+
+	case "/toggle":
+		response := mp.handleToggleCommand(args)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -403,22 +426,53 @@ func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKe
 	if agent == nil {
 		return "No default agent configured"
 	}
-	previousHistory := agent.Sessions.GetHistory(sessionKey)
-	previousSummary := agent.Sessions.GetSummary(sessionKey)
-	agent.Sessions.TruncateHistory(sessionKey, 0)
-	agent.Sessions.SetSummary(sessionKey, "")
-	// Reset memory context to ensure fresh reload of MEMORY.md and daily notes
-	agent.ContextBuilder.ResetMemoryContext()
-	if err := agent.Sessions.Save(sessionKey); err != nil {
-		agent.Sessions.SetHistory(sessionKey, previousHistory)
-		agent.Sessions.SetSummary(sessionKey, previousSummary)
-		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
-			"session_key": sessionKey,
-			"error":       err.Error(),
-		})
+	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
 	}
 	return "🔄 New conversation started. Context refreshed from SOUL.md, AGENTS.md, and MEMORY.md."
+}
+
+func (mp *messageProcessorImpl) handleToggleCommand(args []string) string {
+	if len(args) != 1 {
+		return "Usage: /toggle [ephemeral]"
+	}
+
+	switch args[0] {
+	case "ephemeral":
+		return mp.al.ToggleEphemeral()
+	default:
+		return fmt.Sprintf("Unknown toggle target: %s", args[0])
+	}
+}
+
+func (mp *messageProcessorImpl) maybeStartEphemeralSession(agent *AgentInstance, sessionKey string) string {
+	if agent == nil || sessionKey == "" || !mp.al.cfg.SessionEphemeralEnabled() {
+		return ""
+	}
+
+	threshold := time.Duration(mp.al.cfg.SessionEphemeralThresholdSeconds()) * time.Second
+	shouldReset, idle := agent.Sessions.ShouldStartFreshSession(sessionKey, threshold)
+	if !shouldReset {
+		return ""
+	}
+
+	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
+		logger.WarnCF("agent", "Failed to start ephemeral session", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		return ""
+	}
+
+	idleSeconds := int(idle.Seconds())
+	logger.InfoCF("agent", "Started fresh ephemeral session", map[string]interface{}{
+		"session_key":    sessionKey,
+		"idle_seconds":   idleSeconds,
+		"threshold_secs": mp.al.cfg.SessionEphemeralThresholdSeconds(),
+		"ephemeral_mode": true,
+	})
+
+	return fmt.Sprintf("🫧 New ephemeral session created after %d seconds of inactivity.", idleSeconds)
 }
 
 // handleModelCommand handles the /model command.
