@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSanitizeFilename(t *testing.T) {
@@ -70,5 +71,33 @@ func TestSave_RejectsPathTraversal(t *testing.T) {
 		if err := sm.Save(key); err == nil {
 			t.Errorf("Save(%q) should have failed but didn't", key)
 		}
+	}
+}
+
+func TestShouldStartFreshSession(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:123"
+	sm.AddMessage(key, "user", "hello")
+	session := sm.GetOrCreate(key)
+	session.Updated = time.Now().Add(-2 * time.Minute)
+
+	shouldReset, idle := sm.ShouldStartFreshSession(key, time.Minute)
+	if !shouldReset {
+		t.Fatal("expected session to require a fresh start after exceeding threshold")
+	}
+	if idle < time.Minute {
+		t.Fatalf("idle = %v, want >= %v", idle, time.Minute)
+	}
+}
+
+func TestShouldStartFreshSession_IgnoresEmptySession(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:empty"
+	session := sm.GetOrCreate(key)
+	session.Updated = time.Now().Add(-2 * time.Minute)
+
+	shouldReset, _ := sm.ShouldStartFreshSession(key, time.Minute)
+	if shouldReset {
+		t.Fatal("empty session should not start a fresh session")
 	}
 }

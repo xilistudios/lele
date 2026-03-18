@@ -147,6 +147,39 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
+func (sm *SessionManager) ShouldStartFreshSession(key string, threshold time.Duration) (bool, time.Duration) {
+	if threshold <= 0 {
+		return false, 0
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || session == nil {
+		return false, 0
+	}
+
+	if len(session.Messages) == 0 && strings.TrimSpace(session.Summary) == "" {
+		return false, 0
+	}
+
+	lastActivity := session.Updated
+	if lastActivity.IsZero() {
+		lastActivity = session.Created
+	}
+	if lastActivity.IsZero() {
+		return false, 0
+	}
+
+	idle := time.Since(lastActivity)
+	if idle <= threshold {
+		return false, idle
+	}
+
+	return true, idle
+}
+
 // sanitizeFilename converts a session key into a cross-platform safe filename.
 // Session keys use "channel:chatID" (e.g. "telegram:123456") but ':' is the
 // volume separator on Windows, so filepath.Base would misinterpret the key.

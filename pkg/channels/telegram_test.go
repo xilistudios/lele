@@ -15,7 +15,7 @@ func TestTelegramMenuCommands(t *testing.T) {
 		}
 	}
 
-	want := []string{"models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent"}
+	want := []string{"models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "agent"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected command menu order: got %v want %v", got, want)
 	}

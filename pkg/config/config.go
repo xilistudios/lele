@@ -136,9 +136,13 @@ type AgentBinding struct {
 }
 
 type SessionConfig struct {
-	DMScope       string              `json:"dm_scope,omitempty"`
-	IdentityLinks map[string][]string `json:"identity_links,omitempty"`
+	DMScope            string              `json:"dm_scope,omitempty"`
+	IdentityLinks      map[string][]string `json:"identity_links,omitempty"`
+	Ephemeral          bool                `json:"ephemeral"`
+	EphemeralThreshold int                 `json:"ephemeral_threshold"`
 }
+
+const DefaultEphemeralThresholdSeconds = 560
 
 type AgentDefaults struct {
 	Workspace           string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
@@ -616,6 +620,10 @@ func DefaultConfig() *Config {
 				MaxToolIterations:   20,
 			},
 		},
+		Session: SessionConfig{
+			Ephemeral:          true,
+			EphemeralThreshold: DefaultEphemeralThresholdSeconds,
+		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
 				Enabled:   false,
@@ -745,8 +753,25 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	sessionEphemeralConfigured := false
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err == nil {
+		if sessionRaw, ok := raw["session"]; ok {
+			var rawSession map[string]json.RawMessage
+			if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
+				_, sessionEphemeralConfigured = rawSession["ephemeral"]
+			}
+		}
+	}
+
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+	if !sessionEphemeralConfigured {
+		cfg.Session.Ephemeral = false
+	}
+	if cfg.Session.EphemeralThreshold <= 0 {
+		cfg.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
 	}
 
 	if err := env.Parse(cfg); err != nil {
@@ -795,6 +820,38 @@ func (c *Config) PersistTelegramVerbose(path string, level VerboseLevel) error {
 		path = DefaultConfigPath()
 	}
 	c.SetTelegramVerbose(level)
+	return SaveConfig(path, c)
+}
+
+func (c *Config) SessionEphemeralEnabled() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Session.Ephemeral
+}
+
+func (c *Config) SessionEphemeralThresholdSeconds() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Session.EphemeralThreshold <= 0 {
+		return DefaultEphemeralThresholdSeconds
+	}
+	return c.Session.EphemeralThreshold
+}
+
+func (c *Config) SetSessionEphemeral(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Session.Ephemeral = enabled
+	if c.Session.EphemeralThreshold <= 0 {
+		c.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
+	}
+}
+
+func (c *Config) PersistSessionEphemeral(path string, enabled bool) error {
+	if path == "" {
+		path = DefaultConfigPath()
+	}
+	c.SetSessionEphemeral(enabled)
 	return SaveConfig(path, c)
 }
 

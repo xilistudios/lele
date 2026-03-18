@@ -113,6 +113,8 @@ func TestAgentConfig_FullParse(t *testing.T) {
 		],
 		"session": {
 			"dm_scope": "per-peer",
+			"ephemeral": true,
+			"ephemeral_threshold": 560,
 			"identity_links": {
 				"john": ["telegram:123", "discord:john#1234"]
 			}
@@ -166,6 +168,12 @@ func TestAgentConfig_FullParse(t *testing.T) {
 	}
 	if len(cfg.Session.IdentityLinks) != 1 {
 		t.Errorf("Session.IdentityLinks = %v", cfg.Session.IdentityLinks)
+	}
+	if !cfg.Session.Ephemeral {
+		t.Error("Session.Ephemeral should be true")
+	}
+	if cfg.Session.EphemeralThreshold != 560 {
+		t.Errorf("Session.EphemeralThreshold = %d, want 560", cfg.Session.EphemeralThreshold)
 	}
 	links := cfg.Session.IdentityLinks["john"]
 	if len(links) != 2 {
@@ -352,6 +360,27 @@ func TestConfig_PersistTelegramVerbose(t *testing.T) {
 	}
 }
 
+func TestConfig_PersistSessionEphemeral(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	cfg := DefaultConfig()
+	if err := cfg.PersistSessionEphemeral(path, true); err != nil {
+		t.Fatalf("PersistSessionEphemeral failed: %v", err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !loaded.Session.Ephemeral {
+		t.Fatal("session ephemeral should be true after persistence")
+	}
+	if loaded.Session.EphemeralThreshold != DefaultEphemeralThresholdSeconds {
+		t.Fatalf("session ephemeral threshold = %d, want %d", loaded.Session.EphemeralThreshold, DefaultEphemeralThresholdSeconds)
+	}
+}
+
 // TestConfig_Complete verifies all config fields are set
 func TestConfig_Complete(t *testing.T) {
 	cfg := DefaultConfig()
@@ -389,6 +418,16 @@ func TestDefaultConfig_OpenAIWebSearchEnabled(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_EphemeralEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Session.Ephemeral {
+		t.Fatal("DefaultConfig().Session.Ephemeral should be true")
+	}
+	if cfg.Session.EphemeralThreshold != DefaultEphemeralThresholdSeconds {
+		t.Fatalf("DefaultConfig().Session.EphemeralThreshold = %d, want %d", cfg.Session.EphemeralThreshold, DefaultEphemeralThresholdSeconds)
+	}
+}
+
 func TestLoadConfig_OpenAIWebSearchDefaultsTrueWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -402,6 +441,25 @@ func TestLoadConfig_OpenAIWebSearchDefaultsTrueWhenUnset(t *testing.T) {
 	}
 	if !cfg.Providers.OpenAI.WebSearch {
 		t.Fatal("OpenAI codex web search should remain true when unset in config file")
+	}
+}
+
+func TestLoadConfig_EphemeralDefaultsFalseWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"session":{"dm_scope":"per-peer"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Session.Ephemeral {
+		t.Fatal("ephemeral should remain disabled for legacy config files that omit the field")
+	}
+	if cfg.Session.EphemeralThreshold != DefaultEphemeralThresholdSeconds {
+		t.Fatalf("ephemeral threshold = %d, want %d", cfg.Session.EphemeralThreshold, DefaultEphemeralThresholdSeconds)
 	}
 }
 

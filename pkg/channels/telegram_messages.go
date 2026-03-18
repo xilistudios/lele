@@ -26,7 +26,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		if len(parts) > 0 {
 			cmd := parts[0]
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "verbose", "agent":
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -237,6 +237,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 	case "subagents":
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/subagents"))
 		c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("subagents", args), map[string]string{
+			"message_id": fmt.Sprintf("%d", message.MessageID),
+		})
+		return nil
+
+	case "toggle":
+		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/toggle"))
+		c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("toggle", args), map[string]string{
 			"message_id": fmt.Sprintf("%d", message.MessageID),
 		})
 		return nil

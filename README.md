@@ -707,6 +707,10 @@ lele agent -m "Hello"
       "model": "anthropic/claude-opus-4-5"
     }
   },
+  "session": {
+    "ephemeral": true,
+    "ephemeral_threshold": 560
+  },
   "providers": {
     "openrouter": {
       "type": "openrouter",
@@ -770,6 +774,25 @@ lele agent -m "Hello"
 ```
 
 </details>
+
+### Ephemeral Sessions
+
+Add the `session` block to enable automatic fresh sessions after inactivity:
+
+```json
+{
+  "session": {
+    "ephemeral": true,
+    "ephemeral_threshold": 560
+  }
+}
+```
+
+`ephemeral_threshold` is measured in seconds.
+
+When `ephemeral` is enabled and a chat stays idle longer than the configured threshold, the next incoming message starts a new empty session automatically and Lele notifies the user that a fresh session was created.
+
+You can also toggle this at runtime with `/toggle ephemeral`. The command updates `~/.lele/config.json` so the setting persists across restarts.
 
 ## CLI Reference
 

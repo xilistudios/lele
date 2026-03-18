@@ -181,6 +181,58 @@ func TestAgentLoop_GetVerboseLevel_UsesTelegramConfigDefault(t *testing.T) {
 	}
 }
 
+func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Session: config.SessionConfig{
+			Ephemeral:          true,
+			EphemeralThreshold: 60,
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &simpleMockProvider{response: "Fresh response"})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	sessionKey := "telegram:123"
+	agent.Sessions.AddMessage(sessionKey, "user", "old question")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "old answer")
+	agent.Sessions.SetSummary(sessionKey, "old summary")
+	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
+
+	response, err := al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel failed: %v", err)
+	}
+	if !strings.Contains(response, "New ephemeral session created") {
+		t.Fatalf("expected ephemeral notice, got: %s", response)
+	}
+	if !strings.Contains(response, "Fresh response") {
+		t.Fatalf("expected model response, got: %s", response)
+	}
+
+	history := agent.Sessions.GetHistory(sessionKey)
+	if len(history) != 2 {
+		t.Fatalf("expected fresh history with 2 messages, got %d", len(history))
+	}
+	if history[0].Content == "old question" || history[1].Content == "old answer" {
+		t.Fatalf("expected old conversation to be cleared, got history: %+v", history)
+	}
+	if got := agent.Sessions.GetSummary(sessionKey); got != "" {
+		t.Fatalf("expected empty summary after fresh session, got %q", got)
+	}
+}
+
 // TestToolRegistry_ToolRegistration verifies tools can be registered and retrieved
 func TestToolRegistry_ToolRegistration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")

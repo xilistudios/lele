@@ -789,6 +789,10 @@ lele agent -m "Hola"
       "model": "anthropic/claude-opus-4-5"
     }
   },
+  "session": {
+    "ephemeral": true,
+    "ephemeral_threshold": 560
+  },
   "providers": {
     "openrouter": {
       "type": "openrouter",
@@ -852,6 +856,25 @@ lele agent -m "Hola"
 ```
 
 </details>
+
+### Sesiones Efímeras
+
+Agrega el bloque `session` para habilitar sesiones nuevas automáticas después de un periodo de inactividad:
+
+```json
+{
+  "session": {
+    "ephemeral": true,
+    "ephemeral_threshold": 560
+  }
+}
+```
+
+`ephemeral_threshold` se mide en segundos.
+
+Cuando `ephemeral` está activado y un chat supera ese tiempo sin actividad, el siguiente mensaje entrante inicia una sesión vacía automáticamente y Lele notifica que se creó una nueva sesión.
+
+También puedes cambiarlo en runtime con `/toggle ephemeral`. Ese comando actualiza `~/.lele/config.json`, así que la configuración persiste entre reinicios.
 
 ---
 

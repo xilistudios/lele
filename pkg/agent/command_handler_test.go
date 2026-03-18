@@ -570,6 +570,73 @@ func TestHandleVerboseCommand_NoSession(t *testing.T) {
 	}
 }
 
+func TestHandleToggleEphemeralCommand(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("HOME", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Session: config.SessionConfig{
+			Ephemeral:          false,
+			EphemeralThreshold: config.DefaultEphemeralThresholdSeconds,
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/toggle ephemeral",
+	})
+
+	if !handled {
+		t.Error("Expected /toggle ephemeral to be handled")
+	}
+	if !strings.Contains(result, "Ephemeral mode enabled") {
+		t.Fatalf("expected enabled response, got: %s", result)
+	}
+	if !cfg.SessionEphemeralEnabled() {
+		t.Fatal("ephemeral mode should be enabled in runtime config")
+	}
+
+	loaded, err := config.LoadConfig(config.DefaultConfigPath())
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if !loaded.Session.Ephemeral {
+		t.Fatal("ephemeral mode should be persisted to config.json")
+	}
+
+	result, handled = ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/toggle ephemeral",
+	})
+	if !handled {
+		t.Error("Expected second /toggle ephemeral to be handled")
+	}
+	if !strings.Contains(result, "Ephemeral mode disabled") {
+		t.Fatalf("expected disabled response, got: %s", result)
+	}
+}
+
 // TestHandleAgentCommand_NoArgs lists available agents
 func TestHandleAgentCommand_NoArgs(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")

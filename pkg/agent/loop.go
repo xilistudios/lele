@@ -519,6 +519,37 @@ func (al *AgentLoop) CompactSession(sessionKey string) string {
 		stats.BeforeMessages, stats.AfterMessages, stats.SavedTokens)
 }
 
+func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) error {
+	previousHistory := agent.Sessions.GetHistory(sessionKey)
+	previousSummary := agent.Sessions.GetSummary(sessionKey)
+	agent.Sessions.TruncateHistory(sessionKey, 0)
+	agent.Sessions.SetSummary(sessionKey, "")
+	agent.ContextBuilder.ResetMemoryContext()
+	if err := agent.Sessions.Save(sessionKey); err != nil {
+		agent.Sessions.SetHistory(sessionKey, previousHistory)
+		agent.Sessions.SetSummary(sessionKey, previousSummary)
+		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		return err
+	}
+	return nil
+}
+
+func (al *AgentLoop) ToggleEphemeral() string {
+	current := al.cfg.SessionEphemeralEnabled()
+	next := !current
+	if err := al.cfg.PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
+		return fmt.Sprintf("Failed to update ephemeral mode in config.json: %v", err)
+	}
+	threshold := al.cfg.SessionEphemeralThresholdSeconds()
+	if next {
+		return fmt.Sprintf("🫧 Ephemeral mode enabled. Chats idle for more than %d seconds will start a fresh session on the next message.", threshold)
+	}
+	return "🧱 Ephemeral mode disabled. Chat history will persist across inactivity again."
+}
+
 // ToggleVerbose toggles verbose mode for a session (implements AgentProvidable).
 func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
 	if sessionKey == "" {
@@ -567,19 +598,7 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
-	previousHistory := agent.Sessions.GetHistory(sessionKey)
-	previousSummary := agent.Sessions.GetSummary(sessionKey)
-	agent.Sessions.TruncateHistory(sessionKey, 0)
-	agent.Sessions.SetSummary(sessionKey, "")
-	// Reset memory context to ensure fresh reload of MEMORY.md and daily notes
-	agent.ContextBuilder.ResetMemoryContext()
-	if err := agent.Sessions.Save(sessionKey); err != nil {
-		agent.Sessions.SetHistory(sessionKey, previousHistory)
-		agent.Sessions.SetSummary(sessionKey, previousSummary)
-		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
-			"session_key": sessionKey,
-			"error":       err.Error(),
-		})
+	if err := al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
 	}
 	return "🔄 New conversation started. Context refreshed from SOUL.md, AGENTS.md, and MEMORY.md."

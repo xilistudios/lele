@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
 )
@@ -76,6 +75,8 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	switch cmd {
 	case "/new":
 		return ch.handleNewCommand(agent, sessionKey), true
+	case "/toggle":
+		return ch.handleToggleCommand(args), true
 	case "/clear":
 		if agent != nil {
 			agent.Sessions.TruncateHistory(sessionKey, 0)
@@ -192,22 +193,23 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 	if agent == nil {
 		return "No default agent configured"
 	}
-	previousHistory := agent.Sessions.GetHistory(sessionKey)
-	previousSummary := agent.Sessions.GetSummary(sessionKey)
-	agent.Sessions.TruncateHistory(sessionKey, 0)
-	agent.Sessions.SetSummary(sessionKey, "")
-	// Reset memory context to ensure fresh reload of MEMORY.md and daily notes
-	agent.ContextBuilder.ResetMemoryContext()
-	if err := agent.Sessions.Save(sessionKey); err != nil {
-		agent.Sessions.SetHistory(sessionKey, previousHistory)
-		agent.Sessions.SetSummary(sessionKey, previousSummary)
-		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
-			"session_key": sessionKey,
-			"error":       err.Error(),
-		})
+	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
 	}
 	return "🔄 New conversation started. Context refreshed from SOUL.md, AGENTS.md, and MEMORY.md."
+}
+
+func (ch *commandHandlerImpl) handleToggleCommand(args []string) string {
+	if len(args) != 1 {
+		return "Usage: /toggle [ephemeral]"
+	}
+
+	switch args[0] {
+	case "ephemeral":
+		return ch.al.ToggleEphemeral()
+	default:
+		return fmt.Sprintf("Unknown toggle target: %s", args[0])
+	}
 }
 
 // handleModelCommand handles the /model command.
