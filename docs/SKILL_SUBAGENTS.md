@@ -15,10 +15,10 @@ Los subagentes tienen acceso completo a las siguientes categorías de herramient
 - `append_file` - Añadir contenido al final
 - `list_dir` - Listar directorios
 
-### 🔧 Fmod - Edición Inteligente
+### 🔧 Edición Avanzada
+La antigua skill/workflow de FMOD está deprecada. El flujo actual aplica cambios directamente sobre el archivo, sin `preview`, `apply` ni respaldos temporales.
+
 - `smart_edit` - Edición con estrategias de fallback
-- `preview` - Previsualizar cambios en archivos temporales
-- `apply` - Aplicar cambios desde archivo temporal
 - `patch` - Aplicar unified diffs
 - `sequential_replace` - Múltiples reemplazos simultáneos
 

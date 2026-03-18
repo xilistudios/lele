@@ -9,7 +9,7 @@ import (
 )
 
 // SmartEditTool edits a file using intelligent fallback strategies.
-// It writes to a temp file (.fmod.tmp) rather than modifying the original directly.
+// It writes changes directly to the original file while preserving encoding.
 type SmartEditTool struct {
 	workspace string
 	restrict  bool
@@ -28,7 +28,7 @@ func (t *SmartEditTool) Name() string {
 }
 
 func (t *SmartEditTool) Description() string {
-	return "Edit a file with intelligent fallback strategies (exact, whitespace-tolerant, regex). Writes to temp file first, then apply changes."
+	return "Edit a file with intelligent fallback strategies (exact, whitespace-tolerant, regex). Applies changes directly to the target file."
 }
 
 func (t *SmartEditTool) Parameters() map[string]interface{} {
@@ -143,7 +143,7 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 			if len(matches) == 0 {
 				logger.ErrorCF("smart_edit", "Match failed",
 					map[string]interface{}{"strategy": "all", "old_text": oldText})
-				return ErrorResult(fmt.Sprintf("old_text not found in file (tried exact and whitespace-tolerant matching)"))
+				return ErrorResult("old_text not found in file (tried exact and whitespace-tolerant matching)")
 			}
 		}
 	}
@@ -162,21 +162,18 @@ func (t *SmartEditTool) Execute(ctx context.Context, args map[string]interface{}
 	match := matches[0]
 	newContent := ReplaceRange(content, match, newText)
 
-	// Write to temp file
-	tempPath := GetTempPath(resolvedPath)
-	if err := WriteFileWithEncoding(tempPath, newContent, encoding); err != nil {
-		logger.ErrorCF("smart_edit", "Failed to write temp file",
-			map[string]interface{}{"path": tempPath, "error": err.Error()})
-		return ErrorResult(fmt.Sprintf("failed to write temp file: %v", err))
+	if err := WriteFileWithEncoding(resolvedPath, newContent, encoding); err != nil {
+		logger.ErrorCF("smart_edit", "Failed to write file",
+			map[string]interface{}{"path": resolvedPath, "error": err.Error()})
+		return ErrorResult(fmt.Sprintf("failed to write file: %v", err))
 	}
 
 	logger.InfoCF("smart_edit", "Edit successful",
 		map[string]interface{}{
 			"path":           path,
 			"strategy":       strategyName,
-			"temp_file":      tempPath,
 			"original_match": match,
 		})
 
-	return SilentResult(fmt.Sprintf("Edit successful using %s strategy. Use 'preview' to review changes, 'apply' to commit.", strategyName))
+	return SilentResult(fmt.Sprintf("Edit successful using %s strategy.", strategyName))
 }

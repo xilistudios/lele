@@ -287,3 +287,94 @@ func TestEditTool_AppendFile_MissingContent(t *testing.T) {
 		t.Errorf("Expected error when content is missing")
 	}
 }
+
+func TestSmartEditTool_DirectWrite_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "smart.txt")
+	os.WriteFile(testFile, []byte("Hello World\nThis is a test"), 0644)
+
+	tool := NewSmartEditTool(tmpDir, true)
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"path":     testFile,
+		"old_text": "World",
+		"new_text": "Universe",
+	}
+
+	result := tool.Execute(ctx, args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to read edited file: %v", err)
+	}
+	if string(content) != "Hello Universe\nThis is a test" {
+		t.Errorf("unexpected smart_edit content: %q", string(content))
+	}
+
+	if _, err := os.Stat(testFile + ".fmod.tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected no legacy temp file, got err=%v", err)
+	}
+}
+
+func TestSequentialReplaceTool_DirectWrite_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "seq.txt")
+	os.WriteFile(testFile, []byte("one two three"), 0644)
+
+	tool := NewSequentialReplaceTool(tmpDir, true)
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"path":  testFile,
+		"pairs": `[{"old":"one","new":"1"},{"old":"three","new":"3"}]`,
+	}
+
+	result := tool.Execute(ctx, args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to read edited file: %v", err)
+	}
+	if string(content) != "1 two 3" {
+		t.Errorf("unexpected sequential_replace content: %q", string(content))
+	}
+
+	if _, err := os.Stat(testFile + ".fmod.tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected no legacy temp file, got err=%v", err)
+	}
+}
+
+func TestPatchTool_DirectWrite_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "patch.txt")
+	os.WriteFile(testFile, []byte("Hello World\nThis is a test"), 0644)
+
+	tool := NewPatchTool(tmpDir, true)
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"path": testFile,
+		"diff": "@@ -1,2 +1,2 @@\n-Hello World\n+Hello Universe\n This is a test",
+	}
+
+	result := tool.Execute(ctx, args)
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+
+	content, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to read patched file: %v", err)
+	}
+	if string(content) != "Hello Universe\nThis is a test" {
+		t.Errorf("unexpected patch content: %q", string(content))
+	}
+
+	if _, err := os.Stat(testFile + ".fmod.tmp"); !os.IsNotExist(err) {
+		t.Errorf("expected no legacy temp file, got err=%v", err)
+	}
+}

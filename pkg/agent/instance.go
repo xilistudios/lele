@@ -128,7 +128,7 @@ func NewAgentInstance(
 	toolsRegistry.Register(tools.NewEditFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict))
 
-	// Fmod tools - DEPRECATED: Use git worktree instead
+	// Advanced editing tools. The legacy FMOD preview/apply workflow is deprecated.
 	toolsRegistry.Register(tools.NewSmartEditTool(workspace, restrict))
 	// toolsRegistry.Register(tools.NewPreviewTool(workspace, restrict))     // DEPRECATED
 	// toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))        // DEPRECATED

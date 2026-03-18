@@ -38,8 +38,6 @@ func main() {
 	manager.RegisterTool(tools.NewReadFileTool(workspace, true))
 	manager.RegisterTool(tools.NewListDirTool(workspace, true))
 	manager.RegisterTool(tools.NewSmartEditTool(workspace, true))
-	manager.RegisterTool(tools.NewPreviewTool(workspace, true))
-	manager.RegisterTool(tools.NewApplyTool(workspace, true))
 	manager.RegisterTool(tools.NewPatchTool(workspace, true))
 	manager.RegisterTool(tools.NewSequentialReplaceTool(workspace, true))
 	manager.RegisterTool(tools.NewAppendFileTool(workspace, true))
@@ -110,11 +108,11 @@ func main() {
 		{"read_file", true},
 		{"list_dir", true},
 		{"smart_edit", true},
-		{"preview", true},
-		{"apply", true},
 		{"patch", true},
 		{"sequential_replace", true},
 		{"append_file", true},
+		{"preview", false},
+		{"apply", false},
 		{"spawn", false}, // Not registered yet
 		{"web_search", false},
 	}

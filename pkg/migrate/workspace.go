@@ -56,12 +56,12 @@ func planFileCopy(src, dst string, force bool) Action {
 	}
 
 	_, dstExists := os.Stat(dst)
-	if dstExists == nil && !force {
+	if dstExists == nil {
 		return Action{
-			Type:        ActionBackup,
+			Type:        ActionCopy,
 			Source:      src,
 			Destination: dst,
-			Description: "destination exists, will backup and overwrite",
+			Description: "destination exists, will overwrite",
 		}
 	}
 

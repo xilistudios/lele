@@ -1086,7 +1086,8 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_EditingTools verifies Fmod tools are available to subagents
+// TestSubagentManager_EditingTools verifies advanced editing tools are available
+// and the legacy FMOD preview/apply flow stays deprecated.
 func TestSubagentManager_EditingTools(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "subagent-editing-test-*")
 	if err != nil {
@@ -1116,11 +1117,19 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 
 	subagentManager := al.subagents[defaultAgent.ID]
 
-	// Verificar herramientas de edici00f3n (fmod deprecated)
+	// Verificar herramientas de edición avanzadas
 	editingTools := []string{"smart_edit", "patch", "sequential_replace"}
 	for _, toolName := range editingTools {
 		if !subagentManager.HasTool(toolName) {
-			t.Errorf("Subagent missing Fmod tool: %s", toolName)
+			t.Errorf("subagent missing editing tool: %s", toolName)
+		}
+	}
+
+	// Verificar que el flujo legacy de FMOD siga deprecado
+	deprecatedTools := []string{"preview", "apply"}
+	for _, toolName := range deprecatedTools {
+		if subagentManager.HasTool(toolName) {
+			t.Errorf("subagent should not expose deprecated tool: %s", toolName)
 		}
 	}
 }

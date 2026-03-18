@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-// Constants for file editing
-const (
-	TempFileExt = ".fmod.tmp"
-)
-
 // Encoding detection and BOM handling
 
 // DetectEncoding detects encoding from BOM and removes it if present
@@ -27,7 +22,7 @@ func DetectEncoding(buffer []byte) (string, []byte) {
 			return "UTF-32LE", buffer[4:]
 		}
 	}
-	
+
 	if len(buffer) >= 2 {
 		// UTF-16 BE: FE FF
 		if buffer[0] == 0xFE && buffer[1] == 0xFF {
@@ -38,14 +33,14 @@ func DetectEncoding(buffer []byte) (string, []byte) {
 			return "UTF-16LE", buffer[2:]
 		}
 	}
-	
+
 	if len(buffer) >= 3 {
 		// UTF-8 BOM: EF BB BF
 		if buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF {
 			return "UTF-8-BOM", buffer[3:]
 		}
 	}
-	
+
 	// Default to UTF-8 without BOM
 	return "UTF-8", buffer
 }
@@ -73,7 +68,7 @@ func ReadFileWithEncoding(path string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	
+
 	encoding, content := DetectEncoding(data)
 	return string(content), encoding, nil
 }
@@ -83,11 +78,6 @@ func WriteFileWithEncoding(path, content, encoding string) error {
 	bom := GetBOM(encoding)
 	data := append(bom, []byte(content)...)
 	return os.WriteFile(path, data, 0644)
-}
-
-// GetTempPath returns the path to the temp file for a given file
-func GetTempPath(originalPath string) string {
-	return originalPath + TempFileExt
 }
 
 // Match and replacement utilities
@@ -109,12 +99,12 @@ type ExactMatchStrategy struct{}
 
 func (s *ExactMatchStrategy) FindMatches(content, oldStr string) []Match {
 	var matches []Match
-	
+
 	// Handle empty search string
 	if len(oldStr) == 0 {
 		return matches
 	}
-	
+
 	start := 0
 	for {
 		if start >= len(content) {
@@ -143,20 +133,20 @@ func (s *RegexMatchStrategy) FindMatches(content, pattern string) []Match {
 	flags := s.Flags
 	caseInsensitive := strings.Contains(flags, "i")
 	global := strings.Contains(flags, "g")
-	
+
 	var re *regexp.Regexp
 	var err error
-	
+
 	if caseInsensitive {
 		re, err = regexp.Compile("(?i:" + pattern + ")")
 	} else {
 		re, err = regexp.Compile(pattern)
 	}
-	
+
 	if err != nil {
 		return nil
 	}
-	
+
 	var matches []Match
 	if global {
 		allMatches := re.FindAllStringIndex(content, -1)
@@ -175,7 +165,7 @@ func (s *RegexMatchStrategy) FindMatches(content, pattern string) []Match {
 			})
 		}
 	}
-	
+
 	return matches
 }
 
@@ -193,9 +183,9 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 		Pair  ReplacementPair
 		Match Match
 	}
-	
+
 	var allMatches []replacementMatch
-	
+
 	for _, pair := range pairs {
 		matches := strategy.FindMatches(content, pair.Old)
 		if len(matches) == 0 {
@@ -209,7 +199,7 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 			Match: matches[0],
 		})
 	}
-	
+
 	// Check for overlaps
 	for i := 0; i < len(allMatches); i++ {
 		for j := i + 1; j < len(allMatches); j++ {
@@ -219,7 +209,7 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 			}
 		}
 	}
-	
+
 	// Sort by position (descending) so we can apply from end to start
 	for i := 0; i < len(allMatches); i++ {
 		for j := i + 1; j < len(allMatches); j++ {
@@ -228,13 +218,13 @@ func ApplyReplacements(content string, pairs []ReplacementPair, strategy MatchSt
 			}
 		}
 	}
-	
+
 	// Apply replacements
 	result := content
 	for _, rm := range allMatches {
 		result = ReplaceRange(result, rm.Match, rm.Pair.New)
 	}
-	
+
 	return result, nil
 }
 
@@ -269,7 +259,7 @@ type WhitespaceTolerantStrategy struct{}
 func (s *WhitespaceTolerantStrategy) FindMatches(content, oldStr string) []Match {
 	normalizedContent := normalizeWhitespace(content)
 	normalizedOld := normalizeWhitespace(oldStr)
-	
+
 	var matches []Match
 	start := 0
 	for {
@@ -278,11 +268,11 @@ func (s *WhitespaceTolerantStrategy) FindMatches(content, oldStr string) []Match
 			break
 		}
 		matchStart := start + idx
-		
+
 		// Map normalized position back to original
 		origStart := mapNormalizedToOriginal(content, matchStart)
 		origEnd := mapNormalizedToOriginal(content, matchStart+len(normalizedOld))
-		
+
 		matches = append(matches, Match{
 			Start: origStart,
 			End:   origEnd,
@@ -304,11 +294,11 @@ func mapNormalizedToOriginal(original string, normalizedPos int) int {
 	if normalizedPos <= 0 {
 		return 0
 	}
-	
+
 	whitespacePattern := regexp.MustCompile(`\s+`)
 	normalizedIndex := 0
 	originalIndex := 0
-	
+
 	for originalIndex < len(original) && normalizedIndex < normalizedPos {
 		// Check if we're at whitespace
 		loc := whitespacePattern.FindStringIndex(original[originalIndex:])
@@ -321,12 +311,12 @@ func mapNormalizedToOriginal(original string, normalizedPos int) int {
 			normalizedIndex++
 			originalIndex++
 		}
-		
+
 		if normalizedIndex >= normalizedPos {
 			return originalIndex
 		}
 	}
-	
+
 	return originalIndex
 }
 
@@ -336,7 +326,7 @@ func ReadLines(content string, from, to int) ([]struct {
 	Text   string
 }, error) {
 	lines := strings.Split(content, "\n")
-	
+
 	// Validate range
 	if from < 1 {
 		from = 1
@@ -347,7 +337,7 @@ func ReadLines(content string, from, to int) ([]struct {
 	if from > to {
 		return nil, fmt.Errorf("from (%d) must be <= to (%d)", from, to)
 	}
-	
+
 	var result []struct {
 		Number int
 		Text   string
