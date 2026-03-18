@@ -1998,6 +1998,71 @@ func TestLLMRunner_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestRunAgentLoop_StopAgentCancelsSessionAndCleansUp(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	started := make(chan struct{})
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+
+	opts := processOptions{
+		SessionKey:      "telegram:stop-test",
+		Channel:         "telegram",
+		ChatID:          "123",
+		UserMessage:     "Stop this run",
+		DefaultResponse: "Default response",
+		SendResponse:    false,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := runner.runAgentLoop(context.Background(), agent, opts)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("provider was not called")
+	}
+
+	if _, ok := al.sessionCancels.Load(opts.SessionKey); !ok {
+		t.Fatal("expected session cancel to be registered")
+	}
+
+	response := al.StopAgent(opts.SessionKey)
+	if !strings.Contains(response, "Agente detenido") {
+		t.Fatalf("unexpected stop response: %s", response)
+	}
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context cancellation, got %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("runAgentLoop did not stop after cancellation")
+	}
+
+	if _, ok := al.sessionCancels.Load(opts.SessionKey); ok {
+		t.Fatal("expected session cancel registry to be cleaned up")
+	}
+}
+
 func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)

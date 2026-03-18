@@ -213,6 +213,11 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		if c.agentLoop != nil {
 			response = c.agentLoop.StopAgent(sessionKey)
 		}
+		chatKey := fmt.Sprintf("%d", chatID)
+		c.stopActiveThinking(chatKey)
+		if c.resolvePlaceholderWithText(ctx, chatID, chatKey, response) {
+			return nil
+		}
 		return c.sendReplyText(ctx, message, response)
 
 	case "status":

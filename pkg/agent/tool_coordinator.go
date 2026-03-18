@@ -72,12 +72,7 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 
 // cancelSession cancels any active processing for a specific session
 func (tc *toolCoordinatorImpl) cancelSession(sessionKey string) {
-	if cancel, ok := tc.al.sessionCancels.Load(sessionKey); ok {
-		if cf, ok := cancel.(context.CancelFunc); ok && cf != nil {
-			cf()
-		}
-		tc.al.sessionCancels.Delete(sessionKey)
-	}
+	tc.al.cancelSession(sessionKey)
 }
 
 // listRunningSubagentTasks lists all running subagent tasks.

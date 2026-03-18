@@ -51,6 +51,13 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		}
 	}
 
+	runCtx := ctx
+	if opts.SessionKey != "" {
+		sessionCtx, cancel := context.WithCancel(ctx)
+		runCtx = sessionCtx
+		defer lr.al.registerSessionCancel(opts.SessionKey, cancel)()
+	}
+
 	// 1. Update tool contexts
 	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID)
 
@@ -82,7 +89,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
 
 	// 4. Run LLM iteration loop
-	finalContent, iteration, err := lr.runLLMIteration(ctx, agent, messages, opts)
+	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
 	if err != nil {
 		return "", err
 	}
@@ -149,6 +156,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	}
 
 	for iteration < agent.MaxIterations {
+		if err := ctx.Err(); err != nil {
+			return "", iteration, err
+		}
+
 		iteration++
 
 		logger.DebugCF("agent", "LLM iteration",
@@ -226,6 +237,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			if err == nil {
 				break
 			}
+			if ctx.Err() != nil {
+				return "", iteration, ctx.Err()
+			}
 
 			errMsg := strings.ToLower(err.Error())
 			isContextError := strings.Contains(errMsg, "token") ||
@@ -240,8 +254,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					"error": err.Error(),
 					"retry": retry,
 				})
-				// Wait a bit before retrying
-				time.Sleep(time.Duration(retry+1) * 2 * time.Second)
+				waitTime := time.Duration(retry+1) * 2 * time.Second
+				select {
+				case <-time.After(waitTime):
+				case <-ctx.Done():
+					return "", iteration, ctx.Err()
+				}
 				continue
 			}
 
@@ -348,6 +366,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Execute tool calls
 		for _, tc := range response.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				return "", iteration, err
+			}
+
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)
 			logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
@@ -435,8 +457,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					})
 
 					// Wait for user response
-					approved, err := approval.WaitForResponse(lr.al.approvalManager.GetTimeout())
+					approved, err := approval.WaitForResponse(ctx, lr.al.approvalManager.GetTimeout())
 					if err != nil {
+						if ctx.Err() != nil {
+							return "", iteration, ctx.Err()
+						}
 						toolResult = &tools.ToolResult{
 							IsError: true,
 							ForLLM:  "Error: timeout esperando aprobación del usuario",
@@ -467,6 +492,17 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 			} else {
 				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+			}
+
+			if toolResult == nil {
+				if err := ctx.Err(); err != nil {
+					return "", iteration, err
+				}
+				toolResult = tools.ErrorResult(fmt.Sprintf("tool %s returned no result", tc.Name))
+			}
+
+			if err := ctx.Err(); err != nil {
+				return "", iteration, err
 			}
 
 			// Verbose mode: send result notification (only in Full mode)

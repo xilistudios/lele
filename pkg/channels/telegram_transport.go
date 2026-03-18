@@ -60,6 +60,15 @@ func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc 
 	return cancel
 }
 
+func (c *TelegramChannel) stopActiveThinking(chatKey string) {
+	if stop, ok := c.stopThinking.Load(chatKey); ok {
+		if cf, ok := stop.(*thinkingCancel); ok && cf != nil {
+			cf.Cancel()
+		}
+		c.stopThinking.Delete(chatKey)
+	}
+}
+
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return fmt.Errorf("telegram bot not running")
@@ -71,12 +80,7 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	}
 
 	if !msg.IsIntermediate {
-		if stop, ok := c.stopThinking.Load(msg.ChatID); ok {
-			if cf, ok := stop.(*thinkingCancel); ok && cf != nil {
-				cf.Cancel()
-			}
-			c.stopThinking.Delete(msg.ChatID)
-		}
+		c.stopActiveThinking(msg.ChatID)
 	}
 
 	if len(msg.Attachments) > 0 {
@@ -141,13 +145,15 @@ func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg
 	return nil
 }
 
-func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID int64, chatKey, content string) {
+func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID int64, chatKey, content string) bool {
 	if pID, ok := c.placeholders.Load(chatKey); ok {
 		c.placeholders.Delete(chatKey)
 		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), markdownToTelegramHTML(content))
 		editMsg.ParseMode = telego.ModeHTML
 		_, _ = c.bot.EditMessageText(ctx, editMsg)
+		return true
 	}
+	return false
 }
 
 func (c *TelegramChannel) sendDocument(ctx context.Context, chatID int64, replyTo string, attachment bus.FileAttachment) error {

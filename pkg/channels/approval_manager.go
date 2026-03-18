@@ -1,4 +1,4 @@
-﻿package channels
+package channels
 
 import (
 	"context"
@@ -121,15 +121,22 @@ func (am *ApprovalManager) HandleApproval(approvalID string, approved bool) (*Pe
 	return approval, nil
 }
 
-// WaitForResponse espera la respuesta del usuario con timeout
-func (p *PendingApproval) WaitForResponse(timeout time.Duration) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+// WaitForResponse espera la respuesta del usuario con timeout y respeta la cancelación del contexto.
+func (p *PendingApproval) WaitForResponse(ctx context.Context, timeout time.Duration) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	select {
 	case approved := <-p.responseChan:
 		return approved, nil
-	case <-ctx.Done():
+	case <-waitCtx.Done():
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		return false, fmt.Errorf("approval timeout")
 	}
 }
