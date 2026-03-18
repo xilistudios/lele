@@ -15,7 +15,6 @@ type ActionType int
 const (
 	ActionCopy ActionType = iota
 	ActionSkip
-	ActionBackup
 	ActionConvertConfig
 	ActionCreateDir
 	ActionMergeConfig
@@ -41,7 +40,6 @@ type Action struct {
 type Result struct {
 	FilesCopied    int
 	FilesSkipped   int
-	BackupsCreated int
 	ConfigMigrated bool
 	DirsCreated    int
 	Warnings       []string
@@ -166,27 +164,6 @@ func Execute(actions []Action, openclawHome, picoClawHome string) *Result {
 			} else {
 				result.DirsCreated++
 			}
-		case ActionBackup:
-			bakPath := action.Destination + ".bak"
-			if err := copyFile(action.Destination, bakPath); err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("backup %s: %w", action.Destination, err))
-				fmt.Printf("  ✗ Backup failed: %s\n", action.Destination)
-				continue
-			}
-			result.BackupsCreated++
-			fmt.Printf("  ✓ Backed up %s -> %s.bak\n", filepath.Base(action.Destination), filepath.Base(action.Destination))
-
-			if err := os.MkdirAll(filepath.Dir(action.Destination), 0755); err != nil {
-				result.Errors = append(result.Errors, err)
-				continue
-			}
-			if err := copyFile(action.Source, action.Destination); err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("copy %s: %w", action.Source, err))
-				fmt.Printf("  ✗ Copy failed: %s\n", action.Source)
-			} else {
-				result.FilesCopied++
-				fmt.Printf("  ✓ Copied %s\n", relPath(action.Source, openclawHome))
-			}
 		case ActionCopy:
 			if err := os.MkdirAll(filepath.Dir(action.Destination), 0755); err != nil {
 				result.Errors = append(result.Errors, err)
@@ -243,7 +220,6 @@ func PrintPlan(actions []Action, warnings []string) {
 	fmt.Println("Planned actions:")
 	copies := 0
 	skips := 0
-	backups := 0
 	configCount := 0
 
 	for _, action := range actions {
@@ -252,11 +228,11 @@ func PrintPlan(actions []Action, warnings []string) {
 			fmt.Printf("  [config]  %s -> %s\n", action.Source, action.Destination)
 			configCount++
 		case ActionCopy:
-			fmt.Printf("  [copy]    %s\n", filepath.Base(action.Source))
-			copies++
-		case ActionBackup:
-			fmt.Printf("  [backup]  %s (exists, will backup and overwrite)\n", filepath.Base(action.Destination))
-			backups++
+			if action.Description != "" && action.Description != "copy file" {
+				fmt.Printf("  [copy]    %s (%s)\n", filepath.Base(action.Source), action.Description)
+			} else {
+				fmt.Printf("  [copy]    %s\n", filepath.Base(action.Source))
+			}
 			copies++
 		case ActionSkip:
 			if action.Description != "" {
@@ -277,8 +253,8 @@ func PrintPlan(actions []Action, warnings []string) {
 	}
 
 	fmt.Println()
-	fmt.Printf("%d files to copy, %d configs to convert, %d backups needed, %d skipped\n",
-		copies, configCount, backups, skips)
+	fmt.Printf("%d files to copy, %d configs to convert, %d skipped\n",
+		copies, configCount, skips)
 }
 
 func PrintSummary(result *Result) {
@@ -289,9 +265,6 @@ func PrintSummary(result *Result) {
 	}
 	if result.ConfigMigrated {
 		parts = append(parts, "1 config converted")
-	}
-	if result.BackupsCreated > 0 {
-		parts = append(parts, fmt.Sprintf("%d backups created", result.BackupsCreated))
 	}
 	if result.FilesSkipped > 0 {
 		parts = append(parts, fmt.Sprintf("%d files skipped", result.FilesSkipped))
@@ -356,11 +329,6 @@ func expandHome(path string) string {
 		return home
 	}
 	return path
-}
-
-func backupFile(path string) error {
-	bakPath := path + ".bak"
-	return copyFile(path, bakPath)
 }
 
 func copyFile(src, dst string) error {

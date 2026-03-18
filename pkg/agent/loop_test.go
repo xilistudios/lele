@@ -1086,9 +1086,10 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 	}
 }
 
-// TestSubagentManager_FmodTools verifies Fmod tools are available to subagents
-func TestSubagentManager_FmodTools(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "subagent-fmod-test-*")
+// TestSubagentManager_EditingTools verifies advanced editing tools are available
+// and the legacy FMOD preview/apply flow stays deprecated.
+func TestSubagentManager_EditingTools(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagent-editing-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -1116,11 +1117,19 @@ func TestSubagentManager_FmodTools(t *testing.T) {
 
 	subagentManager := al.subagents[defaultAgent.ID]
 
-	// Verificar herramientas Fmod
-	fmodTools := []string{"smart_edit", "preview", "apply", "patch", "sequential_replace"}
-	for _, toolName := range fmodTools {
+	// Verificar herramientas de edición avanzadas
+	editingTools := []string{"smart_edit", "patch", "sequential_replace"}
+	for _, toolName := range editingTools {
 		if !subagentManager.HasTool(toolName) {
-			t.Errorf("Subagent missing Fmod tool: %s", toolName)
+			t.Errorf("subagent missing editing tool: %s", toolName)
+		}
+	}
+
+	// Verificar que el flujo legacy de FMOD siga deprecado
+	deprecatedTools := []string{"preview", "apply"}
+	for _, toolName := range deprecatedTools {
+		if subagentManager.HasTool(toolName) {
+			t.Errorf("subagent should not expose deprecated tool: %s", toolName)
 		}
 	}
 }

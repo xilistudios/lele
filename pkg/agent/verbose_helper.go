@@ -16,11 +16,11 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 	switch toolName {
 	case "exec":
 		return formatBasicExec(args)
-	case "read", "fmod_read":
+	case "read":
 		return formatBasicFileOp("read", args)
 	case "write":
 		return formatBasicFileOp("write", args)
-	case "edit", "smart_edit", "fmod_edit":
+	case "edit", "smart_edit":
 		return formatBasicFileOp("edit", args)
 	case "web_search":
 		return formatBasicWebSearch(args)
@@ -268,18 +268,6 @@ func extractCommandDescription(cmd string) string {
 		return "secure copy"
 	}
 
-	// Detectar fmod
-	switch {
-	case strings.Contains(lower, "fmod edit") || strings.Contains(lower, "fmod write"):
-		return "edit file (fmod)"
-	case strings.Contains(lower, "fmod apply"):
-		return "apply file changes"
-	case strings.Contains(lower, "fmod preview"):
-		return "preview file changes"
-	case strings.Contains(lower, "fmod read"):
-		return "read file (fmod)"
-	}
-
 	// Default: usar primer comando después de cd y &&
 	parts := strings.Fields(cmd)
 	if len(parts) > 0 {
@@ -306,7 +294,7 @@ func extractCommandDescription(cmd string) string {
 				if start < len(parts) {
 					return parts[start] + " (with sudo)"
 				}
-			continue
+				continue
 			}
 			if cmd != "" {
 				return cmd + " command"

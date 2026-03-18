@@ -29,7 +29,7 @@ func (t *SequentialReplaceTool) Name() string {
 }
 
 func (t *SequentialReplaceTool) Description() string {
-	return "Perform multiple replacements in a single operation. Detects overlaps/conflicts. Use when you need to replace multiple distinct strings in a file. Writes to temp file first."
+	return "Perform multiple replacements in a single operation. Detects overlaps/conflicts and applies changes directly to the target file."
 }
 
 func (t *SequentialReplaceTool) Parameters() map[string]interface{} {
@@ -136,17 +136,14 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 		return ErrorResult(err.Error())
 	}
 
-	// Write to temp file
-	tempPath := GetTempPath(resolvedPath)
-	if err := WriteFileWithEncoding(tempPath, newContent, encoding); err != nil {
-		return ErrorResult(fmt.Sprintf("failed to write temp file: %v", err))
+	if err := WriteFileWithEncoding(resolvedPath, newContent, encoding); err != nil {
+		return ErrorResult(fmt.Sprintf("failed to write file: %v", err))
 	}
 
 	logger.InfoCF("sequential_replace", "Replacements successful",
 		map[string]interface{}{
-			"path":      path,
-			"temp_file": tempPath,
-			"pairs":     len(pairs),
+			"path":  path,
+			"pairs": len(pairs),
 		})
 
 	strategyName := "exact"
@@ -154,6 +151,6 @@ func (t *SequentialReplaceTool) Execute(ctx context.Context, args map[string]int
 		strategyName = "regex"
 	}
 
-	return SilentResult(fmt.Sprintf("Applied %d %s replacement(s) successfully. Use 'preview' to review, 'apply' to commit.",
+	return SilentResult(fmt.Sprintf("Applied %d %s replacement(s) successfully.",
 		len(pairs), strategyName))
 }

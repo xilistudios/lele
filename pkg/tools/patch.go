@@ -31,7 +31,7 @@ func (t *PatchTool) Name() string {
 }
 
 func (t *PatchTool) Description() string {
-	return "Apply a unified diff to a file. Supports standard unified diff format with multiple hunks."
+	return "Apply a unified diff directly to a file. Supports standard unified diff format with multiple hunks."
 }
 
 func (t *PatchTool) Parameters() map[string]interface{} {
@@ -89,8 +89,9 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult(fmt.Sprintf("file not found: %s", path))
 	}
 
-	// If diff starts with '@', read from file
-	if strings.HasPrefix(diffContent, "@") {
+	// If diff starts with a single '@', read it from a file.
+	// Unified diff hunks start with '@@' and should be parsed directly.
+	if strings.HasPrefix(diffContent, "@") && !strings.HasPrefix(diffContent, "@@") {
 		diffPath := strings.TrimPrefix(diffContent, "@")
 		diffPath = strings.TrimSpace(diffPath)
 
@@ -134,16 +135,14 @@ func (t *PatchTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult(fmt.Sprintf("failed to apply patch: %v", err))
 	}
 
-	// Write to temp file (like smart_edit)
-	tempPath := GetTempPath(resolvedPath)
-	if err := WriteFileWithEncoding(tempPath, newContent, encoding); err != nil {
-		return ErrorResult(fmt.Sprintf("failed to write temp file: %v", err))
+	if err := WriteFileWithEncoding(resolvedPath, newContent, encoding); err != nil {
+		return ErrorResult(fmt.Sprintf("failed to write file: %v", err))
 	}
 
 	logger.InfoCF("patch", "Patch applied successfully",
-		map[string]interface{}{"path": path, "temp_file": tempPath})
+		map[string]interface{}{"path": path})
 
-	return SilentResult(fmt.Sprintf("Patch applied successfully. Use 'preview' to review changes, 'apply' to commit."))
+	return SilentResult("Patch applied successfully.")
 }
 
 // parseUnifiedDiff parses a unified diff string

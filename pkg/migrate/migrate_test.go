@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -296,8 +297,8 @@ func TestConvertConfig(t *testing.T) {
 		if len(warnings) != 0 {
 			t.Errorf("expected no warnings, got %v", warnings)
 		}
-		if cfg.Agents.Defaults.Model != "glm-4.7" {
-			t.Errorf("default model should be glm-4.7, got %q", cfg.Agents.Defaults.Model)
+		if cfg.Agents.Defaults.Model != config.DefaultConfig().Agents.Defaults.Model {
+			t.Errorf("default model should be %q, got %q", config.DefaultConfig().Agents.Defaults.Model, cfg.Agents.Defaults.Model)
 		}
 	})
 }
@@ -416,7 +417,7 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		}
 	})
 
-	t.Run("plans backup for existing destination files", func(t *testing.T) {
+	t.Run("plans overwrite for existing destination files", func(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
@@ -428,18 +429,18 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 			t.Fatalf("PlanWorkspaceMigration: %v", err)
 		}
 
-		backupCount := 0
+		overwriteCount := 0
 		for _, a := range actions {
-			if a.Type == ActionBackup && filepath.Base(a.Destination) == "AGENTS.md" {
-				backupCount++
+			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENTS.md" && strings.Contains(a.Description, "overwrite") {
+				overwriteCount++
 			}
 		}
-		if backupCount != 1 {
-			t.Errorf("expected 1 backup action for AGENTS.md, got %d", backupCount)
+		if overwriteCount != 1 {
+			t.Errorf("expected 1 overwrite copy action for AGENTS.md, got %d", overwriteCount)
 		}
 	})
 
-	t.Run("force skips backup", func(t *testing.T) {
+	t.Run("force keeps overwrite as a copy action", func(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
@@ -451,10 +452,14 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 			t.Fatalf("PlanWorkspaceMigration: %v", err)
 		}
 
+		overwriteCount := 0
 		for _, a := range actions {
-			if a.Type == ActionBackup {
-				t.Error("expected no backup actions with force=true")
+			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENTS.md" && strings.Contains(a.Description, "overwrite") {
+				overwriteCount++
 			}
+		}
+		if overwriteCount != 1 {
+			t.Errorf("expected 1 overwrite copy action with force=true, got %d", overwriteCount)
 		}
 	})
 
@@ -610,7 +615,7 @@ func TestRunDryRun(t *testing.T) {
 	opts := Options{
 		DryRun:       true,
 		OpenClawHome: openclawHome,
-		LeleHome: picoClawHome,
+		LeleHome:     picoClawHome,
 	}
 
 	result, err := Run(opts)
@@ -665,7 +670,7 @@ func TestRunFullMigration(t *testing.T) {
 	opts := Options{
 		Force:        true,
 		OpenClawHome: openclawHome,
-		LeleHome: picoClawHome,
+		LeleHome:     picoClawHome,
 	}
 
 	result, err := Run(opts)
@@ -730,7 +735,7 @@ func TestRunFullMigration(t *testing.T) {
 func TestRunOpenClawNotFound(t *testing.T) {
 	opts := Options{
 		OpenClawHome: "/nonexistent/path/to/openclaw",
-		LeleHome: t.TempDir(),
+		LeleHome:     t.TempDir(),
 	}
 
 	_, err := Run(opts)
@@ -751,25 +756,6 @@ func TestRunMutuallyExclusiveFlags(t *testing.T) {
 	}
 }
 
-func TestBackupFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "test.md")
-	os.WriteFile(filePath, []byte("original content"), 0644)
-
-	if err := backupFile(filePath); err != nil {
-		t.Fatalf("backupFile: %v", err)
-	}
-
-	bakPath := filePath + ".bak"
-	bakData, err := os.ReadFile(bakPath)
-	if err != nil {
-		t.Fatalf("reading backup: %v", err)
-	}
-	if string(bakData) != "original content" {
-		t.Errorf("backup content = %q, want %q", string(bakData), "original content")
-	}
-}
-
 func TestCopyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "src.md")
@@ -787,6 +773,27 @@ func TestCopyFile(t *testing.T) {
 	}
 	if string(data) != "file content" {
 		t.Errorf("copy content = %q, want %q", string(data), "file content")
+	}
+}
+
+func TestCopyFileOverwritesDestination(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcPath := filepath.Join(tmpDir, "src.md")
+	dstPath := filepath.Join(tmpDir, "dst.md")
+
+	os.WriteFile(srcPath, []byte("new content"), 0644)
+	os.WriteFile(dstPath, []byte("old content"), 0644)
+
+	if err := copyFile(srcPath, dstPath); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+
+	data, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatalf("reading overwritten copy: %v", err)
+	}
+	if string(data) != "new content" {
+		t.Errorf("overwrite content = %q, want %q", string(data), "new content")
 	}
 }
 
@@ -812,7 +819,7 @@ func TestRunConfigOnly(t *testing.T) {
 		Force:        true,
 		ConfigOnly:   true,
 		OpenClawHome: openclawHome,
-		LeleHome: picoClawHome,
+		LeleHome:     picoClawHome,
 	}
 
 	result, err := Run(opts)
@@ -852,7 +859,7 @@ func TestRunWorkspaceOnly(t *testing.T) {
 		Force:         true,
 		WorkspaceOnly: true,
 		OpenClawHome:  openclawHome,
-		LeleHome:  picoClawHome,
+		LeleHome:      picoClawHome,
 	}
 
 	result, err := Run(opts)
