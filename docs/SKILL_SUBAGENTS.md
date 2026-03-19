@@ -203,6 +203,39 @@ El agente padre puede procesar estos resultados y:
 - Sintetizar información de múltiples subagentes
 - Presentar resumen final al usuario
 
+## Spawn desde Cron Jobs
+
+Los cron jobs pueden usar `spawn` para delegar tareas a subagentes cuando se ejecutan:
+
+```json
+{
+  "action": "add",
+  "message": "Backup diario de base de datos",
+  "cron_expr": "0 2 * * *",
+  "spawn": {
+    "task": "Crear backup de la base de datos PostgreSQL y subirlo a S3",
+    "agent_id": "coder",
+    "label": "backup-diario",
+    "guidance": "Usa pg_dump y aws cli. El bucket es backups-db"
+  }
+}
+```
+
+### Flujo de Ejecución
+
+1. **Usuario crea job** con parámetro `spawn`
+2. **Cuando llega la hora**, Cron genera mensaje `SYSTEM_SPAWN:`
+3. **MessageProcessor** detecta el prefijo y ejecuta `spawn`
+4. **Subagente** opera de forma independiente
+5. **Callback** notifica al usuario con el resultado
+
+### Beneficios
+
+- Tasks pesadas no bloquean el agente principal
+- Ejecución en paralelo con el agente
+- Notificaciones automáticas al completar
+- Soporte para agentes específicos (`agent_id`)
+
 ---
 
 ## Referencia Técnica

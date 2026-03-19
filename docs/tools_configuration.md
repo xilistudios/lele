@@ -110,6 +110,37 @@ The cron tool is used for scheduling periodic tasks.
 |--------|------|---------|-------------|
 | `exec_timeout_minutes` | int | 5 | Execution timeout in minutes, 0 means no limit |
 
+### Cron with Spawn Support
+
+The cron tool supports spawning subagents for complex tasks. Use the `spawn` parameter to delegate jobs to subagents:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `spawn.task` | string | Required. Task description for the subagent |
+| `spawn.label` | string | Optional. Short identifier |
+| `spawn.agent_id` | string | Optional. Target agent ID |
+| `spawn.guidance` | string | Optional. Additional instructions |
+
+**Example:**
+
+```json
+{
+  "action": "add",
+  "message": "Daily health check",
+  "cron_expr": "0 9 * * *",
+  "spawn": {
+    "task": "Perform heartbeat check and report status",
+    "label": "heartbeat",
+    "agent_id": "coder"
+  }
+}
+```
+
+**Behavior:**
+- When `spawn` is set, `deliver` is automatically `false`
+- `at` jobs (one-time) are deleted after execution
+- `every` and `cron` jobs remain active until removed or disabled
+
 ## Environment Variables
 
 All configuration options can be overridden via environment variables with the format `LELE_TOOLS_<SECTION>_<KEY>`:
