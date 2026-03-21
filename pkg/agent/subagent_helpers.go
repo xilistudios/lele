@@ -3,11 +3,21 @@ package agent
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
+)
+
+// Pre-compiled regex patterns for basic verbose formatting
+var (
+	// Matches verbose tool notification lines like "🛠️ Exec: push git changes"
+	toolLineRegex  = regexp.MustCompile(`(?m)^🛠️ \w+:.*$`)
+	// Matches multiple consecutive empty lines
+	multipleNewlinesRegex = regexp.MustCompile(`\n{3,}`)
 )
 
 func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID string, result *tools.ToolResult) {
@@ -23,6 +33,15 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID strin
 		return
 	}
 
+	// Check verbose level and apply formatting if in basic mode
+	// Note: verboseManager might be nil in some contexts, so we check for it
+	if al.verboseManager != nil {
+		level := al.verboseManager.GetLevel(sessionKey)
+		if level == session.VerboseBasic {
+			content = formatBasicVerboseSubagentContent(content)
+		}
+	}
+
 	al.bus.PublishInbound(bus.InboundMessage{
 		Channel:    "system",
 		SenderID:   "subagent",
@@ -30,6 +49,92 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID strin
 		Content:    content,
 		SessionKey: sessionKey,
 	})
+}
+
+// formatBasicVerboseSubagentContent formats subagent content for basic verbose mode.
+// It simplifies verbose tool call notifications while preserving important status info.
+func formatBasicVerboseSubagentContent(content string) string {
+	if content == "" {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	var resultLines []string
+	var inDetails bool
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check if this line matches a verbose tool notification pattern
+		if toolLineRegex.MatchString(trimmed) {
+			// Skip this line in basic mode - it's too verbose
+			// But if it's the last line, keep it
+			if i == len(lines)-1 {
+				resultLines = append(resultLines, line)
+			}
+			continue
+		}
+
+		// Skip the blank line after tool notifications
+		if trimmed == "" && i > 0 && toolLineRegex.MatchString(strings.TrimSpace(lines[i-1])) {
+			continue
+		}
+
+		// Skip tool result headers like "📤 Output:", "✅ Success:", etc.
+		if strings.HasPrefix(trimmed, "📤") || strings.HasPrefix(trimmed, "📥") {
+			continue
+		}
+
+		// Skip result line markers in basic mode
+		if strings.HasPrefix(trimmed, "→") || strings.HasPrefix(trimmed, "Result:") {
+			continue
+		}
+
+		// Check if entering details section (before checking status lines)
+		isDetailsHeader := strings.HasPrefix(trimmed, "Details:") || strings.HasPrefix(trimmed, "DETAILS:")
+
+		// Preserve important status lines
+		if strings.HasPrefix(trimmed, "STATUS:") ||
+			strings.HasPrefix(trimmed, "Summary:") ||
+			strings.HasPrefix(trimmed, "SUMMARY:") ||
+			strings.HasPrefix(trimmed, "Details:") ||
+			strings.HasPrefix(trimmed, "DETAILS:") ||
+			strings.HasPrefix(trimmed, "Context needed:") ||
+			strings.HasPrefix(trimmed, "CONTEXT_NEEDED:") {
+			resultLines = append(resultLines, line)
+			// If this was a details header, mark that we're now in details section
+			if isDetailsHeader {
+				inDetails = true
+			}
+			continue
+		}
+
+		// Process lines inside the details section
+		if inDetails {
+			// Keep details but truncate if too long
+			if len(trimmed) > 300 {
+				// Preserve indentation when truncating
+				leadingSpaces := len(line) - len(strings.TrimLeft(line, " \t"))
+				if leadingSpaces > 0 {
+					resultLines = append(resultLines, line[:leadingSpaces]+trimmed[:297]+"...")
+				} else {
+					resultLines = append(resultLines, trimmed[:297]+"...")
+				}
+			} else {
+				resultLines = append(resultLines, line)
+			}
+			continue
+		}
+
+		// Keep everything else (preserving original formatting)
+		resultLines = append(resultLines, line)
+	}
+
+	// Join and clean up multiple empty lines
+	result := strings.Join(resultLines, "\n")
+	result = multipleNewlinesRegex.ReplaceAllString(result, "\n\n")
+
+	return strings.TrimSpace(result)
 }
 
 func formatSubagentsCommand(ctx context.Context, tc toolCoordinator, sessionKey string, args []string) string {
