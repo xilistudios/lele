@@ -205,17 +205,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			}
 			// Add reasoning config if available
 			if agent.Reasoning != nil {
-				llmOptions["reasoning"] = map[string]interface{}{}
+				reasoningMap := map[string]interface{}{}
 				if agent.Reasoning.Effort != nil {
-					llmOptions["reasoning"] = map[string]interface{}{
-						"effort": *agent.Reasoning.Effort,
-					}
-					if agent.Reasoning.Summary != nil {
-						llmOptions["reasoning"] = map[string]interface{}{
-							"effort":  *agent.Reasoning.Effort,
-							"summary": *agent.Reasoning.Summary,
-						}
-					}
+					reasoningMap["effort"] = *agent.Reasoning.Effort
+				}
+				if agent.Reasoning.Summary != nil {
+					reasoningMap["summary"] = *agent.Reasoning.Summary
+				}
+				if len(reasoningMap) > 0 {
+					llmOptions["reasoning"] = reasoningMap
+					logger.DebugCF("agent", "Reasoning config applied", map[string]interface{}{
+						"agent_id": agent.ID,
+						"effort":   agent.Reasoning.Effort,
+						"summary":  agent.Reasoning.Summary,
+					})
 				}
 			}
 

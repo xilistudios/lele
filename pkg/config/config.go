@@ -339,6 +339,16 @@ type ProviderModelConfig struct {
 	Reasoning     *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
+// Validate checks if the provider model config is valid.
+func (p *ProviderModelConfig) Validate() error {
+	if p.Reasoning != nil {
+		if err := p.Reasoning.Validate(); err != nil {
+			return fmt.Errorf("model %q: %w", p.Model, err)
+		}
+	}
+	return nil
+}
+
 type NamedProviderConfig struct {
 	Type string `json:"type,omitempty"`
 	ProviderConfig
@@ -369,6 +379,12 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 		}
 		if named.Type == "" {
 			named.Type = name
+		}
+		// Validate model configs
+		for modelName, modelCfg := range named.Models {
+			if err := modelCfg.Validate(); err != nil {
+				return fmt.Errorf("provider %q, model %q: %w", name, modelName, err)
+			}
 		}
 		p.Named[name] = named
 	}
