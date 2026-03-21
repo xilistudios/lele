@@ -198,6 +198,30 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var err error
 
 		callLLM := func() (*providers.LLMResponse, error) {
+			// Build LLM options including reasoning config
+			llmOptions := map[string]interface{}{
+				"max_tokens":  agent.MaxTokens,
+				"temperature": agent.Temperature,
+			}
+			// Add reasoning config if available
+			if agent.Reasoning != nil {
+				reasoningMap := map[string]interface{}{}
+				if agent.Reasoning.Effort != nil {
+					reasoningMap["effort"] = *agent.Reasoning.Effort
+				}
+				if agent.Reasoning.Summary != nil {
+					reasoningMap["summary"] = *agent.Reasoning.Summary
+				}
+				if len(reasoningMap) > 0 {
+					llmOptions["reasoning"] = reasoningMap
+					logger.DebugCF("agent", "Reasoning config applied", map[string]interface{}{
+						"agent_id": agent.ID,
+						"effort":   agent.Reasoning.Effort,
+						"summary":  agent.Reasoning.Summary,
+					})
+				}
+			}
+
 			if len(candidates) > 1 && lr.al.fallback != nil {
 				fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
@@ -208,10 +232,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						}
 						fullModel := FormatProviderModel(provider, model)
 						log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
-						return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, map[string]interface{}{
-							"max_tokens":  agent.MaxTokens,
-							"temperature": agent.Temperature,
-						})
+						return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
 					},
 				)
 				if fbErr != nil {
@@ -224,10 +245,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 				return fbResult.Response, nil
 			}
-			return agent.Provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
-				"max_tokens":  agent.MaxTokens,
-				"temperature": agent.Temperature,
-			})
+			return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOptions)
 		}
 
 		// Retry loop for context/token errors

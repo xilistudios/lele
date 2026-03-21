@@ -26,6 +26,7 @@ type AgentInstance struct {
 	Temperature    float64
 	ContextWindow  int
 	SupportsImages bool
+	Reasoning      *config.ReasoningConfig // Reasoning configuration for the model
 	Provider       providers.LLMProvider
 	Sessions       *session.SessionManager
 	ContextBuilder *ContextBuilder
@@ -105,6 +106,14 @@ func getSupportsImages(cfg *config.Config, model string, provider string) bool {
 		return modelCfg.Vision
 	}
 	return false
+}
+
+// getReasoningConfig returns the reasoning configuration for a model from provider config.
+func getReasoningConfig(cfg *config.Config, model string, provider string) *config.ReasoningConfig {
+	if modelCfg, ok := getProviderModelConfig(cfg, model, provider); ok && modelCfg.Reasoning != nil {
+		return modelCfg.Reasoning
+	}
+	return nil
 }
 
 func NewAgentInstance(
@@ -189,6 +198,7 @@ func NewAgentInstance(
 		Temperature:    temperature,
 		ContextWindow:  getContextWindow(cfg, model, defaults.Provider),
 		SupportsImages: getSupportsImages(cfg, model, defaults.Provider),
+		Reasoning:      getReasoningConfig(cfg, model, defaults.Provider),
 		Provider:       provider,
 		Sessions:       sessionsManager,
 		ContextBuilder: contextBuilder,

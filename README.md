@@ -659,6 +659,59 @@ Lele routes providers by protocol family:
 
 This keeps the runtime lightweight while making new OpenAI-compatible backends mostly a config operation (`api_base` + `api_key`).
 
+### Per-Model Configuration
+
+You can configure individual parameters (temperature, reasoning, vision, context window) for specific models within a provider:
+
+```json
+{
+  "providers": {
+    "my-openai-compatible": {
+      "type": "openai",
+      "api_key": "sk-xxx",
+      "api_base": "https://example.com/v1",
+      "models": {
+        "fast": {
+          "model": "gpt-4o-mini",
+          "vision": true,
+          "temperature": 0.7
+        },
+        "o4-mini": {
+          "model": "o4-mini",
+          "context_window": 200000,
+          "max_tokens": 100000,
+          "temperature": 1.0,
+          "reasoning": {
+            "effort": "medium",
+            "summary": "auto"
+          }
+        },
+        "qwen3-thinking": {
+          "model": "qwen3.5-397b-a17b-thinking",
+          "context_window": 128000,
+          "temperature": 0.8,
+          "reasoning": {
+            "effort": "high"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | The actual model identifier sent to the API |
+| `context_window` | int | Maximum context window size (tokens) |
+| `max_tokens` | int | Maximum tokens to generate |
+| `temperature` | float | Sampling temperature (overrides agent default) |
+| `vision` | bool | Enable image/vision support |
+| `reasoning.effort` | string | Reasoning effort: `low`, `medium`, `high` |
+| `reasoning.summary` | string | Reasoning summary: `auto`, `detailed`, `concise` |
+
+> **Note**: The `reasoning` parameter is supported by OpenAI o-series models and compatible providers. It controls how much reasoning effort the model uses before responding.
+
 <details>
 <summary><b>Zhipu</b></summary>
 

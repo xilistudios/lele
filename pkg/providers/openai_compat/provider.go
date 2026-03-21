@@ -96,6 +96,20 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		}
 	}
 
+	// Handle reasoning config (for OpenAI o-series and compatible models)
+	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
+		reasoningBody := map[string]interface{}{}
+		if effort, ok := reasoning["effort"].(string); ok && effort != "" {
+			reasoningBody["effort"] = effort
+		}
+		if summary, ok := reasoning["summary"].(string); ok && summary != "" {
+			reasoningBody["summary"] = summary
+		}
+		if len(reasoningBody) > 0 {
+			requestBody["reasoning"] = reasoningBody
+		}
+	}
+
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
