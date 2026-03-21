@@ -298,12 +298,45 @@ type OpenAIProviderConfig struct {
 	WebSearch bool `json:"web_search" env:"LELE_PROVIDERS_OPENAI_WEB_SEARCH"`
 }
 
+// ReasoningConfig holds reasoning-related configuration for models that support it.
+// Based on OpenAI's reasoning API specification.
+type ReasoningConfig struct {
+	Effort  *string `json:"effort,omitempty"`  // "low", "medium", "high"
+	Summary *string `json:"summary,omitempty"` // "auto", "detailed", "concise"
+}
+
+// Validate checks if the reasoning config has valid values.
+func (r *ReasoningConfig) Validate() error {
+	if r == nil {
+		return nil
+	}
+	validEfforts := map[string]bool{"low": true, "medium": true, "high": true}
+	validSummaries := map[string]bool{"auto": true, "detailed": true, "concise": true}
+
+	if r.Effort != nil {
+		if !validEfforts[strings.ToLower(*r.Effort)] {
+			return fmt.Errorf("invalid reasoning effort: %q (must be low, medium, or high)", *r.Effort)
+		}
+		low := strings.ToLower(*r.Effort)
+		r.Effort = &low
+	}
+	if r.Summary != nil {
+		if !validSummaries[strings.ToLower(*r.Summary)] {
+			return fmt.Errorf("invalid reasoning summary: %q (must be auto, detailed, or concise)", *r.Summary)
+		}
+		low := strings.ToLower(*r.Summary)
+		r.Summary = &low
+	}
+	return nil
+}
+
 type ProviderModelConfig struct {
-	ContextWindow int      `json:"context_window,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	MaxTokens     int      `json:"max_tokens,omitempty"`
-	Temperature   *float64 `json:"temperature,omitempty"`
-	Vision        bool     `json:"vision,omitempty"`
+	ContextWindow int              `json:"context_window,omitempty"`
+	Model         string           `json:"model,omitempty"`
+	MaxTokens     int              `json:"max_tokens,omitempty"`
+	Temperature   *float64         `json:"temperature,omitempty"`
+	Vision        bool             `json:"vision,omitempty"`
+	Reasoning     *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type NamedProviderConfig struct {
