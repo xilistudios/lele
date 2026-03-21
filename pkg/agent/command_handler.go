@@ -329,18 +329,26 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 			apiKey = apiKey[:6] + "…" + apiKey[len(apiKey)-4:]
 		}
 	}
+	
+	// Get token counts from session
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	totalTokens := inputTokens + outputTokens
+	
+	// Estimate current context from history
 	history := agent.Sessions.GetHistory(sessionKey)
-	tokenIn := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
+	contextTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
+	
 	contextWindow := agent.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = 128000
 	}
-	contextPercent := tokenIn * 100 / contextWindow
+	contextPercent := contextTokens * 100 / contextWindow
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
-	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
-		gatewayVersion(), gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
+	
+	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
+		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, "medium")
 }
 
 // gatewayVersion returns the gateway version from build info.

@@ -33,6 +33,7 @@ type sessionManagerImpl struct {
 type sessionManager interface {
 	maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats
 	summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats
+	AddTokenCounts(sessionKey string, inputTokens, outputTokens int)
 }
 
 // newSessionManager creates a new session manager instance.
@@ -262,4 +263,14 @@ func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey s
 		}
 	}
 	return agent.Model
+}
+
+// AddTokenCounts adds token counts to a session.
+func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
+	// Find the default agent to get its Sessions manager
+	agent := sm.al.registry.GetDefaultAgent()
+	if agent == nil {
+		return
+	}
+	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 }

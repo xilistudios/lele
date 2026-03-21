@@ -322,6 +322,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
+		// Track token usage from response
+		if response.Usage != nil && opts.SessionKey != "" {
+			lr.al.sessionManager.AddTokenCounts(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+			logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
+				"agent_id":        agent.ID,
+				"session_key":     opts.SessionKey,
+				"prompt_tokens":   response.Usage.PromptTokens,
+				"completion_tokens": response.Usage.CompletionTokens,
+				"total_tokens":    response.Usage.TotalTokens,
+			})
+		}
+
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
