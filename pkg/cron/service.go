@@ -22,13 +22,22 @@ type CronSchedule struct {
 	TZ      string `json:"tz,omitempty"`
 }
 
+// SpawnConfig contains configuration for spawning a subagent from a cron job
+type SpawnConfig struct {
+	Task     string `json:"task"`
+	Label    string `json:"label,omitempty"`
+	AgentID  string `json:"agent_id,omitempty"`
+	Guidance string `json:"guidance,omitempty"`
+}
+
 type CronPayload struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-	Command string `json:"command,omitempty"`
-	Deliver bool   `json:"deliver"`
-	Channel string `json:"channel,omitempty"`
-	To      string `json:"to,omitempty"`
+	Kind    string       `json:"kind"`
+	Message string       `json:"message"`
+	Command string       `json:"command,omitempty"`
+	Deliver bool         `json:"deliver"`
+	Channel string       `json:"channel,omitempty"`
+	To      string       `json:"to,omitempty"`
+	Spawn   *SpawnConfig `json:"spawn,omitempty"`
 }
 
 type CronJobState struct {

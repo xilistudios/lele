@@ -115,3 +115,49 @@ WhatsApp/Telegram: No headers - use bold or CAPS for emphasis
 - Remember important information in your memory files
 - Be proactive and helpful
 - Learn from user feedback
+
+## Cron & Spawn
+
+### Scheduling Tasks (Cron Tool)
+
+Use the `cron` tool to schedule reminders, tasks, or system commands.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `action` | string | `add`, `list`, `remove`, `enable`, `disable` |
+| `message` | string | Task/reminder message |
+| `at_seconds` | int | One-time: seconds from now (e.g., 600 = 10 min) |
+| `every_seconds` | int | Recurring: interval in seconds (e.g., 3600 = hourly) |
+| `cron_expr` | string | Cron expression (e.g., `0 9 * * *` = daily 9am) |
+| `deliver` | bool | true = send direct, false = process with agent |
+| `command` | string | Shell command to execute |
+| `spawn` | object | Delegate to a subagent |
+
+### Spawning Subagents from Cron
+
+When a task requires a subagent, use the `spawn` parameter:
+
+```json
+{
+  "action": "add",
+  "message": "Daily system health check",
+  "cron_expr": "0 9 * * *",
+  "spawn": {
+    "task": "Perform heartbeat check and report status",
+    "label": "heartbeat",
+    "agent_id": "coder",
+    "guidance": "Report concisely"
+  }
+}
+```
+
+**Spawn fields:**
+- `task` (required): Task description for the subagent
+- `label` (optional): Short identifier
+- `agent_id` (optional): Target agent ID
+- `guidance` (optional): Additional instructions
+
+**Behavior:**
+- When `spawn` is set, `deliver` is automatically `false`
+- `at` jobs (one-time) are deleted after execution
+- `every` and `cron` jobs remain active until removed

@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -359,6 +360,11 @@ func (mp *messageProcessorImpl) ProcessDirect(ctx context.Context, content, sess
 
 // ProcessDirectWithChannel processes a message directly with channel information.
 func (mp *messageProcessorImpl) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
+	// Check for SYSTEM_SPAWN: prefix
+	if strings.HasPrefix(content, "SYSTEM_SPAWN:") {
+		return mp.handleSystemSpawn(ctx, content, sessionKey, channel, chatID)
+	}
+
 	msg := bus.InboundMessage{
 		Channel:    channel,
 		SenderID:   "cron",
@@ -368,6 +374,119 @@ func (mp *messageProcessorImpl) ProcessDirectWithChannel(ctx context.Context, co
 	}
 
 	return mp.processMessage(ctx, msg)
+}
+
+// handleSystemSpawn parses SYSTEM_SPAWN: message and spawns a subagent
+func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
+	logger.InfoCF("agent", "Handling SYSTEM_SPAWN request",
+		map[string]interface{}{
+			"session_key": sessionKey,
+			"channel":     channel,
+			"chat_id":     chatID,
+		})
+
+	// Parse the spawn configuration from the message
+	spawnConfig := mp.parseSystemSpawnMessage(content)
+
+	// Get the agent for this session to access its subagent manager
+	agentID := mp.al.GetSessionAgent(sessionKey)
+	if agentID == "" {
+		agentID = mp.al.GetDefaultAgentID()
+	}
+
+	subagentManager, ok := mp.al.subagents[agentID]
+	if !ok || subagentManager == nil {
+		// Try default agent's subagent manager
+		subagentManager = mp.al.subagents[mp.al.GetDefaultAgentID()]
+	}
+
+	if subagentManager == nil {
+		return "", fmt.Errorf("no subagent manager available for agent %s", agentID)
+	}
+
+	// Build callback to send result to user when subagent completes
+	callback := func(ctx context.Context, result *tools.ToolResult) {
+		var responseContent string
+		if result.IsError {
+			responseContent = fmt.Sprintf("❌ Scheduled task failed:\n%s", result.ForLLM)
+		} else {
+			responseContent = fmt.Sprintf("✅ Scheduled task completed:\n%s", result.ForLLM)
+		}
+
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel: channel,
+			ChatID:  chatID,
+			Content: responseContent,
+		})
+	}
+
+	// Spawn the subagent
+	_, err := subagentManager.Spawn(
+		ctx,
+		spawnConfig.Task,
+		spawnConfig.Label,
+		spawnConfig.AgentID,
+		channel,
+		chatID,
+		callback,
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to spawn subagent: %w", err)
+	}
+
+	return fmt.Sprintf("Scheduled task spawned as subagent (label: %s)", spawnConfig.Label), nil
+}
+
+// spawnConfig holds parsed SYSTEM_SPAWN configuration
+type spawnConfig struct {
+	Task     string
+	Label    string
+	AgentID  string
+	Guidance string
+	Context  string
+}
+
+// parseSystemSpawnMessage parses a SYSTEM_SPAWN: message
+func (mp *messageProcessorImpl) parseSystemSpawnMessage(content string) spawnConfig {
+	config := spawnConfig{}
+
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "SYSTEM_SPAWN:" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "TASK:") {
+			config.Task = strings.TrimSpace(line[5:])
+		} else if strings.HasPrefix(line, "LABEL:") {
+			config.Label = strings.TrimSpace(line[6:])
+		} else if strings.HasPrefix(line, "AGENT_ID:") {
+			config.AgentID = strings.TrimSpace(line[9:])
+		} else if strings.HasPrefix(line, "GUIDANCE:") {
+			config.Guidance = strings.TrimSpace(line[9:])
+		} else if strings.HasPrefix(line, "CONTEXT:") {
+			config.Context = strings.TrimSpace(line[8:])
+		}
+	}
+
+	// If no label, generate one from task
+	if config.Label == "" {
+		config.Label = utils.Truncate(config.Task, 30)
+	}
+
+	// If guidance was provided, append it to the task
+	if config.Guidance != "" {
+		config.Task = config.Task + "\n\nAdditional guidance: " + config.Guidance
+	}
+
+	// If context was provided, prepend it
+	if config.Context != "" {
+		config.Task = "Context: " + config.Context + "\n\nTask: " + config.Task
+	}
+
+	return config
 }
 
 // ProcessHeartbeat processes a heartbeat request without session history.

@@ -110,6 +110,92 @@ The cron tool is used for scheduling periodic tasks.
 |--------|------|---------|-------------|
 | `exec_timeout_minutes` | int | 5 | Execution timeout in minutes, 0 means no limit |
 
+### Cron Job Execution Modes
+
+Cron jobs have three execution modes based on the payload configuration:
+
+#### 1. Direct Delivery (`deliver: true`)
+
+Sends the message directly to the channel without agent processing. Useful for simple reminders.
+
+```json
+{
+  "action": "add",
+  "message": "Reminder: Submit your report",
+  "cron_expr": "0 9 * * *",
+  "deliver": true
+}
+```
+
+#### 2. Agent Processing (`deliver: false`)
+
+Processes the message as a normal conversation with the main agent. The agent can use tools and perform complex tasks.
+
+```json
+{
+  "action": "add",
+  "message": "Analyze system logs and report issues",
+  "cron_expr": "0 9 * * *",
+  "deliver": false
+}
+```
+
+#### 3. Command Execution (`command`)
+
+Executes a shell command directly and sends the output to the channel. Automatically sets `deliver: false`.
+
+```json
+{
+  "action": "add",
+  "message": "Disk usage check",
+  "cron_expr": "0 9 * * *",
+  "command": "df -h"
+}
+```
+
+#### 4. Subagent Spawn (`spawn`)
+
+Spawns a subagent to handle the task. Generates a `SYSTEM_SPAWN:` message that delegates to a subagent with specific instructions.
+
+```json
+{
+  "action": "add",
+  "message": "Daily health check",
+  "cron_expr": "0 9 * * *",
+  "spawn": {
+    "task": "Perform heartbeat check and report status",
+    "label": "heartbeat",
+    "agent_id": "coder",
+    "guidance": "Report only if there are problems"
+  }
+}
+```
+
+**Spawn Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `task` | string | Required. Task description for the subagent |
+| `label` | string | Optional. Short identifier |
+| `agent_id` | string | Optional. Target agent ID |
+| `guidance` | string | Optional. Additional instructions |
+
+**Generated SYSTEM_SPAWN: Message Format:**
+
+```
+SYSTEM_SPAWN:
+TASK: <task>
+LABEL: <label>
+AGENT_ID: <agent_id>
+GUIDANCE: <guidance>
+CONTEXT: <original message>
+```
+
+**Behavior Notes:**
+- When `spawn` is set, `deliver` is automatically `false`
+- `at` jobs (one-time) are deleted after execution
+- `every` and `cron` jobs remain active until removed or disabled
+
 ## Environment Variables
 
 All configuration options can be overridden via environment variables with the format `LELE_TOOLS_<SECTION>_<KEY>`:
