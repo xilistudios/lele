@@ -8,7 +8,9 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1816,4 +1818,84 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 	}
 
 	t.Logf("Status with zero tokens: %s", result)
+}
+
+// TestHandleStatusCommand_ContextIncludesSystemPrompt verifies that /status includes system prompt tokens
+// in the context calculation (not just history tokens).
+func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create bootstrap files to have non-empty system prompt
+	os.MkdirAll(filepath.Join(tmpDir, "memory"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte("# SOUL\nTest soul content with enough text"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# AGENTS\nTest agents content with enough text"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "memory", "MEMORY.md"), []byte("# Memory\nTest memory content"), 0644)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	sessionKey := "test:context-tokens"
+	ch := newCommandHandler(al)
+
+	// Build system prompt to verify it's non-empty
+	agent := al.registry.GetDefaultAgent()
+	_ = agent.ContextBuilder.BuildSystemPrompt()
+
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/status",
+		SessionKey: sessionKey,
+	})
+
+	if !handled {
+		t.Error("Expected /status to be handled")
+	}
+
+	// Verify context is shown
+	if !strings.Contains(result, "Context:") {
+		t.Fatal("Expected 'Context:' in status output")
+	}
+
+	// Extract the context percentage
+	// Format: "📚 Context: ~1234/128000 (0%)"
+	contextIdx := strings.Index(result, "Context: ~")
+	if contextIdx == -1 {
+		t.Fatal("Could not find 'Context: ~' in status output")
+	}
+
+	// Parse the context number
+	contextPart := result[contextIdx+len("Context: ~"):]
+	var contextTokens int
+	n, _ := fmt.Sscanf(contextPart, "%d", &contextTokens)
+	if n != 1 {
+		t.Fatal("Could not parse context tokens from status output")
+	}
+
+	// System prompt should contribute significant tokens
+	// With our bootstrap files (~150 chars), system prompt should be ~60 tokens minimum
+	// If status only counted history, it would show ~0-10 tokens for empty history
+	// So context should be > 50 tokens if system prompt is included
+	if contextTokens < 50 {
+		t.Errorf("Context tokens (%d) too low - seems system prompt not included. Expected > 50", contextTokens)
+	}
+
+	t.Logf("Context tokens: %d (includes system prompt with bootstrap files)", contextTokens)
 }

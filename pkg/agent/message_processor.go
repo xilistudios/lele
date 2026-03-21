@@ -526,18 +526,34 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 			apiKey = apiKey[:6] + "…" + apiKey[len(apiKey)-4:]
 		}
 	}
+
+	// Get token counts from session
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	totalTokens := inputTokens + outputTokens
+
+	// Calculate context tokens including system prompt (initial context)
 	history := agent.Sessions.GetHistory(sessionKey)
-	tokenIn := mp.estimateTokens(history)
+	historyTokens := mp.estimateTokens(history)
+	summary := agent.Sessions.GetSummary(sessionKey)
+	summaryTokens := mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+
+	// Build system prompt to get accurate token count
+	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+	systemTokens := mp.estimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
+
+	// Total context = system prompt + summary (if any) + history
+	contextTokens := systemTokens + summaryTokens + historyTokens
+
 	contextWindow := agent.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = 128000
 	}
-	contextPercent := tokenIn * 100 / contextWindow
+	contextPercent := contextTokens * 100 / contextWindow
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
-	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
-		gatewayVersion(), gatewayVersion(), currentModel, apiKey, tokenIn, tokenIn, contextWindow, contextPercent, sessionKey, originChannel, "medium")
+	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
+		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, "medium")
 }
 
 // handleNewCommand handles the /new command.

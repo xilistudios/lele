@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
 )
@@ -329,15 +330,24 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 			apiKey = apiKey[:6] + "…" + apiKey[len(apiKey)-4:]
 		}
 	}
-	
+
 	// Get token counts from session
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
 	totalTokens := inputTokens + outputTokens
-	
-	// Estimate current context from history
+
+	// Calculate context tokens including system prompt (initial context)
 	history := agent.Sessions.GetHistory(sessionKey)
-	contextTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
-	
+	historyTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
+	summary := agent.Sessions.GetSummary(sessionKey)
+	summaryTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+
+	// Build system prompt to get accurate token count
+	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+	systemTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
+
+	// Total context = system prompt + summary (if any) + history
+	contextTokens := systemTokens + summaryTokens + historyTokens
+
 	contextWindow := agent.ContextWindow
 	if contextWindow <= 0 {
 		contextWindow = 128000
@@ -346,7 +356,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
-	
+
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, "medium")
 }
