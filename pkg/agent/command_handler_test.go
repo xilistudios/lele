@@ -1655,3 +1655,165 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 		t.Errorf("Expected status response, got: %s", result)
 	}
 }
+
+// TestHandleStatusCommand_WithTokens tests /status command shows token counts
+func TestHandleStatusCommand_WithTokens(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Use the default agent's session directly
+	agent := al.registry.GetDefaultAgent()
+	sessionKey := "agent:main:main" // This is what the command handler will use
+
+	// Add some token counts to the session
+	agent.Sessions.AddTokenCounts(sessionKey, 150, 80)
+	agent.Sessions.AddMessage(sessionKey, "user", "test message")
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/status",
+	})
+
+	if !handled {
+		t.Error("Expected /status to be handled")
+	}
+
+	// Verify token information is present
+	if !strings.Contains(result, "Tokens:") {
+		t.Errorf("Expected 'Tokens:' in status, got: %s", result)
+	}
+
+	// The new format should show "X in / Y out (Z total)"
+	if !strings.Contains(result, "in") || !strings.Contains(result, "out") {
+		t.Errorf("Expected token format 'in / out', got: %s", result)
+	}
+
+	// Verify context information
+	if !strings.Contains(result, "Context:") {
+		t.Errorf("Expected 'Context:' in status, got: %s", result)
+	}
+
+	t.Logf("Status output: %s", result)
+}
+
+// TestHandleStatusCommand_TokenAccumulation tests that tokens accumulate correctly
+func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Use the default agent's session directly
+	agent := al.registry.GetDefaultAgent()
+	sessionKey := "agent:main:main" // This is what the command handler will use
+
+	// Add tokens multiple times to test accumulation
+	agent.Sessions.AddTokenCounts(sessionKey, 100, 50)
+	agent.Sessions.AddTokenCounts(sessionKey, 200, 75)
+	agent.Sessions.AddTokenCounts(sessionKey, 50, 25)
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/status",
+	})
+
+	if !handled {
+		t.Error("Expected /status to be handled")
+	}
+
+	// Total should be 350 in + 150 out = 500 total
+	if !strings.Contains(result, "350") || !strings.Contains(result, "150") || !strings.Contains(result, "500") {
+		t.Errorf("Expected accumulated tokens (350 in / 150 out / 500 total), got: %s", result)
+	}
+
+	t.Logf("Status with accumulated tokens: %s", result)
+}
+
+// TestHandleStatusCommand_ZeroTokens tests /status when no tokens have been used
+func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	agent := al.registry.GetDefaultAgent()
+	sessionKey := "agent:main:main"
+
+	// Don't add any tokens - should show zeros
+	agent.Sessions.AddMessage(sessionKey, "user", "test")
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/status",
+	})
+
+	if !handled {
+		t.Error("Expected /status to be handled")
+	}
+
+	// Should still show token format even with zeros
+	if !strings.Contains(result, "Tokens:") {
+		t.Errorf("Expected 'Tokens:' in status, got: %s", result)
+	}
+
+	t.Logf("Status with zero tokens: %s", result)
+}

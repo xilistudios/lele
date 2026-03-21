@@ -19,6 +19,9 @@ type Session struct {
 	VerboseLevel string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
 	Created      time.Time           `json:"created"`
 	Updated      time.Time           `json:"updated"`
+	// Token tracking
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
 type SessionManager struct {
@@ -334,6 +337,38 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	return sm.saveUnlocked(key)
 }
 
+// GetTokenCounts returns the input and output token counts for a session.
+func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens int) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return 0, 0
+	}
+	return session.InputTokens, session.OutputTokens
+}
+
+// AddTokenCounts adds token counts to a session.
+func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	session.InputTokens += inputTokens
+	session.OutputTokens += outputTokens
+	session.Updated = time.Now()
+}
+
 // saveUnlocked saves a session without acquiring the lock (caller must hold lock).
 func (sm *SessionManager) saveUnlocked(key string) error {
 	if sm.storage == "" {
@@ -352,11 +387,13 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	}
 
 	snapshot := Session{
-		Key:         stored.Key,
-		Summary:     stored.Summary,
-		VerboseMode: stored.VerboseMode,
-		Created:     stored.Created,
-		Updated:     stored.Updated,
+		Key:          stored.Key,
+		Summary:      stored.Summary,
+		VerboseMode:  stored.VerboseMode,
+		Created:      stored.Created,
+		Updated:      stored.Updated,
+		InputTokens:  stored.InputTokens,
+		OutputTokens: stored.OutputTokens,
 	}
 	if len(stored.Messages) > 0 {
 		snapshot.Messages = make([]providers.Message, len(stored.Messages))
