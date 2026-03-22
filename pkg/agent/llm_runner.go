@@ -13,6 +13,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/constants"
@@ -347,15 +348,32 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 
 		// Track token usage from response
-		if response.Usage != nil && opts.SessionKey != "" {
-			lr.al.sessionManager.AddTokenCounts(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
-			logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
-				"agent_id":          agent.ID,
-				"session_key":       opts.SessionKey,
-				"prompt_tokens":     response.Usage.PromptTokens,
-				"completion_tokens": response.Usage.CompletionTokens,
-				"total_tokens":      response.Usage.TotalTokens,
-			})
+		if opts.SessionKey != "" {
+			if response.Usage != nil && (response.Usage.PromptTokens > 0 || response.Usage.CompletionTokens > 0) {
+				lr.al.sessionManager.AddTokenCounts(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+				logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
+					"agent_id":          agent.ID,
+					"session_key":       opts.SessionKey,
+					"prompt_tokens":     response.Usage.PromptTokens,
+					"completion_tokens": response.Usage.CompletionTokens,
+					"total_tokens":      response.Usage.TotalTokens,
+				})
+			} else {
+				// Provider returned no usage data — estimate using 2.5 chars/token heuristic
+				var inputChars int
+				for _, msg := range messages {
+					inputChars += utf8.RuneCountInString(msg.Content)
+				}
+				inputEst := inputChars * 2 / 5
+				outputEst := utf8.RuneCountInString(response.Content) * 2 / 5
+				lr.al.sessionManager.AddTokenCounts(opts.SessionKey, inputEst, outputEst)
+				logger.DebugCF("agent", "Token usage estimated (provider returned no usage data)", map[string]interface{}{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"input_est":   inputEst,
+					"output_est":  outputEst,
+				})
+			}
 		}
 
 		// Check if no tool calls - we're done
