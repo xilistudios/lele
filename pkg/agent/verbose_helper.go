@@ -112,13 +112,23 @@ func formatBasicWebFetch(args map[string]interface{}) string {
 }
 
 func formatBasicMessage(args map[string]interface{}) string {
-	target := "unknown"
-	if t, ok := args["target"].(string); ok && t != "" {
-		target = t
+	channel := "unknown"
+	if c, ok := args["channel"].(string); ok && c != "" {
+		channel = c
+	}
+	
+	chatID := ""
+	if c, ok := args["chat_id"].(string); ok && c != "" {
+		chatID = c
+	}
+	
+	target := channel
+	if chatID != "" {
+		target = fmt.Sprintf("%s:%s", channel, chatID)
 	}
 
-	if message, ok := args["message"].(string); ok && message != "" {
-		preview := message
+	if content, ok := args["content"].(string); ok && content != "" {
+		preview := content
 		if len(preview) > 50 {
 			preview = preview[:47] + "..."
 		}
