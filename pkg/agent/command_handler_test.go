@@ -916,7 +916,7 @@ func TestHandleSubagentsCommand_Continue(t *testing.T) {
 		SenderID:   "user1",
 		ChatID:     "chat1",
 		Content:    "/subagents continue subagent-9 use the main workspace",
-		SessionKey: "telegram:chat1",
+		SessionKey: "agent:telegram:chat1",
 	})
 
 	if !handled {
@@ -925,8 +925,8 @@ func TestHandleSubagentsCommand_Continue(t *testing.T) {
 	if result != stub.response {
 		t.Fatalf("Unexpected response: %s", result)
 	}
-	if stub.lastSessionKey != "telegram:chat1" {
-		t.Fatalf("Expected session key telegram:chat1, got %s", stub.lastSessionKey)
+	if stub.lastSessionKey != "agent:main:main" {
+		t.Fatalf("Expected session key agent:main:main, got %s", stub.lastSessionKey)
 	}
 	if stub.lastTaskID != "subagent-9" {
 		t.Fatalf("Expected task id subagent-9, got %s", stub.lastTaskID)
@@ -965,7 +965,7 @@ func TestHandleSubagentsCommand_ContinueUsage(t *testing.T) {
 		SenderID:   "user1",
 		ChatID:     "chat1",
 		Content:    "/subagents continue subagent-9",
-		SessionKey: "telegram:chat1",
+		SessionKey: "agent:telegram:chat1",
 	})
 
 	if !handled {

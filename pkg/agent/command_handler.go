@@ -62,10 +62,11 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		agent = ch.al.registry.GetDefaultAgent()
 	}
 	sessionKey := route.SessionKey
-	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
-			sessionKey = msg.SessionKey
-		}
+	if msg.SessionKey != "" && strings.HasPrefix(msg.SessionKey, "agent:") {
+		// Only accept agent-scoped session keys from messages (e.g., "agent:coder:telegram:123")
+		// Channel-specific keys like "telegram:123" are ignored to ensure consistency
+		// with the router's generated session key format.
+		sessionKey = msg.SessionKey
 	}
 	if sessionAgentID := ch.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {

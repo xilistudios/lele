@@ -257,14 +257,23 @@ func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey s
 
 // AddTokenCounts adds token counts to a session.
 func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
-	parsed := routing.ParseAgentSessionKey(sessionKey)
-	if parsed == nil {
-		return
-	}
+	var agent *AgentInstance
+	var ok bool
 
-	agent, ok := sm.al.registry.GetAgent(parsed.AgentID)
-	if !ok || agent == nil {
-		return
+	// Try to parse session key with agent prefix (e.g., "agent:coder:telegram:12345")
+	parsed := routing.ParseAgentSessionKey(sessionKey)
+	if parsed != nil {
+		agent, ok = sm.al.registry.GetAgent(parsed.AgentID)
+		if !ok || agent == nil {
+			return
+		}
+	} else {
+		// Session key doesn't have agent prefix (e.g., "telegram:12345")
+		// Use the default agent
+		agent = sm.al.registry.GetDefaultAgent()
+		if agent == nil {
+			return
+		}
 	}
 
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
