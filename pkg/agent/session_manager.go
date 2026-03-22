@@ -18,6 +18,7 @@ import (
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
 )
 
 // sessionManagerImpl implements the sessionManager interface for managing
@@ -267,10 +268,15 @@ func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey s
 
 // AddTokenCounts adds token counts to a session.
 func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
-	// Find the default agent to get its Sessions manager
-	agent := sm.al.registry.GetDefaultAgent()
-	if agent == nil {
+	parsed := routing.ParseAgentSessionKey(sessionKey)
+	if parsed == nil {
 		return
 	}
+
+	agent, ok := sm.al.registry.GetAgent(parsed.AgentID)
+	if !ok || agent == nil {
+		return
+	}
+
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 }
