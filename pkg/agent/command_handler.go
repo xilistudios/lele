@@ -301,7 +301,20 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
 
-	// Store selected agent and its model for this session
+	// Reset the new agent's session so old history for this session key doesn't bleed through.
+	// This also clears any stale model override; we set the new model explicitly below.
+	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
+		agentName := agent.Name
+		if agentName == "" {
+			agentName = agentID
+		}
+		// Bind agent even if session reset failed
+		ch.al.sessionAgents.Store(sessionKey, agentID)
+		ch.al.sessionModels.Store(sessionKey, agentModel)
+		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, err)
+	}
+
+	// Bind after reset so sessionModels is not wiped by resetAgentSession
 	ch.al.sessionAgents.Store(sessionKey, agentID)
 	ch.al.sessionModels.Store(sessionKey, agentModel)
 

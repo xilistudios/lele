@@ -85,8 +85,8 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
 
-	// Need at least system prompt + 3 messages to summarize (keep last 2 exchanges)
-	if len(history) <= 3 {
+	// Need at least 3 messages to summarize (keep last 2 for continuity)
+	if len(history) <= 2 {
 		return nil
 	}
 
@@ -94,8 +94,9 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	beforeMessages := len(history)
 	beforeTokens := sm.estimateTokens(history)
 
-	// Keep system prompt [0] and last 2 messages for continuity
-	toSummarize := history[1 : len(history)-2] // Everything between system and last 2
+	// Summarize everything except the last 2 messages (kept for continuity).
+	// Note: history contains only user/assistant/tool messages — no system prompt.
+	toSummarize := history[:len(history)-2]
 
 	if len(toSummarize) == 0 {
 		return nil
@@ -143,7 +144,8 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	}
 
 	agent.Sessions.SetSummary(sessionKey, finalSummary)
-	agent.Sessions.TruncateHistory(sessionKey, 4)
+	// Keep only the last 2 messages (the ones not summarized above)
+	agent.Sessions.TruncateHistory(sessionKey, 2)
 	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats
@@ -183,17 +185,16 @@ func (sm *sessionManagerImpl) summarizeBatch(ctx context.Context, agent *AgentIn
 }
 
 // forceCompression aggressively reduces context when the limit is hit.
-// It drops the oldest 50% of messages (keeping system prompt and last user message).
+// It drops the oldest 50% of messages (keeping the last user message).
 func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) <= 4 {
 		return
 	}
 
-	// Keep system prompt (usually [0]) and the very last message (user's trigger)
-	// We want to drop the oldest half of the *conversation*
-	// Assuming [0] is system, [1:] is conversation
-	conversation := history[1 : len(history)-1]
+	// history contains only user/assistant/tool messages — no system prompt.
+	// Drop the oldest half of the conversation, preserving the last message.
+	conversation := history[:len(history)-1]
 	if len(conversation) == 0 {
 		return
 	}
@@ -213,21 +214,9 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	droppedCount := mid
 	keptConversation := conversation[mid:]
 
-	newHistory := make([]providers.Message, 0)
-	newHistory = append(newHistory, history[0]) // System prompt
-
-	// Add a note about compression
-	compressionNote := fmt.Sprintf("[System: Emergency compression dropped %d oldest messages due to context limit]", droppedCount)
-	// If there was an existing summary, we might lose it if it was in the dropped part (which is just messages).
-	// The summary is stored separately in session.Summary, so it persists!
-	// We just need to ensure the user knows there's a gap.
-
-	// We only modify the messages list here
-	newHistory = append(newHistory, providers.Message{
-		Role:    "system",
-		Content: compressionNote,
-	})
-
+	// The summary is stored separately in session.Summary, so it persists.
+	// We only modify the messages list here.
+	newHistory := make([]providers.Message, 0, len(keptConversation)+1)
 	newHistory = append(newHistory, keptConversation...)
 	newHistory = append(newHistory, history[len(history)-1]) // Last message
 

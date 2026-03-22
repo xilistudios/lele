@@ -525,6 +525,8 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
 	agent.ContextBuilder.ResetMemoryContext()
+	// Clear any session-specific model override so the agent's default model is used
+	al.sessionModels.Delete(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		agent.Sessions.SetHistory(sessionKey, previousHistory)
 		agent.Sessions.SetSummary(sessionKey, previousSummary)

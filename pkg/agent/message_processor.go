@@ -705,7 +705,20 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 		agentModel = mp.al.cfg.Agents.Defaults.Model
 	}
 
-	// Store selected agent and its model for this session
+	// Reset the new agent's session so old history for this session key doesn't bleed through.
+	// This also clears any stale model override; we set the new model explicitly below.
+	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
+		agentName := agent.Name
+		if agentName == "" {
+			agentName = agentID
+		}
+		// Bind agent even if session reset failed
+		mp.al.sessionAgents.Store(sessionKey, agentID)
+		mp.al.sessionModels.Store(sessionKey, agentModel)
+		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, err)
+	}
+
+	// Bind after reset so sessionModels is not wiped by resetAgentSession
 	mp.al.sessionAgents.Store(sessionKey, agentID)
 	mp.al.sessionModels.Store(sessionKey, agentModel)
 
