@@ -26,6 +26,10 @@ type AgentProvidable interface {
 	GetVerboseLevel(sessionKey string) string
 	// SetVerboseLevel establece el nivel de verbose para una sesión
 	SetVerboseLevel(sessionKey string, level string) bool
+	// GetThinkLevel devuelve el nivel de razonamiento actual para una sesión
+	GetThinkLevel(sessionKey string) string
+	// SetThinkLevel establece el nivel de razonamiento para una sesión
+	SetThinkLevel(sessionKey string, level string) bool
 	// GetSubagents list los subagentes activos
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión

@@ -91,6 +91,8 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		return ch.handleModelCommand(agent, sessionKey, args), true
 	case "/verbose":
 		return ch.handleVerboseCommand(sessionKey), true
+	case "/think":
+		return ch.handleThinkCommand(sessionKey, args), true
 	case "/agent":
 		return ch.handleAgentCommand(sessionKey, args), true
 	case "/subagents":
@@ -258,6 +260,72 @@ func (ch *commandHandlerImpl) handleVerboseCommand(sessionKey string) string {
 	return "Unknown verbose level"
 }
 
+// thinkLevels is the ordered cycle for /think: off → low → medium → high → off.
+var thinkLevels = []string{"off", "low", "medium", "high"}
+
+// handleThinkCommand handles the /think command, cycling or setting the reasoning effort level.
+func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []string) string {
+	if sessionKey == "" {
+		return "Think mode requires a session context. Please start a conversation first."
+	}
+
+	// If an explicit level is provided, set it directly.
+	if len(args) > 0 {
+		level := strings.ToLower(args[0])
+		valid := false
+		for _, l := range thinkLevels {
+			if l == level {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: off, low, medium, high", args[0])
+		}
+		if level == "off" {
+			ch.al.sessionThinking.Delete(sessionKey)
+		} else {
+			ch.al.sessionThinking.Store(sessionKey, level)
+		}
+		return thinkLevelResponse(level)
+	}
+
+	// Cycle to the next level.
+	current := "off"
+	if v, ok := ch.al.sessionThinking.Load(sessionKey); ok {
+		if s, ok := v.(string); ok && s != "" {
+			current = s
+		}
+	}
+	next := "low"
+	for i, l := range thinkLevels {
+		if l == current {
+			next = thinkLevels[(i+1)%len(thinkLevels)]
+			break
+		}
+	}
+	if next == "off" {
+		ch.al.sessionThinking.Delete(sessionKey)
+	} else {
+		ch.al.sessionThinking.Store(sessionKey, next)
+	}
+	return thinkLevelResponse(next)
+}
+
+func thinkLevelResponse(level string) string {
+	switch level {
+	case "off":
+		return "🧠 Think mode **OFF**\nUsing default reasoning level from agent configuration."
+	case "low":
+		return "💡 Think mode **LOW**\nMinimal reasoning effort for fast responses."
+	case "medium":
+		return "🤔 Think mode **MEDIUM**\nBalanced reasoning effort."
+	case "high":
+		return "🧩 Think mode **HIGH**\nMaximum reasoning effort for complex tasks."
+	}
+	return "Unknown think level"
+}
+
 // handleAgentCommand handles the /agent command.
 func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []string) string {
 	if sessionKey == "" {
@@ -370,8 +438,18 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		contextPercent = 100
 	}
 
+	// Get think level for session
+	thinkLevel := "default"
+	if v, ok := ch.al.sessionThinking.Load(sessionKey); ok {
+		if s, ok := v.(string); ok && s != "" {
+			thinkLevel = s
+		}
+	} else if agent.Reasoning != nil && agent.Reasoning.Effort != nil {
+		thinkLevel = *agent.Reasoning.Effort
+	}
+
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
-		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, "medium")
+		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)
 }
 
 // gatewayVersion returns the gateway version from build info.

@@ -34,6 +34,7 @@ type AgentLoop struct {
 	summarizing      sync.Map
 	sessionModels    sync.Map
 	sessionAgents    sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking  sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
 	fallback         *providers.FallbackChain
 	channelManager   *channels.Manager
 	subagents        map[string]*tools.SubagentManager
@@ -525,8 +526,9 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
 	agent.ContextBuilder.ResetMemoryContext()
-	// Clear any session-specific model override so the agent's default model is used
+	// Clear any session-specific model and thinking overrides
 	al.sessionModels.Delete(sessionKey)
+	al.sessionThinking.Delete(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		agent.Sessions.SetHistory(sessionKey, previousHistory)
 		agent.Sessions.SetSummary(sessionKey, previousSummary)
@@ -586,6 +588,36 @@ func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
 		return false
 	}
 	al.verboseManager.SetLevel(sessionKey, session.VerboseLevel(level))
+	return true
+}
+
+// GetThinkLevel returns the current reasoning effort level for a session (implements AgentProvidable).
+func (al *AgentLoop) GetThinkLevel(sessionKey string) string {
+	if sessionKey == "" {
+		return "default"
+	}
+	if v, ok := al.sessionThinking.Load(sessionKey); ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return "default"
+}
+
+// SetThinkLevel sets the reasoning effort level for a session (implements AgentProvidable).
+func (al *AgentLoop) SetThinkLevel(sessionKey string, level string) bool {
+	if sessionKey == "" {
+		return false
+	}
+	validLevels := map[string]bool{"off": true, "low": true, "medium": true, "high": true}
+	if !validLevels[level] {
+		return false
+	}
+	if level == "off" {
+		al.sessionThinking.Delete(sessionKey)
+	} else {
+		al.sessionThinking.Store(sessionKey, level)
+	}
 	return true
 }
 

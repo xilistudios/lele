@@ -26,7 +26,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		if len(parts) > 0 {
 			cmd := parts[0]
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "agent":
+			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "think", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -254,6 +254,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 			currentLevel = c.agentLoop.GetVerboseLevel(sessionKey)
 		}
 		return c.commands.Verbose(ctx, *message, currentLevel)
+
+	case "think":
+		currentLevel := "default"
+		if c.agentLoop != nil {
+			currentLevel = c.agentLoop.GetThinkLevel(sessionKey)
+		}
+		return c.commands.Think(ctx, *message, currentLevel)
 
 	case "model":
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/model"))

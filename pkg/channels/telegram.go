@@ -76,6 +76,7 @@ func (c *TelegramChannel) telegramCallbackRegistry() []telegramCallbackSpec {
 		{prefix: "approval:", handler: c.handleApprovalCallback},
 		{prefix: "agent:", handler: c.handleAgentCallback},
 		{prefix: "verbose:", handler: c.handleVerboseCallback},
+		{prefix: "think:", handler: c.handleThinkCallback},
 	}
 }
 

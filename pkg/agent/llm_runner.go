@@ -203,8 +203,32 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"max_tokens":  agent.MaxTokens,
 				"temperature": agent.Temperature,
 			}
-			// Add reasoning config if available
-			if agent.Reasoning != nil {
+			// Add reasoning config if available, with per-session override support
+			sessionEffort := ""
+			if opts.SessionKey != "" {
+				if v, ok := lr.al.sessionThinking.Load(opts.SessionKey); ok {
+					if s, ok := v.(string); ok {
+						sessionEffort = s
+					}
+				}
+			}
+			if sessionEffort == "off" {
+				// Explicitly disabled for this session – do not send reasoning.
+			} else if sessionEffort != "" {
+				// Per-session effort override.
+				reasoningMap := map[string]interface{}{
+					"effort": sessionEffort,
+				}
+				if agent.Reasoning != nil && agent.Reasoning.Summary != nil {
+					reasoningMap["summary"] = *agent.Reasoning.Summary
+				}
+				llmOptions["reasoning"] = reasoningMap
+				logger.DebugCF("agent", "Session reasoning override applied", map[string]interface{}{
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+					"effort":      sessionEffort,
+				})
+			} else if agent.Reasoning != nil {
 				reasoningMap := map[string]interface{}{}
 				if agent.Reasoning.Effort != nil {
 					reasoningMap["effort"] = *agent.Reasoning.Effort
@@ -326,11 +350,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		if response.Usage != nil && opts.SessionKey != "" {
 			lr.al.sessionManager.AddTokenCounts(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
 			logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
-				"agent_id":        agent.ID,
-				"session_key":     opts.SessionKey,
-				"prompt_tokens":   response.Usage.PromptTokens,
+				"agent_id":          agent.ID,
+				"session_key":       opts.SessionKey,
+				"prompt_tokens":     response.Usage.PromptTokens,
 				"completion_tokens": response.Usage.CompletionTokens,
-				"total_tokens":    response.Usage.TotalTokens,
+				"total_tokens":      response.Usage.TotalTokens,
 			})
 		}
 

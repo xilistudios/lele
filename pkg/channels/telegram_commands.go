@@ -24,6 +24,7 @@ type TelegramCommander interface {
 	Subagents(ctx context.Context, message telego.Message) error
 	Agent(ctx context.Context, message telego.Message) error
 	Verbose(ctx context.Context, message telego.Message, currentLevel string) error
+	Think(ctx context.Context, message telego.Message, currentLevel string) error
 }
 
 type cmd struct {
@@ -347,6 +348,47 @@ func (c *cmd) Verbose(ctx context.Context, message telego.Message, currentLevel 
 			tu.InlineKeyboardButton("🔇 off").WithCallbackData("verbose:set:off"),
 			tu.InlineKeyboardButton("🛠️ basic").WithCallbackData("verbose:set:basic"),
 			tu.InlineKeyboardButton("📋 full").WithCallbackData("verbose:set:full"),
+		),
+	}
+
+	msg := tu.Message(tu.ID(message.Chat.ID), response).WithReplyMarkup(tu.InlineKeyboard(rows...))
+	msg.ParseMode = telego.ModeMarkdown
+
+	_, err := c.bot.SendMessage(ctx, msg)
+	return err
+}
+
+func (c *cmd) Think(ctx context.Context, message telego.Message, currentLevel string) error {
+	var currentEmoji string
+	switch currentLevel {
+	case "low":
+		currentEmoji = "💡"
+	case "medium":
+		currentEmoji = "🤔"
+	case "high":
+		currentEmoji = "🧩"
+	default:
+		currentEmoji = "🧠"
+		currentLevel = "default"
+	}
+
+	response := fmt.Sprintf(
+		"*Think Mode Settings*\n\n"+
+			"Current level: %s *%s*\n\n"+
+			"*Available options:*\n"+
+			"🧠 *off* - Use agent default reasoning\n"+
+			"💡 *low* - Minimal reasoning effort\n"+
+			"🤔 *medium* - Balanced reasoning effort\n"+
+			"🧩 *high* - Maximum reasoning effort\n\n"+
+			"Use /think to cycle through levels.",
+		currentEmoji, currentLevel)
+
+	rows := [][]telego.InlineKeyboardButton{
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("🧠 off").WithCallbackData("think:set:off"),
+			tu.InlineKeyboardButton("💡 low").WithCallbackData("think:set:low"),
+			tu.InlineKeyboardButton("🤔 medium").WithCallbackData("think:set:medium"),
+			tu.InlineKeyboardButton("🧩 high").WithCallbackData("think:set:high"),
 		),
 	}
 
