@@ -246,7 +246,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 			}
 
-			if len(candidates) > 1 && lr.al.fallback != nil {
+			if len(candidates) > 0 && lr.al.fallback != nil {
 				fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
 						// Create provider dynamically for each candidate
