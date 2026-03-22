@@ -173,6 +173,27 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	return result
 }
 
+// GetAvailableBootstrapFiles returns the list of bootstrap files that exist in the workspace.
+// This is used to show which context files are loaded when switching agents.
+func (cb *ContextBuilder) GetAvailableBootstrapFiles() []string {
+	bootstrapFiles := []string{
+		"AGENTS.md",
+		"SOUL.md",
+		"USER.md",
+		"IDENTITY.md",
+	}
+
+	var available []string
+	for _, filename := range bootstrapFiles {
+		filePath := filepath.Join(cb.workspace, filename)
+		if _, err := os.Stat(filePath); err == nil {
+			available = append(available, filename)
+		}
+	}
+
+	return available
+}
+
 func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID string) []providers.Message {
 	messages := []providers.Message{}
 	renderedUserMessage := cb.RenderUserMessage(currentMessage, attachments)

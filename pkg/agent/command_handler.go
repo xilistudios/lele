@@ -369,6 +369,15 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
 
+	// Get available context files for the message
+	availableFiles := agent.ContextBuilder.GetAvailableBootstrapFiles()
+	contextFilesText := ""
+	if len(availableFiles) > 0 {
+		contextFilesText = fmt.Sprintf("Context loaded from: %s", strings.Join(availableFiles, ", "))
+	} else {
+		contextFilesText = "No context files found in workspace"
+	}
+
 	// Reset the new agent's session so old history for this session key doesn't bleed through.
 	// This also clears any stale model override; we set the new model explicitly below.
 	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
@@ -379,7 +388,7 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 		// Bind agent even if session reset failed
 		ch.al.sessionAgents.Store(sessionKey, agentID)
 		ch.al.sessionModels.Store(sessionKey, agentModel)
-		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, err)
+		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n📂 Workspace: %s\n🔄 %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, agent.Workspace, contextFilesText, err)
 	}
 
 	// Bind after reset so sessionModels is not wiped by resetAgentSession
@@ -391,7 +400,7 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 		agentName = agentID
 	}
 
-	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s", agentName, agentModel)
+	return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n📂 Workspace: %s\n🔄 %s", agentName, agentModel, agent.Workspace, contextFilesText)
 }
 
 // formatStatusResponse formats the status response.
