@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// MaxBasicMessageSize is the maximum character limit for verbose basic mode messages
+const MaxBasicMessageSize = 80
+
 // formatBasicToolMessage genera un mensaje simplificado para verbose basic
 // Ejemplo: "🛠️ Exec: push git changes (in ~/.openclaw/workspace/lele)"
 func formatBasicToolMessage(toolName string, args map[string]interface{}) string {
@@ -37,10 +40,15 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 		argsJSON, _ := json.Marshal(args)
 		preview := string(argsJSON)
 		if len(preview) > 60 {
-			preview = preview[:60] + "..."
+			preview = preview[:57] + "..."
 		}
 		builder.WriteString(fmt.Sprintf(": %s", preview))
-		return builder.String()
+		result := builder.String()
+		// Ensure total message doesn't exceed limit
+		if len(result) > MaxBasicMessageSize {
+			return result[:MaxBasicMessageSize-3] + "..."
+		}
+		return result
 	}
 }
 
@@ -53,11 +61,27 @@ func formatBasicExec(args map[string]interface{}) string {
 
 		// Si hay cwd, mostrarlo
 		if cwd, ok := args["cwd"].(string); ok && cwd != "" {
-			builder.WriteString(fmt.Sprintf(" (in %s)", cwd))
+			// Limit cwd length for basic mode
+			displayCwd := cwd
+			if len(displayCwd) > 50 {
+				displayCwd = displayCwd[:47] + "..."
+			}
+			builder.WriteString(fmt.Sprintf(" (in %s)", displayCwd))
 		}
 
-		builder.WriteString(fmt.Sprintf("\n%s", cmd))
-		return builder.String()
+		// Limit command length for basic mode
+		displayCmd := cmd
+		if len(displayCmd) > 200 {
+			displayCmd = displayCmd[:197] + "..."
+		}
+		builder.WriteString(fmt.Sprintf("\n%s", displayCmd))
+
+		result := builder.String()
+		// Ensure total message doesn't exceed limit
+		if len(result) > MaxBasicMessageSize {
+			return result[:MaxBasicMessageSize-3] + "..."
+		}
+		return result
 	}
 	return "🛠️ Exec: [no command]"
 }
@@ -87,14 +111,24 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 			}
 		}
 
-		return builder.String()
+		result := builder.String()
+		// Ensure total message doesn't exceed limit
+		if len(result) > MaxBasicMessageSize {
+			return result[:MaxBasicMessageSize-3] + "..."
+		}
+		return result
 	}
 	return fmt.Sprintf("🛠️ %s: [no path]", strings.Title(action))
 }
 
 func formatBasicWebSearch(args map[string]interface{}) string {
 	if query, ok := args["query"].(string); ok && query != "" {
-		return fmt.Sprintf("🛠️ Search: \"%s\"", query)
+		// Limit query length for basic mode
+		displayQuery := query
+		if len(displayQuery) > 100 {
+			displayQuery = displayQuery[:97] + "..."
+		}
+		return fmt.Sprintf("🛠️ Search: \"%s\"", displayQuery)
 	}
 	return "🛠️ Search: [no query]"
 }
@@ -116,12 +150,12 @@ func formatBasicMessage(args map[string]interface{}) string {
 	if c, ok := args["channel"].(string); ok && c != "" {
 		channel = c
 	}
-	
+
 	chatID := ""
 	if c, ok := args["chat_id"].(string); ok && c != "" {
 		chatID = c
 	}
-	
+
 	target := channel
 	if chatID != "" {
 		target = fmt.Sprintf("%s:%s", channel, chatID)
@@ -152,6 +186,10 @@ func formatBasicListDir(args map[string]interface{}) string {
 	path := "current"
 	if p, ok := args["path"].(string); ok && p != "" {
 		path = p
+		// Limit path length for basic mode
+		if len(path) > 100 {
+			path = path[:97] + "..."
+		}
 	}
 	return fmt.Sprintf("🛠️ List: %s", path)
 }
