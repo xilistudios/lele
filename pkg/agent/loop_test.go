@@ -847,6 +847,175 @@ func TestHandleCommand_NewClearsSession(t *testing.T) {
 	}
 }
 
+func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	sessionKey := "agent:main:test:direct:user1"
+	// Add some messages and token counts
+	agent.Sessions.AddMessage(sessionKey, "user", "hello")
+	agent.Sessions.AddTokenCounts(sessionKey, 1000, 500)
+
+	// Verify tokens were added
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 1000 || outputTokens != 500 {
+		t.Fatalf("Expected tokens (1000, 500), got (%d, %d)", inputTokens, outputTokens)
+	}
+
+	ch, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		t.Fatal("command handler is not *commandHandlerImpl")
+	}
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		ChatID:     "1",
+		SessionKey: sessionKey,
+		Content:    "/new",
+	})
+	if !handled {
+		t.Fatal("Expected /new to be handled")
+	}
+	if !strings.Contains(response, "New conversation started") {
+		t.Fatalf("Unexpected response: %s", response)
+	}
+
+	// Verify token counts were reset
+	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 0 || outputTokens != 0 {
+		t.Fatalf("Expected token counts to be reset to (0, 0), got (%d, %d)", inputTokens, outputTokens)
+	}
+}
+
+func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	sessionKey := "telegram:123456"
+	// Add messages, summary, and token counts
+	agent.Sessions.AddMessage(sessionKey, "user", "hello")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "hi there")
+	agent.Sessions.SetSummary(sessionKey, "previous conversation summary")
+	agent.Sessions.AddTokenCounts(sessionKey, 1500, 800)
+
+	// Verify initial state
+	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 2 {
+		t.Fatalf("Expected 2 messages, got %d", got)
+	}
+	if got := agent.Sessions.GetSummary(sessionKey); got != "previous conversation summary" {
+		t.Fatalf("Expected summary, got %q", got)
+	}
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 1500 || outputTokens != 800 {
+		t.Fatalf("Expected tokens (1500, 800), got (%d, %d)", inputTokens, outputTokens)
+	}
+
+	// Reset the session
+	if err := al.resetAgentSession(agent, sessionKey); err != nil {
+		t.Fatalf("resetAgentSession failed: %v", err)
+	}
+
+	// Verify everything was cleared including token counts
+	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 0 {
+		t.Fatalf("Expected empty history, got %d", got)
+	}
+	if got := agent.Sessions.GetSummary(sessionKey); got != "" {
+		t.Fatalf("Expected empty summary, got %q", got)
+	}
+	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 0 || outputTokens != 0 {
+		t.Fatalf("Expected token counts to be reset to (0, 0), got (%d, %d)", inputTokens, outputTokens)
+	}
+}
+
+func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Session: config.SessionConfig{
+			Ephemeral:          true,
+			EphemeralThreshold: 60,
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &simpleMockProvider{response: "Fresh response"})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	sessionKey := "telegram:123"
+	// Add old conversation with token counts
+	agent.Sessions.AddMessage(sessionKey, "user", "old question")
+	agent.Sessions.AddMessage(sessionKey, "assistant", "old answer")
+	agent.Sessions.AddTokenCounts(sessionKey, 2000, 1000)
+	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
+
+	// Verify tokens exist before ephemeral reset
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 2000 || outputTokens != 1000 {
+		t.Fatalf("Expected tokens (2000, 1000) before ephemeral reset, got (%d, %d)", inputTokens, outputTokens)
+	}
+
+	response, err := al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
+	if err != nil {
+		t.Fatalf("ProcessDirectWithChannel failed: %v", err)
+	}
+	if !strings.Contains(response, "New ephemeral session created") {
+		t.Fatalf("expected ephemeral notice, got: %s", response)
+	}
+
+	// Verify token counts were reset after ephemeral session creation
+	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 0 || outputTokens != 0 {
+		t.Fatalf("Expected token counts to be reset to (0, 0) after ephemeral session, got (%d, %d)", inputTokens, outputTokens)
+	}
+}
+
 func TestHandleCommand_ModelAndStatus(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {

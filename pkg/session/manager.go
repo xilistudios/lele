@@ -369,6 +369,21 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 	session.Updated = time.Now()
 }
 
+// ResetTokenCounts resets the input and output token counts for a session to zero.
+func (sm *SessionManager) ResetTokenCounts(key string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return
+	}
+
+	session.InputTokens = 0
+	session.OutputTokens = 0
+	session.Updated = time.Now()
+}
+
 // saveUnlocked saves a session without acquiring the lock (caller must hold lock).
 func (sm *SessionManager) saveUnlocked(key string) error {
 	if sm.storage == "" {

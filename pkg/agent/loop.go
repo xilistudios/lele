@@ -525,6 +525,7 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	previousSummary := agent.Sessions.GetSummary(sessionKey)
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
+	agent.Sessions.ResetTokenCounts(sessionKey)
 	agent.ContextBuilder.ResetMemoryContext()
 	// Clear any session-specific model and thinking overrides
 	al.sessionModels.Delete(sessionKey)

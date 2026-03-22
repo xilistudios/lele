@@ -189,3 +189,106 @@ func TestSessionManager_TokenCounts_WithMultipleSessions(t *testing.T) {
 		t.Errorf("Session %q: got (%d, %d), want (200, 75)", key2, input2, output2)
 	}
 }
+
+func TestSessionManager_ResetTokenCounts(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:123456"
+
+	// Add some tokens
+	sm.AddTokenCounts(key, 100, 50)
+	input, output := sm.GetTokenCounts(key)
+	if input != 100 || output != 50 {
+		t.Errorf("GetTokenCounts(%q) after add = (%d, %d), want (100, 50)", key, input, output)
+	}
+
+	// Reset tokens
+	sm.ResetTokenCounts(key)
+	input, output = sm.GetTokenCounts(key)
+	if input != 0 || output != 0 {
+		t.Errorf("GetTokenCounts(%q) after reset = (%d, %d), want (0, 0)", key, input, output)
+	}
+}
+
+func TestSessionManager_ResetTokenCounts_NonExistent(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "non-existent-session"
+
+	// Reset on non-existent session should not panic or create session
+	sm.ResetTokenCounts(key)
+	input, output := sm.GetTokenCounts(key)
+	if input != 0 || output != 0 {
+		t.Errorf("GetTokenCounts(%q) for non-existent session after reset = (%d, %d), want (0, 0)", key, input, output)
+	}
+}
+
+func TestSessionManager_ResetTokenCounts_Persistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+	key := "telegram:123456"
+
+	// Add tokens and save
+	sm.AddTokenCounts(key, 150, 80)
+	sm.AddMessage(key, "user", "test message")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) failed: %v", key, err)
+	}
+
+	// Reset tokens and save again
+	sm.ResetTokenCounts(key)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save(%q) after reset failed: %v", key, err)
+	}
+
+	// Load into fresh manager
+	sm2 := NewSessionManager(tmpDir)
+	input, output := sm2.GetTokenCounts(key)
+	if input != 0 || output != 0 {
+		t.Errorf("GetTokenCounts(%q) after reload = (%d, %d), want (0, 0)", key, input, output)
+	}
+}
+
+func TestSessionManager_ResetTokenCounts_OnlyTargetSession(t *testing.T) {
+	sm := NewSessionManager("")
+	key1 := "telegram:111"
+	key2 := "telegram:222"
+
+	// Add tokens to both sessions
+	sm.AddTokenCounts(key1, 100, 50)
+	sm.AddTokenCounts(key2, 200, 75)
+
+	// Reset only first session
+	sm.ResetTokenCounts(key1)
+
+	// Verify first session is reset
+	input1, output1 := sm.GetTokenCounts(key1)
+	if input1 != 0 || output1 != 0 {
+		t.Errorf("Session %q after reset: got (%d, %d), want (0, 0)", key1, input1, output1)
+	}
+
+	// Verify second session is unchanged
+	input2, output2 := sm.GetTokenCounts(key2)
+	if input2 != 200 || output2 != 75 {
+		t.Errorf("Session %q should be unchanged: got (%d, %d), want (200, 75)", key2, input2, output2)
+	}
+}
+
+func TestSessionManager_ResetTokenCounts_UpdatesTimestamp(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:123456"
+
+	// Create session and add tokens
+	session := sm.GetOrCreate(key)
+	oldUpdated := session.Updated
+
+	// Wait a bit to ensure time difference
+	time.Sleep(10 * time.Millisecond)
+
+	// Reset tokens
+	sm.ResetTokenCounts(key)
+
+	// Verify Updated timestamp changed
+	session = sm.GetOrCreate(key)
+	if !session.Updated.After(oldUpdated) {
+		t.Errorf("Updated timestamp should be after original: got %v, want > %v", session.Updated, oldUpdated)
+	}
+}
