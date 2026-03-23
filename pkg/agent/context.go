@@ -50,7 +50,7 @@ func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 	cb.tools = registry
 }
 
-// GetInitialContext returns the initial context files (SOUL.md, AGENTS.md, etc.)
+// GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
 // to be loaded at session start. This ensures consistent context across /new and subagents.
 func (cb *ContextBuilder) GetInitialContext() string {
 	parts := []string{}
@@ -155,12 +155,7 @@ func (cb *ContextBuilder) ResetMemoryContext() {
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
-	bootstrapFiles := []string{
-		"AGENTS.md",
-		"SOUL.md",
-		"USER.md",
-		"IDENTITY.md",
-	}
+	bootstrapFiles := []string{"AGENT.md", "SOUL.md", "USER.md", "IDENTITY.md"}
 
 	var result string
 	for _, filename := range bootstrapFiles {

@@ -325,8 +325,8 @@ func TestLoadBootstrapFiles_WithFiles(t *testing.T) {
 
 	// Create some bootstrap files
 	bootstrapFiles := map[string]string{
+		"AGENT.md":    "This is the AGENT content",
 		"SOUL.md":     "This is the SOUL content",
-		"AGENTS.md":   "This is the AGENTS content",
 		"USER.md":     "This is the USER content",
 		"IDENTITY.md": "This is the IDENTITY content",
 	}
@@ -349,6 +349,31 @@ func TestLoadBootstrapFiles_WithFiles(t *testing.T) {
 		if !strings.Contains(result, content) {
 			t.Errorf("Expected result to contain content from %s", filename)
 		}
+	}
+}
+
+// TestLoadBootstrapFiles_IgnoresDeprecatedAgentsFile tests LoadBootstrapFiles ignores deprecated AGENTS.md.
+func TestLoadBootstrapFiles_IgnoresDeprecatedAgentsFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	legacyContent := "This is the legacy AGENTS content"
+	path := filepath.Join(tmpDir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte(legacyContent), 0644); err != nil {
+		t.Fatalf("Failed to create AGENTS.md: %v", err)
+	}
+
+	cb := NewContextBuilder(tmpDir)
+	result := cb.LoadBootstrapFiles()
+
+	if strings.Contains(result, "## AGENTS.md") {
+		t.Error("Expected deprecated AGENTS.md to be ignored")
+	}
+	if strings.Contains(result, legacyContent) {
+		t.Error("Expected deprecated AGENTS.md content to be ignored")
 	}
 }
 

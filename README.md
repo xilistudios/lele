@@ -455,7 +455,7 @@ Lele stores data in your configured workspace (default: `~/.lele/workspace`):
 ├── state/            # Persistent state (last channel, etc.)
 ├── cron/             # Scheduled jobs database
 ├── skills/           # Custom skills
-├── AGENTS.md         # Agent behavior guide
+├── AGENT.md          # Agent behavior guide
 ├── HEARTBEAT.md      # Periodic task prompts (checked every 30 min)
 ├── IDENTITY.md       # Agent identity
 ├── SOUL.md           # Agent soul

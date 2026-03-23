@@ -286,7 +286,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		// Spawn tool with allowlist checker
 		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-		// Set callback to get context for specific agent types (each agent loads its own SOUL.md, AGENTS.md, etc.)
+		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
 		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
 			if targetAgent, ok := registry.GetAgent(agentID); ok {
 				return tools.AgentContextInfo{
@@ -636,7 +636,7 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	if err := al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
 	}
-	return "🔄 New conversation started. Context refreshed from SOUL.md, AGENTS.md, and MEMORY.md."
+	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
 
 // ============================================================================

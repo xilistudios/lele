@@ -176,6 +176,9 @@ func TestHandleNewCommand(t *testing.T) {
 	if !strings.Contains(result, "SOUL.md") {
 		t.Errorf("Expected SOUL.md reference in response, got: %s", result)
 	}
+	if !strings.Contains(result, "AGENT.md") {
+		t.Errorf("Expected AGENT.md reference in response, got: %s", result)
+	}
 }
 
 // TestHandleNewCommand_NoAgent tests /new command when no agent is configured
@@ -723,6 +726,111 @@ func TestHandleAgentCommand_WithAgent(t *testing.T) {
 	}
 	if !strings.Contains(result, "main") {
 		t.Errorf("Expected 'main' in response, got: %s", result)
+	}
+}
+
+// TestHandleNewCommand_RefreshesBootstrapFiles verifies /new picks up current workspace bootstrap files.
+func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("agent context v1"), 0644); err != nil {
+		t.Fatalf("Failed to write AGENT.md: %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	if !strings.Contains(agent.ContextBuilder.BuildSystemPrompt(), "agent context v1") {
+		t.Fatal("Expected initial system prompt to contain first AGENT.md content")
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("agent context v2"), 0644); err != nil {
+		t.Fatalf("Failed to update AGENT.md: %v", err)
+	}
+
+	ch := newCommandHandler(al)
+	response := ch.handleNewCommand(agent, "test:new-refresh")
+	if !strings.Contains(response, "AGENT.md") {
+		t.Fatalf("Expected refresh message to mention AGENT.md, got: %s", response)
+	}
+
+	if !strings.Contains(agent.ContextBuilder.BuildSystemPrompt(), "agent context v2") {
+		t.Fatal("Expected refreshed system prompt to contain updated AGENT.md content")
+	}
+}
+
+// TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext verifies /agent switches to the selected agent workspace context.
+func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
+	mainDir := t.TempDir()
+	supportDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(mainDir, "AGENT.md"), []byte("main agent context"), 0644); err != nil {
+		t.Fatalf("Failed to write main AGENT.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(supportDir, "AGENT.md"), []byte("support agent context"), 0644); err != nil {
+		t.Fatalf("Failed to write support AGENT.md: %v", err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         mainDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: mainDir},
+				{ID: "support", Workspace: supportDir},
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	ch := newCommandHandler(al)
+	sessionKey := "agent:main:test:direct:user1"
+
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/agent support",
+		SessionKey: sessionKey,
+	})
+
+	if !handled {
+		t.Fatal("Expected /agent to be handled")
+	}
+	if !strings.Contains(result, "support") {
+		t.Fatalf("Expected response to mention support agent, got: %s", result)
+	}
+	if got := al.GetSessionAgent(sessionKey); got != "support" {
+		t.Fatalf("Expected session agent support, got %s", got)
+	}
+
+	switchedAgent, ok := al.registry.GetAgent(al.GetSessionAgent(sessionKey))
+	if !ok {
+		t.Fatal("Expected switched agent to exist in registry")
+	}
+	prompt := switchedAgent.ContextBuilder.BuildSystemPrompt()
+	if !strings.Contains(prompt, "support agent context") {
+		t.Fatal("Expected switched agent prompt to contain support workspace context")
+	}
+	if strings.Contains(prompt, "main agent context") {
+		t.Fatal("Expected switched agent prompt to exclude main workspace context")
 	}
 }
 
@@ -1753,10 +1861,10 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 
 	ch := newCommandHandler(al)
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
-		Channel:    "test",
-		SenderID:   "user1",
-		ChatID:     "chat1",
-		Content:    "/status",
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/status",
 	})
 
 	if !handled {
@@ -1832,7 +1940,7 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	// Create bootstrap files to have non-empty system prompt
 	os.MkdirAll(filepath.Join(tmpDir, "memory"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte("# SOUL\nTest soul content with enough text"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("# AGENTS\nTest agents content with enough text"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("# AGENT\nTest agent content with enough text"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "memory", "MEMORY.md"), []byte("# Memory\nTest memory content"), 0644)
 
 	cfg := &config.Config{

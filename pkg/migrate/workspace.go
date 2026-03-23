@@ -5,12 +5,17 @@ import (
 	"path/filepath"
 )
 
-var migrateableFiles = []string{
-	"AGENTS.md",
-	"SOUL.md",
-	"USER.md",
-	"TOOLS.md",
-	"HEARTBEAT.md",
+type migrateableFile struct {
+	Destination string
+	Sources     []string
+}
+
+var migrateableFiles = []migrateableFile{
+	{Destination: "AGENT.md", Sources: []string{"AGENT.md", "AGENTS.md"}},
+	{Destination: "SOUL.md", Sources: []string{"SOUL.md"}},
+	{Destination: "USER.md", Sources: []string{"USER.md"}},
+	{Destination: "TOOLS.md", Sources: []string{"TOOLS.md"}},
+	{Destination: "HEARTBEAT.md", Sources: []string{"HEARTBEAT.md"}},
 }
 
 var migrateableDirs = []string{
@@ -21,9 +26,9 @@ var migrateableDirs = []string{
 func PlanWorkspaceMigration(srcWorkspace, dstWorkspace string, force bool) ([]Action, error) {
 	var actions []Action
 
-	for _, filename := range migrateableFiles {
-		src := filepath.Join(srcWorkspace, filename)
-		dst := filepath.Join(dstWorkspace, filename)
+	for _, file := range migrateableFiles {
+		src := resolveMigrateableSource(srcWorkspace, file)
+		dst := filepath.Join(dstWorkspace, file.Destination)
 		action := planFileCopy(src, dst, force)
 		if action.Type != ActionSkip || action.Description != "" {
 			actions = append(actions, action)
@@ -43,6 +48,16 @@ func PlanWorkspaceMigration(srcWorkspace, dstWorkspace string, force bool) ([]Ac
 	}
 
 	return actions, nil
+}
+
+func resolveMigrateableSource(srcWorkspace string, file migrateableFile) string {
+	for _, name := range file.Sources {
+		candidate := filepath.Join(srcWorkspace, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return filepath.Join(srcWorkspace, file.Destination)
 }
 
 func planFileCopy(src, dst string, force bool) Action {

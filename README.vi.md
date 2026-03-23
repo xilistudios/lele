@@ -52,7 +52,7 @@
 
 2026-02-16 🎉 Lele đạt 12K stars chỉ trong một tuần! Cảm ơn tất cả mọi người! Lele đang phát triển nhanh hơn chúng tôi tưởng tượng. Do số lượng PR tăng cao, chúng tôi cấp thiết cần maintainer từ cộng đồng. Các vai trò tình nguyện viên và roadmap đã được công bố [tại đây](docs/lele_community_roadmap_260216.md) — rất mong đón nhận sự tham gia của bạn!
 
-2026-02-13 🎉 Lele đạt 5000 stars trong 4 ngày! Cảm ơn cộng đồng! Chúng tôi đang hoàn thiện **Lộ trình dự án (Roadmap)** và thiết lập **Nhóm phát triển** để đẩy nhanh tốc độ phát triển Lele.  
+2026-02-13 🎉 Lele đạt 5000 stars trong 4 ngày! Cảm ơn cộng đồng! Chúng tôi đang hoàn thiện **Lộ trình dự án (Roadmap)** và thiết lập **Nhóm phát triển** để đẩy nhanh tốc độ phát triển Lele.
 🚀 **Kêu gọi hành động:** Vui lòng gửi yêu cầu tính năng tại GitHub Discussions. Chúng tôi sẽ xem xét và ưu tiên trong cuộc họp hàng tuần.
 
 2026-02-09 🎉 Lele chính thức ra mắt! Được xây dựng trong 1 ngày để mang AI Agent đến phần cứng $10 với RAM <10MB. 🦐 Lele, Lên Đường!
@@ -472,7 +472,7 @@ Lele lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/
 ├── state/            # Trạng thái lưu trữ (kênh cuối cùng, v.v.)
 ├── cron/             # Cơ sở dữ liệu tác vụ định kỳ
 ├── skills/           # Kỹ năng tùy chỉnh
-├── AGENTS.md         # Hướng dẫn hành vi Agent
+├── AGENT.md          # Hướng dẫn hành vi Agent
 ├── HEARTBEAT.md      # Prompt tác vụ định kỳ (kiểm tra mỗi 30 phút)
 ├── IDENTITY.md       # Danh tính Agent
 ├── SOUL.md           # Tâm hồn/Tính cách Agent
