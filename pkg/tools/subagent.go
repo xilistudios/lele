@@ -39,7 +39,7 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string // Full context (SOUL.md, AGENTS.md, etc.)
+	Context   string // Full context (AGENT.md, SOUL.md, etc.)
 	Workspace string // Agent's workspace path
 	Name      string // Agent display name
 }
@@ -400,7 +400,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Updated = time.Now().UnixMilli()
 	sm.mu.Unlock()
 
-	// Get the specific agent's context info (SOUL.md, AGENTS.md, workspace, name from its workspace)
+	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name from its workspace)
 	sm.mu.RLock()
 	getContextInfo := sm.getAgentContext
 	agentID := task.AgentID

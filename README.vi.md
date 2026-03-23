@@ -472,7 +472,7 @@ Lele lưu trữ dữ liệu trong workspace đã cấu hình (mặc định: `~/
 ├── state/            # Trạng thái lưu trữ (kênh cuối cùng, v.v.)
 ├── cron/             # Cơ sở dữ liệu tác vụ định kỳ
 ├── skills/           # Kỹ năng tùy chỉnh
-├── AGENTS.md         # Hướng dẫn hành vi Agent
+├── AGENT.md          # Hướng dẫn hành vi Agent
 ├── HEARTBEAT.md      # Prompt tác vụ định kỳ (kiểm tra mỗi 30 phút)
 ├── IDENTITY.md       # Danh tính Agent
 ├── SOUL.md           # Tâm hồn/Tính cách Agent

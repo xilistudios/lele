@@ -390,7 +390,7 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		os.WriteFile(filepath.Join(srcDir, "AGENTS.md"), []byte("# Agents"), 0644)
+		os.WriteFile(filepath.Join(srcDir, "AGENT.md"), []byte("# Agent"), 0644)
 		os.WriteFile(filepath.Join(srcDir, "SOUL.md"), []byte("# Soul"), 0644)
 		os.WriteFile(filepath.Join(srcDir, "USER.md"), []byte("# User"), 0644)
 
@@ -421,8 +421,8 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		os.WriteFile(filepath.Join(srcDir, "AGENTS.md"), []byte("# Agents from OpenClaw"), 0644)
-		os.WriteFile(filepath.Join(dstDir, "AGENTS.md"), []byte("# Existing Agents"), 0644)
+		os.WriteFile(filepath.Join(srcDir, "AGENT.md"), []byte("# Agent from OpenClaw"), 0644)
+		os.WriteFile(filepath.Join(dstDir, "AGENT.md"), []byte("# Existing Agent"), 0644)
 
 		actions, err := PlanWorkspaceMigration(srcDir, dstDir, false)
 		if err != nil {
@@ -431,12 +431,12 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 
 		overwriteCount := 0
 		for _, a := range actions {
-			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENTS.md" && strings.Contains(a.Description, "overwrite") {
+			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENT.md" && strings.Contains(a.Description, "overwrite") {
 				overwriteCount++
 			}
 		}
 		if overwriteCount != 1 {
-			t.Errorf("expected 1 overwrite copy action for AGENTS.md, got %d", overwriteCount)
+			t.Errorf("expected 1 overwrite copy action for AGENT.md, got %d", overwriteCount)
 		}
 	})
 
@@ -444,8 +444,8 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
-		os.WriteFile(filepath.Join(srcDir, "AGENTS.md"), []byte("# Agents"), 0644)
-		os.WriteFile(filepath.Join(dstDir, "AGENTS.md"), []byte("# Existing"), 0644)
+		os.WriteFile(filepath.Join(srcDir, "AGENT.md"), []byte("# Agent"), 0644)
+		os.WriteFile(filepath.Join(dstDir, "AGENT.md"), []byte("# Existing"), 0644)
 
 		actions, err := PlanWorkspaceMigration(srcDir, dstDir, true)
 		if err != nil {
@@ -454,7 +454,7 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 
 		overwriteCount := 0
 		for _, a := range actions {
-			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENTS.md" && strings.Contains(a.Description, "overwrite") {
+			if a.Type == ActionCopy && filepath.Base(a.Destination) == "AGENT.md" && strings.Contains(a.Description, "overwrite") {
 				overwriteCount++
 			}
 		}
@@ -600,7 +600,7 @@ func TestRunDryRun(t *testing.T) {
 	wsDir := filepath.Join(openclawHome, "workspace")
 	os.MkdirAll(wsDir, 0755)
 	os.WriteFile(filepath.Join(wsDir, "SOUL.md"), []byte("# Soul"), 0644)
-	os.WriteFile(filepath.Join(wsDir, "AGENTS.md"), []byte("# Agents"), 0644)
+	os.WriteFile(filepath.Join(wsDir, "AGENT.md"), []byte("# Agent"), 0644)
 
 	configData := map[string]interface{}{
 		"providers": map[string]interface{}{
@@ -688,12 +688,12 @@ func TestRunFullMigration(t *testing.T) {
 		t.Errorf("SOUL.md content = %q, want %q", string(soulData), "# Soul from OpenClaw")
 	}
 
-	agentsData, err := os.ReadFile(filepath.Join(picoWs, "AGENTS.md"))
+	agentsData, err := os.ReadFile(filepath.Join(picoWs, "AGENT.md"))
 	if err != nil {
-		t.Fatalf("reading AGENTS.md: %v", err)
+		t.Fatalf("reading AGENT.md: %v", err)
 	}
 	if string(agentsData) != "# Agents from OpenClaw" {
-		t.Errorf("AGENTS.md content = %q", string(agentsData))
+		t.Errorf("AGENT.md content = %q", string(agentsData))
 	}
 
 	memData, err := os.ReadFile(filepath.Join(picoWs, "memory", "MEMORY.md"))

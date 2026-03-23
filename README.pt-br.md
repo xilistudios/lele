@@ -492,7 +492,7 @@ O Lele armazena dados no workspace configurado (padrão: `~/.lele/workspace`):
 ├── state/             # Estado persistente (ultimo canal, etc.)
 ├── cron/              # Banco de dados de tarefas agendadas
 ├── skills/            # Skills personalizadas
-├── AGENTS.md          # Guia de comportamento do Agente
+├── AGENT.md           # Guia de comportamento do Agente
 ├── HEARTBEAT.md       # Prompts de tarefas periodicas (verificado a cada 30 min)
 ├── IDENTITY.md        # Identidade do Agente
 ├── SOUL.md            # Alma do Agente
