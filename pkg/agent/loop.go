@@ -32,6 +32,7 @@ type AgentLoop struct {
 	state            *state.Manager
 	running          atomic.Bool
 	summarizing      sync.Map
+	sessionAliases   sync.Map // base session key -> active session key
 	sessionModels    sync.Map
 	sessionAgents    sync.Map // sessionKey -> agentID for agent switching
 	sessionThinking  sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
@@ -40,6 +41,7 @@ type AgentLoop struct {
 	subagents        map[string]*tools.SubagentManager
 	verboseManager   *session.VerboseManager
 	sessionCancels   sync.Map // sessionKey -> context.CancelFunc
+	sessionKeySeq    atomic.Uint64
 	sessionCancelSeq atomic.Uint64
 	approvalManager  *channels.ApprovalManager // Manager for command approvals
 
@@ -49,6 +51,45 @@ type AgentLoop struct {
 	commandHandler   commandHandler
 	sessionManager   sessionManager
 	toolCoordinator  toolCoordinator
+}
+
+func (al *AgentLoop) resolveSessionKey(sessionKey string) string {
+	if sessionKey == "" {
+		return ""
+	}
+	if active, ok := al.sessionAliases.Load(sessionKey); ok {
+		if resolved, ok := active.(string); ok && resolved != "" {
+			return resolved
+		}
+	}
+	return sessionKey
+}
+
+func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
+	if baseSessionKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:chat:%d", baseSessionKey, al.sessionKeySeq.Add(1))
+}
+
+func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model string) string {
+	baseSessionKey = strings.TrimSpace(baseSessionKey)
+	if baseSessionKey == "" {
+		return ""
+	}
+
+	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
+	al.sessionAliases.Store(baseSessionKey, newSessionKey)
+
+	if agentID != "" {
+		al.sessionAgents.Store(newSessionKey, agentID)
+	}
+	if model != "" {
+		al.sessionModels.Store(newSessionKey, model)
+	}
+	al.sessionThinking.Delete(newSessionKey)
+
+	return newSessionKey
 }
 
 // processOptions configures how a message is processed
@@ -445,11 +486,12 @@ func (al *AgentLoop) ListAvailableAgentIDs() []string {
 
 // SetSessionAgent sets the active agent for a specific session (implements AgentProvidable).
 func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
-	al.sessionAgents.Store(sessionKey, agentID)
+	al.sessionAgents.Store(al.resolveSessionKey(sessionKey), agentID)
 }
 
 // GetSessionAgent gets the active agent for a session (implements AgentProvidable).
 func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
 		return agentID.(string)
 	}
@@ -470,6 +512,7 @@ func (al *AgentLoop) GetDefaultAgentID() string {
 
 // GetStatus returns the current status for a session (implements AgentProvidable).
 func (al *AgentLoop) GetStatus(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	agent := al.registry.GetDefaultAgent()
 	// Respect session-selected agent (set via /agent command)
 	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
@@ -489,6 +532,7 @@ func (al *AgentLoop) GetStatus(sessionKey string) string {
 
 // StopAgent stops the agent processing for a session (implements AgentProvidable).
 func (al *AgentLoop) StopAgent(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	subagentCount := 0
 	if al.toolCoordinator != nil {
 		subagentCount = al.toolCoordinator.stopAllSubagents()
@@ -502,6 +546,7 @@ func (al *AgentLoop) StopAgent(sessionKey string) string {
 
 // CompactSession compacts the session history (implements AgentProvidable).
 func (al *AgentLoop) CompactSession(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	agent := al.registry.GetDefaultAgent()
 	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
 		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
@@ -563,6 +608,7 @@ func (al *AgentLoop) ToggleEphemeral() string {
 
 // ToggleVerbose toggles verbose mode for a session (implements AgentProvidable).
 func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return "Verbose mode requires a session context. Please start a conversation first."
 	}
@@ -580,6 +626,7 @@ func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
 
 // GetVerboseLevel returns the current verbose level for a session (implements AgentProvidable).
 func (al *AgentLoop) GetVerboseLevel(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return "off"
 	}
@@ -588,6 +635,7 @@ func (al *AgentLoop) GetVerboseLevel(sessionKey string) string {
 
 // SetVerboseLevel sets the verbose level for a session (implements AgentProvidable).
 func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return false
 	}
@@ -600,6 +648,7 @@ func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
 
 // GetThinkLevel returns the current reasoning effort level for a session (implements AgentProvidable).
 func (al *AgentLoop) GetThinkLevel(sessionKey string) string {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return "default"
 	}
@@ -613,6 +662,7 @@ func (al *AgentLoop) GetThinkLevel(sessionKey string) string {
 
 // SetThinkLevel sets the reasoning effort level for a session (implements AgentProvidable).
 func (al *AgentLoop) SetThinkLevel(sessionKey string, level string) bool {
+	sessionKey = al.resolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return false
 	}
@@ -633,9 +683,11 @@ func (al *AgentLoop) GetSubagents() string {
 	return formatSubagentTaskList(al.toolCoordinator.listRunningSubagentTasks())
 }
 
-// ClearSession clears the session history (implements AgentProvidable).
-// It preserves the session-selected agent and restores its model after reset.
+// ClearSession starts a fresh conversation for the current chat (implements AgentProvidable).
+// It preserves the selected agent while switching the chat to a new empty session.
 func (al *AgentLoop) ClearSession(sessionKey string) string {
+	baseSessionKey := strings.TrimSpace(sessionKey)
+	sessionKey = al.resolveSessionKey(sessionKey)
 	agent := al.registry.GetDefaultAgent()
 	// Respect session-selected agent
 	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
@@ -646,23 +698,14 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
-	// Preserve the session agent binding before reset
-	var preservedAgentID string
-	if v, ok := al.sessionAgents.Load(sessionKey); ok {
-		preservedAgentID = v.(string)
+	agentModel := agent.Model
+	if agentModel == "" {
+		agentModel = al.cfg.Agents.Defaults.Model
 	}
-	if err := al.resetAgentSession(agent, sessionKey); err != nil {
-		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
+	if baseSessionKey == "" {
+		baseSessionKey = sessionKey
 	}
-	// Restore session agent and model after reset
-	if preservedAgentID != "" {
-		al.sessionAgents.Store(sessionKey, preservedAgentID)
-		agentModel := agent.Model
-		if agentModel == "" {
-			agentModel = al.cfg.Agents.Defaults.Model
-		}
-		al.sessionModels.Store(sessionKey, agentModel)
-	}
+	al.startFreshConversation(baseSessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
 

@@ -90,6 +90,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 			sessionKey = msg.SessionKey
 		}
 	}
+	sessionKey = mp.al.resolveSessionKey(sessionKey)
 
 	// Check if a session-specific agent is set (e.g., via /agent command)
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
@@ -188,6 +189,8 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	if sessionKey == "" {
 		sessionKey = routing.BuildAgentMainSessionKey(agent.ID)
 	}
+	baseSessionKey := sessionKey
+	sessionKey = mp.al.resolveSessionKey(sessionKey)
 
 	// Honor session-selected agent for command/system handling as well.
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
@@ -221,7 +224,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/new":
-		response := mp.handleNewCommand(agent, sessionKey)
+		response := mp.handleNewCommand(agent, baseSessionKey)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -329,7 +332,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/agent":
-		response := mp.handleAgentCommand(sessionKey, args)
+		response := mp.handleAgentCommand(baseSessionKey, args)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
@@ -557,28 +560,16 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 }
 
 // handleNewCommand handles the /new command.
-// Preserves the session-selected agent and restores its model after reset.
+// It preserves the selected agent while switching the chat to a fresh session.
 func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
-	// Preserve the session agent binding before reset
-	var preservedAgentID string
-	if v, ok := mp.al.sessionAgents.Load(sessionKey); ok {
-		preservedAgentID = v.(string)
+	agentModel := agent.Model
+	if agentModel == "" {
+		agentModel = mp.al.cfg.Agents.Defaults.Model
 	}
-	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
-		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
-	}
-	// Restore session agent and model after reset
-	if preservedAgentID != "" {
-		mp.al.sessionAgents.Store(sessionKey, preservedAgentID)
-		agentModel := agent.Model
-		if agentModel == "" {
-			agentModel = mp.al.cfg.Agents.Defaults.Model
-		}
-		mp.al.sessionModels.Store(sessionKey, agentModel)
-	}
+	mp.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
 
@@ -719,30 +710,7 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 	if agentModel == "" {
 		agentModel = mp.al.cfg.Agents.Defaults.Model
 	}
-
-	// Reset token counts on the OLD agent's session before switching
-	if oldAgentID := mp.al.GetSessionAgent(sessionKey); oldAgentID != "" && oldAgentID != agentID {
-		if oldAgent, ok := mp.al.registry.GetAgent(oldAgentID); ok {
-			oldAgent.Sessions.ResetTokenCounts(sessionKey)
-		}
-	}
-
-	// Reset the new agent's session so old history for this session key doesn't bleed through.
-	// This also clears any stale model override; we set the new model explicitly below.
-	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
-		agentName := agent.Name
-		if agentName == "" {
-			agentName = agentID
-		}
-		// Bind agent even if session reset failed
-		mp.al.sessionAgents.Store(sessionKey, agentID)
-		mp.al.sessionModels.Store(sessionKey, agentModel)
-		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, err)
-	}
-
-	// Bind after reset so sessionModels is not wiped by resetAgentSession
-	mp.al.sessionAgents.Store(sessionKey, agentID)
-	mp.al.sessionModels.Store(sessionKey, agentModel)
+	mp.al.startFreshConversation(sessionKey, agentID, agentModel)
 
 	agentName := agent.Name
 	if agentName == "" {

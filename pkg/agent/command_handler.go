@@ -67,6 +67,8 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 			sessionKey = msg.SessionKey
 		}
 	}
+	baseSessionKey := sessionKey
+	sessionKey = ch.al.resolveSessionKey(sessionKey)
 	if sessionAgentID := ch.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
@@ -75,7 +77,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 
 	switch cmd {
 	case "/new":
-		return ch.handleNewCommand(agent, sessionKey), true
+		return ch.handleNewCommand(agent, baseSessionKey), true
 	case "/toggle":
 		return ch.handleToggleCommand(args), true
 	case "/clear":
@@ -94,7 +96,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	case "/think":
 		return ch.handleThinkCommand(sessionKey, args), true
 	case "/agent":
-		return ch.handleAgentCommand(sessionKey, args), true
+		return ch.handleAgentCommand(baseSessionKey, args), true
 	case "/subagents":
 		return formatSubagentsCommand(ctx, ch.al.toolCoordinator, sessionKey, args), true
 	case "/stop":
@@ -192,28 +194,19 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 }
 
 // handleNewCommand handles the /new command.
-// Preserves the session-selected agent and restores its model after reset.
+// It preserves the selected agent while switching the chat to a fresh session.
 func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
-	// Preserve the session agent binding before reset
-	var preservedAgentID string
-	if v, ok := ch.al.sessionAgents.Load(sessionKey); ok {
-		preservedAgentID = v.(string)
+	agentModel := agent.Model
+	if agentModel == "" {
+		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
-	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
-		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
+	if sessionKey == "" {
+		sessionKey = ch.al.resolveSessionKey(sessionKey)
 	}
-	// Restore session agent and model after reset
-	if preservedAgentID != "" {
-		ch.al.sessionAgents.Store(sessionKey, preservedAgentID)
-		agentModel := agent.Model
-		if agentModel == "" {
-			agentModel = ch.al.cfg.Agents.Defaults.Model
-		}
-		ch.al.sessionModels.Store(sessionKey, agentModel)
-	}
+	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
 
@@ -383,30 +376,7 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 	if agentModel == "" {
 		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
-
-	// Reset token counts on the OLD agent's session before switching
-	if oldAgentID := ch.al.GetSessionAgent(sessionKey); oldAgentID != "" && oldAgentID != agentID {
-		if oldAgent, ok := ch.al.registry.GetAgent(oldAgentID); ok {
-			oldAgent.Sessions.ResetTokenCounts(sessionKey)
-		}
-	}
-
-	// Reset the new agent's session so old history for this session key doesn't bleed through.
-	// This also clears any stale model override; we set the new model explicitly below.
-	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
-		agentName := agent.Name
-		if agentName == "" {
-			agentName = agentID
-		}
-		// Bind agent even if session reset failed
-		ch.al.sessionAgents.Store(sessionKey, agentID)
-		ch.al.sessionModels.Store(sessionKey, agentModel)
-		return fmt.Sprintf("🤖 Agent changed to: %s\n🧠 Using model: %s\n⚠️ Warning: failed to clear session: %v", agentName, agentModel, err)
-	}
-
-	// Bind after reset so sessionModels is not wiped by resetAgentSession
-	ch.al.sessionAgents.Store(sessionKey, agentID)
-	ch.al.sessionModels.Store(sessionKey, agentModel)
+	ch.al.startFreshConversation(sessionKey, agentID, agentModel)
 
 	agentName := agent.Name
 	if agentName == "" {

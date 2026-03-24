@@ -802,6 +802,12 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
 	ch := newCommandHandler(al)
 	sessionKey := "agent:main:test:direct:user1"
+	mainAgent := al.registry.GetDefaultAgent()
+	if mainAgent == nil {
+		t.Fatal("Expected default agent")
+	}
+	mainAgent.Sessions.AddMessage(sessionKey, "user", "legacy question")
+	mainAgent.Sessions.AddTokenCounts(sessionKey, 321, 123)
 
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "test",
@@ -820,6 +826,14 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	if got := al.GetSessionAgent(sessionKey); got != "support" {
 		t.Fatalf("Expected session agent support, got %s", got)
 	}
+	activeSessionKey := al.resolveSessionKey(sessionKey)
+	if activeSessionKey == sessionKey {
+		t.Fatal("Expected /agent to switch the chat to a fresh session key")
+	}
+	inputTokens, outputTokens := mainAgent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 321 || outputTokens != 123 {
+		t.Fatalf("Expected original session tokens to remain (321, 123), got (%d, %d)", inputTokens, outputTokens)
+	}
 
 	switchedAgent, ok := al.registry.GetAgent(al.GetSessionAgent(sessionKey))
 	if !ok {
@@ -831,6 +845,76 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	}
 	if strings.Contains(prompt, "main agent context") {
 		t.Fatal("Expected switched agent prompt to exclude main workspace context")
+	}
+
+	status, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/status",
+		SessionKey: sessionKey,
+	})
+	if !handled {
+		t.Fatal("Expected /status to be handled")
+	}
+	if !strings.Contains(status, "~0 in / ~0 out (~0 total)") {
+		t.Fatalf("Expected fresh session token counts in status, got: %s", status)
+	}
+}
+
+func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
+	mainDir := t.TempDir()
+	supportDir := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         mainDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: mainDir},
+				{ID: "support", Workspace: supportDir},
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	ch := newCommandHandler(al)
+	sessionKey := "telegram:42"
+
+	if _, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "42",
+		Content:    "/agent support",
+		SessionKey: sessionKey,
+	}); !handled {
+		t.Fatal("Expected /agent to be handled")
+	}
+	firstActiveSessionKey := al.resolveSessionKey(sessionKey)
+
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "42",
+		Content:    "/new",
+		SessionKey: sessionKey,
+	})
+	if !handled {
+		t.Fatal("Expected /new to be handled")
+	}
+	if !strings.Contains(response, "New conversation started") {
+		t.Fatalf("Unexpected /new response: %s", response)
+	}
+	secondActiveSessionKey := al.resolveSessionKey(sessionKey)
+	if secondActiveSessionKey == firstActiveSessionKey {
+		t.Fatal("Expected /new to create a different active session key")
+	}
+	if got := al.GetSessionAgent(sessionKey); got != "support" {
+		t.Fatalf("Expected selected agent to remain support after /new, got %s", got)
 	}
 }
 

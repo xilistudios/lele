@@ -839,11 +839,21 @@ func TestHandleCommand_NewClearsSession(t *testing.T) {
 	if !strings.Contains(response, "New conversation started") {
 		t.Fatalf("Unexpected response: %s", response)
 	}
-	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 0 {
-		t.Fatalf("Expected empty history, got %d", got)
+	activeSessionKey := al.resolveSessionKey(sessionKey)
+	if activeSessionKey == sessionKey {
+		t.Fatal("Expected /new to switch to a fresh session key")
 	}
-	if got := agent.Sessions.GetSummary(sessionKey); got != "" {
-		t.Fatalf("Expected empty summary, got %q", got)
+	if got := len(agent.Sessions.GetHistory(sessionKey)); got != 1 {
+		t.Fatalf("Expected old history to be preserved, got %d messages", got)
+	}
+	if got := agent.Sessions.GetSummary(sessionKey); got != "old summary" {
+		t.Fatalf("Expected old summary to be preserved, got %q", got)
+	}
+	if got := len(agent.Sessions.GetHistory(activeSessionKey)); got != 0 {
+		t.Fatalf("Expected fresh session history to be empty, got %d", got)
+	}
+	if got := agent.Sessions.GetSummary(activeSessionKey); got != "" {
+		t.Fatalf("Expected fresh session summary to be empty, got %q", got)
 	}
 }
 
@@ -898,10 +908,19 @@ func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
 		t.Fatalf("Unexpected response: %s", response)
 	}
 
-	// Verify token counts were reset
+	activeSessionKey := al.resolveSessionKey(sessionKey)
+	if activeSessionKey == sessionKey {
+		t.Fatal("Expected /new to switch to a fresh session key")
+	}
+
+	// Verify token counts are zero in the new chat while the old chat remains intact.
 	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 1000 || outputTokens != 500 {
+		t.Fatalf("Expected old session tokens to remain (1000, 500), got (%d, %d)", inputTokens, outputTokens)
+	}
+	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(activeSessionKey)
 	if inputTokens != 0 || outputTokens != 0 {
-		t.Fatalf("Expected token counts to be reset to (0, 0), got (%d, %d)", inputTokens, outputTokens)
+		t.Fatalf("Expected fresh session token counts to start at (0, 0), got (%d, %d)", inputTokens, outputTokens)
 	}
 }
 
@@ -1089,7 +1108,7 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 	}
 }
 
-func TestHandleCommand_NewSaveFailure(t *testing.T) {
+func TestHandleCommand_NewStartsFreshSessionWithoutClearingPreviousHistory(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -1128,14 +1147,21 @@ func TestHandleCommand_NewSaveFailure(t *testing.T) {
 	if !handled {
 		t.Fatal("Expected /new to be handled")
 	}
-	if !strings.Contains(response, "failed to persist") {
-		t.Fatalf("Expected persist failure response, got: %s", response)
+	if !strings.Contains(response, "New conversation started") {
+		t.Fatalf("Expected success response, got: %s", response)
+	}
+	activeSessionKey := al.resolveSessionKey(sessionKey)
+	if activeSessionKey == sessionKey {
+		t.Fatal("Expected /new to switch to a fresh session key")
 	}
 	if got := len(agent.Sessions.GetHistory(sessionKey)); got == 0 {
-		t.Fatal("Expected history rollback on save failure")
+		t.Fatal("Expected previous history to remain in the original session")
 	}
 	if got := agent.Sessions.GetSummary(sessionKey); got == "" {
-		t.Fatal("Expected summary rollback on save failure")
+		t.Fatal("Expected previous summary to remain in the original session")
+	}
+	if got := len(agent.Sessions.GetHistory(activeSessionKey)); got != 0 {
+		t.Fatalf("Expected fresh session history to be empty, got %d", got)
 	}
 }
 
