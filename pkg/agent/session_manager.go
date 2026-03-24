@@ -256,15 +256,27 @@ func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey s
 }
 
 // AddTokenCounts adds token counts to a session.
+// It respects session agent overrides set via /agent command.
 func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
-	parsed := routing.ParseAgentSessionKey(sessionKey)
-	if parsed == nil {
-		return
+	// Check for session-level agent override first (set via /agent command)
+	var agent *AgentInstance
+	if overrideID := sm.al.GetSessionAgent(sessionKey); overrideID != "" {
+		if a, ok := sm.al.registry.GetAgent(overrideID); ok {
+			agent = a
+		}
 	}
 
-	agent, ok := sm.al.registry.GetAgent(parsed.AgentID)
-	if !ok || agent == nil {
-		return
+	// Fall back to agent ID embedded in the session key
+	if agent == nil {
+		parsed := routing.ParseAgentSessionKey(sessionKey)
+		if parsed == nil {
+			return
+		}
+		a, ok := sm.al.registry.GetAgent(parsed.AgentID)
+		if !ok || a == nil {
+			return
+		}
+		agent = a
 	}
 
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)

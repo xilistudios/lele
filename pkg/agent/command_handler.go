@@ -192,12 +192,27 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 }
 
 // handleNewCommand handles the /new command.
+// Preserves the session-selected agent and restores its model after reset.
 func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
+	// Preserve the session agent binding before reset
+	var preservedAgentID string
+	if v, ok := ch.al.sessionAgents.Load(sessionKey); ok {
+		preservedAgentID = v.(string)
+	}
 	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
+	}
+	// Restore session agent and model after reset
+	if preservedAgentID != "" {
+		ch.al.sessionAgents.Store(sessionKey, preservedAgentID)
+		agentModel := agent.Model
+		if agentModel == "" {
+			agentModel = ch.al.cfg.Agents.Defaults.Model
+		}
+		ch.al.sessionModels.Store(sessionKey, agentModel)
 	}
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }

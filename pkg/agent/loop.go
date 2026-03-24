@@ -628,13 +628,34 @@ func (al *AgentLoop) GetSubagents() string {
 }
 
 // ClearSession clears the session history (implements AgentProvidable).
+// It preserves the session-selected agent and restores its model after reset.
 func (al *AgentLoop) ClearSession(sessionKey string) string {
 	agent := al.registry.GetDefaultAgent()
+	// Respect session-selected agent
+	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
+		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
+			agent = selectedAgent
+		}
+	}
 	if agent == nil {
 		return "No default agent configured"
 	}
+	// Preserve the session agent binding before reset
+	var preservedAgentID string
+	if v, ok := al.sessionAgents.Load(sessionKey); ok {
+		preservedAgentID = v.(string)
+	}
 	if err := al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
+	}
+	// Restore session agent and model after reset
+	if preservedAgentID != "" {
+		al.sessionAgents.Store(sessionKey, preservedAgentID)
+		agentModel := agent.Model
+		if agentModel == "" {
+			agentModel = al.cfg.Agents.Defaults.Model
+		}
+		al.sessionModels.Store(sessionKey, agentModel)
 	}
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
