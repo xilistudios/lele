@@ -471,6 +471,12 @@ func (al *AgentLoop) GetDefaultAgentID() string {
 // GetStatus returns the current status for a session (implements AgentProvidable).
 func (al *AgentLoop) GetStatus(sessionKey string) string {
 	agent := al.registry.GetDefaultAgent()
+	// Respect session-selected agent (set via /agent command)
+	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
+		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
+			agent = selectedAgent
+		}
+	}
 	if agent == nil {
 		return "No default agent configured."
 	}

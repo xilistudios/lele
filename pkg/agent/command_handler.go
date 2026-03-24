@@ -384,6 +384,13 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
 
+	// Reset token counts on the OLD agent's session before switching
+	if oldAgentID := ch.al.GetSessionAgent(sessionKey); oldAgentID != "" && oldAgentID != agentID {
+		if oldAgent, ok := ch.al.registry.GetAgent(oldAgentID); ok {
+			oldAgent.Sessions.ResetTokenCounts(sessionKey)
+		}
+	}
+
 	// Reset the new agent's session so old history for this session key doesn't bleed through.
 	// This also clears any stale model override; we set the new model explicitly below.
 	if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {

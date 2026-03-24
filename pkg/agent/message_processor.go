@@ -557,12 +557,27 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 }
 
 // handleNewCommand handles the /new command.
+// Preserves the session-selected agent and restores its model after reset.
 func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKey string) string {
 	if agent == nil {
 		return "No default agent configured"
 	}
+	// Preserve the session agent binding before reset
+	var preservedAgentID string
+	if v, ok := mp.al.sessionAgents.Load(sessionKey); ok {
+		preservedAgentID = v.(string)
+	}
 	if err := mp.al.resetAgentSession(agent, sessionKey); err != nil {
 		return fmt.Sprintf("Conversation cleared, but failed to persist session state: %v", err)
+	}
+	// Restore session agent and model after reset
+	if preservedAgentID != "" {
+		mp.al.sessionAgents.Store(sessionKey, preservedAgentID)
+		agentModel := agent.Model
+		if agentModel == "" {
+			agentModel = mp.al.cfg.Agents.Defaults.Model
+		}
+		mp.al.sessionModels.Store(sessionKey, agentModel)
 	}
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
@@ -703,6 +718,13 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 	agentModel := agent.Model
 	if agentModel == "" {
 		agentModel = mp.al.cfg.Agents.Defaults.Model
+	}
+
+	// Reset token counts on the OLD agent's session before switching
+	if oldAgentID := mp.al.GetSessionAgent(sessionKey); oldAgentID != "" && oldAgentID != agentID {
+		if oldAgent, ok := mp.al.registry.GetAgent(oldAgentID); ok {
+			oldAgent.Sessions.ResetTokenCounts(sessionKey)
+		}
 	}
 
 	// Reset the new agent's session so old history for this session key doesn't bleed through.
