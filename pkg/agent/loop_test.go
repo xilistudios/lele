@@ -445,6 +445,7 @@ func (m *simpleMockProvider) Chat(ctx context.Context, messages []providers.Mess
 	return &providers.LLMResponse{
 		Content:   m.response,
 		ToolCalls: []providers.ToolCall{},
+		Usage:     &providers.UsageInfo{PromptTokens: 0, CompletionTokens: 0, TotalTokens: 0},
 	}, nil
 }
 
