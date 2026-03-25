@@ -28,14 +28,16 @@ type TelegramCommander interface {
 }
 
 type cmd struct {
-	bot    *telego.Bot
-	config *config.Config
+	bot       *telego.Bot
+	config    *config.Config
+	agentLoop AgentProvidable
 }
 
-func NewTelegramCommands(bot *telego.Bot, cfg *config.Config) TelegramCommander {
+func NewTelegramCommands(bot *telego.Bot, cfg *config.Config, agentLoop AgentProvidable) TelegramCommander {
 	return &cmd{
-		bot:    bot,
-		config: cfg,
+		bot:       bot,
+		config:    cfg,
+		agentLoop: agentLoop,
 	}
 }
 
@@ -197,9 +199,11 @@ func (c *cmd) Models(ctx context.Context, message telego.Message) error {
 }
 
 func (c *cmd) New(ctx context.Context, message telego.Message) error {
+	sessionKey := fmt.Sprintf("telegram:%d", message.Chat.ID)
+	response := c.agentLoop.ClearSession(sessionKey)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   "🔄 Nueva conversación iniciada. Historial limpiado.",
+		Text:   response,
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},
@@ -244,11 +248,8 @@ func (c *cmd) Model(ctx context.Context, message telego.Message) error {
 }
 
 func (c *cmd) Status(ctx context.Context, message telego.Message) error {
-	response := fmt.Sprintf("📊 Estado del Gateway\n\nModelo: %s\nProveedor: %s\nToken máximo: %d\nTemperatura: %.1f",
-		c.config.Agents.Defaults.Model,
-		c.config.Agents.Defaults.Provider,
-		c.config.Agents.Defaults.MaxTokens,
-		*c.config.Agents.Defaults.Temperature)
+	sessionKey := fmt.Sprintf("telegram:%d", message.Chat.ID)
+	response := c.agentLoop.GetStatus(sessionKey)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
 		Text:   response,
@@ -271,11 +272,12 @@ func (c *cmd) Subagents(ctx context.Context, message telego.Message) error {
 }
 
 func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
+	sessionKey := fmt.Sprintf("telegram:%d", message.Chat.ID)
 	args := commandArgs(message.Text)
 	if args == "" {
 		// Verificar si hay agentes configurados
-		agents := c.config.Agents.List
-		if len(agents) == 0 {
+		agentIDs := c.agentLoop.ListAvailableAgentIDs()
+		if len(agentIDs) == 0 {
 			_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 				ChatID: telego.ChatID{ID: message.Chat.ID},
 				Text:   "No hay agentes configurados.",
@@ -287,15 +289,19 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 		}
 
 		// Crear botones para cada agente
-		rows := make([][]telego.InlineKeyboardButton, 0, len(agents))
-		for _, agent := range agents {
-			label := agent.Name
+		rows := make([][]telego.InlineKeyboardButton, 0, len(agentIDs))
+		for _, agentID := range agentIDs {
+			agentInfo, ok := c.agentLoop.GetAgentInfo(agentID)
+			if !ok {
+				continue
+			}
+			label := agentInfo.Name
 			if label == "" {
-				label = agent.ID
+				label = agentID
 			}
 			label = fmt.Sprintf("🤖 %s", label)
 			rows = append(rows, tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton(label).WithCallbackData("agent:select:"+agent.ID),
+				tu.InlineKeyboardButton(label).WithCallbackData("agent:select:"+agentID),
 			))
 		}
 
@@ -308,9 +314,11 @@ func (c *cmd) Agent(ctx context.Context, message telego.Message) error {
 	}
 
 	// Cambio directo de agente
+	c.agentLoop.SetSessionAgent(sessionKey, args)
+	response := c.agentLoop.ClearSession(sessionKey)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   fmt.Sprintf("Cambiando al agente: %s", args),
+		Text:   response,
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},

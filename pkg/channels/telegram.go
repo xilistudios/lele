@@ -106,7 +106,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 
 	return &TelegramChannel{
 		BaseChannel:  base,
-		commands:     NewTelegramCommands(bot, cfg),
+		commands:     NewTelegramCommands(bot, cfg, agentLoop),
 		bot:          bot,
 		config:       cfg,
 		chatIDs:      make(map[string]int64),
