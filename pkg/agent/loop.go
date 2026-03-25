@@ -89,6 +89,23 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	}
 	al.sessionThinking.Delete(newSessionKey)
 
+	// Reset token counts for the new session to ensure clean state.
+	// Get the agent for this session to access its session manager.
+	var sessionAgent *AgentInstance
+	if agentID != "" {
+		if a, ok := al.registry.GetAgent(agentID); ok {
+			sessionAgent = a
+		}
+	}
+	if sessionAgent == nil {
+		sessionAgent = al.registry.GetDefaultAgent()
+	}
+	if sessionAgent != nil {
+		// GetOrCreate ensures the session exists before resetting tokens.
+		sessionAgent.Sessions.GetOrCreate(newSessionKey)
+		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
+	}
+
 	return newSessionKey
 }
 
