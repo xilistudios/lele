@@ -7,9 +7,17 @@ import (
 	"time"
 )
 
+// Default retry configuration (can be overridden via WithRetryConfig for testing)
+const (
+	defaultMaxRetryAttempts   = 10
+	defaultMaxBackoffDuration = 60 * time.Second
+)
+
 // FallbackChain orchestrates model fallback across multiple candidates.
 type FallbackChain struct {
-	cooldown *CooldownTracker
+	cooldown  *CooldownTracker
+	maxRetries int
+	maxBackoff time.Duration
 }
 
 // FallbackCandidate represents one model/provider to try.
@@ -38,7 +46,20 @@ type FallbackAttempt struct {
 
 // NewFallbackChain creates a new fallback chain with the given cooldown tracker.
 func NewFallbackChain(cooldown *CooldownTracker) *FallbackChain {
-	return &FallbackChain{cooldown: cooldown}
+	return &FallbackChain{
+		cooldown:   cooldown,
+		maxRetries: defaultMaxRetryAttempts,
+		maxBackoff: defaultMaxBackoffDuration,
+	}
+}
+
+// WithRetryConfig creates a new FallbackChain with custom retry settings (for testing).
+func (fc *FallbackChain) WithRetryConfig(maxRetries int, maxBackoff time.Duration) *FallbackChain {
+	return &FallbackChain{
+		cooldown:   fc.cooldown,
+		maxRetries: maxRetries,
+		maxBackoff: maxBackoff,
+	}
 }
 
 // ResolveCandidates parses model config into a deduplicated candidate list.
@@ -80,7 +101,8 @@ func ResolveCandidates(cfg ModelConfig, defaultProvider string) []FallbackCandid
 //   - Candidates in cooldown are skipped (logged as skipped attempt).
 //   - context.Canceled aborts immediately (user abort, no fallback).
 //   - Non-retriable errors (format) abort immediately.
-//   - Retriable errors trigger fallback to next candidate.
+//   - Retriable errors trigger retry with exponential backoff (up to 10 retries, max 60s).
+//   - After all retries exhausted, mark provider as failed and try next candidate.
 //   - Success marks provider as good (resets cooldown).
 //   - If all fail, returns aggregate error with all attempts.
 func (fc *FallbackChain) Execute(
@@ -115,9 +137,9 @@ func (fc *FallbackChain) Execute(
 			continue
 		}
 
-		// Execute the run function.
+		// Execute the run function with retry logic.
 		start := time.Now()
-		resp, err := run(ctx, candidate.Provider, candidate.Model)
+		resp, err := fc.executeWithRetry(ctx, candidate.Provider, candidate.Model, run)
 		elapsed := time.Since(start)
 
 		if err == nil {
@@ -185,6 +207,57 @@ func (fc *FallbackChain) Execute(
 
 	// All candidates were skipped (all in cooldown).
 	return nil, &FallbackExhaustedError{Attempts: result.Attempts}
+}
+
+// executeWithRetry executes the LLM call with exponential backoff retry logic.
+// Retries up to fc.maxRetries times with backoff capped at fc.maxBackoff.
+// After all retries are exhausted, returns the last error.
+func (fc *FallbackChain) executeWithRetry(
+	ctx context.Context,
+	provider string,
+	model string,
+	run func(ctx context.Context, provider, model string) (*LLMResponse, error),
+) (*LLMResponse, error) {
+	var lastErr error
+
+	for attempt := 0; attempt < fc.maxRetries; attempt++ {
+		// Check context before each attempt.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		resp, err := run(ctx, provider, model)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retriable before waiting.
+		failErr := ClassifyError(err, provider, model)
+		if failErr == nil || !failErr.IsRetriable() {
+			// Non-retriable error, don't retry.
+			return nil, err
+		}
+
+		// Calculate backoff with exponential increase.
+		// Formula: min(fc.maxBackoff, 1s * 2^attempt)
+		// attempt 0: 1s, attempt 1: 2s, attempt 2: 4s, ... capped at maxBackoff
+		backoff := time.Duration(1<<uint(attempt)) * time.Second
+		if backoff > fc.maxBackoff {
+			backoff = fc.maxBackoff
+		}
+
+		// Wait with context awareness.
+		select {
+		case <-time.After(backoff):
+			// Continue to next retry.
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, lastErr
 }
 
 // ExecuteImage runs the fallback chain for image/vision requests.
