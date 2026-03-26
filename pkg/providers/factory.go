@@ -55,6 +55,10 @@ func defaultAPIBaseByType(providerType string) string {
 		return "https://openrouter.ai/api/v1"
 	case "nanogpt":
 		return "https://nano-gpt.com/api/v1"
+	case "chutes":
+		return "https://llm.chutes.ai/v1"
+	case "alibaba":
+		return "https://coding-intl.dashscope.aliyuncs.com/v1"
 	case "zhipu":
 		return "https://open.bigmodel.cn/api/paas/v4"
 	case "gemini":
@@ -294,14 +298,30 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "nanogpt":
-			if cfg.Providers.Named != nil {
-				if named, ok := cfg.Providers.GetNamed("nanogpt"); ok && named.APIKey != "" {
-					sel.apiKey = named.APIKey
-					sel.apiBase = named.APIBase
-					sel.proxy = named.Proxy
-					if sel.apiBase == "" {
-						sel.apiBase = "https://nano-gpt.com/api/v1"
-					}
+			if named, ok := cfg.Providers.GetNamed("nanogpt"); ok && named.APIKey != "" {
+				sel.apiKey = named.APIKey
+				sel.apiBase = named.APIBase
+				sel.proxy = named.Proxy
+				if sel.apiBase == "" {
+					sel.apiBase = "https://nano-gpt.com/api/v1"
+				}
+			}
+		case "chutes":
+			if named, ok := cfg.Providers.GetNamed("chutes"); ok && named.APIKey != "" {
+				sel.apiKey = named.APIKey
+				sel.apiBase = named.APIBase
+				sel.proxy = named.Proxy
+				if sel.apiBase == "" {
+					sel.apiBase = "https://llm.chutes.ai/v1"
+				}
+			}
+		case "alibaba":
+			if named, ok := cfg.Providers.GetNamed("alibaba"); ok && named.APIKey != "" {
+				sel.apiKey = named.APIKey
+				sel.apiBase = named.APIBase
+				sel.proxy = named.Proxy
+				if sel.apiBase == "" {
+					sel.apiBase = "https://coding-intl.dashscope.aliyuncs.com/v1"
 				}
 			}
 		case "zhipu", "glm":
