@@ -7,9 +7,17 @@ import (
 	"time"
 )
 
+// Default retry configuration (can be overridden via WithRetryConfig for testing)
+const (
+	defaultMaxRetryAttempts   = 10
+	defaultMaxBackoffDuration = 60 * time.Second
+)
+
 // FallbackChain orchestrates model fallback across multiple candidates.
 type FallbackChain struct {
-	cooldown *CooldownTracker
+	cooldown  *CooldownTracker
+	maxRetries int
+	maxBackoff time.Duration
 }
 
 // FallbackCandidate represents one model/provider to try.
@@ -38,7 +46,20 @@ type FallbackAttempt struct {
 
 // NewFallbackChain creates a new fallback chain with the given cooldown tracker.
 func NewFallbackChain(cooldown *CooldownTracker) *FallbackChain {
-	return &FallbackChain{cooldown: cooldown}
+	return &FallbackChain{
+		cooldown:   cooldown,
+		maxRetries: defaultMaxRetryAttempts,
+		maxBackoff: defaultMaxBackoffDuration,
+	}
+}
+
+// WithRetryConfig creates a new FallbackChain with custom retry settings (for testing).
+func (fc *FallbackChain) WithRetryConfig(maxRetries int, maxBackoff time.Duration) *FallbackChain {
+	return &FallbackChain{
+		cooldown:   fc.cooldown,
+		maxRetries: maxRetries,
+		maxBackoff: maxBackoff,
+	}
 }
 
 // ResolveCandidates parses model config into a deduplicated candidate list.
@@ -189,7 +210,7 @@ func (fc *FallbackChain) Execute(
 }
 
 // executeWithRetry executes the LLM call with exponential backoff retry logic.
-// Retries up to maxRetryAttempts (10) times with backoff capped at maxBackoffDuration (60s).
+// Retries up to fc.maxRetries times with backoff capped at fc.maxBackoff.
 // After all retries are exhausted, returns the last error.
 func (fc *FallbackChain) executeWithRetry(
 	ctx context.Context,
@@ -199,7 +220,7 @@ func (fc *FallbackChain) executeWithRetry(
 ) (*LLMResponse, error) {
 	var lastErr error
 
-	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
+	for attempt := 0; attempt < fc.maxRetries; attempt++ {
 		// Check context before each attempt.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -220,11 +241,11 @@ func (fc *FallbackChain) executeWithRetry(
 		}
 
 		// Calculate backoff with exponential increase.
-		// Formula: min(maxBackoffDuration, 1s * 2^attempt)
-		// attempt 0: 1s, attempt 1: 2s, attempt 2: 4s, ... capped at 60s
+		// Formula: min(fc.maxBackoff, 1s * 2^attempt)
+		// attempt 0: 1s, attempt 1: 2s, attempt 2: 4s, ... capped at maxBackoff
 		backoff := time.Duration(1<<uint(attempt)) * time.Second
-		if backoff > maxBackoffDuration {
-			backoff = maxBackoffDuration
+		if backoff > fc.maxBackoff {
+			backoff = fc.maxBackoff
 		}
 
 		// Wait with context awareness.

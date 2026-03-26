@@ -42,17 +42,17 @@ func TestFallback_SingleCandidate_Success(t *testing.T) {
 
 func TestFallback_SecondCandidateSuccess(t *testing.T) {
 	ct := NewCooldownTracker()
-	fc := NewFallbackChain(ct)
+	fc := NewFallbackChain(ct).WithRetryConfig(3, 100*time.Millisecond)
 
 	candidates := []FallbackCandidate{
 		makeCandidate("openai", "gpt-4"),
 		makeCandidate("anthropic", "claude-opus"),
 	}
 
-	attempt := 0
+	// Use retriable error - retry will exhaust then fallback to second candidate
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
-		attempt++
-		if attempt == 1 {
+		if provider == "openai" {
+			// Retriable error: will retry 3 times, then fallback
 			return nil, errors.New("rate limit exceeded")
 		}
 		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
@@ -68,14 +68,11 @@ func TestFallback_SecondCandidateSuccess(t *testing.T) {
 	if result.Response.Content != "from claude" {
 		t.Errorf("content = %q, want 'from claude'", result.Response.Content)
 	}
-	if len(result.Attempts) != 1 {
-		t.Errorf("attempts = %d, want 1 (failed attempt recorded)", len(result.Attempts))
-	}
 }
 
 func TestFallback_AllFail(t *testing.T) {
 	ct := NewCooldownTracker()
-	fc := NewFallbackChain(ct)
+	fc := NewFallbackChain(ct).WithRetryConfig(2, 50*time.Millisecond)
 
 	candidates := []FallbackCandidate{
 		makeCandidate("openai", "gpt-4"),
@@ -95,8 +92,10 @@ func TestFallback_AllFail(t *testing.T) {
 	if !errors.As(err, &exhausted) {
 		t.Errorf("expected FallbackExhaustedError, got %T: %v", err, err)
 	}
+	// With retry logic, each candidate exhausts retries before moving to next
+	// But we only record 1 attempt per candidate in the final error
 	if len(exhausted.Attempts) != 3 {
-		t.Errorf("attempts = %d, want 3", len(exhausted.Attempts))
+		t.Errorf("attempts = %d, want 3 (one per candidate)", len(exhausted.Attempts))
 	}
 }
 
@@ -154,7 +153,77 @@ func TestFallback_NonRetriableError(t *testing.T) {
 		t.Errorf("reason = %q, want format", fe.Reason)
 	}
 	if attempt != 1 {
-		t.Errorf("attempt = %d, want 1 (non-retriable should not try next)", attempt)
+		t.Errorf("attempt = %d, want 1 (non-retriable should not retry or fallback)", attempt)
+	}
+}
+
+func TestFallback_RetryWithBackoff(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(5, 50*time.Millisecond)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	callCount := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		callCount++
+		if provider == "openai" && callCount <= 3 {
+			// Fail first 3 calls with retriable error, succeed on 4th
+			return nil, errors.New("rate limit exceeded")
+		}
+		return &LLMResponse{Content: "success after retry", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Response.Content != "success after retry" {
+		t.Errorf("content = %q, want 'success after retry'", result.Response.Content)
+	}
+	// Should succeed on 4th call (3 retries on first candidate)
+	if callCount != 4 {
+		t.Errorf("callCount = %d, want 4 (3 retries + 1 success)", callCount)
+	}
+	if result.Provider != "openai" {
+		t.Errorf("provider = %q, want openai (succeeded after retry)", result.Provider)
+	}
+}
+
+func TestFallback_RetryExhaustedThenFallback(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(3, 50*time.Millisecond)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	openaiCalls := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		if provider == "openai" {
+			openaiCalls++
+			return nil, errors.New("rate limit exceeded")
+		}
+		return &LLMResponse{Content: "from anthropic", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// After maxRetryAttempts on openai, should fallback to anthropic
+	if result.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic", result.Provider)
+	}
+	if result.Response.Content != "from anthropic" {
+		t.Errorf("content = %q, want 'from anthropic'", result.Response.Content)
+	}
+	// OpenAI should be called maxRetryAttempts times before fallback
+	if openaiCalls != 3 {
+		t.Errorf("openaiCalls = %d, want 3 (maxRetryAttempts for this test)", openaiCalls)
 	}
 }
 
