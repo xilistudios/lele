@@ -203,9 +203,6 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 	if agentModel == "" {
 		agentModel = ch.al.cfg.Agents.Defaults.Model
 	}
-	if sessionKey == "" {
-		sessionKey = ch.al.resolveSessionKey(sessionKey)
-	}
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
