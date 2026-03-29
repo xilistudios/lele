@@ -46,6 +46,7 @@ var telegramCommandRegistry = []telegramCommandSpec{
 	{name: "list"},
 	{name: "models", description: "Select provider/model from UI"},
 	{name: "new", description: "Start a new conversation"},
+	{name: "clear", description: "Clear conversation history"},
 	{name: "stop", description: "Stop the agent"},
 	{name: "model", description: "Show models and change current model"},
 	{name: "status", description: "Show model, tokens and gateway version"},

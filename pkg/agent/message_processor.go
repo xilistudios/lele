@@ -251,6 +251,13 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			agent.Sessions.SetSummary(sessionKey, "")
 			agent.Sessions.Save(sessionKey)
 		}
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   "✅ Conversation cleared.",
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
 		return "", nil
 
 	case "/stop":
@@ -284,6 +291,14 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	case "/compact":
 		// Manual compaction command - use existing sessionKey from caller
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   "🔄 Compacting conversation history...",
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+		
 		history := agent.Sessions.GetHistory(sessionKey)
 		if len(history) <= 4 {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
@@ -296,7 +311,23 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			return "", nil
 		}
 
-		stats := mp.al.sessionManager.summarizeSession(agent, sessionKey)
+		stats, err := mp.al.sessionManager.summarizeSessionWithError(agent, sessionKey)
+		if err != nil {
+			errorMsg := fmt.Sprintf("❌ Compaction failed: %v", err)
+			// Truncate error message if too long for Telegram
+			if len(errorMsg) > 4000 {
+				errorMsg = errorMsg[:3997] + "..."
+			}
+			mp.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel:   originChannel,
+				ChatID:    originChatID,
+				Content:   errorMsg,
+				ReplyTo:   replyToMessageID,
+				MessageID: replyToMessageID,
+			})
+			return "", nil
+		}
+
 		if stats == nil {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel:   originChannel,

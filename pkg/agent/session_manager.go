@@ -34,6 +34,7 @@ type sessionManagerImpl struct {
 type sessionManager interface {
 	maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats
 	summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats
+	summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error)
 	AddTokenCounts(sessionKey string, inputTokens, outputTokens int)
 }
 
@@ -280,4 +281,95 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 	}
 
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
+}
+// summarizeSessionWithError summarizes the conversation history for a session and returns any error.
+// Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
+// Returns statistics about the operation and any error that occurred.
+func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	history := agent.Sessions.GetHistory(sessionKey)
+	existingSummary := agent.Sessions.GetSummary(sessionKey)
+
+	// Need at least 3 messages to summarize (keep last 2 for continuity)
+	if len(history) <= 2 {
+		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(history))
+	}
+
+	// Calculate before stats
+	beforeMessages := len(history)
+	beforeTokens := sm.estimateTokens(history)
+
+	// Summarize everything except the last 2 messages (kept for continuity).
+	// Note: history contains only user/assistant/tool messages — no system prompt.
+	toSummarize := history[:len(history)-2]
+
+	if len(toSummarize) == 0 {
+		return nil, fmt.Errorf("no messages available to summarize")
+	}
+
+	// Build comprehensive summary prompt with ALL old messages
+	prompt := "Please provide a comprehensive summary of the following conversation. " +
+		"Capture all important context, decisions, facts, and action items so that " +
+		"someone reading just this summary would understand what happened.\n\n"
+
+	if existingSummary != "" {
+		prompt += "=== PREVIOUS SUMMARY ===\n" + existingSummary + "\n\n"
+	}
+
+	prompt += "=== CONVERSATION TO SUMMARIZE ===\n"
+	for _, m := range toSummarize {
+		role := strings.ToUpper(m.Role)
+		content := m.Content
+		// Truncate very long messages for the summary prompt
+		if len(content) > 4000 {
+			content = content[:4000] + "\n[Content truncated...]"
+		}
+		prompt += fmt.Sprintf("%s: %s\n\n", role, content)
+	}
+
+	prompt += "=== END OF CONVERSATION ===\n\n" +
+		"Now provide a detailed summary that preserves all critical context."
+
+	// Call LLM to summarize everything
+	resp, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, agent.Model, map[string]interface{}{
+		"max_tokens":  2048,
+		"temperature": 0.3,
+	})
+
+	var finalSummary string
+	if err != nil {
+		return nil, fmt.Errorf("LLM summarization failed: %w", err)
+	}
+	
+	if resp != nil {
+		finalSummary = resp.Content
+	} else if existingSummary != "" {
+		// Fall back to existing summary
+		finalSummary = existingSummary + "\n[Update: Additional conversation not summarized due to empty response]"
+	}
+
+	if finalSummary == "" {
+		return nil, fmt.Errorf("summarization produced empty result")
+	}
+
+	agent.Sessions.SetSummary(sessionKey, finalSummary)
+	// Keep only the last 2 messages (the ones not summarized above)
+	agent.Sessions.TruncateHistory(sessionKey, 2)
+	agent.Sessions.Save(sessionKey)
+
+	// Calculate after stats
+	afterHistory := agent.Sessions.GetHistory(sessionKey)
+	afterMessages := len(afterHistory)
+	afterTokens := sm.estimateTokens(afterHistory)
+
+	return &SummarizeStats{
+		BeforeMessages:  beforeMessages,
+		AfterMessages:   afterMessages,
+		DroppedMessages: beforeMessages - afterMessages,
+		BeforeTokens:    beforeTokens,
+		AfterTokens:     afterTokens,
+		SavedTokens:     beforeTokens - afterTokens,
+	}, nil
 }

@@ -2091,3 +2091,108 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 
 	t.Logf("Context tokens: %d (includes system prompt with bootstrap files)", contextTokens)
 }
+// TestHandleCompactCommand_WithError tests /compact command with error handling
+func TestHandleCompactCommand_WithError(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Use a session key that matches the expected format
+	sessionKey := "agent:main:test:compact-error-session"
+	agent := al.registry.GetDefaultAgent()
+
+	// Add enough history to trigger compaction (5+ messages)
+	// Add 10 messages total to ensure we pass the threshold
+	for i := 0; i < 10; i++ {
+		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Message %d", i))
+	}
+
+	// Debug: check message count
+	history := agent.Sessions.GetHistory(sessionKey)
+	t.Logf("Added %d messages to session", len(history))
+
+	ch := newCommandHandler(al)
+
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "test",
+		SenderID:   "user1",
+		ChatID:     "chat1",
+		Content:    "/compact",
+		SessionKey: sessionKey,
+	})
+
+	if !handled {
+		t.Error("Expected /compact to be handled")
+	}
+	
+	// Should either show success stats, not enough messages, or an error message
+	success := strings.Contains(result, "Memory compacted")
+	notEnough := strings.Contains(result, "Not enough messages")
+	failed := strings.Contains(result, "Compaction failed")
+	
+	if !success && !notEnough && !failed {
+		t.Errorf("Expected compaction result, not enough messages, or error, got: %s", result)
+	}
+	
+	// Log the actual result for debugging
+	t.Logf("Compact result: %s", result)
+}
+
+// TestHandleClearCommand_NoAgent tests /clear command when no agent is configured
+func TestHandleClearCommand_NoAgent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	// Remove default agent for this test
+	al.registry.agents = make(map[string]*AgentInstance)
+
+	ch := newCommandHandler(al)
+	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:  "test",
+		SenderID: "user1",
+		ChatID:   "chat1",
+		Content:  "/clear",
+	})
+
+	if !handled {
+		t.Error("Expected /clear to be handled")
+	}
+	if result != "✅ Conversation cleared." {
+		t.Errorf("Expected clear message even without agent, got: %s", result)
+	}
+}
