@@ -86,9 +86,10 @@ func markdownToTelegramHTML(text string) string {
 	text = inlineCodes.text
 
 	// Convert Markdown headers to plain text (remove #)
-	text = regexp.MustCompile(`^#{1,6}\s+(.+)$`).ReplaceAllString(text, "$1")
+	// Use (?m) flag so ^ and $ match line boundaries, not just start/end of string
+	text = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`).ReplaceAllString(text, "$1")
 	// Convert blockquotes to plain text
-	text = regexp.MustCompile(`^>\s*(.*)$`).ReplaceAllString(text, "$1")
+	text = regexp.MustCompile(`(?m)^>\s*(.*)$`).ReplaceAllString(text, "$1")
 	// Escape HTML to prevent injection
 	text = escapeHTML(text)
 	// Convert Markdown links to HTML
@@ -109,8 +110,8 @@ func markdownToTelegramHTML(text string) string {
 
 	// Convert strikethrough (~~)
 	text = regexp.MustCompile(`~~(.+?)~~`).ReplaceAllString(text, "<s>$1</s>")
-	// Convert list items to bullets
-	text = regexp.MustCompile(`^[-*]\s+`).ReplaceAllString(text, "• ")
+	// Convert list items to bullets (use (?m) flag for line matching)
+	text = regexp.MustCompile(`(?m)^[-*]\s+`).ReplaceAllString(text, "• ")
 
 	// Restore inline code blocks
 	for i, code := range inlineCodes.codes {

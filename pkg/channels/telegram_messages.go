@@ -303,9 +303,12 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 }
 
 func (c *TelegramChannel) sendReplyText(ctx context.Context, message *telego.Message, text string) error {
+	// Convert Markdown to HTML for proper formatting
+	htmlText := markdownToTelegramHTML(text)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   text,
+		ChatID:    telego.ChatID{ID: message.Chat.ID},
+		Text:      htmlText,
+		ParseMode: telego.ModeHTML,
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},
