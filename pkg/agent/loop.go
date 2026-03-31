@@ -104,6 +104,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		// GetOrCreate ensures the session exists before resetting tokens.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
+		// Clear any existing history to ensure a truly fresh conversation.
+		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
+		// Also clear any summary from previous sessions.
+		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
 	return newSessionKey
