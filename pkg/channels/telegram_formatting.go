@@ -28,9 +28,10 @@ func renderTelegramText(text string, textMode TextMode) string {
 	case TextModeHTML:
 		// For HTML mode, we still escape to prevent parse errors from raw model HTML
 		return escapeRawHTMLForTelegram(text)
-	case TextModeMarkdown, "":
+	case TextModeMarkdown:
 		return markdownToTelegramHTML(text)
 	default:
+		// Empty string or any other value defaults to markdown conversion
 		return markdownToTelegramHTML(text)
 	}
 }
