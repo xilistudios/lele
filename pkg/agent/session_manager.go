@@ -270,14 +270,20 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 	// Fall back to agent ID embedded in the session key
 	if agent == nil {
 		parsed := routing.ParseAgentSessionKey(sessionKey)
-		if parsed == nil {
-			return
+		if parsed != nil {
+			a, ok := sm.al.registry.GetAgent(parsed.AgentID)
+			if !ok || a == nil {
+				return
+			}
+			agent = a
+		} else {
+			// Session key doesn't have agent prefix (e.g., "telegram:12345")
+			// Use the default agent
+			agent = sm.al.registry.GetDefaultAgent()
+			if agent == nil {
+				return
+			}
 		}
-		a, ok := sm.al.registry.GetAgent(parsed.AgentID)
-		if !ok || a == nil {
-			return
-		}
-		agent = a
 	}
 
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)

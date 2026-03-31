@@ -26,7 +26,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		if len(parts) > 0 {
 			cmd := parts[0]
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "think", "agent":
+			case "help", "start", "show", "list", "models", "new", "clear", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "think", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -203,6 +203,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 	switch cmd {
 	case "new":
 		response := "🔄 Nueva conversación iniciada. Historial limpiado."
+		if c.agentLoop != nil {
+			response = c.agentLoop.ClearSession(sessionKey)
+		}
+		return c.sendReplyText(ctx, message, response)
+
+	case "clear":
+		response := "✅ Historial de conversación limpiado."
 		if c.agentLoop != nil {
 			response = c.agentLoop.ClearSession(sessionKey)
 		}

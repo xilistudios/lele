@@ -14,6 +14,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/routing"
 )
 
 // TestSummarizeSessionWithError_InsufficientMessages tests error handling for insufficient messages
@@ -116,7 +117,7 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	// Create a mock provider that returns empty response
 	emptyProvider := &mockProvider{
-		mockResponse: "",
+		returnEmpty: true,
 	}
 	al := NewAgentLoop(cfg, msgBus, emptyProvider)
 
@@ -210,5 +211,71 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
 	if len(afterHistory) != 2 {
 		t.Errorf("Expected 2 messages after compaction, got %d", len(afterHistory))
+	}
+}
+
+// TestAddTokenCounts_SessionKeyWithoutAgentPrefix tests token counting with session keys without agent prefix
+func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	provider := &mockProvider{}
+	al := NewAgentLoop(cfg, msgBus, provider)
+
+	sm := newSessionManager(al)
+	
+	// Test with session key without agent prefix (e.g., "telegram:12345")
+	sessionKey := "telegram:12345"
+	inputTokens := 100
+	outputTokens := 50
+	
+	// This should use the default agent and add token counts
+	sm.AddTokenCounts(sessionKey, inputTokens, outputTokens)
+	
+	// Verify token counts were added
+	defaultAgent := al.registry.GetDefaultAgent()
+	inputTokensActual, outputTokensActual := defaultAgent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokensActual != inputTokens || outputTokensActual != outputTokens {
+		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d", 
+			inputTokens, outputTokens, inputTokensActual, outputTokensActual)
+	}
+	
+	// Test with session key with agent prefix (e.g., "agent:main:telegram:12345")
+	sessionKeyWithPrefix := "agent:main:telegram:12345"
+	inputTokens2 := 200
+	outputTokens2 := 75
+	
+	sm.AddTokenCounts(sessionKeyWithPrefix, inputTokens2, outputTokens2)
+	
+	// Verify token counts were added to the correct agent
+	parsed := routing.ParseAgentSessionKey(sessionKeyWithPrefix)
+	if parsed == nil {
+		t.Fatal("Failed to parse session key with prefix")
+	}
+	
+	agent, ok := al.registry.GetAgent(parsed.AgentID)
+	if !ok {
+		t.Fatalf("Failed to get agent %s", parsed.AgentID)
+	}
+	
+	inputTokensActual2, outputTokensActual2 := agent.Sessions.GetTokenCounts(sessionKeyWithPrefix)
+	if inputTokensActual2 != inputTokens2 || outputTokensActual2 != outputTokens2 {
+		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d", 
+			inputTokens2, outputTokens2, inputTokensActual2, outputTokensActual2)
 	}
 }

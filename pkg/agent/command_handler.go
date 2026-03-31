@@ -82,9 +82,9 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		return ch.handleToggleCommand(args), true
 	case "/clear":
 		if agent != nil {
-			agent.Sessions.TruncateHistory(sessionKey, 0)
-			agent.Sessions.SetSummary(sessionKey, "")
-			agent.Sessions.Save(sessionKey)
+			if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
+				return fmt.Sprintf("❌ Failed to clear conversation: %s", err.Error()), true
+			}
 		}
 		return "✅ Conversation cleared.", true
 	case "/status":
@@ -181,6 +181,12 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		if len(history) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
+		// Send feedback message before starting compaction (LLM call can take seconds)
+		ch.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel: msg.Channel,
+			ChatID:  msg.ChatID,
+			Content: "🔄 Compacting conversation history...",
+		})
 		stats := ch.al.sessionManager.summarizeSession(agent, sessionKey)
 		if stats == nil {
 			return "❌ Compaction failed or nothing to compact.", true

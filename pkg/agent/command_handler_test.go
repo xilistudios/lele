@@ -215,7 +215,7 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 	}
 }
 
-// TestHandleClearCommand tests the /clear command
+// TestHandleClearCommand tests the /clear command resets all session state
 func TestHandleClearCommand(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {
@@ -238,12 +238,16 @@ func TestHandleClearCommand(t *testing.T) {
 	provider := &mockProvider{}
 	al := NewAgentLoop(cfg, msgBus, provider)
 
-	sessionKey := "test:clear-session"
+	// Use agent: prefixed key so the handler accepts it from msg.SessionKey
+	sessionKey := "agent:main:test:clear-session"
 	agent := al.registry.GetDefaultAgent()
 
-	// Add some history first
+	// Add some history, tokens, and session overrides
 	agent.Sessions.AddMessage(sessionKey, "user", "Hello")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Hi there!")
+	agent.Sessions.AddTokenCounts(sessionKey, 500, 250)
+	al.sessionThinking.Store(sessionKey, "high")
+	al.sessionModels.Store(sessionKey, "some-model")
 
 	ch := newCommandHandler(al)
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
@@ -261,11 +265,32 @@ func TestHandleClearCommand(t *testing.T) {
 		t.Errorf("Expected clear message, got: %s", result)
 	}
 
-	// Verify history was cleared (TruncateHistory(0) keeps system prompt if exists)
+	// Verify history was cleared
 	history := agent.Sessions.GetHistory(sessionKey)
-	// TruncateHistory(0) clears all messages, but may keep system prompt
 	if len(history) > 0 {
-		t.Logf("History after clear: %d messages (may include system prompt)", len(history))
+		t.Errorf("Expected empty history after clear, got %d messages", len(history))
+	}
+
+	// Verify summary was cleared
+	summary := agent.Sessions.GetSummary(sessionKey)
+	if summary != "" {
+		t.Errorf("Expected empty summary after clear, got: %s", summary)
+	}
+
+	// Verify token counts were reset
+	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
+	if inputTokens != 0 || outputTokens != 0 {
+		t.Errorf("Expected token counts (0, 0) after clear, got (%d, %d)", inputTokens, outputTokens)
+	}
+
+	// Verify think level override was cleared
+	if _, ok := al.sessionThinking.Load(sessionKey); ok {
+		t.Error("Expected session thinking override to be cleared after /clear")
+	}
+
+	// Verify model override was cleared
+	if _, ok := al.sessionModels.Load(sessionKey); ok {
+		t.Error("Expected session model override to be cleared after /clear")
 	}
 }
 
@@ -2194,5 +2219,181 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 	}
 	if result != "✅ Conversation cleared." {
 		t.Errorf("Expected clear message even without agent, got: %s", result)
+	}
+}
+// TestNewCommand_CleanSession verifies that /new properly cleans session context
+func TestNewCommand_CleanSession(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxToolIterations: 10,
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-peer",
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &mockProvider{})
+	ch := newCommandHandler(al)
+	sessionKey := "telegram:99999"
+
+	// Step 1: Send first message
+	_, _ = ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "99999",
+		Content:    "First message",
+		SessionKey: sessionKey,
+	})
+
+	// Get the active session key after first message
+	firstActiveSession := al.resolveSessionKey(sessionKey)
+	t.Logf("First active session: %s", firstActiveSession)
+
+	// Add some history manually to simulate a long conversation
+	defaultAgent, _ := al.registry.GetAgent("main")
+	defaultAgent.Sessions.AddMessage(firstActiveSession, "user", "Message 1")
+	defaultAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 1")
+	defaultAgent.Sessions.AddMessage(firstActiveSession, "user", "Message 2")
+	defaultAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 2")
+	defaultAgent.Sessions.Save(firstActiveSession)
+
+	historyCount1 := len(defaultAgent.Sessions.GetHistory(firstActiveSession))
+	t.Logf("History count in first session: %d", historyCount1)
+
+	// Step 2: Execute /new
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "99999",
+		Content:    "/new",
+		SessionKey: sessionKey,
+	})
+	if !handled {
+		t.Fatal("/new should be handled")
+	}
+	if !strings.Contains(response, "New conversation") {
+		t.Fatalf("Unexpected /new response: %s", response)
+	}
+
+	// Step 3: Get the new active session key
+	secondActiveSession := al.resolveSessionKey(sessionKey)
+	t.Logf("Second active session: %s", secondActiveSession)
+
+	if secondActiveSession == firstActiveSession {
+		t.Fatal("/new should create a new session key, but it didn't")
+	}
+
+	// Step 4: Check that the new session has no history
+	historyCount2 := len(defaultAgent.Sessions.GetHistory(secondActiveSession))
+	t.Logf("History count in second session: %d", historyCount2)
+
+	if historyCount2 != 0 {
+		t.Errorf("Expected 0 messages in new session, got %d", historyCount2)
+	}
+
+	// Step 5: Check that old session is preserved (for safety)
+	historyCountOld := len(defaultAgent.Sessions.GetHistory(firstActiveSession))
+	t.Logf("History count in old session: %d", historyCountOld)
+
+	// Note: Steps 6-7 removed because handleCommand only processes commands (messages starting with "/").
+	// To test message processing, use processMessage via the message processor, which requires
+	// more complex setup including the LLM runner.
+}
+
+// TestAgentCommand_CleanSession verifies that /agent <id> properly cleans session context
+func TestAgentCommand_CleanSession(t *testing.T) {
+	tmpDir1 := t.TempDir()
+	tmpDir2 := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir1,
+				Model:             "test-model",
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: tmpDir1},
+				{ID: "coder", Workspace: tmpDir2},
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-peer",
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus, &mockProvider{})
+	ch := newCommandHandler(al)
+	sessionKey := "telegram:88888"
+
+	// Step 1: Send message with main agent
+	_, _ = ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "88888",
+		Content:    "Hello from main",
+		SessionKey: sessionKey,
+	})
+
+	firstActiveSession := al.resolveSessionKey(sessionKey)
+	t.Logf("First active session (main): %s", firstActiveSession)
+
+	// Add some history
+	mainAgent, _ := al.registry.GetAgent("main")
+	mainAgent.Sessions.AddMessage(firstActiveSession, "user", "Long conversation message 1")
+	mainAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 1")
+	mainAgent.Sessions.AddMessage(firstActiveSession, "user", "Long conversation message 2")
+	mainAgent.Sessions.AddMessage(firstActiveSession, "assistant", "Response 2")
+	mainAgent.Sessions.Save(firstActiveSession)
+
+	historyCount1 := len(mainAgent.Sessions.GetHistory(firstActiveSession))
+	t.Logf("History count before /agent: %d", historyCount1)
+
+	// Step 2: Switch to coder agent
+	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
+		Channel:    "telegram",
+		SenderID:   "user1",
+		ChatID:     "88888",
+		Content:    "/agent coder",
+		SessionKey: sessionKey,
+	})
+	if !handled {
+		t.Fatal("/agent should be handled")
+	}
+	if !strings.Contains(response, "coder") {
+		t.Fatalf("Unexpected /agent response: %s", response)
+	}
+
+	// Step 3: Verify new session key
+	secondActiveSession := al.resolveSessionKey(sessionKey)
+	t.Logf("Second active session (coder): %s", secondActiveSession)
+
+	if secondActiveSession == firstActiveSession {
+		t.Fatal("/agent should create a new session key, but it didn't")
+	}
+
+	// Step 4: Verify the coder agent has no history in the new session
+	coderAgent, _ := al.registry.GetAgent("coder")
+	historyCount2 := len(coderAgent.Sessions.GetHistory(secondActiveSession))
+	t.Logf("History count in coder session: %d", historyCount2)
+
+	if historyCount2 != 0 {
+		t.Errorf("Expected 0 messages in coder session, got %d", historyCount2)
+	}
+
+	// Step 5: Verify old main session is preserved
+	historyCountOld := len(mainAgent.Sessions.GetHistory(firstActiveSession))
+	t.Logf("History count in old main session: %d", historyCountOld)
+
+	if historyCountOld != 4 {
+		t.Errorf("Expected 4 messages in old main session, got %d", historyCountOld)
 	}
 }
