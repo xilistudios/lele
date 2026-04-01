@@ -355,6 +355,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 					Context:   targetAgent.ContextBuilder.GetInitialContext(),
 					Workspace: targetAgent.Workspace,
 					Name:      targetAgent.Name,
+					Model:     targetAgent.Model,
 				}
 			}
 			// Fallback: use parent agent's context if agent not found
@@ -362,6 +363,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 				Context:   agent.ContextBuilder.GetInitialContext(),
 				Workspace: agent.Workspace,
 				Name:      agent.Name,
+				Model:     agent.Model,
 			}
 		})
 		spawnTool := tools.NewSpawnTool(subagentManager)

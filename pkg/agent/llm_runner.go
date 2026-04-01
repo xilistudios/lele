@@ -60,7 +60,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	}
 
 	// 1. Update tool contexts
-	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID)
+	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID, opts.SessionKey)
 
 	// 2. Build messages (skip history for heartbeat)
 	var history []providers.Message
@@ -642,7 +642,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 }
 
 // updateToolContexts updates the context for tools that need channel/chatID info.
-func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
 	if tool, ok := agent.Tools.Get("message"); ok {
 		if mt, ok := tool.(tools.ContextualTool); ok {

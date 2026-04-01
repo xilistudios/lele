@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/utils"
 )
 
 type ExecTool struct {
@@ -24,6 +25,26 @@ type ExecTool struct {
 	approvalMode        bool                           // Activa modo aprobación
 	approvalCallback    func(cmd string) (bool, error) // Callback para solicitar aprobación
 	bypassGuard         bool                           // Bypass all safety guards when command is approved
+	channel             string                         // Channel for feedback messages
+	chatID              string                         // ChatID for feedback messages
+	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
+	verbose             bool                           // Whether verbose mode is enabled
+}
+
+// SetContext implements ContextualTool interface
+func (t *ExecTool) SetContext(channel, chatID string) {
+	t.channel = channel
+	t.chatID = chatID
+}
+
+// SetFeedbackCallback sets the callback for sending feedback messages
+func (t *ExecTool) SetFeedbackCallback(callback func(channel, chatID, message string)) {
+	t.feedbackCallback = callback
+}
+
+// SetVerbose enables or disables verbose mode
+func (t *ExecTool) SetVerbose(enabled bool) {
+	t.verbose = enabled
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{
@@ -201,22 +222,57 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	// Generate process name for feedback
+	processName := utils.RandomProcessName()
+
+	// Start the command
+	startTime := time.Now()
+	if err := cmd.Start(); err != nil {
+		return ErrorResult(fmt.Sprintf("failed to start command: %v", err))
+	}
+
+	// Channel to signal command completion
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	// Wait for command to complete or timeout, with feedback after 5 seconds
+	var execErr error
+	feedbackSent := false
+	select {
+	case execErr = <-done:
+		// Command completed quickly (within 5 seconds)
+	case <-time.After(5 * time.Second):
+		// Command is taking longer than 5 seconds, send feedback
+		if t.verbose && t.feedbackCallback != nil && t.channel != "" && t.chatID != "" {
+			feedbackMsg := fmt.Sprintf("🧰 Process: %s", processName)
+			t.feedbackCallback(t.channel, t.chatID, feedbackMsg)
+			feedbackSent = true
+		}
+		// Wait for the actual command completion
+		execErr = <-done
+	}
+
+	elapsed := time.Since(startTime)
+
+	// Check if context was cancelled due to timeout
+	if cmdCtx.Err() == context.DeadlineExceeded {
+		msg := fmt.Sprintf("Command timed out after %v", t.timeout)
+		return &ToolResult{
+			ForLLM:  msg,
+			ForUser: msg,
+			IsError: true,
+		}
+	}
+
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		output += "\nSTDERR:\n" + stderr.String()
 	}
 
-	if err != nil {
-		if cmdCtx.Err() == context.DeadlineExceeded {
-			msg := fmt.Sprintf("Command timed out after %v", t.timeout)
-			return &ToolResult{
-				ForLLM:  msg,
-				ForUser: msg,
-				IsError: true,
-			}
-		}
-		output += fmt.Sprintf("\nExit code: %v", err)
+	if execErr != nil {
+		output += fmt.Sprintf("\nExit code: %v", execErr)
 	}
 
 	if output == "" {
@@ -228,7 +284,14 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output = output[:maxLen] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-maxLen)
 	}
 
-	if err != nil {
+	// If feedback was sent and command completed, optionally send completion message
+	// (only if it took significant time)
+	if feedbackSent && elapsed > 10*time.Second && t.feedbackCallback != nil {
+		completionMsg := fmt.Sprintf("✅ Process %s completed (took %v)", processName, elapsed.Round(time.Second))
+		t.feedbackCallback(t.channel, t.chatID, completionMsg)
+	}
+
+	if execErr != nil {
 		return &ToolResult{
 			ForLLM:  output,
 			ForUser: output,

@@ -39,9 +39,10 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace string // Agent's workspace path
-	Name      string // Agent display name
+	Context   string  // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace string  // Agent's workspace path
+	Name      string  // Agent display name
+	Model     string  // Agent's model (e.g., "alibaba/kimi-k2.5")
 }
 
 type subagentOutcome struct {
@@ -400,7 +401,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Updated = time.Now().UnixMilli()
 	sm.mu.Unlock()
 
-	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name from its workspace)
+	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model from its workspace)
 	sm.mu.RLock()
 	getContextInfo := sm.getAgentContext
 	agentID := task.AgentID
@@ -410,12 +411,14 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	var systemPrompt string
 	var agentWorkspace string
 	var agentName string
+	var agentModel string
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
+			agentModel = ctxInfo.Model
 			if agentName == "" {
 				agentName = agentID
 			}
@@ -427,6 +430,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		systemPrompt = buildSubagentSystemPrompt("", agentID, agentName, agentWorkspace)
 		agentWorkspace = "unknown"
 		agentName = agentID
+	}
+
+	// Use the agent's model if available, otherwise fall back to the manager's default model
+	if agentModel == "" {
+		agentModel = sm.defaultModel
 	}
 
 	messages := previousTask.buildMessages(systemPrompt)
@@ -467,7 +475,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
 		Provider:      sm.provider,
-		Model:         sm.defaultModel,
+		Model:         agentModel,
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,

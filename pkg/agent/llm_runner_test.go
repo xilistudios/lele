@@ -294,7 +294,7 @@ type llmRunnerMockToolCoordinator struct {
 	lastChatID               string
 }
 
-func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	m.updateToolContextsCalled = true
 	m.lastAgent = agent
 	m.lastChannel = channel
@@ -1248,7 +1248,7 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent.Tools.Register(subagentTool)
 
 	// Call updateToolContexts
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id")
+	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 
 	// Verify all tools received context
 	if !messageTool.setContextCalled {
@@ -1278,7 +1278,7 @@ func TestUpdateToolContexts_MissingTools(t *testing.T) {
 
 	// Don't register any contextual tools
 	// Should not panic
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id")
+	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 }
 
 // ============================================================================

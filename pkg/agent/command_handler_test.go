@@ -1075,7 +1075,7 @@ type commandHandlerSubagentCoordinatorStub struct {
 	err            error
 }
 
-func (m *commandHandlerSubagentCoordinatorStub) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (m *commandHandlerSubagentCoordinatorStub) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 }
 
 func (m *commandHandlerSubagentCoordinatorStub) stopAllSubagents() int { return 0 }
