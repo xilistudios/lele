@@ -134,10 +134,18 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	return finalContent, nil
 }
 
+// commandSequence tracks recent tool calls to detect loops
+type commandSequence struct {
+	name      string
+	arguments string
+	count     int
+}
+
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	var lastCommand *commandSequence
 	model := lr.modelForSession(agent, opts.SessionKey)
 	candidates := agent.Candidates
 	if model != agent.Model {
@@ -633,6 +641,36 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				messages = append(messages, toolResult.ContextMessages...)
 				for _, contextMsg := range toolResult.ContextMessages {
 					agent.Sessions.AddFullMessage(opts.SessionKey, contextMsg)
+				}
+			}
+
+			// Track command repetitions to detect loops
+			cmdKey := tc.Name + "(" + string(argsJSON) + ")"
+			if lastCommand != nil && lastCommand.name == cmdKey {
+				lastCommand.count++
+				if lastCommand.count >= 3 {
+					logger.WarnCF("agent", "Detected command loop, injecting guidance",
+						map[string]interface{}{
+							"agent_id":     agent.ID,
+							"tool":         tc.Name,
+							"repetitions":  lastCommand.count,
+							"iteration":    iteration,
+						})
+					// Inject guidance message to break the loop
+					guidanceMsg := providers.Message{
+						Role:    "user",
+						Content: fmt.Sprintf("⚠️ GUIDANCE: You have executed the same command (%s) multiple times consecutively. This appears to be a loop. Please STOP repeating this command and either:\n1. Analyze the results you've already received, or\n2. Try a different approach, or\n3. Provide a final response based on the information gathered.", tc.Name),
+					}
+					messages = append(messages, guidanceMsg)
+					agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
+					// Reset counter after injecting guidance
+					lastCommand.count = 0
+				}
+			} else {
+				lastCommand = &commandSequence{
+					name:      cmdKey,
+					arguments: string(argsJSON),
+					count:     1,
 				}
 			}
 		}

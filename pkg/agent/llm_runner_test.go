@@ -2086,3 +2086,5 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 		t.Errorf("Expected 'default-model' for different session, got: %s", model)
 	}
 }
+
+
