@@ -105,7 +105,6 @@ You are lele, a helpful AI assistant.
 ## Workspace
 Your workspace is at: %s
 - Memory: %s/memory/MEMORY.md
-- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md
 - Skills: %s/skills/{skill-name}/SKILL.md
 
 %s
@@ -117,7 +116,7 @@ Your workspace is at: %s
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
 3. **Memory** - When remembering something, write to %s/memory/MEMORY.md`,
-		now, runtime, workspacePath, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
+		now, runtime, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 
 func (cb *ContextBuilder) buildToolsSection() string {

@@ -745,7 +745,7 @@ func TestGetMemoryContext_OnlyLongTerm(t *testing.T) {
 	}
 }
 
-// TestGetMemoryContext_OnlyDailyNotes tests with only daily notes
+// TestGetMemoryContext_OnlyDailyNotes tests with only daily notes (no longer included in context)
 func TestGetMemoryContext_OnlyDailyNotes(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
@@ -762,23 +762,14 @@ func TestGetMemoryContext_OnlyDailyNotes(t *testing.T) {
 
 	result := ms.GetMemoryContext()
 
-	// Should contain memory header and daily notes section
-	if !strings.Contains(result, "# Memory") {
-		t.Error("Expected result to contain '# Memory' header")
-	}
-	if !strings.Contains(result, "## Recent Daily Notes") {
-		t.Error("Expected result to contain daily notes section")
-	}
-	if !strings.Contains(result, "Today's activity") {
-		t.Error("Expected result to contain daily note content")
-	}
-	// Should not contain long-term section
-	if strings.Contains(result, "## Long-term Memory") {
-		t.Error("Expected result to not contain long-term section when none exists")
+	// Should return empty since daily notes are no longer included in context
+	if result != "" {
+		t.Errorf("Expected empty result when only daily notes exist, got: %s", result)
 	}
 }
 
 // TestGetMemoryContext_BothMemories tests with both long-term and daily notes
+// Daily notes are no longer included in context, only MEMORY.md
 func TestGetMemoryContext_BothMemories(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "lele-test-*")
 	if err != nil {
@@ -794,29 +785,26 @@ func TestGetMemoryContext_BothMemories(t *testing.T) {
 		t.Fatalf("Failed to write long-term memory: %v", err)
 	}
 
-	// Create daily note
+	// Create daily note (will be ignored in context)
 	if err := ms.AppendToday("Daily activity"); err != nil {
 		t.Fatalf("Failed to append today's note: %v", err)
 	}
 
 	result := ms.GetMemoryContext()
 
-	// Should contain both sections
+	// Should contain only long-term section
 	if !strings.Contains(result, "## Long-term Memory") {
 		t.Error("Expected result to contain long-term memory section")
-	}
-	if !strings.Contains(result, "## Recent Daily Notes") {
-		t.Error("Expected result to contain daily notes section")
 	}
 	if !strings.Contains(result, longTermContent) {
 		t.Error("Expected result to contain long-term content")
 	}
-	if !strings.Contains(result, "Daily activity") {
-		t.Error("Expected result to contain daily note content")
+	// Should not contain daily notes section anymore
+	if strings.Contains(result, "## Recent Daily Notes") {
+		t.Error("Expected result to NOT contain daily notes section")
 	}
-	// Should have separator between sections
-	if !strings.Contains(result, "---") {
-		t.Error("Expected result to contain separator between sections")
+	if strings.Contains(result, "Daily activity") {
+		t.Error("Expected result to NOT contain daily note content")
 	}
 }
 
@@ -835,7 +823,7 @@ func TestGetMemoryContext_EmptyLongTerm(t *testing.T) {
 		t.Fatalf("Failed to write empty long-term memory: %v", err)
 	}
 
-	// Create daily note
+	// Create daily note (will be ignored in context)
 	if err := ms.AppendToday("Daily activity"); err != nil {
 		t.Fatalf("Failed to append today's note: %v", err)
 	}
@@ -846,9 +834,13 @@ func TestGetMemoryContext_EmptyLongTerm(t *testing.T) {
 	if strings.Contains(result, "## Long-term Memory") {
 		t.Error("Expected result to not contain long-term section when empty")
 	}
-	// Should contain daily notes
-	if !strings.Contains(result, "## Recent Daily Notes") {
-		t.Error("Expected result to contain daily notes section")
+	// Should not contain daily notes section anymore
+	if strings.Contains(result, "## Recent Daily Notes") {
+		t.Error("Expected result to NOT contain daily notes section")
+	}
+	// Result should be empty since long-term is empty and daily notes are excluded
+	if result != "" {
+		t.Errorf("Expected empty result, got: %s", result)
 	}
 }
 
@@ -894,19 +886,20 @@ func TestMemoryStore_FullWorkflow(t *testing.T) {
 		t.Fatalf("Failed to append to today's notes: %v", err)
 	}
 
-	// Step 6: Get memory context
+	// Step 6: Get memory context (now only includes long-term memory)
 	context := ms.GetMemoryContext()
 	if !strings.Contains(context, "User Preferences") {
 		t.Error("Memory context doesn't contain long-term memory")
 	}
-	if !strings.Contains(context, "Started working on project") {
-		t.Error("Memory context doesn't contain first daily note")
+	// Daily notes are no longer included in GetMemoryContext
+	if strings.Contains(context, "Started working on project") {
+		t.Error("Memory context should NOT contain daily notes anymore")
 	}
-	if !strings.Contains(context, "Made good progress") {
-		t.Error("Memory context doesn't contain second daily note")
+	if strings.Contains(context, "Made good progress") {
+		t.Error("Memory context should NOT contain daily notes anymore")
 	}
 
-	// Step 7: Get recent daily notes
+	// Step 7: GetRecentDailyNotes still works for explicit access
 	recentNotes := ms.GetRecentDailyNotes(1)
 	if !strings.Contains(recentNotes, "Started working on project") {
 		t.Error("Recent notes don't contain expected content")
