@@ -134,18 +134,35 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	return finalContent, nil
 }
 
-// commandSequence tracks recent tool calls to detect loops
-type commandSequence struct {
+// messageSignature tracks repeated LLM responses to detect loops
+type messageSignature struct {
+	toolCalls []toolCallSignature
+	count     int
+}
+
+type toolCallSignature struct {
 	name      string
 	arguments string
-	count     int
+}
+
+// messageSignaturesEqual compares two sets of tool call signatures
+func messageSignaturesEqual(a, b []toolCallSignature) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].name != b[i].name || a[i].arguments != b[i].arguments {
+			return false
+		}
+	}
+	return true
 }
 
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
-	var lastCommand *commandSequence
+	var lastMessage *messageSignature
 	model := lr.modelForSession(agent, opts.SessionKey)
 	candidates := agent.Candidates
 	if model != agent.Model {
@@ -418,12 +435,48 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			toolNames = append(toolNames, tc.Name)
 		}
 		logger.InfoCF("agent", "LLM requested tool calls",
-			map[string]interface{}{
-				"agent_id":  agent.ID,
+			map[string]interface{}{"agent_id": agent.ID,
 				"tools":     toolNames,
 				"count":     len(response.ToolCalls),
 				"iteration": iteration,
 			})
+
+		// Build signature of this message to detect loops
+		currentSignature := messageSignature{
+			toolCalls: make([]toolCallSignature, 0, len(response.ToolCalls)),
+		}
+		for _, tc := range response.ToolCalls {
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			currentSignature.toolCalls = append(currentSignature.toolCalls, toolCallSignature{
+				name:      tc.Name,
+				arguments: string(argsJSON),
+			})
+		}
+
+		// Check if this message matches the last one (loop detection)
+		if lastMessage != nil && messageSignaturesEqual(lastMessage.toolCalls, currentSignature.toolCalls) {
+			lastMessage.count++
+			if lastMessage.count >= 3 {
+				logger.WarnCF("agent", "Detected repeated message loop, injecting guidance",
+					map[string]interface{}{"agent_id": agent.ID,
+						"repetitions": lastMessage.count,
+						"iteration":   iteration,
+						"tools":       toolNames,
+					})
+				// Inject guidance message to break the loop
+				guidanceMsg := providers.Message{
+					Role:    "user",
+					Content: fmt.Sprintf("⚠️ GUIDANCE: You have sent the same tool calls multiple times consecutively. This appears to be a loop. The previous tool calls have already been executed and their results are in the conversation history. Please STOP repeating the same tool calls and either:\n1. Analyze the results you've already received, or\n2. Try a different approach, or\n3. Provide a final response based on the information gathered."),
+				}
+				messages = append(messages, guidanceMsg)
+				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
+				// Reset counter after injecting guidance
+				lastMessage.count = 0
+			}
+		} else {
+			lastMessage = &currentSignature
+			lastMessage.count = 1
+		}
 
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
@@ -641,36 +694,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				messages = append(messages, toolResult.ContextMessages...)
 				for _, contextMsg := range toolResult.ContextMessages {
 					agent.Sessions.AddFullMessage(opts.SessionKey, contextMsg)
-				}
-			}
-
-			// Track command repetitions to detect loops
-			cmdKey := tc.Name + "(" + string(argsJSON) + ")"
-			if lastCommand != nil && lastCommand.name == cmdKey {
-				lastCommand.count++
-				if lastCommand.count >= 3 {
-					logger.WarnCF("agent", "Detected command loop, injecting guidance",
-						map[string]interface{}{
-							"agent_id":     agent.ID,
-							"tool":         tc.Name,
-							"repetitions":  lastCommand.count,
-							"iteration":    iteration,
-						})
-					// Inject guidance message to break the loop
-					guidanceMsg := providers.Message{
-						Role:    "user",
-						Content: fmt.Sprintf("⚠️ GUIDANCE: You have executed the same command (%s) multiple times consecutively. This appears to be a loop. Please STOP repeating this command and either:\n1. Analyze the results you've already received, or\n2. Try a different approach, or\n3. Provide a final response based on the information gathered.", tc.Name),
-					}
-					messages = append(messages, guidanceMsg)
-					agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
-					// Reset counter after injecting guidance
-					lastCommand.count = 0
-				}
-			} else {
-				lastCommand = &commandSequence{
-					name:      cmdKey,
-					arguments: string(argsJSON),
-					count:     1,
 				}
 			}
 		}
