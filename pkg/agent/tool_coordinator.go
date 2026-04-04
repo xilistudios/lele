@@ -43,7 +43,7 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 // updateToolContexts updates the context for tools that need channel/chatID info.
 func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
-	if tool, ok := agent.Tools.Get("message"); ok {
+	if tool, ok := agent.Tools.Get("send_file"); ok {
 		if mt, ok := tool.(tools.ContextualTool); ok {
 			mt.SetContext(channel, chatID)
 		}

@@ -1228,7 +1228,7 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 
 	expectedTools := len(parentTools)
 	if defaultAgent.Tools != nil {
-		if _, ok := defaultAgent.Tools.Get("message"); ok {
+		if _, ok := defaultAgent.Tools.Get("send_file"); ok {
 			expectedTools--
 		}
 	}
@@ -1238,8 +1238,8 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 			expectedTools, len(subagentTools))
 	}
 
-	if subagentManager.HasTool("message") {
-		t.Error("Subagent should not have the message tool")
+	if subagentManager.HasTool("send_file") {
+		t.Error("Subagent should not have the send_file tool")
 	}
 
 	// Verificar herramientas específicas que debe tener el subagente

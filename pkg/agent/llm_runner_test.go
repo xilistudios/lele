@@ -1238,7 +1238,7 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	// Create mock contextual tools
-	messageTool := &llmRunnerMockContextualTool{name: "message"}
+	messageTool := &llmRunnerMockContextualTool{name: "send_file"}
 	spawnTool := &llmRunnerMockContextualTool{name: "spawn"}
 	subagentTool := &llmRunnerMockContextualTool{name: "subagent"}
 
@@ -1251,13 +1251,13 @@ func TestUpdateToolContexts(t *testing.T) {
 
 	// Verify all tools received context
 	if !messageTool.setContextCalled {
-		t.Error("Expected message tool SetContext to be called")
+		t.Error("Expected send_file tool SetContext to be called")
 	}
 	if messageTool.channel != "test-channel" {
-		t.Errorf("Expected message tool channel to be 'test-channel', got: %s", messageTool.channel)
+		t.Errorf("Expected send_file tool channel to be 'test-channel', got: %s", messageTool.channel)
 	}
 	if messageTool.chatID != "test-chat-id" {
-		t.Errorf("Expected message tool chatID to be 'test-chat-id', got: %s", messageTool.chatID)
+		t.Errorf("Expected send_file tool chatID to be 'test-chat-id', got: %s", messageTool.chatID)
 	}
 
 	if !spawnTool.setContextCalled {
@@ -2085,5 +2085,3 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 		t.Errorf("Expected 'default-model' for different session, got: %s", model)
 	}
 }
-
-

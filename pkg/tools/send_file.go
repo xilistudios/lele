@@ -11,46 +11,45 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
-type MessagePayload struct {
+type SendFilePayload struct {
 	Content     string
 	Attachments []bus.FileAttachment
 }
 
-type SendCallback func(channel, chatID string, payload MessagePayload) error
+type SendFileCallback func(channel, chatID string, payload SendFilePayload) error
 
-type MessageTool struct {
-	sendCallback   SendCallback
+type SendFileTool struct {
+	sendCallback   SendFileCallback
 	defaultChannel string
 	defaultChatID  string
-	sentInRound    bool // Tracks whether a message was sent in the current processing round
 }
 
-func NewMessageTool() *MessageTool {
-	return &MessageTool{}
+func NewSendFileTool() *SendFileTool {
+	return &SendFileTool{}
 }
 
-func (t *MessageTool) Name() string {
-	return "message"
+func (t *SendFileTool) Name() string {
+	return "send_file"
 }
 
-func (t *MessageTool) Description() string {
-	return "Send a message or file attachments to the user on a chat channel. Use this when you want to communicate something or deliver a generated file."
+func (t *SendFileTool) Description() string {
+	return "Send file attachments to the user on a chat channel. Use this when you need to deliver generated files or documents."
 }
 
-func (t *MessageTool) Parameters() map[string]interface{} {
+func (t *SendFileTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
 			"content": map[string]interface{}{
 				"type":        "string",
-				"description": "Optional text content to send. If file_paths is present, this text is used as message body or caption.",
+				"description": "Optional text content to send as a caption or short message with the files.",
 			},
 			"file_paths": map[string]interface{}{
 				"type": "array",
 				"items": map[string]interface{}{
 					"type": "string",
 				},
-				"description": "Optional local file paths to send back to the user.",
+				"description": "Local file paths to send back to the user.",
 			},
 			"channel": map[string]interface{}{
 				"type":        "string",
@@ -65,24 +64,18 @@ func (t *MessageTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *MessageTool) SetContext(channel, chatID string) {
+func (t *SendFileTool) SetContext(channel, chatID string) {
 	t.defaultChannel = channel
 	t.defaultChatID = chatID
-	t.sentInRound = false // Reset send tracking for new processing round
 }
 
-// HasSentInRound returns true if the message tool sent a message during the current round.
-func (t *MessageTool) HasSentInRound() bool {
-	return t.sentInRound
-}
-
-func (t *MessageTool) SetSendCallback(callback SendCallback) {
+func (t *SendFileTool) SetSendCallback(callback SendFileCallback) {
 	t.sendCallback = callback
 }
 
-func (t *MessageTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
+func (t *SendFileTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	content, _ := args["content"].(string)
-	attachments, err := parseMessageAttachments(args["file_paths"])
+	attachments, err := parseSendFileAttachments(args["file_paths"])
 	if err != nil {
 		return &ToolResult{ForLLM: err.Error(), IsError: true}
 	}
@@ -92,39 +85,34 @@ func (t *MessageTool) Execute(ctx context.Context, args map[string]interface{}) 
 
 	channel, _ := args["channel"].(string)
 	chatID, _ := args["chat_id"].(string)
-
 	if channel == "" {
 		channel = t.defaultChannel
 	}
 	if chatID == "" {
 		chatID = t.defaultChatID
 	}
-
 	if channel == "" || chatID == "" {
 		return &ToolResult{ForLLM: "No target channel/chat specified", IsError: true}
 	}
-
 	if t.sendCallback == nil {
-		return &ToolResult{ForLLM: "Message sending not configured", IsError: true}
+		return &ToolResult{ForLLM: "File sending not configured", IsError: true}
 	}
 
-	if err := t.sendCallback(channel, chatID, MessagePayload{Content: content, Attachments: attachments}); err != nil {
+	if err := t.sendCallback(channel, chatID, SendFilePayload{Content: content, Attachments: attachments}); err != nil {
 		return &ToolResult{
-			ForLLM:  fmt.Sprintf("sending message: %v", err),
+			ForLLM:  fmt.Sprintf("sending file(s): %v", err),
 			IsError: true,
 			Err:     err,
 		}
 	}
 
-	t.sentInRound = true
-	// Silent: user already received the message directly
 	return &ToolResult{
-		ForLLM: fmt.Sprintf("Message sent to %s:%s", channel, chatID),
+		ForLLM: fmt.Sprintf("Files sent to %s:%s", channel, chatID),
 		Silent: true,
 	}
 }
 
-func parseMessageAttachments(raw interface{}) ([]bus.FileAttachment, error) {
+func parseSendFileAttachments(raw interface{}) ([]bus.FileAttachment, error) {
 	if raw == nil {
 		return nil, nil
 	}

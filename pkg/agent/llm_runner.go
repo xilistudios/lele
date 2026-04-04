@@ -705,7 +705,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 // updateToolContexts updates the context for tools that need channel/chatID info.
 func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
-	if tool, ok := agent.Tools.Get("message"); ok {
+	if tool, ok := agent.Tools.Get("send_file"); ok {
 		if mt, ok := tool.(tools.ContextualTool); ok {
 			mt.SetContext(channel, chatID)
 		}

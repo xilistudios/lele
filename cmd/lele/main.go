@@ -238,6 +238,24 @@ func onboard() {
 	workspace := cfg.WorkspacePath()
 	createWorkspaceTemplates(workspace)
 
+	// Create logs directory and initial log files
+	logsPath := cfg.LogsPath()
+	if err := os.MkdirAll(logsPath, 0755); err != nil {
+		fmt.Printf("Warning: could not create logs directory: %v\n", err)
+	} else {
+		// Create initial empty log files with current date
+		currentDate := time.Now().Format("2006-01-02")
+		infoLog := filepath.Join(logsPath, fmt.Sprintf("info-%s.log", currentDate))
+		errorsLog := filepath.Join(logsPath, fmt.Sprintf("errors-%s.log", currentDate))
+
+		if _, err := os.Create(infoLog); err != nil {
+			fmt.Printf("Warning: could not create info log file: %v\n", err)
+		}
+		if _, err := os.Create(errorsLog); err != nil {
+			fmt.Printf("Warning: could not create errors log file: %v\n", err)
+		}
+	}
+
 	fmt.Printf("%s lele is ready!\n", logo)
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Add your API key to", configPath)
@@ -525,6 +543,21 @@ func gatewayCmd() {
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Initialize logging with configured path
+	if cfg.Logs.Enabled {
+		logsPath := cfg.LogsPath()
+		if err := logger.EnableMultiFileLogging(logsPath); err != nil {
+			fmt.Printf("Warning: could not enable file logging: %v\n", err)
+		} else {
+			// Cleanup old logs (older than max_days)
+			if cfg.Logs.MaxDays > 0 {
+				if err := logger.CleanupOldLogs(cfg.Logs.MaxDays); err != nil {
+					fmt.Printf("Warning: could not cleanup old logs: %v\n", err)
+				}
+			}
+		}
 	}
 
 	msgBus := bus.NewMessageBus()

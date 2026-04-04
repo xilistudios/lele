@@ -55,6 +55,7 @@ type Config struct {
 	Tools     ToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
+	Logs      LogsConfig      `json:"logs"`
 	mu        sync.RWMutex
 }
 
@@ -266,6 +267,14 @@ type HeartbeatConfig struct {
 type DevicesConfig struct {
 	Enabled    bool `json:"enabled" env:"LELE_DEVICES_ENABLED"`
 	MonitorUSB bool `json:"monitor_usb" env:"LELE_DEVICES_MONITOR_USB"`
+}
+
+// LogsConfig holds logging-related configuration
+type LogsConfig struct {
+	Enabled  bool   `json:"enabled" env:"LELE_LOGS_ENABLED"`             // Enable/disable file logging
+	Path     string `json:"path,omitempty" env:"LELE_LOGS_PATH"`         // Custom path (default: ~/.lele/logs)
+	MaxDays  int    `json:"max_days,omitempty" env:"LELE_LOGS_MAX_DAYS"` // Max days to keep logs (default: 7)
+	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"` // "daily" or "weekly" (default: daily)
 }
 
 type ProvidersConfig struct {
@@ -787,6 +796,12 @@ func DefaultConfig() *Config {
 			Enabled:    false,
 			MonitorUSB: true,
 		},
+		Logs: LogsConfig{
+			Enabled:  true,
+			Path:     "~/.lele/logs",
+			MaxDays:  7,
+			Rotation: "daily",
+		},
 	}
 }
 
@@ -907,6 +922,15 @@ func (c *Config) WorkspacePath() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return expandHome(c.Agents.Defaults.Workspace)
+}
+
+func (c *Config) LogsPath() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Logs.Path == "" {
+		return expandHome("~/.lele/logs")
+	}
+	return expandHome(c.Logs.Path)
 }
 
 func (c *Config) GetAPIKey() string {

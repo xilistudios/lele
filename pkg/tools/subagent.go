@@ -528,7 +528,6 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		}
 		result = &ToolResult{
 			ForLLM:  task.statusMessage(),
-			ForUser: "",
 			Silent:  true,
 			IsError: true,
 			Async:   false,
@@ -544,7 +543,6 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.Updated = time.Now().UnixMilli()
 		result = &ToolResult{
 			ForLLM:  task.statusMessage(),
-			ForUser: "",
 			Silent:  true,
 			IsError: false,
 			Async:   false,
@@ -552,9 +550,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	// NOTE: Subagents do NOT send messages directly to users.
-	// The result is returned via callback to the parent agent, which decides
-	// what to do with the result (e.g., display it, use it for further processing,
-	// or send a message to the user if appropriate).
+	// Their output is returned as LLM context for the parent agent only.
 }
 
 func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
@@ -676,7 +672,7 @@ func (t *SubagentTool) Name() string {
 }
 
 func (t *SubagentTool) Description() string {
-	return "Execute a subagent task synchronously and return the result. Use this for delegating specific tasks to an independent agent instance. Returns execution summary to user and full details to LLM."
+	return "Execute a subagent task synchronously and return the result to the parent agent. Use this for delegating specific tasks to an independent agent instance."
 }
 
 func (t *SubagentTool) Parameters() map[string]interface{} {
@@ -758,13 +754,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 	}
 
-	// ForUser: Brief summary for user (truncated if too long)
-	userContent := loopResult.Content
-	maxUserLen := 500
-	if len(userContent) > maxUserLen {
-		userContent = userContent[:maxUserLen] + "..."
-	}
-
 	// ForLLM: Full execution details
 	labelStr := label
 	if labelStr == "" {
@@ -775,8 +764,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 
 	return &ToolResult{
 		ForLLM:  llmContent,
-		ForUser: userContent,
-		Silent:  false,
+		Silent:  true,
 		IsError: false,
 		Async:   false,
 	}

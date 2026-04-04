@@ -326,9 +326,9 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		agent.Tools.Register(tools.NewI2CTool())
 		agent.Tools.Register(tools.NewSPITool())
 
-		// Message tool
-		messageTool := tools.NewMessageTool()
-		messageTool.SetSendCallback(func(channel, chatID string, payload tools.MessagePayload) error {
+		// File tool
+		sendFileTool := tools.NewSendFileTool()
+		sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
 			msgBus.PublishOutbound(bus.OutboundMessage{
 				Channel:     channel,
 				ChatID:      chatID,
@@ -337,7 +337,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			})
 			return nil
 		})
-		agent.Tools.Register(messageTool)
+		agent.Tools.Register(sendFileTool)
 
 		// Shell/Exec tool with approval support
 		execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
@@ -377,7 +377,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 		})
 		agent.Tools.Register(spawnTool)
-		subagentManager.SetTools(agent.Tools.CloneWithout("message")) // Subagents inherit all parent tools except direct external messaging
+		subagentManager.SetTools(agent.Tools.CloneWithout("send_file")) // Subagents inherit all parent tools except direct external file delivery
 
 		// Update context builder with the complete tools registry
 		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
@@ -414,26 +414,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			}
 
 			if response != "" {
-				// Check if the message tool already sent a response during this round.
-				// If so, skip publishing to avoid duplicate messages to the user.
-				// Use default agent's tools to check (message tool is shared).
-				alreadySent := false
-				defaultAgent := al.registry.GetDefaultAgent()
-				if defaultAgent != nil {
-					if tool, ok := defaultAgent.Tools.Get("message"); ok {
-						if mt, ok := tool.(*tools.MessageTool); ok {
-							alreadySent = mt.HasSentInRound()
-						}
-					}
-				}
-
-				if !alreadySent {
-					al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel: msg.Channel,
-						ChatID:  msg.ChatID,
-						Content: response,
-					})
-				}
+				al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: msg.Channel,
+					ChatID:  msg.ChatID,
+					Content: response,
+				})
 			}
 		}
 	}
