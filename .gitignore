@@ -10,6 +10,7 @@ build/
 *.out
 /picoclaw
 /picoclaw-test
+/lele
 cmd/picoclaw/workspace
 
 # Picoclaw specific
