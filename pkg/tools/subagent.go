@@ -39,11 +39,11 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string                  // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace string                  // Agent's workspace path
-	Name      string                  // Agent display name
-	Model     string                  // Agent's model (e.g., "alibaba/kimi-k2.5")
-	Provider  providers.LLMProvider   // Agent's LLM provider (critical for correct API routing)
+	Context   string                // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace string                // Agent's workspace path
+	Name      string                // Agent display name
+	Model     string                // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Provider  providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
 }
 
 type subagentOutcome struct {
@@ -354,8 +354,9 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	}
 	sm.tasks[taskID] = subagentTask
 
-	// Start task in background with context cancellation support
-	taskCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() to decouple from parent agent's context
+	// This allows the subagent to continue running even after the parent agent finishes
+	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	go sm.runTask(taskCtx, subagentTask, callback)
 
@@ -386,7 +387,8 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	task.Guidance = append(task.Guidance, guidance)
 	task.Status = SubagentStatusRunning
 	task.Updated = time.Now().UnixMilli()
-	taskCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() to decouple from parent agent's context
+	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
 
