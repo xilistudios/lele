@@ -349,6 +349,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		// Spawn tool with allowlist checker - use agent's own provider
 		subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+		subagentManager.SetMaxIterations(agent.MaxIterations)
 		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
 		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
 			if targetAgent, ok := registry.GetAgent(agentID); ok {

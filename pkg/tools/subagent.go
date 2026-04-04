@@ -296,7 +296,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 20, // Increased from 10 to allow more complex tasks
+		maxIterations: 20, // Default, will be overridden by SetMaxIterations
 		nextID:        1,
 	}
 }
@@ -309,6 +309,13 @@ func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.hasMaxTokens = true
 	sm.temperature = temperature
 	sm.hasTemperature = true
+}
+
+// SetMaxIterations sets the maximum number of tool iterations for subagent execution.
+func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.maxIterations = maxIterations
 }
 
 // SetTools sets the tool registry for subagent execution.
