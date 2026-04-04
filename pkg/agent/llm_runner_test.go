@@ -490,8 +490,7 @@ func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	return al, tmpDir
 }

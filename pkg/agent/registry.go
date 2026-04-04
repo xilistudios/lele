@@ -5,7 +5,6 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
-	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 )
 
@@ -17,10 +16,8 @@ type AgentRegistry struct {
 }
 
 // NewAgentRegistry creates a registry from config, instantiating all agents.
-func NewAgentRegistry(
-	cfg *config.Config,
-	provider providers.LLMProvider,
-) *AgentRegistry {
+// Each agent creates its own provider based on its model configuration.
+func NewAgentRegistry(cfg *config.Config) *AgentRegistry {
 	registry := &AgentRegistry{
 		agents:   make(map[string]*AgentInstance),
 		resolver: routing.NewRouteResolver(cfg),
@@ -32,14 +29,14 @@ func NewAgentRegistry(
 			ID:      "main",
 			Default: true,
 		}
-		instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg, provider)
+		instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg)
 		registry.agents["main"] = instance
 		logger.InfoCF("agent", "Created implicit main agent (no agents.list configured)", nil)
 	} else {
 		for i := range agentConfigs {
 			ac := &agentConfigs[i]
 			id := routing.NormalizeAgentID(ac.ID)
-			instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg, provider)
+			instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg)
 			registry.agents[id] = instance
 			logger.InfoCF("agent", "Registered agent",
 				map[string]interface{}{
@@ -47,6 +44,7 @@ func NewAgentRegistry(
 					"name":      ac.Name,
 					"workspace": instance.Workspace,
 					"model":     instance.Model,
+					"provider":  extractProviderFromModel(instance.Model, cfg.Agents.Defaults.Provider),
 				})
 		}
 	}

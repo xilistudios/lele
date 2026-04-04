@@ -26,8 +26,7 @@ func TestStartFreshConversation_CreatesCleanSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	baseSessionKey := "telegram:12345"
 	

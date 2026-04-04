@@ -28,8 +28,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Simulate a Telegram session
 	sessionKey := "telegram:123456789"

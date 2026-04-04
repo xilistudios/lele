@@ -7,6 +7,30 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
+func createTestConfig(tmpDir string) *config.Config {
+	return &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "testprovider/test-model",
+				MaxTokens:         1234,
+				MaxToolIterations: 5,
+			},
+		},
+		Providers: config.ProvidersConfig{
+			Named: map[string]config.NamedProviderConfig{
+				"testprovider": {
+					Type: "openai",
+					ProviderConfig: config.ProviderConfig{
+						APIKey:  "test-key",
+						APIBase: "https://test.example.com/v1",
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
@@ -14,22 +38,11 @@ func TestNewAgentInstance_UsesDefaultsTemperatureAndMaxTokens(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cfg := &config.Config{
-		Agents: config.AgentsConfig{
-			Defaults: config.AgentDefaults{
-				Workspace:         tmpDir,
-				Model:             "test-model",
-				MaxTokens:         1234,
-				MaxToolIterations: 5,
-			},
-		},
-	}
-
+	cfg := createTestConfig(tmpDir)
 	configuredTemp := 1.0
 	cfg.Agents.Defaults.Temperature = &configuredTemp
 
-	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 
 	if agent.MaxTokens != 1234 {
 		t.Fatalf("MaxTokens = %d, want %d", agent.MaxTokens, 1234)
@@ -46,22 +59,11 @@ func TestNewAgentInstance_DefaultsTemperatureWhenZero(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cfg := &config.Config{
-		Agents: config.AgentsConfig{
-			Defaults: config.AgentDefaults{
-				Workspace:         tmpDir,
-				Model:             "test-model",
-				MaxTokens:         1234,
-				MaxToolIterations: 5,
-			},
-		},
-	}
-
+	cfg := createTestConfig(tmpDir)
 	configuredTemp := 0.0
 	cfg.Agents.Defaults.Temperature = &configuredTemp
 
-	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 
 	if agent.Temperature != 0.0 {
 		t.Fatalf("Temperature = %f, want %f", agent.Temperature, 0.0)
@@ -75,19 +77,11 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cfg := &config.Config{
-		Agents: config.AgentsConfig{
-			Defaults: config.AgentDefaults{
-				Workspace:         tmpDir,
-				Model:             "test-model",
-				MaxTokens:         1234,
-				MaxToolIterations: 5,
-			},
-		},
-	}
+	cfg := createTestConfig(tmpDir)
+	// Temperature is nil, should default to 0.7
+	cfg.Agents.Defaults.Temperature = nil
 
-	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 
 	if agent.Temperature != 0.7 {
 		t.Fatalf("Temperature = %f, want %f", agent.Temperature, 0.7)
@@ -114,8 +108,7 @@ func TestNewAgentInstance_ResolvesNamedProviderModelAlias(t *testing.T) {
 		},
 	}
 
-	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if agent.Model != "chutes/minimax_m2.5" {
 		t.Fatalf("Model = %q, want %q", agent.Model, "chutes/minimax_m2.5")
 	}
@@ -141,8 +134,7 @@ func TestNewAgentInstance_ResolvesSlashModelAliasOnDefaultProvider(t *testing.T)
 		},
 	}
 
-	provider := &mockProvider{}
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if agent.Model != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
 		t.Fatalf("Model = %q, want %q", agent.Model, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
@@ -168,7 +160,7 @@ func TestNewAgentInstance_RegistersReadImageToolWhenVisionEnabled(t *testing.T) 
 		},
 	}
 
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if _, ok := agent.Tools.Get("read_image"); !ok {
 		t.Fatal("expected read_image tool to be registered")
 	}
@@ -197,7 +189,7 @@ func TestNewAgentInstance_DoesNotRegisterReadImageToolWithoutVision(t *testing.T
 		},
 	}
 
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if _, ok := agent.Tools.Get("read_image"); ok {
 		t.Fatal("did not expect read_image tool to be registered")
 	}
@@ -231,7 +223,7 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 		},
 	}
 
-	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
 	if _, ok := agent.Tools.Get("read_image"); !ok {
 		t.Fatal("expected read_image tool to be registered when using model alias with vision: true")
 	}

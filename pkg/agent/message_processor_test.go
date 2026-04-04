@@ -37,8 +37,7 @@ func TestProcessSystemMessage_ClearCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	mp := newMessageProcessor(al)
 
@@ -101,8 +100,7 @@ func TestProcessSystemMessage_CompactCommand_NotEnoughMessages(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	mp := newMessageProcessor(al)
 
@@ -159,8 +157,7 @@ func TestProcessSystemMessage_SummarizeSessionWithError(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sm := newSessionManager(al)
 

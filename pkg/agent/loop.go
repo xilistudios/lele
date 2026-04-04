@@ -179,14 +179,14 @@ type SummarizeStats struct {
 }
 
 // NewAgentLoop creates a new agent loop instance.
-func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
-	registry := NewAgentRegistry(cfg, provider)
+func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
+	registry := NewAgentRegistry(cfg)
 
 	// Create approval manager early so it can be passed to tools during registration
 	approvalManager := channels.NewApprovalManager()
 
-	// Register shared tools to all agents (pass approvalManager so exec tool has approval support)
-	subagents := registerSharedTools(cfg, msgBus, registry, provider, approvalManager)
+	// Register shared tools to all agents (each agent uses its own provider)
+	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
 
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
@@ -298,7 +298,8 @@ func (al *AgentLoop) cancelSession(sessionKey string) int {
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
+// Each agent uses its own provider for subagent spawning.
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
 	subagents := make(map[string]*tools.SubagentManager)
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
@@ -345,8 +346,8 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		}
 		agent.Tools.Register(execTool)
 
-		// Spawn tool with allowlist checker
-		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
+		// Spawn tool with allowlist checker - use agent's own provider
+		subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
 		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
@@ -356,6 +357,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 					Workspace: targetAgent.Workspace,
 					Name:      targetAgent.Name,
 					Model:     targetAgent.Model,
+					Provider:  targetAgent.Provider,
 				}
 			}
 			// Fallback: use parent agent's context if agent not found
@@ -364,6 +366,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 				Workspace: agent.Workspace,
 				Name:      agent.Name,
 				Model:     agent.Model,
+				Provider:  agent.Provider,
 			}
 		})
 		spawnTool := tools.NewSpawnTool(subagentManager)

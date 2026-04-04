@@ -39,8 +39,7 @@ func TestHandleCommand_NotACommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	msg := bus.InboundMessage{
 		Channel:  "test",
@@ -80,8 +79,7 @@ func TestHandleCommand_EmptyCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	msg := bus.InboundMessage{
 		Channel:  "test",
@@ -121,8 +119,7 @@ func TestHandleCommand_UnknownCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	msg := bus.InboundMessage{
 		Channel:  "test",
@@ -162,8 +159,7 @@ func TestHandleNewCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:new-session"
 	ch := newCommandHandler(al)
@@ -201,8 +197,7 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Remove default agent for this test
 	al.registry.agents = make(map[string]*AgentInstance)
@@ -235,8 +230,7 @@ func TestHandleClearCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Use agent: prefixed key so the handler accepts it from msg.SessionKey
 	sessionKey := "agent:main:test:clear-session"
@@ -314,8 +308,7 @@ func TestHandleStatusCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
@@ -371,8 +364,7 @@ func TestHandleModelCommand_NoArgs(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:model-session"
 	ch := newCommandHandler(al)
@@ -427,8 +419,7 @@ func TestHandleModelCommand_WithArgs(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:model-change-session"
 	ch := newCommandHandler(al)
@@ -469,8 +460,7 @@ func TestHandleModelCommand_NoSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -511,8 +501,7 @@ func TestHandleVerboseCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:verbose-session"
 	ch := newCommandHandler(al)
@@ -566,8 +555,7 @@ func TestHandleVerboseCommand_NoSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -624,8 +612,7 @@ func TestHandleToggleEphemeralCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
@@ -687,8 +674,7 @@ func TestHandleAgentCommand_NoArgs(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:agent-session"
 	ch := newCommandHandler(al)
@@ -729,8 +715,7 @@ func TestHandleAgentCommand_WithAgent(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:agent-switch-session"
 	ch := newCommandHandler(al)
@@ -772,7 +757,7 @@ func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 		},
 	}
 
-	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	agent := al.registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("No default agent found")
@@ -824,7 +809,7 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 		},
 	}
 
-	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	ch := newCommandHandler(al)
 	sessionKey := "agent:main:test:direct:user1"
 	mainAgent := al.registry.GetDefaultAgent()
@@ -906,7 +891,7 @@ func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 		},
 	}
 
-	al := NewAgentLoop(cfg, bus.NewMessageBus(), &mockProvider{})
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
 	ch := newCommandHandler(al)
 	sessionKey := "telegram:42"
 
@@ -963,8 +948,7 @@ func TestHandleAgentCommand_UnknownAgent(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:agent-unknown-session"
 	ch := newCommandHandler(al)
@@ -1005,8 +989,7 @@ func TestHandleAgentCommand_NoSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1047,8 +1030,7 @@ func TestHandleSubagentsCommand_NoRunning(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1122,8 +1104,7 @@ func TestHandleSubagentsCommand_Continue(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 	stub := &commandHandlerSubagentCoordinatorStub{response: "Continuing subagent task subagent-9 with new guidance."}
 	al.toolCoordinator = stub
 
@@ -1172,8 +1153,7 @@ func TestHandleSubagentsCommand_ContinueUsage(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 	al.toolCoordinator = &commandHandlerSubagentCoordinatorStub{}
 
 	ch := newCommandHandler(al)
@@ -1213,8 +1193,7 @@ func TestHandleStopCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1253,8 +1232,7 @@ func TestHandleShowCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1354,8 +1332,7 @@ func TestHandleListCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1456,8 +1433,7 @@ func TestHandleSwitchCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1544,8 +1520,7 @@ func TestHandleCompactCommand(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:compact-session"
 	agent := al.registry.GetDefaultAgent()
@@ -1713,8 +1688,7 @@ func TestFormatSubagentsResponse_Info(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1753,8 +1727,7 @@ func TestFormatSubagentsResponse_Stop(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	ch := newCommandHandler(al)
 
@@ -1793,8 +1766,7 @@ func TestSessionKeyOverride(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 	ch := newCommandHandler(al)
 
 	// Test with agent: prefixed session key
@@ -1850,8 +1822,7 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:session-agent-override"
 	ch := newCommandHandler(al)
@@ -1895,8 +1866,7 @@ func TestHandleStatusCommand_WithTokens(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Use the default agent's session directly
 	agent := al.registry.GetDefaultAgent()
@@ -1956,8 +1926,7 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Use the default agent's session directly
 	agent := al.registry.GetDefaultAgent()
@@ -2008,8 +1977,7 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	agent := al.registry.GetDefaultAgent()
 	sessionKey := "agent:main:main"
@@ -2064,8 +2032,7 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sessionKey := "test:context-tokens"
 	ch := newCommandHandler(al)
@@ -2136,8 +2103,7 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Use a session key that matches the expected format
 	sessionKey := "agent:main:test:compact-error-session"
@@ -2200,8 +2166,7 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Remove default agent for this test
 	al.registry.agents = make(map[string]*AgentInstance)
@@ -2239,7 +2204,7 @@ func TestNewCommand_CleanSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	al := NewAgentLoop(cfg, msgBus, &mockProvider{})
+	al := NewAgentLoop(cfg, msgBus)
 	ch := newCommandHandler(al)
 	sessionKey := "telegram:99999"
 
@@ -2330,7 +2295,7 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	al := NewAgentLoop(cfg, msgBus, &mockProvider{})
+	al := NewAgentLoop(cfg, msgBus)
 	ch := newCommandHandler(al)
 	sessionKey := "telegram:88888"
 

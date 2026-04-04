@@ -39,10 +39,11 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string  // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace string  // Agent's workspace path
-	Name      string  // Agent display name
-	Model     string  // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Context   string                  // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace string                  // Agent's workspace path
+	Name      string                  // Agent display name
+	Model     string                  // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Provider  providers.LLMProvider   // Agent's LLM provider (critical for correct API routing)
 }
 
 type subagentOutcome struct {
@@ -401,7 +402,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Updated = time.Now().UnixMilli()
 	sm.mu.Unlock()
 
-	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model from its workspace)
+	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model, provider from its workspace)
 	sm.mu.RLock()
 	getContextInfo := sm.getAgentContext
 	agentID := task.AgentID
@@ -412,6 +413,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	var agentWorkspace string
 	var agentName string
 	var agentModel string
+	var agentProvider providers.LLMProvider
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
@@ -419,6 +421,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
 			agentModel = ctxInfo.Model
+			agentProvider = ctxInfo.Provider
 			if agentName == "" {
 				agentName = agentID
 			}
@@ -432,9 +435,12 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		agentName = agentID
 	}
 
-	// Use the agent's model if available, otherwise fall back to the manager's default model
+	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
 	if agentModel == "" {
 		agentModel = sm.defaultModel
+	}
+	if agentProvider == nil {
+		agentProvider = sm.provider
 	}
 
 	messages := previousTask.buildMessages(systemPrompt)
@@ -474,7 +480,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
+		Provider:      agentProvider,
 		Model:         agentModel,
 		Tools:         tools,
 		MaxIterations: maxIter,

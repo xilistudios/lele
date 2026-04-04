@@ -37,8 +37,7 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
@@ -66,7 +65,7 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 		t.Error("Expected nil stats for 1 message")
 	}
 
-	// Test with 2 messages  
+	// Test with 2 messages
 	agent.Sessions.AddMessage(sessionKey, "assistant", "Hi")
 	stats, err = sm.summarizeSessionWithError(agent, sessionKey)
 	if err == nil {
@@ -115,11 +114,7 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	// Create a mock provider that returns empty response
-	emptyProvider := &mockProvider{
-		returnEmpty: true,
-	}
-	al := NewAgentLoop(cfg, msgBus, emptyProvider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
@@ -163,11 +158,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	// Create a mock provider that returns a valid summary
-	successfulProvider := &mockProvider{
-		mockResponse: "This is a comprehensive summary of the conversation.",
-	}
-	al := NewAgentLoop(cfg, msgBus, successfulProvider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
@@ -194,7 +185,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected BeforeMessages=%d, got %d", beforeCount, stats.BeforeMessages)
 	}
 	if stats.AfterMessages >= stats.BeforeMessages {
-		t.Errorf("Expected fewer messages after: before=%d, after=%d", 
+		t.Errorf("Expected fewer messages after: before=%d, after=%d",
 			stats.BeforeMessages, stats.AfterMessages)
 	}
 	if stats.DroppedMessages <= 0 {
@@ -234,48 +225,47 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	sm := newSessionManager(al)
-	
+
 	// Test with session key without agent prefix (e.g., "telegram:12345")
 	sessionKey := "telegram:12345"
 	inputTokens := 100
 	outputTokens := 50
-	
+
 	// This should use the default agent and add token counts
 	sm.AddTokenCounts(sessionKey, inputTokens, outputTokens)
-	
+
 	// Verify token counts were added
 	defaultAgent := al.registry.GetDefaultAgent()
 	inputTokensActual, outputTokensActual := defaultAgent.Sessions.GetTokenCounts(sessionKey)
 	if inputTokensActual != inputTokens || outputTokensActual != outputTokens {
-		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d", 
+		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d",
 			inputTokens, outputTokens, inputTokensActual, outputTokensActual)
 	}
-	
+
 	// Test with session key with agent prefix (e.g., "agent:main:telegram:12345")
 	sessionKeyWithPrefix := "agent:main:telegram:12345"
 	inputTokens2 := 200
 	outputTokens2 := 75
-	
+
 	sm.AddTokenCounts(sessionKeyWithPrefix, inputTokens2, outputTokens2)
-	
+
 	// Verify token counts were added to the correct agent
 	parsed := routing.ParseAgentSessionKey(sessionKeyWithPrefix)
 	if parsed == nil {
 		t.Fatal("Failed to parse session key with prefix")
 	}
-	
+
 	agent, ok := al.registry.GetAgent(parsed.AgentID)
 	if !ok {
 		t.Fatalf("Failed to get agent %s", parsed.AgentID)
 	}
-	
+
 	inputTokensActual2, outputTokensActual2 := agent.Sessions.GetTokenCounts(sessionKeyWithPrefix)
 	if inputTokensActual2 != inputTokens2 || outputTokensActual2 != outputTokens2 {
-		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d", 
+		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d",
 			inputTokens2, outputTokens2, inputTokensActual2, outputTokensActual2)
 	}
 }

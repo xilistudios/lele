@@ -26,8 +26,7 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	// Use a session key without agent prefix (e.g., "telegram:12345")
 	sessionKey := "telegram:12345"

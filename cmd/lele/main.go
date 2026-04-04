@@ -33,7 +33,6 @@ import (
 	"github.com/xilistudios/lele/pkg/heartbeat"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/migrate"
-	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -399,14 +398,8 @@ func agentCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
-	}
-
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()
@@ -534,14 +527,8 @@ func gatewayCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
-	}
-
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
 	// Print agent startup info
 	fmt.Println("\n📦 Agent Status:")
