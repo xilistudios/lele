@@ -296,7 +296,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 10,
+		maxIterations: 20, // Increased from 10 to allow more complex tasks
 		nextID:        1,
 	}
 }
