@@ -15,7 +15,6 @@ import (
 
 // MemoryStore manages persistent memory for the agent.
 // - Long-term memory: memory/MEMORY.md
-// - Daily notes: memory/YYYYMM/YYYYMMDD.md
 type MemoryStore struct {
 	workspace  string
 	memoryDir  string
@@ -129,33 +128,13 @@ func (ms *MemoryStore) GetRecentDailyNotes(days int) string {
 }
 
 // GetMemoryContext returns formatted memory context for the agent prompt.
-// Includes long-term memory and recent daily notes.
+// Includes only long-term memory (MEMORY.md).
 func (ms *MemoryStore) GetMemoryContext() string {
-	var parts []string
-
-	// Long-term memory
+	// Long-term memory only
 	longTerm := ms.ReadLongTerm()
-	if longTerm != "" {
-		parts = append(parts, "## Long-term Memory\n\n"+longTerm)
-	}
-
-	// Recent daily notes (last 3 days)
-	recentNotes := ms.GetRecentDailyNotes(3)
-	if recentNotes != "" {
-		parts = append(parts, "## Recent Daily Notes\n\n"+recentNotes)
-	}
-
-	if len(parts) == 0 {
+	if longTerm == "" {
 		return ""
 	}
 
-	// Join parts with separator
-	var result string
-	for i, part := range parts {
-		if i > 0 {
-			result += "\n\n---\n\n"
-		}
-		result += part
-	}
-	return fmt.Sprintf("# Memory\n\n%s", result)
+	return fmt.Sprintf("# Memory\n\n## Long-term Memory\n\n%s", longTerm)
 }

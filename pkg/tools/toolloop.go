@@ -153,6 +153,16 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 	}
 
+	// Handle case where max iterations was reached without a final response
+	if finalContent == "" {
+		finalContent = "STATUS: not_done\nSUMMARY: Maximum iterations reached without completing the task\nDETAILS:\nThe subagent ran out of iterations while still using tools. The task may require more steps to complete."
+		logger.WarnCF("toolloop", "Max iterations reached without final response",
+			map[string]any{
+				"iterations": iteration,
+				"max":        config.MaxIterations,
+			})
+	}
+
 	return &ToolLoopResult{
 		Content:    finalContent,
 		Iterations: iteration,

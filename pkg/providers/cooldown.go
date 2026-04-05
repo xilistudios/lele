@@ -8,6 +8,8 @@ import (
 
 const (
 	defaultFailureWindow = 24 * time.Hour
+	maxRetryAttempts     = 10
+	maxBackoffDuration   = 60 * time.Second
 )
 
 // CooldownTracker manages per-provider cooldown state for the fallback chain.

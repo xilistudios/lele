@@ -60,7 +60,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	}
 
 	// 1. Update tool contexts
-	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID)
+	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID, opts.SessionKey)
 
 	// 2. Build messages (skip history for heartbeat)
 	var history []providers.Message
@@ -134,14 +134,39 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	return finalContent, nil
 }
 
+// messageSignature tracks repeated LLM responses to detect loops
+type messageSignature struct {
+	toolCalls []toolCallSignature
+	count     int
+}
+
+type toolCallSignature struct {
+	name      string
+	arguments string
+}
+
+// messageSignaturesEqual compares two sets of tool call signatures
+func messageSignaturesEqual(a, b []toolCallSignature) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].name != b[i].name || a[i].arguments != b[i].arguments {
+			return false
+		}
+	}
+	return true
+}
+
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	var lastMessage *messageSignature
 	model := lr.modelForSession(agent, opts.SessionKey)
 	candidates := agent.Candidates
 	if model != agent.Model {
-		if ref := providers.ParseModelRef(model, lr.al.cfg.Agents.Defaults.Provider); ref != nil {
+		if ref := providers.ParseModelRef(model, lr.al.cfg().Agents.Defaults.Provider); ref != nil {
 			candidates = make([]providers.FallbackCandidate, 0, len(agent.Candidates)+1)
 			candidates = append(candidates, providers.FallbackCandidate{
 				Provider: ref.Provider,
@@ -247,22 +272,24 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 			}
 
-			if len(candidates) > 0 && lr.al.fallback != nil {
-				fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
-					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						// Create provider dynamically for each candidate
-						providerInst, err := providers.CreateProviderForCandidate(lr.al.cfg, provider)
-						if err != nil {
-							// If we can't create a provider (e.g., in tests with mock providers),
-							// fall back to using the agent's provider directly
-							log.Printf("[DEBUG] Failed to create provider for %s: %v, using agent's provider", provider, err)
+			if len(candidates) > 0 && lr.al.fallback != nil {			fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
+				func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
+					// Create provider dynamically for each candidate
+					providerInst, err := providers.CreateProviderForCandidate(lr.al.cfg(), provider)
+					if err != nil {
+						// If we can't create a provider (e.g., in tests with mock providers),
+						// fall back to using the agent's provider directly
+						log.Printf("[DEBUG] Failed to create provider for %s: %v", provider, err)
+						if agent.Provider != nil {
 							return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOptions)
 						}
-						fullModel := FormatProviderModel(provider, model)
-						log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
-						return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
-					},
-				)
+						return nil, fmt.Errorf("no provider available for model %s", model)
+					}
+					fullModel := FormatProviderModel(provider, model)
+					log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
+					return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
+				},
+			)
 				if fbErr != nil {
 					return nil, fbErr
 				}
@@ -410,12 +437,48 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			toolNames = append(toolNames, tc.Name)
 		}
 		logger.InfoCF("agent", "LLM requested tool calls",
-			map[string]interface{}{
-				"agent_id":  agent.ID,
+			map[string]interface{}{"agent_id": agent.ID,
 				"tools":     toolNames,
 				"count":     len(response.ToolCalls),
 				"iteration": iteration,
 			})
+
+		// Build signature of this message to detect loops
+		currentSignature := messageSignature{
+			toolCalls: make([]toolCallSignature, 0, len(response.ToolCalls)),
+		}
+		for _, tc := range response.ToolCalls {
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			currentSignature.toolCalls = append(currentSignature.toolCalls, toolCallSignature{
+				name:      tc.Name,
+				arguments: string(argsJSON),
+			})
+		}
+
+		// Check if this message matches the last one (loop detection)
+		if lastMessage != nil && messageSignaturesEqual(lastMessage.toolCalls, currentSignature.toolCalls) {
+			lastMessage.count++
+			if lastMessage.count >= 3 {
+				logger.WarnCF("agent", "Detected repeated message loop, injecting guidance",
+					map[string]interface{}{"agent_id": agent.ID,
+						"repetitions": lastMessage.count,
+						"iteration":   iteration,
+						"tools":       toolNames,
+					})
+				// Inject guidance message to break the loop
+				guidanceMsg := providers.Message{
+					Role:    "user",
+					Content: fmt.Sprintf("⚠️ GUIDANCE: You have sent the same tool calls multiple times consecutively. This appears to be a loop. The previous tool calls have already been executed and their results are in the conversation history. Please STOP repeating the same tool calls and either:\n1. Analyze the results you've already received, or\n2. Try a different approach, or\n3. Provide a final response based on the information gathered."),
+				}
+				messages = append(messages, guidanceMsg)
+				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
+				// Reset counter after injecting guidance
+				lastMessage.count = 0
+			}
+		} else {
+			lastMessage = &currentSignature
+			lastMessage.count = 1
+		}
 
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
@@ -642,9 +705,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 }
 
 // updateToolContexts updates the context for tools that need channel/chatID info.
-func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
-	if tool, ok := agent.Tools.Get("message"); ok {
+	if tool, ok := agent.Tools.Get("send_file"); ok {
 		if mt, ok := tool.(tools.ContextualTool); ok {
 			mt.SetContext(channel, chatID)
 		}

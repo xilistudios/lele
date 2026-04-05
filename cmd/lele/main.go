@@ -33,7 +33,6 @@ import (
 	"github.com/xilistudios/lele/pkg/heartbeat"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/migrate"
-	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -239,6 +238,24 @@ func onboard() {
 	workspace := cfg.WorkspacePath()
 	createWorkspaceTemplates(workspace)
 
+	// Create logs directory and initial log files
+	logsPath := cfg.LogsPath()
+	if err := os.MkdirAll(logsPath, 0755); err != nil {
+		fmt.Printf("Warning: could not create logs directory: %v\n", err)
+	} else {
+		// Create initial empty log files with current date
+		currentDate := time.Now().Format("2006-01-02")
+		infoLog := filepath.Join(logsPath, fmt.Sprintf("info-%s.log", currentDate))
+		errorsLog := filepath.Join(logsPath, fmt.Sprintf("errors-%s.log", currentDate))
+
+		if _, err := os.Create(infoLog); err != nil {
+			fmt.Printf("Warning: could not create info log file: %v\n", err)
+		}
+		if _, err := os.Create(errorsLog); err != nil {
+			fmt.Printf("Warning: could not create errors log file: %v\n", err)
+		}
+	}
+
 	fmt.Printf("%s lele is ready!\n", logo)
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Add your API key to", configPath)
@@ -399,14 +416,8 @@ func agentCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
-	}
-
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()
@@ -534,14 +545,23 @@ func gatewayCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
+	// Initialize logging with configured path
+	if cfg.Logs.Enabled {
+		logsPath := cfg.LogsPath()
+		if err := logger.EnableMultiFileLogging(logsPath); err != nil {
+			fmt.Printf("Warning: could not enable file logging: %v\n", err)
+		} else {
+			// Cleanup old logs (older than max_days)
+			if cfg.Logs.MaxDays > 0 {
+				if err := logger.CleanupOldLogs(cfg.Logs.MaxDays); err != nil {
+					fmt.Printf("Warning: could not cleanup old logs: %v\n", err)
+				}
+			}
+		}
 	}
 
 	msgBus := bus.NewMessageBus()
-	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
 	// Print agent startup info
 	fmt.Println("\n📦 Agent Status:")
@@ -682,6 +702,21 @@ func gatewayCmd() {
 		fmt.Printf("Error starting channels: %v\n", err)
 	}
 
+	configWatcher := config.NewConfigWatcher(getConfigPath())
+	go func() {
+		if err := configWatcher.Start(ctx, func(updated *config.Config) error {
+			agentLoop.UpdateConfig(updated)
+			if err := channelManager.ReloadConfig(updated); err != nil {
+				return err
+			}
+			heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
+			deviceService.UpdateConfig(devices.Config{Enabled: updated.Devices.Enabled, MonitorUSB: updated.Devices.MonitorUSB})
+			return nil
+		}); err != nil {
+			logger.ErrorCF("config", "Config watcher error", map[string]interface{}{"error": err.Error()})
+		}
+	}()
+
 	healthServer := health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	go func() {
 		if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
@@ -698,6 +733,7 @@ func gatewayCmd() {
 
 	fmt.Println("\nShutting down...")
 	cancel()
+	configWatcher.Stop()
 	healthServer.Stop(context.Background())
 	deviceService.Stop()
 	heartbeatService.Stop()

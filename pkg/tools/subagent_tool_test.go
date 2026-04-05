@@ -234,17 +234,17 @@ func TestSubagentTool_Execute_Success(t *testing.T) {
 		t.Error("SubagentTool should be synchronous, not async")
 	}
 
-	// Verify not silent
-	if result.Silent {
-		t.Error("SubagentTool should not be silent")
+	// Verify silent
+	if !result.Silent {
+		t.Error("SubagentTool should be silent")
 	}
 
-	// Verify ForUser contains brief summary (not empty)
-	if result.ForUser == "" {
-		t.Error("ForUser should contain result summary")
+	// Subagents should not send directly to users
+	if result.ForUser != "" {
+		t.Errorf("ForUser should be empty, got: %s", result.ForUser)
 	}
-	if !strings.Contains(result.ForUser, "Task completed") {
-		t.Errorf("ForUser should contain task completion, got: %s", result.ForUser)
+	if !strings.Contains(result.ForLLM, "Task completed") {
+		t.Errorf("ForLLM should contain task completion, got: %s", result.ForLLM)
 	}
 
 	// Verify ForLLM contains full details
@@ -380,10 +380,9 @@ func TestSubagentTool_ForUserTruncation(t *testing.T) {
 
 	result := tool.Execute(ctx, args)
 
-	// ForUser should be truncated to 500 chars + "..."
-	maxUserLen := 500
-	if len(result.ForUser) > maxUserLen+3 { // +3 for "..."
-		t.Errorf("ForUser should be truncated to ~%d chars, got: %d", maxUserLen, len(result.ForUser))
+	// ForUser should remain empty
+	if result.ForUser != "" {
+		t.Errorf("ForUser should be empty, got: %s", result.ForUser)
 	}
 
 	// ForLLM should have full content

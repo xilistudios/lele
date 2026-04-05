@@ -103,13 +103,60 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	return c.sendTextMessage(ctx, chatID, msg)
 }
 
+// sendTextMessage sends a text message to Telegram with proper formatting.
+// It handles:
+// - Markdown to HTML conversion (default)
+// - Direct HTML mode
+// - Automatic fallback to plain text if HTML parsing fails
+// - Link preview control
 func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg bus.OutboundMessage) error {
-	htmlContent := markdownToTelegramHTML(msg.Content)
+	// Determine text mode (default: markdown)
+	textMode := TextMode(msg.TextMode)
+	if textMode == "" {
+		textMode = TextModeMarkdown
+	}
 
+	// Render the text based on mode
+	htmlContent := renderTelegramText(msg.Content, textMode)
+
+	// Determine fallback text (use PlainText if provided, otherwise use original content)
+	fallbackText := msg.PlainText
+	if fallbackText == "" {
+		fallbackText = msg.Content
+	}
+
+	// Check if we should disable link previews (default: enabled)
+	linkPreviewEnabled := true
+	if msg.LinkPreview != nil {
+		linkPreviewEnabled = *msg.LinkPreview
+	}
+
+	// Try to send with HTML formatting
+	err := c.sendFormattedText(ctx, chatID, msg, htmlContent, linkPreviewEnabled)
+	if err == nil {
+		return nil
+	}
+
+	// If it's a parse error, try fallback to plain text
+	if isTelegramParseError(err) {
+		logger.ErrorCF("telegram", "HTML parse failed, falling back to plain text", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return c.sendPlainTextFallback(ctx, chatID, msg, fallbackText, linkPreviewEnabled)
+	}
+
+	return err
+}
+
+// sendFormattedText sends text with HTML formatting
+func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, msg bus.OutboundMessage, htmlContent string, linkPreview bool) error {
 	if pID, ok := c.placeholders.Load(msg.ChatID); ok {
 		c.placeholders.Delete(msg.ChatID)
 		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), htmlContent)
 		editMsg.ParseMode = telego.ModeHTML
+		editMsg.LinkPreviewOptions = &telego.LinkPreviewOptions{
+			IsDisabled: !linkPreview,
+		}
 
 		if _, err := c.bot.EditMessageText(ctx, editMsg); err == nil {
 			return nil
@@ -118,6 +165,9 @@ func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg
 
 	tgMsg := tu.Message(tu.ID(chatID), htmlContent)
 	tgMsg.ParseMode = telego.ModeHTML
+	tgMsg.LinkPreviewOptions = &telego.LinkPreviewOptions{
+		IsDisabled: !linkPreview,
+	}
 
 	if msg.ReplyTo != "" {
 		if replyMsgID, parseErr := strconv.Atoi(msg.ReplyTo); parseErr == nil {
@@ -133,22 +183,54 @@ func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg
 		}
 	}
 
-	if _, err := c.bot.SendMessage(ctx, tgMsg); err != nil {
-		logger.ErrorCF("telegram", "HTML parse failed, falling back to plain text", map[string]interface{}{
-			"error": err.Error(),
-		})
-		tgMsg.ParseMode = ""
-		_, err = c.bot.SendMessage(ctx, tgMsg)
-		return err
+	_, err := c.bot.SendMessage(ctx, tgMsg)
+	return err
+}
+
+// sendPlainTextFallback sends text without any formatting
+func (c *TelegramChannel) sendPlainTextFallback(ctx context.Context, chatID int64, msg bus.OutboundMessage, plainText string, linkPreview bool) error {
+	if pID, ok := c.placeholders.Load(msg.ChatID); ok {
+		c.placeholders.Delete(msg.ChatID)
+		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), plainText)
+		editMsg.ParseMode = ""
+		editMsg.LinkPreviewOptions = &telego.LinkPreviewOptions{
+			IsDisabled: !linkPreview,
+		}
+
+		if _, err := c.bot.EditMessageText(ctx, editMsg); err == nil {
+			return nil
+		}
 	}
 
-	return nil
+	tgMsg := tu.Message(tu.ID(chatID), plainText)
+	tgMsg.ParseMode = ""
+	tgMsg.LinkPreviewOptions = &telego.LinkPreviewOptions{
+		IsDisabled: !linkPreview,
+	}
+
+	if msg.ReplyTo != "" {
+		if replyMsgID, parseErr := strconv.Atoi(msg.ReplyTo); parseErr == nil {
+			tgMsg.ReplyParameters = &telego.ReplyParameters{
+				MessageID: replyMsgID,
+			}
+		}
+	}
+
+	if msg.ReplyMarkup != nil {
+		if markup, ok := msg.ReplyMarkup.(*telego.InlineKeyboardMarkup); ok {
+			tgMsg.ReplyMarkup = markup
+		}
+	}
+
+	_, err := c.bot.SendMessage(ctx, tgMsg)
+	return err
 }
 
 func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID int64, chatKey, content string) bool {
 	if pID, ok := c.placeholders.Load(chatKey); ok {
 		c.placeholders.Delete(chatKey)
-		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), markdownToTelegramHTML(content))
+		htmlContent := markdownToTelegramHTML(content)
+		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), htmlContent)
 		editMsg.ParseMode = telego.ModeHTML
 		_, _ = c.bot.EditMessageText(ctx, editMsg)
 		return true

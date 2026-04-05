@@ -10,12 +10,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // toolCoordinator is an internal interface for tool coordination operations.
 type toolCoordinator interface {
-	updateToolContexts(agent *AgentInstance, channel, chatID string)
+	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
 	cancelSession(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
@@ -39,9 +41,9 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 }
 
 // updateToolContexts updates the context for tools that need channel/chatID info.
-func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
-	if tool, ok := agent.Tools.Get("message"); ok {
+	if tool, ok := agent.Tools.Get("send_file"); ok {
 		if mt, ok := tool.(tools.ContextualTool); ok {
 			mt.SetContext(channel, chatID)
 		}
@@ -54,6 +56,24 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 	if tool, ok := agent.Tools.Get("subagent"); ok {
 		if st, ok := tool.(tools.ContextualTool); ok {
 			st.SetContext(channel, chatID)
+		}
+	}
+	// Configure exec tool with context and feedback callback
+	if tool, ok := agent.Tools.Get("exec"); ok {
+		if et, ok := tool.(*tools.ExecTool); ok {
+			et.SetContext(channel, chatID)
+			// Enable verbose mode if session has verbose enabled
+			isVerbose := tc.al.verboseManager.GetLevel(sessionKey) != session.VerboseOff
+			et.SetVerbose(isVerbose)
+			// Set feedback callback that uses the event bus
+			et.SetFeedbackCallback(func(ch, cid, msg string) {
+				tc.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:        ch,
+					ChatID:         cid,
+					Content:        msg,
+					IsIntermediate: true,
+				})
+			})
 		}
 	}
 }

@@ -10,6 +10,8 @@ build/
 *.out
 /picoclaw
 /picoclaw-test
+/lele
+/main
 cmd/picoclaw/workspace
 
 # Picoclaw specific
@@ -44,3 +46,10 @@ tasks/
 
 # Added by goreleaser init:
 dist/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
+# cocoindex-code
+/.codeindex/
+
+# Logs
+logs/

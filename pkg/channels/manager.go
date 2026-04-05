@@ -23,6 +23,7 @@ type Manager struct {
 	config       *config.Config
 	agentLoop    AgentProvidable
 	dispatchTask *asyncTask
+	runCtx       context.Context
 	mu           sync.RWMutex
 }
 
@@ -188,6 +189,7 @@ func (m *Manager) initChannels() error {
 func (m *Manager) StartAll(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.runCtx = ctx
 
 	if len(m.channels) == 0 {
 		logger.WarnC("channels", "No channels enabled")
@@ -214,6 +216,60 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	}
 
 	logger.InfoC("channels", "All channels started")
+	return nil
+}
+
+func (m *Manager) ReloadConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+	m.mu.Lock()
+	ctx := m.runCtx
+	oldChannels := m.channels
+	oldDispatch := m.dispatchTask
+	m.config = cfg
+	m.channels = make(map[string]Channel)
+	m.dispatchTask = nil
+	m.mu.Unlock()
+
+	if oldDispatch != nil {
+		oldDispatch.cancel()
+	}
+	for name, channel := range oldChannels {
+		if err := channel.Stop(ctx); err != nil {
+			logger.ErrorCF("channels", "Error stopping channel during reload", map[string]interface{}{
+				"channel": name,
+				"error":   err.Error(),
+			})
+		}
+	}
+
+	m.mu.Lock()
+	if err := m.initChannels(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	newChannels := make([]Channel, 0, len(m.channels))
+	for _, channel := range m.channels {
+		newChannels = append(newChannels, channel)
+	}
+	if ctx != nil && len(newChannels) > 0 {
+		dispatchCtx, cancel := context.WithCancel(ctx)
+		m.dispatchTask = &asyncTask{cancel: cancel}
+		m.mu.Unlock()
+		go m.dispatchOutbound(dispatchCtx)
+		for _, channel := range newChannels {
+			if err := channel.Start(ctx); err != nil {
+				logger.ErrorCF("channels", "Failed to restart channel during reload", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+		}
+		logger.InfoC("channels", "Channels reloaded")
+		return nil
+	}
+	m.mu.Unlock()
+	logger.InfoC("channels", "Channels reloaded")
 	return nil
 }
 

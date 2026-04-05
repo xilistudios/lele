@@ -26,7 +26,7 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		if len(parts) > 0 {
 			cmd := parts[0]
 			switch cmd {
-			case "help", "start", "show", "list", "models", "new", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "think", "agent":
+			case "help", "start", "show", "list", "models", "new", "clear", "stop", "model", "status", "compact", "subagents", "toggle", "verbose", "think", "agent":
 				return c.handleCommandWithSession(ctx, message, cmd)
 			}
 		}
@@ -208,6 +208,13 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		}
 		return c.sendReplyText(ctx, message, response)
 
+	case "clear":
+		response := "✅ Historial de conversación limpiado."
+		if c.agentLoop != nil {
+			response = c.agentLoop.ClearSession(sessionKey)
+		}
+		return c.sendReplyText(ctx, message, response)
+
 	case "stop":
 		response := "⏹️ Agente detenido."
 		if c.agentLoop != nil {
@@ -296,9 +303,12 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 }
 
 func (c *TelegramChannel) sendReplyText(ctx context.Context, message *telego.Message, text string) error {
+	// Convert Markdown to HTML for proper formatting
+	htmlText := markdownToTelegramHTML(text)
 	_, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
-		ChatID: telego.ChatID{ID: message.Chat.ID},
-		Text:   text,
+		ChatID:    telego.ChatID{ID: message.Chat.ID},
+		Text:      htmlText,
+		ParseMode: telego.ModeHTML,
 		ReplyParameters: &telego.ReplyParameters{
 			MessageID: message.MessageID,
 		},

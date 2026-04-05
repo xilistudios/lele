@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -91,7 +92,7 @@ func (t *ReadFileTool) Name() string {
 }
 
 func (t *ReadFileTool) Description() string {
-	return "Read the contents of a file"
+	return "Read the contents of a file. For large files (>500 lines), only the first 100 lines are shown automatically. Use from/to parameters to read specific line ranges."
 }
 
 func (t *ReadFileTool) Parameters() map[string]interface{} {
@@ -115,6 +116,13 @@ func (t *ReadFileTool) Parameters() map[string]interface{} {
 	}
 }
 
+const (
+	// maxLinesAuto is the threshold for auto-limiting large files
+	maxLinesAuto = 500
+	// chunkSize is the number of lines to show when auto-limiting
+	chunkSize = 100
+)
+
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	path, ok := args["path"].(string)
 	if !ok {
@@ -126,12 +134,146 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(err.Error())
 	}
 
-	content, err := os.ReadFile(resolvedPath)
+	// Check if file exists and get info
+	fileInfo, err := os.Stat(resolvedPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
 	}
 
-	return NewToolResult(string(content))
+	// Get explicit line range from args
+	var fromLine, toLine int
+	if fromVal, ok := args["from"].(float64); ok {
+		fromLine = int(fromVal)
+	}
+	if toVal, ok := args["to"].(float64); ok {
+		toLine = int(toVal)
+	}
+
+	// If no explicit range and file is large, auto-limit
+	autoLimited := false
+	if fromLine == 0 && toLine == 0 {
+		lineCount := estimateLineCount(resolvedPath, fileInfo.Size())
+		if lineCount > maxLinesAuto {
+			fromLine = 1
+			toLine = chunkSize
+			autoLimited = true
+		}
+	}
+
+	content, actualFrom, actualTo, err := readFileChunk(resolvedPath, fromLine, toLine)
+	if err != nil {
+		return ErrorResult(fmt.Sprintf("failed to read file: %v", err))
+	}
+
+	// Build result with line range indicator
+	var result strings.Builder
+	if autoLimited {
+		result.WriteString(fmt.Sprintf("(showing lines %d-%d of %d - file is large, use from/to to read specific lines)\n\n", actualFrom, actualTo, estimateLineCount(resolvedPath, fileInfo.Size())))
+	} else if fromLine > 0 || toLine > 0 {
+		result.WriteString(fmt.Sprintf("(showing lines %d-%d)\n\n", actualFrom, actualTo))
+	}
+	result.WriteString(content)
+
+	return NewToolResult(result.String())
+}
+
+// estimateLineCount quickly estimates the number of lines in a file
+// by sampling the first part of the file
+func estimateLineCount(path string, fileSize int64) int {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	// Sample first 64KB to estimate average line length
+	const sampleSize = 64 * 1024
+	buf := make([]byte, sampleSize)
+	n, err := file.Read(buf)
+	if err != nil && err.Error() != "EOF" {
+		return 0
+	}
+	buf = buf[:n]
+
+	// Count newlines in sample
+	newlines := 0
+	for _, b := range buf {
+		if b == '\n' {
+			newlines++
+		}
+	}
+
+	if newlines == 0 {
+		return 1
+	}
+
+	// Estimate total lines based on sample
+	avgLineLength := float64(len(buf)) / float64(newlines)
+	return int(float64(fileSize) / avgLineLength)
+}
+
+// readFileChunk reads a specific range of lines from a file
+// Returns the content and the actual line range read
+func readFileChunk(path string, fromLine, toLine int) (string, int, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	defer file.Close()
+
+	// If no range specified, read entire file
+	if fromLine == 0 && toLine == 0 {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		lines := strings.Split(string(content), "\n")
+		return string(content), 1, len(lines), nil
+	}
+
+	// Normalize line numbers (1-indexed)
+	if fromLine < 1 {
+		fromLine = 1
+	}
+
+	var result strings.Builder
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	actualFrom := fromLine
+	actualTo := fromLine - 1
+
+	for scanner.Scan() {
+		lineNum++
+
+		// Skip lines before fromLine
+		if lineNum < fromLine {
+			continue
+		}
+
+		// Stop if we've reached toLine
+		if toLine > 0 && lineNum > toLine {
+			break
+		}
+
+		if actualTo < lineNum {
+			actualTo = lineNum
+		}
+
+		result.WriteString(scanner.Text())
+		result.WriteString("\n")
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", 0, 0, err
+	}
+
+	// Handle case where fromLine is beyond file length
+	if lineNum < fromLine {
+		actualFrom = lineNum
+		actualTo = lineNum
+	}
+
+	return result.String(), actualFrom, actualTo, nil
 }
 
 type WriteFileTool struct {

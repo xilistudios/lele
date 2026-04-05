@@ -727,7 +727,9 @@ func TestAddAssistantMessage_EmptyMessages(t *testing.T) {
 	}
 }
 
-// TestLoadSkills_NoSkills tests loadSkills when no skills exist
+// TestLoadSkills_NoSkills tests loadSkills when no local workspace skills exist.
+// Global skills from ~/.lele/skills/ may still be present, so we only verify
+// that no workspace-local skills content appears.
 func TestLoadSkills_NoSkills(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
@@ -738,13 +740,19 @@ func TestLoadSkills_NoSkills(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 	result := cb.loadSkills()
 
-	// Should return empty string when no skills exist
+	// If there are no skills at all (local or global), result should be empty
+	// If global skills exist, that's expected — just verify no workspace-local skill markers appear
 	if result != "" {
-		t.Errorf("Expected empty result when no skills exist, got: %s", result)
+		// Global skills may be present; verify no references to workspace-local skill paths
+		if strings.Contains(result, filepath.Join(tmpDir, "skills")) {
+			t.Errorf("Expected no workspace-local skills, but found workspace path in result: %s", result)
+		}
 	}
 }
 
-// TestGetSkillsInfo_NoSkills tests GetSkillsInfo when no skills exist
+// TestGetSkillsInfo_NoSkills tests GetSkillsInfo when no local workspace skills exist.
+// Global skills from ~/.lele/skills/ may still be present, so we verify the workspace
+// has no local skills by checking that no workspace-local skill names appear.
 func TestGetSkillsInfo_NoSkills(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
@@ -755,21 +763,23 @@ func TestGetSkillsInfo_NoSkills(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 	info := cb.GetSkillsInfo()
 
-	// Should return zero counts
-	if info["total"] != 0 {
-		t.Errorf("Expected total 0, got %v", info["total"])
-	}
-	if info["available"] != 0 {
-		t.Errorf("Expected available 0, got %v", info["available"])
-	}
-
-	// Should have empty names slice
 	names, ok := info["names"].([]string)
 	if !ok {
 		t.Fatalf("Expected names to be []string, got %T", info["names"])
 	}
-	if len(names) != 0 {
-		t.Errorf("Expected empty names slice, got %v", names)
+
+	// No workspace-local skills should exist — any skills present are global only
+	// and should NOT reference the workspace temp dir
+	for _, name := range names {
+		skillPath := filepath.Join(tmpDir, "skills", name, "SKILL.md")
+		if _, err := os.Stat(skillPath); err == nil {
+			t.Errorf("Found unexpected workspace-local skill: %s", name)
+		}
+	}
+
+	// Total and available should be consistent
+	if info["total"] != info["available"] {
+		t.Errorf("Expected total == available, got total=%v available=%v", info["total"], info["available"])
 	}
 }
 
@@ -809,21 +819,36 @@ This is a test skill.
 	cb := NewContextBuilder(tmpDir)
 	info := cb.GetSkillsInfo()
 
-	// Should have 1 skill
-	if info["total"] != 1 {
-		t.Errorf("Expected total 1, got %v", info["total"])
+	// Should have at least 1 skill (test-skill from workspace, plus any global skills)
+	total, ok := info["total"].(int)
+	if !ok {
+		t.Fatalf("Expected total to be int, got %T", info["total"])
 	}
-	if info["available"] != 1 {
-		t.Errorf("Expected available 1, got %v", info["available"])
+	if total < 1 {
+		t.Errorf("Expected total >= 1, got %d", total)
+	}
+	available, ok := info["available"].(int)
+	if !ok {
+		t.Fatalf("Expected available to be int, got %T", info["available"])
+	}
+	if available < 1 {
+		t.Errorf("Expected available >= 1, got %d", available)
 	}
 
-	// Should have the skill name
+	// Should contain the workspace-local skill name
 	names, ok := info["names"].([]string)
 	if !ok {
 		t.Fatalf("Expected names to be []string, got %T", info["names"])
 	}
-	if len(names) != 1 || names[0] != "test-skill" {
-		t.Errorf("Expected names to contain ['test-skill'], got %v", names)
+	found := false
+	for _, n := range names {
+		if n == "test-skill" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected names to contain 'test-skill', got %v", names)
 	}
 }
 
@@ -1196,16 +1221,31 @@ description: Description for %s
 	cb := NewContextBuilder(tmpDir)
 	info := cb.GetSkillsInfo()
 
-	// Should have 3 skills
-	if info["total"] != 3 {
-		t.Errorf("Expected total 3, got %v", info["total"])
+	// Should have at least 3 local skills (plus any global skills)
+	total, ok := info["total"].(int)
+	if !ok {
+		t.Fatalf("Expected total to be int, got %T", info["total"])
+	}
+	if total < 3 {
+		t.Errorf("Expected total >= 3, got %d", total)
 	}
 
 	names, ok := info["names"].([]string)
 	if !ok {
 		t.Fatalf("Expected names to be []string, got %T", info["names"])
 	}
-	if len(names) != 3 {
-		t.Errorf("Expected 3 skill names, got %d", len(names))
+
+	// Verify all 3 local skills are present
+	for _, expected := range skillNames {
+		found := false
+		for _, n := range names {
+			if n == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected names to contain '%s', got %v", expected, names)
+		}
 	}
 }

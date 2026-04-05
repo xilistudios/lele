@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-func TestMessageTool_Execute_Success(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_Success(t *testing.T) {
+	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
 
 	var sentChannel, sentChatID, sentContent string
-	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
+	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		sentChannel = channel
 		sentChatID = chatID
 		sentContent = payload.Content
@@ -38,15 +38,15 @@ func TestMessageTool_Execute_Success(t *testing.T) {
 		t.Errorf("Expected content 'Hello, world!', got '%s'", sentContent)
 	}
 
-	// Verify ToolResult meets US-011 criteria:
+	// Verify ToolResult meets criteria:
 	// - Send success returns SilentResult (Silent=true)
 	if !result.Silent {
 		t.Error("Expected Silent=true for successful send")
 	}
 
 	// - ForLLM contains send status description
-	if result.ForLLM != "Message sent to test-channel:test-chat-id" {
-		t.Errorf("Expected ForLLM 'Message sent to test-channel:test-chat-id', got '%s'", result.ForLLM)
+	if result.ForLLM != "Files sent to test-channel:test-chat-id" {
+		t.Errorf("Expected ForLLM 'Files sent to test-channel:test-chat-id', got '%s'", result.ForLLM)
 	}
 
 	// - ForUser is empty (user already received message directly)
@@ -60,12 +60,12 @@ func TestMessageTool_Execute_Success(t *testing.T) {
 	}
 }
 
-func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_WithCustomChannel(t *testing.T) {
+	tool := NewSendFileTool()
 	tool.SetContext("default-channel", "default-chat-id")
 
 	var sentChannel, sentChatID string
-	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
+	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		sentChannel = channel
 		sentChatID = chatID
 		return nil
@@ -91,17 +91,17 @@ func TestMessageTool_Execute_WithCustomChannel(t *testing.T) {
 	if !result.Silent {
 		t.Error("Expected Silent=true")
 	}
-	if result.ForLLM != "Message sent to custom-channel:custom-chat-id" {
-		t.Errorf("Expected ForLLM 'Message sent to custom-channel:custom-chat-id', got '%s'", result.ForLLM)
+	if result.ForLLM != "Files sent to custom-channel:custom-chat-id" {
+		t.Errorf("Expected ForLLM 'Files sent to custom-channel:custom-chat-id', got '%s'", result.ForLLM)
 	}
 }
 
-func TestMessageTool_Execute_SendFailure(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_SendFailure(t *testing.T) {
+	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
 
 	sendErr := errors.New("network error")
-	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
+	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		return sendErr
 	})
 
@@ -119,7 +119,7 @@ func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	}
 
 	// - ForLLM contains error description
-	expectedErrMsg := "sending message: network error"
+	expectedErrMsg := "sending file(s): network error"
 	if result.ForLLM != expectedErrMsg {
 		t.Errorf("Expected ForLLM '%s', got '%s'", expectedErrMsg, result.ForLLM)
 	}
@@ -133,8 +133,8 @@ func TestMessageTool_Execute_SendFailure(t *testing.T) {
 	}
 }
 
-func TestMessageTool_Execute_MissingContent(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_MissingContent(t *testing.T) {
+	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
 
 	ctx := context.Background()
@@ -151,11 +151,11 @@ func TestMessageTool_Execute_MissingContent(t *testing.T) {
 	}
 }
 
-func TestMessageTool_Execute_NoTargetChannel(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_NoTargetChannel(t *testing.T) {
+	tool := NewSendFileTool()
 	// No SetContext called, so defaultChannel and defaultChatID are empty
 
-	tool.SetSendCallback(func(channel, chatID string, payload MessagePayload) error {
+	tool.SetSendCallback(func(channel, chatID string, payload SendFilePayload) error {
 		return nil
 	})
 
@@ -175,8 +175,8 @@ func TestMessageTool_Execute_NoTargetChannel(t *testing.T) {
 	}
 }
 
-func TestMessageTool_Execute_NotConfigured(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Execute_NotConfigured(t *testing.T) {
+	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
 	// No SetSendCallback called
 
@@ -191,38 +191,38 @@ func TestMessageTool_Execute_NotConfigured(t *testing.T) {
 	if !result.IsError {
 		t.Error("Expected IsError=true when send callback not configured")
 	}
-	if result.ForLLM != "Message sending not configured" {
-		t.Errorf("Expected ForLLM 'Message sending not configured', got '%s'", result.ForLLM)
+	if result.ForLLM != "File sending not configured" {
+		t.Errorf("Expected ForLLM 'File sending not configured', got '%s'", result.ForLLM)
 	}
 }
 
-func TestMessageTool_Name(t *testing.T) {
-	tool := NewMessageTool()
-	if tool.Name() != "message" {
-		t.Errorf("Expected name 'message', got '%s'", tool.Name())
+func TestSendFileTool_Name(t *testing.T) {
+	tool := NewSendFileTool()
+	if tool.Name() != "send_file" {
+		t.Errorf("Expected name 'send_file', got '%s'", tool.Name())
 	}
 }
 
-func TestMessageTool_Description(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Description(t *testing.T) {
+	tool := NewSendFileTool()
 	desc := tool.Description()
 	if desc == "" {
 		t.Error("Description should not be empty")
 	}
 }
 
-func TestMessageTool_Execute_WithAttachments(t *testing.T) {
+func TestSendFileTool_Execute_WithAttachments(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "report.txt")
 	if err := os.WriteFile(filePath, []byte("hello"), 0600); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	tool := NewMessageTool()
+	tool := NewSendFileTool()
 	tool.SetContext("test-channel", "test-chat-id")
 
-	var payload MessagePayload
-	tool.SetSendCallback(func(channel, chatID string, sent MessagePayload) error {
+	var payload SendFilePayload
+	tool.SetSendCallback(func(channel, chatID string, sent SendFilePayload) error {
 		payload = sent
 		return nil
 	})
@@ -243,8 +243,8 @@ func TestMessageTool_Execute_WithAttachments(t *testing.T) {
 	}
 }
 
-func TestMessageTool_Parameters(t *testing.T) {
-	tool := NewMessageTool()
+func TestSendFileTool_Parameters(t *testing.T) {
+	tool := NewSendFileTool()
 	params := tool.Parameters()
 
 	// Verify parameters structure

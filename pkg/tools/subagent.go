@@ -39,9 +39,11 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace string // Agent's workspace path
-	Name      string // Agent display name
+	Context   string                // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace string                // Agent's workspace path
+	Name      string                // Agent display name
+	Model     string                // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Provider  providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
 }
 
 type subagentOutcome struct {
@@ -294,7 +296,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 10,
+		maxIterations: 20, // Default, will be overridden by SetMaxIterations
 		nextID:        1,
 	}
 }
@@ -307,6 +309,13 @@ func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.hasMaxTokens = true
 	sm.temperature = temperature
 	sm.hasTemperature = true
+}
+
+// SetMaxIterations sets the maximum number of tool iterations for subagent execution.
+func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.maxIterations = maxIterations
 }
 
 // SetTools sets the tool registry for subagent execution.
@@ -352,8 +361,9 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	}
 	sm.tasks[taskID] = subagentTask
 
-	// Start task in background with context cancellation support
-	taskCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() to decouple from parent agent's context
+	// This allows the subagent to continue running even after the parent agent finishes
+	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	go sm.runTask(taskCtx, subagentTask, callback)
 
@@ -384,7 +394,8 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	task.Guidance = append(task.Guidance, guidance)
 	task.Status = SubagentStatusRunning
 	task.Updated = time.Now().UnixMilli()
-	taskCtx, cancel := context.WithCancel(ctx)
+	// Use context.Background() to decouple from parent agent's context
+	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
 
@@ -400,7 +411,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	task.Updated = time.Now().UnixMilli()
 	sm.mu.Unlock()
 
-	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name from its workspace)
+	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model, provider from its workspace)
 	sm.mu.RLock()
 	getContextInfo := sm.getAgentContext
 	agentID := task.AgentID
@@ -410,12 +421,16 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	var systemPrompt string
 	var agentWorkspace string
 	var agentName string
+	var agentModel string
+	var agentProvider providers.LLMProvider
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
+			agentModel = ctxInfo.Model
+			agentProvider = ctxInfo.Provider
 			if agentName == "" {
 				agentName = agentID
 			}
@@ -427,6 +442,14 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		systemPrompt = buildSubagentSystemPrompt("", agentID, agentName, agentWorkspace)
 		agentWorkspace = "unknown"
 		agentName = agentID
+	}
+
+	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
+	if agentModel == "" {
+		agentModel = sm.defaultModel
+	}
+	if agentProvider == nil {
+		agentProvider = sm.provider
 	}
 
 	messages := previousTask.buildMessages(systemPrompt)
@@ -466,8 +489,8 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
-		Model:         sm.defaultModel,
+		Provider:      agentProvider,
+		Model:         agentModel,
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,
@@ -505,7 +528,6 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		}
 		result = &ToolResult{
 			ForLLM:  task.statusMessage(),
-			ForUser: "",
 			Silent:  true,
 			IsError: true,
 			Async:   false,
@@ -521,7 +543,6 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.Updated = time.Now().UnixMilli()
 		result = &ToolResult{
 			ForLLM:  task.statusMessage(),
-			ForUser: "",
 			Silent:  true,
 			IsError: false,
 			Async:   false,
@@ -529,9 +550,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	// NOTE: Subagents do NOT send messages directly to users.
-	// The result is returned via callback to the parent agent, which decides
-	// what to do with the result (e.g., display it, use it for further processing,
-	// or send a message to the user if appropriate).
+	// Their output is returned as LLM context for the parent agent only.
 }
 
 func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
@@ -653,7 +672,7 @@ func (t *SubagentTool) Name() string {
 }
 
 func (t *SubagentTool) Description() string {
-	return "Execute a subagent task synchronously and return the result. Use this for delegating specific tasks to an independent agent instance. Returns execution summary to user and full details to LLM."
+	return "Execute a subagent task synchronously and return the result to the parent agent. Use this for delegating specific tasks to an independent agent instance."
 }
 
 func (t *SubagentTool) Parameters() map[string]interface{} {
@@ -735,13 +754,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 	}
 
-	// ForUser: Brief summary for user (truncated if too long)
-	userContent := loopResult.Content
-	maxUserLen := 500
-	if len(userContent) > maxUserLen {
-		userContent = userContent[:maxUserLen] + "..."
-	}
-
 	// ForLLM: Full execution details
 	labelStr := label
 	if labelStr == "" {
@@ -752,8 +764,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 
 	return &ToolResult{
 		ForLLM:  llmContent,
-		ForUser: userContent,
-		Silent:  false,
+		Silent:  true,
 		IsError: false,
 		Async:   false,
 	}

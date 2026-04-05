@@ -82,9 +82,9 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		return ch.handleToggleCommand(args), true
 	case "/clear":
 		if agent != nil {
-			agent.Sessions.TruncateHistory(sessionKey, 0)
-			agent.Sessions.SetSummary(sessionKey, "")
-			agent.Sessions.Save(sessionKey)
+			if err := ch.al.resetAgentSession(agent, sessionKey); err != nil {
+				return fmt.Sprintf("❌ Failed to clear conversation: %s", err.Error()), true
+			}
 		}
 		return "✅ Conversation cleared.", true
 	case "/status":
@@ -177,10 +177,19 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		if agent == nil {
 			return "No agent available for compaction", true
 		}
+		if ch.al.sessionManager == nil {
+			return "Session manager not available for compaction", true
+		}
 		history := agent.Sessions.GetHistory(sessionKey)
 		if len(history) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
+		// Send feedback message before starting compaction (LLM call can take seconds)
+		ch.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel: msg.Channel,
+			ChatID:  msg.ChatID,
+			Content: "🔄 Compacting conversation history...",
+		})
 		stats := ch.al.sessionManager.summarizeSession(agent, sessionKey)
 		if stats == nil {
 			return "❌ Compaction failed or nothing to compact.", true
@@ -201,10 +210,7 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 	}
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = ch.al.cfg.Agents.Defaults.Model
-	}
-	if sessionKey == "" {
-		sessionKey = ch.al.resolveSessionKey(sessionKey)
+		agentModel = ch.al.cfg().Agents.Defaults.Model
 	}
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
@@ -231,7 +237,7 @@ func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKe
 	currentModel := ch.al.sessionManager.(*sessionManagerImpl).modelForSession(agent, sessionKey)
 	if len(args) == 0 {
 		var models []string
-		if provider, ok := ch.al.cfg.Providers.GetNamed(ch.al.cfg.Agents.Defaults.Provider); ok {
+		if provider, ok := ch.al.cfg().Providers.GetNamed(ch.al.cfg().Agents.Defaults.Provider); ok {
 			models = make([]string, 0, len(provider.Models))
 			for alias := range provider.Models {
 				models = append(models, alias)
@@ -243,7 +249,7 @@ func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKe
 		}
 		return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", currentModel, strings.Join(models, ", "))
 	}
-	next := ch.al.cfg.Providers.ResolveModelAlias(args[0], ch.al.cfg.Agents.Defaults.Provider)
+	next := ch.al.cfg().Providers.ResolveModelAlias(args[0], ch.al.cfg().Agents.Defaults.Provider)
 	if sessionKey == "" {
 		return "Model switching requires a session context. Please start a conversation first."
 	}
@@ -374,7 +380,7 @@ func (ch *commandHandlerImpl) handleAgentCommand(sessionKey string, args []strin
 	// Get agent model
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = ch.al.cfg.Agents.Defaults.Model
+		agentModel = ch.al.cfg().Agents.Defaults.Model
 	}
 	ch.al.startFreshConversation(sessionKey, agentID, agentModel)
 
@@ -392,12 +398,12 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		return "No default agent configured"
 	}
 	currentModel := ch.al.sessionManager.(*sessionManagerImpl).modelForSession(agent, sessionKey)
-	providerName := ch.al.cfg.Agents.Defaults.Provider
+	providerName := ch.al.cfg().Agents.Defaults.Provider
 	if idx := strings.Index(currentModel, "/"); idx > 0 {
 		providerName = currentModel[:idx]
 	}
 	apiKey := ""
-	if provider, ok := ch.al.cfg.Providers.GetNamed(providerName); ok {
+	if provider, ok := ch.al.cfg().Providers.GetNamed(providerName); ok {
 		apiKey = provider.APIKey
 		if len(apiKey) > 10 {
 			apiKey = apiKey[:6] + "…" + apiKey[len(apiKey)-4:]

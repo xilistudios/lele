@@ -27,7 +27,7 @@ import (
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
 	bus              *bus.MessageBus
-	cfg              *config.Config
+	cfgPtr           atomic.Pointer[config.Config]
 	registry         *AgentRegistry
 	state            *state.Manager
 	running          atomic.Bool
@@ -51,6 +51,20 @@ type AgentLoop struct {
 	commandHandler   commandHandler
 	sessionManager   sessionManager
 	toolCoordinator  toolCoordinator
+}
+
+func (al *AgentLoop) cfg() *config.Config {
+	if cfg := al.cfgPtr.Load(); cfg != nil {
+		return cfg
+	}
+	return config.DefaultConfig()
+}
+
+func (al *AgentLoop) UpdateConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	al.cfgPtr.Store(cfg)
 }
 
 func (al *AgentLoop) resolveSessionKey(sessionKey string) string {
@@ -104,6 +118,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		// GetOrCreate ensures the session exists before resetting tokens.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
+		// Clear any existing history to ensure a truly fresh conversation.
+		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
+		// Also clear any summary from previous sessions.
+		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
 	return newSessionKey
@@ -175,14 +193,14 @@ type SummarizeStats struct {
 }
 
 // NewAgentLoop creates a new agent loop instance.
-func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers.LLMProvider) *AgentLoop {
-	registry := NewAgentRegistry(cfg, provider)
+func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
+	registry := NewAgentRegistry(cfg)
 
 	// Create approval manager early so it can be passed to tools during registration
 	approvalManager := channels.NewApprovalManager()
 
-	// Register shared tools to all agents (pass approvalManager so exec tool has approval support)
-	subagents := registerSharedTools(cfg, msgBus, registry, provider, approvalManager)
+	// Register shared tools to all agents (each agent uses its own provider)
+	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
 
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
@@ -221,7 +239,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 
 	loop := &AgentLoop{
 		bus:             msgBus,
-		cfg:             cfg,
 		registry:        registry,
 		state:           stateManager,
 		summarizing:     sync.Map{},
@@ -230,6 +247,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
 	}
+	loop.cfgPtr.Store(cfg)
 
 	// Initialize internal components
 	loop.messageProcessor = newMessageProcessor(loop)
@@ -294,7 +312,8 @@ func (al *AgentLoop) cancelSession(sessionKey string) int {
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, provider providers.LLMProvider, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
+// Each agent uses its own provider for subagent spawning.
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
 	subagents := make(map[string]*tools.SubagentManager)
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
@@ -321,9 +340,9 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		agent.Tools.Register(tools.NewI2CTool())
 		agent.Tools.Register(tools.NewSPITool())
 
-		// Message tool
-		messageTool := tools.NewMessageTool()
-		messageTool.SetSendCallback(func(channel, chatID string, payload tools.MessagePayload) error {
+		// File tool
+		sendFileTool := tools.NewSendFileTool()
+		sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
 			msgBus.PublishOutbound(bus.OutboundMessage{
 				Channel:     channel,
 				ChatID:      chatID,
@@ -332,7 +351,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			})
 			return nil
 		})
-		agent.Tools.Register(messageTool)
+		agent.Tools.Register(sendFileTool)
 
 		// Shell/Exec tool with approval support
 		execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
@@ -341,9 +360,10 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		}
 		agent.Tools.Register(execTool)
 
-		// Spawn tool with allowlist checker
-		subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace, msgBus)
+		// Spawn tool with allowlist checker - use agent's own provider
+		subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
 		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+		subagentManager.SetMaxIterations(agent.MaxIterations)
 		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
 		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
 			if targetAgent, ok := registry.GetAgent(agentID); ok {
@@ -351,6 +371,8 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 					Context:   targetAgent.ContextBuilder.GetInitialContext(),
 					Workspace: targetAgent.Workspace,
 					Name:      targetAgent.Name,
+					Model:     targetAgent.Model,
+					Provider:  targetAgent.Provider,
 				}
 			}
 			// Fallback: use parent agent's context if agent not found
@@ -358,6 +380,8 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 				Context:   agent.ContextBuilder.GetInitialContext(),
 				Workspace: agent.Workspace,
 				Name:      agent.Name,
+				Model:     agent.Model,
+				Provider:  agent.Provider,
 			}
 		})
 		spawnTool := tools.NewSpawnTool(subagentManager)
@@ -367,7 +391,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 		})
 		agent.Tools.Register(spawnTool)
-		subagentManager.SetTools(agent.Tools.CloneWithout("message")) // Subagents inherit all parent tools except direct external messaging
+		subagentManager.SetTools(agent.Tools.CloneWithout("send_file")) // Subagents inherit all parent tools except direct external file delivery
 
 		// Update context builder with the complete tools registry
 		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
@@ -404,26 +428,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			}
 
 			if response != "" {
-				// Check if the message tool already sent a response during this round.
-				// If so, skip publishing to avoid duplicate messages to the user.
-				// Use default agent's tools to check (message tool is shared).
-				alreadySent := false
-				defaultAgent := al.registry.GetDefaultAgent()
-				if defaultAgent != nil {
-					if tool, ok := defaultAgent.Tools.Get("message"); ok {
-						if mt, ok := tool.(*tools.MessageTool); ok {
-							alreadySent = mt.HasSentInRound()
-						}
-					}
-				}
-
-				if !alreadySent {
-					al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel: msg.Channel,
-						ChatID:  msg.ChatID,
-						Content: response,
-					})
-				}
+				al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: msg.Channel,
+					ChatID:  msg.ChatID,
+					Content: response,
+				})
 			}
 		}
 	}
@@ -611,12 +620,12 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 }
 
 func (al *AgentLoop) ToggleEphemeral() string {
-	current := al.cfg.SessionEphemeralEnabled()
+	current := al.cfg().SessionEphemeralEnabled()
 	next := !current
-	if err := al.cfg.PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
+	if err := al.cfg().PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
 		return fmt.Sprintf("Failed to update ephemeral mode in config.json: %v", err)
 	}
-	threshold := al.cfg.SessionEphemeralThresholdSeconds()
+	threshold := al.cfg().SessionEphemeralThresholdSeconds()
 	if next {
 		return fmt.Sprintf("🫧 Ephemeral mode enabled. Chats idle for more than %d seconds will start a fresh session on the next message.", threshold)
 	}
@@ -717,7 +726,7 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	}
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = al.cfg.Agents.Defaults.Model
+		agentModel = al.cfg().Agents.Defaults.Model
 	}
 	if baseSessionKey == "" {
 		baseSessionKey = sessionKey

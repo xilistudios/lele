@@ -13,6 +13,17 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
+// extractProviderFromModel extracts the provider name from a model string.
+// If model is "provider/model-name", returns "provider".
+// If model has no provider prefix, returns defaultProvider.
+func extractProviderFromModel(model, defaultProvider string) string {
+	model = strings.TrimSpace(model)
+	if idx := strings.Index(model, "/"); idx > 0 {
+		return strings.ToLower(strings.TrimSpace(model[:idx]))
+	}
+	return strings.ToLower(strings.TrimSpace(defaultProvider))
+}
+
 // AgentInstance represents a fully configured agent with its own workspace,
 // session manager, context builder, and tool registry.
 type AgentInstance struct {
@@ -120,13 +131,28 @@ func NewAgentInstance(
 	agentCfg *config.AgentConfig,
 	defaults *config.AgentDefaults,
 	cfg *config.Config,
-	provider providers.LLMProvider,
 ) *AgentInstance {
 	workspace := resolveAgentWorkspace(agentCfg, defaults)
 	os.MkdirAll(workspace, 0755)
 
 	model := resolveAgentModel(agentCfg, defaults, cfg)
 	fallbacks := resolveAgentFallbacks(agentCfg, defaults, cfg)
+
+	// Extract provider name from the agent's model specification
+	// This allows each agent to use its own provider based on its model config
+	providerName := extractProviderFromModel(model, defaults.Provider)
+
+	// Create a provider specifically for this agent
+	provider, err := providers.CreateProviderForCandidate(cfg, providerName)
+	if err != nil {
+		log.Printf("[WARN] Failed to create provider '%s' for agent, falling back to default: %v", providerName, err)
+		// Fallback: try to create default provider
+		provider, err = providers.CreateProvider(cfg)
+		if err != nil {
+			log.Printf("[ERROR] Failed to create any provider: %v", err)
+			provider = nil
+		}
+	}
 
 	restrict := defaults.RestrictToWorkspace
 	toolsRegistry := tools.NewToolRegistry()
@@ -143,7 +169,7 @@ func NewAgentInstance(
 	// toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))        // DEPRECATED
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
-	if getSupportsImages(cfg, model, defaults.Provider) {
+	if getSupportsImages(cfg, model, providerName) {
 		toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
 	}
 
@@ -180,12 +206,12 @@ func NewAgentInstance(
 		temperature = *defaults.Temperature
 	}
 
-	// Resolve fallback candidates
+	// Resolve fallback candidates using the agent's provider
 	modelCfg := providers.ModelConfig{
 		Primary:   model,
 		Fallbacks: fallbacks,
 	}
-	candidates := providers.ResolveCandidates(modelCfg, defaults.Provider)
+	candidates := providers.ResolveCandidates(modelCfg, providerName)
 
 	return &AgentInstance{
 		ID:             agentID,
@@ -196,9 +222,9 @@ func NewAgentInstance(
 		MaxIterations:  maxIter,
 		MaxTokens:      maxTokens,
 		Temperature:    temperature,
-		ContextWindow:  getContextWindow(cfg, model, defaults.Provider),
-		SupportsImages: getSupportsImages(cfg, model, defaults.Provider),
-		Reasoning:      getReasoningConfig(cfg, model, defaults.Provider),
+		ContextWindow:  getContextWindow(cfg, model, providerName),
+		SupportsImages: getSupportsImages(cfg, model, providerName),
+		Reasoning:      getReasoningConfig(cfg, model, providerName),
 		Provider:       provider,
 		Sessions:       sessionsManager,
 		ContextBuilder: contextBuilder,

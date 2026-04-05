@@ -105,7 +105,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		if agent.Model != "" {
 			mp.al.sessionModels.Store(sessionKey, agent.Model)
 		} else {
-			mp.al.sessionModels.Store(sessionKey, mp.al.cfg.Agents.Defaults.Model)
+			mp.al.sessionModels.Store(sessionKey, mp.al.cfg().Agents.Defaults.Model)
 		}
 	}
 
@@ -251,6 +251,13 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			agent.Sessions.SetSummary(sessionKey, "")
 			agent.Sessions.Save(sessionKey)
 		}
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   "✅ Conversation cleared.",
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
 		return "", nil
 
 	case "/stop":
@@ -284,6 +291,14 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	case "/compact":
 		// Manual compaction command - use existing sessionKey from caller
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   "🔄 Compacting conversation history...",
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+
 		history := agent.Sessions.GetHistory(sessionKey)
 		if len(history) <= 4 {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
@@ -296,7 +311,23 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			return "", nil
 		}
 
-		stats := mp.al.sessionManager.summarizeSession(agent, sessionKey)
+		stats, err := mp.al.sessionManager.summarizeSessionWithError(agent, sessionKey)
+		if err != nil {
+			errorMsg := fmt.Sprintf("❌ Compaction failed: %v", err)
+			// Truncate error message if too long for Telegram
+			if len(errorMsg) > 4000 {
+				errorMsg = errorMsg[:3997] + "..."
+			}
+			mp.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel:   originChannel,
+				ChatID:    originChatID,
+				Content:   errorMsg,
+				ReplyTo:   replyToMessageID,
+				MessageID: replyToMessageID,
+			})
+			return "", nil
+		}
+
 		if stats == nil {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel:   originChannel,
@@ -518,12 +549,12 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 		return "No default agent configured"
 	}
 	currentModel := mp.modelForSession(agent, sessionKey)
-	providerName := mp.al.cfg.Agents.Defaults.Provider
+	providerName := mp.al.cfg().Agents.Defaults.Provider
 	if idx := strings.Index(currentModel, "/"); idx > 0 {
 		providerName = currentModel[:idx]
 	}
 	apiKey := ""
-	if provider, ok := mp.al.cfg.Providers.GetNamed(providerName); ok {
+	if provider, ok := mp.al.cfg().Providers.GetNamed(providerName); ok {
 		apiKey = provider.APIKey
 		if len(apiKey) > 10 {
 			apiKey = apiKey[:6] + "…" + apiKey[len(apiKey)-4:]
@@ -567,7 +598,7 @@ func (mp *messageProcessorImpl) handleNewCommand(agent *AgentInstance, sessionKe
 	}
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = mp.al.cfg.Agents.Defaults.Model
+		agentModel = mp.al.cfg().Agents.Defaults.Model
 	}
 	mp.al.startFreshConversation(sessionKey, agent.ID, agentModel)
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
@@ -587,11 +618,11 @@ func (mp *messageProcessorImpl) handleToggleCommand(args []string) string {
 }
 
 func (mp *messageProcessorImpl) maybeStartEphemeralSession(agent *AgentInstance, sessionKey string) string {
-	if agent == nil || sessionKey == "" || !mp.al.cfg.SessionEphemeralEnabled() {
+	if agent == nil || sessionKey == "" || !mp.al.cfg().SessionEphemeralEnabled() {
 		return ""
 	}
 
-	threshold := time.Duration(mp.al.cfg.SessionEphemeralThresholdSeconds()) * time.Second
+	threshold := time.Duration(mp.al.cfg().SessionEphemeralThresholdSeconds()) * time.Second
 	shouldReset, idle := agent.Sessions.ShouldStartFreshSession(sessionKey, threshold)
 	if !shouldReset {
 		return ""
@@ -609,7 +640,7 @@ func (mp *messageProcessorImpl) maybeStartEphemeralSession(agent *AgentInstance,
 	logger.InfoCF("agent", "Started fresh ephemeral session", map[string]interface{}{
 		"session_key":    sessionKey,
 		"idle_seconds":   idleSeconds,
-		"threshold_secs": mp.al.cfg.SessionEphemeralThresholdSeconds(),
+		"threshold_secs": mp.al.cfg().SessionEphemeralThresholdSeconds(),
 		"ephemeral_mode": true,
 	})
 
@@ -624,7 +655,7 @@ func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, session
 	currentModel := mp.modelForSession(agent, sessionKey)
 	if len(args) == 0 {
 		var models []string
-		if provider, ok := mp.al.cfg.Providers.GetNamed(mp.al.cfg.Agents.Defaults.Provider); ok {
+		if provider, ok := mp.al.cfg().Providers.GetNamed(mp.al.cfg().Agents.Defaults.Provider); ok {
 			models = make([]string, 0, len(provider.Models))
 			for alias := range provider.Models {
 				models = append(models, alias)
@@ -643,7 +674,7 @@ func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, session
 		}
 		return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", currentModel, strings.Join(models, ", "))
 	}
-	next := mp.al.cfg.Providers.ResolveModelAlias(args[0], mp.al.cfg.Agents.Defaults.Provider)
+	next := mp.al.cfg().Providers.ResolveModelAlias(args[0], mp.al.cfg().Agents.Defaults.Provider)
 	if sessionKey == "" {
 		return "Model switching requires a session context. Please start a conversation first."
 	}
@@ -708,7 +739,7 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 	// Get agent model
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = mp.al.cfg.Agents.Defaults.Model
+		agentModel = mp.al.cfg().Agents.Defaults.Model
 	}
 	mp.al.startFreshConversation(sessionKey, agentID, agentModel)
 

@@ -294,7 +294,7 @@ type llmRunnerMockToolCoordinator struct {
 	lastChatID               string
 }
 
-func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, channel, chatID string) {
+func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	m.updateToolContextsCalled = true
 	m.lastAgent = agent
 	m.lastChannel = channel
@@ -490,8 +490,7 @@ func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 	}
 
 	msgBus := bus.NewMessageBus()
-	provider := &mockProvider{}
-	al := NewAgentLoop(cfg, msgBus, provider)
+	al := NewAgentLoop(cfg, msgBus)
 
 	return al, tmpDir
 }
@@ -1239,7 +1238,7 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	// Create mock contextual tools
-	messageTool := &llmRunnerMockContextualTool{name: "message"}
+	messageTool := &llmRunnerMockContextualTool{name: "send_file"}
 	spawnTool := &llmRunnerMockContextualTool{name: "spawn"}
 	subagentTool := &llmRunnerMockContextualTool{name: "subagent"}
 
@@ -1248,17 +1247,17 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent.Tools.Register(subagentTool)
 
 	// Call updateToolContexts
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id")
+	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 
 	// Verify all tools received context
 	if !messageTool.setContextCalled {
-		t.Error("Expected message tool SetContext to be called")
+		t.Error("Expected send_file tool SetContext to be called")
 	}
 	if messageTool.channel != "test-channel" {
-		t.Errorf("Expected message tool channel to be 'test-channel', got: %s", messageTool.channel)
+		t.Errorf("Expected send_file tool channel to be 'test-channel', got: %s", messageTool.channel)
 	}
 	if messageTool.chatID != "test-chat-id" {
-		t.Errorf("Expected message tool chatID to be 'test-chat-id', got: %s", messageTool.chatID)
+		t.Errorf("Expected send_file tool chatID to be 'test-chat-id', got: %s", messageTool.chatID)
 	}
 
 	if !spawnTool.setContextCalled {
@@ -1278,7 +1277,7 @@ func TestUpdateToolContexts_MissingTools(t *testing.T) {
 
 	// Don't register any contextual tools
 	// Should not panic
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id")
+	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 }
 
 // ============================================================================

@@ -29,8 +29,8 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 		return formatBasicWebSearch(args)
 	case "web_fetch":
 		return formatBasicWebFetch(args)
-	case "message":
-		return formatBasicMessage(args)
+	case "send_file":
+		return formatBasicSendFile(args)
 	case "spawn":
 		return formatBasicSpawn(args)
 	case "list_dir":
@@ -145,7 +145,7 @@ func formatBasicWebFetch(args map[string]interface{}) string {
 	return "🛠️ Fetch: [no url]"
 }
 
-func formatBasicMessage(args map[string]interface{}) string {
+func formatBasicSendFile(args map[string]interface{}) string {
 	channel := "unknown"
 	if c, ok := args["channel"].(string); ok && c != "" {
 		channel = c
@@ -166,9 +166,9 @@ func formatBasicMessage(args map[string]interface{}) string {
 		if len(preview) > 50 {
 			preview = preview[:47] + "..."
 		}
-		return fmt.Sprintf("🛠️ Message to %s: \"%s\"", target, preview)
+		return fmt.Sprintf("🛠️ Send file to %s: \"%s\"", target, preview)
 	}
-	return fmt.Sprintf("🛠️ Message to %s", target)
+	return fmt.Sprintf("🛠️ Send file to %s", target)
 }
 
 func formatBasicSpawn(args map[string]interface{}) string {
