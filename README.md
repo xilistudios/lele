@@ -648,6 +648,8 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 | `openai(To be tested)`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)     |
 | `deepseek(To be tested)`   | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq`                     | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com)           |
+| `chutes`                   | LLM (Chutes AI)                         | [chutes.ai](https://chutes.ai)                         |
+| `alibaba`                  | LLM (Alibaba DashScope)                 | [dashscope.aliyun.com](https://dashscope.aliyun.com)   |
 
 ### Provider Architecture
 
