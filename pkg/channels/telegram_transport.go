@@ -22,17 +22,25 @@ import (
 )
 
 type thinkingCancel struct {
-	fn context.CancelFunc
+	fn       context.CancelFunc
+	doneChan chan struct{}
 }
 
 func (c *thinkingCancel) Cancel() {
 	if c != nil && c.fn != nil {
 		c.fn()
+		if c.doneChan != nil {
+			select {
+			case <-c.doneChan:
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
 	}
 }
 
-func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc {
+func (c *TelegramChannel) startTypingIndicator(chatID int64) *thinkingCancel {
 	ctx, cancel := context.WithCancel(context.Background())
+	doneChan := make(chan struct{})
 	ticker := time.NewTicker(4 * time.Second)
 
 	if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
@@ -42,6 +50,7 @@ func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc 
 	}
 
 	go func() {
+		defer close(doneChan)
 		for {
 			select {
 			case <-ticker.C:
@@ -57,16 +66,32 @@ func (c *TelegramChannel) startTypingIndicator(chatID int64) context.CancelFunc 
 		}
 	}()
 
-	return cancel
+	return &thinkingCancel{fn: cancel, doneChan: doneChan}
 }
 
-func (c *TelegramChannel) stopActiveThinking(chatKey string) {
-	if stop, ok := c.stopThinking.Load(chatKey); ok {
+func (c *TelegramChannel) stopActiveThinking(thinkingKey string) {
+	if stop, ok := c.stopThinking.Load(thinkingKey); ok {
 		if cf, ok := stop.(*thinkingCancel); ok && cf != nil {
 			cf.Cancel()
 		}
-		c.stopThinking.Delete(chatKey)
+		c.stopThinking.Delete(thinkingKey)
 	}
+}
+
+func (c *TelegramChannel) stopAllThinkingForChat(chatID string) {
+	c.stopThinking.Range(func(key, value interface{}) bool {
+		keyStr, ok := key.(string)
+		if !ok {
+			return true
+		}
+		if strings.HasPrefix(keyStr, chatID+":") {
+			if cf, ok := value.(*thinkingCancel); ok && cf != nil {
+				cf.Cancel()
+			}
+			c.stopThinking.Delete(key)
+		}
+		return true
+	})
 }
 
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
@@ -80,7 +105,17 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	}
 
 	if !msg.IsIntermediate {
-		c.stopActiveThinking(msg.ChatID)
+		var thinkingKey string
+		if msg.ReplyTo != "" {
+			thinkingKey = fmt.Sprintf("%s:%s", msg.ChatID, msg.ReplyTo)
+		} else if msg.MessageID != "" {
+			thinkingKey = fmt.Sprintf("%s:%s", msg.ChatID, msg.MessageID)
+		}
+		if thinkingKey != "" {
+			c.stopActiveThinking(thinkingKey)
+		} else {
+			c.stopAllThinkingForChat(msg.ChatID)
+		}
 	}
 
 	if len(msg.Attachments) > 0 {
