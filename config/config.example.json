@@ -16,15 +16,15 @@
   "channels": {
     "telegram": {
       "enabled": false,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "token": "{{ENV_TELEGRAM_BOT_TOKEN}}",
       "proxy": "",
       "allow_from": [
-        "YOUR_USER_ID"
+        "{{ENV_TELEGRAM_USER_ID}}"
       ]
     },
     "discord": {
       "enabled": false,
-      "token": "YOUR_DISCORD_BOT_TOKEN",
+      "token": "{{ENV_DISCORD_BOT_TOKEN}}",
       "allow_from": []
     },
     "maixcam": {
@@ -40,28 +40,28 @@
     },
     "feishu": {
       "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "encrypt_key": "",
-      "verification_token": "",
+      "app_id": "{{ENV_FEISHU_APP_ID}}",
+      "app_secret": "{{ENV_FEISHU_APP_SECRET}}",
+      "encrypt_key": "{{ENV_FEISHU_ENCRYPT_KEY:}}",
+      "verification_token": "{{ENV_FEISHU_VERIFICATION_TOKEN:}}",
       "allow_from": []
     },
     "dingtalk": {
       "enabled": false,
-      "client_id": "YOUR_CLIENT_ID",
-      "client_secret": "YOUR_CLIENT_SECRET",
+      "client_id": "{{ENV_DINGTALK_CLIENT_ID}}",
+      "client_secret": "{{ENV_DINGTALK_CLIENT_SECRET}}",
       "allow_from": []
     },
     "slack": {
       "enabled": false,
-      "bot_token": "xoxb-YOUR-BOT-TOKEN",
-      "app_token": "xapp-YOUR-APP-TOKEN",
+      "bot_token": "{{ENV_SLACK_BOT_TOKEN}}",
+      "app_token": "{{ENV_SLACK_APP_TOKEN}}",
       "allow_from": []
     },
     "line": {
       "enabled": false,
-      "channel_secret": "YOUR_LINE_CHANNEL_SECRET",
-      "channel_access_token": "YOUR_LINE_CHANNEL_ACCESS_TOKEN",
+      "channel_secret": "{{ENV_LINE_CHANNEL_SECRET}}",
+      "channel_access_token": "{{ENV_LINE_CHANNEL_ACCESS_TOKEN}}",
       "webhook_host": "0.0.0.0",
       "webhook_port": 18791,
       "webhook_path": "/webhook/line",
@@ -70,7 +70,7 @@
     "onebot": {
       "enabled": false,
       "ws_url": "ws://127.0.0.1:3001",
-      "access_token": "",
+      "access_token": "{{ENV_ONEBOT_ACCESS_TOKEN:}}",
       "reconnect_interval": 5,
       "group_trigger_prefix": [],
       "allow_from": []
@@ -79,8 +79,8 @@
   "providers": {
     "anthropic": {
       "type": "anthropic",
-      "api_key": "",
-      "api_base": "",
+      "api_key": "{{ENV_ANTHROPIC_API_KEY}}",
+      "api_base": "{{ENV_ANTHROPIC_API_BASE:}}",
       "models": {
         "claude-sonnet": {
           "model": "claude-sonnet-4-5",
@@ -90,14 +90,14 @@
     },
     "openai": {
       "type": "openai",
-      "api_key": "",
-      "api_base": "",
+      "api_key": "{{ENV_OPENAI_API_KEY}}",
+      "api_base": "{{ENV_OPENAI_API_BASE:}}",
       "web_search": true
     },
     "my-openai-compatible": {
       "type": "openai",
-      "api_key": "sk-xxx",
-      "api_base": "https://example.com/v1",
+      "api_key": "{{ENV_MY_OPENAI_API_KEY:sk-xxx}}",
+      "api_base": "{{ENV_MY_OPENAI_API_BASE:https://example.com/v1}}",
       "models": {
         "fast": {
           "model": "gpt-4o-mini",
@@ -135,56 +135,56 @@
     },
     "openrouter": {
       "type": "openrouter",
-      "api_key": "sk-or-v1-xxx",
-      "api_base": ""
+      "api_key": "{{ENV_OPENROUTER_API_KEY}}",
+      "api_base": "{{ENV_OPENROUTER_API_BASE:}}"
     },
     "groq": {
       "type": "groq",
-      "api_key": "gsk_xxx",
-      "api_base": ""
+      "api_key": "{{ENV_GROQ_API_KEY}}",
+      "api_base": "{{ENV_GROQ_API_BASE:}}"
     },
     "zhipu": {
       "type": "zhipu",
-      "api_key": "YOUR_ZHIPU_API_KEY",
-      "api_base": ""
+      "api_key": "{{ENV_ZHIPU_API_KEY}}",
+      "api_base": "{{ENV_ZHIPU_API_BASE:}}"
     },
     "gemini": {
       "type": "gemini",
-      "api_key": "",
-      "api_base": ""
+      "api_key": "{{ENV_GEMINI_API_KEY}}",
+      "api_base": "{{ENV_GEMINI_API_BASE:}}"
     },
     "vllm": {
       "type": "vllm",
-      "api_key": "",
-      "api_base": ""
+      "api_key": "{{ENV_VLLM_API_KEY:}}",
+      "api_base": "{{ENV_VLLM_API_BASE:}}"
     },
     "nvidia": {
       "type": "nvidia",
-      "api_key": "nvapi-xxx",
-      "api_base": "",
-      "proxy": "http://127.0.0.1:7890"
+      "api_key": "{{ENV_NVIDIA_API_KEY}}",
+      "api_base": "{{ENV_NVIDIA_API_BASE:}}",
+      "proxy": "{{ENV_NVIDIA_PROXY:http://127.0.0.1:7890}}"
     },
     "moonshot": {
       "type": "moonshot",
-      "api_key": "sk-xxx",
-      "api_base": ""
+      "api_key": "{{ENV_MOONSHOT_API_KEY}}",
+      "api_base": "{{ENV_MOONSHOT_API_BASE:}}"
     },
     "ollama": {
       "type": "ollama",
-      "api_key": "",
-      "api_base": "http://localhost:11434/v1"
+      "api_key": "{{ENV_OLLAMA_API_KEY:}}",
+      "api_base": "{{ENV_OLLAMA_API_BASE:http://localhost:11434/v1}}"
     }
   },
   "tools": {
     "web": {
       "brave": {
         "enabled": false,
-        "api_key": "YOUR_BRAVE_API_KEY",
+        "api_key": "{{ENV_BRAVE_API_KEY}}",
         "max_results": 5
       },
       "perplexity": {
         "enabled": false,
-        "api_key": "pplx-xxx",
+        "api_key": "{{ENV_PERPLEXITY_API_KEY}}",
         "max_results": 5
       }
     },

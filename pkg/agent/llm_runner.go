@@ -166,7 +166,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	model := lr.modelForSession(agent, opts.SessionKey)
 	candidates := agent.Candidates
 	if model != agent.Model {
-		if ref := providers.ParseModelRef(model, lr.al.cfg.Agents.Defaults.Provider); ref != nil {
+		if ref := providers.ParseModelRef(model, lr.al.cfg().Agents.Defaults.Provider); ref != nil {
 			candidates = make([]providers.FallbackCandidate, 0, len(agent.Candidates)+1)
 			candidates = append(candidates, providers.FallbackCandidate{
 				Provider: ref.Provider,
@@ -272,22 +272,24 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 			}
 
-			if len(candidates) > 0 && lr.al.fallback != nil {
-				fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
-					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						// Create provider dynamically for each candidate
-						providerInst, err := providers.CreateProviderForCandidate(lr.al.cfg, provider)
-						if err != nil {
-							// If we can't create a provider (e.g., in tests with mock providers),
-							// fall back to using the agent's provider directly
-							log.Printf("[DEBUG] Failed to create provider for %s: %v, using agent's provider", provider, err)
+			if len(candidates) > 0 && lr.al.fallback != nil {			fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
+				func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
+					// Create provider dynamically for each candidate
+					providerInst, err := providers.CreateProviderForCandidate(lr.al.cfg(), provider)
+					if err != nil {
+						// If we can't create a provider (e.g., in tests with mock providers),
+						// fall back to using the agent's provider directly
+						log.Printf("[DEBUG] Failed to create provider for %s: %v", provider, err)
+						if agent.Provider != nil {
 							return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOptions)
 						}
-						fullModel := FormatProviderModel(provider, model)
-						log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
-						return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
-					},
-				)
+						return nil, fmt.Errorf("no provider available for model %s", model)
+					}
+					fullModel := FormatProviderModel(provider, model)
+					log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
+					return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
+				},
+			)
 				if fbErr != nil {
 					return nil, fbErr
 				}

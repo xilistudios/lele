@@ -7,6 +7,7 @@ import (
 	"os"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 func TestTelegramSessionFlow(t *testing.T) {
@@ -25,10 +26,24 @@ func TestTelegramSessionFlow(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
+	agent := al.registry.GetDefaultAgent()
+	if agent != nil {
+		agent.Provider = &llmRunnerMockLLMProvider{
+			response: &providers.LLMResponse{
+				Content:   "I'm doing well, thank you!",
+				ToolCalls: []providers.ToolCall{},
+			},
+		}
+	}
 
 	// Simulate a Telegram session
 	sessionKey := "telegram:123456789"

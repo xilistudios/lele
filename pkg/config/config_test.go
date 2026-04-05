@@ -552,3 +552,108 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen-portal/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
 }
+
+func TestExpandEnvVars_Basic(t *testing.T) {
+	os.Setenv("TEST_API_KEY", "my-secret-key")
+	defer os.Unsetenv("TEST_API_KEY")
+
+	input := []byte(`{"api_key": "{{ENV_TEST_API_KEY}}"}`)
+	output := expandEnvVars(input)
+
+	var result map[string]string
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["api_key"] != "my-secret-key" {
+		t.Errorf("api_key = %q, want 'my-secret-key'", result["api_key"])
+	}
+}
+
+func TestExpandEnvVars_WithDefault(t *testing.T) {
+	input := []byte(`{"api_key": "{{ENV_MISSING_KEY:default-value}}"}`)
+	output := expandEnvVars(input)
+
+	var result map[string]string
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["api_key"] != "default-value" {
+		t.Errorf("api_key = %q, want 'default-value'", result["api_key"])
+	}
+}
+
+func TestExpandEnvVars_EnvExistsOverridesDefault(t *testing.T) {
+	os.Setenv("TEST_OVERRIDE_KEY", "actual-value")
+	defer os.Unsetenv("TEST_OVERRIDE_KEY")
+
+	input := []byte(`{"api_key": "{{ENV_TEST_OVERRIDE_KEY:default-value}}"}`)
+	output := expandEnvVars(input)
+
+	var result map[string]string
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["api_key"] != "actual-value" {
+		t.Errorf("api_key = %q, want 'actual-value'", result["api_key"])
+	}
+}
+
+func TestExpandEnvVars_EmptyWhenNoDefault(t *testing.T) {
+	input := []byte(`{"api_key": "{{ENV_NONEXISTENT_KEY}}"}`)
+	output := expandEnvVars(input)
+
+	var result map[string]string
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["api_key"] != "" {
+		t.Errorf("api_key = %q, want ''", result["api_key"])
+	}
+}
+
+func TestExpandEnvVars_MultipleVars(t *testing.T) {
+	os.Setenv("TEST_KEY1", "value1")
+	os.Setenv("TEST_KEY2", "value2")
+	defer os.Unsetenv("TEST_KEY1")
+	defer os.Unsetenv("TEST_KEY2")
+
+	input := []byte(`{"key1": "{{ENV_TEST_KEY1}}", "key2": "{{ENV_TEST_KEY2:default2}}"}`)
+	output := expandEnvVars(input)
+
+	var result map[string]string
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result["key1"] != "value1" {
+		t.Errorf("key1 = %q, want 'value1'", result["key1"])
+	}
+	if result["key2"] != "value2" {
+		t.Errorf("key2 = %q, want 'value2'", result["key2"])
+	}
+}
+
+func TestLoadConfig_WithEnvVars(t *testing.T) {
+	os.Setenv("LELE_TEST_API_KEY", "test-api-key-123")
+	defer os.Unsetenv("LELE_TEST_API_KEY")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	configContent := `{
+		"providers": {
+			"anthropic": {
+				"api_key": "{{ENV_LELE_TEST_API_KEY}}"
+			}
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Providers.Anthropic.APIKey != "test-api-key-123" {
+		t.Errorf("Anthropic API key = %q, want 'test-api-key-123'", cfg.Providers.Anthropic.APIKey)
+	}
+}

@@ -27,7 +27,7 @@ import (
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
 	bus              *bus.MessageBus
-	cfg              *config.Config
+	cfgPtr           atomic.Pointer[config.Config]
 	registry         *AgentRegistry
 	state            *state.Manager
 	running          atomic.Bool
@@ -51,6 +51,20 @@ type AgentLoop struct {
 	commandHandler   commandHandler
 	sessionManager   sessionManager
 	toolCoordinator  toolCoordinator
+}
+
+func (al *AgentLoop) cfg() *config.Config {
+	if cfg := al.cfgPtr.Load(); cfg != nil {
+		return cfg
+	}
+	return config.DefaultConfig()
+}
+
+func (al *AgentLoop) UpdateConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	al.cfgPtr.Store(cfg)
 }
 
 func (al *AgentLoop) resolveSessionKey(sessionKey string) string {
@@ -225,7 +239,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	loop := &AgentLoop{
 		bus:             msgBus,
-		cfg:             cfg,
 		registry:        registry,
 		state:           stateManager,
 		summarizing:     sync.Map{},
@@ -234,6 +247,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
 	}
+	loop.cfgPtr.Store(cfg)
 
 	// Initialize internal components
 	loop.messageProcessor = newMessageProcessor(loop)
@@ -606,12 +620,12 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 }
 
 func (al *AgentLoop) ToggleEphemeral() string {
-	current := al.cfg.SessionEphemeralEnabled()
+	current := al.cfg().SessionEphemeralEnabled()
 	next := !current
-	if err := al.cfg.PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
+	if err := al.cfg().PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
 		return fmt.Sprintf("Failed to update ephemeral mode in config.json: %v", err)
 	}
-	threshold := al.cfg.SessionEphemeralThresholdSeconds()
+	threshold := al.cfg().SessionEphemeralThresholdSeconds()
 	if next {
 		return fmt.Sprintf("🫧 Ephemeral mode enabled. Chats idle for more than %d seconds will start a fresh session on the next message.", threshold)
 	}
@@ -712,7 +726,7 @@ func (al *AgentLoop) ClearSession(sessionKey string) string {
 	}
 	agentModel := agent.Model
 	if agentModel == "" {
-		agentModel = al.cfg.Agents.Defaults.Model
+		agentModel = al.cfg().Agents.Defaults.Model
 	}
 	if baseSessionKey == "" {
 		baseSessionKey = sessionKey

@@ -95,6 +95,21 @@ func (s *Service) Stop() {
 	logger.InfoC("devices", "Device event service stopped")
 }
 
+func (s *Service) UpdateConfig(cfg Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enabled = cfg.Enabled
+	sourcesList := make([]events.EventSource, 0)
+	if cfg.Enabled && cfg.MonitorUSB {
+		sourcesList = append(sourcesList, sources.NewUSBMonitor())
+	}
+	s.sources = sourcesList
+	if s.cancel != nil && !cfg.Enabled {
+		s.cancel()
+		s.cancel = nil
+	}
+}
+
 func (s *Service) handleEvents(kind events.Kind, eventCh <-chan *events.DeviceEvent) {
 	for ev := range eventCh {
 		if ev == nil {

@@ -702,6 +702,21 @@ func gatewayCmd() {
 		fmt.Printf("Error starting channels: %v\n", err)
 	}
 
+	configWatcher := config.NewConfigWatcher(getConfigPath())
+	go func() {
+		if err := configWatcher.Start(ctx, func(updated *config.Config) error {
+			agentLoop.UpdateConfig(updated)
+			if err := channelManager.ReloadConfig(updated); err != nil {
+				return err
+			}
+			heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
+			deviceService.UpdateConfig(devices.Config{Enabled: updated.Devices.Enabled, MonitorUSB: updated.Devices.MonitorUSB})
+			return nil
+		}); err != nil {
+			logger.ErrorCF("config", "Config watcher error", map[string]interface{}{"error": err.Error()})
+		}
+	}()
+
 	healthServer := health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
 	go func() {
 		if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
@@ -718,6 +733,7 @@ func gatewayCmd() {
 
 	fmt.Println("\nShutting down...")
 	cancel()
+	configWatcher.Stop()
 	healthServer.Stop(context.Background())
 	deviceService.Stop()
 	heartbeatService.Stop()

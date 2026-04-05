@@ -15,6 +15,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // TestProcessSystemMessage_ClearCommand tests that /clear command works correctly
@@ -154,6 +155,11 @@ func TestProcessSystemMessage_SummarizeSessionWithError(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -164,6 +170,15 @@ func TestProcessSystemMessage_SummarizeSessionWithError(t *testing.T) {
 	// Test with insufficient messages
 	sessionKey := "test:summarize-error"
 	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Summary of conversation",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
 	agent.Sessions.AddMessage(sessionKey, "user", "Hello")
 
 	stats, err := sm.summarizeSessionWithError(agent, sessionKey)

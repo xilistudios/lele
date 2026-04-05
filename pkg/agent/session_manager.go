@@ -80,6 +80,9 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 // Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
 // Returns statistics about the operation.
 func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
+	if agent == nil || agent.Provider == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -288,10 +291,14 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 }
+
 // summarizeSessionWithError summarizes the conversation history for a session and returns any error.
 // Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
 // Returns statistics about the operation and any error that occurred.
 func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
+	if agent == nil || agent.Provider == nil {
+		return nil, fmt.Errorf("no provider available for summarization")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -348,7 +355,7 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 	if err != nil {
 		return nil, fmt.Errorf("LLM summarization failed: %w", err)
 	}
-	
+
 	if resp != nil {
 		finalSummary = resp.Content
 	} else if existingSummary != "" {

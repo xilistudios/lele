@@ -115,6 +115,23 @@ func (hs *HeartbeatService) Stop() {
 	hs.stopChan = nil
 }
 
+func (hs *HeartbeatService) UpdateConfig(intervalMinutes int, enabled bool) {
+	hs.mu.Lock()
+	defer hs.mu.Unlock()
+	if intervalMinutes < minIntervalMinutes && intervalMinutes != 0 {
+		intervalMinutes = minIntervalMinutes
+	}
+	if intervalMinutes == 0 {
+		intervalMinutes = defaultIntervalMinutes
+	}
+	hs.interval = time.Duration(intervalMinutes) * time.Minute
+	hs.enabled = enabled
+	if hs.stopChan != nil && !enabled {
+		close(hs.stopChan)
+		hs.stopChan = nil
+	}
+}
+
 // IsRunning returns whether the service is running
 func (hs *HeartbeatService) IsRunning() bool {
 	hs.mu.RLock()

@@ -14,6 +14,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 )
 
@@ -34,6 +35,11 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -41,6 +47,15 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Summary",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
 	sessionKey := "test:insufficient"
 
 	// Test with no messages
@@ -111,6 +126,11 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -118,6 +138,15 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "", // Empty response to test handling
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
 	sessionKey := "test:empty-result"
 
 	// Add enough messages to trigger summarization
@@ -155,6 +184,11 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		Providers: config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -162,6 +196,15 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Summary: The user asked several questions about important topics and received detailed answers.",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
 	sessionKey := "test:success"
 
 	// Add enough messages to trigger summarization
@@ -194,8 +237,11 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 
 	// Verify summary was set
 	summary := agent.Sessions.GetSummary(sessionKey)
-	if summary != "This is a comprehensive summary of the conversation." {
-		t.Errorf("Expected summary to be set, got: %s", summary)
+	if summary == "" {
+		t.Error("Expected summary to be set, got empty string")
+	}
+	if !strings.Contains(summary, "Summary") {
+		t.Errorf("Expected summary to contain 'Summary', got: %s", summary)
 	}
 
 	// Verify history was truncated (should keep last 2 messages)

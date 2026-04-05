@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -57,6 +58,21 @@ type Config struct {
 	Devices   DevicesConfig   `json:"devices"`
 	Logs      LogsConfig      `json:"logs"`
 	mu        sync.RWMutex
+}
+
+func (c *Config) clone() *Config {
+	if c == nil {
+		return nil
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil
+	}
+	var cloned Config
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil
+	}
+	return &cloned
 }
 
 type AgentsConfig struct {
@@ -805,6 +821,30 @@ func DefaultConfig() *Config {
 	}
 }
 
+var envVarRegex = regexp.MustCompile(`\{\{ENV_([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}\}`)
+
+func expandEnvVars(data []byte) []byte {
+	return envVarRegex.ReplaceAllFunc(data, func(match []byte) []byte {
+		submatches := envVarRegex.FindSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+
+		envName := string(submatches[1])
+		envValue := os.Getenv(envName)
+
+		if envValue != "" {
+			return []byte(envValue)
+		}
+
+		if len(submatches) > 2 && string(submatches[2]) != "" {
+			return submatches[2]
+		}
+
+		return []byte{}
+	})
+}
+
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 
@@ -815,6 +855,8 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		return nil, err
 	}
+
+	data = expandEnvVars(data)
 
 	sessionEphemeralConfigured := false
 	var raw map[string]json.RawMessage
@@ -842,6 +884,38 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) Reload(path string) error {
+	if c == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.Agents = loaded.Agents
+	c.Bindings = loaded.Bindings
+	c.Session = loaded.Session
+	c.Channels = loaded.Channels
+	c.Providers = loaded.Providers
+	c.Gateway = loaded.Gateway
+	c.Tools = loaded.Tools
+	c.Heartbeat = loaded.Heartbeat
+	c.Devices = loaded.Devices
+	c.Logs = loaded.Logs
+	return nil
+}
+
+func (c *Config) Snapshot() *Config {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.clone()
 }
 
 func DefaultConfigPath() string {

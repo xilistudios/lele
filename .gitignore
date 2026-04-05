@@ -11,6 +11,7 @@ build/
 /picoclaw
 /picoclaw-test
 /lele
+/main
 cmd/picoclaw/workspace
 
 # Picoclaw specific
@@ -47,3 +48,8 @@ tasks/
 dist/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+# cocoindex-code
+/.codeindex/
+
+# Logs
+logs/
