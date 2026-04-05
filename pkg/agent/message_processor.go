@@ -118,6 +118,10 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 
 	// Delegate to llmRunner for processing
 	ephemeralNotice := mp.maybeStartEphemeralSession(agent, sessionKey)
+	replyTo := ""
+	if msg.Metadata != nil {
+		replyTo = msg.Metadata["message_id"]
+	}
 	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
@@ -127,6 +131,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		DefaultResponse: "I've completed processing but have no response to give.",
 		EnableSummary:   true,
 		SendResponse:    false,
+		ReplyTo:         replyTo,
 	})
 	if err != nil {
 		return "", err

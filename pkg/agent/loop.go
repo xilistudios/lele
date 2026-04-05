@@ -129,15 +129,16 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey      string // Session identifier for history/context
-	Channel         string // Target channel for tool execution
-	ChatID          string // Target chat ID for tool execution
-	UserMessage     string // User message content (may include prefix)
+	SessionKey      string
+	Channel         string
+	ChatID          string
+	UserMessage     string
 	Attachments     []bus.FileAttachment
-	DefaultResponse string // Response when LLM returns empty
-	EnableSummary   bool   // Whether to trigger summarization
-	SendResponse    bool   // Whether to send response via bus
-	NoHistory       bool   // If true, don't load session history (for heartbeat)
+	DefaultResponse string
+	EnableSummary   bool
+	SendResponse    bool
+	NoHistory       bool
+	ReplyTo         string
 }
 
 type sessionCancelGroup struct {
@@ -428,11 +429,15 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			}
 
 			if response != "" {
-				al.bus.PublishOutbound(bus.OutboundMessage{
+				outboundMsg := bus.OutboundMessage{
 					Channel: msg.Channel,
 					ChatID:  msg.ChatID,
 					Content: response,
-				})
+				}
+				if msg.Metadata != nil && msg.Metadata["message_id"] != "" {
+					outboundMsg.ReplyTo = msg.Metadata["message_id"]
+				}
+				al.bus.PublishOutbound(outboundMsg)
 			}
 		}
 	}

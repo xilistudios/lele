@@ -165,14 +165,12 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	})
 
 	chatIDStr := fmt.Sprintf("%d", chatID)
-	if prevStop, ok := c.stopThinking.Load(chatIDStr); ok {
-		if cf, ok := prevStop.(*thinkingCancel); ok && cf != nil {
-			cf.Cancel()
-		}
-	}
+	thinkingKey := fmt.Sprintf("%d:%d", chatID, message.MessageID)
 
-	typingCancel := c.startTypingIndicator(chatID)
-	c.stopThinking.Store(chatIDStr, &thinkingCancel{fn: typingCancel})
+	c.stopAllThinkingForChat(chatIDStr)
+
+	tc := c.startTypingIndicator(chatID)
+	c.stopThinking.Store(thinkingKey, tc)
 
 	pMsg, err := c.bot.SendMessage(ctx, tu.Message(tu.ID(chatID), "Thinking... 💭"))
 	if err == nil {
@@ -221,7 +219,7 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 			response = c.agentLoop.StopAgent(sessionKey)
 		}
 		chatKey := fmt.Sprintf("%d", chatID)
-		c.stopActiveThinking(chatKey)
+		c.stopAllThinkingForChat(chatKey)
 		if c.resolvePlaceholderWithText(ctx, chatID, chatKey, response) {
 			return nil
 		}
