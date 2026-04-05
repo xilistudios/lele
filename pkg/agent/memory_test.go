@@ -42,7 +42,7 @@ func TestNewMemoryStore_CreatesMemoryDir(t *testing.T) {
 	if ms.memoryDir != memoryDir {
 		t.Errorf("Expected memoryDir to be '%s', got '%s'", memoryDir, ms.memoryDir)
 	}
-	expectedMemoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	expectedMemoryFile := filepath.Join(tempDir, "MEMORY.md")
 	if ms.memoryFile != expectedMemoryFile {
 		t.Errorf("Expected memoryFile to be '%s', got '%s'", expectedMemoryFile, ms.memoryFile)
 	}

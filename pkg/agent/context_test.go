@@ -974,13 +974,8 @@ func TestGetInitialContext_WithMemory(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create memory directory and file
-	memoryDir := filepath.Join(tmpDir, "memory")
-	if err := os.MkdirAll(memoryDir, 0755); err != nil {
-		t.Fatalf("Failed to create memory dir: %v", err)
-	}
-
-	memoryFile := filepath.Join(memoryDir, "MEMORY.md")
+	// Create MEMORY.md at workspace root (not in memory/ directory)
+	memoryFile := filepath.Join(tmpDir, "MEMORY.md")
 	if err := os.WriteFile(memoryFile, []byte("Long-term memory content"), 0644); err != nil {
 		t.Fatalf("Failed to create MEMORY.md: %v", err)
 	}
@@ -988,11 +983,7 @@ func TestGetInitialContext_WithMemory(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 	context := cb.GetInitialContext()
 
-	// Should contain memory section
-	if !strings.Contains(context, "# Memory") {
-		t.Error("Expected context to contain Memory section")
-	}
-
+	// Should contain memory content in bootstrap files section
 	if !strings.Contains(context, "Long-term memory content") {
 		t.Error("Expected context to contain memory content")
 	}

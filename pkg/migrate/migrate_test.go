@@ -412,8 +412,8 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		if copyCount != 3 {
 			t.Errorf("expected 3 copies, got %d", copyCount)
 		}
-		if skipCount != 2 {
-			t.Errorf("expected 2 skips (TOOLS.md, HEARTBEAT.md), got %d", skipCount)
+		if skipCount != 3 {
+			t.Errorf("expected 3 skips (TOOLS.md, HEARTBEAT.md, MEMORY.md), got %d", skipCount)
 		}
 	})
 
@@ -463,10 +463,34 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 		}
 	})
 
-	t.Run("handles memory directory", func(t *testing.T) {
+	t.Run("handles MEMORY.md at workspace root", func(t *testing.T) {
 		srcDir := t.TempDir()
 		dstDir := t.TempDir()
 
+		// Create MEMORY.md at workspace root
+		os.WriteFile(filepath.Join(srcDir, "MEMORY.md"), []byte("# Memory"), 0644)
+
+		actions, err := PlanWorkspaceMigration(srcDir, dstDir, false)
+		if err != nil {
+			t.Fatalf("PlanWorkspaceMigration: %v", err)
+		}
+
+		hasCopy := false
+		for _, a := range actions {
+			if a.Type == ActionCopy && filepath.Base(a.Source) == "MEMORY.md" {
+				hasCopy = true
+			}
+		}
+		if !hasCopy {
+			t.Error("expected copy action for MEMORY.md at workspace root")
+		}
+	})
+
+	t.Run("migrates MEMORY.md from memory/ directory to root", func(t *testing.T) {
+		srcDir := t.TempDir()
+		dstDir := t.TempDir()
+
+		// Create MEMORY.md in memory/ directory (old location)
 		memDir := filepath.Join(srcDir, "memory")
 		os.MkdirAll(memDir, 0755)
 		os.WriteFile(filepath.Join(memDir, "MEMORY.md"), []byte("# Memory"), 0644)
@@ -476,10 +500,39 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 			t.Fatalf("PlanWorkspaceMigration: %v", err)
 		}
 
+		// Should copy to root, not to memory/ subdirectory
+		hasCopyToRoot := false
+		for _, a := range actions {
+			if a.Type == ActionCopy && filepath.Base(a.Source) == "MEMORY.md" {
+				// Destination should be at root, not in memory/
+				if filepath.Dir(a.Destination) == dstDir {
+					hasCopyToRoot = true
+				}
+			}
+		}
+		if !hasCopyToRoot {
+			t.Error("expected MEMORY.md to be copied to workspace root (not memory/ subdirectory)")
+		}
+	})
+
+	t.Run("handles memory directory for daily notes", func(t *testing.T) {
+		srcDir := t.TempDir()
+		dstDir := t.TempDir()
+
+		// Create memory directory with daily notes (not MEMORY.md)
+		memDir := filepath.Join(srcDir, "memory", "202601")
+		os.MkdirAll(memDir, 0755)
+		os.WriteFile(filepath.Join(memDir, "20260105.md"), []byte("# Daily note"), 0644)
+
+		actions, err := PlanWorkspaceMigration(srcDir, dstDir, false)
+		if err != nil {
+			t.Fatalf("PlanWorkspaceMigration: %v", err)
+		}
+
 		hasCopy := false
 		hasDir := false
 		for _, a := range actions {
-			if a.Type == ActionCopy && filepath.Base(a.Source) == "MEMORY.md" {
+			if a.Type == ActionCopy && filepath.Base(a.Source) == "20260105.md" {
 				hasCopy = true
 			}
 			if a.Type == ActionCreateDir {
@@ -487,7 +540,7 @@ func TestPlanWorkspaceMigration(t *testing.T) {
 			}
 		}
 		if !hasCopy {
-			t.Error("expected copy action for memory/MEMORY.md")
+			t.Error("expected copy action for memory/202601/20260105.md")
 		}
 		if !hasDir {
 			t.Error("expected create dir action for memory/")
@@ -693,15 +746,16 @@ func TestRunFullMigration(t *testing.T) {
 		t.Fatalf("reading AGENT.md: %v", err)
 	}
 	if string(agentsData) != "# Agents from OpenClaw" {
-		t.Errorf("AGENT.md content = %q", string(agentsData))
+		t.Errorf("AGENT.md content = %q, want %q", string(agentsData), "# Agents from OpenClaw")
 	}
 
-	memData, err := os.ReadFile(filepath.Join(picoWs, "memory", "MEMORY.md"))
+	// MEMORY.md should now be at workspace root (not in memory/)
+	memData, err := os.ReadFile(filepath.Join(picoWs, "MEMORY.md"))
 	if err != nil {
-		t.Fatalf("reading memory/MEMORY.md: %v", err)
+		t.Fatalf("reading MEMORY.md: %v", err)
 	}
 	if string(memData) != "# Memory notes" {
-		t.Errorf("MEMORY.md content = %q", string(memData))
+		t.Errorf("MEMORY.md content = %q, want %q", string(memData), "# Memory notes")
 	}
 
 	picoConfig, err := config.LoadConfig(filepath.Join(picoClawHome, "config.json"))
