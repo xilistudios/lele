@@ -2015,10 +2015,9 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create bootstrap files to have non-empty system prompt
-	os.MkdirAll(filepath.Join(tmpDir, "memory"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte("# SOUL\nTest soul content with enough text"), 0644)
 	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("# AGENT\nTest agent content with enough text"), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "memory", "MEMORY.md"), []byte("# Memory\nTest memory content"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "MEMORY.md"), []byte("# Memory\nTest memory content"), 0644)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -2083,6 +2082,7 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 
 	t.Logf("Context tokens: %d (includes system prompt with bootstrap files)", contextTokens)
 }
+
 // TestHandleCompactCommand_WithError tests /compact command with error handling
 func TestHandleCompactCommand_WithError(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
@@ -2132,16 +2132,16 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 	if !handled {
 		t.Error("Expected /compact to be handled")
 	}
-	
+
 	// Should either show success stats, not enough messages, or an error message
 	success := strings.Contains(result, "Memory compacted")
 	notEnough := strings.Contains(result, "Not enough messages")
 	failed := strings.Contains(result, "Compaction failed")
-	
+
 	if !success && !notEnough && !failed {
 		t.Errorf("Expected compaction result, not enough messages, or error, got: %s", result)
 	}
-	
+
 	// Log the actual result for debugging
 	t.Logf("Compact result: %s", result)
 }
@@ -2186,6 +2186,7 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 		t.Errorf("Expected clear message even without agent, got: %s", result)
 	}
 }
+
 // TestNewCommand_CleanSession verifies that /new properly cleans session context
 func TestNewCommand_CleanSession(t *testing.T) {
 	tmpDir := t.TempDir()

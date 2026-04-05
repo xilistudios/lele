@@ -16,6 +16,7 @@ var migrateableFiles = []migrateableFile{
 	{Destination: "USER.md", Sources: []string{"USER.md"}},
 	{Destination: "TOOLS.md", Sources: []string{"TOOLS.md"}},
 	{Destination: "HEARTBEAT.md", Sources: []string{"HEARTBEAT.md"}},
+	{Destination: "MEMORY.md", Sources: []string{"MEMORY.md", "memory/MEMORY.md"}},
 }
 
 var migrateableDirs = []string{
@@ -109,6 +110,11 @@ func planDirCopy(srcDir, dstDir string, force bool) ([]Action, error) {
 				Destination: dst,
 				Description: "create directory",
 			})
+			return nil
+		}
+
+		// Skip MEMORY.md in memory/ directory - it's handled as migrateableFile to root
+		if filepath.Base(srcDir) == "memory" && filepath.Base(path) == "MEMORY.md" {
 			return nil
 		}
 

@@ -74,12 +74,6 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 %s`, skillsSummary))
 	}
 
-	// Memory context
-	memoryContext := cb.memory.GetMemoryContext()
-	if memoryContext != "" {
-		parts = append(parts, "# Memory\n\n"+memoryContext)
-	}
-
 	// Join with "---" separator
 	return strings.Join(parts, "\n\n---\n\n")
 }
@@ -104,7 +98,7 @@ You are lele, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: %s
-- Memory: %s/memory/MEMORY.md
+- Memory: %s/MEMORY.md
 - Skills: %s/skills/{skill-name}/SKILL.md
 
 %s
@@ -115,7 +109,7 @@ Your workspace is at: %s
 
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
-3. **Memory** - When remembering something, write to %s/memory/MEMORY.md`,
+3. **Memory** - When remembering something, write to %s/MEMORY.md`,
 		now, runtime, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 
@@ -154,13 +148,16 @@ func (cb *ContextBuilder) ResetMemoryContext() {
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
-	bootstrapFiles := []string{"AGENT.md", "SOUL.md", "USER.md", "IDENTITY.md"}
+	bootstrapFiles := []string{"AGENT.md", "SOUL.md", "USER.md", "IDENTITY.md", "MEMORY.md"}
 
 	var result string
-	for _, filename := range bootstrapFiles {
+	for i, filename := range bootstrapFiles {
 		filePath := filepath.Join(cb.workspace, filename)
 		if data, err := os.ReadFile(filePath); err == nil {
-			result += fmt.Sprintf("## %s\n\n%s\n\n", filename, string(data))
+			if i > 0 {
+				result += "\n----\n"
+			}
+			result += fmt.Sprintf("[%s]\n%s\n", filePath, string(data))
 		}
 	}
 
