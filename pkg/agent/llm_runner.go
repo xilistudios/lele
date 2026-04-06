@@ -530,7 +530,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			if opts.Channel == channels.ChannelName {
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
+					ChatID:  opts.SessionKey,
 					Event:   "tool.executing",
 					Metadata: map[string]string{
 						"tool":   tc.Name,
@@ -604,7 +604,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					if opts.Channel == channels.ChannelName {
 						lr.al.bus.PublishOutbound(bus.OutboundMessage{
 							Channel: opts.Channel,
-							ChatID:  opts.ChatID,
+							ChatID:  opts.SessionKey,
 							Event:   "approval.request",
 							Metadata: map[string]string{
 								"id":      approval.ID,
@@ -686,7 +686,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
+					ChatID:  opts.SessionKey,
 					Event:   "tool.result",
 					Metadata: map[string]string{
 						"tool":   tc.Name,

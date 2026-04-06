@@ -297,6 +297,9 @@ func (n *NativeChannel) sendWSEvent(sessionKey, event string, data interface{}) 
 
 func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	sessionKey := msg.ChatID
+	if n.agentLoop != nil {
+		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
+	}
 	logger.InfoCF("native", "Dispatching outbound message", map[string]interface{}{
 		"session_key": sessionKey,
 		"event":       msg.Event,
@@ -336,9 +339,10 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 
 	if msg.Content != "" {
 		n.sendWSEvent(sessionKey, "message.stream", WSStreamPayload{
-			MessageID: messageID,
-			Chunk:     msg.Content,
-			Done:      true,
+			MessageID:  messageID,
+			SessionKey: sessionKey,
+			Chunk:      msg.Content,
+			Done:       true,
 		})
 	}
 
@@ -348,6 +352,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 
 	n.sendWSEvent(sessionKey, "message.complete", WSMessageCompletePayload{
 		MessageID:   messageID,
+		SessionKey:  sessionKey,
 		Content:     msg.Content,
 		Attachments: attachmentsToMaps(msg.Attachments),
 	})
@@ -382,6 +387,12 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		if client.SessionKey == sessionKey {
 			client.Send(mustMarshal(msg))
 			found++
+		} else if n.agentLoop != nil && client.SessionKey != "" {
+			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
+			if resolved == sessionKey {
+				client.Send(mustMarshal(msg))
+				found++
+			}
 		}
 	}
 	logger.InfoCF("native", "Broadcast to session", map[string]interface{}{

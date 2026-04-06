@@ -886,7 +886,7 @@ func TestHandleCommand_NewClearsSession(t *testing.T) {
 	if !strings.Contains(response, "New conversation started") {
 		t.Fatalf("Unexpected response: %s", response)
 	}
-	activeSessionKey := al.resolveSessionKey(sessionKey)
+	activeSessionKey := al.ResolveSessionKey(sessionKey)
 	if activeSessionKey == sessionKey {
 		t.Fatal("Expected /new to switch to a fresh session key")
 	}
@@ -955,7 +955,7 @@ func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
 		t.Fatalf("Unexpected response: %s", response)
 	}
 
-	activeSessionKey := al.resolveSessionKey(sessionKey)
+	activeSessionKey := al.ResolveSessionKey(sessionKey)
 	if activeSessionKey == sessionKey {
 		t.Fatal("Expected /new to switch to a fresh session key")
 	}
@@ -1209,7 +1209,7 @@ func TestHandleCommand_NewStartsFreshSessionWithoutClearingPreviousHistory(t *te
 	if !strings.Contains(response, "New conversation started") {
 		t.Fatalf("Expected success response, got: %s", response)
 	}
-	activeSessionKey := al.resolveSessionKey(sessionKey)
+	activeSessionKey := al.ResolveSessionKey(sessionKey)
 	if activeSessionKey == sessionKey {
 		t.Fatal("Expected /new to switch to a fresh session key")
 	}

@@ -44,11 +44,14 @@
     "agentLocked": "O agente não pode ser alterado após o início da conversa",
     "connected": "Conectado",
     "connecting": "Conectando",
-    "disconnected": "Desconectado"
+    "disconnected": "Desconectado",
+    "showMore": "Ver mais",
+    "showLess": "Ver menos",
+    "deleteSession": "Excluir sessão"
   },
   "approval": {
-    "title": "Aprovação necessária",
-    "pendingCommand": "Comando pendente",
+    "inlineTitle": "Aprovação necessária",
+    "pendingCommand": "Execução de comando pendente",
     "approve": "Aprovar",
     "reject": "Rejeitar"
   },
@@ -56,6 +59,7 @@
     "connectionFailed": "Não foi possível conectar",
     "authFailed": "Não foi possível autenticar",
     "sendFailed": "Não foi possível enviar a mensagem",
-    "messageRequired": "A mensagem não pode estar vazia"
+    "messageRequired": "A mensagem não pode estar vazia",
+    "deleteSessionFailed": "Não foi possível excluir a sessão"
   }
 }

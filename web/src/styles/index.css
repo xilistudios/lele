@@ -40,6 +40,9 @@ body {
 }
 
 /* Monospace for code */
-code, pre, .font-mono {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+code,
+pre,
+.font-mono {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, monospace;
 }

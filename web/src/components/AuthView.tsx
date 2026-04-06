@@ -1,6 +1,6 @@
-import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 
 type Props = {
   apiUrl: string
@@ -15,7 +15,10 @@ export function AuthView({ apiUrl, error, onSubmit }: Props) {
   const [deviceName, setDeviceName] = useState('My Desktop')
   const [loading, setLoading] = useState(false)
   const disabled =
-    apiInput.trim().length === 0 || pin.trim().length !== 6 || deviceName.trim().length === 0 || loading
+    apiInput.trim().length === 0 ||
+    pin.trim().length !== 6 ||
+    deviceName.trim().length === 0 ||
+    loading
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

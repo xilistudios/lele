@@ -90,7 +90,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 			sessionKey = msg.SessionKey
 		}
 	}
-	sessionKey = mp.al.resolveSessionKey(sessionKey)
+	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Check if a session-specific agent is set (e.g., via /agent command)
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
@@ -195,7 +195,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		sessionKey = routing.BuildAgentMainSessionKey(agent.ID)
 	}
 	baseSessionKey := sessionKey
-	sessionKey = mp.al.resolveSessionKey(sessionKey)
+	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Honor session-selected agent for command/system handling as well.
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {

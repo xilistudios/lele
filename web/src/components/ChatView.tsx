@@ -1,6 +1,6 @@
-import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import type {
   Agent,
   AgentDetails,
@@ -10,12 +10,14 @@ import type {
   ChatMessage,
   ChatSession,
   ConfigResponse,
+  ModelGroup,
   SystemStatus,
   ToolInfo,
   ToolStatus,
 } from '../lib/types'
-import { ApprovalModal } from './ApprovalModal'
+import { ApprovalInline } from './ApprovalModal'
 import { MessageBubble } from './MessageBubble'
+import { SearchableSelect } from './SearchableSelect'
 
 type DiagnosticsState = {
   status: SystemStatus | null
@@ -28,6 +30,7 @@ type DiagnosticsState = {
 type ModelState = {
   current: string
   available: string[]
+  groups: ModelGroup[]
 }
 
 type Props = {
@@ -56,10 +59,14 @@ type Props = {
   onSelectAgent: (agentId: string) => void
   onSelectModel: (model: string) => void
   onSelectSession: (sessionKey: string) => void
+  onDeleteSession: (sessionKey: string) => void
   onToggleDiagnostics: () => void
 }
 
-const formatSessionTitle = (sessionKey: string) => {
+const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
+  if (sessionName && sessionName.trim()) {
+    return sessionName
+  }
   const parts = sessionKey.split(':')
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
@@ -93,15 +100,18 @@ export function ChatView({
   onSelectAgent,
   onSelectModel,
   onSelectSession,
+  onDeleteSession,
   onToggleDiagnostics,
 }: Props) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
+  const [showAllSessions, setShowAllSessions] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? agents[0] ?? null
-  const currentSession = sessions.find((session) => session.key === currentSessionKey) ?? sessions[0] ?? null
+  const currentSession =
+    sessions.find((session) => session.key === currentSessionKey) ?? sessions[0] ?? null
   const isStreaming = messages.some((m) => m.streaming)
   const canCancel = isStreaming || Boolean(toolStatus)
   const hasConversation = messages.length > 0
@@ -111,6 +121,8 @@ export function ChatView({
       : currentAgent?.model
         ? [currentAgent.model]
         : [t('chat.default')]
+  const groupedModels = modelState.groups.filter((group) => group.models.length > 0)
+  const hasGroupedModels = groupedModels.length > 0
   const selectedModel = modelState.current || availableModels[0]
 
   useEffect(() => {
@@ -170,7 +182,14 @@ export function ChatView({
             type="button"
             className="text-[#555] transition-colors hover:text-[#aaa]"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <polyline points="16 17 21 12 16 7" />
               <line x1="21" y1="12" x2="9" y2="12" />
@@ -184,7 +203,14 @@ export function ChatView({
             type="button"
             className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -195,7 +221,14 @@ export function ChatView({
             type="button"
             className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#999] transition-colors hover:bg-[#2a2a2a] hover:text-white"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <path d="M3 6h18" />
               <path d="M8 6V4h8v2" />
               <path d="M19 6l-1 14H6L5 6" />
@@ -205,14 +238,23 @@ export function ChatView({
         </div>
 
         <div className="border-b border-[#2e2e2e] px-3 py-3">
-          <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.sessions')}</p>
-          <nav className="mt-2 space-y-0.5">
-            {sessions.map((session) => (
-              <button
+          <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">
+            {t('chat.sessions')}
+          </p>
+          <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
+            {(showAllSessions ? sessions : sessions.slice(0, 5)).map((session) => (
+              <div
                 key={session.key}
                 onClick={() => onSelectSession(session.key)}
-                type="button"
-                className={`flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition-colors ${
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onSelectSession(session.key)
+                  }
+                }}
+                className={`group flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition-colors cursor-pointer ${
                   session.key === currentSession?.key
                     ? 'bg-[#2e2e2e] text-white'
                     : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
@@ -220,14 +262,46 @@ export function ChatView({
               >
                 <span className="mt-0.5 text-xs text-[#555]">#</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs leading-5">{formatSessionTitle(session.key)}</span>
+                  <span className="block truncate text-xs leading-5">
+                    {formatSessionTitle(session.key, session.name)}
+                  </span>
                   <span className="block text-[10px] text-[#666]">
                     {formatMessageCount(session.message_count, t)}
                   </span>
                 </span>
-              </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDeleteSession(session.key)
+                  }}
+                  type="button"
+                  title={t('chat.deleteSession')}
+                  className="opacity-0 group-hover:opacity-100 ml-auto text-[#666] hover:text-[#f0b4b4] transition-opacity"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                </button>
+              </div>
             ))}
           </nav>
+          {sessions.length > 5 && (
+            <button
+              onClick={() => setShowAllSessions(!showAllSessions)}
+              type="button"
+              className="mt-2 w-full text-center text-xs text-[#666] hover:text-[#999] transition-colors"
+            >
+              {showAllSessions ? t('chat.showLess') : t('chat.showMore')}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-[#2e2e2e] px-4 py-3">
@@ -250,7 +324,14 @@ export function ChatView({
               className="transition-colors hover:text-[#888]"
               onClick={onToggleDiagnostics}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
@@ -263,9 +344,13 @@ export function ChatView({
         <div className="flex items-center justify-between border-b border-[#2e2e2e] px-6 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-medium text-white">
-              {currentSession ? formatSessionTitle(currentSession.key) : t('chat.session')}
+              {currentSession
+                ? formatSessionTitle(currentSession.key, currentSession.name)
+                : t('chat.session')}
             </h2>
-            <p className="truncate text-[11px] text-[#666]">{currentAgent?.name ?? t('chat.default')}</p>
+            <p className="truncate text-[11px] text-[#666]">
+              {currentAgent?.name ?? t('chat.default')}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {(isStreaming || toolStatus) && (
@@ -278,7 +363,13 @@ export function ChatView({
                     <span>{toolStatus.action}</span>
                   </>
                 ) : (
-                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg
+                    className="h-3 w-3 animate-spin"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
                     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                   </svg>
                 )}
@@ -306,20 +397,26 @@ export function ChatView({
           <section className="mx-6 mt-3 rounded-lg border border-[#2e2e2e] bg-[#202020] p-4 text-xs text-[#bbb]">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.systemStatus')}</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                  {t('chat.systemStatus')}
+                </p>
                 <p>{diagnostics.status?.status ?? '-'}</p>
                 <p>{diagnostics.status?.uptime ?? '-'}</p>
                 <p>{diagnostics.status?.version ?? '-'}</p>
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.agentInfo')}</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                  {t('chat.agentInfo')}
+                </p>
                 <p>{diagnostics.agentInfo?.name ?? '-'}</p>
                 <p>{diagnostics.agentInfo?.model ?? '-'}</p>
                 <p>{diagnostics.agentInfo?.workspace ?? '-'}</p>
                 <p>{diagnostics.agentInfo?.status ?? '-'}</p>
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.channels')}</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                  {t('chat.channels')}
+                </p>
                 {diagnostics.channels.map((channel) => (
                   <p key={channel.name}>
                     {channel.name} · {channel.running ? t('chat.running') : t('chat.stopped')}
@@ -327,7 +424,9 @@ export function ChatView({
                 ))}
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.tools')}</p>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                  {t('chat.tools')}
+                </p>
                 {diagnostics.tools.map((tool) => (
                   <p key={tool.name}>
                     {tool.name} · {tool.enabled ? t('chat.enabled') : t('chat.disabled')}
@@ -354,8 +453,19 @@ export function ChatView({
           ) : (
             <div className="mx-auto max-w-3xl space-y-1">
               {messages.map((message, index) => (
-                <MessageBubble key={message.id} message={message} isLast={index === messages.length - 1} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  isLast={index === messages.length - 1}
+                />
               ))}
+              {approvalRequest ? (
+                <ApprovalInline
+                  request={approvalRequest}
+                  onApprove={() => onApprove(true)}
+                  onReject={() => onApprove(false)}
+                />
+              ) : null}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -401,43 +511,53 @@ export function ChatView({
                       title={t('chat.attach')}
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
                         <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 1 1 5.65 5.66l-9.2 9.19a2 2 0 1 1-2.82-2.83l8.48-8.48" />
                       </svg>
                     </button>
                     <div className="flex items-center gap-2 text-[10px] text-[#555]">
-                      <label className="flex items-center gap-2 rounded border border-[#2f2f2f] bg-[#1a1a1a] px-2 py-1 text-[11px] text-[#888]">
-                        <span>{t('chat.model')}</span>
-                        <select
-                          aria-label={t('chat.model')}
-                          className="bg-transparent text-[11px] text-[#ddd] outline-none"
-                          value={selectedModel}
-                          onChange={(event) => onSelectModel(event.target.value)}
-                        >
-                          {availableModels.map((model) => (
-                            <option key={model} value={model}>
-                              {model}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex items-center gap-2 rounded border border-[#2f2f2f] bg-[#1a1a1a] px-2 py-1 text-[11px] text-[#888]">
-                        <span>{t('chat.agent')}</span>
-                        <select
-                          aria-label={t('chat.agent')}
-                          className="bg-transparent text-[11px] text-[#ddd] outline-none disabled:cursor-not-allowed disabled:text-[#666]"
-                          value={currentAgentId ?? ''}
-                          disabled={hasConversation}
-                          title={hasConversation ? t('chat.agentLocked') : undefined}
-                          onChange={(event) => onSelectAgent(event.target.value)}
-                        >
-                          {agents.map((agent) => (
-                            <option key={agent.id} value={agent.id}>
-                              {agent.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <SearchableSelect
+                        ariaLabel={t('chat.model')}
+                        buttonLabel={t('chat.model')}
+                        emptyLabel={t('chat.default')}
+                        groups={
+                          hasGroupedModels
+                            ? groupedModels.map((group) => ({
+                                label: group.provider,
+                                options: group.models,
+                              }))
+                            : undefined
+                        }
+                        onChange={onSelectModel}
+                        options={
+                          hasGroupedModels
+                            ? undefined
+                            : availableModels.map((model) => ({ value: model, label: model }))
+                        }
+                        placeholder={selectedModel}
+                        searchAriaLabel={`${t('chat.model')} buscar`}
+                        searchPlaceholder={t('chat.model')}
+                        value={selectedModel}
+                      />
+                      <SearchableSelect
+                        ariaLabel={t('chat.agent')}
+                        buttonLabel={t('chat.agent')}
+                        disabled={hasConversation}
+                        emptyLabel={t('chat.agentLocked')}
+                        onChange={onSelectAgent}
+                        options={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+                        placeholder={currentAgent?.name ?? t('chat.agent')}
+                        searchAriaLabel={`${t('chat.agent')} buscar`}
+                        searchPlaceholder={t('chat.agent')}
+                        value={currentAgentId ?? ''}
+                      />
                     </div>
                   </div>
                   <button
@@ -446,7 +566,14 @@ export function ChatView({
                     aria-label={t('chat.send')}
                     className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-black transition-colors hover:bg-[#ddd] disabled:opacity-20"
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
                       <line x1="12" y1="19" x2="12" y2="5" />
                       <polyline points="5 12 12 5 19 12" />
                     </svg>
@@ -457,10 +584,6 @@ export function ChatView({
           </div>
         </div>
       </main>
-
-      {approvalRequest ? (
-        <ApprovalModal request={approvalRequest} onApprove={() => onApprove(true)} onReject={() => onApprove(false)} />
-      ) : null}
     </div>
   )
 }

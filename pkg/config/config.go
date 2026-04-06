@@ -513,6 +513,15 @@ func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
 	return cfg, ok
 }
 
+func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
+	p.ensureNamedDefaults()
+	result := make(map[string]NamedProviderConfig, len(p.Named))
+	for name, cfg := range p.Named {
+		result[name] = cfg
+	}
+	return result
+}
+
 func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, preferExact bool) (string, bool) {
 	if provider == "" {
 		return "", false

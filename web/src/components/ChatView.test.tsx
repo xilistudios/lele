@@ -47,6 +47,7 @@ const diagnostics = {
 const modelState = {
   current: 'gpt-4',
   available: ['gpt-4', 'gpt-4o-mini'],
+  groups: [],
 }
 
 describe('ChatView', () => {
@@ -73,6 +74,7 @@ describe('ChatView', () => {
         onSelectAgent={mock(() => undefined)}
         onSelectModel={mock(() => undefined)}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={mock(() => undefined)}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}
@@ -111,6 +113,7 @@ describe('ChatView', () => {
         onSelectAgent={mock(() => undefined)}
         onSelectModel={mock(() => undefined)}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={onSend}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}
@@ -159,6 +162,7 @@ describe('ChatView', () => {
         onSelectAgent={mock(() => undefined)}
         onSelectModel={mock(() => undefined)}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={mock(() => undefined)}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}
@@ -196,6 +200,7 @@ describe('ChatView', () => {
         onSelectAgent={onSelectAgent}
         onSelectModel={mock(() => undefined)}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={mock(() => undefined)}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}
@@ -205,9 +210,11 @@ describe('ChatView', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Agente'), {
+    fireEvent.click(screen.getByRole('button', { name: 'Agente' }))
+    fireEvent.change(screen.getByLabelText('Agente buscar'), {
       target: { value: 'research' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'Research Agent' }))
 
     expect(onSelectAgent).toHaveBeenCalledWith('research')
   })
@@ -237,6 +244,7 @@ describe('ChatView', () => {
         onSelectAgent={mock(() => undefined)}
         onSelectModel={onSelectModel}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={mock(() => undefined)}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}
@@ -246,9 +254,11 @@ describe('ChatView', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Modelo'), {
+    fireEvent.click(screen.getByRole('button', { name: 'Modelo' }))
+    fireEvent.change(screen.getByLabelText('Modelo buscar'), {
       target: { value: 'gpt-4o-mini' },
     })
+    fireEvent.click(screen.getByRole('button', { name: 'gpt-4o-mini' }))
 
     expect(onSelectModel).toHaveBeenCalledWith('gpt-4o-mini')
   })
@@ -276,6 +286,7 @@ describe('ChatView', () => {
         onSelectAgent={mock(() => undefined)}
         onSelectModel={mock(() => undefined)}
         onSelectSession={mock(() => undefined)}
+        onDeleteSession={mock(() => undefined)}
         onSend={mock(() => undefined)}
         onToggleDiagnostics={mock(() => undefined)}
         pendingAttachments={[]}

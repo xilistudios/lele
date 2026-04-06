@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,18 +18,21 @@ import (
 )
 
 type nativeTestAgentLoop struct {
-	config        *config.Config
-	histories     map[string][]providers.Message
-	sessionAgents map[string]string
-	sessionModels map[string]string
+	config           *config.Config
+	histories        map[string][]providers.Message
+	sessionAgents    map[string]string
+	sessionModels    map[string]string
+	sessionAliases   map[string]string // base -> resolved
+	sessionAliasesMu sync.RWMutex
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
-		config:        cfg,
-		histories:     make(map[string][]providers.Message),
-		sessionAgents: make(map[string]string),
-		sessionModels: make(map[string]string),
+		config:         cfg,
+		histories:      make(map[string][]providers.Message),
+		sessionAgents:  make(map[string]string),
+		sessionModels:  make(map[string]string),
+		sessionAliases: make(map[string]string),
 	}
 }
 
@@ -133,6 +137,23 @@ func (m *nativeTestAgentLoop) ClearSession(sessionKey string) string {
 	return "cleared"
 }
 
+func (m *nativeTestAgentLoop) GetName(sessionKey string) string {
+	return ""
+}
+
+func (m *nativeTestAgentLoop) SetName(sessionKey string, name string) error {
+	return nil
+}
+
+func (m *nativeTestAgentLoop) ResolveSessionKey(sessionKey string) string {
+	m.sessionAliasesMu.RLock()
+	defer m.sessionAliasesMu.RUnlock()
+	if resolved, ok := m.sessionAliases[sessionKey]; ok {
+		return resolved
+	}
+	return sessionKey
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop
@@ -154,6 +175,24 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	cfg.Channels.Native.PinExpiryMinutes = 5
 	cfg.Channels.Native.MaxClients = 5
 	cfg.Channels.Native.SessionExpiryDays = 30
+
+	// Configure test providers for model endpoint tests
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"openai": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"gpt-4":       {Model: "gpt-4"},
+				"gpt-4o":      {Model: "gpt-4o"},
+				"gpt-4o-mini": {Model: "gpt-4o-mini"},
+			},
+		},
+		"anthropic": {
+			Type: "anthropic",
+			Models: map[string]config.ProviderModelConfig{
+				"claude-sonnet": {Model: "claude-3-5-sonnet"},
+			},
+		},
+	}
 
 	msgBus := bus.NewMessageBus()
 	loop := newNativeTestAgentLoop(cfg)
@@ -241,8 +280,19 @@ func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	ts.loop.histories[sessionKey] = []providers.Message{
 		{Role: "system", Content: "hidden"},
 		{Role: "user", Content: "Hello"},
-		{Role: "assistant", Content: "Hi there!"},
-		{Role: "tool", Content: "ignored"},
+		{
+			Role:    "assistant",
+			Content: "Hi there!",
+			ToolCalls: []providers.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Name: "search_docs",
+				Arguments: map[string]interface{}{
+					"query": "lele",
+				},
+			}},
+		},
+		{Role: "tool", Content: "result", ToolCallID: "call-1"},
 	}
 
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/history?session_key="+url.QueryEscape(sessionKey), nil)
@@ -269,14 +319,26 @@ func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	if payload.SessionKey != sessionKey {
 		t.Fatalf("session_key = %q, want %q", payload.SessionKey, sessionKey)
 	}
-	if len(payload.Messages) != 2 {
-		t.Fatalf("len(messages) = %d, want 2", len(payload.Messages))
+	if len(payload.Messages) != 3 {
+		t.Fatalf("len(messages) = %d, want 3", len(payload.Messages))
 	}
-	if payload.Messages[0]["role"] != "user" || payload.Messages[0]["content"] != "Hello" {
+	if payload.Messages[0].Role != "user" || payload.Messages[0].Content != "Hello" {
 		t.Fatalf("first message = %#v, want user Hello", payload.Messages[0])
 	}
-	if payload.Messages[1]["role"] != "assistant" || payload.Messages[1]["content"] != "Hi there!" {
+	if payload.Messages[1].Role != "assistant" || payload.Messages[1].Content != "Hi there!" {
 		t.Fatalf("second message = %#v, want assistant Hi there!", payload.Messages[1])
+	}
+	if len(payload.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("assistant tool_calls = %#v, want 1 call", payload.Messages[1].ToolCalls)
+	}
+	if payload.Messages[1].ToolCalls[0].ID != "call-1" || payload.Messages[1].ToolCalls[0].Name != "search_docs" {
+		t.Fatalf("assistant tool call = %#v, want call-1/search_docs", payload.Messages[1].ToolCalls[0])
+	}
+	if payload.Messages[2].Role != "tool" || payload.Messages[2].Content != "result" {
+		t.Fatalf("third message = %#v, want tool result", payload.Messages[2])
+	}
+	if payload.Messages[2].ToolCallID != "call-1" {
+		t.Fatalf("tool_call_id = %#v, want call-1", payload.Messages[2].ToolCallID)
 	}
 }
 
@@ -358,6 +420,15 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 	}
 	if len(getPayload.Models) == 0 {
 		t.Fatal("expected available models")
+	}
+	if len(getPayload.ModelGroups) == 0 {
+		t.Fatal("expected grouped models")
+	}
+	if getPayload.ModelGroups[0].Provider == "" {
+		t.Fatalf("unexpected provider group = %q", getPayload.ModelGroups[0].Provider)
+	}
+	if len(getPayload.ModelGroups[0].Models) == 0 {
+		t.Fatal("expected models in first group")
 	}
 
 	body := strings.NewReader(`{"model":"gpt-4o-mini"}`)
@@ -475,7 +546,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 	}
 	var streamPayload WSStreamPayload
 	decodeWSData(t, stream.Data, &streamPayload)
-	if streamPayload.MessageID != "msg-1" || streamPayload.Chunk != "Hello back" || !streamPayload.Done {
+	if streamPayload.MessageID != "msg-1" || streamPayload.SessionKey != sessionKey || streamPayload.Chunk != "Hello back" || !streamPayload.Done {
 		t.Fatalf("stream payload = %#v, want msg-1/Hello back/done", streamPayload)
 	}
 
@@ -485,7 +556,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 	}
 	var completePayload WSMessageCompletePayload
 	decodeWSData(t, complete.Data, &completePayload)
-	if completePayload.MessageID != "msg-1" || completePayload.Content != "Hello back" {
+	if completePayload.MessageID != "msg-1" || completePayload.SessionKey != sessionKey || completePayload.Content != "Hello back" {
 		t.Fatalf("complete payload = %#v, want msg-1/Hello back", completePayload)
 	}
 
@@ -578,5 +649,75 @@ func decodeWSData(t *testing.T, data json.RawMessage, target interface{}) {
 	t.Helper()
 	if err := json.Unmarshal(data, target); err != nil {
 		t.Fatalf("Unmarshal(data) error = %v", err)
+	}
+}
+
+func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.T) {
+	ts := newNativeTestServer(t)
+	baseSessionKey := "native:" + ts.clientID
+	aliasedSessionKey := baseSessionKey + ":chat:1"
+
+	// Set up alias: base -> aliased
+	ts.loop.sessionAliasesMu.Lock()
+	ts.loop.sessionAliases[baseSessionKey] = aliasedSessionKey
+	ts.loop.sessionAliasesMu.Unlock()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws?token=" + url.QueryEscape(ts.token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	// Read welcome
+	welcome := readWSMessage(t, conn)
+	if welcome.Event != "welcome" {
+		t.Fatalf("first event = %q, want welcome", welcome.Event)
+	}
+
+	// Subscribe to base session key
+	if err := conn.WriteJSON(map[string]interface{}{
+		"event": "subscribe",
+		"data": map[string]interface{}{
+			"session_key": baseSessionKey,
+		},
+	}); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
+	}
+
+	// Read subscribe.ack
+	ack := readWSMessage(t, conn)
+	if ack.Event != "subscribe.ack" {
+		t.Fatalf("ack event = %q, want subscribe.ack", ack.Event)
+	}
+
+	// Publish outbound message to the aliased session key (simulating what happens when a new chat starts)
+	ts.bus.PublishOutbound(bus.OutboundMessage{
+		Channel:   ChannelName,
+		ChatID:    aliasedSessionKey, // Message is published with the resolved key
+		Content:   "Message from aliased session",
+		MessageID: "msg-aliased-1",
+	})
+
+	// Should receive message.stream even though we subscribed to base key
+	stream := readWSMessage(t, conn)
+	if stream.Event != "message.stream" {
+		t.Fatalf("stream event = %q, want message.stream", stream.Event)
+	}
+	var streamPayload WSStreamPayload
+	decodeWSData(t, stream.Data, &streamPayload)
+	if streamPayload.MessageID != "msg-aliased-1" || streamPayload.SessionKey != aliasedSessionKey {
+		t.Fatalf("stream payload = %#v, want msg-aliased-1/%s", streamPayload, aliasedSessionKey)
+	}
+
+	// Should also receive message.complete
+	complete := readWSMessage(t, conn)
+	if complete.Event != "message.complete" {
+		t.Fatalf("complete event = %q, want message.complete", complete.Event)
+	}
+	var completePayload WSMessageCompletePayload
+	decodeWSData(t, complete.Data, &completePayload)
+	if completePayload.MessageID != "msg-aliased-1" || completePayload.SessionKey != aliasedSessionKey {
+		t.Fatalf("complete payload = %#v, want msg-aliased-1/%s", completePayload, aliasedSessionKey)
 	}
 }

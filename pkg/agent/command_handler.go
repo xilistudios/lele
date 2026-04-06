@@ -68,7 +68,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		}
 	}
 	baseSessionKey := sessionKey
-	sessionKey = ch.al.resolveSessionKey(sessionKey)
+	sessionKey = ch.al.ResolveSessionKey(sessionKey)
 	if sessionAgentID := ch.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent

@@ -3,6 +3,7 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -179,15 +180,30 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	}
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
-	messages := make([]map[string]interface{}, 0, len(history))
+	messages := make([]ChatHistoryMessage, 0, len(history))
 	for _, msg := range history {
-		if msg.Role != "user" && msg.Role != "assistant" {
+		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
 			continue
 		}
-		messages = append(messages, map[string]interface{}{
-			"role":    msg.Role,
-			"content": msg.Content,
-		})
+
+		historyMsg := ChatHistoryMessage{
+			Role:       msg.Role,
+			Content:    msg.Content,
+			ToolCallID: msg.ToolCallID,
+		}
+		if len(msg.ToolCalls) > 0 {
+			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
+					ID:               tc.ID,
+					Type:             tc.Type,
+					Name:             tc.Name,
+					Arguments:        tc.Arguments,
+					ThoughtSignature: tc.ThoughtSignature,
+				})
+			}
+		}
+		messages = append(messages, historyMsg)
 	}
 
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
@@ -221,6 +237,7 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 
 		sessions = append(sessions, ChatSession{
 			Key:          sk,
+			Name:         n.agentLoop.GetName(sk),
 			Created:      client.Created,
 			Updated:      client.LastSeen,
 			MessageCount: messageCount,
@@ -244,6 +261,17 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 	action := getQueryParam(r, "action")
 
 	if r.Method == http.MethodDelete {
+		action := getQueryParam(r, "action")
+		if action == "delete" {
+			clientID := getClientID(r)
+			if err := n.auth.RemoveSessionKey(clientID, sessionKey); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error(), "session_not_found")
+				return
+			}
+			n.agentLoop.ClearSession(sessionKey)
+			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+			return
+		}
 		n.agentLoop.ClearSession(sessionKey)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 		return
@@ -258,11 +286,13 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 		switch r.Method {
 		case http.MethodGet:
 			agentID := n.agentLoop.GetSessionAgent(sessionKey)
+			models := n.listAllModels()
 			writeJSON(w, http.StatusOK, SessionModelResponse{
-				SessionKey: sessionKey,
-				AgentID:    agentID,
-				Model:      n.agentLoop.GetSessionModel(sessionKey),
-				Models:     n.agentLoop.ListAvailableModels(agentID),
+				SessionKey:  sessionKey,
+				AgentID:     agentID,
+				Model:       n.agentLoop.GetSessionModel(sessionKey),
+				Models:      models,
+				ModelGroups: n.buildModelGroups(agentID, models),
 			})
 			return
 		case http.MethodPatch:
@@ -276,11 +306,13 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 				return
 			}
 			agentID := n.agentLoop.GetSessionAgent(sessionKey)
+			models := n.listAllModels()
 			writeJSON(w, http.StatusOK, SessionModelResponse{
-				SessionKey: sessionKey,
-				AgentID:    agentID,
-				Model:      n.agentLoop.SetSessionModel(sessionKey, req.Model),
-				Models:     n.agentLoop.ListAvailableModels(agentID),
+				SessionKey:  sessionKey,
+				AgentID:     agentID,
+				Model:       n.agentLoop.SetSessionModel(sessionKey, req.Model),
+				Models:      models,
+				ModelGroups: n.buildModelGroups(agentID, models),
 			})
 			return
 		default:
@@ -293,6 +325,40 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 		result := n.agentLoop.CompactSession(sessionKey)
 		writeJSON(w, http.StatusOK, map[string]string{"result": result})
 		return
+	}
+
+	if action == "name" {
+		switch r.Method {
+		case http.MethodGet:
+			name := n.agentLoop.GetName(sessionKey)
+			writeJSON(w, http.StatusOK, SessionNameResponse{
+				SessionKey: sessionKey,
+				Name:       name,
+			})
+			return
+		case http.MethodPatch:
+			var req SessionNameUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+				return
+			}
+			if strings.TrimSpace(req.Name) == "" {
+				writeError(w, http.StatusBadRequest, "name is required", "name_missing")
+				return
+			}
+			if err := n.agentLoop.SetName(sessionKey, req.Name); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error(), "name_update_failed")
+				return
+			}
+			writeJSON(w, http.StatusOK, SessionNameResponse{
+				SessionKey: sessionKey,
+				Name:       n.agentLoop.GetName(sessionKey),
+			})
+			return
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+			return
+		}
 	}
 
 	writeError(w, http.StatusBadRequest, "unknown action", "action_invalid")
@@ -434,16 +500,18 @@ func (n *NativeChannel) handleModels(w http.ResponseWriter, r *http.Request) {
 		agentID = n.agentLoop.GetSessionAgent("native:" + getClientID(r))
 	}
 
-	models := n.agentLoop.ListAvailableModels(agentID)
+	models := n.listAllModels()
+	modelGroups := n.buildModelGroups(agentID, models)
 	model := ""
 	if sessionKey := getQueryParam(r, "session_key"); sessionKey != "" {
 		model = n.agentLoop.GetSessionModel(sessionKey)
 	}
 
 	writeJSON(w, http.StatusOK, ModelsResponse{
-		AgentID: agentID,
-		Model:   model,
-		Models:  models,
+		AgentID:     agentID,
+		Model:       model,
+		Models:      models,
+		ModelGroups: modelGroups,
 	})
 }
 
@@ -505,6 +573,89 @@ func (n *NativeChannel) handleChannels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ChannelsResponse{Channels: channels})
+}
+
+func (n *NativeChannel) buildModelGroups(_ string, _ []string) []ModelGroup {
+	cfg := n.cfgSnapshot()
+	if cfg == nil {
+		return nil
+	}
+
+	providers := cfg.Providers.ListNamed()
+	providerNames := make([]string, 0, len(providers))
+	for name := range providers {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
+	groups := make([]ModelGroup, 0, len(providerNames))
+	for _, providerName := range providerNames {
+		provider := providers[providerName]
+		aliases := make([]string, 0, len(provider.Models))
+		for alias := range provider.Models {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+		if len(aliases) == 0 {
+			continue
+		}
+
+		group := ModelGroup{
+			Provider: providerName,
+			Models:   make([]ModelOption, 0, len(aliases)),
+		}
+		for _, alias := range aliases {
+			resolved := strings.TrimSpace(provider.Models[alias].Model)
+			value := alias
+			if resolved != "" {
+				value = providerName + "/" + resolved
+			} else {
+				value = providerName + "/" + alias
+			}
+			group.Models = append(group.Models, ModelOption{Value: value, Label: alias})
+		}
+		groups = append(groups, group)
+	}
+
+	if len(groups) == 0 {
+		return nil
+	}
+	return groups
+}
+
+func (n *NativeChannel) listAllModels() []string {
+	cfg := n.cfgSnapshot()
+	if cfg == nil {
+		return nil
+	}
+
+	providers := cfg.Providers.ListNamed()
+	providerNames := make([]string, 0, len(providers))
+	for name := range providers {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
+	models := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, providerName := range providerNames {
+		provider := providers[providerName]
+		aliases := make([]string, 0, len(provider.Models))
+		for alias := range provider.Models {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+		for _, alias := range aliases {
+			key := providerName + "/" + alias
+			if seen[key] {
+				continue
+			}
+			models = append(models, key)
+			seen[key] = true
+		}
+	}
+
+	return models
 }
 
 func (n *NativeChannel) cfgSnapshot() *config.Config {

@@ -38,7 +38,16 @@ describe('createApiClient', () => {
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
       const body = url.endsWith('/api/v1/chat/sessions')
-        ? { sessions: [{ key: 'native:client', created: '2026-01-01T00:00:00Z', updated: '2026-01-01T00:00:00Z', message_count: 2 }] }
+        ? {
+            sessions: [
+              {
+                key: 'native:client',
+                created: '2026-01-01T00:00:00Z',
+                updated: '2026-01-01T00:00:00Z',
+                message_count: 2,
+              },
+            ],
+          }
         : url.endsWith('/api/v1/channels')
           ? { channels: [{ name: 'native', enabled: true, running: true }] }
           : {}
@@ -62,11 +71,51 @@ describe('createApiClient', () => {
   test('loads and updates session model', async () => {
     const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      const body = init?.method === 'PATCH'
-        ? { session_key: 'native:client', model: 'gpt-4o-mini', models: ['gpt-4', 'gpt-4o-mini'] }
-        : url.includes('/api/v1/chat/session/')
-          ? { session_key: 'native:client', model: 'gpt-4', models: ['gpt-4', 'gpt-4o-mini'] }
-          : { agent_id: 'main', model: 'gpt-4', models: ['gpt-4', 'gpt-4o-mini'] }
+      const body =
+        init?.method === 'PATCH'
+          ? {
+              session_key: 'native:client',
+              model: 'gpt-4o-mini',
+              models: ['gpt-4', 'gpt-4o-mini'],
+              model_groups: [
+                {
+                  provider: 'openai',
+                  models: [
+                    { value: 'gpt-4', label: 'gpt-4' },
+                    { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+                  ],
+                },
+              ],
+            }
+          : url.includes('/api/v1/chat/session/')
+            ? {
+                session_key: 'native:client',
+                model: 'gpt-4',
+                models: ['gpt-4', 'gpt-4o-mini'],
+                model_groups: [
+                  {
+                    provider: 'openai',
+                    models: [
+                      { value: 'gpt-4', label: 'gpt-4' },
+                      { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+                    ],
+                  },
+                ],
+              }
+            : {
+                agent_id: 'main',
+                model: 'gpt-4',
+                models: ['gpt-4', 'gpt-4o-mini'],
+                model_groups: [
+                  {
+                    provider: 'openai',
+                    models: [
+                      { value: 'gpt-4', label: 'gpt-4' },
+                      { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+                    ],
+                  },
+                ],
+              }
 
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -81,6 +130,7 @@ describe('createApiClient', () => {
     const updated = await api.updateSessionModel('native:client', 'gpt-4o-mini', 'token')
 
     expect(available.models).toContain('gpt-4')
+    expect(available.model_groups?.[0]?.provider).toBe('openai')
     expect(updated.model).toBe('gpt-4o-mini')
   })
 })

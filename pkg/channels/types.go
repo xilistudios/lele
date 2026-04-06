@@ -51,13 +51,15 @@ type WSSubscribePayload struct {
 }
 
 type WSStreamPayload struct {
-	MessageID string `json:"message_id"`
-	Chunk     string `json:"chunk"`
-	Done      bool   `json:"done"`
+	MessageID  string `json:"message_id"`
+	SessionKey string `json:"session_key,omitempty"`
+	Chunk      string `json:"chunk"`
+	Done       bool   `json:"done"`
 }
 
 type WSMessageCompletePayload struct {
 	MessageID   string                   `json:"message_id"`
+	SessionKey  string                   `json:"session_key,omitempty"`
 	Content     string                   `json:"content"`
 	Attachments []map[string]interface{} `json:"attachments,omitempty"`
 }
@@ -135,12 +137,28 @@ type ChatSendResponse struct {
 }
 
 type ChatHistoryResponse struct {
-	SessionKey string                   `json:"session_key"`
-	Messages   []map[string]interface{} `json:"messages"`
+	SessionKey string               `json:"session_key"`
+	Messages   []ChatHistoryMessage `json:"messages"`
+}
+
+type ChatHistoryMessage struct {
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	ToolCalls  []HistoryToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+}
+
+type HistoryToolCall struct {
+	ID               string                 `json:"id"`
+	Type             string                 `json:"type,omitempty"`
+	Name             string                 `json:"name,omitempty"`
+	Arguments        map[string]interface{} `json:"arguments,omitempty"`
+	ThoughtSignature string                 `json:"thought_signature,omitempty"`
 }
 
 type ChatSession struct {
 	Key          string    `json:"key"`
+	Name         string    `json:"name,omitempty"`
 	Created      time.Time `json:"created"`
 	Updated      time.Time `json:"updated"`
 	MessageCount int       `json:"message_count"`
@@ -151,14 +169,24 @@ type ChatSessionsResponse struct {
 }
 
 type SessionModelResponse struct {
-	SessionKey string   `json:"session_key"`
-	AgentID    string   `json:"agent_id,omitempty"`
-	Model      string   `json:"model"`
-	Models     []string `json:"models,omitempty"`
+	SessionKey  string       `json:"session_key"`
+	AgentID     string       `json:"agent_id,omitempty"`
+	Model       string       `json:"model"`
+	Models      []string     `json:"models,omitempty"`
+	ModelGroups []ModelGroup `json:"model_groups,omitempty"`
 }
 
 type SessionModelUpdateRequest struct {
 	Model string `json:"model"`
+}
+
+type SessionNameUpdateRequest struct {
+	Name string `json:"name"`
+}
+
+type SessionNameResponse struct {
+	SessionKey string `json:"session_key"`
+	Name       string `json:"name"`
 }
 
 type NativeAgentInfo struct {
@@ -193,9 +221,20 @@ type ToolsResponse struct {
 }
 
 type ModelsResponse struct {
-	AgentID string   `json:"agent_id,omitempty"`
-	Model   string   `json:"model,omitempty"`
-	Models  []string `json:"models"`
+	AgentID     string       `json:"agent_id,omitempty"`
+	Model       string       `json:"model,omitempty"`
+	Models      []string     `json:"models"`
+	ModelGroups []ModelGroup `json:"model_groups,omitempty"`
+}
+
+type ModelGroup struct {
+	Provider string        `json:"provider"`
+	Models   []ModelOption `json:"models"`
+}
+
+type ModelOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
 }
 
 type ToolInfo struct {

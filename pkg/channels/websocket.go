@@ -86,6 +86,16 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 	conn := client.Conn
 	conn.SetReadLimit(1024 * 1024)
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	})
+	conn.SetPingHandler(func(appData string) error {
+		if err := conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			return err
+		}
+		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
+	})
 
 	for {
 		_, message, err := conn.ReadMessage()
@@ -116,16 +126,21 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 		select {
 		case data, ok := <-client.SendChan:
 			if !ok {
+				client.mu.Lock()
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
+				client.mu.Unlock()
 				return
 			}
 			conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+			client.mu.Lock()
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				client.mu.Unlock()
 				logger.ErrorCF("native", "WebSocket write error", map[string]interface{}{
 					"error": err.Error(),
 				})
 				return
 			}
+			client.mu.Unlock()
 		}
 	}
 }
@@ -139,9 +154,12 @@ func (n *NativeChannel) wsPingLoop(client *WSClient) {
 		select {
 		case <-ticker.C:
 			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			client.mu.Lock()
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				client.mu.Unlock()
 				return
 			}
+			client.mu.Unlock()
 		}
 	}
 }
@@ -330,9 +348,10 @@ func (n *NativeChannel) sendError(client *WSClient, code, message string) {
 
 func (n *NativeChannel) StreamMessage(sessionKey, messageID, chunk string, done bool) {
 	n.broadcastToSession(sessionKey, "message.stream", WSStreamPayload{
-		MessageID: messageID,
-		Chunk:     chunk,
-		Done:      done,
+		MessageID:  messageID,
+		SessionKey: sessionKey,
+		Chunk:      chunk,
+		Done:       done,
 	})
 }
 

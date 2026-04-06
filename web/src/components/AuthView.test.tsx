@@ -25,7 +25,11 @@ describe('AuthView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Conectar' }))
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith({ apiUrl: 'http://localhost', pin: '123456', deviceName: 'Office PC' })
+      expect(onSubmit).toHaveBeenCalledWith({
+        apiUrl: 'http://localhost',
+        pin: '123456',
+        deviceName: 'Office PC',
+      })
     })
   })
 })

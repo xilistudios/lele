@@ -395,6 +395,32 @@ func (am *AuthManager) RemoveClient(clientID string) error {
 	return nil
 }
 
+func (am *AuthManager) RemoveSessionKey(clientID, sessionKey string) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	client, exists := am.store.Clients[clientID]
+	if !exists {
+		return fmt.Errorf("client not found")
+	}
+
+	for i, key := range client.SessionKeys {
+		if key == sessionKey {
+			client.SessionKeys = append(client.SessionKeys[:i], client.SessionKeys[i+1:]...)
+			if err := am.saveStoreUnlocked(); err != nil {
+				logger.ErrorCF("native", "Failed to save store after removing session key", map[string]interface{}{
+					"client_id":   clientID,
+					"session_key": sessionKey,
+					"error":       err.Error(),
+				})
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("session key not found")
+}
+
 func (am *AuthManager) ListClients() []*ClientInfo {
 	am.mu.RLock()
 	defer am.mu.RUnlock()

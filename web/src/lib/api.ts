@@ -14,6 +14,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SessionModelResponse,
+  SessionNameResponse,
   SystemStatus,
   ToolsResponse,
 } from './types'
@@ -85,7 +86,11 @@ export const createApiClient = (baseUrl: string) => {
     agents: (token: string) => request<AgentsResponse>('/api/v1/agents', { method: 'GET' }, token),
     agentInfo: async (agentId: string, token: string) => {
       const [info, status] = await Promise.all([
-        request<AgentDetails>(`/api/v1/agents/${encodeURIComponent(agentId)}`, { method: 'GET' }, token),
+        request<AgentDetails>(
+          `/api/v1/agents/${encodeURIComponent(agentId)}`,
+          { method: 'GET' },
+          token,
+        ),
         request<AgentStatusResponse>(
           `/api/v1/agents/${encodeURIComponent(agentId)}?action=status`,
           { method: 'GET' },
@@ -116,7 +121,11 @@ export const createApiClient = (baseUrl: string) => {
         params.set('session_key', sessionKey)
       }
       const query = params.toString()
-      return request<ModelsResponse>(`/api/v1/models${query ? `?${query}` : ''}`, { method: 'GET' }, token)
+      return request<ModelsResponse>(
+        `/api/v1/models${query ? `?${query}` : ''}`,
+        { method: 'GET' },
+        token,
+      )
     },
     sessionModel: (sessionKey: string, token: string) =>
       request<SessionModelResponse>(
@@ -130,6 +139,15 @@ export const createApiClient = (baseUrl: string) => {
         {
           method: 'PATCH',
           body: JSON.stringify({ model }),
+        },
+        token,
+      ),
+    updateSessionName: (sessionKey: string, name: string, token: string) =>
+      request<SessionNameResponse>(
+        `/api/v1/chat/session/${encodeURIComponent(sessionKey)}?action=name`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ name }),
         },
         token,
       ),
@@ -149,11 +167,19 @@ export const createApiClient = (baseUrl: string) => {
         token,
       )
     },
+    deleteSession: async (sessionKey: string, token: string) => {
+      await request<unknown>(
+        `/api/v1/chat/session/${encodeURIComponent(sessionKey)}?action=delete`,
+        { method: 'DELETE' },
+        token,
+      )
+    },
     config: (token: string) => request<ConfigResponse>('/api/v1/config', { method: 'GET' }, token),
     tools: (token: string) => request<ToolsResponse>('/api/v1/tools', { method: 'GET' }, token),
     channels: (token: string) =>
       request<ChannelsResponse>('/api/v1/channels', { method: 'GET' }, token),
-    systemStatus: (token: string) => request<SystemStatus>('/api/v1/status', { method: 'GET' }, token),
+    systemStatus: (token: string) =>
+      request<SystemStatus>('/api/v1/status', { method: 'GET' }, token),
     ApiError,
   }
 }

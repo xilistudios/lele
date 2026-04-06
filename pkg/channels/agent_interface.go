@@ -49,6 +49,12 @@ type AgentProvidable interface {
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión
 	ClearSession(sessionKey string) string
+	// GetName devuelve el nombre de una sesión
+	GetName(sessionKey string) string
+	// SetName establece el nombre de una sesión
+	SetName(sessionKey string, name string) error
+	// ResolveSessionKey resuelve el alias de session_key si existe
+	ResolveSessionKey(sessionKey string) string
 }
 
 // AgentBasicInfo contiene información pública de un agente

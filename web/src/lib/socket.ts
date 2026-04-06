@@ -14,6 +14,7 @@ export class LeleSocket {
   private reconnectDelay = 500
   private readonly openQueue: Array<{ event: string; data: unknown }> = []
   private pingIntervalId: number | null = null
+  private subscribedSessionKey: string | null = null
 
   constructor(
     private readonly baseUrl: string,
@@ -38,6 +39,23 @@ export class LeleSocket {
   }
 
   send(event: string, data: unknown) {
+    if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
+      const sessionKey = (data as { session_key?: unknown }).session_key
+      this.subscribedSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
+    }
+    if (event === 'unsubscribe') {
+      this.subscribedSessionKey = null
+    }
+
+    if (event === 'subscribe' || event === 'unsubscribe') {
+      for (let index = this.openQueue.length - 1; index >= 0; index -= 1) {
+        const queuedEvent = this.openQueue[index]?.event
+        if (queuedEvent === 'subscribe' || queuedEvent === 'unsubscribe') {
+          this.openQueue.splice(index, 1)
+        }
+      }
+    }
+
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       this.openQueue.push({ event, data })
       return
@@ -47,7 +65,11 @@ export class LeleSocket {
   }
 
   private open() {
-    const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws?token=${encodeURIComponent(this.token)}`
+    const params = new URLSearchParams({ token: this.token })
+    if (this.subscribedSessionKey) {
+      params.set('session_key', this.subscribedSessionKey)
+    }
+    const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws?${params.toString()}`
     const socket = new WebSocket(url)
     this.socket = socket
 

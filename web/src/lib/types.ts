@@ -16,6 +16,7 @@ export type Attachment = {
 
 export type ChatSession = {
   key: string
+  name?: string
   created: string
   updated: string
   message_count: number
@@ -70,6 +71,7 @@ export type ModelsResponse = {
   agent_id?: string
   model?: string
   models: string[]
+  model_groups?: ModelGroup[]
 }
 
 export type SessionModelResponse = {
@@ -77,6 +79,22 @@ export type SessionModelResponse = {
   agent_id?: string
   model: string
   models: string[]
+  model_groups?: ModelGroup[]
+}
+
+export type ModelOption = {
+  value: string
+  label: string
+}
+
+export type ModelGroup = {
+  provider: string
+  models: ModelOption[]
+}
+
+export type SessionNameResponse = {
+  session_key: string
+  name: string
 }
 
 export type ChannelsResponse = {
@@ -87,6 +105,14 @@ export type ChatSessionsResponse = {
   sessions: ChatSession[]
 }
 
+export type HistoryToolCall = {
+  id: string
+  type?: string
+  name?: string
+  arguments?: Record<string, unknown>
+  thought_signature?: string
+}
+
 export type AuthSession = {
   token: string
   refresh_token: string
@@ -95,14 +121,20 @@ export type AuthSession = {
   device_name?: string
 }
 
+export type ToolMessageStatus = 'executing' | 'completed' | 'error'
+
 export type ChatMessage = {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   content: string
   streaming: boolean
   createdAt: string
   attachments?: Attachment[]
   sessionKey?: string
+  toolName?: string
+  toolArgs?: string
+  toolResult?: string
+  toolStatus?: ToolMessageStatus
 }
 
 export type ToolStatus = {
@@ -149,7 +181,12 @@ export type SendMessageResponse = {
 
 export type HistoryResponse = {
   session_key: string
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+  messages: Array<{
+    role: 'user' | 'assistant' | 'tool'
+    content: string
+    tool_calls?: HistoryToolCall[]
+    tool_call_id?: string
+  }>
 }
 
 export type ApiErrorResponse = {
@@ -170,10 +207,18 @@ export type ClientEvent =
       }
     }
   | { event: 'message.ack'; data: { message_id: string; session_key: string } }
-  | { event: 'message.stream'; data: { message_id: string; chunk: string; done: boolean } }
+  | {
+      event: 'message.stream'
+      data: { message_id: string; session_key?: string; chunk: string; done: boolean }
+    }
   | {
       event: 'message.complete'
-      data: { message_id: string; content: string; attachments?: Attachment[] }
+      data: {
+        message_id: string
+        session_key?: string
+        content: string
+        attachments?: Attachment[]
+      }
     }
   | { event: 'tool.executing'; data: ToolStatus }
   | { event: 'tool.result'; data: { tool: string; result: string } }
