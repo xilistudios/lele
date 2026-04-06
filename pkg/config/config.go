@@ -185,6 +185,18 @@ type ChannelsConfig struct {
 	Slack    SlackConfig    `json:"slack"`
 	LINE     LINEConfig     `json:"line"`
 	OneBot   OneBotConfig   `json:"onebot"`
+	Native   NativeConfig   `json:"native"`
+}
+
+type NativeConfig struct {
+	Enabled           bool     `json:"enabled" env:"LELE_CHANNELS_NATIVE_ENABLED"`
+	Host              string   `json:"host" env:"LELE_CHANNELS_NATIVE_HOST"`
+	Port              int      `json:"port" env:"LELE_CHANNELS_NATIVE_PORT"`
+	TokenExpiryDays   int      `json:"token_expiry_days" env:"LELE_CHANNELS_NATIVE_TOKEN_EXPIRY_DAYS"`
+	PinExpiryMinutes  int      `json:"pin_expiry_minutes" env:"LELE_CHANNELS_NATIVE_PIN_EXPIRY_MINUTES"`
+	MaxClients        int      `json:"max_clients" env:"LELE_CHANNELS_NATIVE_MAX_CLIENTS"`
+	CORSOrigins       []string `json:"cors_origins" env:"LELE_CHANNELS_NATIVE_CORS_ORIGINS"`
+	SessionExpiryDays int      `json:"session_expiry_days" env:"LELE_CHANNELS_NATIVE_SESSION_EXPIRY_DAYS"`
 }
 
 type WhatsAppConfig struct {
@@ -762,6 +774,16 @@ func DefaultConfig() *Config {
 				ReconnectInterval:  5,
 				GroupTriggerPrefix: []string{},
 				AllowFrom:          FlexibleStringSlice{},
+			},
+			Native: NativeConfig{
+				Enabled:           false,
+				Host:              "127.0.0.1",
+				Port:              18792,
+				TokenExpiryDays:   30,
+				PinExpiryMinutes:  5,
+				MaxClients:        5,
+				CORSOrigins:       []string{"http://localhost", "tauri://localhost", "https://tauri.localhost"},
+				SessionExpiryDays: 30,
 			},
 		},
 		Providers: ProvidersConfig{

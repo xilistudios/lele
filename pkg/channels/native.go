@@ -1,0 +1,410 @@
+package channels
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
+)
+
+const (
+	ChannelName = "native"
+)
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+type NativeChannel struct {
+	base      *BaseChannel
+	cfg       *config.NativeConfig
+	auth      *AuthManager
+	bus       *bus.MessageBus
+	agentLoop AgentProvidable
+	server    *http.Server
+	running   bool
+	wsClients map[string]*WSClient
+	leleDir   string
+	mu        sync.RWMutex
+	startTime time.Time
+}
+
+type WSClient struct {
+	ID         string
+	Conn       *websocket.Conn
+	ClientInfo *ClientInfo
+	SessionKey string
+	SendChan   chan []byte
+	mu         sync.Mutex
+}
+
+func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable) (*NativeChannel, error) {
+	nativeCfg := cfg.Channels.Native
+
+	home, _ := os.UserHomeDir()
+	leleDir := filepath.Join(home, ".lele")
+
+	auth, err := NewAuthManager(&nativeCfg, leleDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create auth manager: %w", err)
+	}
+
+	base := NewBaseChannel(ChannelName, nativeCfg, messageBus, []string{})
+
+	return &NativeChannel{
+		base:      base,
+		cfg:       &nativeCfg,
+		auth:      auth,
+		bus:       messageBus,
+		agentLoop: agentLoop,
+		wsClients: make(map[string]*WSClient),
+		leleDir:   leleDir,
+	}, nil
+}
+
+func (n *NativeChannel) Name() string {
+	return ChannelName
+}
+
+func (n *NativeChannel) IsRunning() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.running
+}
+
+func (n *NativeChannel) IsAllowed(senderID string) bool {
+	return true
+}
+
+func (n *NativeChannel) Start(ctx context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.running {
+		return nil
+	}
+
+	host := n.cfg.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+
+	port := n.cfg.Port
+	if port <= 0 {
+		port = 18792
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	mux := http.NewServeMux()
+	n.registerRoutes(mux)
+
+	handler := n.corsMiddleware(n.authMiddleware(mux))
+
+	n.server = &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	go n.listenForOutbound(ctx)
+
+	go func() {
+		logger.InfoCF("native", "Starting native channel server", map[string]interface{}{
+			"address": addr,
+		})
+		n.startTime = time.Now()
+		if err := n.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.ErrorCF("native", "Server error", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+	}()
+
+	n.running = true
+	n.base.setRunning(true)
+
+	logger.InfoC("native", "Native channel started successfully")
+	return nil
+}
+
+func (n *NativeChannel) Stop(ctx context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if !n.running {
+		return nil
+	}
+
+	for id, client := range n.wsClients {
+		client.Conn.Close()
+		delete(n.wsClients, id)
+	}
+
+	if n.server != nil {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if err := n.server.Shutdown(shutdownCtx); err != nil {
+			logger.ErrorCF("native", "Error shutting down server", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+	}
+
+	n.running = false
+	n.base.setRunning(false)
+
+	logger.InfoC("native", "Native channel stopped")
+	return nil
+}
+
+func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	for _, client := range n.wsClients {
+		if client.SessionKey == msg.ChatID || msg.ChatID == "" {
+			event := WSMessage{
+				Event: "message.complete",
+				Data: mustMarshal(WSMessageCompletePayload{
+					MessageID:   uuid.New().String(),
+					Content:     msg.Content,
+					Attachments: attachmentsToMaps(msg.Attachments),
+				}),
+			}
+			client.Send(mustMarshal(event))
+		}
+	}
+
+	return nil
+}
+
+func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/v1/auth/pin", n.handleGetPIN)
+	mux.HandleFunc("/api/v1/auth/pair", n.handlePair)
+	mux.HandleFunc("/api/v1/auth/refresh", n.handleRefresh)
+	mux.HandleFunc("/api/v1/auth/status", n.handleAuthStatus)
+	mux.HandleFunc("/api/v1/ws", n.handleWebSocket)
+	mux.HandleFunc("/api/v1/chat/send", n.handleChatSend)
+	mux.HandleFunc("/api/v1/chat/history", n.handleChatHistory)
+	mux.HandleFunc("/api/v1/chat/sessions", n.handleChatSessions)
+	mux.HandleFunc("/api/v1/chat/session/", n.handleChatSession)
+	mux.HandleFunc("/api/v1/agents", n.handleAgents)
+	mux.HandleFunc("/api/v1/agents/", n.handleAgentInfo)
+	mux.HandleFunc("/api/v1/config", n.handleConfig)
+	mux.HandleFunc("/api/v1/tools", n.handleTools)
+	mux.HandleFunc("/api/v1/skills", n.handleSkills)
+	mux.HandleFunc("/api/v1/status", n.handleStatus)
+	mux.HandleFunc("/api/v1/channels", n.handleChannels)
+}
+
+func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		allowed := false
+
+		for _, allowedOrigin := range n.cfg.CORSOrigins {
+			if origin == allowedOrigin {
+				allowed = true
+				break
+			}
+		}
+
+		if !allowed && (origin == "" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost")) {
+			allowed = true
+		}
+
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		if strings.HasPrefix(path, "/api/v1/auth/") && path != "/api/v1/auth/status" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeError(w, http.StatusUnauthorized, "missing authorization header", "auth_missing")
+			return
+		}
+
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == authHeader {
+			writeError(w, http.StatusUnauthorized, "invalid authorization format", "auth_invalid_format")
+			return
+		}
+
+		client, valid := n.auth.ValidateToken(token)
+		if !valid {
+			writeError(w, http.StatusUnauthorized, "invalid or expired token", "auth_invalid_token")
+			return
+		}
+
+		n.auth.UpdateLastSeen(client.ClientID)
+
+		r.Header.Set("X-Client-ID", client.ClientID)
+		r.Header.Set("X-Device-Name", client.DeviceName)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (n *NativeChannel) listenForOutbound(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			msg, ok := n.bus.SubscribeOutbound(ctx)
+			if !ok {
+				continue
+			}
+
+			if msg.Channel != ChannelName {
+				continue
+			}
+
+			n.mu.RLock()
+			for _, client := range n.wsClients {
+				if client.SessionKey == msg.ChatID || msg.ChatID == "" {
+					event := WSMessage{
+						Event: "message.complete",
+						Data: mustMarshal(WSMessageCompletePayload{
+							MessageID:   uuid.New().String(),
+							Content:     msg.Content,
+							Attachments: attachmentsToMaps(msg.Attachments),
+						}),
+					}
+					client.Send(mustMarshal(event))
+				}
+			}
+			n.mu.RUnlock()
+		}
+	}
+}
+
+func (n *NativeChannel) addWSClient(client *WSClient) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.wsClients[client.ID] = client
+}
+
+func (n *NativeChannel) removeWSClient(clientID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if client, exists := n.wsClients[clientID]; exists {
+		client.Conn.Close()
+		delete(n.wsClients, clientID)
+	}
+}
+
+func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	msg := WSMessage{
+		Event: event,
+		Data:  mustMarshal(data),
+	}
+
+	for _, client := range n.wsClients {
+		if client.SessionKey == sessionKey {
+			client.Send(mustMarshal(msg))
+		}
+	}
+}
+
+func (n *NativeChannel) broadcastAll(event string, data interface{}) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	msg := WSMessage{
+		Event: event,
+		Data:  mustMarshal(data),
+	}
+
+	for _, client := range n.wsClients {
+		client.Send(mustMarshal(msg))
+	}
+}
+
+func (c *WSClient) Send(data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Conn != nil {
+		c.Conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+func mustMarshal(v interface{}) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
+}
+
+func attachmentsToMaps(attachments []bus.FileAttachment) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(attachments))
+	for _, a := range attachments {
+		result = append(result, map[string]interface{}{
+			"name":      a.Name,
+			"path":      a.Path,
+			"mime_type": a.MIMEType,
+			"kind":      a.Kind,
+			"caption":   a.Caption,
+		})
+	}
+	return result
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, message string, code string) {
+	writeJSON(w, status, ErrorResponse{
+		Error: message,
+		Code:  code,
+	})
+}
+
+func getClientID(r *http.Request) string {
+	return r.Header.Get("X-Client-ID")
+}
+
+func getQueryParam(r *http.Request, key string) string {
+	return r.URL.Query().Get(key)
+}
