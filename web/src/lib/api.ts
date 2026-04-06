@@ -9,6 +9,7 @@ import type {
   ChannelsResponse,
   ChatSessionsResponse,
   ConfigResponse,
+  FileUploadResponse,
   HistoryResponse,
   ModelsResponse,
   SendMessageRequest,
@@ -180,6 +181,26 @@ export const createApiClient = (baseUrl: string) => {
       request<ChannelsResponse>('/api/v1/channels', { method: 'GET' }, token),
     systemStatus: (token: string) =>
       request<SystemStatus>('/api/v1/status', { method: 'GET' }, token),
+    uploadFiles: async (files: File[], token: string) => {
+      const formData = new FormData()
+      for (const file of files) {
+        formData.append('files', file)
+      }
+
+      const response = await fetch(joinUrl(baseUrl, '/api/v1/files/upload'), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw await parseError(response)
+      }
+
+      return (await response.json()) as FileUploadResponse
+    },
     ApiError,
   }
 }

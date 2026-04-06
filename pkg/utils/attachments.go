@@ -143,3 +143,68 @@ func sameFilePath(a, b string) bool {
 	cleanB := filepath.Clean(b)
 	return strings.EqualFold(cleanA, cleanB)
 }
+
+func CleanupOldUploads(uploadDir string, maxAge time.Duration) error {
+	if uploadDir == "" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read upload directory: %w", err)
+	}
+
+	now := time.Now()
+	cleanedCount := 0
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			logger.DebugCF("attachments", "Failed to get file info",
+				map[string]interface{}{
+					"file":  entry.Name(),
+					"error": err.Error(),
+				})
+			continue
+		}
+
+		age := now.Sub(info.ModTime())
+		if age > maxAge {
+			path := filepath.Join(uploadDir, entry.Name())
+
+			if err := os.Remove(path); err != nil {
+				logger.WarnCF("attachments", "Failed to remove old upload",
+					map[string]interface{}{
+						"file":  path,
+						"age":   age.String(),
+						"error": err.Error(),
+					})
+				continue
+			}
+
+			cleanedCount++
+			logger.DebugCF("attachments", "Removed old upload",
+				map[string]interface{}{
+					"file": path,
+					"age":  age.String(),
+				})
+		}
+	}
+
+	if cleanedCount > 0 {
+		logger.InfoCF("attachments", "Cleanup completed",
+			map[string]interface{}{
+				"cleaned": cleanedCount,
+				"max_age": maxAge.String(),
+			})
+	}
+
+	return nil
+}

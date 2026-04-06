@@ -175,6 +175,76 @@ DELETE /api/v1/chat/session/<session_key>
 Authorization: Bearer <token>
 ```
 
+### File Upload
+
+#### Upload Files
+
+Upload files for use as message attachments. Files are stored temporarily and will be automatically cleaned up after 24 hours if not used in a message.
+
+```
+POST /api/v1/files/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+Request body should contain a `files` field with one or more files:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -F "files=@/path/to/document.pdf" \
+  -F "files=@/path/to/image.png" \
+  http://127.0.0.1:18793/api/v1/files/upload
+```
+
+Response:
+```json
+{
+  "files": [
+    {
+      "id": "a1b2c3d4",
+      "path": "/home/user/.lele/tmp/uploads/a1b2c3d4_document.pdf",
+      "name": "document.pdf",
+      "mime_type": "application/pdf",
+      "size": 1024
+    },
+    {
+      "id": "e5f6g7h8",
+      "path": "/home/user/.lele/tmp/uploads/e5f6g7h8_image.png",
+      "name": "image.png",
+      "mime_type": "image/png",
+      "size": 2048
+    }
+  ]
+}
+```
+
+**Constraints:**
+- Maximum file size: configurable (default: 50MB per file)
+- Maximum total request size: configurable (default: 50MB)
+- Files are stored in `~/.lele/tmp/uploads/`
+- Files are automatically deleted after 24 hours if not used in a message
+- When a message is sent with uploaded files, they are moved to the workspace attachments directory
+
+**Using Uploaded Files in Messages:**
+
+After uploading, use the returned `path` values in the `attachments` field when sending a message:
+
+```json
+{
+  "content": "Please analyze these files",
+  "attachments": [
+    "/home/user/.lele/tmp/uploads/a1b2c3d4_document.pdf",
+    "/home/user/.lele/tmp/uploads/e5f6g7h8_image.png"
+  ]
+}
+```
+
+**Error Responses:**
+
+- `413 Request Entity Too Large`: File exceeds maximum size
+- `400 Bad Request`: No files provided or invalid multipart form
+
 ### Agents
 
 #### List Agents

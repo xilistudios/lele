@@ -15,6 +15,7 @@ import type {
   ToolInfo,
   ToolStatus,
 } from '../lib/types'
+import { createApiClient } from '../lib/api'
 import { ApprovalInline } from './ApprovalModal'
 import { MessageBubble } from './MessageBubble'
 import { SearchableSelect } from './SearchableSelect'
@@ -156,13 +157,20 @@ export function ChatView({
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
   }
 
-  const handleAttachmentInput = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleAttachmentInput = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])
-    const paths = files
-      .map((file) => (file as File & { path?: string }).path ?? file.name)
-      .filter((path) => path.length > 0)
+    if (files.length === 0) return
 
-    onAttachmentsChange(paths)
+    try {
+      const api = createApiClient(apiUrl)
+      const uploadedFiles = await api.uploadFiles(files, auth.token)
+      const paths = uploadedFiles.files.map((f) => f.path)
+      onAttachmentsChange(paths)
+    } catch (err) {
+      console.error('Upload failed:', err)
+    }
+
+    event.target.value = ''
   }
 
   return (

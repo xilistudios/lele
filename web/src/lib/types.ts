@@ -194,6 +194,18 @@ export type ApiErrorResponse = {
   message?: string
 }
 
+export type UploadedFile = {
+  id: string
+  path: string
+  name: string
+  mime_type: string
+  size: number
+}
+
+export type FileUploadResponse = {
+  files: UploadedFile[]
+}
+
 export type ClientEvent =
   | {
       event: 'welcome'

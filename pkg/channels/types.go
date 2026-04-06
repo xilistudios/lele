@@ -287,3 +287,15 @@ type ErrorResponse struct {
 	Code    string `json:"code,omitempty"`
 	Details string `json:"details,omitempty"`
 }
+
+type FileUploadResponse struct {
+	Files []UploadedFile `json:"files"`
+}
+
+type UploadedFile struct {
+	ID       string `json:"id"`
+	Path     string `json:"path"`
+	Name     string `json:"name"`
+	MIMEType string `json:"mime_type"`
+	Size     int64  `json:"size"`
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -218,11 +220,44 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 
 	attachments := make([]bus.FileAttachment, 0, len(payload.Attachments))
 	for _, path := range payload.Attachments {
+		_, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			logger.WarnCF("native", "Attachment file not found, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+				})
+			continue
+		}
+		if err != nil {
+			logger.WarnCF("native", "Failed to stat attachment, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+					"error":       err.Error(),
+				})
+			continue
+		}
+
+		uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
+		isTemporary := strings.HasPrefix(path, uploadDir)
+
+		mimeType := detectMimeType(path)
+
 		attachments = append(attachments, bus.FileAttachment{
-			Path: path,
-			Name: path,
-			Kind: "file",
+			Path:      path,
+			Name:      filepath.Base(path),
+			MIMEType:  mimeType,
+			Kind:      "file",
+			Temporary: isTemporary,
 		})
+
+		logger.DebugCF("native", "Processed attachment",
+			map[string]interface{}{
+				"session_key": sessionKey,
+				"path":        path,
+				"temporary":   isTemporary,
+			})
 	}
 
 	n.bus.PublishInbound(bus.InboundMessage{

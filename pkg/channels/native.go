@@ -16,6 +16,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/utils"
 )
 
 const (
@@ -124,6 +125,7 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	}
 
 	go n.listenForOutbound(ctx)
+	go n.runUploadCleanup(ctx)
 
 	go func() {
 		logger.InfoCF("native", "Starting native channel server", map[string]interface{}{
@@ -174,6 +176,25 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 	return nil
 }
 
+func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
+	uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
+	maxAge := time.Duration(n.cfg.UploadTTLHours) * time.Hour
+
+	utils.CleanupOldUploads(uploadDir, maxAge)
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			utils.CleanupOldUploads(uploadDir, maxAge)
+		}
+	}
+}
+
 func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	n.dispatchOutboundMessage(msg)
 	return nil
@@ -197,6 +218,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/skills", n.handleSkills)
 	mux.HandleFunc("/api/v1/status", n.handleStatus)
 	mux.HandleFunc("/api/v1/channels", n.handleChannels)
+	mux.HandleFunc("/api/v1/files/upload", n.handleFileUpload)
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {

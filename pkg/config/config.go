@@ -197,6 +197,9 @@ type NativeConfig struct {
 	MaxClients        int      `json:"max_clients" env:"LELE_CHANNELS_NATIVE_MAX_CLIENTS"`
 	CORSOrigins       []string `json:"cors_origins" env:"LELE_CHANNELS_NATIVE_CORS_ORIGINS"`
 	SessionExpiryDays int      `json:"session_expiry_days" env:"LELE_CHANNELS_NATIVE_SESSION_EXPIRY_DAYS"`
+	MaxUploadSizeMB   int64    `json:"max_upload_size_mb" env:"LELE_CHANNELS_NATIVE_MAX_UPLOAD_SIZE_MB"`
+	UploadTTLHours    int      `json:"upload_ttl_hours" env:"LELE_CHANNELS_NATIVE_UPLOAD_TTL_HOURS"`
+	LeleDir           string   `json:"lele_dir,omitempty" env:"LELE_CHANNELS_NATIVE_LELE_DIR"`
 }
 
 type WhatsAppConfig struct {
@@ -793,6 +796,9 @@ func DefaultConfig() *Config {
 				MaxClients:        5,
 				CORSOrigins:       []string{"http://localhost", "http://localhost:3005", "http://127.0.0.1:3005", "http://0.0.0.0:3005", "tauri://localhost", "https://tauri.localhost"},
 				SessionExpiryDays: 30,
+				MaxUploadSizeMB:   50,
+				UploadTTLHours:    24,
+				LeleDir:           getDefaultLeleDir(),
 			},
 		},
 		Providers: ProvidersConfig{
@@ -1124,4 +1130,12 @@ func expandHome(path string) string {
 		return home
 	}
 	return path
+}
+
+func getDefaultLeleDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ".lele"
+	}
+	return filepath.Join(homeDir, ".lele")
 }

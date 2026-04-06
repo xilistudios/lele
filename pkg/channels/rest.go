@@ -3,6 +3,8 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -144,10 +147,36 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 	attachments := make([]bus.FileAttachment, 0, len(req.Attachments))
 	for _, path := range req.Attachments {
+		_, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			logger.WarnCF("native", "Attachment file not found, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+				})
+			continue
+		}
+		if err != nil {
+			logger.WarnCF("native", "Failed to stat attachment, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+					"error":       err.Error(),
+				})
+			continue
+		}
+
+		uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
+		isTemporary := strings.HasPrefix(path, uploadDir)
+
+		mimeType := detectMimeType(path)
+
 		attachments = append(attachments, bus.FileAttachment{
-			Path: path,
-			Name: path,
-			Kind: "file",
+			Path:      path,
+			Name:      filepath.Base(path),
+			MIMEType:  mimeType,
+			Kind:      "file",
+			Temporary: isTemporary,
 		})
 	}
 
