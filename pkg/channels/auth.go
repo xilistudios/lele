@@ -101,6 +101,11 @@ func (am *AuthManager) loadStore() error {
 	}
 
 	am.store = &store
+	for clientID, client := range am.store.Clients {
+		if len(client.SessionKeys) == 0 {
+			client.SessionKeys = []string{"native:" + clientID}
+		}
+	}
 	am.cleanupExpired()
 	return nil
 }
@@ -189,6 +194,12 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
+	if err := am.loadStore(); err != nil {
+		logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
 	pin = strings.TrimSpace(pin)
 
 	pending, exists := am.store.PendingPINs[pin]
@@ -241,6 +252,7 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 		Created:     time.Now(),
 		Expires:     time.Now().AddDate(0, 0, expiryDays),
 		LastSeen:    time.Now(),
+		SessionKeys: []string{"native:" + clientID},
 	}
 
 	am.store.Clients[clientID] = client
@@ -319,6 +331,49 @@ func (am *AuthManager) UpdateLastSeen(clientID string) {
 	if client, exists := am.store.Clients[clientID]; exists {
 		client.LastSeen = time.Now()
 	}
+}
+
+func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
+	if sessionKey == "" {
+		return
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	client, exists := am.store.Clients[clientID]
+	if !exists {
+		return
+	}
+
+	for _, existing := range client.SessionKeys {
+		if existing == sessionKey {
+			return
+		}
+	}
+
+	client.SessionKeys = append(client.SessionKeys, sessionKey)
+	if err := am.saveStoreUnlocked(); err != nil {
+		logger.ErrorCF("native", "Failed to save store after tracking session", map[string]interface{}{
+			"client_id":   clientID,
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+	}
+}
+
+func (am *AuthManager) GetClient(clientID string) (*ClientInfo, bool) {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	client, exists := am.store.Clients[clientID]
+	if !exists {
+		return nil, false
+	}
+
+	copy := *client
+	copy.SessionKeys = append([]string(nil), client.SessionKeys...)
+	return &copy, true
 }
 
 func (am *AuthManager) RemoveClient(clientID string) error {

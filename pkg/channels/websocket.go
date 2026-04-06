@@ -58,6 +58,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		SendChan:   make(chan []byte, 100),
 	}
 
+	n.auth.TrackSessionKey(clientInfo.ClientID, sessionKey)
 	n.addWSClient(client)
 	n.auth.UpdateLastSeen(clientInfo.ClientID)
 
@@ -189,6 +190,7 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	if sessionKey == "" {
 		sessionKey = client.SessionKey
 	}
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
 	if payload.AgentID != "" {
 		n.agentLoop.SetSessionAgent(sessionKey, payload.AgentID)
@@ -250,6 +252,7 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	}
 
 	client.SessionKey = payload.SessionKey
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
 
 	client.Send(mustMarshal(WSMessage{
 		Event: "subscribe.ack",
@@ -291,12 +294,16 @@ func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage) {
 func (n *NativeChannel) sendWelcome(client *WSClient) {
 	status := n.agentLoop.GetStatus(client.SessionKey)
 	agents := make([]map[string]interface{}, 0)
+	defaultID := n.agentLoop.GetDefaultAgentID()
 	for _, id := range n.agentLoop.ListAvailableAgentIDs() {
 		info, ok := n.agentLoop.GetAgentInfo(id)
 		if ok {
 			agents = append(agents, map[string]interface{}{
-				"id":   info.ID,
-				"name": info.Name,
+				"id":        info.ID,
+				"name":      info.Name,
+				"workspace": info.Workspace,
+				"model":     info.Model,
+				"default":   info.ID == defaultID,
 			})
 		}
 	}

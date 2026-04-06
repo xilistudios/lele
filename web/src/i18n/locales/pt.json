@@ -1,0 +1,61 @@
+{
+  "auth": {
+    "title": "Conectar cliente",
+    "subtitle": "Lele Client",
+    "apiUrlLabel": "API de emparelhamento",
+    "apiUrlPlaceholder": "http://127.0.0.1:18793",
+    "apiUrlHint": "Use esta URL para o PIN inicial.",
+    "pinLabel": "PIN",
+    "pinPlaceholder": "123456",
+    "deviceNameLabel": "Nome do dispositivo",
+    "deviceNamePlaceholder": "My Desktop",
+    "connect": "Conectar",
+    "connecting": "Conectando..."
+  },
+  "chat": {
+    "newSession": "Nova sessão",
+    "clearSession": "Limpar sessão",
+    "logout": "Sair",
+    "settings": "Configurações",
+    "help": "Ajuda",
+    "attach": "Anexar",
+    "cancel": "Cancelar",
+    "default": "Padrão",
+    "agent": "Agente",
+    "model": "Modelo",
+    "sessions": "Sessões",
+    "channels": "Canais",
+    "tools": "Ferramentas",
+    "config": "Configuração",
+    "agentInfo": "Agente ativo",
+    "systemStatus": "Estado do sistema",
+    "running": "Ativo",
+    "stopped": "Parado",
+    "enabled": "Habilitado",
+    "disabled": "Desabilitado",
+    "messagePlaceholder": "Mensagem...",
+    "sendMessage": "Enviar mensagem",
+    "send": "Enviar",
+    "startConversation": "Envie uma mensagem para começar",
+    "session": "Sessão",
+    "moreOptions": "Mais opções",
+    "messageCount_one": "{{count}} mensagem",
+    "messageCount_other": "{{count}} mensagens",
+    "agentLocked": "O agente não pode ser alterado após o início da conversa",
+    "connected": "Conectado",
+    "connecting": "Conectando",
+    "disconnected": "Desconectado"
+  },
+  "approval": {
+    "title": "Aprovação necessária",
+    "pendingCommand": "Comando pendente",
+    "approve": "Aprovar",
+    "reject": "Rejeitar"
+  },
+  "errors": {
+    "connectionFailed": "Não foi possível conectar",
+    "authFailed": "Não foi possível autenticar",
+    "sendFailed": "Não foi possível enviar a mensagem",
+    "messageRequired": "A mensagem não pode estar vazia"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "lele-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --apply src/",
+    "format": "biome format src/",
+    "format:fix": "biome format --write src/",
+    "check": "biome check --apply src/ && tsc --noEmit"
+  },
+  "dependencies": {
+    "i18next": "^26.0.3",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.2",
+    "zustand": "^4.5.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@types/bun": "latest",
+    "@types/jsdom": "^21.1.7",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

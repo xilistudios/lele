@@ -150,6 +150,17 @@ type ChatSessionsResponse struct {
 	Sessions []ChatSession `json:"sessions"`
 }
 
+type SessionModelResponse struct {
+	SessionKey string   `json:"session_key"`
+	AgentID    string   `json:"agent_id,omitempty"`
+	Model      string   `json:"model"`
+	Models     []string `json:"models,omitempty"`
+}
+
+type SessionModelUpdateRequest struct {
+	Model string `json:"model"`
+}
+
 type NativeAgentInfo struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -179,6 +190,12 @@ type ConfigUpdateRequest struct {
 
 type ToolsResponse struct {
 	Tools []ToolInfo `json:"tools"`
+}
+
+type ModelsResponse struct {
+	AgentID string   `json:"agent_id,omitempty"`
+	Model   string   `json:"model,omitempty"`
+	Models  []string `json:"models"`
 }
 
 type ToolInfo struct {
@@ -226,7 +243,8 @@ type ChannelInfo struct {
 }
 
 type ErrorResponse struct {
-	Error   string `json:"error"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
 	Code    string `json:"code,omitempty"`
 	Details string `json:"details,omitempty"`
 }

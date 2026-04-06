@@ -1,0 +1,61 @@
+{
+  "auth": {
+    "title": "Connect client",
+    "subtitle": "Lele Client",
+    "apiUrlLabel": "Pairing API",
+    "apiUrlPlaceholder": "http://127.0.0.1:18793",
+    "apiUrlHint": "Use this URL for the initial PIN.",
+    "pinLabel": "PIN",
+    "pinPlaceholder": "123456",
+    "deviceNameLabel": "Device name",
+    "deviceNamePlaceholder": "My Desktop",
+    "connect": "Connect",
+    "connecting": "Connecting..."
+  },
+  "chat": {
+    "newSession": "New session",
+    "clearSession": "Clear session",
+    "logout": "Logout",
+    "settings": "Settings",
+    "help": "Help",
+    "attach": "Attach",
+    "cancel": "Cancel",
+    "default": "Default",
+    "agent": "Agent",
+    "model": "Model",
+    "sessions": "Sessions",
+    "channels": "Channels",
+    "tools": "Tools",
+    "config": "Config",
+    "agentInfo": "Active agent",
+    "systemStatus": "System status",
+    "running": "Running",
+    "stopped": "Stopped",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "messagePlaceholder": "Message...",
+    "sendMessage": "Send message",
+    "send": "Send",
+    "startConversation": "Send a message to start",
+    "session": "Session",
+    "moreOptions": "More options",
+    "messageCount_one": "{{count}} message",
+    "messageCount_other": "{{count}} messages",
+    "agentLocked": "Agent cannot be changed once the conversation has started",
+    "connected": "Connected",
+    "connecting": "Connecting",
+    "disconnected": "Disconnected"
+  },
+  "approval": {
+    "title": "Approval required",
+    "pendingCommand": "Pending command",
+    "approve": "Approve",
+    "reject": "Reject"
+  },
+  "errors": {
+    "connectionFailed": "Could not connect",
+    "authFailed": "Could not authenticate",
+    "sendFailed": "Could not send message",
+    "messageRequired": "Message cannot be empty"
+  }
+}

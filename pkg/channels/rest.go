@@ -95,14 +95,20 @@ func (n *NativeChannel) handleAuthStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	token := strings.TrimPrefix(authHeader, "Bearer ")
-	client, valid := n.auth.ValidateToken(token)
+	if token == authHeader {
+		writeJSON(w, http.StatusOK, AuthStatusResponse{Valid: false})
+		return
+	}
 
-	writeJSON(w, http.StatusOK, AuthStatusResponse{
-		Valid:      valid,
-		ClientID:   client.ClientID,
-		DeviceName: client.DeviceName,
-		Expires:    client.Expires.Format(time.RFC3339),
-	})
+	client, valid := n.auth.ValidateToken(token)
+	resp := AuthStatusResponse{Valid: valid}
+	if valid && client != nil {
+		resp.ClientID = client.ClientID
+		resp.DeviceName = client.DeviceName
+		resp.Expires = client.Expires.Format(time.RFC3339)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +133,7 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if sessionKey == "" {
 		sessionKey = "native:" + clientID
 	}
+	n.auth.TrackSessionKey(clientID, sessionKey)
 
 	if req.AgentID != "" {
 		n.agentLoop.SetSessionAgent(sessionKey, req.AgentID)
@@ -150,6 +157,7 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		Content:     req.Content,
 		Attachments: attachments,
 		SessionKey:  sessionKey,
+		Metadata:    map[string]string{"message_id": messageID},
 	})
 
 	writeJSON(w, http.StatusOK, ChatSendResponse{
@@ -170,7 +178,17 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		sessionKey = "native:" + clientID
 	}
 
-	messages := make([]map[string]interface{}, 0)
+	history := n.agentLoop.GetSessionHistory(sessionKey)
+	messages := make([]map[string]interface{}, 0, len(history))
+	for _, msg := range history {
+		if msg.Role != "user" && msg.Role != "assistant" {
+			continue
+		}
+		messages = append(messages, map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
 		SessionKey: sessionKey,
@@ -184,17 +202,29 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	clients := n.auth.ListClients()
-	sessions := make([]ChatSession, 0, len(clients))
-	for _, client := range clients {
-		for _, sk := range client.SessionKeys {
-			sessions = append(sessions, ChatSession{
-				Key:          sk,
-				Created:      client.Created,
-				Updated:      client.LastSeen,
-				MessageCount: 0,
-			})
+	clientID := getClientID(r)
+	client, ok := n.auth.GetClient(clientID)
+	if !ok {
+		writeJSON(w, http.StatusOK, ChatSessionsResponse{Sessions: []ChatSession{}})
+		return
+	}
+
+	sessions := make([]ChatSession, 0, len(client.SessionKeys))
+	for _, sk := range client.SessionKeys {
+		history := n.agentLoop.GetSessionHistory(sk)
+		messageCount := 0
+		for _, msg := range history {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				messageCount++
+			}
 		}
+
+		sessions = append(sessions, ChatSession{
+			Key:          sk,
+			Created:      client.Created,
+			Updated:      client.LastSeen,
+			MessageCount: messageCount,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, ChatSessionsResponse{
@@ -222,6 +252,41 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 	if action == "summary" {
 		writeJSON(w, http.StatusOK, map[string]string{"summary": ""})
 		return
+	}
+
+	if action == "model" {
+		switch r.Method {
+		case http.MethodGet:
+			agentID := n.agentLoop.GetSessionAgent(sessionKey)
+			writeJSON(w, http.StatusOK, SessionModelResponse{
+				SessionKey: sessionKey,
+				AgentID:    agentID,
+				Model:      n.agentLoop.GetSessionModel(sessionKey),
+				Models:     n.agentLoop.ListAvailableModels(agentID),
+			})
+			return
+		case http.MethodPatch:
+			var req SessionModelUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+				return
+			}
+			if strings.TrimSpace(req.Model) == "" {
+				writeError(w, http.StatusBadRequest, "model is required", "model_missing")
+				return
+			}
+			agentID := n.agentLoop.GetSessionAgent(sessionKey)
+			writeJSON(w, http.StatusOK, SessionModelResponse{
+				SessionKey: sessionKey,
+				AgentID:    agentID,
+				Model:      n.agentLoop.SetSessionModel(sessionKey, req.Model),
+				Models:     n.agentLoop.ListAvailableModels(agentID),
+			})
+			return
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+			return
+		}
 	}
 
 	if action == "compact" {
@@ -302,19 +367,25 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 func (n *NativeChannel) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		cfg := n.cfgSnapshot()
 		cfgMap := map[string]interface{}{
 			"agents": map[string]interface{}{
 				"defaults": map[string]interface{}{
-					"workspace": n.cfgSnapshot().Agents.Defaults.Workspace,
-					"provider":  n.cfgSnapshot().Agents.Defaults.Provider,
-					"model":     n.cfgSnapshot().Agents.Defaults.Model,
+					"workspace": cfg.Agents.Defaults.Workspace,
+					"provider":  cfg.Agents.Defaults.Provider,
+					"model":     cfg.Agents.Defaults.Model,
 				},
 			},
 			"channels": map[string]interface{}{
 				"native": map[string]interface{}{
-					"enabled": n.cfg.Enabled,
-					"host":    n.cfg.Host,
-					"port":    n.cfg.Port,
+					"enabled":             cfg.Channels.Native.Enabled,
+					"host":                cfg.Channels.Native.Host,
+					"port":                cfg.Channels.Native.Port,
+					"token_expiry_days":   cfg.Channels.Native.TokenExpiryDays,
+					"pin_expiry_minutes":  cfg.Channels.Native.PinExpiryMinutes,
+					"max_clients":         cfg.Channels.Native.MaxClients,
+					"cors_origins":        cfg.Channels.Native.CORSOrigins,
+					"session_expiry_days": cfg.Channels.Native.SessionExpiryDays,
 				},
 			},
 		}
@@ -350,6 +421,30 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ToolsResponse{Tools: tools})
+}
+
+func (n *NativeChannel) handleModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+		return
+	}
+
+	agentID := getQueryParam(r, "agent_id")
+	if agentID == "" {
+		agentID = n.agentLoop.GetSessionAgent("native:" + getClientID(r))
+	}
+
+	models := n.agentLoop.ListAvailableModels(agentID)
+	model := ""
+	if sessionKey := getQueryParam(r, "session_key"); sessionKey != "" {
+		model = n.agentLoop.GetSessionModel(sessionKey)
+	}
+
+	writeJSON(w, http.StatusOK, ModelsResponse{
+		AgentID: agentID,
+		Model:   model,
+		Models:  models,
+	})
 }
 
 func (n *NativeChannel) handleSkills(w http.ResponseWriter, r *http.Request) {
@@ -413,5 +508,15 @@ func (n *NativeChannel) handleChannels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (n *NativeChannel) cfgSnapshot() *config.Config {
-	return nil
+	if n.agentLoop != nil {
+		if cfg := n.agentLoop.GetConfigSnapshot(); cfg != nil {
+			return cfg
+		}
+	}
+
+	cfg := config.DefaultConfig()
+	if n.cfg != nil {
+		cfg.Channels.Native = *n.cfg
+	}
+	return cfg
 }

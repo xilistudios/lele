@@ -86,7 +86,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	// Also honor channel-specific session keys (e.g., telegram:<chat_id>)
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
+		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") || strings.HasPrefix(msg.SessionKey, "native:") {
 			sessionKey = msg.SessionKey
 		}
 	}
@@ -389,6 +389,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
 		SendResponse:    true,
+		MessageID:       msg.Metadata["message_id"],
 	})
 }
 

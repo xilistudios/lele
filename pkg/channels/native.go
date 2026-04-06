@@ -106,7 +106,7 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 
 	port := n.cfg.Port
 	if port <= 0 {
-		port = 18792
+		port = 18793
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -175,23 +175,7 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 }
 
 func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	for _, client := range n.wsClients {
-		if client.SessionKey == msg.ChatID || msg.ChatID == "" {
-			event := WSMessage{
-				Event: "message.complete",
-				Data: mustMarshal(WSMessageCompletePayload{
-					MessageID:   uuid.New().String(),
-					Content:     msg.Content,
-					Attachments: attachmentsToMaps(msg.Attachments),
-				}),
-			}
-			client.Send(mustMarshal(event))
-		}
-	}
-
+	n.dispatchOutboundMessage(msg)
 	return nil
 }
 
@@ -209,6 +193,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/agents/", n.handleAgentInfo)
 	mux.HandleFunc("/api/v1/config", n.handleConfig)
 	mux.HandleFunc("/api/v1/tools", n.handleTools)
+	mux.HandleFunc("/api/v1/models", n.handleModels)
 	mux.HandleFunc("/api/v1/skills", n.handleSkills)
 	mux.HandleFunc("/api/v1/status", n.handleStatus)
 	mux.HandleFunc("/api/v1/channels", n.handleChannels)
@@ -226,7 +211,7 @@ func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		if !allowed && (origin == "" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost")) {
+		if !allowed && (origin == "" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://0.0.0.0") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost")) {
 			allowed = true
 		}
 
@@ -250,7 +235,7 @@ func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		if strings.HasPrefix(path, "/api/v1/auth/") && path != "/api/v1/auth/status" {
+		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -297,23 +282,75 @@ func (n *NativeChannel) listenForOutbound(ctx context.Context) {
 				continue
 			}
 
-			n.mu.RLock()
-			for _, client := range n.wsClients {
-				if client.SessionKey == msg.ChatID || msg.ChatID == "" {
-					event := WSMessage{
-						Event: "message.complete",
-						Data: mustMarshal(WSMessageCompletePayload{
-							MessageID:   uuid.New().String(),
-							Content:     msg.Content,
-							Attachments: attachmentsToMaps(msg.Attachments),
-						}),
-					}
-					client.Send(mustMarshal(event))
-				}
-			}
-			n.mu.RUnlock()
+			n.dispatchOutboundMessage(msg)
 		}
 	}
+}
+
+func (n *NativeChannel) sendWSEvent(sessionKey, event string, data interface{}) {
+	if sessionKey == "" {
+		n.broadcastAll(event, data)
+		return
+	}
+	n.broadcastToSession(sessionKey, event, data)
+}
+
+func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
+	sessionKey := msg.ChatID
+	logger.InfoCF("native", "Dispatching outbound message", map[string]interface{}{
+		"session_key": sessionKey,
+		"event":       msg.Event,
+		"content_len": len(msg.Content),
+		"message_id":  msg.MessageID,
+	})
+	switch msg.Event {
+	case "tool.executing":
+		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
+			Tool:   msg.Metadata["tool"],
+			Action: msg.Metadata["action"],
+		})
+		return
+	case "tool.result":
+		result := msg.Content
+		if msg.Metadata != nil && msg.Metadata["result"] != "" {
+			result = msg.Metadata["result"]
+		}
+		n.sendWSEvent(sessionKey, "tool.result", WSToolResultPayload{
+			Tool:   msg.Metadata["tool"],
+			Result: result,
+		})
+		return
+	case "approval.request":
+		n.sendWSEvent(sessionKey, "approval.request", WSApprovalRequestPayload{
+			ID:      msg.Metadata["id"],
+			Command: msg.Metadata["command"],
+			Reason:  msg.Metadata["reason"],
+		})
+		return
+	}
+
+	messageID := msg.MessageID
+	if messageID == "" {
+		messageID = uuid.New().String()
+	}
+
+	if msg.Content != "" {
+		n.sendWSEvent(sessionKey, "message.stream", WSStreamPayload{
+			MessageID: messageID,
+			Chunk:     msg.Content,
+			Done:      true,
+		})
+	}
+
+	if msg.Content == "" && len(msg.Attachments) == 0 {
+		return
+	}
+
+	n.sendWSEvent(sessionKey, "message.complete", WSMessageCompletePayload{
+		MessageID:   messageID,
+		Content:     msg.Content,
+		Attachments: attachmentsToMaps(msg.Attachments),
+	})
 }
 
 func (n *NativeChannel) addWSClient(client *WSClient) {
@@ -340,11 +377,19 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		Data:  mustMarshal(data),
 	}
 
+	found := 0
 	for _, client := range n.wsClients {
 		if client.SessionKey == sessionKey {
 			client.Send(mustMarshal(msg))
+			found++
 		}
 	}
+	logger.InfoCF("native", "Broadcast to session", map[string]interface{}{
+		"session_key": sessionKey,
+		"event":       event,
+		"clients":     len(n.wsClients),
+		"matched":     found,
+	})
 }
 
 func (n *NativeChannel) broadcastAll(event string, data interface{}) {
@@ -396,8 +441,9 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string, code string) {
 	writeJSON(w, status, ErrorResponse{
-		Error: message,
-		Code:  code,
+		Error:   message,
+		Message: message,
+		Code:    code,
 	})
 }
 

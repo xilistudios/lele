@@ -1,5 +1,10 @@
 package channels
 
+import (
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
+)
+
 // AgentSessionManager define la interfaz necesaria para gestionar agentes por sesión
 // Esta interfaz es implementada por agent.AgentLoop para evitar ciclos de importación
 type AgentSessionManager interface {
@@ -14,6 +19,16 @@ type AgentProvidable interface {
 	AgentSessionManager
 	// GetAgentInfo devuelve información básica de un agente
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
+	// GetSessionHistory devuelve el historial persistido de una sesión
+	GetSessionHistory(sessionKey string) []providers.Message
+	// GetSessionModel devuelve el modelo efectivo de una sesión
+	GetSessionModel(sessionKey string) string
+	// SetSessionModel establece el modelo de una sesión
+	SetSessionModel(sessionKey, model string) string
+	// ListAvailableModels devuelve los modelos configurados para un agente/sesión
+	ListAvailableModels(agentID string) []string
+	// GetConfigSnapshot devuelve la configuración actual
+	GetConfigSnapshot() *config.Config
 	// GetStatus devuelve el estado actual del agente para una sesión
 	GetStatus(sessionKey string) string
 	// StopAgent detiene el procesamiento del agente para una sesión

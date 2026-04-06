@@ -53,3 +53,9 @@ dist/
 
 # Logs
 logs/
+
+# Web app
+web/node_modules/
+web/dist/
+web/.vite/
+web/.bun/

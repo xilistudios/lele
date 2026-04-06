@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -115,9 +116,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	// 8. Optional: send response via bus
 	if opts.SendResponse {
 		outboundMsg := bus.OutboundMessage{
-			Channel: opts.Channel,
-			ChatID:  opts.ChatID,
-			Content: finalContent,
+			Channel:   opts.Channel,
+			ChatID:    opts.ChatID,
+			Content:   finalContent,
+			MessageID: opts.MessageID,
 		}
 		if opts.ReplyTo != "" {
 			outboundMsg.ReplyTo = opts.ReplyTo
@@ -522,9 +524,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					"iteration": iteration,
 				})
 
-			// Verbose mode: send notification before executing tool
+			// Native clients consume structured tool events; other channels keep the
+			// existing verbose text notifications.
 			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
-			if level != session.VerboseOff {
+			if opts.Channel == channels.ChannelName {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: opts.Channel,
+					ChatID:  opts.ChatID,
+					Event:   "tool.executing",
+					Metadata: map[string]string{
+						"tool":   tc.Name,
+						"action": "Executing " + tc.Name,
+					},
+				})
+			} else if level != session.VerboseOff {
 				var verboseMsg string
 				if level == session.VerboseFull {
 					// Full mode: detailed tool call with JSON args
@@ -588,16 +601,29 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						chatIDInt,
 					)
 
-					// Build inline keyboard
-					keyboard := lr.al.approvalManager.BuildApprovalKeyboard(approval.ID)
+					if opts.Channel == channels.ChannelName {
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel: opts.Channel,
+							ChatID:  opts.ChatID,
+							Event:   "approval.request",
+							Metadata: map[string]string{
+								"id":      approval.ID,
+								"command": toolResult.ApprovalRequired.Command,
+								"reason":  toolResult.ApprovalRequired.Reason,
+							},
+						})
+					} else {
+						// Build inline keyboard
+						keyboard := lr.al.approvalManager.BuildApprovalKeyboard(approval.ID)
 
-					// Send message with keyboard
-					lr.al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel:     opts.Channel,
-						ChatID:      opts.ChatID,
-						Content:     approvalMsg,
-						ReplyMarkup: keyboard,
-					})
+						// Send message with keyboard
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel:     opts.Channel,
+							ChatID:      opts.ChatID,
+							Content:     approvalMsg,
+							ReplyMarkup: keyboard,
+						})
+					}
 
 					// Wait for user response
 					approved, err := approval.WaitForResponse(ctx, lr.al.approvalManager.GetTimeout())
@@ -648,8 +674,26 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				return "", iteration, err
 			}
 
-			// Verbose mode: send result notification (only in Full mode)
-			if lr.al.verboseManager.IsFull(opts.SessionKey) {
+			// Native clients consume structured tool results; other channels keep the
+			// existing full verbose message.
+			if opts.Channel == channels.ChannelName {
+				resultPreview := toolResult.ForLLM
+				if resultPreview == "" && toolResult.Err != nil {
+					resultPreview = toolResult.Err.Error()
+				}
+				if len(resultPreview) > 300 {
+					resultPreview = resultPreview[:300] + "..."
+				}
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: opts.Channel,
+					ChatID:  opts.ChatID,
+					Event:   "tool.result",
+					Metadata: map[string]string{
+						"tool":   tc.Name,
+						"result": resultPreview,
+					},
+				})
+			} else if lr.al.verboseManager.IsFull(opts.SessionKey) {
 				status := "✅"
 				if toolResult.IsError {
 					status = "❌"

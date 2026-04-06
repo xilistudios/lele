@@ -34,7 +34,7 @@ Add to `~/.lele/config.json`:
     "native": {
       "enabled": true,
       "host": "127.0.0.1",
-      "port": 18792,
+      "port": 18793,
       "token_expiry_days": 30,
       "pin_expiry_minutes": 5,
       "max_clients": 5,
@@ -224,6 +224,43 @@ GET /api/v1/tools
 Authorization: Bearer <token>
 ```
 
+### Models
+
+#### List Models For Agent/Session
+
+```
+GET /api/v1/models?agent_id=<agent_id>&session_key=<session_key>
+Authorization: Bearer <token>
+```
+
+Response:
+```json
+{
+  "agent_id": "main",
+  "model": "gpt-4",
+  "models": ["gpt-4", "gpt-4o-mini"]
+}
+```
+
+#### Get Session Model
+
+```
+GET /api/v1/chat/session/<session_key>?action=model
+Authorization: Bearer <token>
+```
+
+#### Update Session Model
+
+```
+PATCH /api/v1/chat/session/<session_key>?action=model
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "model": "gpt-4o-mini"
+}
+```
+
 ### System
 
 #### Get Status
@@ -249,7 +286,7 @@ Response:
 ### Connection
 
 ```
-ws://127.0.0.1:18792/api/v1/ws?token=<token>
+ws://127.0.0.1:18793/api/v1/ws?token=<token>
 ```
 
 Or use header:
@@ -429,12 +466,12 @@ Authorization: Bearer <token>
 ```typescript
 // auth.ts
 async function getPIN(): Promise<{pin: string, expires: string}> {
-  const res = await fetch('http://127.0.0.1:18792/api/v1/auth/pin');
+  const res = await fetch('http://127.0.0.1:18793/api/v1/auth/pin');
   return res.json();
 }
 
 async function pair(pin: string, deviceName: string): Promise<AuthPairResponse> {
-  const res = await fetch('http://127.0.0.1:18792/api/v1/auth/pair', {
+  const res = await fetch('http://127.0.0.1:18793/api/v1/auth/pair', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({pin, device_name: deviceName})
@@ -447,7 +484,7 @@ class LeleWS {
   private ws: WebSocket;
   
   constructor(token: string) {
-    this.ws = new WebSocket(`ws://127.0.0.1:18792/api/v1/ws?token=${token}`);
+    this.ws = new WebSocket(`ws://127.0.0.1:18793/api/v1/ws?token=${token}`);
     
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);

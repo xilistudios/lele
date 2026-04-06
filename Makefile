@@ -1,4 +1,4 @@
-.PHONY: all build install uninstall clean help test
+.PHONY: all build install uninstall clean help test web-build
 
 # Build variables
 BINARY_NAME=lele
@@ -23,10 +23,11 @@ INSTALL_BIN_DIR=$(INSTALL_PREFIX)/bin
 INSTALL_MAN_DIR=$(INSTALL_PREFIX)/share/man/man1
 
 # Workspace and Skills
-PICOCLAW_HOME?=$(HOME)/.lele
-WORKSPACE_DIR?=$(PICOCLAW_HOME)/workspace
+LELEm_HOME?=$(HOME)/.lele
+WORKSPACE_DIR?=$(LELEm_HOME)/workspace
 WORKSPACE_SKILLS_DIR=$(WORKSPACE_DIR)/skills
 BUILTIN_SKILLS_DIR=$(CURDIR)/skills
+WEB_DIR=web
 
 # OS detection
 UNAME_S:=$(shell uname -s)
@@ -72,8 +73,17 @@ generate:
 	@$(GO) generate ./...
 	@echo "Run generate complete"
 
+## web-build: Build the web app for embedding
+web-build:
+	@echo "Building web app..."
+	@cd $(WEB_DIR) && bun run --bun build 
+	@rm -rf ./cmd/lele/web
+	@mkdir -p ./cmd/lele/web
+	@cp -R ./web/dist ./cmd/lele/web/dist
+	@echo "Web app build complete"
+
 ## build: Build the lele binary for current platform
-build: generate
+build: web-build generate
 	@echo "Building $(BINARY_NAME) for $(PLATFORM)/$(ARCH)..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_PATH) ./$(CMD_DIR)
@@ -112,8 +122,8 @@ uninstall:
 ## uninstall-all: Remove lele and all data
 uninstall-all:
 	@echo "Removing workspace and skills..."
-	@rm -rf $(PICOCLAW_HOME)
-	@echo "Removed workspace: $(PICOCLAW_HOME)"
+	@rm -rf $(LELEm_HOME)
+	@echo "Removed workspace: $(LELEm_HOME)"
 	@echo "Complete uninstallation done!"
 
 ## clean: Remove build artifacts

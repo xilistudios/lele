@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -139,6 +140,7 @@ type processOptions struct {
 	SendResponse    bool
 	NoHistory       bool
 	ReplyTo         string
+	MessageID       string
 }
 
 type sessionCancelGroup struct {
@@ -435,6 +437,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					Content: response,
 				}
 				if msg.Metadata != nil && msg.Metadata["message_id"] != "" {
+					outboundMsg.MessageID = msg.Metadata["message_id"]
 					outboundMsg.ReplyTo = msg.Metadata["message_id"]
 				}
 				al.bus.PublishOutbound(outboundMsg)
@@ -510,6 +513,82 @@ func (al *AgentLoop) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool
 	}, true
 }
 
+func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
+	resolvedSessionKey := al.resolveSessionKey(sessionKey)
+	agent := al.registry.GetDefaultAgent()
+	if selectedAgentID := al.GetSessionAgent(resolvedSessionKey); selectedAgentID != "" {
+		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
+			agent = selectedAgent
+		}
+	}
+	return agent
+}
+
+// GetSessionHistory returns the persisted history for a session (implements AgentProvidable).
+func (al *AgentLoop) GetSessionHistory(sessionKey string) []providers.Message {
+	resolvedSessionKey := al.resolveSessionKey(sessionKey)
+	agent := al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return nil
+	}
+	return agent.Sessions.GetHistory(resolvedSessionKey)
+}
+
+// GetSessionModel returns the effective model for a session (implements AgentProvidable).
+func (al *AgentLoop) GetSessionModel(sessionKey string) string {
+	resolvedSessionKey := al.resolveSessionKey(sessionKey)
+	agent := al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return ""
+	}
+	if model, ok := al.sessionModels.Load(resolvedSessionKey); ok {
+		if selected, ok := model.(string); ok && selected != "" {
+			return selected
+		}
+	}
+	return agent.Model
+}
+
+// SetSessionModel sets the model for a session (implements AgentProvidable).
+func (al *AgentLoop) SetSessionModel(sessionKey, model string) string {
+	resolvedSessionKey := al.resolveSessionKey(sessionKey)
+	if resolvedSessionKey == "" {
+		return ""
+	}
+	next := al.cfg().Providers.ResolveModelAlias(model, al.cfg().Agents.Defaults.Provider)
+	al.sessionModels.Store(resolvedSessionKey, next)
+	return next
+}
+
+// ListAvailableModels returns configured model aliases for the provider backing an agent (implements AgentProvidable).
+func (al *AgentLoop) ListAvailableModels(agentID string) []string {
+	providerName := al.cfg().Agents.Defaults.Provider
+	if agentID != "" {
+		if agent, ok := al.registry.GetAgent(agentID); ok && agent != nil {
+			if ref := providers.ParseModelRef(agent.Model, al.cfg().Agents.Defaults.Provider); ref != nil {
+				providerName = ref.Provider
+			}
+		}
+	}
+
+	provider, ok := al.cfg().Providers.GetNamed(providerName)
+	if !ok || len(provider.Models) == 0 {
+		return nil
+	}
+
+	models := make([]string, 0, len(provider.Models))
+	for alias := range provider.Models {
+		models = append(models, alias)
+	}
+	sort.Strings(models)
+	return models
+}
+
+// GetConfigSnapshot returns the current configuration snapshot (implements AgentProvidable).
+func (al *AgentLoop) GetConfigSnapshot() *config.Config {
+	return al.cfg()
+}
+
 // ListAvailableAgentIDs returns the list of available agent IDs (implements AgentProvidable).
 func (al *AgentLoop) ListAvailableAgentIDs() []string {
 	return al.registry.ListAgentIDs()
@@ -544,13 +623,7 @@ func (al *AgentLoop) GetDefaultAgentID() string {
 // GetStatus returns the current status for a session (implements AgentProvidable).
 func (al *AgentLoop) GetStatus(sessionKey string) string {
 	sessionKey = al.resolveSessionKey(sessionKey)
-	agent := al.registry.GetDefaultAgent()
-	// Respect session-selected agent (set via /agent command)
-	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
-		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
-			agent = selectedAgent
-		}
-	}
+	agent := al.agentForSession(sessionKey)
 	if agent == nil {
 		return "No default agent configured."
 	}
@@ -578,12 +651,7 @@ func (al *AgentLoop) StopAgent(sessionKey string) string {
 // CompactSession compacts the session history (implements AgentProvidable).
 func (al *AgentLoop) CompactSession(sessionKey string) string {
 	sessionKey = al.resolveSessionKey(sessionKey)
-	agent := al.registry.GetDefaultAgent()
-	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
-		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
-			agent = selectedAgent
-		}
-	}
+	agent := al.agentForSession(sessionKey)
 	if agent == nil {
 		return "No default agent configured."
 	}
@@ -719,13 +787,7 @@ func (al *AgentLoop) GetSubagents() string {
 func (al *AgentLoop) ClearSession(sessionKey string) string {
 	baseSessionKey := strings.TrimSpace(sessionKey)
 	sessionKey = al.resolveSessionKey(sessionKey)
-	agent := al.registry.GetDefaultAgent()
-	// Respect session-selected agent
-	if selectedAgentID := al.GetSessionAgent(sessionKey); selectedAgentID != "" {
-		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
-			agent = selectedAgent
-		}
-	}
+	agent := al.agentForSession(sessionKey)
 	if agent == nil {
 		return "No default agent configured"
 	}

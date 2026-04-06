@@ -1,6 +1,6 @@
 module github.com/xilistudios/lele
 
-go 1.25.7
+go 1.25.5
 
 require (
 	github.com/adhocore/gronx v1.19.6
