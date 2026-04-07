@@ -1,57 +1,35 @@
 import { type ChangeEvent, type FormEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { AttachmentInput } from './AttachmentInput'
 import { SearchableSelect } from './SearchableSelect'
 
-type SelectOption = { value: string; label: string }
-
-type Props = {
-  placeholder?: string
-  disabled?: boolean
-  canCancel: boolean
-  attachments: string[]
-  selectedModel: string
-  availableModels: SelectOption[]
-  groupedModels?: { label: string; options: SelectOption[] }[]
-  selectedAgent: string
-  agents: SelectOption[]
-  hasConversation: boolean
-  onSend: (content: string, attachments: string[]) => void
-  onCancel: () => void
-  onUploadAttachments: (files: File[]) => Promise<string[]>
-  onAttachmentsChange: (attachments: string[]) => void
-  onSelectModel: (model: string) => void
-  onSelectAgent: (agentId: string) => void
-}
-
-export function ChatComposer({
-  placeholder,
-  disabled = false,
-  canCancel,
-  attachments,
-  selectedModel,
-  availableModels,
-  groupedModels,
-  selectedAgent,
-  agents,
-  hasConversation,
-  onSend,
-  onCancel,
-  onUploadAttachments,
-  onAttachmentsChange,
-  onSelectModel,
-  onSelectAgent,
-}: Props) {
+export function ChatComposer() {
   const { t } = useTranslation()
+  const { canCancel, hasConversation, availableModels, groupedModels, selectedModel } =
+    useChatPageContext()
+  const {
+    currentAgent,
+    agents,
+    pendingAttachments,
+    onSend,
+    onCancel,
+    onUploadAttachments,
+    onAttachmentsChange,
+    onSelectAgent,
+    onSelectModel,
+  } = useAppLogicContext()
+
   const [draft, setDraft] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
     const content = draft.trim()
-    if (!content && attachments.length === 0) return
+    if (!content && pendingAttachments.length === 0) return
 
-    onSend(content, attachments)
+    onSend(content, pendingAttachments)
     setDraft('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -71,11 +49,14 @@ export function ChatComposer({
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
   }
 
+  const agentsOptions = agents.map((agent) => ({ value: agent.id, label: agent.name }))
+  const selectedAgentId = currentAgent?.id ?? ''
+
   return (
     <form onSubmit={submit}>
-      {attachments.length > 0 && (
+      {pendingAttachments.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2">
-          {attachments.map((attachment) => (
+          {pendingAttachments.map((attachment) => (
             <span
               key={attachment}
               className="rounded-full border border-[#3a3a3a] bg-[#222] px-3 py-1 text-xs text-[#bbb]"
@@ -89,11 +70,11 @@ export function ChatComposer({
         <textarea
           ref={textareaRef}
           className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-white outline-none placeholder:text-[#444]"
-          placeholder={placeholder ?? t('chat.messagePlaceholder')}
+          placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
-          disabled={disabled}
+          disabled={false}
           rows={1}
         />
         <div className="flex items-center justify-between px-3 pb-2 pt-1">
@@ -127,19 +108,19 @@ export function ChatComposer({
                 disabled={hasConversation}
                 emptyLabel={t('chat.agentLocked')}
                 onChange={onSelectAgent}
-                options={agents}
+                options={agentsOptions}
                 placeholder={
-                  agents.find((a) => a.value === selectedAgent)?.label ?? t('chat.agent')
+                  agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
                 }
                 searchAriaLabel={`${t('chat.agent')} buscar`}
                 searchPlaceholder={t('chat.agent')}
-                value={selectedAgent}
+                value={selectedAgentId}
               />
             </div>
           </div>
           <button
             type="submit"
-            disabled={disabled}
+            disabled={false}
             aria-label={t('chat.send')}
             className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-black transition-colors hover:bg-[#ddd] disabled:opacity-20"
           >

@@ -1,18 +1,14 @@
 import { useEffect, useRef } from 'react'
-import type { ChatMessage } from '../../lib/types'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { MessageBubble } from '../MessageBubble'
 
-type Props = {
-  messages: ChatMessage[]
-  approvalRequest: { id: string; command: string; reason: string } | null
-  onApprove: (approved: boolean) => void
-}
-
-export function MessageList({ messages, approvalRequest, onApprove }: Props) {
+export function MessageList() {
+  const { messages, approvalRequest, onApprove } = useAppLogicContext()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages])
 
   if (messages.length === 0) {

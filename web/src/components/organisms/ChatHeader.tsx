@@ -1,14 +1,7 @@
 import { useTranslation } from 'react-i18next'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { Spinner } from '../atoms/Spinner'
-
-type Props = {
-  currentSession: { key: string; name?: string } | null
-  currentAgent: { name: string } | null
-  toolStatus: { tool: string; action: string } | null
-  isStreaming: boolean
-  canCancel: boolean
-  onCancel: () => void
-}
 
 const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
   if (sessionName?.trim()) return sessionName
@@ -16,15 +9,10 @@ const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
-export function ChatHeader({
-  currentSession,
-  currentAgent,
-  toolStatus,
-  isStreaming,
-  canCancel,
-  onCancel,
-}: Props) {
+export function ChatHeader() {
   const { t } = useTranslation()
+  const { currentAgent, toolStatus, isStreaming, onCancel } = useAppLogicContext()
+  const { currentSession, canCancel } = useChatPageContext()
 
   return (
     <div className="flex items-center justify-between border-b border-[#2e2e2e] px-6 py-3">

@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { SettingsPage } from './components/pages/SettingsPage'
-import { useAppLogic } from './hooks/useAppLogic'
-import { useAuth, defaultApiUrlFromWindow } from './hooks/useAuth'
-import { useSocket } from './hooks/useSocket'
-import type { ClientEvent } from './lib/types'
+import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
+import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
@@ -16,17 +14,16 @@ function AuthRoute() {
   const [searchParams] = useSearchParams()
   const [autoAuthAttempted, setAutoAuthAttempted] = useState(false)
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null)
-  const { apiUrl, session, handleAuth } = useAuth(defaultApiUrl)
+  const { apiUrl, session, handleAuth, isLoading } = useAuthContext()
   const [authError, setAuthError] = useState<string | null>(null)
-  const [isAutoAuthenticating, setIsAutoAuthenticating] = useState(false)
+  const isAutoAuthenticating = isLoading && !autoAuthAttempted
 
   const codeFromUrl = searchParams.get('code')
   const deviceName = 'My Desktop'
 
   // Auto-pair if code is provided and no session exists
   useEffect(() => {
-    if (codeFromUrl && !session?.token && !autoAuthAttempted && !isAutoAuthenticating) {
-      setIsAutoAuthenticating(true)
+    if (codeFromUrl && !session?.token && !autoAuthAttempted && !isLoading) {
       setAutoAuthAttempted(true)
 
       const autoAuth = async () => {
@@ -37,13 +34,12 @@ function AuthRoute() {
           navigate('/', { replace: true })
         } catch (err) {
           setAutoAuthError((err as Error).message)
-          setIsAutoAuthenticating(false)
         }
       }
 
       autoAuth()
     }
-  }, [codeFromUrl, session?.token, autoAuthAttempted, isAutoAuthenticating, apiUrl, handleAuth, navigate])
+  }, [codeFromUrl, session?.token, autoAuthAttempted, isLoading, apiUrl, handleAuth, navigate])
 
   const handleAuthSubmit = useCallback(
     async (input: { apiUrl: string; pin: string; deviceName: string }) => {
@@ -87,7 +83,7 @@ function AuthRoute() {
 
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session } = useAuth(defaultApiUrl)
+  const { session } = useAuthContext()
 
   if (!session?.token) {
     return <Navigate to="/pair" replace />
@@ -100,144 +96,59 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function ChatRoute() {
   const { chat_id } = useParams<{ chat_id?: string }>()
   const navigate = useNavigate()
-  const { api, apiUrl, session, persistSession } = useAuth(defaultApiUrl)
-  const token = session?.token ?? null
-  const clientId = session?.client_id ?? null
-  const deviceName = session?.device_name ?? ''
-  const eventHandlerRef = useRef<(event: ClientEvent) => void>(() => {})
-
-  const {
-    status: wsStatus,
-    send: wsSend,
-    close: wsClose,
-  } = useSocket(apiUrl, token, {
-    onEvent: (event) => eventHandlerRef.current(event),
-  })
-
-  const app = useAppLogic(api, token, clientId, wsStatus, wsSend, wsClose, (s) => persistSession(s))
-
-  eventHandlerRef.current = app.handleEvent
+  const { sessions, currentSessionKey, onSelectSession } = useAppLogicContext()
 
   // Sync URL param with session selection - only runs when chat_id changes
   useEffect(() => {
     if (!chat_id) return
 
-    const availableKeys = new Set(app.sessions.map((s) => s.key))
+    const availableKeys = new Set(sessions.map((s) => s.key))
     if (availableKeys.has(chat_id)) {
       // URL session exists, select it (only if different from current)
-      if (app.currentSessionKey !== chat_id) {
-        app.onSelectSession(chat_id)
+      if (currentSessionKey !== chat_id) {
+        onSelectSession(chat_id)
       }
-    } else if (app.sessions.length > 0) {
+    } else if (sessions.length > 0) {
       // Chat ID doesn't exist, redirect to home
       navigate('/', { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat_id]) // Only run when chat_id changes from URL
+  }, [chat_id])
 
   // Sync session selection with URL - only runs when currentSessionKey changes
   useEffect(() => {
-    if (!app.currentSessionKey) return
+    if (!currentSessionKey) return
 
     const currentPath = chat_id ? `/chat/${chat_id}` : '/'
-    const newPath = `/chat/${app.currentSessionKey}`
+    const newPath = `/chat/${currentSessionKey}`
 
     if (currentPath !== newPath) {
       navigate(newPath, { replace: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [app.currentSessionKey]) // Only run when currentSessionKey changes
+  }, [currentSessionKey])
 
-  const handleCreateSession = useCallback(() => {
-    const newKey = app.onCreateSession()
-    if (newKey !== null) {
-      navigate(`/chat/${newKey}`, { replace: true })
-    }
-  }, [app, navigate])
+  // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
+  // directly within the ChatPage components via context hooks
 
-  const handleDeleteSession = useCallback(
-    async (key: string) => {
-      await app.onDeleteSession(key)
-      // Navigation is handled by useChatSessions internally
-    },
-    [app.onDeleteSession]
-  )
-
-  const handleClearSession = useCallback(() => {
-    void app.onClearSession()
-    // Stay on the same route, just clear the messages
-  }, [app.onClearSession])
-
-  const handleLogout = useCallback(() => {
-    app.onLogout()
-    navigate('/pair', { replace: true })
-  }, [app.onLogout, navigate])
-
-  return (
-    <ChatPage
-      apiUrl={apiUrl}
-      deviceName={deviceName}
-      wsStatus={wsStatus}
-      sessions={app.sessions}
-      agents={app.agents}
-      currentSessionKey={app.currentSessionKey}
-      currentAgent={app.currentAgent}
-      diagnostics={app.diagnostics}
-      diagnosticsOpen={app.diagnosticsOpen}
-      error={app.error}
-      modelState={app.modelState}
-      messages={app.messages}
-      approvalRequest={app.approvalRequest}
-      pendingAttachments={app.pendingAttachments}
-      toolStatus={app.toolStatus}
-      isStreaming={app.isStreaming}
-      onApprove={app.onApprove}
-      onUploadAttachments={app.onUploadAttachments}
-      onAttachmentsChange={app.onAttachmentsChange}
-      onCancel={app.onCancel}
-      onClearSession={handleClearSession}
-      onCreateSession={handleCreateSession}
-      onLogout={handleLogout}
-      onSend={app.onSend}
-      onSelectAgent={app.onSelectAgent}
-      onSelectModel={app.onSelectModel}
-      onSelectSession={app.onSelectSession}
-      onDeleteSession={handleDeleteSession}
-      onToggleDiagnostics={app.onToggleDiagnostics}
-    />
-  )
+  return <ChatPage />
 }
 
 // Settings route component
 function SettingsRoute() {
   const navigate = useNavigate()
-  const { api, apiUrl, session, persistSession } = useAuth(defaultApiUrl)
-  const token = session?.token ?? null
-  const clientId = session?.client_id ?? null
-  const eventHandlerRef = useRef<(event: ClientEvent) => void>(() => {})
-
-  const {
-    status: wsStatus,
-    send: wsSend,
-    close: wsClose,
-  } = useSocket(apiUrl, token, {
-    onEvent: (event) => eventHandlerRef.current(event),
-  })
-
-  const app = useAppLogic(api, token, clientId, wsStatus, wsSend, wsClose, (s) => persistSession(s))
-
-  eventHandlerRef.current = app.handleEvent
+  const { onLogout } = useAppLogicContext()
 
   const handleLogout = useCallback(() => {
-    app.onLogout()
+    onLogout()
     navigate('/pair', { replace: true })
-  }, [app.onLogout, navigate])
+  }, [onLogout, navigate])
 
-  return <SettingsPage diagnostics={app.diagnostics} onLogout={handleLogout} />
+  return <SettingsPage onLogout={handleLogout} />
 }
 
-function App() {
-  const { session } = useAuth(defaultApiUrl)
+function AppContent() {
+  const { session } = useAuthContext()
   const navigate = useNavigate()
 
   // Redirect authenticated users away from /pair
@@ -257,7 +168,9 @@ function App() {
         path="/"
         element={
           <ProtectedRoute>
-            <ChatRoute />
+            <AppLogicProvider>
+              <ChatRoute />
+            </AppLogicProvider>
           </ProtectedRoute>
         }
       />
@@ -265,7 +178,9 @@ function App() {
         path="/chat/:chat_id"
         element={
           <ProtectedRoute>
-            <ChatRoute />
+            <AppLogicProvider>
+              <ChatRoute />
+            </AppLogicProvider>
           </ProtectedRoute>
         }
       />
@@ -273,7 +188,9 @@ function App() {
         path="/settings"
         element={
           <ProtectedRoute>
-            <SettingsRoute />
+            <AppLogicProvider>
+              <SettingsRoute />
+            </AppLogicProvider>
           </ProtectedRoute>
         }
       />
@@ -281,6 +198,14 @@ function App() {
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+  )
+}
+
+function App() {
+  return (
+    <AuthProvider defaultApiUrl={defaultApiUrl}>
+      <AppContent />
+    </AuthProvider>
   )
 }
 

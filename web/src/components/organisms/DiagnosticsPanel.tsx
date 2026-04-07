@@ -1,24 +1,9 @@
 import { useTranslation } from 'react-i18next'
-import type {
-  AgentDetails,
-  ChannelInfo,
-  ConfigResponse,
-  SystemStatus,
-  ToolInfo,
-} from '../../lib/types'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
 
-type Props = {
-  diagnostics: {
-    status: SystemStatus | null
-    channels: ChannelInfo[]
-    tools: ToolInfo[]
-    config: ConfigResponse | null
-    agentInfo: AgentDetails | null
-  }
-}
-
-export function DiagnosticsPanel({ diagnostics }: Props) {
+export function DiagnosticsPanel() {
   const { t } = useTranslation()
+  const { diagnostics } = useAppLogicContext()
 
   return (
     <section className="mx-6 mt-3 rounded-lg border border-[#2e2e2e] bg-[#202020] p-4 text-xs text-[#bbb]">

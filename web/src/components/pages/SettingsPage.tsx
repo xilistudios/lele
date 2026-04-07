@@ -1,27 +1,11 @@
 import { useTranslation } from 'react-i18next'
-import type {
-  AgentDetails,
-  ChannelInfo,
-  ConfigResponse,
-  SystemStatus,
-  ToolInfo,
-} from '../../lib/types'
 import { DiagnosticsPanel } from '../organisms/DiagnosticsPanel'
 
-type DiagnosticsState = {
-  status: SystemStatus | null
-  channels: ChannelInfo[]
-  tools: ToolInfo[]
-  config: ConfigResponse | null
-  agentInfo: AgentDetails | null
-}
-
 type Props = {
-  diagnostics: DiagnosticsState
   onLogout: () => void
 }
 
-export function SettingsPage({ diagnostics, onLogout }: Props) {
+export function SettingsPage({ onLogout }: Props) {
   const { t } = useTranslation()
 
   return (
@@ -39,7 +23,7 @@ export function SettingsPage({ diagnostics, onLogout }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          <DiagnosticsPanel diagnostics={diagnostics} />
+          <DiagnosticsPanel />
         </div>
       </main>
     </div>

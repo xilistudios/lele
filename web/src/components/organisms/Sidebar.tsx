@@ -1,21 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { useAuthContext } from '../../contexts/AuthContext'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { SessionItem } from '../molecules/SessionItem'
-
-type Props = {
-  deviceName: string
-  apiUrl: string
-  wsStatus: 'disconnected' | 'connecting' | 'connected'
-  sessions: Array<{ key: string; name?: string; message_count: number; updated: string }>
-  currentSessionKey: string | null
-  onCreateSession: () => void
-  onClearSession: () => void
-  onSelectSession: (key: string) => void
-  onDeleteSession: (key: string) => void
-  onLogout: () => void
-  onToggleDiagnostics: () => void
-}
 
 export function formatSessionTitle(sessionKey: string, sessionName?: string) {
   if (sessionName?.trim()) return sessionName
@@ -23,18 +11,20 @@ export function formatSessionTitle(sessionKey: string, sessionName?: string) {
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
-export function Sidebar({
-  deviceName,
-  apiUrl,
-  wsStatus,
-  sessions,
-  currentSessionKey,
-  onCreateSession,
-  onClearSession,
-  onDeleteSession,
-}: Props) {
+export function Sidebar() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { apiUrl, session } = useAuthContext()
+  const {
+    wsStatus,
+    sessions,
+    currentSessionKey,
+    onCreateSession,
+    onClearSession,
+    onDeleteSession,
+  } = useAppLogicContext()
+
+  const deviceName = session?.device_name ?? 'lele'
 
   const sortedSessions = [...sessions].sort(
     (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
@@ -50,7 +40,7 @@ export function Sidebar({
           {deviceName?.[0]?.toUpperCase() ?? 'L'}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-white">{deviceName ?? 'lele'}</p>
+          <p className="truncate text-sm font-medium text-white">{deviceName}</p>
           <p className="truncate text-[10px] text-[#666]">{apiUrl.replace(/^https?:\/\//, '')}</p>
         </div>
         <button
