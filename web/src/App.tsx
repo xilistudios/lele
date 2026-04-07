@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { SettingsPage } from './components/pages/SettingsPage'
@@ -51,7 +59,7 @@ function AuthRoute() {
         setAuthError((err as Error).message)
       }
     },
-    [handleAuth, navigate]
+    [handleAuth, navigate],
   )
 
   // Pre-fill PIN from URL if available

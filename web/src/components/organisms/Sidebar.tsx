@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { useAuthContext } from '../../contexts/AuthContext'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { SessionItem } from '../molecules/SessionItem'
 

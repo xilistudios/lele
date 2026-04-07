@@ -1,7 +1,7 @@
-import { createContext, useContext, useRef, type ReactNode, type MutableRefObject } from 'react'
-import { useSocket, type SocketStatus } from '../hooks/useSocket'
+import { type MutableRefObject, type ReactNode, createContext, useContext, useRef } from 'react'
 import { useAppLogic as useAppLogicHook } from '../hooks/useAppLogic'
-import type { ClientEvent, AuthSession } from '../lib/types'
+import { type SocketStatus, useSocket } from '../hooks/useSocket'
+import type { AuthSession, ClientEvent } from '../lib/types'
 import { useAuthContext } from './AuthContext'
 
 // Re-export types for convenience
@@ -66,7 +66,9 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onEvent: (event) => eventHandlerRef.current(event),
   })
 
-  const app = useAppLogicHook(api, token, clientId, wsStatus, wsSend, wsClose, (s) => persistSession(s as AuthSession | null))
+  const app = useAppLogicHook(api, token, clientId, wsStatus, wsSend, wsClose, (s) =>
+    persistSession(s as AuthSession | null),
+  )
 
   // Expose the event handler via ref
   eventHandlerRef.current = app.handleEvent

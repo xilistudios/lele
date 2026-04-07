@@ -8,15 +8,7 @@ type Props = {
   step?: number
 }
 
-export function NumberInput({
-  id,
-  value,
-  onChange,
-  disabled,
-  min,
-  max,
-  step = 1,
-}: Props) {
+export function NumberInput({ id, value, onChange, disabled, min, max, step = 1 }: Props) {
   return (
     <input
       id={id}

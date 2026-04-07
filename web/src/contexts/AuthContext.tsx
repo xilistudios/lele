@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useCallback, useState, type ReactNode } from 'react'
+import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { createApiClient } from '../lib/api'
 import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
@@ -20,7 +20,10 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-export function AuthProvider({ children, defaultApiUrl }: { children: ReactNode; defaultApiUrl: string }) {
+export function AuthProvider({
+  children,
+  defaultApiUrl,
+}: { children: ReactNode; defaultApiUrl: string }) {
   const [apiUrl, setApiUrlState] = useState(() => loadApiUrl(defaultApiUrl))
   const [session, setSession] = useState<AuthSession | null>(() => loadSession())
   const [isLoading, setIsLoading] = useState(false)
@@ -75,7 +78,7 @@ export function AuthProvider({ children, defaultApiUrl }: { children: ReactNode;
         setIsLoading(false)
       }
     },
-    [persistSession, setApiUrl]
+    [persistSession, setApiUrl],
   )
 
   const ensureSession = useCallback(
@@ -110,7 +113,7 @@ export function AuthProvider({ children, defaultApiUrl }: { children: ReactNode;
         return null
       }
     },
-    [api, persistSession]
+    [api, persistSession],
   )
 
   const value: AuthContextValue = {

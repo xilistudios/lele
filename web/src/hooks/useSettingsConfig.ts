@@ -1,11 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { useCallback, useEffect, useState } from 'react'
-import type {
-  ConfigError,
-  ConfigMetadata,
-  EditableConfig,
-} from '../lib/types'
+import type { ConfigError, ConfigMetadata, EditableConfig } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
 export type SaveState = 'idle' | 'validating' | 'saving' | 'saved' | 'error'
@@ -24,7 +20,12 @@ export type SettingsConfigState = {
 
   // Actions
   updateField: <T>(path: string, value: T) => void
-  updateSecretField: (path: string, mode: 'literal' | 'env' | 'empty', value?: string, envName?: string) => void
+  updateSecretField: (
+    path: string,
+    mode: 'literal' | 'env' | 'empty',
+    value?: string,
+    envName?: string,
+  ) => void
   replaceDraft: (nextConfig: EditableConfig) => void
   reset: () => void
   validate: () => Promise<boolean>
@@ -34,7 +35,11 @@ export type SettingsConfigState = {
   hasErrors: boolean
 }
 
-function setValueAtPath(obj: Record<string, unknown>, p: string, v: unknown): Record<string, unknown> {
+function setValueAtPath(
+  obj: Record<string, unknown>,
+  p: string,
+  v: unknown,
+): Record<string, unknown> {
   if (!p) {
     return v as Record<string, unknown>
   }
@@ -81,39 +86,40 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
     loadConfig()
   }, [apiClient])
 
-  const updateField = useCallback(<T,>(path: string, value: T) => {
-    if (!draftConfig) return
+  const updateField = useCallback(
+    <T>(path: string, value: T) => {
+      if (!draftConfig) return
 
-    const newDraft = deepClone(draftConfig)
-    const updated = setValueAtPath(newDraft as Record<string, unknown>, path, value)
-    setDraftConfig(updated as EditableConfig)
-    setDirtyPaths((prev) => new Set(prev).add(path))
-    setSaveState('idle')
-    setValidationErrors([])
-  }, [draftConfig])
+      const newDraft = deepClone(draftConfig)
+      const updated = setValueAtPath(newDraft as Record<string, unknown>, path, value)
+      setDraftConfig(updated as EditableConfig)
+      setDirtyPaths((prev) => new Set(prev).add(path))
+      setSaveState('idle')
+      setValidationErrors([])
+    },
+    [draftConfig],
+  )
 
-  const updateSecretField = useCallback((
-    path: string,
-    mode: 'literal' | 'env' | 'empty',
-    value?: string,
-    envName?: string
-  ) => {
-    if (!draftConfig) return
+  const updateSecretField = useCallback(
+    (path: string, mode: 'literal' | 'env' | 'empty', value?: string, envName?: string) => {
+      if (!draftConfig) return
 
-    const newDraft = deepClone(draftConfig)
-    const secretValue = {
-      mode,
-      value: mode === 'literal' ? value : undefined,
-      env_name: mode === 'env' ? envName : undefined,
-      env_default: undefined,
-      has_env_var: mode === 'env' ? !!envName && envName.length > 0 : false,
-    }
-    const updated = setValueAtPath(newDraft as Record<string, unknown>, path, secretValue)
-    setDraftConfig(updated as EditableConfig)
-    setDirtyPaths((prev) => new Set(prev).add(path))
-    setSaveState('idle')
-    setValidationErrors([])
-  }, [draftConfig])
+      const newDraft = deepClone(draftConfig)
+      const secretValue = {
+        mode,
+        value: mode === 'literal' ? value : undefined,
+        env_name: mode === 'env' ? envName : undefined,
+        env_default: undefined,
+        has_env_var: mode === 'env' ? !!envName && envName.length > 0 : false,
+      }
+      const updated = setValueAtPath(newDraft as Record<string, unknown>, path, secretValue)
+      setDraftConfig(updated as EditableConfig)
+      setDirtyPaths((prev) => new Set(prev).add(path))
+      setSaveState('idle')
+      setValidationErrors([])
+    },
+    [draftConfig],
+  )
 
   const replaceDraft = useCallback((nextConfig: EditableConfig) => {
     setDraftConfig(deepClone(nextConfig))

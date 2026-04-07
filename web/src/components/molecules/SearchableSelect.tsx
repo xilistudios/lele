@@ -10,9 +10,12 @@ type OptionGroup = {
   options: Option[]
 }
 
+type Direction = 'up' | 'down'
+
 type Props = {
   ariaLabel: string
   buttonLabel: string
+  direction?: Direction
   disabled?: boolean
   emptyLabel: string
   groups?: OptionGroup[]
@@ -29,6 +32,7 @@ const ANIMATION_MS = 200
 export function SearchableSelect({
   ariaLabel,
   buttonLabel,
+  direction = 'up',
   disabled = false,
   emptyLabel,
   groups,
@@ -190,13 +194,13 @@ export function SearchableSelect({
           stroke="currentColor"
           strokeWidth="2"
         >
-          <polyline points="6 9 12 15 18 9" />
+          <polyline points={direction === 'down' ? '6 15 12 9 18 15' : '6 9 12 15 18 9'} />
         </svg>
       </button>
 
       {isMounted ? (
         <div
-          className={`absolute bottom-full left-0 z-30 mb-2 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-[#3a3a3a] bg-[#1d1d1d] shadow-2xl transition-all duration-200 ease-out ${
+          className={`absolute ${direction === 'down' ? 'top-full left-0 mt-2' : 'bottom-full left-0 mb-2'} z-30 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-[#3a3a3a] bg-[#1d1d1d] shadow-2xl transition-all duration-200 ease-out ${
             isOpen
               ? 'translate-y-0 scale-100 opacity-100'
               : 'pointer-events-none translate-y-2 scale-95 opacity-0'

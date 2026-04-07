@@ -259,8 +259,10 @@ export function useMessages(
             if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
             // Usar la misma transformación que history para consistencia
             const existingIds = new Set(messagesRef.current.map((m) => m.id))
-            const newMessages = toChatMessages(catchupData.messages, eventSessionKey as string)
-              .filter((m) => !existingIds.has(m.id))
+            const newMessages = toChatMessages(
+              catchupData.messages,
+              eventSessionKey as string,
+            ).filter((m) => !existingIds.has(m.id))
             if (newMessages.length > 0) {
               setMessages((current) => [...current, ...newMessages])
             }

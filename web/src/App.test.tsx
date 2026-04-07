@@ -75,29 +75,110 @@ const jsonResponse = (body: FetchResponseBody) =>
 
 const mockConfigResponse = () => ({
   config: {
-    agents: { defaults: { workspace: '~/.lele', restrict_to_workspace: false, provider: 'openai', model: 'gpt-4', max_tokens: 4096, max_tool_iterations: 30 } },
+    agents: {
+      defaults: {
+        workspace: '~/.lele',
+        restrict_to_workspace: false,
+        provider: 'openai',
+        model: 'gpt-4',
+        max_tokens: 4096,
+        max_tool_iterations: 30,
+      },
+    },
     session: { ephemeral: false, ephemeral_threshold: 3600 },
     channels: {
-      native: { enabled: true, host: '127.0.0.1', port: 18793, token_expiry_days: 30, pin_expiry_minutes: 10, max_clients: 5, cors_origins: [], session_expiry_days: 365, max_upload_size_mb: 50, upload_ttl_hours: 24 },
-      telegram: { enabled: false, token: { mode: 'empty', has_env_var: false }, proxy: '', allow_from: [], verbose: 'off' },
+      native: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 18793,
+        token_expiry_days: 30,
+        pin_expiry_minutes: 10,
+        max_clients: 5,
+        cors_origins: [],
+        session_expiry_days: 365,
+        max_upload_size_mb: 50,
+        upload_ttl_hours: 24,
+      },
+      telegram: {
+        enabled: false,
+        token: { mode: 'empty', has_env_var: false },
+        proxy: '',
+        allow_from: [],
+        verbose: 'off',
+      },
       discord: { enabled: false, token: { mode: 'empty', has_env_var: false }, allow_from: [] },
       whatsapp: { enabled: false, bridge_url: '', allow_from: [] },
-      feishu: { enabled: false, app_id: { mode: 'empty', has_env_var: false }, app_secret: { mode: 'empty', has_env_var: false }, encrypt_key: { mode: 'empty', has_env_var: false }, verification_token: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      slack: { enabled: false, bot_token: { mode: 'empty', has_env_var: false }, app_token: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      line: { enabled: false, channel_secret: { mode: 'empty', has_env_var: false }, channel_access_token: { mode: 'empty', has_env_var: false }, webhook_host: '', webhook_port: 0, webhook_path: '', allow_from: [] },
-      onebot: { enabled: false, ws_url: '', access_token: { mode: 'empty', has_env_var: false }, reconnect_interval: 5, group_trigger_prefix: [], allow_from: [] },
+      feishu: {
+        enabled: false,
+        app_id: { mode: 'empty', has_env_var: false },
+        app_secret: { mode: 'empty', has_env_var: false },
+        encrypt_key: { mode: 'empty', has_env_var: false },
+        verification_token: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      slack: {
+        enabled: false,
+        bot_token: { mode: 'empty', has_env_var: false },
+        app_token: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      line: {
+        enabled: false,
+        channel_secret: { mode: 'empty', has_env_var: false },
+        channel_access_token: { mode: 'empty', has_env_var: false },
+        webhook_host: '',
+        webhook_port: 0,
+        webhook_path: '',
+        allow_from: [],
+      },
+      onebot: {
+        enabled: false,
+        ws_url: '',
+        access_token: { mode: 'empty', has_env_var: false },
+        reconnect_interval: 5,
+        group_trigger_prefix: [],
+        allow_from: [],
+      },
       maixcam: { enabled: false, host: '', port: 0, allow_from: [] },
-      qq: { enabled: false, app_id: { mode: 'empty', has_env_var: false }, app_secret: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      dingtalk: { enabled: false, client_id: { mode: 'empty', has_env_var: false }, client_secret: { mode: 'empty', has_env_var: false }, allow_from: [] },
+      qq: {
+        enabled: false,
+        app_id: { mode: 'empty', has_env_var: false },
+        app_secret: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      dingtalk: {
+        enabled: false,
+        client_id: { mode: 'empty', has_env_var: false },
+        client_secret: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
     },
     providers: { named: {} },
     gateway: { host: '127.0.0.1', port: 18793 },
-    tools: { web: { brave: { enabled: false, api_key: { mode: 'empty', has_env_var: false }, max_results: 10 }, duckduckgo: { enabled: false, max_results: 10 }, perplexity: { enabled: false, api_key: { mode: 'empty', has_env_var: false }, max_results: 10 } }, cron: { exec_timeout_minutes: 0 }, exec: { enable_deny_patterns: false, custom_deny_patterns: [] } },
+    tools: {
+      web: {
+        brave: { enabled: false, api_key: { mode: 'empty', has_env_var: false }, max_results: 10 },
+        duckduckgo: { enabled: false, max_results: 10 },
+        perplexity: {
+          enabled: false,
+          api_key: { mode: 'empty', has_env_var: false },
+          max_results: 10,
+        },
+      },
+      cron: { exec_timeout_minutes: 0 },
+      exec: { enable_deny_patterns: false, custom_deny_patterns: [] },
+    },
     heartbeat: { enabled: true, interval: 10 },
     devices: { enabled: false, monitor_usb: false },
     logs: { enabled: false, path: '', max_days: 7, rotation: 'daily' },
   },
-  meta: { config_path: '/tmp/config.json', source: 'file', can_save: true, restart_required_sections: ['channels', 'gateway'], secrets_by_path: {} },
+  meta: {
+    config_path: '/tmp/config.json',
+    source: 'file',
+    can_save: true,
+    restart_required_sections: ['channels', 'gateway'],
+    secrets_by_path: {},
+  },
 })
 
 describe('App', () => {
@@ -856,9 +937,12 @@ describe('Auto-pairing', () => {
     )
 
     // Wait for loading state to finish and form to appear
-    await waitFor(() => {
-      expect(view.container.querySelector('form')).not.toBeNull()
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        expect(view.container.querySelector('form')).not.toBeNull()
+      },
+      { timeout: 3000 },
+    )
 
     // PIN should be pre-filled - look for numeric input
     const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement

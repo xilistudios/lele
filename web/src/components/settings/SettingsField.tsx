@@ -34,13 +34,9 @@ export function SettingsField({
           </span>
         )}
       </div>
-      {description && (
-        <p className="text-[11px] text-[#666]">{description}</p>
-      )}
+      {description && <p className="text-[11px] text-[#666]">{description}</p>}
       <div className="mt-1">{children}</div>
-      {error && (
-        <p className="text-[11px] text-rose-400">{error}</p>
-      )}
+      {error && <p className="text-[11px] text-rose-400">{error}</p>}
     </div>
   )
 }

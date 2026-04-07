@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { toChatMessages } from './useMessages'
 import type { HistoryToolCall } from '../lib/types'
+import { toChatMessages } from './useMessages'
 
 describe('toChatMessages', () => {
   const sessionKey = 'test-session'

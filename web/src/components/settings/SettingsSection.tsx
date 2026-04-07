@@ -20,9 +20,7 @@ export function SettingsSection({ title, description, children, isRestartRequire
           </span>
         )}
       </div>
-      {description && (
-        <p className="mb-4 text-xs text-[#888]">{description}</p>
-      )}
+      {description && <p className="mb-4 text-xs text-[#888]">{description}</p>}
       <div className="space-y-4">{children}</div>
     </section>
   )
