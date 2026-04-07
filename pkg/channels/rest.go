@@ -460,39 +460,145 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 }
 
 func (n *NativeChannel) handleConfig(w http.ResponseWriter, r *http.Request) {
+	configPath := config.DefaultConfigPath()
+
 	switch r.Method {
 	case http.MethodGet:
-		cfg := n.cfgSnapshot()
-		cfgMap := map[string]interface{}{
-			"agents": map[string]interface{}{
-				"defaults": map[string]interface{}{
-					"workspace": cfg.Agents.Defaults.Workspace,
-					"provider":  cfg.Agents.Defaults.Provider,
-					"model":     cfg.Agents.Defaults.Model,
-				},
-			},
-			"channels": map[string]interface{}{
-				"native": map[string]interface{}{
-					"enabled":             cfg.Channels.Native.Enabled,
-					"host":                cfg.Channels.Native.Host,
-					"port":                cfg.Channels.Native.Port,
-					"token_expiry_days":   cfg.Channels.Native.TokenExpiryDays,
-					"pin_expiry_minutes":  cfg.Channels.Native.PinExpiryMinutes,
-					"max_clients":         cfg.Channels.Native.MaxClients,
-					"cors_origins":        cfg.Channels.Native.CORSOrigins,
-					"session_expiry_days": cfg.Channels.Native.SessionExpiryDays,
-				},
-			},
-		}
-		writeJSON(w, http.StatusOK, ConfigResponse{Config: cfgMap})
-
-	case http.MethodPatch:
-		var req ConfigUpdateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+		doc, meta, err := config.LoadEditableDocument(configPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load config: "+err.Error(), "config_load_failed")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "updated", "path": req.Path})
+
+		response := ConfigResponse{
+			Config: doc,
+			Metadata: ConfigMetadata{
+				ConfigPath:              meta.ConfigPath,
+				Source:                  meta.Source,
+				CanSave:                 meta.CanSave,
+				RestartRequiredSections: meta.RestartRequiredSections,
+				SecretsByPath:           meta.SecretsByPath,
+			},
+		}
+		writeJSON(w, http.StatusOK, response)
+
+	case http.MethodPut:
+		var req ConfigUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "body_invalid")
+			return
+		}
+		body, err := json.Marshal(req.Config)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid config payload", "body_invalid")
+			return
+		}
+		var doc config.EditableDocument
+		if err := json.Unmarshal(body, &doc); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid config payload: "+err.Error(), "body_invalid")
+			return
+		}
+
+		// Validar documento
+		validationErrors := config.ValidateEditableDocument(&doc)
+		if len(validationErrors) > 0 {
+			httpErrors := make([]ConfigError, len(validationErrors))
+			for i, err := range validationErrors {
+				httpErrors[i] = ConfigError{
+					Path:    err.Path,
+					Message: err.Message,
+					Code:    err.Code,
+				}
+			}
+			writeJSON(w, http.StatusBadRequest, ConfigUpdateResponse{
+				Errors: httpErrors,
+			})
+			return
+		}
+
+		// Convertir a Config para validación adicional
+		_, err = doc.ToConfig()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "config validation failed: "+err.Error(), "config_invalid")
+			return
+		}
+
+		// Guardar documento
+		if err := config.SaveEditableDocument(configPath, &doc); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save config: "+err.Error(), "config_save_failed")
+			return
+		}
+
+		// Recargar metadata después de guardar
+		_, meta, err := config.LoadEditableDocument(configPath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reload config: "+err.Error(), "config_reload_failed")
+			return
+		}
+
+		response := ConfigUpdateResponse{
+			Config: &doc,
+			Metadata: ConfigMetadata{
+				ConfigPath:              meta.ConfigPath,
+				Source:                  meta.Source,
+				CanSave:                 meta.CanSave,
+				RestartRequiredSections: meta.RestartRequiredSections,
+				SecretsByPath:           meta.SecretsByPath,
+			},
+		}
+		writeJSON(w, http.StatusOK, response)
+
+	case http.MethodPost:
+		if r.URL.Path != "/api/v1/config/validate" {
+			writeError(w, http.StatusNotFound, "not found", "not_found")
+			return
+		}
+
+		var req ConfigValidateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "body_invalid")
+			return
+		}
+		body, err := json.Marshal(req.Config)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid config payload", "body_invalid")
+			return
+		}
+		var doc config.EditableDocument
+		if err := json.Unmarshal(body, &doc); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid config payload: "+err.Error(), "body_invalid")
+			return
+		}
+
+		validationErrors := config.ValidateEditableDocument(&doc)
+		if _, err := doc.ToConfig(); err != nil {
+			validationErrors = append(validationErrors, config.ValidationError{
+				Path:    "config",
+				Message: err.Error(),
+				Code:    "config_invalid",
+			})
+		}
+
+		if len(validationErrors) > 0 {
+			httpErrors := make([]ConfigError, len(validationErrors))
+			for i, err := range validationErrors {
+				httpErrors[i] = ConfigError{
+					Path:    err.Path,
+					Message: err.Message,
+					Code:    err.Code,
+				}
+			}
+			writeJSON(w, http.StatusOK, ConfigValidateResponse{
+				Valid:  false,
+				Errors: httpErrors,
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, ConfigValidateResponse{
+			Valid:  true,
+			Errors: nil,
+		})
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")

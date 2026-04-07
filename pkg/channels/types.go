@@ -210,12 +210,41 @@ type AgentStatusResponse struct {
 }
 
 type ConfigResponse struct {
-	Config map[string]interface{} `json:"config"`
+	Config   interface{}    `json:"config"`
+	Metadata ConfigMetadata `json:"meta"`
+}
+
+type ConfigMetadata struct {
+	ConfigPath              string            `json:"config_path"`
+	Source                  string            `json:"source"`
+	CanSave                 bool              `json:"can_save"`
+	RestartRequiredSections []string          `json:"restart_required_sections"`
+	SecretsByPath           map[string]string `json:"secrets_by_path"`
 }
 
 type ConfigUpdateRequest struct {
-	Path  string      `json:"path"`
-	Value interface{} `json:"value"`
+	Config interface{} `json:"config"`
+}
+
+type ConfigUpdateResponse struct {
+	Config   interface{}    `json:"config"`
+	Metadata ConfigMetadata `json:"meta"`
+	Errors   []ConfigError  `json:"errors,omitempty"`
+}
+
+type ConfigValidateRequest struct {
+	Config interface{} `json:"config"`
+}
+
+type ConfigValidateResponse struct {
+	Valid  bool          `json:"valid"`
+	Errors []ConfigError `json:"errors,omitempty"`
+}
+
+type ConfigError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+	Code    string `json:"code"`
 }
 
 type ToolsResponse struct {

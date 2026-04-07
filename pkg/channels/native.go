@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,6 +214,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/agents", n.handleAgents)
 	mux.HandleFunc("/api/v1/agents/", n.handleAgentInfo)
 	mux.HandleFunc("/api/v1/config", n.handleConfig)
+	mux.HandleFunc("/api/v1/config/validate", n.handleConfig)
 	mux.HandleFunc("/api/v1/tools", n.handleTools)
 	mux.HandleFunc("/api/v1/models", n.handleModels)
 	mux.HandleFunc("/api/v1/skills", n.handleSkills)
@@ -233,13 +235,31 @@ func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
+		if !allowed && origin != "" {
+			if parsedOrigin, err := url.Parse(origin); err == nil {
+				originHost := parsedOrigin.Hostname()
+				serverHost := n.cfg.Host
+				if serverHost == "" {
+					serverHost = "127.0.0.1"
+				}
+
+				if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
+					if originHost == serverHost {
+						allowed = true
+					} else if (serverHost == "0.0.0.0" || serverHost == "::") && originHost != "" {
+						allowed = true
+					}
+				}
+			}
+		}
+
 		if !allowed && (origin == "" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://0.0.0.0") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost")) {
 			allowed = true
 		}
 
 		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}

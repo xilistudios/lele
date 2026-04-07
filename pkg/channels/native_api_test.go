@@ -1,11 +1,14 @@
 package channels
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -274,6 +277,37 @@ func TestNativeChannelAuthStatusInvalidTokenReturnsValidFalse(t *testing.T) {
 	}
 }
 
+func TestNativeChannelConfigPreflightAllowsPutFromSameHost(t *testing.T) {
+	ts := newNativeTestServer(t)
+	ts.channel.cfg.Host = "192.168.0.171"
+
+	req, err := http.NewRequest(http.MethodOptions, ts.server.URL+"/api/v1/config", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Origin", "http://192.168.0.171:3005")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://192.168.0.171:3005" {
+		t.Fatalf("allow origin = %q, want %q", got, "http://192.168.0.171:3005")
+	}
+
+	allowMethods := resp.Header.Get("Access-Control-Allow-Methods")
+	if !strings.Contains(allowMethods, http.MethodPut) {
+		t.Fatalf("allow methods = %q, expected to contain %q", allowMethods, http.MethodPut)
+	}
+}
+
 func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
@@ -458,7 +492,7 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 	}
 }
 
-func TestNativeChannelConfigUsesAgentSnapshot(t *testing.T) {
+func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/config", nil)
@@ -477,19 +511,46 @@ func TestNativeChannelConfigUsesAgentSnapshot(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	var payload struct {
-		Config map[string]map[string]map[string]interface{} `json:"config"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	var response ConfigResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
 
-	nativeCfg := payload.Config["channels"]["native"]
-	if nativeCfg["host"] != ts.loop.config.Channels.Native.Host {
-		t.Fatalf("host = %v, want %q", nativeCfg["host"], ts.loop.config.Channels.Native.Host)
+	// Verificar que la respuesta contiene los datos esperados
+	configMap, ok := response.Config.(map[string]interface{})
+	if !ok {
+		t.Fatalf("config is not a map, got %T", response.Config)
 	}
-	if nativeCfg["session_expiry_days"] != float64(ts.loop.config.Channels.Native.SessionExpiryDays) {
-		t.Fatalf("session_expiry_days = %v, want %d", nativeCfg["session_expiry_days"], ts.loop.config.Channels.Native.SessionExpiryDays)
+
+	channels, ok := configMap["channels"].(map[string]interface{})
+	if !ok {
+		t.Fatal("channels config not found or invalid")
+	}
+
+	native, ok := channels["native"].(map[string]interface{})
+	if !ok {
+		t.Fatal("native channel config not found or invalid")
+	}
+
+	// Verificar que el native config tiene valores por defecto (documento editable)
+	if native["host"] != "0.0.0.0" {
+		t.Errorf("host = %v, want 0.0.0.0 (default)", native["host"])
+	}
+
+	// JSON numbers are decoded as float64
+	if native["port"] != float64(18793) {
+		t.Errorf("port = %v, want 18793 (default)", native["port"])
+	}
+
+	// Verificar metadata
+	if response.Metadata.Source != "file" {
+		t.Errorf("metadata.source = %q, want 'file'", response.Metadata.Source)
+	}
+	if !response.Metadata.CanSave {
+		t.Error("expected metadata.can_save to be true")
+	}
+	if response.Metadata.ConfigPath == "" {
+		t.Error("expected config_path in metadata")
 	}
 }
 
@@ -719,5 +780,397 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 	decodeWSData(t, complete.Data, &completePayload)
 	if completePayload.MessageID != "msg-aliased-1" || completePayload.SessionKey != aliasedSessionKey {
 		t.Fatalf("complete payload = %#v, want msg-aliased-1/%s", completePayload, aliasedSessionKey)
+	}
+}
+
+// ==================== Config API Tests ====================
+
+func TestHandleConfig_Get(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	configContent := `{
+		"agents": {
+			"defaults": {
+				"workspace": "/test/workspace",
+				"provider": "openai",
+				"model": "gpt-4",
+				"max_tokens": 8192,
+				"max_tool_iterations": 20
+			}
+		},
+		"channels": {
+			"native": {
+				"enabled": true,
+				"port": 8080
+			}
+		}
+	}`
+
+	leleDir := filepath.Join(tmpDir, ".lele")
+	os.MkdirAll(leleDir, 0755)
+	configPath := filepath.Join(leleDir, "config.json")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	nc := &NativeChannel{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		return
+	}
+
+	var response ConfigResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	configMap, ok := response.Config.(map[string]interface{})
+	if !ok {
+		t.Error("expected config to be a map")
+		return
+	}
+
+	if response.Metadata.ConfigPath == "" {
+		t.Error("expected config_path in metadata")
+	}
+	if response.Metadata.Source != "file" {
+		t.Errorf("expected source 'file', got %q", response.Metadata.Source)
+	}
+
+	agents, ok := configMap["agents"].(map[string]interface{})
+	if !ok {
+		t.Error("expected agents config")
+		return
+	}
+	defaults, ok := agents["defaults"].(map[string]interface{})
+	if !ok {
+		t.Error("expected agents.defaults")
+		return
+	}
+	if defaults["workspace"] != "/test/workspace" {
+		t.Errorf("workspace = %v, want /test/workspace", defaults["workspace"])
+	}
+}
+
+func TestHandleConfig_GetWithEnvPlaceholder(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	configContent := `{
+		"channels": {
+			"telegram": {
+				"enabled": true,
+				"token": "{{ENV_TELEGRAM_BOT_TOKEN}}"
+			}
+		}
+	}`
+
+	leleDir := filepath.Join(tmpDir, ".lele")
+	os.MkdirAll(leleDir, 0755)
+	configPath := filepath.Join(leleDir, "config.json")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	nc := &NativeChannel{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var response ConfigResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response.Metadata.SecretsByPath["channels.telegram.token"] != "env" {
+		t.Errorf("expected token to be marked as env, got %q", response.Metadata.SecretsByPath["channels.telegram.token"])
+	}
+}
+
+func TestHandleConfig_Put(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	leleDir := filepath.Join(tmpDir, ".lele")
+	os.MkdirAll(leleDir, 0755)
+
+	nc := &NativeChannel{}
+
+	doc := config.EditableDocument{
+		Agents: config.EditableAgentsConfig{
+			Defaults: config.EditableAgentDefaults{
+				Workspace:         "/test",
+				Provider:          "openai",
+				Model:             "gpt-4",
+				MaxTokens:         8192,
+				MaxToolIterations: 20,
+			},
+		},
+		Channels: config.EditableChannelsConfig{
+			Native: config.EditableNativeConfig{
+				Enabled: true,
+				Port:    8080,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(ConfigUpdateRequest{Config: doc})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		return
+	}
+
+	var response ConfigUpdateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response.Errors) > 0 {
+		t.Errorf("expected no errors, got %v", response.Errors)
+	}
+
+	configPath := filepath.Join(leleDir, "config.json")
+	if _, err := os.Stat(configPath); err != nil {
+		t.Errorf("config file should exist: %v", err)
+	}
+}
+
+func TestHandleConfig_Put_InvalidConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	leleDir := filepath.Join(tmpDir, ".lele")
+	os.MkdirAll(leleDir, 0755)
+
+	nc := &NativeChannel{}
+
+	doc := config.EditableDocument{
+		Agents: config.EditableAgentsConfig{
+			Defaults: config.EditableAgentDefaults{
+				Workspace:         "",
+				Provider:          "",
+				Model:             "",
+				MaxTokens:         0,
+				MaxToolIterations: 0,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(ConfigUpdateRequest{Config: doc})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+		return
+	}
+
+	var response ConfigUpdateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response.Errors) == 0 {
+		t.Error("expected validation errors")
+	}
+}
+
+func TestHandleConfig_Post_Validate(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	nc := &NativeChannel{}
+
+	doc := config.EditableDocument{
+		Agents: config.EditableAgentsConfig{
+			Defaults: config.EditableAgentDefaults{
+				Workspace:         "/test",
+				Provider:          "openai",
+				Model:             "gpt-4",
+				MaxTokens:         8192,
+				MaxToolIterations: 20,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(ConfigValidateRequest{Config: doc})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response ConfigValidateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if !response.Valid {
+		t.Error("expected config to be valid")
+	}
+	if len(response.Errors) > 0 {
+		t.Errorf("expected no errors, got %v", response.Errors)
+	}
+}
+
+func TestHandleConfig_Post_Validate_Invalid(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	nc := &NativeChannel{}
+
+	doc := config.EditableDocument{
+		Agents: config.EditableAgentsConfig{
+			Defaults: config.EditableAgentDefaults{
+				Workspace: "",
+				Provider:  "",
+				Model:     "",
+			},
+		},
+	}
+
+	body, _ := json.Marshal(ConfigValidateRequest{Config: doc})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var response ConfigValidateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if response.Valid {
+		t.Error("expected config to be invalid")
+	}
+	if len(response.Errors) == 0 {
+		t.Error("expected validation errors")
+	}
+}
+
+func TestHandleConfig_Post_InvalidPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	nc := &NativeChannel{}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config", nil)
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestHandleConfig_MethodNotAllowed(t *testing.T) {
+	nc := &NativeChannel{}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/config", nil)
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleConfig_Put_WithEnvProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	leleDir := filepath.Join(tmpDir, ".lele")
+	os.MkdirAll(leleDir, 0755)
+
+	nc := &NativeChannel{}
+
+	doc := config.EditableDocument{
+		Agents: config.EditableAgentsConfig{
+			Defaults: config.EditableAgentDefaults{
+				Workspace:         "/test",
+				Provider:          "openai",
+				Model:             "gpt-4",
+				MaxTokens:         8192,
+				MaxToolIterations: 20,
+			},
+		},
+		Providers: config.EditableProvidersConfig{
+			"my-openai": {
+				Type:    "openai",
+				APIBase: "https://api.example.com",
+				APIKey:  config.SecretValue{Mode: config.SecretModeEnv, EnvName: "MY_API_KEY"},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(ConfigUpdateRequest{Config: doc})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	nc.handleConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
+		return
+	}
+
+	configPath := filepath.Join(leleDir, "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+
+	if !bytes.Contains(data, []byte("{{ENV_MY_API_KEY}}")) {
+		t.Error("expected ENV placeholder to be preserved in saved config")
 	}
 }
