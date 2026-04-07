@@ -59,8 +59,318 @@ export type AgentDetails = Agent & {
   active_sessions?: number
 }
 
+export type SecretMode = 'literal' | 'env' | 'empty'
+
+export type SecretValue = {
+  mode: SecretMode
+  value?: string
+  env_name?: string
+  env_default?: string
+  has_env_var: boolean
+}
+
+export type EditableAgentDefaults = {
+  workspace: string
+  restrict_to_workspace: boolean
+  provider: string
+  model: string
+  model_fallbacks?: string[]
+  image_model?: string
+  image_model_fallbacks?: string[]
+  max_tokens: number
+  temperature?: number
+  max_tool_iterations: number
+}
+
+export type AgentModelConfig = {
+  primary?: string
+  fallbacks?: string[]
+}
+
+export type SubagentsConfig = {
+  allow_agents?: string[]
+  model?: AgentModelConfig
+}
+
+export type EditableAgentConfig = {
+  id: string
+  default?: boolean
+  name?: string
+  workspace?: string
+  model?: AgentModelConfig
+  skills?: string[]
+  subagents?: SubagentsConfig
+}
+
+export type EditableAgentsConfig = {
+  defaults: EditableAgentDefaults
+  list?: EditableAgentConfig[]
+}
+
+export type EditableSessionConfig = {
+  dm_scope?: string
+  identity_links?: Record<string, string[]>
+  ephemeral: boolean
+  ephemeral_threshold: number
+}
+
+export type BindingMatch = {
+  kind: string
+  id: string
+}
+
+export type BindingMatchContainer = {
+  channel: string
+  account_id?: string
+  peer?: BindingMatch
+  guild_id?: string
+  team_id?: string
+}
+
+export type AgentBinding = {
+  agent_id: string
+  match: BindingMatchContainer
+}
+
+export type EditableWhatsAppConfig = {
+  enabled: boolean
+  bridge_url: string
+  allow_from: string[]
+}
+
+export type EditableTelegramConfig = {
+  enabled: boolean
+  token: SecretValue
+  proxy?: string
+  allow_from: string[]
+  verbose?: 'off' | 'basic' | 'full'
+}
+
+export type EditableFeishuConfig = {
+  enabled: boolean
+  app_id: SecretValue
+  app_secret: SecretValue
+  encrypt_key: SecretValue
+  verification_token: SecretValue
+  allow_from: string[]
+}
+
+export type EditableDiscordConfig = {
+  enabled: boolean
+  token: SecretValue
+  allow_from: string[]
+}
+
+export type EditableMaixCamConfig = {
+  enabled: boolean
+  host: string
+  port: number
+  allow_from: string[]
+}
+
+export type EditableQQConfig = {
+  enabled: boolean
+  app_id: SecretValue
+  app_secret: SecretValue
+  allow_from: string[]
+}
+
+export type EditableDingTalkConfig = {
+  enabled: boolean
+  client_id: SecretValue
+  client_secret: SecretValue
+  allow_from: string[]
+}
+
+export type EditableSlackConfig = {
+  enabled: boolean
+  bot_token: SecretValue
+  app_token: SecretValue
+  allow_from: string[]
+}
+
+export type EditableLINEConfig = {
+  enabled: boolean
+  channel_secret: SecretValue
+  channel_access_token: SecretValue
+  webhook_host: string
+  webhook_port: number
+  webhook_path: string
+  allow_from: string[]
+}
+
+export type EditableOneBotConfig = {
+  enabled: boolean
+  ws_url: string
+  access_token: SecretValue
+  reconnect_interval: number
+  group_trigger_prefix: string[]
+  allow_from: string[]
+}
+
+export type EditableNativeConfig = {
+  enabled: boolean
+  host: string
+  port: number
+  token_expiry_days: number
+  pin_expiry_minutes: number
+  max_clients: number
+  cors_origins: string[]
+  session_expiry_days: number
+  max_upload_size_mb: number
+  upload_ttl_hours: number
+}
+
+export type EditableChannelsConfig = {
+  whatsapp: EditableWhatsAppConfig
+  telegram: EditableTelegramConfig
+  feishu: EditableFeishuConfig
+  discord: EditableDiscordConfig
+  maixcam: EditableMaixCamConfig
+  qq: EditableQQConfig
+  dingtalk: EditableDingTalkConfig
+  slack: EditableSlackConfig
+  line: EditableLINEConfig
+  onebot: EditableOneBotConfig
+  native: EditableNativeConfig
+}
+
+export type ReasoningConfig = {
+  effort?: 'low' | 'medium' | 'high'
+  summary?: 'auto' | 'detailed' | 'concise'
+}
+
+export type ProviderModelConfig = {
+  context_window?: number
+  model?: string
+  max_tokens?: number
+  temperature?: number
+  vision?: boolean
+  reasoning?: ReasoningConfig
+}
+
+export type EditableNamedProviderConfig = {
+  type?: string
+  api_key: SecretValue
+  api_base: string
+  proxy?: string
+  auth_method?: string
+  connect_mode?: string
+  web_search?: boolean
+  models?: Record<string, ProviderModelConfig>
+}
+
+export type EditableProvidersConfig = Record<string, EditableNamedProviderConfig>
+
+export type EditableBraveConfig = {
+  enabled: boolean
+  api_key: SecretValue
+  max_results: number
+}
+
+export type EditableDuckDuckGoConfig = {
+  enabled: boolean
+  max_results: number
+}
+
+export type EditablePerplexityConfig = {
+  enabled: boolean
+  api_key: SecretValue
+  max_results: number
+}
+
+export type EditableWebToolsConfig = {
+  brave: EditableBraveConfig
+  duckduckgo: EditableDuckDuckGoConfig
+  perplexity: EditablePerplexityConfig
+}
+
+export type EditableCronToolsConfig = {
+  exec_timeout_minutes: number
+}
+
+export type EditableExecConfig = {
+  enable_deny_patterns: boolean
+  custom_deny_patterns: string[]
+}
+
+export type EditableToolsConfig = {
+  web: EditableWebToolsConfig
+  cron: EditableCronToolsConfig
+  exec: EditableExecConfig
+}
+
+export type GatewayConfig = {
+  host: string
+  port: number
+}
+
+export type HeartbeatConfig = {
+  enabled: boolean
+  interval: number
+}
+
+export type DevicesConfig = {
+  enabled: boolean
+  monitor_usb: boolean
+}
+
+export type EditableLogsConfig = {
+  enabled: boolean
+  path?: string
+  max_days?: number
+  rotation?: 'daily' | 'weekly'
+}
+
+export type EditableConfig = {
+  agents: EditableAgentsConfig
+  session?: EditableSessionConfig
+  bindings?: AgentBinding[]
+  channels: EditableChannelsConfig
+  providers: EditableProvidersConfig
+  gateway: GatewayConfig
+  tools: EditableToolsConfig
+  heartbeat: HeartbeatConfig
+  devices: DevicesConfig
+  logs: EditableLogsConfig
+}
+
+export type ConfigMetadata = {
+  config_path: string
+  source: string
+  can_save: boolean
+  restart_required_sections: string[]
+  secrets_by_path: Record<string, string>
+}
+
 export type ConfigResponse = {
-  config: Record<string, unknown>
+  config: EditableConfig
+  meta: ConfigMetadata
+}
+
+export type ConfigError = {
+  path: string
+  message: string
+  code: string
+}
+
+export type ConfigUpdateResponse = {
+  config?: EditableConfig
+  meta: ConfigMetadata
+  errors?: ConfigError[]
+}
+
+export type ConfigUpdateRequest = {
+  config: EditableConfig
+}
+
+export type ConfigValidateRequest = {
+  config: EditableConfig
+}
+
+export type ConfigValidateResponse = {
+  valid: boolean
+  errors?: ConfigError[]
 }
 
 export type ToolsResponse = {

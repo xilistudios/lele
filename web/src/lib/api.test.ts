@@ -135,4 +135,53 @@ describe('createApiClient', () => {
     expect(available.model_groups?.[0]?.provider).toBe('openai')
     expect(updated.model).toBe('gpt-4o-mini')
   })
+
+  test('updates rotated refresh token after automatic refresh', async () => {
+    let refreshCalls = 0
+    const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+
+      if (url.endsWith('/api/v1/auth/refresh')) {
+        refreshCalls += 1
+        const body = JSON.parse(String(init?.body ?? '{}')) as { refresh_token?: string }
+
+        if (refreshCalls === 1) {
+          expect(body.refresh_token).toBe('refresh-1')
+          return new Response(
+            JSON.stringify({
+              token: 'token-2',
+              refresh_token: 'refresh-2',
+              expires: '2026-01-01T00:00:00Z',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+
+        expect(body.refresh_token).toBe('refresh-2')
+        return new Response(
+          JSON.stringify({
+            token: 'token-3',
+            refresh_token: 'refresh-3',
+            expires: '2026-01-01T00:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+
+      return new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('token-1', 'refresh-1')
+
+    await expect(api.sessions()).rejects.toThrow()
+    await expect(api.channels()).rejects.toThrow()
+
+    expect(refreshCalls).toBe(2)
+  })
 })

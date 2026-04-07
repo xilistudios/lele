@@ -9,6 +9,9 @@ import type {
   ChannelsResponse,
   ChatSessionsResponse,
   ConfigResponse,
+  ConfigUpdateResponse,
+  ConfigValidateResponse,
+  EditableConfig,
   FileUploadResponse,
   HistoryResponse,
   ModelsResponse,
@@ -79,6 +82,7 @@ export const createApiClient = (baseUrl: string) => {
 
       const data = (await response.json()) as AuthRefreshResponse
       tokenState.token = data.token
+      tokenState.refreshToken = data.refresh_token
 
       if (tokenState.onTokenRefresh) {
         const session: AuthSession = {
@@ -249,6 +253,16 @@ export const createApiClient = (baseUrl: string) => {
       })
     },
     config: () => request<ConfigResponse>(endpoints.system.config, { method: 'GET' }),
+    saveConfig: (config: EditableConfig) =>
+      request<ConfigUpdateResponse>(endpoints.system.config, {
+        method: 'PUT',
+        body: JSON.stringify({ config }),
+      }),
+    validateConfig: (config: EditableConfig) =>
+      request<ConfigValidateResponse>(endpoints.system.configValidate, {
+        method: 'POST',
+        body: JSON.stringify({ config }),
+      }),
     tools: () => request<ToolsResponse>(endpoints.system.tools, { method: 'GET' }),
     channels: () => request<ChannelsResponse>(endpoints.system.channels, { method: 'GET' }),
     systemStatus: () => request<SystemStatus>(endpoints.system.status, { method: 'GET' }),

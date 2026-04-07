@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { SettingsPage } from './components/pages/SettingsPage'
@@ -150,13 +150,14 @@ function SettingsRoute() {
 function AppContent() {
   const { session } = useAuthContext()
   const navigate = useNavigate()
+  const location = useLocation()
 
   // Redirect authenticated users away from /pair
   useEffect(() => {
-    if (session?.token && window.location.pathname === '/pair') {
+    if (session?.token && location.pathname === '/pair') {
       navigate('/', { replace: true })
     }
-  }, [session?.token, navigate])
+  }, [location.pathname, session?.token, navigate])
 
   return (
     <Routes>

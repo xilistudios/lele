@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useCallback, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useCallback, useState, type ReactNode } from 'react'
 import { createApiClient } from '../lib/api'
 import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
@@ -25,25 +25,6 @@ export function AuthProvider({ children, defaultApiUrl }: { children: ReactNode;
   const [session, setSession] = useState<AuthSession | null>(() => loadSession())
   const [isLoading, setIsLoading] = useState(false)
 
-  const api = useMemo(() => createApiClient(apiUrl), [apiUrl])
-
-  // Sync token with API client
-  useEffect(() => {
-    if (session?.token && session.refresh_token) {
-      api.setToken(session.token, session.refresh_token, (nextSession) => {
-        persistSession({
-          ...session,
-          ...nextSession,
-          client_id: session.client_id,
-          device_name: session.device_name,
-        })
-      })
-      return
-    }
-
-    api.clearToken()
-  }, [api, session])
-
   const setApiUrl = useCallback((nextApiUrl: string) => {
     setApiUrlState(nextApiUrl)
     saveApiUrl(nextApiUrl)
@@ -57,6 +38,23 @@ export function AuthProvider({ children, defaultApiUrl }: { children: ReactNode;
       clearSession()
     }
   }, [])
+
+  const api = useMemo(() => {
+    const client = createApiClient(apiUrl)
+
+    if (session?.token && session.refresh_token) {
+      client.setToken(session.token, session.refresh_token, (nextSession) => {
+        persistSession({
+          ...session,
+          ...nextSession,
+          client_id: session.client_id,
+          device_name: session.device_name,
+        })
+      })
+    }
+
+    return client
+  }, [apiUrl, persistSession, session])
 
   const handleAuth = useCallback(
     async (input: { apiUrl: string; pin: string; deviceName: string }) => {

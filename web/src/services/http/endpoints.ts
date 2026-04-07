@@ -21,6 +21,7 @@ export const endpoints = {
   },
   system: {
     config: '/api/v1/config',
+    configValidate: '/api/v1/config/validate',
     tools: '/api/v1/tools',
     channels: '/api/v1/channels',
     status: '/api/v1/status',
