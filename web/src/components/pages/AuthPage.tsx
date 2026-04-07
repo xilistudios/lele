@@ -4,13 +4,14 @@ import { useTranslation } from 'react-i18next'
 type Props = {
   apiUrl: string
   error: string | null
+  initialPin?: string
   onSubmit: (input: { apiUrl: string; pin: string; deviceName: string }) => Promise<void>
 }
 
-export function AuthPage({ apiUrl, error, onSubmit }: Props) {
+export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   const { t } = useTranslation()
   const [apiInput, setApiInput] = useState(apiUrl)
-  const [pin, setPin] = useState('')
+  const [pin, setPin] = useState(initialPin)
   const [deviceName, setDeviceName] = useState('My Desktop')
   const [loading, setLoading] = useState(false)
   const disabled =

@@ -1,332 +1,286 @@
-import { useCallback, useEffect, useState } from 'react'
-import { AuthView } from './components/AuthView'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
-import { useAuth } from './hooks/useAuth'
-import { useChatSessions } from './hooks/useChatSessions'
-import { useMessages } from './hooks/useMessages'
-import { useModels } from './hooks/useModels'
-import { usePollingFallback } from './hooks/usePollingFallback'
+import { SettingsPage } from './components/pages/SettingsPage'
+import { useAppLogic } from './hooks/useAppLogic'
+import { useAuth, defaultApiUrlFromWindow } from './hooks/useAuth'
 import { useSocket } from './hooks/useSocket'
-import { clearCurrentSessionKey } from './lib/storage'
-import type {
-  Agent,
-  AgentDetails,
-  ChannelInfo,
-  ChatMessage,
-  ConfigResponse,
-  SystemStatus,
-  ToolInfo,
-} from './lib/types'
+import type { ClientEvent } from './lib/types'
 
-const defaultApiUrl =
-  import.meta.env.VITE_LELE_API_URL ??
-  `${window.location.protocol}//${window.location.hostname}:18793`
+const defaultApiUrl = defaultApiUrlFromWindow()
 
-type DiagnosticsState = {
-  status: SystemStatus | null
-  channels: ChannelInfo[]
-  tools: ToolInfo[]
-  config: ConfigResponse | null
-  agentInfo: AgentDetails | null
+// Auth wrapper component to handle auto-pairing from URL params
+function AuthRoute() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [autoAuthAttempted, setAutoAuthAttempted] = useState(false)
+  const [autoAuthError, setAutoAuthError] = useState<string | null>(null)
+  const { apiUrl, session, handleAuth } = useAuth(defaultApiUrl)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [isAutoAuthenticating, setIsAutoAuthenticating] = useState(false)
+
+  const codeFromUrl = searchParams.get('code')
+  const deviceName = 'My Desktop'
+
+  // Auto-pair if code is provided and no session exists
+  useEffect(() => {
+    if (codeFromUrl && !session?.token && !autoAuthAttempted && !isAutoAuthenticating) {
+      setIsAutoAuthenticating(true)
+      setAutoAuthAttempted(true)
+
+      const autoAuth = async () => {
+        try {
+          setAutoAuthError(null)
+          await handleAuth({ apiUrl, pin: codeFromUrl, deviceName })
+          // Navigate to home on success with replace to avoid back-button issues
+          navigate('/', { replace: true })
+        } catch (err) {
+          setAutoAuthError((err as Error).message)
+          setIsAutoAuthenticating(false)
+        }
+      }
+
+      autoAuth()
+    }
+  }, [codeFromUrl, session?.token, autoAuthAttempted, isAutoAuthenticating, apiUrl, handleAuth, navigate])
+
+  const handleAuthSubmit = useCallback(
+    async (input: { apiUrl: string; pin: string; deviceName: string }) => {
+      try {
+        setAuthError(null)
+        await handleAuth(input)
+        navigate('/', { replace: true })
+      } catch (err) {
+        setAuthError((err as Error).message)
+      }
+    },
+    [handleAuth, navigate]
+  )
+
+  // Pre-fill PIN from URL if available
+  const initialPin = codeFromUrl ?? ''
+
+  if (isAutoAuthenticating && !autoAuthError) {
+    // Show loading state during auto-auth
+    return (
+      <main className="flex min-h-screen items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md space-y-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-sky-950/30">
+          <div className="flex items-center justify-center py-8">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+          </div>
+          <p className="text-center text-slate-300">Connecting...</p>
+        </div>
+      </main>
+    )
+  }
+
+  return (
+    <AuthPage
+      apiUrl={apiUrl}
+      error={authError ?? autoAuthError}
+      initialPin={initialPin}
+      onSubmit={handleAuthSubmit}
+    />
+  )
 }
 
-function App() {
-  const { api, apiUrl, session, persistSession, handleAuth, ensureSession } = useAuth(defaultApiUrl)
-  const [error, setError] = useState<string | null>(null)
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [currentAgentId, setCurrentAgentId] = useState<string | null>(null)
-  const [diagnostics, setDiagnostics] = useState<DiagnosticsState>({
-    status: null,
-    channels: [],
-    tools: [],
-    config: null,
-    agentInfo: null,
-  })
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+// Protected route wrapper
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { session } = useAuth(defaultApiUrl)
 
+  if (!session?.token) {
+    return <Navigate to="/pair" replace />
+  }
+
+  return <>{children}</>
+}
+
+// Chat route component
+function ChatRoute() {
+  const { chat_id } = useParams<{ chat_id?: string }>()
+  const navigate = useNavigate()
+  const { api, apiUrl, session, persistSession } = useAuth(defaultApiUrl)
   const token = session?.token ?? null
   const clientId = session?.client_id ?? null
-
-  const {
-    sessions,
-    currentSessionKey,
-    currentSessionKeyRef,
-    refreshSessions,
-    selectSession,
-    createSession,
-    deleteSession,
-    clearSession,
-  } = useChatSessions(api, token, clientId)
-
-  const { modelState, loadModels, selectModel } = useModels(api, token)
-
-  const {
-    messages,
-    messagesRef,
-    toolStatus,
-    approvalRequest,
-    pendingAttachments,
-    loadHistory,
-    handleEvent,
-    sendMessage,
-    approveRequest,
-    setPendingAttachments,
-    clearMessages,
-  } = useMessages(api, token, currentSessionKey, currentSessionKeyRef)
+  const deviceName = session?.device_name ?? ''
+  const eventHandlerRef = useRef<(event: ClientEvent) => void>(() => {})
 
   const {
     status: wsStatus,
     send: wsSend,
     close: wsClose,
   } = useSocket(apiUrl, token, {
-    onEvent: handleEvent,
+    onEvent: (event) => eventHandlerRef.current(event),
   })
 
-  usePollingFallback({
-    api,
-    currentSessionKey,
-    wsStatus,
-    onMessages: (newMessages: ChatMessage[]) => {
-      if (currentSessionKeyRef.current === currentSessionKey) {
-        messagesRef.current = newMessages
-      }
-    },
-    sessionToken: token ?? undefined,
-    toChatMessages: (history, sessionKey) => {
-      return history.flatMap((message, index) => {
-        const base: ChatMessage = {
-          id: `${sessionKey}:${index}:${message.role}`,
-          role: message.role,
-          content: message.content,
-          streaming: false,
-          createdAt: new Date().toISOString(),
-          sessionKey,
-        }
-        return [base]
-      })
-    },
-  })
+  const app = useAppLogic(api, token, clientId, wsStatus, wsSend, wsClose, (s) => persistSession(s))
 
+  eventHandlerRef.current = app.handleEvent
+
+  // Sync URL param with session selection - only runs when chat_id changes
   useEffect(() => {
-    if (!session) return
+    if (!chat_id) return
 
-    const initSession = async () => {
-      const validSession = await ensureSession(session)
-      if (!validSession) {
-        setError('Session expired')
-        return
+    const availableKeys = new Set(app.sessions.map((s) => s.key))
+    if (availableKeys.has(chat_id)) {
+      // URL session exists, select it (only if different from current)
+      if (app.currentSessionKey !== chat_id) {
+        app.onSelectSession(chat_id)
       }
-
-      try {
-        const agentsResult = await api.agents()
-        setAgents(agentsResult.agents)
-        if (agentsResult.agents.length > 0 && !currentAgentId) {
-          setCurrentAgentId(agentsResult.agents[0].id)
-        }
-
-        await refreshSessions()
-        setError(null)
-      } catch (err) {
-        setError((err as Error).message)
-      }
+    } else if (app.sessions.length > 0) {
+      // Chat ID doesn't exist, redirect to home
+      navigate('/', { replace: true })
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat_id]) // Only run when chat_id changes from URL
 
-    initSession()
-  }, [session, api, ensureSession, currentAgentId, refreshSessions])
-
+  // Sync session selection with URL - only runs when currentSessionKey changes
   useEffect(() => {
-    if (!currentAgentId || !token) return
+    if (!app.currentSessionKey) return
 
-    const loadAgentData = async () => {
-      try {
-        const [info, statusResult, channelsResult, toolsResult, configResult] = await Promise.all([
-          api.agentInfo(currentAgentId),
-          api.systemStatus(),
-          api.channels(),
-          api.tools(),
-          api.config(),
-        ])
+    const currentPath = chat_id ? `/chat/${chat_id}` : '/'
+    const newPath = `/chat/${app.currentSessionKey}`
 
-        setDiagnostics({
-          status: statusResult,
-          channels: channelsResult.channels,
-          tools: toolsResult.tools,
-          config: configResult,
-          agentInfo: info,
-        })
-      } catch (err) {
-        console.error('Failed to load agent data:', err)
-      }
+    if (currentPath !== newPath) {
+      navigate(newPath, { replace: true })
     }
-
-    loadAgentData()
-  }, [currentAgentId, token, api])
-
-  useEffect(() => {
-    if (!currentSessionKey || !currentAgentId || !token) return
-
-    wsSend('subscribe', { session_key: currentSessionKey, agent_id: currentAgentId })
-    loadHistory(currentSessionKey)
-    loadModels(currentAgentId, currentSessionKey, messagesRef.current.length > 0)
-  }, [currentSessionKey, currentAgentId, token, wsSend, loadHistory, loadModels, messagesRef])
-
-  const handleAuthSubmit = useCallback(
-    async (input: { apiUrl: string; pin: string; deviceName: string }) => {
-      try {
-        setError(null)
-        await handleAuth(input)
-      } catch (err) {
-        setError((err as Error).message)
-      }
-    },
-    [handleAuth],
-  )
-
-  const handleLogout = useCallback(() => {
-    wsClose()
-    clearMessages()
-    persistSession(null)
-    clearCurrentSessionKey()
-    setAgents([])
-    setCurrentAgentId(null)
-    setDiagnostics({
-      status: null,
-      channels: [],
-      tools: [],
-      config: null,
-      agentInfo: null,
-    })
-    setError(null)
-  }, [wsClose, clearMessages, persistSession])
-
-  const handleSend = useCallback(
-    (content: string, attachments: string[]) => {
-      if (!currentSessionKey || !currentAgentId) return
-
-      sendMessage(content, attachments, currentSessionKey, currentAgentId)
-      wsSend('send', {
-        session_key: currentSessionKey,
-        agent_id: currentAgentId,
-        content,
-        attachments,
-      })
-      setPendingAttachments([])
-    },
-    [currentSessionKey, currentAgentId, sendMessage, wsSend, setPendingAttachments],
-  )
-
-  const handleApprove = useCallback(
-    (approved: boolean) => {
-      if (!approvalRequest) return
-      const result = approveRequest(approved, approvalRequest.id)
-      wsSend('approve', result)
-    },
-    [approvalRequest, approveRequest, wsSend],
-  )
-
-  const handleCancel = useCallback(() => {
-    wsSend('cancel', {})
-  }, [wsSend])
-
-  const handleSelectSession = useCallback(
-    (sessionKey: string) => {
-      wsSend('unsubscribe', {})
-      selectSession(sessionKey)
-      clearMessages()
-    },
-    [wsSend, selectSession, clearMessages],
-  )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.currentSessionKey]) // Only run when currentSessionKey changes
 
   const handleCreateSession = useCallback(() => {
-    wsSend('unsubscribe', {})
-    const newKey = createSession()
-    if (newKey) {
-      clearMessages()
+    const newKey = app.onCreateSession()
+    if (newKey !== null) {
+      navigate(`/chat/${newKey}`, { replace: true })
     }
-  }, [wsSend, createSession, clearMessages])
+  }, [app, navigate])
 
   const handleDeleteSession = useCallback(
-    async (sessionKey: string) => {
-      await deleteSession(sessionKey)
+    async (key: string) => {
+      await app.onDeleteSession(key)
+      // Navigation is handled by useChatSessions internally
     },
-    [deleteSession],
+    [app.onDeleteSession]
   )
 
-  const handleClearSession = useCallback(async () => {
-    if (!currentSessionKey) return
-    await clearSession(currentSessionKey)
-    clearMessages()
-  }, [currentSessionKey, clearSession, clearMessages])
+  const handleClearSession = useCallback(() => {
+    void app.onClearSession()
+    // Stay on the same route, just clear the messages
+  }, [app.onClearSession])
 
-  const handleSelectAgent = useCallback((agentId: string) => {
-    setCurrentAgentId(agentId)
-  }, [])
-
-  const handleSelectModel = useCallback(
-    async (model: string) => {
-      if (!currentSessionKey) return
-      await selectModel(model, currentSessionKey)
-    },
-    [currentSessionKey, selectModel],
-  )
-
-  const handleUploadAttachments = useCallback(
-    async (files: File[]): Promise<string[]> => {
-      if (!token) return []
-      try {
-        const result = await api.uploadFiles(files)
-        return result.files.map((f) => f.path)
-      } catch (err) {
-        setError((err as Error).message)
-        return []
-      }
-    },
-    [token, api],
-  )
-
-  const handleToggleDiagnostics = useCallback(() => {
-    setDiagnosticsOpen((current) => !current)
-  }, [])
-
-  const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
-  const isStreaming = messages.some((m) => m.streaming)
-
-  if (!session?.token) {
-    return <AuthView apiUrl={apiUrl} error={error} onSubmit={handleAuthSubmit} />
-  }
+  const handleLogout = useCallback(() => {
+    app.onLogout()
+    navigate('/pair', { replace: true })
+  }, [app.onLogout, navigate])
 
   return (
     <ChatPage
       apiUrl={apiUrl}
-      deviceName={session.device_name ?? ''}
+      deviceName={deviceName}
       wsStatus={wsStatus}
-      sessions={sessions}
-      agents={agents}
-      currentSessionKey={currentSessionKey}
-      currentAgent={currentAgent}
-      diagnostics={diagnostics}
-      diagnosticsOpen={diagnosticsOpen}
-      error={error}
-      modelState={modelState}
-      messages={messages}
-      approvalRequest={approvalRequest}
-      pendingAttachments={pendingAttachments}
-      toolStatus={toolStatus}
-      isStreaming={isStreaming}
-      onApprove={handleApprove}
-      onUploadAttachments={handleUploadAttachments}
-      onAttachmentsChange={setPendingAttachments}
-      onCancel={handleCancel}
-      onClearSession={() => void handleClearSession()}
+      sessions={app.sessions}
+      agents={app.agents}
+      currentSessionKey={app.currentSessionKey}
+      currentAgent={app.currentAgent}
+      diagnostics={app.diagnostics}
+      diagnosticsOpen={app.diagnosticsOpen}
+      error={app.error}
+      modelState={app.modelState}
+      messages={app.messages}
+      approvalRequest={app.approvalRequest}
+      pendingAttachments={app.pendingAttachments}
+      toolStatus={app.toolStatus}
+      isStreaming={app.isStreaming}
+      onApprove={app.onApprove}
+      onUploadAttachments={app.onUploadAttachments}
+      onAttachmentsChange={app.onAttachmentsChange}
+      onCancel={app.onCancel}
+      onClearSession={handleClearSession}
       onCreateSession={handleCreateSession}
       onLogout={handleLogout}
-      onSend={handleSend}
-      onSelectAgent={handleSelectAgent}
-      onSelectModel={(model) => void handleSelectModel(model)}
-      onSelectSession={handleSelectSession}
-      onDeleteSession={(key) => void handleDeleteSession(key)}
-      onToggleDiagnostics={handleToggleDiagnostics}
+      onSend={app.onSend}
+      onSelectAgent={app.onSelectAgent}
+      onSelectModel={app.onSelectModel}
+      onSelectSession={app.onSelectSession}
+      onDeleteSession={handleDeleteSession}
+      onToggleDiagnostics={app.onToggleDiagnostics}
     />
+  )
+}
+
+// Settings route component
+function SettingsRoute() {
+  const navigate = useNavigate()
+  const { api, apiUrl, session, persistSession } = useAuth(defaultApiUrl)
+  const token = session?.token ?? null
+  const clientId = session?.client_id ?? null
+  const eventHandlerRef = useRef<(event: ClientEvent) => void>(() => {})
+
+  const {
+    status: wsStatus,
+    send: wsSend,
+    close: wsClose,
+  } = useSocket(apiUrl, token, {
+    onEvent: (event) => eventHandlerRef.current(event),
+  })
+
+  const app = useAppLogic(api, token, clientId, wsStatus, wsSend, wsClose, (s) => persistSession(s))
+
+  eventHandlerRef.current = app.handleEvent
+
+  const handleLogout = useCallback(() => {
+    app.onLogout()
+    navigate('/pair', { replace: true })
+  }, [app.onLogout, navigate])
+
+  return <SettingsPage diagnostics={app.diagnostics} onLogout={handleLogout} />
+}
+
+function App() {
+  const { session } = useAuth(defaultApiUrl)
+  const navigate = useNavigate()
+
+  // Redirect authenticated users away from /pair
+  useEffect(() => {
+    if (session?.token && window.location.pathname === '/pair') {
+      navigate('/', { replace: true })
+    }
+  }, [session?.token, navigate])
+
+  return (
+    <Routes>
+      {/* Public routes */}
+      <Route path="/pair" element={<AuthRoute />} />
+
+      {/* Protected routes */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <ChatRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/chat/:chat_id"
+        element={
+          <ProtectedRoute>
+            <ChatRoute />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <SettingsRoute />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 

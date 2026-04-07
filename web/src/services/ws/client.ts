@@ -1,31 +1,87 @@
-import type { ClientCommand, ClientEvent } from './events'
-import { initialReconnectDelay, nextReconnectDelay } from './reconnect'
+import type { ClientEvent } from './events'
+import { type ClientCommand, parseEvent, serializeCommand } from './events'
+import { type ReconnectStrategy, defaultReconnectStrategy } from './reconnect'
 
-type SocketHandlers = {
-  onConnecting?: () => void
-  onOpen?: () => void
-  onClose?: () => void
-  onEvent?: (event: ClientEvent) => void
-  onError?: (error: Event) => void
+type ConnectionState = 'disconnected' | 'connecting' | 'connected'
+
+type SocketEventMap = {
+  connecting: () => void
+  open: () => void
+  close: () => void
+  event: (event: ClientEvent) => void
+  error: (error: Event) => void
+  stateChange: (state: ConnectionState) => void
+}
+
+type SocketEventKey = keyof SocketEventMap
+
+export type LeleSocketOptions = {
+  reconnectStrategy?: Partial<ReconnectStrategy>
+  pingIntervalMs?: number
 }
 
 export class LeleSocket {
   private socket: WebSocket | null = null
   private shouldReconnect = true
-  private reconnectDelay = initialReconnectDelay
+  private reconnectDelay: number
+  private reconnectStrategy: ReconnectStrategy
   private readonly openQueue: ClientCommand[] = []
   private pingIntervalId: number | null = null
   private subscribedSessionKey: string | null = null
+  private _state: ConnectionState = 'disconnected'
+  private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
+  private readonly pingIntervalMs: number
 
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
-    private readonly handlers: SocketHandlers,
-  ) {}
+    opts: LeleSocketOptions = {},
+  ) {
+    this.reconnectStrategy = defaultReconnectStrategy(opts.reconnectStrategy)
+    this.reconnectDelay = this.reconnectStrategy.initialDelay
+    this.pingIntervalMs = opts.pingIntervalMs ?? 25000
+  }
+
+  get state(): ConnectionState {
+    return this._state
+  }
+
+  on<K extends SocketEventKey>(event: K, handler: SocketEventMap[K]): this {
+    const list = this.listeners[event] as Array<SocketEventMap[K]>
+    if (list) {
+      list.push(handler)
+    } else {
+      ;(this.listeners as Record<string, unknown[]>)[event] = [handler]
+    }
+    return this
+  }
+
+  off<K extends SocketEventKey>(event: K, handler: SocketEventMap[K]): this {
+    const list = this.listeners[event] as Array<SocketEventMap[K]> | undefined
+    if (!list) return this
+    const index = list.indexOf(handler)
+    if (index !== -1) list.splice(index, 1)
+    return this
+  }
+
+  private emit<K extends SocketEventKey>(event: K, ...args: Parameters<SocketEventMap[K]>) {
+    const list = this.listeners[event] as Array<(...a: unknown[]) => void> | undefined
+    if (list) {
+      for (const handler of list) {
+        handler(...args)
+      }
+    }
+  }
+
+  private setState(next: ConnectionState) {
+    this._state = next
+    this.emit('stateChange', next)
+  }
 
   connect() {
     this.shouldReconnect = true
-    this.handlers.onConnecting?.()
+    this.setState('connecting')
+    this.emit('connecting')
     this.open()
   }
 
@@ -37,9 +93,13 @@ export class LeleSocket {
     }
     this.socket?.close()
     this.socket = null
+    this.setState('disconnected')
   }
 
-  send(event: ClientCommand['event'], data: ClientCommand['data']) {
+  send<E extends ClientCommand['event']>(
+    event: E,
+    data: Extract<ClientCommand, { event: E }>['data'],
+  ) {
     if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
       const sessionKey = (data as { session_key?: unknown }).session_key
       this.subscribedSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
@@ -57,12 +117,14 @@ export class LeleSocket {
       }
     }
 
+    const command = { event, data } as ClientCommand
+
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.openQueue.push({ event, data })
+      this.openQueue.push(command)
       return
     }
 
-    this.socket.send(JSON.stringify({ event, data }))
+    this.socket.send(serializeCommand(command))
   }
 
   private open() {
@@ -76,21 +138,22 @@ export class LeleSocket {
     this.socket = socket
 
     socket.addEventListener('open', () => {
-      this.reconnectDelay = initialReconnectDelay
-      this.handlers.onOpen?.()
+      this.reconnectDelay = this.reconnectStrategy.initialDelay
+      this.setState('connected')
+      this.emit('open')
       while (this.openQueue.length > 0) {
         const message = this.openQueue.shift()
         if (message) {
-          socket.send(JSON.stringify(message))
+          socket.send(serializeCommand(message))
         }
       }
     })
 
     socket.addEventListener('message', (event) => {
       try {
-        this.handlers.onEvent?.(JSON.parse(event.data as string) as ClientEvent)
+        this.emit('event', parseEvent(event.data as string))
       } catch {
-        this.handlers.onEvent?.({
+        this.emit('event', {
           event: 'error',
           data: { code: 'unknown_event', message: 'Invalid event payload' },
         })
@@ -98,7 +161,7 @@ export class LeleSocket {
     })
 
     socket.addEventListener('error', (event) => {
-      this.handlers.onError?.(event)
+      this.emit('error', event)
     })
 
     socket.addEventListener('open', () => {
@@ -110,7 +173,7 @@ export class LeleSocket {
         if (this.socket?.readyState === WebSocket.OPEN) {
           this.send('ping', {})
         }
-      }, 25000)
+      }, this.pingIntervalMs)
     })
 
     socket.addEventListener('close', () => {
@@ -118,13 +181,14 @@ export class LeleSocket {
         window.clearInterval(this.pingIntervalId)
         this.pingIntervalId = null
       }
-      this.handlers.onClose?.()
+      this.setState('disconnected')
+      this.emit('close')
       if (!this.shouldReconnect) {
         return
       }
 
       window.setTimeout(() => this.open(), this.reconnectDelay)
-      this.reconnectDelay = nextReconnectDelay(this.reconnectDelay)
+      this.reconnectDelay = this.reconnectStrategy.nextDelay(this.reconnectDelay)
     })
   }
 }

@@ -107,8 +107,8 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
   }, [clientId, persistCurrentSessionKey])
 
   const deleteSession = useCallback(
-    async (sessionKey: string) => {
-      if (!token) return
+    async (sessionKey: string): Promise<string | null> => {
+      if (!token) return null
 
       await api.deleteSession(sessionKey)
       setSessions((current) => current.filter((s) => s.key !== sessionKey))
@@ -117,7 +117,9 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
         const remainingSessions = sessionsRef.current.filter((s) => s.key !== sessionKey)
         const nextSessionKey = remainingSessions.length > 0 ? remainingSessions[0].key : null
         persistCurrentSessionKey(nextSessionKey)
+        return nextSessionKey
       }
+      return currentSessionKeyRef.current
     },
     [api, token, persistCurrentSessionKey],
   )

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createApiClient } from '../lib/api'
 import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
@@ -11,6 +11,22 @@ export function useAuth(defaultApiUrl: string) {
   const [apiUrl, setApiUrlState] = useState(() => loadApiUrl(defaultApiUrl))
   const [session, setSession] = useState<AuthSession | null>(() => loadSession())
   const api = useMemo(() => createApiClient(apiUrl), [apiUrl])
+
+  useEffect(() => {
+    if (session?.token && session.refresh_token) {
+      api.setToken(session.token, session.refresh_token, (nextSession) => {
+        persistSession({
+          ...session,
+          ...nextSession,
+          client_id: session.client_id,
+          device_name: session.device_name,
+        })
+      })
+      return
+    }
+
+    api.clearToken()
+  }, [api, session])
 
   const setApiUrl = useCallback((nextApiUrl: string) => {
     setApiUrlState(nextApiUrl)

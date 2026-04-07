@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { SessionItem } from '../molecules/SessionItem'
 
@@ -30,12 +31,10 @@ export function Sidebar({
   currentSessionKey,
   onCreateSession,
   onClearSession,
-  onSelectSession,
   onDeleteSession,
-  onLogout,
-  onToggleDiagnostics,
 }: Props) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
 
   const sortedSessions = [...sessions].sort(
     (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
@@ -55,7 +54,7 @@ export function Sidebar({
           <p className="truncate text-[10px] text-[#666]">{apiUrl.replace(/^https?:\/\//, '')}</p>
         </div>
         <button
-          onClick={onLogout}
+          onClick={() => navigate('/pair')}
           title={t('chat.logout')}
           type="button"
           aria-label={t('chat.logout')}
@@ -131,7 +130,7 @@ export function Sidebar({
               sessionName={session.name}
               messageCount={session.message_count}
               selected={session.key === currentSession?.key}
-              onSelect={() => onSelectSession(session.key)}
+              onSelect={() => navigate(`/chat/${session.key}`)}
               onDelete={() => onDeleteSession(session.key)}
             />
           ))}
@@ -148,7 +147,7 @@ export function Sidebar({
           title={t('chat.settings')}
           aria-label={t('chat.settings')}
           className="text-[#444] transition-colors hover:text-[#888]"
-          onClick={onToggleDiagnostics}
+          onClick={() => navigate('/settings')}
         >
           <svg
             width="14"

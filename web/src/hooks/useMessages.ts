@@ -40,20 +40,23 @@ export const toChatMessages = (
     }
 
     if (message.role === 'assistant' && message.tool_calls?.length) {
-      return [
-        baseMessage,
-        ...message.tool_calls.map((toolCall, toolIndex) => ({
-          id: `${sessionKey}:${index}:tool:${toolCall.id || toolIndex}`,
-          role: 'tool' as const,
-          content: '',
-          streaming: false,
-          createdAt: new Date().toISOString(),
-          sessionKey,
-          toolName: toolCall.name ?? toolCall.id,
-          toolArgs: formatToolCallArgs(toolCall),
-          toolStatus: 'completed' as const,
-        })),
-      ]
+      const toolMessages = message.tool_calls.map((toolCall, toolIndex) => ({
+        id: `${sessionKey}:${index}:tool:${toolCall.id || toolIndex}`,
+        role: 'tool' as const,
+        content: '',
+        streaming: false,
+        createdAt: new Date().toISOString(),
+        sessionKey,
+        toolName: toolCall.name ?? toolCall.id,
+        toolArgs: formatToolCallArgs(toolCall),
+        toolStatus: 'completed' as const,
+      }))
+      // Si el assistant tiene tool_calls pero content vacío, mostrar tools PRIMERO
+      // para mantener orden cronológico visual (tools ejecutan antes del texto final)
+      if (!message.content || message.content === '') {
+        return [...toolMessages, baseMessage]
+      }
+      return [baseMessage, ...toolMessages]
     }
 
     if (message.role === 'tool') {
@@ -173,11 +176,11 @@ export function useMessages(
       setPendingAttachments([])
 
       const response = await api.sendMessage({
-          content: normalizedContent,
-          session_key: sessionKey,
-          agent_id: agentId ?? undefined,
-          attachments: attachments.length > 0 ? attachments : undefined,
-        })
+        content: normalizedContent,
+        session_key: sessionKey,
+        agent_id: agentId ?? undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      })
 
       ensureAssistantPlaceholder(response.message_id, response.session_key)
       return response
@@ -204,21 +207,35 @@ export function useMessages(
           break
         case 'message.complete':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === (data.message_id as string)
-                ? {
-                    ...message,
-                    content: data.content as string,
-                    attachments: data.attachments as ChatMessage['attachments'],
-                    sessionKey: (eventSessionKey ??
-                      currentSessionKeyRef.current ??
-                      message.sessionKey) as string,
-                    streaming: false,
-                  }
-                : message,
-            ),
-          )
+          setMessages((current) => {
+            const targetId = data.message_id as string
+            const targetIndex = current.findIndex((message) => message.id === targetId)
+            if (targetIndex < 0) return current
+
+            const updatedMessage: ChatMessage = {
+              ...current[targetIndex],
+              content: data.content as string,
+              attachments: data.attachments as ChatMessage['attachments'],
+              sessionKey: (eventSessionKey ??
+                currentSessionKeyRef.current ??
+                current[targetIndex].sessionKey) as string,
+              streaming: false,
+            }
+
+            // Si hay tools DESPUÉS de este assistant, moverlo al final para mantener orden
+            const hasToolsAfter = current.slice(targetIndex + 1).some((m) => m.role === 'tool')
+            if (hasToolsAfter) {
+              const messagesWithoutTarget = [
+                ...current.slice(0, targetIndex),
+                ...current.slice(targetIndex + 1),
+              ]
+              return [...messagesWithoutTarget, updatedMessage]
+            }
+
+            return current.map((message, index) =>
+              index === targetIndex ? updatedMessage : message,
+            )
+          })
           setToolStatus(null)
           setPendingAttachments([])
           break
@@ -240,20 +257,9 @@ export function useMessages(
             }
           } else {
             if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
+            // Usar la misma transformación que history para consistencia
             const existingIds = new Set(messagesRef.current.map((m) => m.id))
-            const newMessages = catchupData.messages
-              .map((msg, idx) => ({
-                id: `${eventSessionKey}:catchup:${idx}:${msg.role}`,
-                role: msg.role,
-                content: msg.content,
-                streaming: false,
-                createdAt: new Date().toISOString(),
-                sessionKey: eventSessionKey as string,
-                toolName: msg.tool_call_id,
-                toolArgs: msg.tool_calls?.[0]?.name,
-                toolStatus: msg.role === 'tool' ? ('completed' as const) : undefined,
-                toolResult: msg.role === 'tool' ? msg.content : undefined,
-              }))
+            const newMessages = toChatMessages(catchupData.messages, eventSessionKey as string)
               .filter((m) => !existingIds.has(m.id))
             if (newMessages.length > 0) {
               setMessages((current) => [...current, ...newMessages])
@@ -283,43 +289,36 @@ export function useMessages(
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
           setToolStatus(event.data as ToolStatus)
           const toolId = `tool-${data.tool as string}-${Date.now()}`
+          const newToolMessage: ChatMessage = {
+            id: toolId,
+            role: 'tool',
+            content: '',
+            streaming: false,
+            createdAt: new Date().toISOString(),
+            sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as
+              | string
+              | undefined,
+            toolName: data.tool as string,
+            toolArgs: data.action as string,
+            toolStatus: 'executing',
+          }
           setMessages((current) => {
             const lastAssistantIndex = [...current]
               .reverse()
               .findIndex((message) => message.role === 'assistant')
             if (lastAssistantIndex < 0) {
-              return [
-                ...current,
-                {
-                  id: toolId,
-                  role: 'tool',
-                  content: '',
-                  streaming: false,
-                  createdAt: new Date().toISOString(),
-                  sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as
-                    | string
-                    | undefined,
-                  toolName: data.tool as string,
-                  toolArgs: data.action as string,
-                  toolStatus: 'executing',
-                },
-              ]
+              return [...current, newToolMessage]
             }
-            const targetIndex = current.length - lastAssistantIndex
+            const lastAssistant = current[current.length - lastAssistantIndex - 1]
+            // Si el último assistant está vacío (streaming sin contenido aún),
+            // insertar el tool ANTES de él para mantener orden cronológico
+            const insertBeforeLastAssistant =
+              lastAssistant.content === '' && lastAssistant.streaming
+            const targetIndex = insertBeforeLastAssistant
+              ? current.length - lastAssistantIndex - 1
+              : current.length - lastAssistantIndex
             const newMessages = [...current]
-            newMessages.splice(targetIndex, 0, {
-              id: toolId,
-              role: 'tool',
-              content: '',
-              streaming: false,
-              createdAt: new Date().toISOString(),
-              sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as
-                | string
-                | undefined,
-              toolName: data.tool as string,
-              toolArgs: data.action as string,
-              toolStatus: 'executing',
-            })
+            newMessages.splice(targetIndex, 0, newToolMessage)
             return newMessages
           })
           break

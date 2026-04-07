@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClientEvent } from '../lib/types'
 import { LeleSocket } from '../services/ws/client'
 
-type SocketStatus = 'disconnected' | 'connecting' | 'connected'
+export type SocketStatus = 'disconnected' | 'connecting' | 'connected'
 
 type EventHandlers = {
   onEvent?: (event: ClientEvent) => void
@@ -30,22 +30,25 @@ export function useSocket(
       return
     }
 
-    const socket = new LeleSocket(apiUrl, token, {
-      onConnecting: () => {
-        setStatus('connecting')
-        handlersRef.current.onStatusChange?.('connecting')
-      },
-      onOpen: () => {
-        setStatus('connected')
-        handlersRef.current.onStatusChange?.('connected')
-      },
-      onClose: () => {
-        setStatus('disconnected')
-        handlersRef.current.onStatusChange?.('disconnected')
-      },
-      onEvent: (event) => {
-        handlersRef.current.onEvent?.(event)
-      },
+    const socket = new LeleSocket(apiUrl, token)
+
+    socket.on('connecting', () => {
+      setStatus('connecting')
+      handlersRef.current.onStatusChange?.('connecting')
+    })
+
+    socket.on('open', () => {
+      setStatus('connected')
+      handlersRef.current.onStatusChange?.('connected')
+    })
+
+    socket.on('close', () => {
+      setStatus('disconnected')
+      handlersRef.current.onStatusChange?.('disconnected')
+    })
+
+    socket.on('event', (event) => {
+      handlersRef.current.onEvent?.(event)
     })
 
     socketRef.current = socket
@@ -59,7 +62,7 @@ export function useSocket(
   }, [apiUrl, token])
 
   const send = useCallback((event: string, data: Record<string, unknown>) => {
-    socketRef.current?.send(event as 'subscribe', data)
+    socketRef.current?.send(event as 'subscribe', data as never)
   }, [])
 
   const close = useCallback(() => {
