@@ -71,13 +71,15 @@ type WSApprovalRequestPayload struct {
 }
 
 type WSToolExecutingPayload struct {
-	Tool   string `json:"tool"`
-	Action string `json:"action"`
+	SessionKey string `json:"session_key,omitempty"`
+	Tool       string `json:"tool"`
+	Action     string `json:"action"`
 }
 
 type WSToolResultPayload struct {
-	Tool   string `json:"tool"`
-	Result string `json:"result"`
+	SessionKey string `json:"session_key,omitempty"`
+	Tool       string `json:"tool"`
+	Result     string `json:"result"`
 }
 
 type WSErrorPayload struct {

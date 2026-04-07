@@ -187,7 +187,7 @@ func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
 		n.handleWSCancel(client, msg.Data)
 
 	case "ping":
-		client.Send(mustMarshal(WSMessage{Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})}))
+		_ = client.Send(mustMarshal(WSMessage{Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})}))
 
 	default:
 		n.sendError(client, "unknown_event", "unknown event type: "+msg.Event)
@@ -270,7 +270,7 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		Metadata:    map[string]string{"message_id": messageID},
 	})
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "message.ack",
 		Data:  mustMarshal(map[string]string{"message_id": messageID, "session_key": sessionKey}),
 	}))
@@ -291,7 +291,7 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage) 
 		SessionKey: client.SessionKey,
 	})
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "approve.ack",
 		Data:  mustMarshal(map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}),
 	}))
@@ -307,7 +307,7 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	client.SessionKey = payload.SessionKey
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "subscribe.ack",
 		Data:  mustMarshal(map[string]string{"session_key": payload.SessionKey}),
 	}))
@@ -322,7 +322,7 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 
 	client.SessionKey = "native:" + client.ClientInfo.ClientID
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "unsubscribe.ack",
 		Data:  mustMarshal(map[string]string{"session_key": payload.SessionKey}),
 	}))
@@ -338,7 +338,7 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage) {
 	n.agentLoop.StopAgent(client.SessionKey)
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "cancel.ack",
 		Data:  mustMarshal(map[string]string{"status": "cancelled"}),
 	}))
@@ -361,7 +361,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 		}
 	}
 
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "welcome",
 		Data: mustMarshal(map[string]interface{}{
 			"client_id":   client.ClientInfo.ClientID,
@@ -375,7 +375,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 }
 
 func (n *NativeChannel) sendError(client *WSClient, code, message string) {
-	client.Send(mustMarshal(WSMessage{
+	_ = client.Send(mustMarshal(WSMessage{
 		Event: "error",
 		Data:  mustMarshal(WSErrorPayload{Code: code, Message: message}),
 	}))

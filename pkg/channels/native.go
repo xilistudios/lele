@@ -331,8 +331,9 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	switch msg.Event {
 	case "tool.executing":
 		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
-			Tool:   msg.Metadata["tool"],
-			Action: msg.Metadata["action"],
+			SessionKey: sessionKey,
+			Tool:       msg.Metadata["tool"],
+			Action:     msg.Metadata["action"],
 		})
 		return
 	case "tool.result":
@@ -341,8 +342,9 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			result = msg.Metadata["result"]
 		}
 		n.sendWSEvent(sessionKey, "tool.result", WSToolResultPayload{
-			Tool:   msg.Metadata["tool"],
-			Result: result,
+			SessionKey: sessionKey,
+			Tool:       msg.Metadata["tool"],
+			Result:     result,
 		})
 		return
 	case "approval.request":
@@ -396,8 +398,8 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 }
 
 func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
 	msg := WSMessage{
 		Event: event,
@@ -405,18 +407,36 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	}
 
 	found := 0
-	for _, client := range n.wsClients {
+	cleanup := make([]string, 0)
+	for id, client := range n.wsClients {
 		if client.SessionKey == sessionKey {
-			client.Send(mustMarshal(msg))
-			found++
+			if err := client.Send(mustMarshal(msg)); err != nil {
+				// Client is disconnected, mark for cleanup
+				cleanup = append(cleanup, id)
+			} else {
+				found++
+			}
 		} else if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if resolved == sessionKey {
-				client.Send(mustMarshal(msg))
-				found++
+				if err := client.Send(mustMarshal(msg)); err != nil {
+					// Client is disconnected, mark for cleanup
+					cleanup = append(cleanup, id)
+				} else {
+					found++
+				}
 			}
 		}
 	}
+
+	// Clean up disconnected clients
+	for _, id := range cleanup {
+		if client, exists := n.wsClients[id]; exists {
+			client.Conn.Close()
+			delete(n.wsClients, id)
+		}
+	}
+
 	logger.InfoCF("native", "Broadcast to session", map[string]interface{}{
 		"session_key": sessionKey,
 		"event":       event,
@@ -426,25 +446,37 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 }
 
 func (n *NativeChannel) broadcastAll(event string, data interface{}) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
 	msg := WSMessage{
 		Event: event,
 		Data:  mustMarshal(data),
 	}
 
-	for _, client := range n.wsClients {
-		client.Send(mustMarshal(msg))
+	cleanup := make([]string, 0)
+	for id, client := range n.wsClients {
+		if err := client.Send(mustMarshal(msg)); err != nil {
+			cleanup = append(cleanup, id)
+		}
+	}
+
+	// Clean up disconnected clients
+	for _, id := range cleanup {
+		if client, exists := n.wsClients[id]; exists {
+			client.Conn.Close()
+			delete(n.wsClients, id)
+		}
 	}
 }
 
-func (c *WSClient) Send(data []byte) {
+func (c *WSClient) Send(data []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.Conn != nil {
-		c.Conn.WriteMessage(websocket.TextMessage, data)
+		return c.Conn.WriteMessage(websocket.TextMessage, data)
 	}
+	return fmt.Errorf("connection is nil")
 }
 
 func mustMarshal(v interface{}) json.RawMessage {
