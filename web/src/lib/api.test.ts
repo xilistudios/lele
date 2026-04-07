@@ -61,8 +61,9 @@ describe('createApiClient', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const api = createApiClient('http://127.0.0.1:18793')
-    const sessions = await api.sessions('token')
-    const channels = await api.channels('token')
+    api.setToken('token', 'refresh_token')
+    const sessions = await api.sessions()
+    const channels = await api.channels()
 
     expect(sessions.sessions[0]?.key).toBe('native:client')
     expect(channels.channels[0]?.name).toBe('native')
@@ -126,8 +127,9 @@ describe('createApiClient', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     const api = createApiClient('http://127.0.0.1:18793')
-    const available = await api.models('main', 'native:client', 'token')
-    const updated = await api.updateSessionModel('native:client', 'gpt-4o-mini', 'token')
+    api.setToken('token', 'refresh_token')
+    const available = await api.models('main', 'native:client')
+    const updated = await api.updateSessionModel('native:client', 'gpt-4o-mini')
 
     expect(available.models).toContain('gpt-4')
     expect(available.model_groups?.[0]?.provider).toBe('openai')

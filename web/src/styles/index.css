@@ -46,3 +46,28 @@ pre,
   font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo,
     Monaco, Consolas, monospace;
 }
+
+/* Message animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-enter {
+  animation: fadeIn 0.3s ease-out, slideUp 0.4s ease-out;
+}

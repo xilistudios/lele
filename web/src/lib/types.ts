@@ -138,6 +138,7 @@ export type ChatMessage = {
 }
 
 export type ToolStatus = {
+  session_key?: string
   tool: string
   action: string
 }
@@ -232,8 +233,23 @@ export type ClientEvent =
         attachments?: Attachment[]
       }
     }
+  | {
+      event: 'messages.catchup'
+      data: {
+        session_key: string
+        message_count: number
+        catchup_count: number
+        is_initial: boolean
+        messages: Array<{
+          role: 'user' | 'assistant' | 'tool'
+          content: string
+          tool_call_id?: string
+          tool_calls?: HistoryToolCall[]
+        }>
+      }
+    }
   | { event: 'tool.executing'; data: ToolStatus }
-  | { event: 'tool.result'; data: { tool: string; result: string } }
+  | { event: 'tool.result'; data: { session_key?: string; tool: string; result: string } }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
   | { event: 'subscribe.ack'; data: { session_key: string } }

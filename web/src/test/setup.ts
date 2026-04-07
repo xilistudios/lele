@@ -13,6 +13,9 @@ Object.assign(globalThis, {
   sessionStorage: dom.window.sessionStorage,
 })
 
+dom.window.requestAnimationFrame = (cb: FrameRequestCallback) => setTimeout(cb, 16)
+dom.window.cancelAnimationFrame = (id: number) => clearTimeout(id)
+
 if (!globalThis.matchMedia) {
   globalThis.matchMedia = (() => ({
     matches: false,
