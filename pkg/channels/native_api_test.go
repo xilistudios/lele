@@ -164,7 +164,6 @@ type nativeTestServer struct {
 	server   *httptest.Server
 	token    string
 	clientID string
-	cancel   context.CancelFunc
 }
 
 func newNativeTestServer(t *testing.T) *nativeTestServer {
@@ -216,11 +215,7 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	channel.registerRoutes(mux)
 	server := httptest.NewServer(channel.corsMiddleware(channel.authMiddleware(mux)))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go channel.listenForOutbound(ctx)
-
 	t.Cleanup(func() {
-		cancel()
 		server.Close()
 	})
 
@@ -241,7 +236,6 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 		server:   server,
 		token:    token,
 		clientID: client.ClientID,
-		cancel:   cancel,
 	}
 }
 
@@ -594,7 +588,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 		t.Fatalf("inbound chat_id = %q, want %q", inbound.ChatID, sessionKey)
 	}
 
-	ts.bus.PublishOutbound(bus.OutboundMessage{
+	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel:   ChannelName,
 		ChatID:    sessionKey,
 		Content:   "Hello back",
@@ -621,7 +615,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 		t.Fatalf("complete payload = %#v, want msg-1/Hello back", completePayload)
 	}
 
-	ts.bus.PublishOutbound(bus.OutboundMessage{
+	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel: ChannelName,
 		ChatID:  sessionKey,
 		Event:   "tool.executing",
@@ -641,7 +635,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 		t.Fatalf("tool = %q, want read_file", toolExecutingPayload.Tool)
 	}
 
-	ts.bus.PublishOutbound(bus.OutboundMessage{
+	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel: ChannelName,
 		ChatID:  sessionKey,
 		Event:   "tool.result",
@@ -661,7 +655,7 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 		t.Fatalf("tool result payload = %#v, want read_file/file contents", toolResultPayload)
 	}
 
-	ts.bus.PublishOutbound(bus.OutboundMessage{
+	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel: ChannelName,
 		ChatID:  sessionKey,
 		Event:   "approval.request",
@@ -753,7 +747,7 @@ func TestNativeChannelWebSocketBroadcastsToBaseSessionKeyWhenAliased(t *testing.
 	}
 
 	// Publish outbound message to the aliased session key (simulating what happens when a new chat starts)
-	ts.bus.PublishOutbound(bus.OutboundMessage{
+	ts.channel.Send(context.Background(), bus.OutboundMessage{
 		Channel:   ChannelName,
 		ChatID:    aliasedSessionKey, // Message is published with the resolved key
 		Content:   "Message from aliased session",

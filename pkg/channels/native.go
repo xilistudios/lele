@@ -125,7 +125,6 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	go n.listenForOutbound(ctx)
 	go n.runUploadCleanup(ctx)
 
 	go func() {
@@ -309,26 +308,6 @@ func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (n *NativeChannel) listenForOutbound(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			msg, ok := n.bus.SubscribeOutbound(ctx)
-			if !ok {
-				continue
-			}
-
-			if msg.Channel != ChannelName {
-				continue
-			}
-
-			n.dispatchOutboundMessage(msg)
-		}
-	}
-}
-
 func (n *NativeChannel) sendWSEvent(sessionKey, event string, data interface{}) {
 	if sessionKey == "" {
 		n.broadcastAll(event, data)
@@ -349,6 +328,15 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		"message_id":  msg.MessageID,
 	})
 	switch msg.Event {
+	case "message.stream":
+		done := msg.Metadata["done"] == "true"
+		n.sendWSEvent(sessionKey, "message.stream", WSStreamPayload{
+			MessageID:  msg.MessageID,
+			SessionKey: sessionKey,
+			Chunk:      msg.Content,
+			Done:       done,
+		})
+		return
 	case "tool.executing":
 		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
 			SessionKey: sessionKey,
@@ -430,7 +418,7 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	cleanup := make([]string, 0)
 	for id, client := range n.wsClients {
 		if client.SessionKey == sessionKey {
-			if err := client.Send(mustMarshal(msg)); err != nil {
+			if err := client.QueueSend(mustMarshal(msg)); err != nil {
 				// Client is disconnected, mark for cleanup
 				cleanup = append(cleanup, id)
 			} else {
@@ -439,7 +427,7 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		} else if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if resolved == sessionKey {
-				if err := client.Send(mustMarshal(msg)); err != nil {
+				if err := client.QueueSend(mustMarshal(msg)); err != nil {
 					// Client is disconnected, mark for cleanup
 					cleanup = append(cleanup, id)
 				} else {
@@ -476,7 +464,7 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 
 	cleanup := make([]string, 0)
 	for id, client := range n.wsClients {
-		if err := client.Send(mustMarshal(msg)); err != nil {
+		if err := client.QueueSend(mustMarshal(msg)); err != nil {
 			cleanup = append(cleanup, id)
 		}
 	}
@@ -497,6 +485,22 @@ func (c *WSClient) Send(data []byte) error {
 		return c.Conn.WriteMessage(websocket.TextMessage, data)
 	}
 	return fmt.Errorf("connection is nil")
+}
+
+func (c *WSClient) QueueSend(data []byte) error {
+	select {
+	case c.SendChan <- data:
+		return nil
+	default:
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case c.SendChan <- data:
+			return nil
+		case <-timer.C:
+			return fmt.Errorf("send channel full, client likely disconnected")
+		}
+	}
 }
 
 func mustMarshal(v interface{}) json.RawMessage {

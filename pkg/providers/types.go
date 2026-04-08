@@ -22,6 +22,10 @@ type LLMProvider interface {
 	GetDefaultModel() string
 }
 
+type StreamingLLMProvider interface {
+	ChatStream(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}, onChunk func(chunk string, done bool)) (*LLMResponse, error)
+}
+
 // FailoverReason classifies why an LLM request failed for fallback decisions.
 type FailoverReason string
 

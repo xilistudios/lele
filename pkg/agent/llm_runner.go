@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/constants"
@@ -229,11 +230,41 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var response *providers.LLMResponse
 		var err error
 
+		var streamOnChunk func(chunk string, done bool)
+		if opts.Channel == channels.ChannelName && opts.SendResponse {
+			messageID := opts.MessageID
+			if messageID == "" {
+				messageID = uuid.New().String()
+			}
+			msgID := messageID
+			streamOnChunk = func(chunk string, done bool) {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:   opts.Channel,
+					ChatID:    opts.SessionKey,
+					Event:     "message.stream",
+					MessageID: msgID,
+					Content:   chunk,
+					Metadata: map[string]string{
+						"done": fmt.Sprintf("%v", done),
+					},
+				})
+			}
+		}
+
 		callLLM := func() (*providers.LLMResponse, error) {
 			// Build LLM options including reasoning config
 			llmOptions := map[string]interface{}{
 				"max_tokens":  agent.MaxTokens,
 				"temperature": agent.Temperature,
+			}
+
+			if streamOnChunk != nil {
+				if sp, ok := agent.Provider.(providers.StreamingLLMProvider); ok {
+					if len(candidates) > 0 && lr.al.fallback != nil {
+					} else {
+						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk)
+					}
+				}
 			}
 			// Add reasoning config if available, with per-session override support
 			sessionEffort := ""

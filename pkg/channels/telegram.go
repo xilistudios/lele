@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -27,6 +28,8 @@ type TelegramChannel struct {
 	stopThinking    sync.Map         // chatID -> thinkingCancel
 	approvalManager *ApprovalManager // Gestor de aprobaciones de comandos
 	agentLoop       AgentProvidable  // Reference to agent loop for session agent management
+	sendMu          sync.Mutex
+	lastSend        time.Time
 }
 
 type telegramCommandSpec struct {
@@ -188,5 +191,22 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 	logger.InfoC("telegram", "Stopping Telegram bot...")
 	c.setRunning(false)
+	return nil
+}
+
+func (c *TelegramChannel) waitRateLimit(ctx context.Context) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	elapsed := time.Since(c.lastSend)
+	if elapsed < 50*time.Millisecond {
+		wait := 50*time.Millisecond - elapsed
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+	c.lastSend = time.Now()
 	return nil
 }
