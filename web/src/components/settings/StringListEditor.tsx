@@ -1,5 +1,16 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { SearchableSelect } from '../molecules/SearchableSelect'
+
+type Option = {
+  value: string
+  label: string
+}
+
+type OptionGroup = {
+  label: string
+  options: Option[]
+}
 
 type Props = {
   id: string
@@ -7,9 +18,23 @@ type Props = {
   onChange: (value: string[]) => void
   disabled?: boolean
   placeholder?: string
+  options?: Option[]
+  groups?: OptionGroup[]
+  emptyLabel?: string
+  loading?: boolean
 }
 
-export function StringListEditor({ id, value, onChange, disabled, placeholder }: Props) {
+export function StringListEditor({
+  id,
+  value,
+  onChange,
+  disabled,
+  placeholder,
+  options,
+  groups,
+  emptyLabel,
+  loading,
+}: Props) {
   const { t } = useTranslation()
   const removeTitle = t('common.remove')
   const [newItem, setNewItem] = useState('')
@@ -33,27 +58,57 @@ export function StringListEditor({ id, value, onChange, disabled, placeholder }:
     }
   }
 
+  const handleSelect = (selectedValue: string) => {
+    if (selectedValue && !items.includes(selectedValue)) {
+      onChange([...items, selectedValue])
+    }
+    setNewItem('')
+  }
+
+  const hasDropdown = options !== undefined || groups !== undefined
+
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <input
-          id={id}
-          type="text"
-          value={newItem}
-          onChange={(e) => setNewItem(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="flex-1 rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none disabled:opacity-50"
-        />
-        <button
-          type="button"
-          onClick={addItem}
-          disabled={disabled || !newItem.trim()}
-          className="rounded bg-blue-600 px-3 py-2 text-xs text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
-        >
-          {t('common.add')}
-        </button>
+        {hasDropdown ? (
+          <div className="flex-1">
+            <SearchableSelect
+              ariaLabel={id}
+              buttonLabel={placeholder || t('common.add')}
+              direction="down"
+              disabled={disabled}
+              emptyLabel={loading ? t('settings.loading') : (emptyLabel || t('settings.noModels'))}
+              groups={groups}
+              onChange={handleSelect}
+              options={options}
+              placeholder={placeholder || t('settings.selectModel')}
+              searchAriaLabel={`${id} buscar`}
+              searchPlaceholder={placeholder || t('settings.selectModel')}
+              value=""
+            />
+          </div>
+        ) : (
+          <input
+            id={id}
+            type="text"
+            value={newItem}
+            onChange={(e) => setNewItem(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={disabled}
+            placeholder={placeholder}
+            className="flex-1 rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          />
+        )}
+        {!hasDropdown && (
+          <button
+            type="button"
+            onClick={addItem}
+            disabled={disabled || !newItem.trim()}
+            className="rounded bg-blue-600 px-3 py-2 text-xs text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+          >
+            {t('common.add')}
+          </button>
+        )}
       </div>
       {items.length > 0 && (
         <div className="space-y-1">

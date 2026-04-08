@@ -63,6 +63,8 @@
     "deleteSessionFailed": "Could not delete session"
   },
   "settings": {
+    "selectModel": "Select model",
+    "loading": "Loading...",
     "tabs": {
       "general": "General",
       "agents": "Agents",
@@ -211,9 +213,6 @@
       "agentModelPrimary": "Primary model",
       "agentModelFallbacks": "Model fallbacks",
       "agentSkills": "Skills",
-      "selectModel": "Select model",
-      "loading": "Loading...",
-      "noModels": "No models available",
       "bindingAgentId": "Agent ID",
       "bindingChannel": "Channel",
       "bindingAccountId": "Account ID",

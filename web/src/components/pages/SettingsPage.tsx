@@ -92,7 +92,10 @@ export function SettingsPage({ onLogout }: Props) {
     }))
   }, [groups])
 
-  const getAgentModelPrimary = (agentModel: string | { primary?: string; fallbacks?: string[] } | undefined): string => {
+  // Helper function to extract primary model from agent model config
+  const getAgentModelPrimary = (
+    agentModel: string | { primary?: string; fallbacks?: string[] } | undefined,
+  ): string => {
     if (!agentModel) return ''
     if (typeof agentModel === 'string') return agentModel
     return agentModel.primary || ''
@@ -105,6 +108,36 @@ export function SettingsPage({ onLogout }: Props) {
   const getDefaultImageModel = (): string => {
     return draftConfig?.agents?.defaults?.image_model || ''
   }
+
+  const getOptionsForAgent = useMemo(() => {
+    const list = draftConfig?.agents?.list || []
+    const allAgentModels = list.map((a) => getAgentModelPrimary(a.model)).filter(Boolean)
+    const existingValues = new Set(modelOptions.map((o) => o.value))
+    const opts = [...modelOptions]
+    for (const m of allAgentModels) {
+      if (!existingValues.has(m)) {
+        opts.push({ value: m, label: m })
+      }
+    }
+    return opts
+  }, [modelOptions, draftConfig])
+
+  const getGroupsForAgent = useMemo(() => {
+    const list = draftConfig?.agents?.list || []
+    const allAgentModels = list.map((a) => getAgentModelPrimary(a.model)).filter(Boolean)
+    const existingValues = new Set(
+      modelGroups.flatMap((g) => g.options.map((o) => o.value)),
+    )
+    const groups = [...modelGroups]
+    const newModels = allAgentModels.filter((m) => !existingValues.has(m))
+    if (newModels.length > 0) {
+      groups.push({
+        label: 'Configured Models',
+        options: newModels.map((m) => ({ value: m, label: m })),
+      })
+    }
+    return groups
+  }, [modelGroups, draftConfig])
 
   const handleSave = async () => {
     const isValid = await validate()
@@ -222,9 +255,9 @@ export function SettingsPage({ onLogout }: Props) {
               buttonLabel={t('settings.fields.model')}
               direction="down"
               emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
-              groups={modelGroups}
+              groups={getGroupsForAgent}
               onChange={(v) => updateField('agents.defaults.model', v)}
-              options={modelOptions}
+              options={getOptionsForAgent}
               placeholder={getDefaultModel() || t('settings.selectModel')}
               searchAriaLabel={`${t('settings.fields.model')} buscar`}
               searchPlaceholder={t('settings.fields.model')}
@@ -241,6 +274,10 @@ export function SettingsPage({ onLogout }: Props) {
               id="agents.defaults.model_fallbacks"
               value={config.agents.defaults.model_fallbacks || []}
               onChange={(v) => updateField('agents.defaults.model_fallbacks', v)}
+              options={getOptionsForAgent}
+              groups={getGroupsForAgent}
+              emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+              loading={isLoadingModels}
             />
           </SettingsField>
           <SettingsField
@@ -273,6 +310,10 @@ export function SettingsPage({ onLogout }: Props) {
               id="agents.defaults.image_model_fallbacks"
               value={config.agents.defaults.image_model_fallbacks || []}
               onChange={(v) => updateField('agents.defaults.image_model_fallbacks', v)}
+              options={modelOptions}
+              groups={modelGroups}
+              emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+              loading={isLoadingModels}
             />
           </SettingsField>
           <SettingsField
@@ -435,11 +476,11 @@ export function SettingsPage({ onLogout }: Props) {
                     buttonLabel={t('settings.fields.agentModelPrimary')}
                     direction="down"
                     emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
-                    groups={modelGroups}
+                    groups={getGroupsForAgent}
                     onChange={(v) =>
                       updateField(`agents.list.${index}.model`, { primary: v })
                     }
-                    options={modelOptions}
+                    options={getOptionsForAgent}
                     placeholder={getAgentModelPrimary(agent.model) || t('settings.selectModel')}
                     searchAriaLabel={`${t('settings.fields.agentModelPrimary')} buscar`}
                     searchPlaceholder={t('settings.fields.agentModelPrimary')}
@@ -457,6 +498,10 @@ export function SettingsPage({ onLogout }: Props) {
                     onChange={(v) =>
                       updateField(`agents.list.${index}.model`, { ...agent.model, fallbacks: v })
                     }
+                    options={getOptionsForAgent}
+                    groups={getGroupsForAgent}
+                    emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+                    loading={isLoadingModels}
                   />
                 </SettingsField>
                 <SettingsField
