@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { SessionItem } from '../molecules/SessionItem'
 
@@ -9,12 +10,6 @@ type SidebarProps = {
   collapsed: boolean
   mobileOpen: boolean
   onClose: () => void
-}
-
-export function formatSessionTitle(sessionKey: string, sessionName?: string) {
-  if (sessionName?.trim()) return sessionName
-  const parts = sessionKey.split(':')
-  return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
 export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
@@ -29,6 +24,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     onClearSession,
     onDeleteSession,
   } = useAppLogicContext()
+  const isMobile = useIsMobile()
 
   const deviceName = session?.device_name ?? 'lele'
 
@@ -163,7 +159,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 selected={session.key === currentSession?.key}
                 onSelect={() => {
                   navigate(`/chat/${session.key}`)
-                  onClose()
+                  if (isMobile) onClose()
                 }}
                 onDelete={() => onDeleteSession(session.key)}
                 collapsed={collapsed}
@@ -190,7 +186,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             className="text-[#444] transition-colors hover:text-[#888]"
             onClick={() => {
               navigate('/settings')
-              onClose()
+              if (isMobile) onClose()
             }}
           >
             <svg

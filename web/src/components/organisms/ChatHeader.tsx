@@ -1,13 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
+import { formatSessionTitle } from '../../lib/utils'
 import { Spinner } from '../atoms/Spinner'
-
-const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
-  if (sessionName?.trim()) return sessionName
-  const parts = sessionKey.split(':')
-  return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
-}
 
 export function ChatHeader() {
   const { t } = useTranslation()
@@ -39,7 +34,11 @@ export function ChatHeader() {
         <div className="min-w-0">
           <h2 className="truncate text-sm font-medium text-white">
             {currentSession
-              ? formatSessionTitle(currentSession.key, currentSession.name)
+              ? formatSessionTitle(
+                  currentSession.key,
+                  currentSession.name,
+                  currentSession.message_count,
+                )
               : t('chat.session')}
           </h2>
           <p className="truncate text-[11px] text-[#666]">

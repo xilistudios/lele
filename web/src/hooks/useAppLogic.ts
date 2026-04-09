@@ -173,6 +173,7 @@ export function useAppLogic(
       messagesHook.sendMessage(content, attachments, sessionsHook.currentSessionKey, currentAgentId)
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey })
       messagesHook.setPendingAttachments([])
+      sessionsHook.refreshSessions()
     },
     [
       sessionsHook.currentSessionKey,
@@ -180,6 +181,7 @@ export function useAppLogic(
       messagesHook.sendMessage,
       wsSend,
       messagesHook.setPendingAttachments,
+      sessionsHook.refreshSessions,
     ],
   )
 

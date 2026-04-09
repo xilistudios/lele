@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { formatSessionTitle } from '../../lib/utils'
 
 type Props = {
   sessionKey: string
@@ -8,14 +9,6 @@ type Props = {
   onSelect: () => void
   onDelete: () => void
   collapsed?: boolean
-}
-
-const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
-  if (sessionName?.trim()) {
-    return sessionName
-  }
-  const parts = sessionKey.split(':')
-  return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
 export function SessionItem({
@@ -34,7 +27,7 @@ export function SessionItem({
       <button
         onClick={onSelect}
         type="button"
-        title={formatSessionTitle(sessionKey, sessionName)}
+        title={formatSessionTitle(sessionKey, sessionName, messageCount)}
         className={`flex w-full items-center justify-center rounded-md p-2 transition-colors ${
           selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
         }`}
@@ -62,7 +55,7 @@ export function SessionItem({
       <span className="mt-0.5 text-xs text-[#555]">#</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs leading-5">
-          {formatSessionTitle(sessionKey, sessionName)}
+          {formatSessionTitle(sessionKey, sessionName, messageCount)}
         </span>
         <span className="block text-[10px] text-[#666]">
           {messageCount === 1
