@@ -109,9 +109,8 @@ func (m *AgentModelConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
-	if len(m.Fallbacks) == 0 && m.Primary != "" {
-		return json.Marshal(m.Primary)
-	}
+	// Always serialize as object to maintain consistent structure in UI
+	// This ensures the frontend always receives {primary, fallbacks} format
 	type raw struct {
 		Primary   string   `json:"primary,omitempty"`
 		Fallbacks []string `json:"fallbacks,omitempty"`

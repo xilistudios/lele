@@ -533,13 +533,14 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {
 		doc.Agents.List = append(doc.Agents.List, EditableAgentConfig{
-			ID:        agent.ID,
-			Default:   agent.Default,
-			Name:      agent.Name,
-			Workspace: agent.Workspace,
-			Model:     agent.Model,
-			Skills:    agent.Skills,
-			Subagents: agent.Subagents,
+			ID:          agent.ID,
+			Default:     agent.Default,
+			Name:        agent.Name,
+			Workspace:   agent.Workspace,
+			Model:       agent.Model,
+			Skills:      agent.Skills,
+			Subagents:   agent.Subagents,
+			Temperature: agent.Temperature,
 		})
 	}
 	doc.Session = EditableSessionConfig(cfg.Session)
