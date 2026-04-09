@@ -275,7 +275,7 @@ func (n *NativeChannel) isOriginAllowed(origin string) bool {
 		}
 
 		if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
-			if originHost == serverHost {
+			if originHost == serverHost || serverHost == "0.0.0.0" {
 				return true
 			}
 		}
