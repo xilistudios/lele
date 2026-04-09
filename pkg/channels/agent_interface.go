@@ -55,6 +55,8 @@ type AgentProvidable interface {
 	SetName(sessionKey string, name string) error
 	// ResolveSessionKey resuelve el alias de session_key si existe
 	ResolveSessionKey(sessionKey string) string
+	// IsSessionProcessing devuelve true si hay un procesamiento LLM activo para la sesión
+	IsSessionProcessing(sessionKey string) bool
 }
 
 // AgentBasicInfo contiene información pública de un agente

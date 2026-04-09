@@ -533,6 +533,7 @@ export type ClientEvent =
         status: string
         agents: Agent[]
         server_time: string
+        processing?: boolean
       }
     }
   | { event: 'message.ack'; data: { message_id: string; session_key: string } }
@@ -568,7 +569,7 @@ export type ClientEvent =
   | { event: 'tool.result'; data: { session_key?: string; tool: string; result: string } }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
-  | { event: 'subscribe.ack'; data: { session_key: string } }
+  | { event: 'subscribe.ack'; data: { session_key: string; processing?: boolean } }
   | { event: 'unsubscribe.ack'; data: { session_key: string } }
   | { event: 'cancel.ack'; data: { status: string } }
   | { event: 'pong'; data: { time: string } }

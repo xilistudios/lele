@@ -29,6 +29,7 @@ export class LeleSocket {
   private reconnectAttempts = 0
   private pingIntervalId: number | null = null
   private subscribedSessionKey: string | null = null
+  private subscribedAgentId: string | null = null
   private _state: ConnectionState = 'disconnected'
   private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
   private readonly pingIntervalMs: number
@@ -105,9 +106,12 @@ export class LeleSocket {
     if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
       const sessionKey = (data as { session_key?: unknown }).session_key
       this.subscribedSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
+      const agentId = (data as { agent_id?: unknown }).agent_id
+      this.subscribedAgentId = typeof agentId === 'string' && agentId ? agentId : null
     }
     if (event === 'unsubscribe') {
       this.subscribedSessionKey = null
+      this.subscribedAgentId = null
     }
 
     if (event === 'subscribe' || event === 'unsubscribe') {
@@ -152,6 +156,15 @@ export class LeleSocket {
         if (message) {
           socket.send(serializeCommand(message))
         }
+      }
+      if (this.subscribedSessionKey) {
+        const subscribeData: { session_key: string; agent_id?: string } = {
+          session_key: this.subscribedSessionKey,
+        }
+        if (this.subscribedAgentId) {
+          subscribeData.agent_id = this.subscribedAgentId
+        }
+        socket.send(serializeCommand({ event: 'subscribe', data: subscribeData }))
       }
     })
 

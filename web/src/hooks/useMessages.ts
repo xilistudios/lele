@@ -86,6 +86,7 @@ export function useMessages(
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
   const messagesRef = useRef(messages)
   const lastLoadedSessionKeyRef = useRef<string | null>(null)
+  const processingSessionKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -107,7 +108,18 @@ export function useMessages(
         }
         console.log('[HTTP] History loaded, messages:', history.messages.length)
         lastLoadedSessionKeyRef.current = sessionKey
-        setMessages(toChatMessages(history.messages, history.session_key))
+        const chatMsgs = toChatMessages(history.messages, history.session_key)
+        if (processingSessionKeyRef.current === sessionKey) {
+          chatMsgs.push({
+            id: '__processing_placeholder__',
+            role: 'assistant',
+            content: '',
+            streaming: true,
+            createdAt: new Date().toISOString(),
+            sessionKey,
+          })
+        }
+        setMessages(chatMsgs)
       } catch (error) {
         console.error('[HTTP] Failed to load history', error)
         if (lastLoadedSessionKeyRef.current === sessionKey) {
@@ -122,8 +134,16 @@ export function useMessages(
   const ensureAssistantPlaceholder = useCallback(
     (messageId: string, sessionKey: string, chunk = '') => {
       setMessages((current) => {
-        if (current.some((message) => message.id === messageId)) {
-          return current.map((message) =>
+        let filtered = current
+        const existingProcessing = current.findIndex(
+          (m) => m.id === '__processing_placeholder__' && m.sessionKey === sessionKey,
+        )
+        if (existingProcessing >= 0 && messageId !== '__processing_placeholder__') {
+          filtered = [...current.slice(0, existingProcessing), ...current.slice(existingProcessing + 1)]
+        }
+
+        if (filtered.some((message) => message.id === messageId)) {
+          return filtered.map((message) =>
             message.id === messageId
               ? {
                   ...message,
@@ -136,7 +156,7 @@ export function useMessages(
         }
 
         return [
-          ...current,
+          ...filtered,
           {
             id: messageId,
             role: 'assistant',
@@ -194,6 +214,19 @@ export function useMessages(
       const eventSessionKey = data.session_key as string | undefined
 
       switch (event.event) {
+        case 'welcome': {
+          const welcomeData = data as {
+            session_key?: string
+            processing?: boolean
+          }
+          if (welcomeData.processing && welcomeData.session_key) {
+            processingSessionKeyRef.current = welcomeData.session_key
+            if (welcomeData.session_key === currentSessionKeyRef.current) {
+              ensureAssistantPlaceholder('__processing_placeholder__', welcomeData.session_key)
+            }
+          }
+          break
+        }
         case 'message.stream':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
             console.warn('[WS] Dropped message.stream: session mismatch', {
@@ -220,36 +253,39 @@ export function useMessages(
             break
           }
           setMessages((current) => {
+            const filtered = current.filter(
+              (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === (eventSessionKey ?? currentSessionKeyRef.current)),
+            )
             const targetId = data.message_id as string
-            const targetIndex = current.findIndex((message) => message.id === targetId)
-            if (targetIndex < 0) return current
+            const targetIndex = filtered.findIndex((message) => message.id === targetId)
+            if (targetIndex < 0) return filtered
 
             const updatedMessage: ChatMessage = {
-              ...current[targetIndex],
+              ...filtered[targetIndex],
               content: data.content as string,
               attachments: data.attachments as ChatMessage['attachments'],
               sessionKey: (eventSessionKey ??
                 currentSessionKeyRef.current ??
-                current[targetIndex].sessionKey) as string,
+                filtered[targetIndex].sessionKey) as string,
               streaming: false,
             }
 
-            // Si hay tools DESPUÉS de este assistant, moverlo al final para mantener orden
-            const hasToolsAfter = current.slice(targetIndex + 1).some((m) => m.role === 'tool')
+            const hasToolsAfter = filtered.slice(targetIndex + 1).some((m) => m.role === 'tool')
             if (hasToolsAfter) {
               const messagesWithoutTarget = [
-                ...current.slice(0, targetIndex),
-                ...current.slice(targetIndex + 1),
+                ...filtered.slice(0, targetIndex),
+                ...filtered.slice(targetIndex + 1),
               ]
               return [...messagesWithoutTarget, updatedMessage]
             }
 
-            return current.map((message, index) =>
+            return filtered.map((message, index) =>
               index === targetIndex ? updatedMessage : message,
             )
           })
           setToolStatus(null)
           setPendingAttachments([])
+          processingSessionKeyRef.current = null
           break
         case 'messages.catchup': {
           const catchupData = data as {
@@ -384,11 +420,23 @@ export function useMessages(
           break
         case 'cancel.ack':
           setToolStatus(null)
-          setMessages((current) => current.map((message) => ({ ...message, streaming: false })))
+          processingSessionKeyRef.current = null
+          setMessages((current) =>
+            current
+              .filter((m) => m.id !== '__processing_placeholder__')
+              .map((message) => ({ ...message, streaming: false })),
+          )
           break
-        case 'subscribe.ack':
+        case 'subscribe.ack': {
           lastLoadedSessionKeyRef.current = (data.session_key as string) ?? null
+          const ackSessionKey = (data.session_key as string) ?? ''
+          const ackProcessing = data.processing === true
+          if (ackProcessing && ackSessionKey === currentSessionKeyRef.current) {
+            processingSessionKeyRef.current = ackSessionKey
+            ensureAssistantPlaceholder('__processing_placeholder__', ackSessionKey)
+          }
           break
+        }
         default:
           break
       }
@@ -407,6 +455,7 @@ export function useMessages(
     setApprovalRequest(null)
     setPendingAttachments([])
     lastLoadedSessionKeyRef.current = null
+    processingSessionKeyRef.current = null
   }, [])
 
   const reset = useCallback(() => {

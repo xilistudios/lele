@@ -463,6 +463,13 @@ func (al *AgentLoop) SetApprovalManager(am *channels.ApprovalManager) {
 	al.approvalManager = am
 }
 
+// IsSessionProcessing returns true if there is an active LLM processing loop for the given session.
+func (al *AgentLoop) IsSessionProcessing(sessionKey string) bool {
+	sessionKey = al.ResolveSessionKey(sessionKey)
+	_, ok := al.sessionCancels.Load(sessionKey)
+	return ok
+}
+
 // RecordLastChannel records the last active channel for this workspace.
 // This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChannel(channel string) error {

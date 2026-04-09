@@ -157,6 +157,10 @@ func (m *nativeTestAgentLoop) ResolveSessionKey(sessionKey string) string {
 	return sessionKey
 }
 
+func (m *nativeTestAgentLoop) IsSessionProcessing(sessionKey string) bool {
+	return false
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop

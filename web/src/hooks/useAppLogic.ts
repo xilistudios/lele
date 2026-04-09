@@ -163,6 +163,7 @@ export function useAppLogic(
 
   useEffect(() => {
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
+    if (wsStatus !== 'connected') return
 
     wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
     messagesHook.loadHistory(sessionsHook.currentSessionKey)
@@ -175,6 +176,7 @@ export function useAppLogic(
     sessionsHook.currentSessionKey,
     currentAgentId,
     token,
+    wsStatus,
     wsSend,
     loadModels,
     messagesHook.loadHistory,

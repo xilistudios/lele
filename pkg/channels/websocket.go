@@ -280,9 +280,17 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	client.SessionKey = payload.SessionKey
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
 
+	processing := false
+	if n.agentLoop != nil {
+		processing = n.agentLoop.IsSessionProcessing(payload.SessionKey)
+	}
+
 	_ = client.Send(mustMarshal(WSMessage{
 		Event: "subscribe.ack",
-		Data:  mustMarshal(map[string]string{"session_key": payload.SessionKey}),
+		Data: mustMarshal(map[string]interface{}{
+			"session_key": payload.SessionKey,
+			"processing":  processing,
+		}),
 	}))
 }
 
@@ -334,6 +342,11 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 		}
 	}
 
+	processing := false
+	if n.agentLoop != nil {
+		processing = n.agentLoop.IsSessionProcessing(client.SessionKey)
+	}
+
 	_ = client.Send(mustMarshal(WSMessage{
 		Event: "welcome",
 		Data: mustMarshal(map[string]interface{}{
@@ -343,6 +356,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"status":      status,
 			"agents":      agents,
 			"server_time": time.Now().Format(time.RFC3339),
+			"processing":  processing,
 		}),
 	}))
 }
