@@ -26,6 +26,7 @@ export class LeleSocket {
   private reconnectDelay: number
   private reconnectStrategy: ReconnectStrategy
   private readonly openQueue: ClientCommand[] = []
+  private reconnectAttempts = 0
   private pingIntervalId: number | null = null
   private subscribedSessionKey: string | null = null
   private _state: ConnectionState = 'disconnected'
@@ -80,6 +81,7 @@ export class LeleSocket {
 
   connect() {
     this.shouldReconnect = true
+    this.reconnectAttempts = 0
     this.setState('connecting')
     this.emit('connecting')
     this.open()
@@ -128,6 +130,9 @@ export class LeleSocket {
   }
 
   private open() {
+    this.setState('connecting')
+    this.emit('connecting')
+    this.reconnectAttempts++
     const params = new URLSearchParams({ token: this.token })
     if (this.subscribedSessionKey) {
       params.set('session_key', this.subscribedSessionKey)
@@ -139,6 +144,7 @@ export class LeleSocket {
 
     socket.addEventListener('open', () => {
       this.reconnectDelay = this.reconnectStrategy.initialDelay
+      this.reconnectAttempts = 0
       this.setState('connected')
       this.emit('open')
       while (this.openQueue.length > 0) {
@@ -184,6 +190,11 @@ export class LeleSocket {
       this.setState('disconnected')
       this.emit('close')
       if (!this.shouldReconnect) {
+        return
+      }
+
+      if (this.reconnectAttempts >= this.reconnectStrategy.maxRetries) {
+        this.emit('error', new Event('max_reconnect_attempts'))
         return
       }
 

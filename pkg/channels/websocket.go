@@ -426,6 +426,15 @@ func (n *NativeChannel) RegisterOutboundHandler(ctx context.Context) {
 			if len(msg.Attachments) > 0 {
 				n.broadcastToSession(msg.ChatID, "attachments", attachmentsToMaps(msg.Attachments))
 			}
+
+			if msg.Content != "" || len(msg.Attachments) > 0 {
+				n.broadcastToSession(msg.ChatID, "message.complete", WSMessageCompletePayload{
+					MessageID:   messageID,
+					SessionKey:  msg.ChatID,
+					Content:     msg.Content,
+					Attachments: attachmentsToMaps(msg.Attachments),
+				})
+			}
 		}
 	}
 }

@@ -47,6 +47,7 @@ type WSClient struct {
 	ClientInfo *ClientInfo
 	SessionKey string
 	SendChan   chan []byte
+	closed     bool
 	mu         sync.Mutex
 }
 
@@ -157,6 +158,10 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 	}
 
 	for id, client := range n.wsClients {
+		client.mu.Lock()
+		client.closed = true
+		client.mu.Unlock()
+		close(client.SendChan)
 		client.Conn.Close()
 		delete(n.wsClients, id)
 	}
@@ -419,6 +424,10 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if client, exists := n.wsClients[clientID]; exists {
+		client.mu.Lock()
+		client.closed = true
+		client.mu.Unlock()
+		close(client.SendChan)
 		client.Conn.Close()
 		delete(n.wsClients, clientID)
 	}
@@ -581,6 +590,12 @@ func (c *WSClient) Send(data []byte) error {
 }
 
 func (c *WSClient) QueueSend(data []byte) error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return fmt.Errorf("client is closed")
+	}
+	c.mu.Unlock()
 	select {
 	case c.SendChan <- data:
 		return nil

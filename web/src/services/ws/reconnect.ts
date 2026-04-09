@@ -2,6 +2,7 @@ export type ReconnectStrategy = {
   initialDelay: number
   maxDelay: number
   factor: number
+  maxRetries: number
   nextDelay: (current: number) => number
 }
 
@@ -11,8 +12,9 @@ export const defaultReconnectStrategy = (
   const factor = overrides?.factor ?? 2
   const initialDelay = overrides?.initialDelay ?? 500
   const maxDelay = overrides?.maxDelay ?? 5000
+  const maxRetries = overrides?.maxRetries ?? 20
   const nextDelay =
     overrides?.nextDelay ?? ((current: number) => Math.min(current * factor, maxDelay))
 
-  return { initialDelay, maxDelay, factor, nextDelay }
+  return { initialDelay, maxDelay, factor, maxRetries, nextDelay }
 }

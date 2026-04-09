@@ -67,7 +67,7 @@ export function useAppLogic(
     wsStatus,
     onMessages: (newMessages: ChatMessage[]) => {
       if (sessionsHook.currentSessionKeyRef.current === sessionsHook.currentSessionKey) {
-        messagesHook.messagesRef.current = newMessages
+        messagesHook.setMessages(newMessages)
       }
     },
     sessionToken: token ?? undefined,
@@ -171,7 +171,6 @@ export function useAppLogic(
       if (!sessionsHook.currentSessionKey || !currentAgentId) return
 
       messagesHook.sendMessage(content, attachments, sessionsHook.currentSessionKey, currentAgentId)
-      wsSend('subscribe', { session_key: sessionsHook.currentSessionKey })
       messagesHook.setPendingAttachments([])
       sessionsHook.refreshSessions()
     },
@@ -179,7 +178,6 @@ export function useAppLogic(
       sessionsHook.currentSessionKey,
       currentAgentId,
       messagesHook.sendMessage,
-      wsSend,
       messagesHook.setPendingAttachments,
       sessionsHook.refreshSessions,
     ],

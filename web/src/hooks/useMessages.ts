@@ -195,7 +195,13 @@ export function useMessages(
 
       switch (event.event) {
         case 'message.stream':
-          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped message.stream: session mismatch', {
+              event: eventSessionKey,
+              current: currentSessionKeyRef.current,
+            })
+            break
+          }
           ensureAssistantPlaceholder(
             data.message_id as string,
             (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string,
@@ -206,7 +212,13 @@ export function useMessages(
           ensureAssistantPlaceholder(data.message_id as string, (data.session_key as string) ?? '')
           break
         case 'message.complete':
-          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped message.complete: session mismatch', {
+              event: eventSessionKey,
+              current: currentSessionKeyRef.current,
+            })
+            break
+          }
           setMessages((current) => {
             const targetId = data.message_id as string
             const targetIndex = current.findIndex((message) => message.id === targetId)
@@ -288,7 +300,13 @@ export function useMessages(
           })
           break
         case 'tool.executing': {
-          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped tool.executing: session mismatch', {
+              event: eventSessionKey,
+              current: currentSessionKeyRef.current,
+            })
+            break
+          }
           setToolStatus(event.data as ToolStatus)
           const toolId = `tool-${data.tool as string}-${Date.now()}`
           const newToolMessage: ChatMessage = {
@@ -326,7 +344,13 @@ export function useMessages(
           break
         }
         case 'tool.result':
-          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped tool.result: session mismatch', {
+              event: eventSessionKey,
+              current: currentSessionKeyRef.current,
+            })
+            break
+          }
           setToolStatus(null)
           setMessages((current) => {
             const lastToolIndex = [...current]
@@ -391,6 +415,7 @@ export function useMessages(
 
   return {
     messages,
+    setMessages,
     messagesRef,
     toolStatus,
     approvalRequest,
