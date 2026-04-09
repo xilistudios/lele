@@ -251,13 +251,17 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage) 
 		return
 	}
 
-	n.bus.PublishInbound(bus.InboundMessage{
-		Channel:    ChannelName,
-		SenderID:   client.ClientInfo.ClientID,
-		ChatID:     client.SessionKey,
-		Content:    getApprovalCommand(payload.Approved, payload.RequestID),
-		SessionKey: client.SessionKey,
-	})
+	if n.approvalManager != nil {
+		_, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
+		if err != nil {
+			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
+				"error":      err.Error(),
+				"request_id": payload.RequestID,
+			})
+			n.sendError(client, "approval_error", "approval request expired or not found")
+			return
+		}
+	}
 
 	_ = client.Send(mustMarshal(WSMessage{
 		Event: "approve.ack",
@@ -404,13 +408,6 @@ func boolToString(b bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func getApprovalCommand(approved bool, requestID string) string {
-	if approved {
-		return "/approve " + requestID
-	}
-	return "/reject " + requestID
 }
 
 func (n *NativeChannel) RegisterOutboundHandler(ctx context.Context) {

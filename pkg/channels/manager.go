@@ -195,7 +195,7 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.Native.Enabled {
 		logger.DebugC("channels", "Attempting to initialize Native channel")
-		native, err := NewNativeChannel(m.config, m.bus, m.agentLoop)
+		native, err := NewNativeChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Native channel", map[string]interface{}{
 				"error": err.Error(),

@@ -25,20 +25,21 @@ const (
 )
 
 type NativeChannel struct {
-	base        *BaseChannel
-	cfg         *config.NativeConfig
-	auth        *AuthManager
-	bus         *bus.MessageBus
-	agentLoop   AgentProvidable
-	server      *http.Server
-	running     bool
-	wsClients   map[string]*WSClient
-	leleDir     string
-	mu          sync.RWMutex
-	startTime   time.Time
-	pinLimiter  *rateLimiter
-	pairLimiter *rateLimiter
-	apiLimiter  *rateLimiter
+	base            *BaseChannel
+	cfg             *config.NativeConfig
+	auth            *AuthManager
+	bus             *bus.MessageBus
+	agentLoop       AgentProvidable
+	approvalManager *ApprovalManager
+	server          *http.Server
+	running         bool
+	wsClients       map[string]*WSClient
+	leleDir         string
+	mu              sync.RWMutex
+	startTime       time.Time
+	pinLimiter      *rateLimiter
+	pairLimiter     *rateLimiter
+	apiLimiter      *rateLimiter
 }
 
 type WSClient struct {
@@ -51,7 +52,7 @@ type WSClient struct {
 	mu         sync.Mutex
 }
 
-func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable) (*NativeChannel, error) {
+func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
 	home, _ := os.UserHomeDir()
@@ -69,16 +70,17 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	apiLimiter := newRateLimiter(120, time.Minute)
 
 	return &NativeChannel{
-		base:        base,
-		cfg:         &nativeCfg,
-		auth:        auth,
-		bus:         messageBus,
-		agentLoop:   agentLoop,
-		wsClients:   make(map[string]*WSClient),
-		leleDir:     leleDir,
-		pinLimiter:  pinLimiter,
-		pairLimiter: pairLimiter,
-		apiLimiter:  apiLimiter,
+		base:            base,
+		cfg:             &nativeCfg,
+		auth:            auth,
+		bus:             messageBus,
+		agentLoop:       agentLoop,
+		approvalManager: approvalManager,
+		wsClients:       make(map[string]*WSClient),
+		leleDir:         leleDir,
+		pinLimiter:      pinLimiter,
+		pairLimiter:     pairLimiter,
+		apiLimiter:      apiLimiter,
 	}, nil
 }
 
