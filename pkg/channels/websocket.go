@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,6 +36,11 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin:     n.checkOrigin,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.ErrorCF("native", "WebSocket upgrade failed", map[string]interface{}{
@@ -212,53 +215,18 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	}
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
+	if payload.SessionKey != "" && !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
+		n.sendError(client, "forbidden", "access denied to this session")
+		return
+	}
+
 	if payload.AgentID != "" {
 		n.agentLoop.SetSessionAgent(sessionKey, payload.AgentID)
 	}
 
 	messageID := uuid.New().String()
 
-	attachments := make([]bus.FileAttachment, 0, len(payload.Attachments))
-	for _, path := range payload.Attachments {
-		_, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			logger.WarnCF("native", "Attachment file not found, skipping",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"path":        path,
-				})
-			continue
-		}
-		if err != nil {
-			logger.WarnCF("native", "Failed to stat attachment, skipping",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"path":        path,
-					"error":       err.Error(),
-				})
-			continue
-		}
-
-		uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
-		isTemporary := strings.HasPrefix(path, uploadDir)
-
-		mimeType := detectMimeType(path)
-
-		attachments = append(attachments, bus.FileAttachment{
-			Path:      path,
-			Name:      filepath.Base(path),
-			MIMEType:  mimeType,
-			Kind:      "file",
-			Temporary: isTemporary,
-		})
-
-		logger.DebugCF("native", "Processed attachment",
-			map[string]interface{}{
-				"session_key": sessionKey,
-				"path":        path,
-				"temporary":   isTemporary,
-			})
-	}
+	attachments := n.processAttachments(payload.Attachments, sessionKey)
 
 	n.bus.PublishInbound(bus.InboundMessage{
 		Channel:     ChannelName,
@@ -301,6 +269,11 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid subscribe payload")
+		return
+	}
+
+	if !n.validateSessionOwnership(client.ClientInfo.ClientID, payload.SessionKey) {
+		n.sendError(client, "forbidden", "access denied to this session")
 		return
 	}
 

@@ -204,16 +204,19 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 
 	channel := &NativeChannel{
-		cfg:       &cfg.Channels.Native,
-		auth:      auth,
-		bus:       msgBus,
-		agentLoop: loop,
-		wsClients: make(map[string]*WSClient),
+		cfg:         &cfg.Channels.Native,
+		auth:        auth,
+		bus:         msgBus,
+		agentLoop:   loop,
+		wsClients:   make(map[string]*WSClient),
+		pinLimiter:  newRateLimiter(10, time.Minute),
+		pairLimiter: newRateLimiter(5, time.Minute),
+		apiLimiter:  newRateLimiter(120, time.Minute),
 	}
 
 	mux := http.NewServeMux()
 	channel.registerRoutes(mux)
-	server := httptest.NewServer(channel.corsMiddleware(channel.authMiddleware(mux)))
+	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(channel.authMiddleware(mux))))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -527,8 +530,8 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 	}
 
 	// Verificar que el native config tiene valores por defecto (documento editable)
-	if native["host"] != "0.0.0.0" {
-		t.Errorf("host = %v, want 0.0.0.0 (default)", native["host"])
+	if native["host"] != "127.0.0.1" {
+		t.Errorf("host = %v, want 127.0.0.1 (default)", native["host"])
 	}
 
 	// JSON numbers are decoded as float64

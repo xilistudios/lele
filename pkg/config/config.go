@@ -790,7 +790,7 @@ func DefaultConfig() *Config {
 			},
 			Native: NativeConfig{
 				Enabled:           false,
-				Host:              "0.0.0.0",
+				Host:              "127.0.0.1",
 				Port:              18793,
 				TokenExpiryDays:   30,
 				PinExpiryMinutes:  5,

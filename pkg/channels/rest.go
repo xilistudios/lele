@@ -3,8 +3,6 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
-	"github.com/xilistudios/lele/pkg/logger"
 )
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -139,46 +136,18 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	n.auth.TrackSessionKey(clientID, sessionKey)
 
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
 	if req.AgentID != "" {
 		n.agentLoop.SetSessionAgent(sessionKey, req.AgentID)
 	}
 
 	messageID := uuid.New().String()
 
-	attachments := make([]bus.FileAttachment, 0, len(req.Attachments))
-	for _, path := range req.Attachments {
-		_, err := os.Stat(path)
-		if os.IsNotExist(err) {
-			logger.WarnCF("native", "Attachment file not found, skipping",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"path":        path,
-				})
-			continue
-		}
-		if err != nil {
-			logger.WarnCF("native", "Failed to stat attachment, skipping",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"path":        path,
-					"error":       err.Error(),
-				})
-			continue
-		}
-
-		uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
-		isTemporary := strings.HasPrefix(path, uploadDir)
-
-		mimeType := detectMimeType(path)
-
-		attachments = append(attachments, bus.FileAttachment{
-			Path:      path,
-			Name:      filepath.Base(path),
-			MIMEType:  mimeType,
-			Kind:      "file",
-			Temporary: isTemporary,
-		})
-	}
+	attachments := n.processAttachments(req.Attachments, sessionKey)
 
 	n.bus.PublishInbound(bus.InboundMessage{
 		Channel:     ChannelName,
@@ -206,6 +175,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	if sessionKey == "" {
 		clientID := getClientID(r)
 		sessionKey = "native:" + clientID
+	}
+
+	clientID := getClientID(r)
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
 	}
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
@@ -287,12 +262,16 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 	}
 
 	sessionKey := strings.TrimPrefix(path, prefix)
+	clientID := getClientID(r)
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
 	action := getQueryParam(r, "action")
 
 	if r.Method == http.MethodDelete {
 		action := getQueryParam(r, "action")
 		if action == "delete" {
-			clientID := getClientID(r)
 			if err := n.auth.RemoveSessionKey(clientID, sessionKey); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error(), "session_not_found")
 				return

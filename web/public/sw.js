@@ -18,6 +18,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  const url = new URL(event.request.url)
+  if (url.pathname.startsWith('/api/')) {
+    return
+  }
+
   event.respondWith(
     caches.match(event.request).then((response) => response ?? fetch(event.request).then((networkResponse) => {
       const copy = networkResponse.clone()

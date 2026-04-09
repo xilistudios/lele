@@ -24,26 +24,21 @@ const (
 	ChannelName = "native"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
 type NativeChannel struct {
-	base      *BaseChannel
-	cfg       *config.NativeConfig
-	auth      *AuthManager
-	bus       *bus.MessageBus
-	agentLoop AgentProvidable
-	server    *http.Server
-	running   bool
-	wsClients map[string]*WSClient
-	leleDir   string
-	mu        sync.RWMutex
-	startTime time.Time
+	base        *BaseChannel
+	cfg         *config.NativeConfig
+	auth        *AuthManager
+	bus         *bus.MessageBus
+	agentLoop   AgentProvidable
+	server      *http.Server
+	running     bool
+	wsClients   map[string]*WSClient
+	leleDir     string
+	mu          sync.RWMutex
+	startTime   time.Time
+	pinLimiter  *rateLimiter
+	pairLimiter *rateLimiter
+	apiLimiter  *rateLimiter
 }
 
 type WSClient struct {
@@ -68,14 +63,21 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 
 	base := NewBaseChannel(ChannelName, nativeCfg, messageBus, []string{})
 
+	pinLimiter := newRateLimiter(10, time.Minute)
+	pairLimiter := newRateLimiter(5, time.Minute)
+	apiLimiter := newRateLimiter(120, time.Minute)
+
 	return &NativeChannel{
-		base:      base,
-		cfg:       &nativeCfg,
-		auth:      auth,
-		bus:       messageBus,
-		agentLoop: agentLoop,
-		wsClients: make(map[string]*WSClient),
-		leleDir:   leleDir,
+		base:        base,
+		cfg:         &nativeCfg,
+		auth:        auth,
+		bus:         messageBus,
+		agentLoop:   agentLoop,
+		wsClients:   make(map[string]*WSClient),
+		leleDir:     leleDir,
+		pinLimiter:  pinLimiter,
+		pairLimiter: pairLimiter,
+		apiLimiter:  apiLimiter,
 	}, nil
 }
 
@@ -116,7 +118,7 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	n.registerRoutes(mux)
 
-	handler := n.corsMiddleware(n.authMiddleware(mux))
+	handler := n.corsMiddleware(n.securityHeadersMiddleware(n.authMiddleware(mux)))
 
 	n.server = &http.Server{
 		Addr:         addr,
@@ -201,10 +203,10 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 }
 
 func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/v1/auth/pin", n.handleGetPIN)
-	mux.HandleFunc("/api/v1/auth/pair", n.handlePair)
-	mux.HandleFunc("/api/v1/auth/refresh", n.handleRefresh)
-	mux.HandleFunc("/api/v1/auth/status", n.handleAuthStatus)
+	mux.HandleFunc("/api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
+	mux.HandleFunc("/api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
+	mux.HandleFunc("/api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
+	mux.HandleFunc("/api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
 	mux.HandleFunc("/api/v1/ws", n.handleWebSocket)
 	mux.HandleFunc("/api/v1/chat/send", n.handleChatSend)
 	mux.HandleFunc("/api/v1/chat/history", n.handleChatHistory)
@@ -225,38 +227,8 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowed := false
 
-		for _, allowedOrigin := range n.cfg.CORSOrigins {
-			if origin == allowedOrigin {
-				allowed = true
-				break
-			}
-		}
-
-		if !allowed && origin != "" {
-			if parsedOrigin, err := url.Parse(origin); err == nil {
-				originHost := parsedOrigin.Hostname()
-				serverHost := n.cfg.Host
-				if serverHost == "" {
-					serverHost = "127.0.0.1"
-				}
-
-				if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
-					if originHost == serverHost {
-						allowed = true
-					} else if (serverHost == "0.0.0.0" || serverHost == "::") && originHost != "" {
-						allowed = true
-					}
-				}
-			}
-		}
-
-		if !allowed && (origin == "" || strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "http://0.0.0.0") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost")) {
-			allowed = true
-		}
-
-		if allowed {
+		if origin != "" && n.isOriginAllowed(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -270,6 +242,53 @@ func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (n *NativeChannel) securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (n *NativeChannel) isOriginAllowed(origin string) bool {
+	for _, allowedOrigin := range n.cfg.CORSOrigins {
+		if origin == allowedOrigin {
+			return true
+		}
+	}
+
+	if parsedOrigin, err := url.Parse(origin); err == nil {
+		originHost := parsedOrigin.Hostname()
+		serverHost := n.cfg.Host
+		if serverHost == "" {
+			serverHost = "127.0.0.1"
+		}
+
+		if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
+			if originHost == serverHost {
+				return true
+			}
+		}
+	}
+
+	if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost") {
+		return true
+	}
+
+	return false
+}
+
+func (n *NativeChannel) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	return n.isOriginAllowed(origin)
 }
 
 func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
@@ -476,6 +495,80 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 			delete(n.wsClients, id)
 		}
 	}
+}
+
+func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []bus.FileAttachment {
+	uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
+	absUploadDir, _ := filepath.Abs(uploadDir)
+
+	attachments := make([]bus.FileAttachment, 0, len(paths))
+	for _, path := range paths {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+
+		absPath, err = filepath.EvalSymlinks(absPath)
+		if err != nil {
+			continue
+		}
+
+		if absUploadDir != "" && !strings.HasPrefix(absPath, absUploadDir) {
+			logger.WarnCF("native", "Attachment path outside upload directory rejected",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+				})
+			continue
+		}
+
+		info, err := os.Stat(absPath)
+		if err != nil {
+			logger.WarnCF("native", "Attachment file not accessible, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+				})
+			continue
+		}
+
+		if info.Size() > int64(n.cfg.MaxUploadSizeMB)*1024*1024 {
+			logger.WarnCF("native", "Attachment file too large, skipping",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"path":        path,
+					"size":        info.Size(),
+				})
+			continue
+		}
+
+		mimeType := detectMimeType(absPath)
+
+		attachments = append(attachments, bus.FileAttachment{
+			Path:      absPath,
+			Name:      filepath.Base(absPath),
+			MIMEType:  mimeType,
+			Kind:      "file",
+			Temporary: strings.HasPrefix(absPath, absUploadDir),
+		})
+	}
+	return attachments
+}
+
+func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
+	if strings.HasPrefix(sessionKey, "native:"+clientID) {
+		return true
+	}
+	client, ok := n.auth.GetClient(clientID)
+	if !ok {
+		return false
+	}
+	for _, sk := range client.SessionKeys {
+		if sk == sessionKey {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *WSClient) Send(data []byte) error {
