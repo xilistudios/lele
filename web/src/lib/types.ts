@@ -408,6 +408,11 @@ export type SessionNameResponse = {
   name: string
 }
 
+export type SessionAgentResponse = {
+  session_key: string
+  agent_id: string
+}
+
 export type ChannelsResponse = {
   channels: ChannelInfo[]
 }

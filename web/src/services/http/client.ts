@@ -18,6 +18,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SessionModelResponse,
+  SessionAgentResponse,
   SessionNameResponse,
   SystemStatus,
   ToolsResponse,
@@ -238,6 +239,15 @@ export const createApiClient = (baseUrl: string) => {
       request<SessionNameResponse>(endpoints.chat.session(sessionKey, 'name'), {
         method: 'PATCH',
         body: JSON.stringify({ name }),
+      }),
+    sessionAgent: (sessionKey: string) =>
+      request<SessionAgentResponse>(endpoints.chat.session(sessionKey, 'agent'), {
+        method: 'GET',
+      }),
+    updateSessionAgent: (sessionKey: string, agentId: string) =>
+      request<SessionAgentResponse>(endpoints.chat.session(sessionKey, 'agent'), {
+        method: 'PATCH',
+        body: JSON.stringify({ agent_id: agentId }),
       }),
     sendMessage: (payload: SendMessageRequest) =>
       request<SendMessageResponse>(endpoints.chat.send, {

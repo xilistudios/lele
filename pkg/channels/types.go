@@ -182,6 +182,15 @@ type SessionModelUpdateRequest struct {
 	Model string `json:"model"`
 }
 
+type SessionAgentResponse struct {
+	SessionKey string `json:"session_key"`
+	AgentID    string `json:"agent_id"`
+}
+
+type SessionAgentUpdateRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
 type SessionNameUpdateRequest struct {
 	Name string `json:"name"`
 }

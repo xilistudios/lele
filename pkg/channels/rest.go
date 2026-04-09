@@ -329,6 +329,37 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	if action == "agent" {
+		switch r.Method {
+		case http.MethodGet:
+			agentID := n.agentLoop.GetSessionAgent(sessionKey)
+			writeJSON(w, http.StatusOK, SessionAgentResponse{
+				SessionKey: sessionKey,
+				AgentID:    agentID,
+			})
+			return
+		case http.MethodPatch:
+			var req SessionAgentUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+				return
+			}
+			if strings.TrimSpace(req.AgentID) == "" {
+				writeError(w, http.StatusBadRequest, "agent_id is required", "agent_id_missing")
+				return
+			}
+			n.agentLoop.SetSessionAgent(sessionKey, req.AgentID)
+			writeJSON(w, http.StatusOK, SessionAgentResponse{
+				SessionKey: sessionKey,
+				AgentID:    n.agentLoop.GetSessionAgent(sessionKey),
+			})
+			return
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+			return
+		}
+	}
+
 	if action == "compact" {
 		result := n.agentLoop.CompactSession(sessionKey)
 		writeJSON(w, http.StatusOK, map[string]string{"result": result})

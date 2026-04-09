@@ -61,6 +61,11 @@ export function useAppLogic(
   const wsStatusRef = useRef(wsStatus)
   wsStatusRef.current = wsStatus
 
+  const agentsRef = useRef(agents)
+  useEffect(() => {
+    agentsRef.current = agents
+  }, [agents])
+
   usePollingFallback({
     api,
     currentSessionKey: sessionsHook.currentSessionKey,
@@ -86,6 +91,11 @@ export function useAppLogic(
     },
   })
 
+  const currentAgentIdRef = useRef(currentAgentId)
+  useEffect(() => {
+    currentAgentIdRef.current = currentAgentId
+  }, [currentAgentId])
+
   useEffect(() => {
     if (!token) return
 
@@ -93,11 +103,27 @@ export function useAppLogic(
       try {
         const agentsResult = await api.agents()
         setAgents(agentsResult.agents)
-        if (agentsResult.agents.length > 0 && !currentAgentId) {
+
+        const sessionKey = await sessionsHook.refreshSessions()
+
+        if (sessionKey && !currentAgentIdRef.current) {
+          try {
+            const agentResult = await api.sessionAgent(sessionKey)
+            const validAgent = agentsResult.agents.find((a) => a.id === agentResult.agent_id)
+            if (validAgent) {
+              setCurrentAgentId(agentResult.agent_id)
+            } else if (agentsResult.agents.length > 0) {
+              setCurrentAgentId(agentsResult.agents[0].id)
+            }
+          } catch {
+            if (agentsResult.agents.length > 0) {
+              setCurrentAgentId(agentsResult.agents[0].id)
+            }
+          }
+        } else if (!currentAgentIdRef.current && agentsResult.agents.length > 0) {
           setCurrentAgentId(agentsResult.agents[0].id)
         }
 
-        await sessionsHook.refreshSessions()
         setError(null)
       } catch (err) {
         setError((err as Error).message)
@@ -105,7 +131,7 @@ export function useAppLogic(
     }
 
     initSession()
-  }, [token, api, currentAgentId, sessionsHook.refreshSessions])
+  }, [token, api, sessionsHook.refreshSessions])
 
   useEffect(() => {
     if (!currentAgentId || !token) return
@@ -197,12 +223,19 @@ export function useAppLogic(
   }, [wsSend])
 
   const handleSelectSession = useCallback(
-    (sessionKey: string) => {
+    async (sessionKey: string) => {
       wsSend('unsubscribe', {})
       sessionsHook.selectSession(sessionKey)
       messagesHook.clearMessages()
+      try {
+        const agentResult = await api.sessionAgent(sessionKey)
+        const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
+        if (validAgent) {
+          setCurrentAgentId(agentResult.agent_id)
+        }
+      } catch {}
     },
-    [wsSend, sessionsHook.selectSession, messagesHook.clearMessages],
+    [wsSend, sessionsHook.selectSession, messagesHook.clearMessages, api],
   )
 
   const handleCreateSession = useCallback(() => {
@@ -226,9 +259,17 @@ export function useAppLogic(
     messagesHook.clearMessages()
   }, [sessionsHook.currentSessionKey, sessionsHook.clearSession, messagesHook.clearMessages])
 
-  const handleSelectAgent = useCallback((agentId: string) => {
-    setCurrentAgentId(agentId)
-  }, [])
+  const handleSelectAgent = useCallback(
+    async (agentId: string) => {
+      setCurrentAgentId(agentId)
+      if (sessionsHook.currentSessionKey) {
+        try {
+          await api.updateSessionAgent(sessionsHook.currentSessionKey, agentId)
+        } catch {}
+      }
+    },
+    [api, sessionsHook.currentSessionKey],
+  )
 
   const handleSelectModel = useCallback(
     async (model: string) => {
