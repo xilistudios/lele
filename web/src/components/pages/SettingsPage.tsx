@@ -480,7 +480,7 @@ export function SettingsPage({ onLogout }: Props) {
                     emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
                     groups={getGroupsForAgent}
                     onChange={(v) =>
-                      updateField(`agents.list.${index}.model`, { primary: v })
+                      updateField(`agents.list.${index}.model`, { ...agent.model, primary: v })
                     }
                     options={getOptionsForAgent}
                     placeholder={getAgentModelPrimary(agent.model) || t('settings.selectModel')}
@@ -498,7 +498,7 @@ export function SettingsPage({ onLogout }: Props) {
                     id={`agents.list.${index}.model.fallbacks`}
                     value={agent.model?.fallbacks || []}
                     onChange={(v) =>
-                      updateField(`agents.list.${index}.model`, { ...agent.model, fallbacks: v })
+                      updateField(`agents.list.${index}.model`, { primary: agent.model?.primary || '', fallbacks: v })
                     }
                     options={getOptionsForAgent}
                     groups={getGroupsForAgent}
