@@ -100,6 +100,7 @@ export type EditableAgentConfig = {
   model?: AgentModelConfig
   skills?: string[]
   subagents?: SubagentsConfig
+  temperature?: number
 }
 
 export type EditableAgentsConfig = {

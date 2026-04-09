@@ -60,13 +60,14 @@ type EditableAgentDefaults struct {
 
 // EditableAgentConfig represents an agent in editable mode.
 type EditableAgentConfig struct {
-	ID        string            `json:"id"`
-	Default   bool              `json:"default,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	Model     *AgentModelConfig `json:"model,omitempty"`
-	Skills    []string          `json:"skills,omitempty"`
-	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	ID          string            `json:"id"`
+	Default     bool              `json:"default,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Workspace   string            `json:"workspace,omitempty"`
+	Model       *AgentModelConfig `json:"model,omitempty"`
+	Skills      []string          `json:"skills,omitempty"`
+	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
+	Temperature *float64          `json:"temperature,omitempty"`
 }
 
 // EditableSessionConfig represents session in editable mode.

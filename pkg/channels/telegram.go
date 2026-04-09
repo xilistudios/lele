@@ -30,6 +30,8 @@ type TelegramChannel struct {
 	agentLoop       AgentProvidable  // Reference to agent loop for session agent management
 	sendMu          sync.Mutex
 	lastSend        time.Time
+	cancel          context.CancelFunc
+	botHandler      *th.BotHandler
 }
 
 type telegramCommandSpec struct {
@@ -85,7 +87,7 @@ func (c *TelegramChannel) telegramCallbackRegistry() []telegramCallbackSpec {
 	}
 }
 
-func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop AgentProvidable) (*TelegramChannel, error) {
+func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*TelegramChannel, error) {
 	var opts []telego.BotOption
 	telegramCfg := cfg.Channels.Telegram
 
@@ -109,15 +111,16 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 	base := NewBaseChannel("telegram", telegramCfg, bus, telegramCfg.AllowFrom)
 
 	return &TelegramChannel{
-		BaseChannel:  base,
-		commands:     NewTelegramCommands(bot, cfg, agentLoop),
-		bot:          bot,
-		config:       cfg,
-		chatIDs:      make(map[string]int64),
-		transcriber:  nil,
-		placeholders: sync.Map{},
-		stopThinking: sync.Map{},
-		agentLoop:    agentLoop,
+		BaseChannel:     base,
+		commands:        NewTelegramCommands(bot, cfg, agentLoop),
+		bot:             bot,
+		config:          cfg,
+		chatIDs:         make(map[string]int64),
+		transcriber:     nil,
+		placeholders:    sync.Map{},
+		stopThinking:    sync.Map{},
+		agentLoop:       agentLoop,
+		approvalManager: approvalManager,
 	}, nil
 }
 
@@ -125,25 +128,26 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
-// SetApprovalManager configures the approval manager for handling command approvals
-func (c *TelegramChannel) SetApprovalManager(am *ApprovalManager) {
-	c.approvalManager = am
-}
-
 func (c *TelegramChannel) Start(ctx context.Context) error {
 	logger.InfoC("telegram", "Starting Telegram bot (polling mode)...")
 
-	updates, err := c.bot.UpdatesViaLongPolling(ctx, &telego.GetUpdatesParams{
+	cancelCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+
+	updates, err := c.bot.UpdatesViaLongPolling(cancelCtx, &telego.GetUpdatesParams{
 		Timeout: 30,
 	})
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to start long polling: %w", err)
 	}
 
 	bh, err := th.NewBotHandler(c.bot, updates)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to create bot handler: %w", err)
 	}
+	c.botHandler = bh
 
 	for _, command := range telegramCommandRegistry {
 		commandName := command.name
@@ -160,7 +164,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		}, th.AnyCallbackQueryWithMessage(), th.CallbackDataPrefix(callbackPrefix))
 	}
 
-	err = c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{
+	err = c.bot.SetMyCommands(cancelCtx, &telego.SetMyCommandsParams{
 		Commands: telegramMenuCommands(telegramCommandRegistry),
 	})
 	if err != nil {
@@ -180,17 +184,18 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 
 	go bh.Start()
 
-	go func() {
-		<-ctx.Done()
-		bh.Stop()
-	}()
-
 	return nil
 }
 
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 	logger.InfoC("telegram", "Stopping Telegram bot...")
 	c.setRunning(false)
+	if c.cancel != nil {
+		c.cancel()
+	}
+	if c.botHandler != nil {
+		c.botHandler.Stop()
+	}
 	return nil
 }
 

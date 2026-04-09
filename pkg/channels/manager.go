@@ -18,27 +18,29 @@ import (
 )
 
 type Manager struct {
-	channels       map[string]Channel
-	dispatchQueues map[string]chan bus.OutboundMessage
-	bus            *bus.MessageBus
-	config         *config.Config
-	agentLoop      AgentProvidable
-	dispatchTask   *asyncTask
-	runCtx         context.Context
-	mu             sync.RWMutex
+	channels        map[string]Channel
+	dispatchQueues  map[string]chan bus.OutboundMessage
+	bus             *bus.MessageBus
+	config          *config.Config
+	agentLoop       AgentProvidable
+	approvalManager *ApprovalManager
+	dispatchTask    *asyncTask
+	runCtx          context.Context
+	mu              sync.RWMutex
 }
 
 type asyncTask struct {
 	cancel context.CancelFunc
 }
 
-func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable) (*Manager, error) {
+func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*Manager, error) {
 	m := &Manager{
-		channels:       make(map[string]Channel),
-		dispatchQueues: make(map[string]chan bus.OutboundMessage),
-		bus:            messageBus,
-		config:         cfg,
-		agentLoop:      agentLoop,
+		channels:        make(map[string]Channel),
+		dispatchQueues:  make(map[string]chan bus.OutboundMessage),
+		bus:             messageBus,
+		config:          cfg,
+		agentLoop:       agentLoop,
+		approvalManager: approvalManager,
 	}
 
 	if err := m.initChannels(); err != nil {
@@ -53,7 +55,7 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
 		logger.DebugC("channels", "Attempting to initialize Telegram channel")
-		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop)
+		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Telegram channel", map[string]interface{}{
 				"error": err.Error(),

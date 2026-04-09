@@ -7,6 +7,7 @@ type Props = {
   selected?: boolean
   onSelect: () => void
   onDelete: () => void
+  collapsed?: boolean
 }
 
 const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
@@ -24,8 +25,24 @@ export function SessionItem({
   selected = false,
   onSelect,
   onDelete,
+  collapsed = false,
 }: Props) {
   const { t } = useTranslation()
+
+  if (collapsed) {
+    return (
+      <button
+        onClick={onSelect}
+        type="button"
+        title={formatSessionTitle(sessionKey, sessionName)}
+        className={`flex w-full items-center justify-center rounded-md p-2 transition-colors ${
+          selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
+        }`}
+      >
+        <span className="text-xs text-[#555]">#</span>
+      </button>
+    )
+  }
 
   return (
     <div

@@ -20,6 +20,7 @@ export type AppLogicContextValue = {
   currentAgent: ReturnType<typeof useAppLogicHook>['currentAgent']
   diagnostics: ReturnType<typeof useAppLogicHook>['diagnostics']
   diagnosticsOpen: ReturnType<typeof useAppLogicHook>['diagnosticsOpen']
+  sidebarOpen: ReturnType<typeof useAppLogicHook>['sidebarOpen']
   modelState: ReturnType<typeof useAppLogicHook>['modelState']
   isStreaming: ReturnType<typeof useAppLogicHook>['isStreaming']
   sessions: ReturnType<typeof useAppLogicHook>['sessions']
@@ -44,6 +45,7 @@ export type AppLogicContextValue = {
   onAttachmentsChange: ReturnType<typeof useAppLogicHook>['onAttachmentsChange']
   onLogout: ReturnType<typeof useAppLogicHook>['onLogout']
   onToggleDiagnostics: ReturnType<typeof useAppLogicHook>['onToggleDiagnostics']
+  onToggleSidebar: ReturnType<typeof useAppLogicHook>['onToggleSidebar']
 
   // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
@@ -85,6 +87,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     currentAgent: app.currentAgent,
     diagnostics: app.diagnostics,
     diagnosticsOpen: app.diagnosticsOpen,
+    sidebarOpen: app.sidebarOpen,
     modelState: app.modelState,
     isStreaming: app.isStreaming,
     sessions: app.sessions,
@@ -109,6 +112,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onAttachmentsChange: app.onAttachmentsChange,
     onLogout: app.onLogout,
     onToggleDiagnostics: app.onToggleDiagnostics,
+    onToggleSidebar: app.onToggleSidebar,
 
     // Ref for internal wiring
     eventHandlerRef,

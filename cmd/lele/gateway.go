@@ -97,20 +97,13 @@ func gatewayCmd() {
 		return tools.SilentResult(response)
 	})
 
-	channelManager, err := channels.NewManager(cfg, msgBus, agentLoop)
+	channelManager, err := channels.NewManager(cfg, msgBus, agentLoop, approvalManager)
 	if err != nil {
 		fmt.Printf("Error creating channel manager: %v\n", err)
 		os.Exit(1)
 	}
 
 	agentLoop.SetChannelManager(channelManager)
-
-	if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
-		if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
-			tc.SetApprovalManager(approvalManager)
-			logger.InfoC("telegram", "Approval system attached to Telegram channel")
-		}
-	}
 
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {

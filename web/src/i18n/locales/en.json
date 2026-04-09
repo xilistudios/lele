@@ -213,6 +213,7 @@
       "agentModelPrimary": "Primary model",
       "agentModelFallbacks": "Model fallbacks",
       "agentSkills": "Skills",
+      "agentTemperature": "Temperature",
       "bindingAgentId": "Agent ID",
       "bindingChannel": "Channel",
       "bindingAccountId": "Account ID",

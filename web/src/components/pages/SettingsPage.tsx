@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useSettingsConfig } from '../../hooks/useSettingsConfig'
@@ -56,6 +57,7 @@ const ADD_BTN_CLS =
 export function SettingsPage({ onLogout }: Props) {
   const { t } = useTranslation()
   const { api } = useAuthContext()
+  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
   const [showRawJson, setShowRawJson] = useState(false)
   const [newProviderName, setNewProviderName] = useState('')
@@ -513,6 +515,22 @@ export function SettingsPage({ onLogout }: Props) {
                     id={`agents.list.${index}.skills`}
                     value={agent.skills || []}
                     onChange={(v) => updateField(`agents.list.${index}.skills`, v)}
+                  />
+                </SettingsField>
+                <SettingsField
+                  label={t('settings.fields.agentTemperature')}
+                  path={`agents.list.${index}.temperature`}
+                  isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.temperature`)}
+                >
+                  <NumberInput
+                    id={`agents.list.${index}.temperature`}
+                    value={agent.temperature ?? 0}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    onChange={(v) =>
+                      updateField(`agents.list.${index}.temperature`, v === 0 ? undefined : v)
+                    }
                   />
                 </SettingsField>
               </div>
@@ -2029,10 +2047,34 @@ export function SettingsPage({ onLogout }: Props) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#1a1a1a] text-[#e0e0e0]">
-      <Sidebar />
+      <Sidebar
+        collapsed={!sidebarOpen}
+        mobileOpen={sidebarOpen}
+        onClose={() => onToggleSidebar()}
+      />
       <main className="flex flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-[#2e2e2e] px-6 py-4">
           <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="text-[#888] transition-colors hover:text-white"
+              aria-label="Toggle sidebar"
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
             <h1 className="text-xl font-semibold text-white">{t('chat.settings')}</h1>
             {metadata && <span className="text-xs text-[#666]">{metadata.config_path}</span>}
           </div>

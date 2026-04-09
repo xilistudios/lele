@@ -213,6 +213,7 @@
       "agentModelPrimary": "Modelo primario",
       "agentModelFallbacks": "Fallbacks de modelo",
       "agentSkills": "Skills",
+      "agentTemperature": "Temperatura",
       "bindingAgentId": "ID del agente",
       "bindingChannel": "Canal",
       "bindingAccountId": "ID de cuenta",

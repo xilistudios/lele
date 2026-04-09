@@ -47,6 +47,7 @@ export function useAppLogic(
     agentInfo: null,
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const sessionsHook = useChatSessions(api, token, clientId)
   const { modelState, loadModels, selectModel } = useModels(api, token)
@@ -255,6 +256,10 @@ export function useAppLogic(
     setDiagnosticsOpen((current) => !current)
   }, [])
 
+  const handleToggleSidebar = useCallback(() => {
+    setSidebarOpen((current) => !current)
+  }, [])
+
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
   const isStreaming = messagesHook.messages.some((m) => m.streaming)
 
@@ -264,6 +269,7 @@ export function useAppLogic(
     currentAgent,
     diagnostics,
     diagnosticsOpen,
+    sidebarOpen,
     modelState,
     isStreaming,
     sessions: sessionsHook.sessions,
@@ -286,5 +292,6 @@ export function useAppLogic(
     onAttachmentsChange: messagesHook.setPendingAttachments,
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
+    onToggleSidebar: handleToggleSidebar,
   }
 }
