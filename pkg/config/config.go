@@ -186,6 +186,7 @@ type ChannelsConfig struct {
 	LINE     LINEConfig     `json:"line"`
 	OneBot   OneBotConfig   `json:"onebot"`
 	Native   NativeConfig   `json:"native"`
+	Web      WebConfig      `json:"web"`
 }
 
 type NativeConfig struct {
@@ -200,6 +201,12 @@ type NativeConfig struct {
 	MaxUploadSizeMB   int64    `json:"max_upload_size_mb" env:"LELE_CHANNELS_NATIVE_MAX_UPLOAD_SIZE_MB"`
 	UploadTTLHours    int      `json:"upload_ttl_hours" env:"LELE_CHANNELS_NATIVE_UPLOAD_TTL_HOURS"`
 	LeleDir           string   `json:"lele_dir,omitempty" env:"LELE_CHANNELS_NATIVE_LELE_DIR"`
+}
+
+type WebConfig struct {
+	Enabled bool   `json:"enabled" env:"LELE_WEB_ENABLED"`
+	Host    string `json:"host" env:"LELE_WEB_HOST"`
+	Port    int    `json:"port" env:"LELE_WEB_PORT"`
 }
 
 type WhatsAppConfig struct {
@@ -799,6 +806,11 @@ func DefaultConfig() *Config {
 				MaxUploadSizeMB:   50,
 				UploadTTLHours:    24,
 				LeleDir:           getDefaultLeleDir(),
+			},
+			Web: WebConfig{
+				Enabled: false,
+				Host:    "0.0.0.0",
+				Port:    3005,
 			},
 		},
 		Providers: ProvidersConfig{

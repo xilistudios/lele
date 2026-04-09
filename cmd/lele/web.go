@@ -22,6 +22,15 @@ type webServerOptions struct {
 
 func parseWebServerOptions(args []string) webServerOptions {
 	opts := webServerOptions{Host: "0.0.0.0", Port: 3005}
+
+	cfg, err := loadConfig()
+	if err == nil && cfg.Channels.Web.Enabled && cfg.Channels.Web.Port != 0 {
+		if cfg.Channels.Web.Host != "" {
+			opts.Host = cfg.Channels.Web.Host
+		}
+		opts.Port = cfg.Channels.Web.Port
+	}
+
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--host":
