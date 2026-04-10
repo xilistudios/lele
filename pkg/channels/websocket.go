@@ -434,21 +434,49 @@ func (n *NativeChannel) RegisterOutboundHandler(ctx context.Context) {
 				messageID = uuid.New().String()
 			}
 
-			if len(msg.Content) > 0 {
-				n.StreamMessage(msg.ChatID, messageID, msg.Content, true)
-			}
+			switch msg.Event {
+			case "message.stream":
+				done := msg.Metadata["done"] == "true"
+				n.StreamMessage(msg.ChatID, messageID, msg.Content, done)
 
-			if len(msg.Attachments) > 0 {
-				n.broadcastToSession(msg.ChatID, "attachments", attachmentsToMaps(msg.Attachments))
-			}
-
-			if msg.Content != "" || len(msg.Attachments) > 0 {
-				n.broadcastToSession(msg.ChatID, "message.complete", WSMessageCompletePayload{
-					MessageID:   messageID,
-					SessionKey:  msg.ChatID,
-					Content:     msg.Content,
-					Attachments: attachmentsToMaps(msg.Attachments),
+			case "tool.executing":
+				n.broadcastToSession(msg.ChatID, "tool.executing", WSToolExecutingPayload{
+					SessionKey: msg.ChatID,
+					Tool:       msg.Metadata["tool"],
+					Action:     msg.Metadata["action"],
 				})
+
+			case "tool.result":
+				n.broadcastToSession(msg.ChatID, "tool.result", WSToolResultPayload{
+					SessionKey: msg.ChatID,
+					Tool:       msg.Metadata["tool"],
+					Result:     msg.Metadata["result"],
+				})
+
+			case "approval.request":
+				n.broadcastToSession(msg.ChatID, "approval.request", WSApprovalRequestPayload{
+					ID:      msg.Metadata["id"],
+					Command: msg.Metadata["command"],
+					Reason:  msg.Metadata["reason"],
+				})
+
+			default:
+				if len(msg.Content) > 0 {
+					n.StreamMessage(msg.ChatID, messageID, msg.Content, true)
+				}
+
+				if len(msg.Attachments) > 0 {
+					n.broadcastToSession(msg.ChatID, "attachments", attachmentsToMaps(msg.Attachments))
+				}
+
+				if msg.Content != "" || len(msg.Attachments) > 0 {
+					n.broadcastToSession(msg.ChatID, "message.complete", WSMessageCompletePayload{
+						MessageID:   messageID,
+						SessionKey:  msg.ChatID,
+						Content:     msg.Content,
+						Attachments: attachmentsToMaps(msg.Attachments),
+					})
+				}
 			}
 		}
 	}
