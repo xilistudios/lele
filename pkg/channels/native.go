@@ -34,6 +34,7 @@ type NativeChannel struct {
 	running     bool
 	wsClients   map[string]*WSClient
 	leleDir     string
+	configPath  string // path to config file, defaults to DefaultConfigPath() if empty
 	mu          sync.RWMutex
 	startTime   time.Time
 	pinLimiter  *rateLimiter
@@ -84,6 +85,15 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 
 func (n *NativeChannel) Name() string {
 	return ChannelName
+}
+
+// getConfigPath returns the path to the config file.
+// If configPath is set, it uses that; otherwise it returns the default path.
+func (n *NativeChannel) getConfigPath() string {
+	if n.configPath != "" {
+		return n.configPath
+	}
+	return config.DefaultConfigPath()
 }
 
 func (n *NativeChannel) IsRunning() bool {

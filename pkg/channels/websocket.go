@@ -301,7 +301,11 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 		return
 	}
 
-	client.SessionKey = "native:" + client.ClientInfo.ClientID
+	// Only reset to default if unsubscribing from the current session
+	// or if no specific session_key is provided (full unsubscribe)
+	if payload.SessionKey == "" || payload.SessionKey == client.SessionKey {
+		client.SessionKey = "native:" + client.ClientInfo.ClientID
+	}
 
 	_ = client.Send(mustMarshal(WSMessage{
 		Event: "unsubscribe.ack",

@@ -28,8 +28,8 @@ export class LeleSocket {
   private readonly openQueue: ClientCommand[] = []
   private reconnectAttempts = 0
   private pingIntervalId: number | null = null
-  private subscribedSessionKey: string | null = null
-  private subscribedAgentId: string | null = null
+  private pendingSessionKey: string | null = null
+  private confirmedSessionKey: string | null = null
   private _state: ConnectionState = 'disconnected'
   private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
   private readonly pingIntervalMs: number
@@ -96,7 +96,14 @@ export class LeleSocket {
     }
     this.socket?.close()
     this.socket = null
+    this.pendingSessionKey = null
+    this.confirmedSessionKey = null
     this.setState('disconnected')
+  }
+
+  clearSubscription() {
+    this.pendingSessionKey = null
+    this.confirmedSessionKey = null
   }
 
   send<E extends ClientCommand['event']>(
@@ -105,13 +112,21 @@ export class LeleSocket {
   ) {
     if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
       const sessionKey = (data as { session_key?: unknown }).session_key
-      this.subscribedSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
-      const agentId = (data as { agent_id?: unknown }).agent_id
-      this.subscribedAgentId = typeof agentId === 'string' && agentId ? agentId : null
+      this.pendingSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
     }
     if (event === 'unsubscribe') {
-      this.subscribedSessionKey = null
-      this.subscribedAgentId = null
+      const sessionKey = (data as { session_key?: unknown })?.session_key
+      if (typeof sessionKey === 'string') {
+        if (this.pendingSessionKey === sessionKey) {
+          this.pendingSessionKey = null
+        }
+        if (this.confirmedSessionKey === sessionKey) {
+          this.confirmedSessionKey = null
+        }
+      } else {
+        this.pendingSessionKey = null
+        this.confirmedSessionKey = null
+      }
     }
 
     if (event === 'subscribe' || event === 'unsubscribe') {
@@ -133,13 +148,22 @@ export class LeleSocket {
     this.socket.send(serializeCommand(command))
   }
 
+  handleEvent(event: ClientEvent) {
+    if (event.event === 'subscribe.ack') {
+      const data = event.data as { session_key?: string; processing?: boolean }
+      if (data.session_key && data.session_key === this.pendingSessionKey) {
+        this.confirmedSessionKey = this.pendingSessionKey
+      }
+    }
+  }
+
   private open() {
     this.setState('connecting')
     this.emit('connecting')
     this.reconnectAttempts++
     const params = new URLSearchParams({ token: this.token })
-    if (this.subscribedSessionKey) {
-      params.set('session_key', this.subscribedSessionKey)
+    if (this.confirmedSessionKey) {
+      params.set('session_key', this.confirmedSessionKey)
     }
 
     const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws?${params.toString()}`
@@ -157,20 +181,13 @@ export class LeleSocket {
           socket.send(serializeCommand(message))
         }
       }
-      if (this.subscribedSessionKey) {
-        const subscribeData: { session_key: string; agent_id?: string } = {
-          session_key: this.subscribedSessionKey,
-        }
-        if (this.subscribedAgentId) {
-          subscribeData.agent_id = this.subscribedAgentId
-        }
-        socket.send(serializeCommand({ event: 'subscribe', data: subscribeData }))
-      }
     })
 
     socket.addEventListener('message', (event) => {
       try {
-        this.emit('event', parseEvent(event.data as string))
+        const parsed = parseEvent(event.data as string)
+        this.handleEvent(parsed)
+        this.emit('event', parsed)
       } catch {
         this.emit('event', {
           event: 'error',

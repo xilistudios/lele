@@ -61,6 +61,8 @@ export function useAppLogic(
   const wsStatusRef = useRef(wsStatus)
   wsStatusRef.current = wsStatus
 
+  const subscribedSessionRef = useRef<string | null>(null)
+
   const agentsRef = useRef(agents)
   useEffect(() => {
     agentsRef.current = agents
@@ -161,11 +163,29 @@ export function useAppLogic(
     loadAgentData()
   }, [currentAgentId, token, api])
 
+  // Cleanup effect: unsubscribe from previous session when session/agent changes
   useEffect(() => {
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
 
+    // Cleanup: unsubscribe from previous session before subscribing to new one
+    return () => {
+      if (subscribedSessionRef.current) {
+        wsSend('unsubscribe', { session_key: subscribedSessionRef.current })
+        subscribedSessionRef.current = null
+      }
+    }
+  }, [sessionsHook.currentSessionKey, currentAgentId, token, wsStatus, wsSend])
+
+  // Subscribe effect: subscribe to current session
+  useEffect(() => {
+    if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
+    if (wsStatus !== 'connected') return
+    // Skip if already subscribed to this session
+    if (subscribedSessionRef.current === sessionsHook.currentSessionKey) return
+
     wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
+    subscribedSessionRef.current = sessionsHook.currentSessionKey
     messagesHook.loadHistory(sessionsHook.currentSessionKey)
     loadModels(
       currentAgentId,
@@ -184,6 +204,7 @@ export function useAppLogic(
   ])
 
   const handleLogout = useCallback(() => {
+    subscribedSessionRef.current = null
     wsClose()
     messagesHook.clearMessages()
     persistSession(null)
@@ -226,7 +247,10 @@ export function useAppLogic(
 
   const handleSelectSession = useCallback(
     async (sessionKey: string) => {
-      wsSend('unsubscribe', {})
+      if (sessionsHook.currentSessionKey) {
+        wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
+      }
+      subscribedSessionRef.current = null
       sessionsHook.selectSession(sessionKey)
       messagesHook.clearMessages()
       try {
@@ -237,16 +261,19 @@ export function useAppLogic(
         }
       } catch {}
     },
-    [wsSend, sessionsHook.selectSession, messagesHook.clearMessages, api],
+    [wsSend, sessionsHook.selectSession, sessionsHook.currentSessionKey, messagesHook.clearMessages, api],
   )
 
   const handleCreateSession = useCallback(() => {
-    wsSend('unsubscribe', {})
+    if (sessionsHook.currentSessionKey) {
+      wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
+    }
+    subscribedSessionRef.current = null
     const newKey = sessionsHook.createSession()
     if (newKey) {
       messagesHook.clearMessages()
     }
-  }, [wsSend, sessionsHook.createSession, messagesHook.clearMessages])
+  }, [wsSend, sessionsHook.createSession, sessionsHook.currentSessionKey, messagesHook.clearMessages])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {

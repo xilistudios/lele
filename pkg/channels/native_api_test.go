@@ -246,6 +246,85 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 }
 
+// newNativeTestServerWithConfigPath creates a test server with a custom config path.
+// This is useful for tests that need to control the config file location.
+func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeTestServer {
+	t.Helper()
+
+	cfg := config.DefaultConfig()
+	cfg.Channels.Native.Enabled = true
+	cfg.Channels.Native.Host = "127.0.0.1"
+	cfg.Channels.Native.Port = 18793
+	cfg.Channels.Native.TokenExpiryDays = 30
+	cfg.Channels.Native.PinExpiryMinutes = 5
+	cfg.Channels.Native.MaxClients = 5
+	cfg.Channels.Native.SessionExpiryDays = 30
+
+	// Configure test providers for model endpoint tests
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"openai": {
+			Type: "openai",
+			Models: map[string]config.ProviderModelConfig{
+				"gpt-4":       {Model: "gpt-4"},
+				"gpt-4o":      {Model: "gpt-4o"},
+				"gpt-4o-mini": {Model: "gpt-4o-mini"},
+			},
+		},
+		"anthropic": {
+			Type: "anthropic",
+			Models: map[string]config.ProviderModelConfig{
+				"claude-sonnet": {Model: "claude-3-5-sonnet"},
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	loop := newNativeTestAgentLoop(cfg)
+	auth, err := NewAuthManager(&cfg.Channels.Native, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewAuthManager() error = %v", err)
+	}
+
+	channel := &NativeChannel{
+		cfg:         &cfg.Channels.Native,
+		auth:        auth,
+		bus:         msgBus,
+		agentLoop:   loop,
+		wsClients:   make(map[string]*WSClient),
+		pinLimiter:  newRateLimiter(10, time.Minute),
+		pairLimiter: newRateLimiter(5, time.Minute),
+		apiLimiter:  newRateLimiter(120, time.Minute),
+		configPath:  configPath,
+	}
+
+	mux := http.NewServeMux()
+	channel.registerRoutes(mux)
+	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(channel.authMiddleware(mux))))
+
+	t.Cleanup(func() {
+		server.Close()
+	})
+
+	pending, err := auth.GeneratePIN("Test Desktop")
+	if err != nil {
+		t.Fatalf("GeneratePIN() error = %v", err)
+	}
+
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "Test Desktop")
+	if err != nil {
+		t.Fatalf("PairWithPIN() error = %v", err)
+	}
+
+	return &nativeTestServer{
+		channel:  channel,
+		loop:     loop,
+		bus:      msgBus,
+		server:   server,
+		token:    token,
+		clientID: client.ClientID,
+	}
+}
+
 func TestNativeChannelAuthStatusInvalidTokenReturnsValidFalse(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -494,7 +573,21 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 }
 
 func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
-	ts := newNativeTestServer(t)
+	// Create a temporary config file with default values
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	// Write a minimal config file with default native settings
+	defaultConfig := config.DefaultConfig()
+	configData, err := json.MarshalIndent(defaultConfig, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	if err := os.WriteFile(configPath, configData, 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	ts := newNativeTestServerWithConfigPath(t, configPath)
 
 	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/config", nil)
 	if err != nil {

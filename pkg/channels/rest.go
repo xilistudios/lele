@@ -470,7 +470,7 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 }
 
 func (n *NativeChannel) handleConfig(w http.ResponseWriter, r *http.Request) {
-	configPath := config.DefaultConfigPath()
+	configPath := n.getConfigPath()
 
 	switch r.Method {
 	case http.MethodGet:
