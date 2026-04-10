@@ -16,5 +16,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["bun-types", "@testing-library/jest-dom"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src"]
 }
