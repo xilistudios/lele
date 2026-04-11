@@ -303,8 +303,22 @@ See `docs/tools_configuration.md` and `docs/client-api.md` for operational detai
 ## Additional Docs
 
 - `docs/agents-models-providers.md`
+- `docs/architecture.md`
+- `docs/channel-setup.md`
+- `docs/cli-reference.md`
+- `docs/config-reference.md`
 - `docs/client-api.md`
+- `docs/deployment.md`
+- `docs/examples.md`
+- `docs/installation-and-onboarding.md`
+- `docs/logging-and-observability.md`
+- `docs/model-routing.md`
+- `docs/security-and-sandbox.md`
+- `docs/session-and-workspace.md`
+- `docs/skills-authoring.md`
 - `docs/tools_configuration.md`
+- `docs/troubleshooting.md`
+- `docs/web-ui.md`
 - `docs/SKILL_SUBAGENTS.md`
 - `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`
 
