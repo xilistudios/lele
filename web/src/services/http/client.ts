@@ -11,14 +11,15 @@ import type {
   ConfigResponse,
   ConfigUpdateResponse,
   ConfigValidateResponse,
+  CreateSessionResponse,
   EditableConfig,
   FileUploadResponse,
   HistoryResponse,
   ModelsResponse,
   SendMessageRequest,
   SendMessageResponse,
-  SessionModelResponse,
   SessionAgentResponse,
+  SessionModelResponse,
   SessionNameResponse,
   SystemStatus,
   ToolsResponse,
@@ -217,6 +218,11 @@ export const createApiClient = (baseUrl: string) => {
     history: (sessionKey: string) =>
       request<HistoryResponse>(endpoints.chat.history(sessionKey), { method: 'GET' }),
     sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),
+    createSession: (sessionKey: string) =>
+      request<CreateSessionResponse>(endpoints.chat.sessions, {
+        method: 'POST',
+        body: JSON.stringify({ session_key: sessionKey }),
+      }),
     models: (agentId: string, sessionKey: string | null) => {
       const params = new URLSearchParams()
       if (agentId) params.set('agent_id', agentId)

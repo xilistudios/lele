@@ -421,6 +421,10 @@ export type ChatSessionsResponse = {
   sessions: ChatSession[]
 }
 
+export type CreateSessionResponse = {
+  session_key: string
+}
+
 export type HistoryToolCall = {
   id: string
   type?: string
@@ -451,12 +455,14 @@ export type ChatMessage = {
   toolArgs?: string
   toolResult?: string
   toolStatus?: ToolMessageStatus
+  subagentSessionKey?: string
 }
 
 export type ToolStatus = {
   session_key?: string
   tool: string
   action: string
+  subagent_session_key?: string
 }
 
 export type ApprovalRequest = {
@@ -566,7 +572,10 @@ export type ClientEvent =
       }
     }
   | { event: 'tool.executing'; data: ToolStatus }
-  | { event: 'tool.result'; data: { session_key?: string; tool: string; result: string } }
+  | {
+      event: 'tool.result' | 'subagent.result'
+      data: { session_key?: string; tool: string; result: string; subagent_session_key?: string }
+    }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
   | { event: 'subscribe.ack'; data: { session_key: string; processing?: boolean } }

@@ -4,6 +4,8 @@ const KEY = 'lele.session'
 const API_URL_KEY = 'lele.apiUrl'
 const SESSION_KEY = 'lele.currentSessionKey'
 
+const isSubagentSessionKey = (sessionKey: string) => sessionKey.startsWith('subagent:')
+
 export const loadSession = (): AuthSession | null => {
   if (typeof localStorage === 'undefined') {
     return null
@@ -46,10 +48,14 @@ export const loadCurrentSessionKey = (): string | null => {
     return null
   }
 
-  return localStorage.getItem(SESSION_KEY)
+  const sessionKey = localStorage.getItem(SESSION_KEY)
+  return sessionKey && !isSubagentSessionKey(sessionKey) ? sessionKey : null
 }
 
 export const saveCurrentSessionKey = (sessionKey: string) => {
+  if (isSubagentSessionKey(sessionKey)) {
+    return
+  }
   localStorage.setItem(SESSION_KEY, sessionKey)
 }
 
