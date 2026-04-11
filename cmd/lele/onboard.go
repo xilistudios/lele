@@ -10,24 +10,29 @@ import (
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 func printHelp() {
-	fmt.Printf("%s lele - Personal AI Assistant v%s\n\n", logo, version)
-	fmt.Println("Usage: lele <command>")
+	fmt.Println(i18n.TWithData("cli.help.title", map[string]interface{}{
+		"logo":    logo,
+		"version": version,
+	}))
 	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  onboard     Initialize lele configuration and workspace")
-	fmt.Println("  agent       Interact with the agent directly")
-	fmt.Println("  auth        Manage authentication (login, logout, status)")
-	fmt.Println("  gateway     Start lele gateway")
-	fmt.Println("  web         Start or stop the web app server")
-	fmt.Println("  status      Show lele status")
-	fmt.Println("  cron        Manage scheduled tasks")
-	fmt.Println("  migrate     Migrate from OpenClaw to Lele")
-	fmt.Println("  skills      Manage skills (install, list, remove)")
-	fmt.Println("  client      Manage native channel clients (pair, list, remove)")
-	fmt.Println("  version     Show version information")
+	fmt.Println(i18n.T("cli.help.usage"))
+	fmt.Println()
+	fmt.Println(i18n.T("cli.help.commands"))
+	fmt.Println("  onboard     " + i18n.T("cli.help.onboard"))
+	fmt.Println("  agent       " + i18n.T("cli.help.agent"))
+	fmt.Println("  auth        " + i18n.T("cli.help.auth"))
+	fmt.Println("  gateway     " + i18n.T("cli.help.gateway"))
+	fmt.Println("  web         " + i18n.T("cli.help.web"))
+	fmt.Println("  status      " + i18n.T("cli.help.status"))
+	fmt.Println("  cron        " + i18n.T("cli.help.cron"))
+	fmt.Println("  migrate     " + i18n.T("cli.help.migrate"))
+	fmt.Println("  skills      " + i18n.T("cli.help.skills"))
+	fmt.Println("  client      " + i18n.T("cli.help.client"))
+	fmt.Println("  version     " + i18n.T("cli.help.version"))
 }
 
 func askYesNo(prompt string, defaultYes bool) bool {
@@ -80,31 +85,31 @@ func askInt(prompt string, defaultVal int) int {
 }
 
 func configureWebUI(cfg *config.Config, leleDir string) {
-	fmt.Println("\n=== Web UI Configuration ===")
+	fmt.Println(i18n.T("cli.onboard.webUIConfiguration"))
 
 	cfg.Channels.Web.Enabled = true
-	cfg.Channels.Web.Port = askInt("Web port", 3005)
+	cfg.Channels.Web.Port = askInt(i18n.T("cli.onboard.webPort"), 3005)
 	cfg.Channels.Web.Host = "0.0.0.0"
 
-	fmt.Println("\n✓ Web UI enabled on port", cfg.Channels.Web.Port)
+	fmt.Println(i18n.T("cli.onboard.webUIEnabled"), cfg.Channels.Web.Port)
 
-	fmt.Println("✓ Native channel auto-enabled (required for Web UI)")
+	fmt.Println(i18n.T("cli.onboard.nativeChannelAutoEnabled"))
 	cfg.Channels.Native.Enabled = true
 
-	if askYesNo("[Advanced] Configure native channel?", false) {
+	if askYesNo(i18n.T("cli.onboard.configureNativeAdvanced"), false) {
 		configureNativeAdvanced(cfg)
 	}
 }
 
 func configureNativeAdvanced(cfg *config.Config) {
-	fmt.Println("\n=== Native Channel Configuration (Advanced) ===")
+	fmt.Println(i18n.T("cli.onboard.nativeChannelConfiguration"))
 
-	cfg.Channels.Native.Host = askString("API host", "127.0.0.1")
-	cfg.Channels.Native.Port = askInt("API port", 18793)
-	cfg.Channels.Native.MaxClients = askInt("Max paired clients", 5)
-	cfg.Channels.Native.TokenExpiryDays = askInt("Token expiry days", 30)
+	cfg.Channels.Native.Host = askString(i18n.T("cli.onboard.apiHost"), "127.0.0.1")
+	cfg.Channels.Native.Port = askInt(i18n.T("cli.onboard.apiPort"), 18793)
+	cfg.Channels.Native.MaxClients = askInt(i18n.T("cli.onboard.maxPairedClients"), 5)
+	cfg.Channels.Native.TokenExpiryDays = askInt(i18n.T("cli.onboard.tokenExpiryDays"), 30)
 
-	fmt.Println("\n✓ Native channel configured")
+	fmt.Println(i18n.T("cli.onboard.nativeChannelConfigured"))
 }
 
 func maybeGeneratePIN(cfg *config.Config, leleDir string) {
@@ -112,29 +117,29 @@ func maybeGeneratePIN(cfg *config.Config, leleDir string) {
 		return
 	}
 
-	if !askYesNo("Generate pairing PIN?", true) {
+	if !askYesNo(i18n.T("cli.onboard.generatePairingPIN"), true) {
 		return
 	}
 
-	deviceName := askString("Device name", "Desktop")
+	deviceName := askString(i18n.T("cli.onboard.deviceName"), "Desktop")
 
 	authMgr, err := channels.NewAuthManager(&cfg.Channels.Native, leleDir)
 	if err != nil {
-		fmt.Printf("Error creating auth manager: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.onboard.errorCreatingAuthManager", err))
 		return
 	}
 
 	pending, err := authMgr.GeneratePIN(deviceName)
 	if err != nil {
-		fmt.Printf("Error generating PIN: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.onboard.errorGeneratingPIN", err))
 		return
 	}
 
-	fmt.Println("\n✓ Pairing PIN generated")
-	fmt.Printf("  PIN:     %s\n", pending.PIN)
-	fmt.Printf("  Expires: %s (%d minutes)\n",
+	fmt.Println(i18n.T("cli.onboard.pairingPINGenerated"))
+	fmt.Println(i18n.TPrintf("cli.onboard.pinLabel", pending.PIN))
+	fmt.Println(i18n.TPrintf("cli.onboard.pinExpires",
 		pending.Expires.Format("15:04:05"),
-		cfg.Channels.Native.PinExpiryMinutes)
+		cfg.Channels.Native.PinExpiryMinutes))
 }
 
 func maybeStartServices(cfg *config.Config) {
@@ -142,41 +147,40 @@ func maybeStartServices(cfg *config.Config) {
 		return
 	}
 
-	if !askYesNo("Start services now?", true) {
-		fmt.Println("\nTo start services manually:")
-		fmt.Println("  lele gateway")
-		fmt.Println("  lele web start")
+	if !askYesNo(i18n.T("cli.onboard.startServicesNow"), true) {
+		fmt.Println(i18n.T("cli.onboard.manualStartInstructions"))
+		fmt.Println(i18n.T("cli.onboard.manualStartGateway"))
+		fmt.Println(i18n.T("cli.onboard.manualStartWeb"))
 		return
 	}
 
-	fmt.Println("\n[+] Starting gateway...")
+	fmt.Println(i18n.T("cli.onboard.startingGateway"))
 	gatewayCmd := exec.Command("lele", "gateway")
 	gatewayCmd.Start()
 
 	time.Sleep(1 * time.Second)
 
-	fmt.Println("[+] Starting web server...")
+	fmt.Println(i18n.T("cli.onboard.startingWebServer"))
 	webCmd := exec.Command("lele", "web", "start",
 		"--port", fmt.Sprintf("%d", cfg.Channels.Web.Port))
 	webCmd.Start()
 
 	time.Sleep(500 * time.Millisecond)
 
-	fmt.Println("\n✓ Services started")
-	fmt.Printf("\nOpen http://127.0.0.1:%d in your browser\n", cfg.Channels.Web.Port)
-	fmt.Println("Enter the PIN to connect your device.")
+	fmt.Println(i18n.T("cli.onboard.servicesStarted"))
+	fmt.Println(i18n.TPrintf("cli.onboard.openBrowser", cfg.Channels.Web.Port))
+	fmt.Println(i18n.T("cli.onboard.enterPINToConnect"))
 }
 
 func onboard() {
 	configPath := getConfigPath()
 
 	if _, err := os.Stat(configPath); err == nil {
-		fmt.Printf("Config already exists at %s\n", configPath)
-		fmt.Print("Overwrite? (y/n): ")
+		fmt.Print(i18n.TPrintf("cli.common.overwritePrompt", configPath))
 		var response string
 		fmt.Scanln(&response)
 		if response != "y" {
-			fmt.Println("Aborted.")
+			fmt.Println(i18n.T("cli.common.aborted"))
 			return
 		}
 	}
@@ -193,7 +197,7 @@ func onboard() {
 	}
 
 	if err := config.SaveConfig(configPath, cfg); err != nil {
-		fmt.Printf("Error saving config: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.onboard.errorSavingConfig", err))
 		os.Exit(1)
 	}
 
@@ -202,19 +206,19 @@ func onboard() {
 
 	logsPath := cfg.LogsPath()
 	if err := os.MkdirAll(logsPath, 0755); err != nil {
-		fmt.Printf("Warning: could not create logs directory: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.onboard.warningCreateLogsDir", err))
 	} else {
 		currentDate := time.Now().Format("2006-01-02")
 		infoLog := filepath.Join(logsPath, fmt.Sprintf("info-%s.log", currentDate))
 		errorsLog := filepath.Join(logsPath, fmt.Sprintf("errors-%s.log", currentDate))
 
 		if _, err := os.Create(infoLog); err != nil {
-			fmt.Printf("Warning: could not create info log file: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.onboard.warningCreateInfoLog", err))
 		}
 		if _, err := os.Create(errorsLog); err != nil {
-			fmt.Printf("Warning: could not create errors log file: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.onboard.warningCreateErrorsLog", err))
 		}
 	}
 
-	fmt.Printf("%s lele is ready!\n", logo)
+	fmt.Println(i18n.TPrintf("cli.onboard.ready", logo))
 }

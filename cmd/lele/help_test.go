@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 func captureOutput(f func()) string {
@@ -24,11 +26,12 @@ func captureOutput(f func()) string {
 }
 
 func TestPrintHelp_ContainsVersion(t *testing.T) {
+	i18n.SetLanguage("en")
 	version = "test-version"
 	output := captureOutput(printHelp)
 
 	if !regexp.MustCompile(`lele - Personal AI Assistant`).MatchString(output) {
-		t.Error("printHelp should contain 'lele - Personal AI Assistant'")
+		t.Errorf("printHelp should contain 'lele - Personal AI Assistant', got: %s", output)
 	}
 }
 
