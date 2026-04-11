@@ -20,7 +20,7 @@ describe('toChatMessages', () => {
     expect(result[1].content).toBe('Hola usuario')
   })
 
-  test('muestra tool calls DESPUÉS del assistant cuando tiene content', () => {
+  test('mapea assistant con tool_calls y tool result sin mensajes sintéticos extra', () => {
     const history = [
       { role: 'user' as const, content: 'Lee archivo' },
       {
@@ -35,18 +35,16 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // [user, assistant, tool-call, tool-result] -> tool calls DESPUÉS del assistant
-    expect(result.length).toBe(4)
+    expect(result.length).toBe(3)
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('assistant')
     expect(result[1].content).toBe('Voy a leer el archivo')
-    expect(result[2].role).toBe('tool') // tool call
+    expect(result[2].role).toBe('tool')
     expect(result[2].toolName).toBe('read_file')
-    expect(result[3].role).toBe('tool') // tool result
-    expect(result[3].toolResult).toBe('Contenido del archivo')
+    expect(result[2].toolResult).toBe('Contenido del archivo')
   })
 
-  test('muestra tool calls ANTES del assistant cuando assistant tiene content vacío', () => {
+  test('omite assistant vacío con tool_calls y conserva tool result', () => {
     const history = [
       { role: 'user' as const, content: 'Lee archivo' },
       {
@@ -61,19 +59,14 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // [user, tool-call, assistant, tool-result] -> tool call ANTES del assistant vacío
-    // Note: el tool result viene del historial como mensaje separado, no se reordena
-    expect(result.length).toBe(4)
+    expect(result.length).toBe(2)
     expect(result[0].role).toBe('user')
-    expect(result[1].role).toBe('tool') // tool call (del assistant) - ANTES del assistant vacío
+    expect(result[1].role).toBe('tool')
     expect(result[1].toolName).toBe('read_file')
-    expect(result[2].role).toBe('assistant') // assistant vacío - DESPUÉS del tool call
-    expect(result[2].content).toBe('')
-    expect(result[3].role).toBe('tool') // tool result (mensaje separado del historial)
-    expect(result[3].toolResult).toBe('Contenido del archivo')
+    expect(result[1].toolResult).toBe('Contenido del archivo')
   })
 
-  test('maneja múltiples tool calls', () => {
+  test('maneja múltiples tool results asociados', () => {
     const history = [
       { role: 'user' as const, content: 'Lee dos archivos' },
       {
@@ -90,16 +83,12 @@ describe('toChatMessages', () => {
 
     const result = toChatMessages(history, sessionKey)
 
-    // [user, tool-call-1, tool-call-2, assistant, tool-result-1, tool-result-2]
-    expect(result.length).toBe(6)
+    expect(result.length).toBe(3)
     expect(result[0].role).toBe('user')
-    expect(result[1].role).toBe('tool') // tool-call-1
+    expect(result[1].role).toBe('tool')
     expect(result[1].toolName).toBe('read_file')
-    expect(result[2].role).toBe('tool') // tool-call-2
+    expect(result[2].role).toBe('tool')
     expect(result[2].toolName).toBe('read_file')
-    expect(result[3].role).toBe('assistant') // assistant vacío después de tool calls
-    expect(result[4].role).toBe('tool') // tool-result-1
-    expect(result[5].role).toBe('tool') // tool-result-2
   })
 
   test('assistant con content vacío pero sin tool_calls se muestra normal', () => {
@@ -114,5 +103,38 @@ describe('toChatMessages', () => {
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('assistant')
     expect(result[1].content).toBe('')
+  })
+
+  test('reconstruye subagentSessionKey desde resultado histórico de spawn', () => {
+    const history = [
+      {
+        role: 'tool' as const,
+        content: "Spawned subagent task task-1 ('Verify task') for task: Investigate issue",
+        tool_call_id: 'spawn',
+      },
+    ]
+
+    const result = toChatMessages(history, sessionKey)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].role).toBe('tool')
+    expect(result[0].toolName).toBe('spawn')
+    expect(result[0].subagentSessionKey).toBe('subagent:task-1')
+  })
+
+  test('usa tool_call_id cuando no encuentra tool call asociada', () => {
+    const history = [
+      {
+        role: 'tool' as const,
+        content: 'Resultado huérfano',
+        tool_call_id: 'spawn',
+      },
+    ]
+
+    const result = toChatMessages(history, sessionKey)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].toolName).toBe('spawn')
+    expect(result[0].toolResult).toBe('Resultado huérfano')
   })
 })

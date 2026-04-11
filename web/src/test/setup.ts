@@ -27,6 +27,10 @@ if (!globalThis.matchMedia) {
   })) as never
 }
 
+if (!dom.window.matchMedia) {
+  dom.window.matchMedia = globalThis.matchMedia
+}
+
 // Mock scrollIntoView for jsdom
 dom.window.Element.prototype.scrollIntoView = () => undefined
 

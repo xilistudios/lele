@@ -334,6 +334,7 @@ describe('App', () => {
   })
 
   test('ignores tool events from a different session after switching chats', async () => {
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
     const fetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/api/v1/auth/status')) {
@@ -444,9 +445,23 @@ describe('App', () => {
     )
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
-    await waitFor(() => expect(view.getByText('Session 2')).not.toBeNull())
 
-    fireEvent.click(view.getByText('Session 2'))
+    let sessionTwoButton: HTMLElement | undefined
+    await waitFor(() => {
+      const sessionItems = Array.from(
+        view.container.querySelectorAll('nav [role="button"]'),
+      ) as HTMLElement[]
+      sessionTwoButton = sessionItems.find(
+        (button) => !button.className.includes('bg-[#2e2e2e]'),
+      )
+      expect(sessionTwoButton).toBeDefined()
+    })
+
+    if (!sessionTwoButton) {
+      throw new Error('Session 2 button not found')
+    }
+
+    fireEvent.click(sessionTwoButton)
 
     const socket = MockWebSocket.instances[0]
     if (!socket) {
@@ -584,15 +599,41 @@ describe('Routing', () => {
           }),
         )
       }
+      if (url.includes('/api/v1/chat/history?session_key=subagent%3Atask-1')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'subagent:task-1',
+            messages: [
+              { role: 'user', content: 'Verifying subagent task' },
+              { role: 'assistant', content: 'Subagent result' },
+            ],
+          }),
+        )
+      }
       if (url.includes('/api/v1/models?')) {
         return Promise.resolve(
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
       if (url.includes('/api/v1/chat/session/')) {
+        if (url.includes('subagent%3Atask-1') || url.includes('subagent:task-1')) {
+          return Promise.resolve(
+            jsonResponse({
+              session_key: 'subagent:task-1',
+              agent_id: 'main',
+              model: 'gpt-4',
+              models: ['gpt-4'],
+            }),
+          )
+        }
+
+        const sessionKeyMatch = url.match(/\/api\/v1\/chat\/session\/([^/?]+)/)
+        const decodedSessionKey = sessionKeyMatch ? decodeURIComponent(sessionKeyMatch[1]) : null
+
         return Promise.resolve(
           jsonResponse({
-            session_key: 'native:client-1:2',
+            session_key: decodedSessionKey ?? 'native:client-1:2',
+            agent_id: 'main',
             model: 'gpt-4',
             models: ['gpt-4'],
           }),
@@ -678,6 +719,23 @@ describe('Routing', () => {
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
   })
 
+  test('loads subagent chat via nested route and keeps parent in sidebar', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    globalThis.fetch = createFetchMock() as unknown as typeof fetch
+
+    const view = render(
+      <MemoryRouter initialEntries={['/chat/native:client-1:1/subagent/subagent:task-1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(view.getByText('Subagent result')).not.toBeNull())
+    expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
+    expect(view.queryByText('subagent:task-1')).toBeNull()
+    expect(view.queryByText('mensaje A')).toBeNull()
+    expect(view.getByRole('button', { name: '# Session 1 1 mensaje' })).not.toBeNull()
+  })
+
   test('redirects to / when chat_id is invalid', async () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
@@ -717,6 +775,154 @@ describe('Routing', () => {
     }
 
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
+  })
+
+  test('navigates to nested subagent route from spawn tool and returns to parent', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+    globalThis.fetch = createFetchMock() as unknown as typeof fetch
+
+    const view = render(
+      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(view.getByText('mensaje A')).not.toBeNull())
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws?.emitJSON({
+        event: 'tool.executing',
+        data: {
+          session_key: 'native:client-1:1',
+          tool: 'spawn',
+          action: 'Launching subagent',
+          subagent_session_key: 'subagent:task-1',
+        },
+      })
+      ws?.emitJSON({
+        event: 'tool.result',
+        data: {
+          session_key: 'native:client-1:1',
+          tool: 'spawn',
+          result: 'Subagent task ready',
+          subagent_session_key: 'subagent:task-1',
+        },
+      })
+      ws?.emitJSON({
+        event: 'message.stream',
+        data: {
+          session_key: 'native:client-1:1',
+          message_id: 'parent-response',
+          chunk: 'Parent response',
+        },
+      })
+      ws?.emitJSON({
+        event: 'message.complete',
+        data: {
+          session_key: 'native:client-1:1',
+          message_id: 'parent-response',
+          content: 'Parent response',
+        },
+      })
+    })
+
+    await waitFor(() => expect(view.getByText('Parent response')).not.toBeNull())
+
+    fireEvent.click(view.getByRole('button', { name: 'Open subagent chat' }))
+
+    await waitFor(() => expect(view.getByText('Subagent result')).not.toBeNull())
+    expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
+    expect(view.queryByText('subagent:task-1')).toBeNull()
+    expect(view.queryByText('Parent response')).toBeNull()
+
+    fireEvent.click(view.getByRole('button', { name: '# Session 1 1 mensaje' }))
+
+    await waitFor(() => expect(view.getByRole('heading', { name: 'Session 1' })).not.toBeNull())
+    expect(view.getByText('mensaje A')).not.toBeNull()
+    expect(view.queryByText('Subagent result')).toBeNull()
+  })
+
+  test('restores spawn link from history after reloading parent chat', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+
+    const baseFetchMock = createFetchMock() as unknown as (input: RequestInfo | URL) => Promise<Response>
+
+    const historyFetchMock = mock((input: RequestInfo | URL) => {
+      const url = String(input)
+
+      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A1')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:1',
+            messages: [
+              {
+                role: 'tool',
+                content: "Spawned subagent task task-1 ('Verify task') for task: Investigate issue",
+                tool_call_id: 'spawn',
+              },
+              { role: 'assistant', content: 'Parent response after reload' },
+            ],
+          }),
+        )
+      }
+
+      return baseFetchMock(input)
+    })
+    globalThis.fetch = historyFetchMock as unknown as typeof fetch
+
+    const view = render(
+      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(view.getByText('Parent response after reload')).not.toBeNull())
+    await waitFor(() => expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull())
+
+    fireEvent.click(view.getByRole('button', { name: 'Open subagent chat' }))
+
+    await waitFor(() => expect(view.getByText('Subagent result')).not.toBeNull())
+    expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
+  })
+
+  test('keeps subagent access when live spawn result only includes task id in text', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
+    globalThis.fetch = createFetchMock() as unknown as typeof fetch
+
+    const view = render(
+      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
+        <App />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(view.getByText('mensaje A')).not.toBeNull())
+
+    const ws = MockWebSocket.instances[0]
+    await act(async () => {
+      ws?.emitJSON({
+        event: 'tool.executing',
+        data: {
+          session_key: 'native:client-1:1',
+          tool: 'spawn',
+          action: 'Launching subagent',
+        },
+      })
+      ws?.emitJSON({
+        event: 'tool.result',
+        data: {
+          session_key: 'native:client-1:1',
+          tool: 'spawn',
+          result:
+            "Spawned subagent task subagent-1 ('test-coder') for task: Di \"Hola, soy el subagente coder. Funciono correctamente.\"",
+        },
+      })
+    })
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull())
   })
 })
 
@@ -879,7 +1085,12 @@ describe('Auto-pairing', () => {
     const fetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/api/v1/auth/pair')) {
-        return Promise.reject(new Error('Invalid PIN'))
+        return Promise.resolve(
+          new Response(JSON.stringify({ message: 'Invalid PIN', code: 'pair_error' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
       }
       if (url.endsWith('/api/v1/auth/status')) {
         return Promise.resolve(jsonResponse({ valid: false }))
@@ -952,7 +1163,7 @@ describe('Auto-pairing', () => {
 
     // Error should be visible
     await waitFor(() => {
-      expect(view.getByText('Invalid PIN')).not.toBeNull()
+      expect(view.container.textContent).toContain('Invalid PIN')
     })
   })
 
@@ -1124,12 +1335,14 @@ describe('Session deletion', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(view.getByText('mensaje A')).not.toBeNull())
-
-    const deleteButtons = view.container.querySelectorAll('button[aria-label="Eliminar sesión"]')
-    const sessionOneDeleteButton = Array.from(deleteButtons).find((button) =>
-      button.parentElement?.textContent?.includes('Session 1'),
-    )
+    let sessionOneDeleteButton: Element | undefined
+    await waitFor(() => {
+      const deleteButtons = view.container.querySelectorAll('button[aria-label="Eliminar sesión"]')
+      sessionOneDeleteButton = Array.from(deleteButtons).find((button) =>
+        button.parentElement?.textContent?.includes('Session 1'),
+      )
+      expect(sessionOneDeleteButton).toBeDefined()
+    })
     if (sessionOneDeleteButton) {
       await act(async () => {
         fireEvent.click(sessionOneDeleteButton)
