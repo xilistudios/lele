@@ -1,32 +1,31 @@
 # Client Channel API Documentation
 
-Lele Client Channel provides a REST + WebSocket API for native desktop clients (Tauri/Electron) to communicate with the Lele AI agent.
+The native client channel provides a local REST + WebSocket API for the built-in web UI and other desktop/local clients.
+
+It is centered around:
+
+- PIN-based pairing
+- bearer-token auth
+- session-scoped chat operations
+- local file upload support
+- real-time streaming over WebSocket
 
 ## CLI Commands
 
-Manage client channel from command line:
+Manage the native client channel from the CLI:
 
 ```bash
-# Generate pairing PIN
 lele client pin
 lele client pin --device "My Desktop"
-
-# List paired clients
 lele client list
-
-# List pending pairing requests
 lele client pending
-
-# Remove a paired client
 lele client remove <client_id>
-
-# Show channel status
 lele client status
 ```
 
 ## Configuration
 
-Add to `~/.lele/config.json`:
+Add or adjust the `channels.native` block in `~/.lele/config.json`:
 
 ```json
 {
@@ -38,156 +37,188 @@ Add to `~/.lele/config.json`:
       "token_expiry_days": 30,
       "pin_expiry_minutes": 5,
       "max_clients": 5,
-      "cors_origins": ["http://localhost", "tauri://localhost"],
-      "session_expiry_days": 30
+      "cors_origins": [
+        "http://localhost",
+        "http://localhost:3005",
+        "http://127.0.0.1:3005",
+        "tauri://localhost",
+        "https://tauri.localhost"
+      ],
+      "session_expiry_days": 30,
+      "max_upload_size_mb": 50,
+      "upload_ttl_hours": 24
     }
   }
 }
 ```
 
-## Authentication Flow
+## Auth Flow
 
-### 1. Generate PIN (CLI)
+### 1. Generate a PIN
+
+CLI:
 
 ```bash
 lele client pin --device "My Desktop"
 ```
 
-Output:
-```
-🦞 Pairing PIN Generated
-------------------------
-  PIN:     123456
-  Expires: 2026-04-05 12:05:00
+REST:
 
-Enter this PIN in your native client to pair.
+```http
+GET /api/v1/auth/pin?device_name=My%20Desktop
 ```
 
-### 2. Pair with PIN (API)
+Example response:
 
+```json
+{
+  "pin": "123456",
+  "expires": "2026-04-05T12:05:00Z"
+}
 ```
+
+### 2. Pair With The PIN
+
+```http
 POST /api/v1/auth/pair
 Content-Type: application/json
 
 {
   "pin": "123456",
-  "device_name": "MyDesktop"
+  "device_name": "My Desktop"
 }
 ```
 
 Response:
+
 ```json
 {
-  "token": "a1b2c3d4...",
-  "refresh_token": "e5f6g7h8...",
+  "token": "a1b2c3...",
+  "refresh_token": "d4e5f6...",
   "expires": "2026-05-05T12:00:00Z",
   "client_id": "client-uuid"
 }
 ```
 
-### 3. Refresh Token
+### 3. Refresh A Token
 
-```
+```http
 POST /api/v1/auth/refresh
 Content-Type: application/json
 
 {
-  "refresh_token": "e5f6g7h8..."
-}
-```
-
-Response:
-```json
-{
-  "token": "new-token...",
-  "refresh_token": "new-refresh...",
-  "expires": "2026-06-05T12:00:00Z"
+  "refresh_token": "d4e5f6..."
 }
 ```
 
 ### 4. Check Auth Status
 
-```
+```http
 GET /api/v1/auth/status
 Authorization: Bearer <token>
 ```
 
-Response:
-```json
-{
-  "valid": true,
-  "client_id": "client-uuid",
-  "device_name": "MyDesktop",
-  "expires": "2026-05-05T12:00:00Z"
-}
-```
+If the header is missing or invalid, the endpoint returns `valid: false` instead of failing hard.
 
-## REST API Endpoints
+## REST API
 
-All endpoints (except auth) require `Authorization: Bearer <token>` header.
+All endpoints below require `Authorization: Bearer <token>` unless stated otherwise.
 
 ### Chat
 
 #### Send Message
 
-```
+```http
 POST /api/v1/chat/send
-Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "content": "Hello, how are you?",
-  "session_key": "optional-session-key",
-  "agent_id": "optional-agent-id"
+  "content": "Hello",
+  "attachments": ["/home/user/.lele/tmp/uploads/file.pdf"],
+  "session_key": "native:client-id:1712339123",
+  "agent_id": "main"
 }
 ```
 
 Response:
+
 ```json
 {
   "message_id": "uuid",
-  "session_key": "native:client-id"
+  "session_key": "native:client-id:1712339123"
 }
 ```
+
+If `session_key` is omitted, the default session is `native:<client_id>`.
 
 #### Get History
 
-```
-GET /api/v1/chat/history?session_key=<session>
-Authorization: Bearer <token>
+```http
+GET /api/v1/chat/history?session_key=<session_key>
 ```
 
-Response:
-```json
+Returned messages may include `user`, `assistant`, and `tool` roles.
+
+#### List Sessions
+
+```http
+GET /api/v1/chat/sessions
+```
+
+Response items include:
+
+- `key`
+- `name`
+- `created`
+- `updated`
+- `message_count`
+
+#### Create Session
+
+```http
+POST /api/v1/chat/sessions
+Content-Type: application/json
+
 {
-  "session_key": "native:client-id",
-  "messages": [
-    {"role": "user", "content": "Hello"},
-    {"role": "assistant", "content": "Hi there!"}
-  ]
+  "session_key": "native:client-id:1712339123"
 }
 ```
 
-#### Clear Session
+The session key must belong to the authenticated client namespace.
 
+#### Session Actions
+
+Session-scoped actions are handled under:
+
+```text
+/api/v1/chat/session/<session_key>
 ```
-DELETE /api/v1/chat/session/<session_key>
-Authorization: Bearer <token>
-```
 
-### File Upload
+Supported actions:
 
-#### Upload Files
+| Method | Query | Behavior |
+| --- | --- | --- |
+| `DELETE` | none | Clear session history |
+| `DELETE` | `action=delete` | Delete the session mapping and clear history |
+| `GET` | `action=model` | Get current model and available models |
+| `PATCH` | `action=model` | Set the current session model |
+| `GET` | `action=agent` | Get the current session agent |
+| `PATCH` | `action=agent` | Set the current session agent |
+| `POST` or `GET` | `action=compact` | Compact the session |
+| `GET` | `action=name` | Read the session name |
+| `PATCH` | `action=name` | Update the session name |
+| `GET` | `action=summary` | Return session summary placeholder |
 
-Upload files for use as message attachments. Files are stored temporarily and will be automatically cleaned up after 24 hours if not used in a message.
+### File Uploads
 
-```
+```http
 POST /api/v1/files/upload
-Authorization: Bearer <token>
 Content-Type: multipart/form-data
 ```
 
-Request body should contain a `files` field with one or more files:
+Send one or more files using the `files` field.
+
+Example:
 
 ```bash
 curl -X POST \
@@ -198,6 +229,7 @@ curl -X POST \
 ```
 
 Response:
+
 ```json
 {
   "files": [
@@ -207,179 +239,117 @@ Response:
       "name": "document.pdf",
       "mime_type": "application/pdf",
       "size": 1024
-    },
-    {
-      "id": "e5f6g7h8",
-      "path": "/home/user/.lele/tmp/uploads/e5f6g7h8_image.png",
-      "name": "image.png",
-      "mime_type": "image/png",
-      "size": 2048
     }
   ]
 }
 ```
 
-**Constraints:**
-- Maximum file size: configurable (default: 50MB per file)
-- Maximum total request size: configurable (default: 50MB)
-- Files are stored in `~/.lele/tmp/uploads/`
-- Files are automatically deleted after 24 hours if not used in a message
-- When a message is sent with uploaded files, they are moved to the workspace attachments directory
+Current behavior:
 
-**Using Uploaded Files in Messages:**
-
-After uploading, use the returned `path` values in the `attachments` field when sending a message:
-
-```json
-{
-  "content": "Please analyze these files",
-  "attachments": [
-    "/home/user/.lele/tmp/uploads/a1b2c3d4_document.pdf",
-    "/home/user/.lele/tmp/uploads/e5f6g7h8_image.png"
-  ]
-}
-```
-
-**Error Responses:**
-
-- `413 Request Entity Too Large`: File exceeds maximum size
-- `400 Bad Request`: No files provided or invalid multipart form
+- default max upload size: `50MB`
+- files are stored under `~/.lele/tmp/uploads/`
+- cleanup runs based on `upload_ttl_hours`
+- uploaded file paths can be passed to chat as `attachments`
 
 ### Agents
 
 #### List Agents
 
-```
+```http
 GET /api/v1/agents
-Authorization: Bearer <token>
-```
-
-Response:
-```json
-{
-  "agents": [
-    {
-      "id": "main",
-      "name": "Main Agent",
-      "workspace": "~/.lele/workspace",
-      "model": "gpt-4",
-      "default": true
-    }
-  ]
-}
 ```
 
 #### Get Agent Info
 
-```
+```http
 GET /api/v1/agents/<agent_id>
-Authorization: Bearer <token>
+```
+
+#### Get Agent Status
+
+```http
+GET /api/v1/agents/<agent_id>?action=status
 ```
 
 ### Config
 
-#### Get Config
+#### Get Editable Config Document
 
-```
+```http
 GET /api/v1/config
-Authorization: Bearer <token>
 ```
 
-### Tools
+#### Save Editable Config Document
 
-#### List Tools
-
-```
-GET /api/v1/tools
-Authorization: Bearer <token>
-```
-
-### Models
-
-#### List Models For Agent/Session
-
-```
-GET /api/v1/models?agent_id=<agent_id>&session_key=<session_key>
-Authorization: Bearer <token>
-```
-
-Response:
-```json
-{
-  "agent_id": "main",
-  "model": "gpt-4",
-  "models": ["gpt-4", "gpt-4o-mini"]
-}
-```
-
-#### Get Session Model
-
-```
-GET /api/v1/chat/session/<session_key>?action=model
-Authorization: Bearer <token>
-```
-
-#### Update Session Model
-
-```
-PATCH /api/v1/chat/session/<session_key>?action=model
-Authorization: Bearer <token>
+```http
+PUT /api/v1/config
 Content-Type: application/json
 
 {
-  "model": "gpt-4o-mini"
+  "config": { ... }
 }
 ```
 
-### System
+#### Validate Editable Config Document
 
-#### Get Status
+```http
+POST /api/v1/config/validate
+Content-Type: application/json
 
-```
-GET /api/v1/status
-Authorization: Bearer <token>
-```
-
-Response:
-```json
 {
-  "status": "running",
-  "uptime": "1h30m",
-  "agents": [...],
-  "channels": [...],
-  "version": "1.0.0"
+  "config": { ... }
 }
 ```
+
+Validation responses include structured errors with `path`, `message`, and `code`.
+
+### Tools, Models, Skills, Status, Channels
+
+```http
+GET /api/v1/tools
+GET /api/v1/models?agent_id=<agent_id>&session_key=<session_key>
+GET /api/v1/skills
+GET /api/v1/status
+GET /api/v1/channels
+```
+
+Notes:
+
+- `/api/v1/tools` currently returns a compact static tool list for client UX
+- `/api/v1/skills` currently returns an empty list in the native channel implementation
+- `/api/v1/status` reports runtime status, uptime, agents, channels, and version
 
 ## WebSocket API
 
-### Connection
+Connect with either query token or bearer auth:
 
-```
+```text
 ws://127.0.0.1:18793/api/v1/ws?token=<token>
 ```
 
-Or use header:
-```
-Authorization: Bearer <token>
+Optional query parameter:
+
+```text
+session_key=native:<client_id>[:suffix]
 ```
 
 ### Client Events
 
-#### Send Message
+#### `message`
 
 ```json
 {
   "event": "message",
   "data": {
     "content": "Hello",
-    "session_key": "optional",
-    "agent_id": "optional"
+    "attachments": ["/home/user/.lele/tmp/uploads/file.pdf"],
+    "session_key": "native:client-id:1712339123",
+    "agent_id": "main"
   }
 }
 ```
 
-#### Approve/Reject Command
+#### `approve`
 
 ```json
 {
@@ -391,18 +361,29 @@ Authorization: Bearer <token>
 }
 ```
 
-#### Subscribe to Session
+#### `subscribe`
 
 ```json
 {
   "event": "subscribe",
   "data": {
-    "session_key": "native:client-id"
+    "session_key": "native:client-id:1712339123"
   }
 }
 ```
 
-#### Cancel Current Operation
+#### `unsubscribe`
+
+```json
+{
+  "event": "unsubscribe",
+  "data": {
+    "session_key": "native:client-id:1712339123"
+  }
+}
+```
+
+#### `cancel`
 
 ```json
 {
@@ -411,194 +392,111 @@ Authorization: Bearer <token>
 }
 ```
 
+#### `ping`
+
+```json
+{
+  "event": "ping",
+  "data": {}
+}
+```
+
 ### Server Events
 
-#### Welcome (on connect)
+#### `welcome`
+
+Sent immediately after connect.
+
+Includes:
+
+- `client_id`
+- `device_name`
+- `session_key`
+- `status`
+- `agents`
+- `server_time`
+- `processing`
+
+#### `message.ack`
+
+Acknowledges accepted inbound messages.
+
+#### `message.stream`
+
+Streaming chunk payload:
 
 ```json
 {
-  "event": "welcome",
-  "data": {
-    "client_id": "uuid",
-    "device_name": "MyDesktop",
-    "session_key": "native:client-id",
-    "status": "idle",
-    "agents": [...],
-    "server_time": "2026-04-05T12:00:00Z"
-  }
+  "message_id": "uuid",
+  "session_key": "native:client-id",
+  "chunk": "partial response",
+  "done": false
 }
 ```
 
-#### Message Ack
+#### `message.complete`
+
+Final assembled message payload, including attachments when present.
+
+#### `tool.executing`
+
+Emitted when a tool starts.
+
+Includes optional `subagent_session_key`.
+
+#### `tool.result`
+
+Emitted when a tool returns.
+
+Includes optional `subagent_session_key`.
+
+#### `subagent.result`
+
+Emitted for async subagent outcomes when surfaced through the native channel.
+
+#### `approval.request`
+
+Sent when user approval is required for a guarded action.
+
+#### `attachments`
+
+Sent when attachment metadata is delivered separately from text.
+
+#### `subscribe.ack`, `unsubscribe.ack`, `approve.ack`, `cancel.ack`, `pong`
+
+Acknowledgement and control events for client-side state handling.
+
+#### `error`
+
+Structured server-side error payload:
 
 ```json
 {
-  "event": "message.ack",
-  "data": {
-    "message_id": "uuid",
-    "session_key": "native:client-id"
-  }
+  "code": "error_code",
+  "message": "Error description"
 }
 ```
 
-#### Message Stream (response chunks)
+## Session Key Rules
 
-```json
-{
-  "event": "message.stream",
-  "data": {
-    "message_id": "uuid",
-    "chunk": "partial response...",
-    "done": false
-  }
-}
-```
+Accepted session key forms include:
 
-#### Message Complete
+- `native:<client_id>`
+- `native:<client_id>:<timestamp-or-suffix>`
+- `subagent:<task_id>` for subagent-related flows
 
-```json
-{
-  "event": "message.complete",
-  "data": {
-    "message_id": "uuid",
-    "content": "full response",
-    "attachments": [...]
-  }
-}
-```
-
-#### Tool Executing
-
-```json
-{
-  "event": "tool.executing",
-  "data": {
-    "tool": "read_file",
-    "action": "Reading /path/to/file"
-  }
-}
-```
-
-#### Tool Result
-
-```json
-{
-  "event": "tool.result",
-  "data": {
-    "tool": "read_file",
-    "result": "file contents..."
-  }
-}
-```
-
-#### Approval Request
-
-```json
-{
-  "event": "approval.request",
-  "data": {
-    "id": "approval-uuid",
-    "command": "rm -rf /path",
-    "reason": "Dangerous command requires approval"
-  }
-}
-```
-
-#### Error
-
-```json
-{
-  "event": "error",
-  "data": {
-    "code": "error_code",
-    "message": "Error description"
-  }
-}
-```
-
-## Error Codes
-
-| Code | Description |
-|------|-------------|
-| `auth_missing` | Missing authorization header |
-| `auth_invalid_format` | Invalid authorization format |
-| `auth_invalid_token` | Invalid or expired token |
-| `pin_error` | PIN generation error |
-| `pair_error` | Pairing error |
-| `content_missing` | Message content required |
-| `method_invalid` | HTTP method not allowed |
-| `body_invalid` | Invalid request body |
-| `agent_not_found` | Agent ID not found |
-| `unknown_event` | Unknown WebSocket event |
-
-## Client Implementation Example (Tauri)
-
-```typescript
-// auth.ts
-async function getPIN(): Promise<{pin: string, expires: string}> {
-  const res = await fetch('http://127.0.0.1:18793/api/v1/auth/pin');
-  return res.json();
-}
-
-async function pair(pin: string, deviceName: string): Promise<AuthPairResponse> {
-  const res = await fetch('http://127.0.0.1:18793/api/v1/auth/pair', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({pin, device_name: deviceName})
-  });
-  return res.json();
-}
-
-// websocket.ts
-class LeleWS {
-  private ws: WebSocket;
-  
-  constructor(token: string) {
-    this.ws = new WebSocket(`ws://127.0.0.1:18793/api/v1/ws?token=${token}`);
-    
-    this.ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      this.handleEvent(msg.event, msg.data);
-    };
-  }
-  
-  send(content: string, sessionKey?: string) {
-    this.ws.send(JSON.stringify({
-      event: 'message',
-      data: {content, session_key: sessionKey}
-    }));
-  }
-  
-  approve(requestId: string, approved: boolean) {
-    this.ws.send(JSON.stringify({
-      event: 'approve',
-      data: {request_id: requestId, approved}
-    }));
-  }
-  
-  private handleEvent(event: string, data: any) {
-    switch(event) {
-      case 'message.stream':
-        this.onStream?.(data.chunk, data.done);
-        break;
-      case 'message.complete':
-        this.onComplete?.(data.content);
-        break;
-      case 'tool.executing':
-        this.onTool?.(data.tool, data.action);
-        break;
-      case 'approval.request':
-        this.onApproval?.(data.id, data.command, data.reason);
-        break;
-    }
-  }
-}
-```
+Clients may only access session keys that belong to their own namespace.
 
 ## Security Notes
 
-- Tokens are stored hashed (SHA256) in `~/.lele/native_clients.json`
-- PINs expire after 5 minutes by default
-- Maximum 5 clients can be paired by default
-- No TLS in development mode (localhost only)
-- CORS restricted to configured origins
+- tokens are validated server-side and tied to paired clients
+- CORS is restricted to configured origins
+- uploads are size-limited and cleaned up periodically
+- WebSocket access requires a valid token
+- session ownership is validated on both REST and WebSocket paths
+
+## Related Docs
+
+- `docs/agents-models-providers.md`
+- `docs/tools_configuration.md`
+- `docs/SKILL_SUBAGENTS.md`
