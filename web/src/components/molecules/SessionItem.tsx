@@ -38,17 +38,10 @@ export function SessionItem({
   }
 
   return (
-    <div
+    <button
       onClick={onSelect}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect()
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      className={`group flex w-full cursor-pointer items-start gap-2 rounded-md px-3 py-2 text-left transition-colors ${
+      type="button"
+      className={`group flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition-colors ${
         selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
       }`}
     >
@@ -85,6 +78,6 @@ export function SessionItem({
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
         </svg>
       </button>
-    </div>
+    </button>
   )
 }

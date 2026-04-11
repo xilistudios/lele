@@ -153,7 +153,10 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
           blocks.map((block, i) => {
             if (block.type === 'tool') {
               return (
-                <div key={`tool-${i}`} className="flex items-center gap-3 text-sm text-[#888]">
+                <div
+                  key={`tool-${block.label}-${block.content.substring(0, 50)}`}
+                  className="flex items-center gap-3 text-sm text-[#888]"
+                >
                   <span className="rounded bg-[#2a2a2a] px-2 py-0.5 text-[11px] font-medium text-[#aaa] font-mono">
                     {block.label}
                   </span>
@@ -165,7 +168,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             if (block.type === 'code') {
               return (
                 <div
-                  key={`code-${i}`}
+                  key={`code-${block.label || ''}-${block.content.substring(0, 50)}`}
                   className="rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] overflow-hidden"
                 >
                   {block.label && (
@@ -184,17 +187,25 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             const hasSpecialRows = lines.some((line) => isDiffStatLine(line) || isFileDiffRow(line))
 
             if (!hasSpecialRows) {
-              return <MarkdownText key={`text-${i}`} content={block.content} />
+              return (
+                <MarkdownText
+                  key={`text-${block.content.substring(0, 50)}`}
+                  content={block.content}
+                />
+              )
             }
 
             return (
-              <div key={`special-${i}`} className="space-y-2">
+              <div key={`special-${block.content.substring(0, 50)}`} className="space-y-2">
                 {lines.map((line, j) => {
                   if (isDiffStatLine(line)) {
                     const parsed = parseDiffStat(line)
                     if (!parsed) return null
                     return (
-                      <div key={`diffstat-${j}`} className="text-sm text-[#ccc]">
+                      <div
+                        key={`diffstat-${parsed.files}-${parsed.added}-${parsed.removed}`}
+                        className="text-sm text-[#ccc]"
+                      >
                         <span>{parsed.files} Changed files </span>
                         <span className="text-emerald-400">{parsed.added}</span>
                         <span> </span>
@@ -207,7 +218,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                     if (!parsed) return null
                     return (
                       <div
-                        key={`filediff-${j}`}
+                        key={`filediff-${parsed.filename}`}
                         className="flex items-center justify-between rounded border border-[#2e2e2e] bg-[#1e1e1e] px-3 py-1.5 text-xs"
                       >
                         <span className="text-[#ccc] font-mono">{parsed.filename}</span>
@@ -230,8 +241,8 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                       </div>
                     )
                   }
-                  if (!line.trim()) return <div key={`blank-${j}`} className="h-2" />
-                  return <MarkdownText key={`line-${j}`} content={line} />
+                  if (!line.trim()) return <div key={`blank-${line}`} className="h-2" />
+                  return <MarkdownText key={`line-${line.substring(0, 50)}`} content={line} />
                 })}
               </div>
             )

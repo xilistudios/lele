@@ -32,7 +32,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const sortedSessions = useMemo(() => {
     const visibleSessions = sessions.filter((session) => !session.key.startsWith('subagent:'))
-    return [...visibleSessions].sort((b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime())
+    return [...visibleSessions].sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
   }, [sessions])
 
   const selectedSidebarSessionKey = parentSessionKey ?? currentSessionKey
@@ -119,26 +121,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
               {t('chat.newSession')}
-            </button>
-            <button
-              onClick={onClearSession}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#999] transition-colors hover:bg-[#2a2a2a] hover:text-white"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M3 6h18" />
-                <path d="M8 6V4h8v2" />
-                <path d="M19 6l-1 14H6L5 6" />
-              </svg>
-              {t('chat.clearSession')}
             </button>
           </div>
         </div>

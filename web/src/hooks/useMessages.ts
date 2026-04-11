@@ -134,7 +134,7 @@ export function useMessages(
 
       // Increment sequence number to track this request
       const seq = ++historySeqRef.current
-      
+
       console.log('[HTTP] Loading history for session', sessionKey)
       try {
         const history = await api.history(sessionKey)
@@ -190,7 +190,10 @@ export function useMessages(
           (m) => m.id === '__processing_placeholder__' && m.sessionKey === sessionKey,
         )
         if (existingProcessing >= 0 && messageId !== '__processing_placeholder__') {
-          filtered = [...current.slice(0, existingProcessing), ...current.slice(existingProcessing + 1)]
+          filtered = [
+            ...current.slice(0, existingProcessing),
+            ...current.slice(existingProcessing + 1),
+          ]
         }
 
         if (filtered.some((message) => message.id === messageId)) {
@@ -305,7 +308,11 @@ export function useMessages(
           }
           setMessages((current) => {
             const filtered = current.filter(
-              (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === (eventSessionKey ?? currentSessionKeyRef.current)),
+              (m) =>
+                !(
+                  m.id === '__processing_placeholder__' &&
+                  m.sessionKey === (eventSessionKey ?? currentSessionKeyRef.current)
+                ),
             )
             const targetId = data.message_id as string
             const targetIndex = filtered.findIndex((message) => message.id === targetId)
@@ -484,11 +491,7 @@ export function useMessages(
           setMessages((current) => {
             const lastSpawnIndex = [...current]
               .reverse()
-              .findIndex(
-                (message) =>
-                  message.role === 'tool' &&
-                  message.toolName === 'spawn',
-              )
+              .findIndex((message) => message.role === 'tool' && message.toolName === 'spawn')
             if (lastSpawnIndex < 0) return current
             const targetIndex = current.length - lastSpawnIndex - 1
             return current.map((message, index) =>
@@ -496,8 +499,7 @@ export function useMessages(
                 ? {
                     ...message,
                     subagentSessionKey:
-                      (data.subagent_session_key as string) ||
-                      message.subagentSessionKey,
+                      (data.subagent_session_key as string) || message.subagentSessionKey,
                     toolResult: message.toolResult || (data.result as string),
                   }
                 : message,

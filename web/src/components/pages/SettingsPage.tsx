@@ -54,6 +54,14 @@ const REMOVE_BTN_CLS = 'text-rose-400 transition-colors hover:text-rose-300 disa
 const ADD_BTN_CLS =
   'rounded bg-blue-600 px-3 py-2 text-xs text-white transition-colors hover:bg-blue-500 disabled:opacity-50'
 
+function getAgentModelPrimary(
+  agentModel: string | { primary?: string; fallbacks?: string[] } | undefined,
+): string {
+  if (!agentModel) return ''
+  if (typeof agentModel === 'string') return agentModel
+  return agentModel.primary || ''
+}
+
 export function SettingsPage({ onLogout }: Props) {
   const { t } = useTranslation()
   const { api } = useAuthContext()
@@ -94,15 +102,6 @@ export function SettingsPage({ onLogout }: Props) {
     }))
   }, [groups])
 
-  // Helper function to extract primary model from agent model config
-  const getAgentModelPrimary = (
-    agentModel: string | { primary?: string; fallbacks?: string[] } | undefined,
-  ): string => {
-    if (!agentModel) return ''
-    if (typeof agentModel === 'string') return agentModel
-    return agentModel.primary || ''
-  }
-
   const getDefaultModel = (): string => {
     return draftConfig?.agents?.defaults?.model || ''
   }
@@ -127,9 +126,7 @@ export function SettingsPage({ onLogout }: Props) {
   const getGroupsForAgent = useMemo(() => {
     const list = draftConfig?.agents?.list || []
     const allAgentModels = list.map((a) => getAgentModelPrimary(a.model)).filter(Boolean)
-    const existingValues = new Set(
-      modelGroups.flatMap((g) => g.options.map((o) => o.value)),
-    )
+    const existingValues = new Set(modelGroups.flatMap((g) => g.options.map((o) => o.value)))
     const groups = [...modelGroups]
     const newModels = allAgentModels.filter((m) => !existingValues.has(m))
     if (newModels.length > 0) {
@@ -498,7 +495,10 @@ export function SettingsPage({ onLogout }: Props) {
                     id={`agents.list.${index}.model.fallbacks`}
                     value={agent.model?.fallbacks || []}
                     onChange={(v) =>
-                      updateField(`agents.list.${index}.model`, { primary: agent.model?.primary || '', fallbacks: v })
+                      updateField(`agents.list.${index}.model`, {
+                        primary: agent.model?.primary || '',
+                        fallbacks: v,
+                      })
                     }
                     options={getOptionsForAgent}
                     groups={getGroupsForAgent}

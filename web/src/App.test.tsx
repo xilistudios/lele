@@ -451,9 +451,7 @@ describe('App', () => {
       const sessionItems = Array.from(
         view.container.querySelectorAll('nav [role="button"]'),
       ) as HTMLElement[]
-      sessionTwoButton = sessionItems.find(
-        (button) => !button.className.includes('bg-[#2e2e2e]'),
-      )
+      sessionTwoButton = sessionItems.find((button) => !button.className.includes('bg-[#2e2e2e]'))
       expect(sessionTwoButton).toBeDefined()
     })
 
@@ -848,7 +846,9 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
 
-    const baseFetchMock = createFetchMock() as unknown as (input: RequestInfo | URL) => Promise<Response>
+    const baseFetchMock = createFetchMock() as unknown as (
+      input: RequestInfo | URL,
+    ) => Promise<Response>
 
     const historyFetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
@@ -880,7 +880,9 @@ describe('Routing', () => {
     )
 
     await waitFor(() => expect(view.getByText('Parent response after reload')).not.toBeNull())
-    await waitFor(() => expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull())
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull(),
+    )
 
     fireEvent.click(view.getByRole('button', { name: 'Open subagent chat' }))
 
@@ -917,12 +919,14 @@ describe('Routing', () => {
           session_key: 'native:client-1:1',
           tool: 'spawn',
           result:
-            "Spawned subagent task subagent-1 ('test-coder') for task: Di \"Hola, soy el subagente coder. Funciono correctamente.\"",
+            'Spawned subagent task subagent-1 (\'test-coder\') for task: Di "Hola, soy el subagente coder. Funciono correctamente."',
         },
       })
     })
 
-    await waitFor(() => expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull())
+    await waitFor(() =>
+      expect(view.getByRole('button', { name: 'Open subagent chat' })).not.toBeNull(),
+    )
   })
 })
 

@@ -211,7 +211,12 @@ export function useAppLogic(
     async (content: string, attachments: string[]) => {
       if (!sessionsHook.currentSessionKey || !currentAgentId) return
 
-      await messagesHook.sendMessage(content, attachments, sessionsHook.currentSessionKey, currentAgentId)
+      await messagesHook.sendMessage(
+        content,
+        attachments,
+        sessionsHook.currentSessionKey,
+        currentAgentId,
+      )
       messagesHook.setPendingAttachments([])
       sessionsHook.refreshSessions()
     },

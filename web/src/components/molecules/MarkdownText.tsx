@@ -60,7 +60,7 @@ function MarkdownTable({
           <tr>
             {headers.map((header, i) => (
               <th
-                key={`header-${i}`}
+                key={`header-${header}`}
                 className={`border border-[#2e2e2e] bg-[#252525] px-3 py-2 text-sm font-semibold text-[#f2f2f2] ${alignClass(alignments[i] ?? 'left')}`}
               >
                 <InlineMarkdown text={header} />
@@ -70,10 +70,10 @@ function MarkdownTable({
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={`row-${rowIndex}`}>
+            <tr key={`row-${row.join('-')}`}>
               {row.map((cell, cellIndex) => (
                 <td
-                  key={`cell-${rowIndex}-${cellIndex}`}
+                  key={`cell-${cell}`}
                   className={`border border-[#2e2e2e] bg-[#1a1a1a] px-3 py-2 text-sm text-[#ccc] ${alignClass(alignments[cellIndex] ?? 'left')}`}
                 >
                   <InlineMarkdown text={cell} />
@@ -133,7 +133,11 @@ function InlineMarkdown({ text }: { text: string }) {
   return (
     <>
       {tokens.map((item, i) => (
-        <InlineToken key={i} text={item.text} token={item.token} />
+        <InlineToken
+          key={`${item.text}-${item.token?.type || ''}`}
+          text={item.text}
+          token={item.token}
+        />
       ))}
     </>
   )

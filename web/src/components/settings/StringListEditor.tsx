@@ -77,7 +77,7 @@ export function StringListEditor({
               buttonLabel={placeholder || t('common.add')}
               direction="down"
               disabled={disabled}
-              emptyLabel={loading ? t('settings.loading') : (emptyLabel || t('settings.noModels'))}
+              emptyLabel={loading ? t('settings.loading') : emptyLabel || t('settings.noModels')}
               groups={groups}
               onChange={handleSelect}
               options={options}
@@ -114,7 +114,7 @@ export function StringListEditor({
         <div className="space-y-1">
           {items.map((item, index) => (
             <div
-              key={`${item}-${index}`}
+              key={item}
               className="flex items-center justify-between rounded bg-[#2a2a2a] px-3 py-2"
             >
               <span className="text-xs text-[#ccc]">{item}</span>
@@ -132,6 +132,7 @@ export function StringListEditor({
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
+                  aria-hidden="true"
                 >
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
