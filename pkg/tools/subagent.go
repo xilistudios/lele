@@ -21,20 +21,21 @@ const (
 )
 
 type SubagentTask struct {
-	ID             string
-	Task           string
-	Label          string
-	AgentID        string
-	OriginChannel  string
-	OriginChatID   string
-	Status         string
-	Summary        string
-	Result         string
-	ContextRequest string
-	Guidance       []string
-	Created        int64
-	Updated        int64
-	Iterations     int
+	ID               string
+	Task             string
+	Label            string
+	AgentID          string
+	OriginChannel    string
+	OriginChatID     string
+	OriginSessionKey string
+	Status           string
+	Summary          string
+	Result           string
+	ContextRequest   string
+	Guidance         []string
+	Created          int64
+	Updated          int64
+	Iterations       int
 }
 
 // AgentContextInfo holds the context and workspace info for a subagent
@@ -278,13 +279,14 @@ type SubagentManager struct {
 	bus             *bus.MessageBus
 	workspace       string
 	tools           *ToolRegistry
-	getAgentContext func(agentID string) AgentContextInfo // Callback to get context info for specific agent
+	getAgentContext func(agentID string) AgentContextInfo
 	maxIterations   int
 	maxTokens       int
 	temperature     float64
 	hasMaxTokens    bool
 	hasTemperature  bool
 	nextID          int
+	sessionRecorder SessionRecorder
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus) *SubagentManager {
@@ -334,6 +336,12 @@ func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string)
 	sm.getAgentContext = callback
 }
 
+func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionRecorder = rec
+}
+
 // RegisterTool registers a tool for subagent execution.
 func (sm *SubagentManager) RegisterTool(tool Tool) {
 	sm.mu.Lock()
@@ -349,15 +357,16 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	sm.nextID++
 
 	subagentTask := &SubagentTask{
-		ID:            taskID,
-		Task:          task,
-		Label:         label,
-		AgentID:       agentID,
-		OriginChannel: originChannel,
-		OriginChatID:  originChatID,
-		Status:        SubagentStatusRunning,
-		Created:       time.Now().UnixMilli(),
-		Updated:       time.Now().UnixMilli(),
+		ID:               taskID,
+		Task:             task,
+		Label:            label,
+		AgentID:          agentID,
+		OriginChannel:    originChannel,
+		OriginChatID:     originChatID,
+		OriginSessionKey: originChatID,
+		Status:           SubagentStatusRunning,
+		Created:          time.Now().UnixMilli(),
+		Updated:          time.Now().UnixMilli(),
 	}
 	sm.tasks[taskID] = subagentTask
 
@@ -475,7 +484,10 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	temperature := sm.temperature
 	hasMaxTokens := sm.hasMaxTokens
 	hasTemperature := sm.hasTemperature
+	recorder := sm.sessionRecorder
 	sm.mu.RUnlock()
+
+	sessionKey := "subagent:" + task.ID
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -489,11 +501,13 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      agentProvider,
-		Model:         agentModel,
-		Tools:         tools,
-		MaxIterations: maxIter,
-		LLMOptions:    llmOptions,
+		Provider:        agentProvider,
+		Model:           agentModel,
+		Tools:           tools,
+		MaxIterations:   maxIter,
+		LLMOptions:      llmOptions,
+		SessionRecorder: recorder,
+		SessionKey:      sessionKey,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	sm.mu.Lock()
@@ -527,11 +541,12 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			task.Result = "Task cancelled during execution"
 		}
 		result = &ToolResult{
-			ForLLM:  task.statusMessage(),
-			Silent:  true,
-			IsError: true,
-			Async:   false,
-			Err:     err,
+			ForLLM:   task.statusMessage(),
+			Silent:   true,
+			IsError:  true,
+			Async:    false,
+			Err:      err,
+			Metadata: map[string]string{"task_id": task.ID, "subagent_session_key": sessionKey},
 		}
 	} else {
 		outcome := parseSubagentOutcome(loopResult.Content)
@@ -542,10 +557,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.Iterations = loopResult.Iterations
 		task.Updated = time.Now().UnixMilli()
 		result = &ToolResult{
-			ForLLM:  task.statusMessage(),
-			Silent:  true,
-			IsError: false,
-			Async:   false,
+			ForLLM:   task.statusMessage(),
+			Silent:   true,
+			IsError:  false,
+			Async:    false,
+			Metadata: map[string]string{"task_id": task.ID, "subagent_session_key": sessionKey},
 		}
 	}
 
