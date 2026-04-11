@@ -16,6 +16,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
       - name: fmt
         run: |
           make fmt
