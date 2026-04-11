@@ -25,22 +25,23 @@ const (
 )
 
 type NativeChannel struct {
-	base            *BaseChannel
-	cfg             *config.NativeConfig
-	auth            *AuthManager
-	bus             *bus.MessageBus
-	agentLoop       AgentProvidable
-	approvalManager *ApprovalManager
-	server          *http.Server
-	running         bool
-	wsClients       map[string]*WSClient
-	leleDir         string
-	configPath      string // path to config file, defaults to DefaultConfigPath() if empty
-	mu              sync.RWMutex
-	startTime       time.Time
-	pinLimiter      *rateLimiter
-	pairLimiter     *rateLimiter
-	apiLimiter      *rateLimiter
+	base             *BaseChannel
+	cfg              *config.NativeConfig
+	auth             *AuthManager
+	bus              *bus.MessageBus
+	agentLoop        AgentProvidable
+	approvalManager  *ApprovalManager
+	server           *http.Server
+	running          bool
+	wsClients        map[string]*WSClient
+	leleDir          string
+	configPath       string // path to config file, defaults to DefaultConfigPath() if empty
+	mu               sync.RWMutex
+	startTime        time.Time
+	pinLimiter       *rateLimiter
+	pairLimiter      *rateLimiter
+	apiLimiter       *rateLimiter
+	wsMessageLimiter *rateLimiter
 }
 
 type WSClient struct {
@@ -69,19 +70,21 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	pinLimiter := newRateLimiter(10, time.Minute)
 	pairLimiter := newRateLimiter(5, time.Minute)
 	apiLimiter := newRateLimiter(120, time.Minute)
+	wsMessageLimiter := newRateLimiter(30, time.Minute)
 
 	return &NativeChannel{
-		base:            base,
-		cfg:             &nativeCfg,
-		auth:            auth,
-		bus:             messageBus,
-		agentLoop:       agentLoop,
-		approvalManager: approvalManager,
-		wsClients:       make(map[string]*WSClient),
-		leleDir:         leleDir,
-		pinLimiter:      pinLimiter,
-		pairLimiter:     pairLimiter,
-		apiLimiter:      apiLimiter,
+		base:             base,
+		cfg:              &nativeCfg,
+		auth:             auth,
+		bus:              messageBus,
+		agentLoop:        agentLoop,
+		approvalManager:  approvalManager,
+		wsClients:        make(map[string]*WSClient),
+		leleDir:          leleDir,
+		pinLimiter:       pinLimiter,
+		pairLimiter:      pairLimiter,
+		apiLimiter:       apiLimiter,
+		wsMessageLimiter: wsMessageLimiter,
 	}, nil
 }
 
@@ -227,7 +230,13 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/ws", n.handleWebSocket)
 	mux.HandleFunc("/api/v1/chat/send", n.handleChatSend)
 	mux.HandleFunc("/api/v1/chat/history", n.handleChatHistory)
-	mux.HandleFunc("/api/v1/chat/sessions", n.handleChatSessions)
+	mux.HandleFunc("/api/v1/chat/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			n.handleCreateSession(w, r)
+			return
+		}
+		n.handleChatSessions(w, r)
+	})
 	mux.HandleFunc("/api/v1/chat/session/", n.handleChatSession)
 	mux.HandleFunc("/api/v1/agents", n.handleAgents)
 	mux.HandleFunc("/api/v1/agents/", n.handleAgentInfo)
@@ -375,9 +384,10 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		return
 	case "tool.executing":
 		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
-			SessionKey: sessionKey,
-			Tool:       msg.Metadata["tool"],
-			Action:     msg.Metadata["action"],
+			SessionKey:         sessionKey,
+			Tool:               msg.Metadata["tool"],
+			Action:             msg.Metadata["action"],
+			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 		})
 		return
 	case "tool.result":
@@ -386,9 +396,18 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			result = msg.Metadata["result"]
 		}
 		n.sendWSEvent(sessionKey, "tool.result", WSToolResultPayload{
-			SessionKey: sessionKey,
-			Tool:       msg.Metadata["tool"],
-			Result:     result,
+			SessionKey:         sessionKey,
+			Tool:               msg.Metadata["tool"],
+			Result:             result,
+			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+		})
+		return
+	case "subagent.result":
+		n.sendWSEvent(sessionKey, "subagent.result", WSToolResultPayload{
+			SessionKey:         sessionKey,
+			Tool:               msg.Metadata["tool"],
+			Result:             msg.Metadata["result"],
+			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 		})
 		return
 	case "approval.request":
@@ -577,11 +596,20 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 }
 
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
-	if strings.HasPrefix(sessionKey, "native:"+clientID) {
-		return true
-	}
 	client, ok := n.auth.GetClient(clientID)
 	if !ok {
+		return false
+	}
+	if strings.HasPrefix(sessionKey, "subagent:") {
+		if n.agentLoop == nil {
+			return false
+		}
+		resolvedParent := n.agentLoop.ResolveSessionKey(sessionKey)
+		for _, sk := range client.SessionKeys {
+			if sk == resolvedParent {
+				return true
+			}
+		}
 		return false
 	}
 	for _, sk := range client.SessionKeys {
