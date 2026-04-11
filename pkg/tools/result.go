@@ -34,8 +34,8 @@ type ToolResult struct {
 	// Used for internal error handling and logging.
 	Err error `json:"-"`
 
-	// ContextMessages are injected into the next LLM turn but are not shown directly to the user.
-	// This is used for structured multimodal context such as image content parts.
+	Metadata map[string]string `json:"metadata,omitempty"`
+
 	ContextMessages []providers.Message `json:"-"`
 
 	// ApprovalRequired indicates that the tool execution requires user approval.
