@@ -4,7 +4,7 @@ ARG TARGETPLATFORM
 
 RUN apk add --no-cache ca-certificates tzdata
 
-COPY $TARGETPLATFORM/picoclaw /usr/local/bin/picoclaw
+COPY $TARGETPLATFORM/lele /usr/local/bin/lele
 
-ENTRYPOINT ["picoclaw"]
+ENTRYPOINT ["lele"]
 CMD ["gateway"]
