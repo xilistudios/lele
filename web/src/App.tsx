@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Navigate,
+  Outlet,
   Route,
   Routes,
   useLocation,
@@ -102,44 +103,89 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // Chat route component
 function ChatRoute() {
-  const { chat_id } = useParams<{ chat_id?: string }>()
+  const { chat_id, parent_chat_id, child_chat_id } = useParams<{
+    chat_id?: string
+    parent_chat_id?: string
+    child_chat_id?: string
+  }>()
   const navigate = useNavigate()
-  const { sessions, currentSessionKey, onSelectSession } = useAppLogicContext()
+  const location = useLocation()
+  const { sessions, currentSessionKey, parentSessionKey, onSelectSession } = useAppLogicContext()
+  const targetSessionKey = child_chat_id ?? chat_id
+  const derivedParentSessionKey = child_chat_id ? (parent_chat_id ?? null) : null
+  const availableKeys = useMemo(() => new Set(sessions.map((s) => s.key)), [sessions])
 
-  // Sync URL param with session selection - only runs when chat_id changes
   useEffect(() => {
-    if (!chat_id) return
+    if (!targetSessionKey) return
 
-    const availableKeys = new Set(sessions.map((s) => s.key))
-    if (availableKeys.has(chat_id)) {
-      // URL session exists, select it (only if different from current)
-      if (currentSessionKey !== chat_id) {
-        onSelectSession(chat_id)
-      }
+    if (currentSessionKey === targetSessionKey && parentSessionKey === derivedParentSessionKey) {
+      return
+    }
+
+    const isNestedSubagent = Boolean(child_chat_id)
+    const hasValidParent = !isNestedSubagent || (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
+    const hasValidTarget = isNestedSubagent
+      ? targetSessionKey.startsWith('subagent:')
+      : !targetSessionKey.startsWith('subagent:') && availableKeys.has(targetSessionKey)
+
+    if (hasValidParent && hasValidTarget) {
+      void onSelectSession(targetSessionKey, { parentSessionKey: derivedParentSessionKey })
     } else if (sessions.length > 0) {
-      // Chat ID doesn't exist, redirect to home
       navigate('/', { replace: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat_id])
+  }, [
+    targetSessionKey,
+    child_chat_id,
+    derivedParentSessionKey,
+    sessions,
+    availableKeys,
+    currentSessionKey,
+    parentSessionKey,
+    onSelectSession,
+    navigate,
+  ])
 
-  // Sync session selection with URL - only runs when currentSessionKey changes
   useEffect(() => {
     if (!currentSessionKey) return
 
-    const currentPath = chat_id ? `/chat/${chat_id}` : '/'
-    const newPath = `/chat/${currentSessionKey}`
+    if (targetSessionKey && currentSessionKey !== targetSessionKey) {
+      return
+    }
 
-    if (currentPath !== newPath) {
+    if (derivedParentSessionKey && parentSessionKey !== derivedParentSessionKey) {
+      return
+    }
+
+    const newPath = parentSessionKey
+      ? `/chat/${encodeURIComponent(parentSessionKey)}/subagent/${encodeURIComponent(currentSessionKey)}`
+      : `/chat/${encodeURIComponent(currentSessionKey)}`
+
+    if (location.pathname !== newPath) {
       navigate(newPath, { replace: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSessionKey])
+  }, [
+    currentSessionKey,
+    parentSessionKey,
+    targetSessionKey,
+    derivedParentSessionKey,
+    location.pathname,
+    navigate,
+  ])
 
   // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
   // directly within the ChatPage components via context hooks
 
   return <ChatPage />
+}
+
+function ProtectedLayout() {
+  return (
+    <ProtectedRoute>
+      <AppLogicProvider>
+        <Outlet />
+      </AppLogicProvider>
+    </ProtectedRoute>
+  )
 }
 
 // Settings route component
@@ -173,36 +219,12 @@ function AppContent() {
       <Route path="/pair" element={<AuthRoute />} />
 
       {/* Protected routes */}
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <AppLogicProvider>
-              <ChatRoute />
-            </AppLogicProvider>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/chat/:chat_id"
-        element={
-          <ProtectedRoute>
-            <AppLogicProvider>
-              <ChatRoute />
-            </AppLogicProvider>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <ProtectedRoute>
-            <AppLogicProvider>
-              <SettingsRoute />
-            </AppLogicProvider>
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/" element={<ProtectedLayout />}>
+        <Route index element={<ChatRoute />} />
+        <Route path="chat/:chat_id" element={<ChatRoute />} />
+        <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
+        <Route path="settings" element={<SettingsRoute />} />
+      </Route>
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
