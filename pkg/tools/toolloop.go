@@ -19,6 +19,10 @@ import (
 // VerboseCallback is called when verbose mode is enabled to notify about tool execution progress.
 type VerboseCallback func(iteration int, toolName string, args map[string]interface{}, result *ToolResult)
 
+type SessionRecorder interface {
+	AddFullMessage(sessionKey string, msg providers.Message)
+}
+
 // ToolLoopConfig configures the tool execution loop.
 type ToolLoopConfig struct {
 	Provider        providers.LLMProvider
@@ -26,7 +30,9 @@ type ToolLoopConfig struct {
 	Tools           *ToolRegistry
 	MaxIterations   int
 	LLMOptions      map[string]any
-	VerboseCallback VerboseCallback // Called when a tool is executed (if verbose mode is enabled)
+	VerboseCallback VerboseCallback
+	SessionRecorder SessionRecorder
+	SessionKey      string
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -40,6 +46,15 @@ type ToolLoopResult struct {
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
 	var finalContent string
+
+	if config.SessionRecorder != nil && config.SessionKey != "" {
+		for _, m := range messages {
+			if m.Role == "user" {
+				config.SessionRecorder.AddFullMessage(config.SessionKey, m)
+				break
+			}
+		}
+	}
 
 	for iteration < config.MaxIterations {
 		iteration++
@@ -114,6 +129,10 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 		messages = append(messages, assistantMsg)
 
+		if config.SessionRecorder != nil && config.SessionKey != "" {
+			config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
+		}
+
 		// 7. Execute tool calls
 		for _, tc := range response.ToolCalls {
 			argsJSON, _ := json.Marshal(tc.Arguments)
@@ -130,6 +149,10 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
 			} else {
 				toolResult = ErrorResult("No tools available")
+			}
+
+			if toolResult == nil {
+				toolResult = ErrorResult(fmt.Sprintf("tool %s returned no result", tc.Name))
 			}
 
 			// Call verbose callback if provided
@@ -150,6 +173,10 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				ToolCallID: tc.ID,
 			}
 			messages = append(messages, toolResultMsg)
+
+			if config.SessionRecorder != nil && config.SessionKey != "" {
+				config.SessionRecorder.AddFullMessage(config.SessionKey, toolResultMsg)
+			}
 		}
 	}
 
@@ -161,6 +188,13 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"iterations": iteration,
 				"max":        config.MaxIterations,
 			})
+	}
+
+	if config.SessionRecorder != nil && config.SessionKey != "" && finalContent != "" {
+		config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
+			Role:    "assistant",
+			Content: finalContent,
+		})
 	}
 
 	return &ToolLoopResult{
