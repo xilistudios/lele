@@ -74,6 +74,24 @@ The main documentation gap was that the old README still described an earlier fo
 
 ## Quick Start
 
+### Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+```
+
+Options:
+
+```bash
+# Install a specific version
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh -s -- --version v0.1.0
+
+# Custom install prefix (default: ~/.local)
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh -s -- --prefix /usr/local
+```
+
+The script detects your OS and architecture, downloads the correct binary, verifies its SHA256 checksum, and installs it.
+
 ### Install From Source
 
 ```bash
@@ -81,9 +99,10 @@ git clone https://github.com/xilistudios/lele.git
 cd lele
 make deps
 make build
+make install
 ```
 
-The binary is written to `build/lele`.
+The binary is written to `build/lele` and installed to `~/.local/bin/lele`.
 
 ### Initial Setup
 
@@ -324,14 +343,42 @@ See `docs/tools_configuration.md` and `docs/client-api.md` for operational detai
 
 ## Development
 
-Useful targets:
+### Prerequisites
+
+- [Go](https://go.dev/dl/) 1.25+
+- [Bun](https://bun.sh/) (for the web UI)
+- Make
+
+### Setup
 
 ```bash
+git clone https://github.com/xilistudios/lele.git
+cd lele
+
+# Install Go dependencies
+make deps
+
+# Install web dependencies
+cd web && bun install && cd ..
+
+# Build for current platform
 make build
-make test
-make fmt
-make vet
-make check
+
+# Or build for all platforms
+make build-all
+```
+
+### Useful targets
+
+```bash
+make build       # Build for current OS/arch
+make build-all   # Cross-compile for all platforms
+make web-build   # Build the web UI
+make test        # Run tests
+make fmt         # Format Go code
+make vet         # Static analysis
+make install     # Install to ~/.local/bin
+make clean       # Remove build artifacts
 ```
 
 ## License
