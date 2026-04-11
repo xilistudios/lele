@@ -137,7 +137,7 @@ func (tc *toolCoordinatorImpl) continueSubagentTask(ctx context.Context, session
 		}
 
 		callback := func(callbackCtx context.Context, result *tools.ToolResult) {
-			publishSubagentAsyncResult(tc.al, sessionKey, task.OriginChannel, task.OriginChatID, result)
+			publishSubagentAsyncResult(tc.al, sessionKey, task.OriginChannel, task.OriginChatID, task.ID, result)
 		}
 
 		return manager.ContinueTask(ctx, taskID, guidance, callback)

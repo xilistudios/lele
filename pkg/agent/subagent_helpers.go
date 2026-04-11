@@ -15,12 +15,12 @@ import (
 // Pre-compiled regex patterns for basic verbose formatting
 var (
 	// Matches verbose tool notification lines like "🛠️ Exec: push git changes"
-	toolLineRegex  = regexp.MustCompile(`(?m)^🛠️ \w+:.*$`)
+	toolLineRegex = regexp.MustCompile(`(?m)^🛠️ \w+:.*$`)
 	// Matches multiple consecutive empty lines
 	multipleNewlinesRegex = regexp.MustCompile(`\n{3,}`)
 )
 
-func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID string, result *tools.ToolResult) {
+func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, taskID string, result *tools.ToolResult) {
 	if al == nil || al.bus == nil || result == nil {
 		return
 	}
@@ -33,8 +33,6 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID strin
 		return
 	}
 
-	// Check verbose level and apply formatting if in basic mode
-	// Note: verboseManager might be nil in some contexts, so we check for it
 	if al.verboseManager != nil {
 		level := al.verboseManager.GetLevel(sessionKey)
 		if level == session.VerboseBasic {
@@ -48,6 +46,7 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID strin
 		ChatID:     fmt.Sprintf("%s:%s", channel, chatID),
 		Content:    content,
 		SessionKey: sessionKey,
+		Metadata:   map[string]string{"task_id": taskID},
 	})
 }
 

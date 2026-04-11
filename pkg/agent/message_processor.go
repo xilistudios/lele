@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -380,7 +381,32 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
-	// For non-command messages, run through LLM
+	isSubagent := msg.SenderID == "subagent"
+
+	subagentSessionKey := ""
+	if isSubagent {
+		if msg.Metadata != nil {
+			if taskID := msg.Metadata["task_id"]; taskID != "" {
+				subagentSessionKey = "subagent:" + taskID
+			}
+		}
+	}
+
+	if isSubagent && originChannel == channels.ChannelName {
+		resultPreview := msg.Content
+		resultPreview = utils.Truncate(resultPreview, 300)
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel: originChannel,
+			ChatID:  sessionKey,
+			Event:   "subagent.result",
+			Metadata: map[string]string{
+				"tool":                 "spawn",
+				"result":               resultPreview,
+				"subagent_session_key": subagentSessionKey,
+			},
+		})
+	}
+
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
@@ -390,6 +416,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		EnableSummary:   false,
 		SendResponse:    true,
 		MessageID:       msg.Metadata["message_id"],
+		SkipUserMessage: isSubagent,
 	})
 }
 
