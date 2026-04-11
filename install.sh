@@ -139,7 +139,7 @@ trap 'rm -rf "$TMPDIR"' EXIT
 http_get "$URL" "${TMPDIR}/${ARCHIVE}"
 
 # Verify checksum
-CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}_checksums.txt"
+CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/${BINARY}_${VERSION_NUM}_checksums.txt"
 info "Verifying checksum..."
 http_get "$CHECKSUMS_URL" "${TMPDIR}/checksums.txt"
 
