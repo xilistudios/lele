@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
@@ -80,6 +81,21 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	return sessionKey
 }
 
+func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
+	if !strings.HasPrefix(sessionKey, "subagent:") {
+		return ""
+	}
+	taskID := strings.TrimPrefix(sessionKey, "subagent:")
+	if al.toolCoordinator == nil {
+		return ""
+	}
+	task, ok := al.toolCoordinator.getSubagentTask(taskID)
+	if !ok || task == nil {
+		return ""
+	}
+	return al.ResolveSessionKey(task.OriginSessionKey)
+}
+
 func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
 	if baseSessionKey == "" {
 		return ""
@@ -141,6 +157,7 @@ type processOptions struct {
 	NoHistory       bool
 	ReplyTo         string
 	MessageID       string
+	SkipUserMessage bool
 }
 
 type sessionCancelGroup struct {
@@ -394,7 +411,8 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 		})
 		agent.Tools.Register(spawnTool)
-		subagentManager.SetTools(agent.Tools.CloneWithout("send_file")) // Subagents inherit all parent tools except direct external file delivery
+		subagentManager.SetTools(agent.Tools.CloneWithout("send_file"))
+		subagentManager.SetSessionRecorder(agent.Sessions)
 
 		// Update context builder with the complete tools registry
 		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
@@ -816,6 +834,15 @@ func (al *AgentLoop) GetName(sessionKey string) string {
 		return ""
 	}
 	return agent.Sessions.GetName(sessionKey)
+}
+
+func (al *AgentLoop) GetUpdated(sessionKey string) time.Time {
+	sessionKey = al.ResolveSessionKey(sessionKey)
+	agent := al.agentForSession(sessionKey)
+	if agent == nil {
+		return time.Time{}
+	}
+	return agent.Sessions.GetUpdated(sessionKey)
 }
 
 func (al *AgentLoop) SetName(sessionKey string, name string) error {
