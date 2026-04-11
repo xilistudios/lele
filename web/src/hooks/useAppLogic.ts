@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ApiClient } from '../lib/api'
 import { clearCurrentSessionKey } from '../lib/storage'
 import type {
@@ -12,7 +13,7 @@ import type {
   ToolInfo,
 } from '../lib/types'
 import { useChatSessions } from './useChatSessions'
-import { useMessages } from './useMessages'
+import { toChatMessages, useMessages } from './useMessages'
 import { useModels } from './useModels'
 import { usePollingFallback } from './usePollingFallback'
 import type { SocketStatus } from './useSocket'
@@ -48,6 +49,8 @@ export function useAppLogic(
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const sessionsHook = useChatSessions(api, token, clientId)
   const { modelState, loadModels, selectModel } = useModels(api, token)
@@ -62,6 +65,7 @@ export function useAppLogic(
   wsStatusRef.current = wsStatus
 
   const subscribedSessionRef = useRef<string | null>(null)
+  const sessionAgentSeqRef = useRef(0)
 
   const agentsRef = useRef(agents)
   useEffect(() => {
@@ -78,19 +82,7 @@ export function useAppLogic(
       }
     },
     sessionToken: token ?? undefined,
-    toChatMessages: (history: HistoryResponse['messages'], sessionKey: string) => {
-      return history.flatMap((message, index) => {
-        const base: ChatMessage = {
-          id: `${sessionKey}:${index}:${message.role}`,
-          role: message.role,
-          content: message.content,
-          streaming: false,
-          createdAt: new Date().toISOString(),
-          sessionKey,
-        }
-        return [base]
-      })
-    },
+    toChatMessages,
   })
 
   const currentAgentIdRef = useRef(currentAgentId)
@@ -216,10 +208,10 @@ export function useAppLogic(
   }, [wsClose, messagesHook.clearMessages, persistSession])
 
   const handleSend = useCallback(
-    (content: string, attachments: string[]) => {
+    async (content: string, attachments: string[]) => {
       if (!sessionsHook.currentSessionKey || !currentAgentId) return
 
-      messagesHook.sendMessage(content, attachments, sessionsHook.currentSessionKey, currentAgentId)
+      await messagesHook.sendMessage(content, attachments, sessionsHook.currentSessionKey, currentAgentId)
       messagesHook.setPendingAttachments([])
       sessionsHook.refreshSessions()
     },
@@ -246,34 +238,67 @@ export function useAppLogic(
   }, [wsSend])
 
   const handleSelectSession = useCallback(
-    async (sessionKey: string) => {
+    async (sessionKey: string, options?: { parentSessionKey?: string | null }) => {
+      if (
+        sessionsHook.currentSessionKey === sessionKey &&
+        parentSessionKey === (options?.parentSessionKey ?? null)
+      ) {
+        return
+      }
       if (sessionsHook.currentSessionKey) {
         wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
       }
       subscribedSessionRef.current = null
+      setParentSessionKey(options?.parentSessionKey ?? null)
       sessionsHook.selectSession(sessionKey)
       messagesHook.clearMessages()
+      const requestSeq = ++sessionAgentSeqRef.current
       try {
         const agentResult = await api.sessionAgent(sessionKey)
+        if (sessionAgentSeqRef.current !== requestSeq) {
+          return
+        }
+        if (sessionsHook.currentSessionKeyRef.current !== sessionKey) {
+          return
+        }
         const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
         if (validAgent) {
           setCurrentAgentId(agentResult.agent_id)
         }
       } catch {}
     },
-    [wsSend, sessionsHook.selectSession, sessionsHook.currentSessionKey, messagesHook.clearMessages, api],
+    [
+      wsSend,
+      sessionsHook.selectSession,
+      sessionsHook.currentSessionKey,
+      sessionsHook.currentSessionKeyRef,
+      messagesHook.clearMessages,
+      api,
+      parentSessionKey,
+    ],
   )
 
   const handleCreateSession = useCallback(() => {
+    const currentSession = sessionsHook.sessions.find(
+      (s) => s.key === sessionsHook.currentSessionKey,
+    )
+
+    if (currentSession && currentSession.message_count === 0 && sessionsHook.currentSessionKey) {
+      navigate(`/chat/${encodeURIComponent(sessionsHook.currentSessionKey)}`)
+      return
+    }
+
     if (sessionsHook.currentSessionKey) {
       wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
     }
     subscribedSessionRef.current = null
+    setParentSessionKey(null)
     const newKey = sessionsHook.createSession()
     if (newKey) {
       messagesHook.clearMessages()
+      navigate(`/chat/${encodeURIComponent(newKey)}`)
     }
-  }, [wsSend, sessionsHook.createSession, sessionsHook.currentSessionKey, messagesHook.clearMessages])
+  }, [wsSend, sessionsHook, messagesHook.clearMessages, navigate])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -344,6 +369,7 @@ export function useAppLogic(
     isStreaming,
     sessions: sessionsHook.sessions,
     currentSessionKey: sessionsHook.currentSessionKey,
+    parentSessionKey,
     messages: messagesHook.messages,
     approvalRequest: messagesHook.approvalRequest,
     pendingAttachments: messagesHook.pendingAttachments,

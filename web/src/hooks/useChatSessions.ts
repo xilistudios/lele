@@ -8,6 +8,8 @@ import {
 import type { ChatSession } from '../lib/types'
 
 const buildDefaultSessionKey = (clientId: string) => `native:${clientId}`
+const isSubagentSessionKey = (sessionKey: string | null | undefined) =>
+  Boolean(sessionKey?.startsWith('subagent:'))
 
 export function useChatSessions(api: ApiClient, token: string | null, clientId: string | null) {
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -52,14 +54,9 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
             },
           ]
 
-    const nextSessions = [
-      ...sessionsRef.current.filter(
-        (sessionItem) =>
-          sessionItem.key === currentSessionKeyRef.current &&
-          !fallbackSessions.some((nextSession) => nextSession.key === sessionItem.key),
-      ),
-      ...fallbackSessions,
-    ].sort((b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime())
+    const nextSessions = fallbackSessions.sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
 
     setSessions(nextSessions)
 
@@ -69,10 +66,12 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       : (nextSessions[0]?.key ?? null)
     const storedSessionKey = loadCurrentSessionKey()
     const nextSessionKey =
-      currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
+      isSubagentSessionKey(currentSessionKeyRef.current)
         ? currentSessionKeyRef.current
         : storedSessionKey && availableKeys.has(storedSessionKey)
           ? storedSessionKey
+          : currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
+            ? currentSessionKeyRef.current
           : fallbackKey
 
     persistCurrentSessionKey(nextSessionKey)
@@ -103,8 +102,11 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       ),
     )
     persistCurrentSessionKey(sessionKey)
+
+    api.createSession(sessionKey).catch(() => {})
+
     return sessionKey
-  }, [clientId, persistCurrentSessionKey])
+  }, [clientId, persistCurrentSessionKey, api])
 
   const deleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
