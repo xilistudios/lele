@@ -25,6 +25,7 @@ export type AppLogicContextValue = {
   isStreaming: ReturnType<typeof useAppLogicHook>['isStreaming']
   sessions: ReturnType<typeof useAppLogicHook>['sessions']
   currentSessionKey: ReturnType<typeof useAppLogicHook>['currentSessionKey']
+  parentSessionKey: ReturnType<typeof useAppLogicHook>['parentSessionKey']
   messages: ReturnType<typeof useAppLogicHook>['messages']
   approvalRequest: ReturnType<typeof useAppLogicHook>['approvalRequest']
   pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
@@ -92,6 +93,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     isStreaming: app.isStreaming,
     sessions: app.sessions,
     currentSessionKey: app.currentSessionKey,
+    parentSessionKey: app.parentSessionKey,
     messages: app.messages,
     approvalRequest: app.approvalRequest,
     pendingAttachments: app.pendingAttachments,

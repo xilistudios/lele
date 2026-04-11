@@ -7,6 +7,17 @@ export type SelectOption = { value: string; label: string }
 
 type GroupedModels = { label: string; options: SelectOption[] }[] | undefined
 
+const deriveSessionNameFromMessages = (currentSessionKey: string, content: string[]) => {
+  const firstLine = content
+    .map((entry) => entry.trim())
+    .find((entry) => entry.length > 0)
+    ?.split('\n')[0]
+    ?.trim()
+
+  if (!firstLine) return currentSessionKey
+  return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine
+}
+
 type ChatPageContextValue = {
   // Computed state
   canCancel: boolean
@@ -15,6 +26,7 @@ type ChatPageContextValue = {
   groupedModels: GroupedModels
   selectedModel: string
   currentSession: ChatSession | null
+  parentSession: ChatSession | null
 }
 
 const ChatPageContext = createContext<ChatPageContextValue | null>(null)
@@ -29,11 +41,34 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     currentAgent,
     sessions,
     currentSessionKey,
+    parentSessionKey,
   } = useAppLogicContext()
 
   const hasConversation = messages.length > 0
   const canCancel = isStreaming || Boolean(toolStatus)
-  const currentSession = sessions.find((s) => s.key === currentSessionKey) ?? sessions[0] ?? null
+  const currentSession = useMemo<ChatSession | null>(() => {
+    if (!currentSessionKey) return null
+
+    const session = sessions.find((s) => s.key === currentSessionKey)
+    if (session) return session
+
+    const sessionMessages = messages
+      .filter((message) => message.sessionKey === currentSessionKey && message.role !== 'tool')
+      .map((message) => message.content)
+
+    return {
+      key: currentSessionKey,
+      name: deriveSessionNameFromMessages(currentSessionKey, sessionMessages),
+      created: new Date(0).toISOString(),
+      updated: new Date(0).toISOString(),
+      message_count: messages.filter((message) => message.sessionKey === currentSessionKey).length,
+    }
+  }, [currentSessionKey, messages, sessions])
+
+  const parentSession = useMemo<ChatSession | null>(() => {
+    if (!parentSessionKey) return null
+    return sessions.find((s) => s.key === parentSessionKey) ?? null
+  }, [parentSessionKey, sessions])
 
   const availableModels = useMemo(() => {
     return modelState.available.length > 0
@@ -62,6 +97,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     groupedModels,
     selectedModel,
     currentSession,
+    parentSession,
   }
 
   return <ChatPageContext.Provider value={value}>{children}</ChatPageContext.Provider>
