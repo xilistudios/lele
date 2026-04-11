@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -20,6 +21,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     wsStatus,
     sessions,
     currentSessionKey,
+    parentSessionKey,
     onCreateSession,
     onClearSession,
     onDeleteSession,
@@ -28,12 +30,14 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const deviceName = session?.device_name ?? 'lele'
 
-  const sortedSessions = [...sessions].sort(
-    (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
-  )
+  const sortedSessions = useMemo(() => {
+    const visibleSessions = sessions.filter((session) => !session.key.startsWith('subagent:'))
+    return [...visibleSessions].sort((b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime())
+  }, [sessions])
 
+  const selectedSidebarSessionKey = parentSessionKey ?? currentSessionKey
   const currentSession =
-    sortedSessions.find((s) => s.key === currentSessionKey) ?? sortedSessions[0] ?? null
+    sortedSessions.find((s) => s.key === selectedSidebarSessionKey) ?? sortedSessions[0] ?? null
 
   const hideText = collapsed
 
@@ -158,7 +162,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 messageCount={session.message_count}
                 selected={session.key === currentSession?.key}
                 onSelect={() => {
-                  navigate(`/chat/${session.key}`)
+                  navigate(`/chat/${encodeURIComponent(session.key)}`)
                   if (isMobile) onClose()
                 }}
                 onDelete={() => onDeleteSession(session.key)}
