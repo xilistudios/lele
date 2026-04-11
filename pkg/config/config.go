@@ -109,9 +109,8 @@ func (m *AgentModelConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
-	if len(m.Fallbacks) == 0 && m.Primary != "" {
-		return json.Marshal(m.Primary)
-	}
+	// Always serialize as object to maintain consistent structure in UI
+	// This ensures the frontend always receives {primary, fallbacks} format
 	type raw struct {
 		Primary   string   `json:"primary,omitempty"`
 		Fallbacks []string `json:"fallbacks,omitempty"`
@@ -120,13 +119,14 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 }
 
 type AgentConfig struct {
-	ID        string            `json:"id"`
-	Default   bool              `json:"default,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	Model     *AgentModelConfig `json:"model,omitempty"`
-	Skills    []string          `json:"skills,omitempty"`
-	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	ID          string            `json:"id"`
+	Default     bool              `json:"default,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Workspace   string            `json:"workspace,omitempty"`
+	Model       *AgentModelConfig `json:"model,omitempty"`
+	Skills      []string          `json:"skills,omitempty"`
+	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
+	Temperature *float64          `json:"temperature,omitempty"`
 }
 
 type SubagentsConfig struct {
@@ -185,6 +185,28 @@ type ChannelsConfig struct {
 	Slack    SlackConfig    `json:"slack"`
 	LINE     LINEConfig     `json:"line"`
 	OneBot   OneBotConfig   `json:"onebot"`
+	Native   NativeConfig   `json:"native"`
+	Web      WebConfig      `json:"web"`
+}
+
+type NativeConfig struct {
+	Enabled           bool     `json:"enabled" env:"LELE_CHANNELS_NATIVE_ENABLED"`
+	Host              string   `json:"host" env:"LELE_CHANNELS_NATIVE_HOST"`
+	Port              int      `json:"port" env:"LELE_CHANNELS_NATIVE_PORT"`
+	TokenExpiryDays   int      `json:"token_expiry_days" env:"LELE_CHANNELS_NATIVE_TOKEN_EXPIRY_DAYS"`
+	PinExpiryMinutes  int      `json:"pin_expiry_minutes" env:"LELE_CHANNELS_NATIVE_PIN_EXPIRY_MINUTES"`
+	MaxClients        int      `json:"max_clients" env:"LELE_CHANNELS_NATIVE_MAX_CLIENTS"`
+	CORSOrigins       []string `json:"cors_origins" env:"LELE_CHANNELS_NATIVE_CORS_ORIGINS"`
+	SessionExpiryDays int      `json:"session_expiry_days" env:"LELE_CHANNELS_NATIVE_SESSION_EXPIRY_DAYS"`
+	MaxUploadSizeMB   int64    `json:"max_upload_size_mb" env:"LELE_CHANNELS_NATIVE_MAX_UPLOAD_SIZE_MB"`
+	UploadTTLHours    int      `json:"upload_ttl_hours" env:"LELE_CHANNELS_NATIVE_UPLOAD_TTL_HOURS"`
+	LeleDir           string   `json:"lele_dir,omitempty" env:"LELE_CHANNELS_NATIVE_LELE_DIR"`
+}
+
+type WebConfig struct {
+	Enabled bool   `json:"enabled" env:"LELE_WEB_ENABLED"`
+	Host    string `json:"host" env:"LELE_WEB_HOST"`
+	Port    int    `json:"port" env:"LELE_WEB_PORT"`
 }
 
 type WhatsAppConfig struct {
@@ -501,6 +523,15 @@ func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
 	return cfg, ok
 }
 
+func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
+	p.ensureNamedDefaults()
+	result := make(map[string]NamedProviderConfig, len(p.Named))
+	for name, cfg := range p.Named {
+		result[name] = cfg
+	}
+	return result
+}
+
 func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, preferExact bool) (string, bool) {
 	if provider == "" {
 		return "", false
@@ -762,6 +793,24 @@ func DefaultConfig() *Config {
 				ReconnectInterval:  5,
 				GroupTriggerPrefix: []string{},
 				AllowFrom:          FlexibleStringSlice{},
+			},
+			Native: NativeConfig{
+				Enabled:           false,
+				Host:              "127.0.0.1",
+				Port:              18793,
+				TokenExpiryDays:   30,
+				PinExpiryMinutes:  5,
+				MaxClients:        5,
+				CORSOrigins:       []string{"http://localhost", "http://localhost:3005", "http://127.0.0.1:3005", "http://0.0.0.0:3005", "tauri://localhost", "https://tauri.localhost"},
+				SessionExpiryDays: 30,
+				MaxUploadSizeMB:   50,
+				UploadTTLHours:    24,
+				LeleDir:           getDefaultLeleDir(),
+			},
+			Web: WebConfig{
+				Enabled: false,
+				Host:    "0.0.0.0",
+				Port:    3005,
 			},
 		},
 		Providers: ProvidersConfig{
@@ -1093,4 +1142,12 @@ func expandHome(path string) string {
 		return home
 	}
 	return path
+}
+
+func getDefaultLeleDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ".lele"
+	}
+	return filepath.Join(homeDir, ".lele")
 }

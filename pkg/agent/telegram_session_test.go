@@ -66,7 +66,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 	}
 
 	// Get the active session key
-	activeSession1 := al.resolveSessionKey(sessionKey)
+	activeSession1 := al.ResolveSessionKey(sessionKey)
 	defaultAgent := al.registry.GetDefaultAgent()
 	history1 := defaultAgent.Sessions.GetHistory(activeSession1)
 	if len(history1) != 2 { // user + assistant
@@ -91,7 +91,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 	}
 
 	// Get the new active session key
-	activeSession2 := al.resolveSessionKey(sessionKey)
+	activeSession2 := al.ResolveSessionKey(sessionKey)
 	if activeSession2 == activeSession1 {
 		t.Fatal("Expected different session key after /new")
 	}

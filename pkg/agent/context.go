@@ -157,7 +157,7 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 			if i > 0 {
 				result += "\n----\n"
 			}
-			result += fmt.Sprintf("[%s]\n%s\n", filePath, string(data))
+			result += fmt.Sprintf("## %s\n%s\n", filename, string(data))
 		}
 	}
 

@@ -8,15 +8,15 @@ build/
 *.dylib
 *.test
 *.out
-/picoclaw
-/picoclaw-test
+/lele
+/lele-test
 /lele
 /main
-cmd/picoclaw/workspace
+cmd/lele/workspace
 
-# Picoclaw specific
+# lele specific
 
-# PicoClaw
+# lele
 .lele/
 config.json
 sessions/
@@ -53,3 +53,9 @@ dist/
 
 # Logs
 logs/
+
+# Web app
+web/node_modules/
+web/dist/
+web/.vite/
+web/.bun/

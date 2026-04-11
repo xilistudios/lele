@@ -104,6 +104,10 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		return fmt.Errorf("invalid chat ID: %w", err)
 	}
 
+	if err := c.waitRateLimit(ctx); err != nil {
+		return err
+	}
+
 	if !msg.IsIntermediate {
 		var thinkingKey string
 		if msg.ReplyTo != "" {

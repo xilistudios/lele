@@ -23,17 +23,19 @@ type InboundMessage struct {
 }
 
 type OutboundMessage struct {
-	Channel        string           `json:"channel"`
-	ChatID         string           `json:"chat_id"`
-	Content        string           `json:"content"`
-	Attachments    []FileAttachment `json:"attachments,omitempty"`
-	ReplyTo        string           `json:"reply_to,omitempty"`        // Message ID to reply to
-	MessageID      string           `json:"message_id,omitempty"`      // Original command message ID
-	ReplyMarkup    interface{}      `json:"reply_markup,omitempty"`    // Optional inline keyboard markup for Telegram
-	IsIntermediate bool             `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
-	TextMode       string           `json:"text_mode,omitempty"`       // "markdown" (default) or "html"
-	PlainText      string           `json:"plain_text,omitempty"`      // Fallback plain text if formatting fails
-	LinkPreview    *bool            `json:"link_preview,omitempty"`    // Enable/disable link previews (nil = default true)
+	Channel        string            `json:"channel"`
+	ChatID         string            `json:"chat_id"`
+	Event          string            `json:"event,omitempty"`
+	Content        string            `json:"content"`
+	Attachments    []FileAttachment  `json:"attachments,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+	ReplyTo        string            `json:"reply_to,omitempty"`        // Message ID to reply to
+	MessageID      string            `json:"message_id,omitempty"`      // Original command message ID
+	ReplyMarkup    interface{}       `json:"reply_markup,omitempty"`    // Optional inline keyboard markup for Telegram
+	IsIntermediate bool              `json:"is_intermediate,omitempty"` // If true, does not stop typing indicator
+	TextMode       string            `json:"text_mode,omitempty"`       // "markdown" (default) or "html"
+	PlainText      string            `json:"plain_text,omitempty"`      // Fallback plain text if formatting fails
+	LinkPreview    *bool             `json:"link_preview,omitempty"`    // Enable/disable link previews (nil = default true)
 }
 
 // MessageHandler is a function that handles incoming messages

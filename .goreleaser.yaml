@@ -5,6 +5,7 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - cd web && bun run build
     - go generate ./cmd/lele
 
 builds:

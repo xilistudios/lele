@@ -13,6 +13,7 @@ import (
 
 type Session struct {
 	Key          string              `json:"key"`
+	Name         string              `json:"name,omitempty"`
 	Messages     []providers.Message `json:"messages"`
 	Summary      string              `json:"summary,omitempty"`
 	VerboseMode  bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
@@ -64,6 +65,36 @@ func (sm *SessionManager) GetOrCreate(key string) *Session {
 	return session
 }
 
+func generateSessionName(content string) string {
+	maxLen := 50
+	content = strings.TrimSpace(content)
+	content = strings.ReplaceAll(content, "\n", " ")
+	content = strings.ReplaceAll(content, "\r", " ")
+	content = strings.ReplaceAll(content, "\t", " ")
+
+	for _, r := range []string{".", ",", "!", "?", ";", ":", "'", "\"", "`"} {
+		content = strings.ReplaceAll(content, r, "")
+	}
+
+	words := strings.Fields(content)
+	if len(words) == 0 {
+		return "New Chat"
+	}
+
+	result := strings.Join(words, " ")
+	if len(result) <= maxLen {
+		return result
+	}
+
+	result = result[:maxLen]
+	lastSpace := strings.LastIndex(result, " ")
+	if lastSpace > 0 && lastSpace > maxLen-20 {
+		result = result[:lastSpace]
+	}
+
+	return strings.TrimSpace(result)
+}
+
 func (sm *SessionManager) AddMessage(sessionKey, role, content string) {
 	sm.AddFullMessage(sessionKey, providers.Message{
 		Role:    role,
@@ -85,6 +116,10 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			Created:  time.Now(),
 		}
 		sm.sessions[sessionKey] = session
+	}
+
+	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
+		session.Name = generateSessionName(msg.Content)
 	}
 
 	session.Messages = append(session.Messages, msg)
@@ -116,6 +151,28 @@ func (sm *SessionManager) GetSummary(key string) string {
 	return session.Summary
 }
 
+func (sm *SessionManager) GetName(key string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return ""
+	}
+	return session.Name
+}
+
+func (sm *SessionManager) GetUpdated(key string) time.Time {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return time.Time{}
+	}
+	return session.Updated
+}
+
 func (sm *SessionManager) SetSummary(key string, summary string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -125,6 +182,26 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 		session.Summary = summary
 		session.Updated = time.Now()
 	}
+}
+
+func (sm *SessionManager) SetName(key string, name string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	session.Name = strings.TrimSpace(name)
+	session.Updated = time.Now()
+
+	return sm.saveUnlocked(key)
 }
 
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
@@ -403,6 +480,7 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 
 	snapshot := Session{
 		Key:          stored.Key,
+		Name:         stored.Name,
 		Summary:      stored.Summary,
 		VerboseMode:  stored.VerboseMode,
 		Created:      stored.Created,

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -86,11 +87,11 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	// Also honor channel-specific session keys (e.g., telegram:<chat_id>)
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
+		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") || strings.HasPrefix(msg.SessionKey, "native:") {
 			sessionKey = msg.SessionKey
 		}
 	}
-	sessionKey = mp.al.resolveSessionKey(sessionKey)
+	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Check if a session-specific agent is set (e.g., via /agent command)
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
@@ -195,7 +196,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		sessionKey = routing.BuildAgentMainSessionKey(agent.ID)
 	}
 	baseSessionKey := sessionKey
-	sessionKey = mp.al.resolveSessionKey(sessionKey)
+	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Honor session-selected agent for command/system handling as well.
 	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
@@ -380,7 +381,32 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
-	// For non-command messages, run through LLM
+	isSubagent := msg.SenderID == "subagent"
+
+	subagentSessionKey := ""
+	if isSubagent {
+		if msg.Metadata != nil {
+			if taskID := msg.Metadata["task_id"]; taskID != "" {
+				subagentSessionKey = "subagent:" + taskID
+			}
+		}
+	}
+
+	if isSubagent && originChannel == channels.ChannelName {
+		resultPreview := msg.Content
+		resultPreview = utils.Truncate(resultPreview, 300)
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel: originChannel,
+			ChatID:  sessionKey,
+			Event:   "subagent.result",
+			Metadata: map[string]string{
+				"tool":                 "spawn",
+				"result":               resultPreview,
+				"subagent_session_key": subagentSessionKey,
+			},
+		})
+	}
+
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         originChannel,
@@ -389,6 +415,8 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		DefaultResponse: "Background task completed.",
 		EnableSummary:   false,
 		SendResponse:    true,
+		MessageID:       msg.Metadata["message_id"],
+		SkipUserMessage: isSubagent,
 	})
 }
 

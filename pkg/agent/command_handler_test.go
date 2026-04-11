@@ -836,7 +836,7 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	if got := al.GetSessionAgent(sessionKey); got != "support" {
 		t.Fatalf("Expected session agent support, got %s", got)
 	}
-	activeSessionKey := al.resolveSessionKey(sessionKey)
+	activeSessionKey := al.ResolveSessionKey(sessionKey)
 	if activeSessionKey == sessionKey {
 		t.Fatal("Expected /agent to switch the chat to a fresh session key")
 	}
@@ -904,7 +904,7 @@ func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 	}); !handled {
 		t.Fatal("Expected /agent to be handled")
 	}
-	firstActiveSessionKey := al.resolveSessionKey(sessionKey)
+	firstActiveSessionKey := al.ResolveSessionKey(sessionKey)
 
 	response, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:    "telegram",
@@ -919,7 +919,7 @@ func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 	if !strings.Contains(response, "New conversation started") {
 		t.Fatalf("Unexpected /new response: %s", response)
 	}
-	secondActiveSessionKey := al.resolveSessionKey(sessionKey)
+	secondActiveSessionKey := al.ResolveSessionKey(sessionKey)
 	if secondActiveSessionKey == firstActiveSessionKey {
 		t.Fatal("Expected /new to create a different active session key")
 	}
@@ -2219,7 +2219,7 @@ func TestNewCommand_CleanSession(t *testing.T) {
 	})
 
 	// Get the active session key after first message
-	firstActiveSession := al.resolveSessionKey(sessionKey)
+	firstActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("First active session: %s", firstActiveSession)
 
 	// Add some history manually to simulate a long conversation
@@ -2249,7 +2249,7 @@ func TestNewCommand_CleanSession(t *testing.T) {
 	}
 
 	// Step 3: Get the new active session key
-	secondActiveSession := al.resolveSessionKey(sessionKey)
+	secondActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("Second active session: %s", secondActiveSession)
 
 	if secondActiveSession == firstActiveSession {
@@ -2309,7 +2309,7 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 		SessionKey: sessionKey,
 	})
 
-	firstActiveSession := al.resolveSessionKey(sessionKey)
+	firstActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("First active session (main): %s", firstActiveSession)
 
 	// Add some history
@@ -2339,7 +2339,7 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 	}
 
 	// Step 3: Verify new session key
-	secondActiveSession := al.resolveSessionKey(sessionKey)
+	secondActiveSession := al.ResolveSessionKey(sessionKey)
 	t.Logf("Second active session (coder): %s", secondActiveSession)
 
 	if secondActiveSession == firstActiveSession {

@@ -22,6 +22,29 @@ type scriptedSubagentProvider struct {
 	calls     int
 }
 
+type recordingSessionRecorder struct {
+	mu       sync.Mutex
+	messages map[string][]providers.Message
+}
+
+func (r *recordingSessionRecorder) AddFullMessage(sessionKey string, msg providers.Message) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.messages == nil {
+		r.messages = make(map[string][]providers.Message)
+	}
+	r.messages[sessionKey] = append(r.messages[sessionKey], msg)
+}
+
+func (r *recordingSessionRecorder) History(sessionKey string) []providers.Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	history := r.messages[sessionKey]
+	result := make([]providers.Message, len(history))
+	copy(result, history)
+	return result
+}
+
 func (m *scriptedSubagentProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, options map[string]interface{}) (*providers.LLMResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -455,6 +478,36 @@ func TestSubagentManager_ContinueTask(t *testing.T) {
 	}
 	if len(task.Guidance) != 1 || task.Guidance[0] != "Use repository /tmp/lele" {
 		t.Fatalf("Expected stored guidance, got: %#v", task.Guidance)
+	}
+}
+
+func TestSubagentManager_SpawnDoesNotDuplicateInitialUserMessage(t *testing.T) {
+	provider := &scriptedSubagentProvider{responses: []string{
+		"STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted.",
+	}}
+	recorder := &recordingSessionRecorder{}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager.SetSessionRecorder(recorder)
+	resultCh := make(chan *ToolResult, 1)
+
+	_, err := manager.Spawn(context.Background(), "Inspect spawn handling", "spawn-check", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("Spawn returned error: %v", err)
+	}
+
+	waitForSubagentCallback(t, resultCh)
+
+	history := recorder.History("subagent:subagent-1")
+	if len(history) != 2 {
+		t.Fatalf("expected 2 recorded messages, got %d: %#v", len(history), history)
+	}
+	if history[0].Role != "user" || history[0].Content != "Inspect spawn handling" {
+		t.Fatalf("first message = %#v, want initial user task", history[0])
+	}
+	if history[1].Role != "assistant" {
+		t.Fatalf("second message = %#v, want final assistant response", history[1])
 	}
 }
 

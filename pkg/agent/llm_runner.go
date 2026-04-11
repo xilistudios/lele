@@ -15,7 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -87,7 +89,11 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	)
 
 	// 3. Save user message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+	if !opts.SkipUserMessage {
+		agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+	} else if opts.Channel == "system" {
+		agent.Sessions.AddMessage(opts.SessionKey, "system", renderedUserMessage)
+	}
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
@@ -115,9 +121,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	// 8. Optional: send response via bus
 	if opts.SendResponse {
 		outboundMsg := bus.OutboundMessage{
-			Channel: opts.Channel,
-			ChatID:  opts.ChatID,
-			Content: finalContent,
+			Channel:   opts.Channel,
+			ChatID:    opts.ChatID,
+			Content:   finalContent,
+			MessageID: opts.MessageID,
 		}
 		if opts.ReplyTo != "" {
 			outboundMsg.ReplyTo = opts.ReplyTo
@@ -227,11 +234,41 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var response *providers.LLMResponse
 		var err error
 
+		var streamOnChunk func(chunk string, done bool)
+		if opts.Channel == channels.ChannelName && opts.SendResponse {
+			messageID := opts.MessageID
+			if messageID == "" {
+				messageID = uuid.New().String()
+			}
+			msgID := messageID
+			streamOnChunk = func(chunk string, done bool) {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:   opts.Channel,
+					ChatID:    opts.SessionKey,
+					Event:     "message.stream",
+					MessageID: msgID,
+					Content:   chunk,
+					Metadata: map[string]string{
+						"done": fmt.Sprintf("%v", done),
+					},
+				})
+			}
+		}
+
 		callLLM := func() (*providers.LLMResponse, error) {
 			// Build LLM options including reasoning config
 			llmOptions := map[string]interface{}{
 				"max_tokens":  agent.MaxTokens,
 				"temperature": agent.Temperature,
+			}
+
+			if streamOnChunk != nil {
+				if sp, ok := agent.Provider.(providers.StreamingLLMProvider); ok {
+					if len(candidates) > 0 && lr.al.fallback != nil {
+					} else {
+						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk)
+					}
+				}
 			}
 			// Add reasoning config if available, with per-session override support
 			sessionEffort := ""
@@ -522,9 +559,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					"iteration": iteration,
 				})
 
-			// Verbose mode: send notification before executing tool
+			// Native clients consume structured tool events; other channels keep the
+			// existing verbose text notifications.
 			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
-			if level != session.VerboseOff {
+			if opts.Channel == channels.ChannelName {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: opts.Channel,
+					ChatID:  opts.SessionKey,
+					Event:   "tool.executing",
+					Metadata: map[string]string{
+						"tool":   tc.Name,
+						"action": "Executing " + tc.Name,
+					},
+				})
+			} else if level != session.VerboseOff {
 				var verboseMsg string
 				if level == session.VerboseFull {
 					// Full mode: detailed tool call with JSON args
@@ -559,7 +607,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						"tool": tc.Name,
 					})
 
-				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, result)
+				taskID := ""
+				if result.Metadata != nil {
+					taskID = result.Metadata["task_id"]
+				}
+				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, taskID, result)
 			}
 
 			// Special handling for exec tool with approval
@@ -588,16 +640,29 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						chatIDInt,
 					)
 
-					// Build inline keyboard
-					keyboard := lr.al.approvalManager.BuildApprovalKeyboard(approval.ID)
+					if opts.Channel == channels.ChannelName {
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel: opts.Channel,
+							ChatID:  opts.SessionKey,
+							Event:   "approval.request",
+							Metadata: map[string]string{
+								"id":      approval.ID,
+								"command": toolResult.ApprovalRequired.Command,
+								"reason":  toolResult.ApprovalRequired.Reason,
+							},
+						})
+					} else {
+						// Build inline keyboard
+						keyboard := lr.al.approvalManager.BuildApprovalKeyboard(approval.ID)
 
-					// Send message with keyboard
-					lr.al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel:     opts.Channel,
-						ChatID:      opts.ChatID,
-						Content:     approvalMsg,
-						ReplyMarkup: keyboard,
-					})
+						// Send message with keyboard
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel:     opts.Channel,
+							ChatID:      opts.ChatID,
+							Content:     approvalMsg,
+							ReplyMarkup: keyboard,
+						})
+					}
 
 					// Wait for user response
 					approved, err := approval.WaitForResponse(ctx, lr.al.approvalManager.GetTimeout())
@@ -648,16 +713,36 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				return "", iteration, err
 			}
 
-			// Verbose mode: send result notification (only in Full mode)
-			if lr.al.verboseManager.IsFull(opts.SessionKey) {
+			// Native clients consume structured tool results; other channels keep the
+			// existing full verbose message.
+			if opts.Channel == channels.ChannelName {
+				resultPreview := toolResult.ForLLM
+				if resultPreview == "" && toolResult.Err != nil {
+					resultPreview = toolResult.Err.Error()
+				}
+				resultPreview = utils.Truncate(resultPreview, 300)
+				metadata := map[string]string{
+					"tool":   tc.Name,
+					"result": resultPreview,
+				}
+				if tc.Name == "spawn" && toolResult.Metadata != nil {
+					if subagentSessionKey := toolResult.Metadata["subagent_session_key"]; subagentSessionKey != "" {
+						metadata["subagent_session_key"] = subagentSessionKey
+					}
+				}
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:  opts.Channel,
+					ChatID:   opts.SessionKey,
+					Event:    "tool.result",
+					Metadata: metadata,
+				})
+			} else if lr.al.verboseManager.IsFull(opts.SessionKey) {
 				status := "✅"
 				if toolResult.IsError {
 					status = "❌"
 				}
 				resultPreview := toolResult.ForLLM
-				if len(resultPreview) > 300 {
-					resultPreview = resultPreview[:300] + "..."
-				}
+				resultPreview = utils.Truncate(resultPreview, 300)
 				verboseResult := fmt.Sprintf("%s **Result:** `%s`\n```\n%s\n```", status, tc.Name, resultPreview)
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel:        opts.Channel,

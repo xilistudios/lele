@@ -88,6 +88,33 @@ func TestNewAgentInstance_DefaultsTemperatureWhenUnset(t *testing.T) {
 	}
 }
 
+func TestNewAgentInstance_AgentTemperatureOverridesDefaults(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := createTestConfig(tmpDir)
+	defaultTemp := 0.5
+	cfg.Agents.Defaults.Temperature = &defaultTemp
+
+	agentCfg := &config.AgentConfig{
+		ID:          "test-agent",
+		Temperature: ptrFloat64(1.5),
+	}
+
+	agent := NewAgentInstance(agentCfg, &cfg.Agents.Defaults, cfg)
+
+	if agent.Temperature != 1.5 {
+		t.Fatalf("Temperature = %f, want %f (agent-level should override defaults)", agent.Temperature, 1.5)
+	}
+}
+
+func ptrFloat64(v float64) *float64 {
+	return &v
+}
+
 func TestNewAgentInstance_ResolvesNamedProviderModelAlias(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {

@@ -108,6 +108,35 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult(fmt.Sprintf("failed to manage subagent: %v", err))
 	}
 
-	// Return AsyncResult since the task runs in background
-	return AsyncResult(result)
+	toolResult := AsyncResult(result)
+	if taskID != "" {
+		if toolResult.Metadata == nil {
+			toolResult.Metadata = map[string]string{}
+		}
+		toolResult.Metadata["task_id"] = taskID
+		toolResult.Metadata["subagent_session_key"] = "subagent:" + taskID
+		return toolResult
+	}
+
+	if extractedTaskID := extractSpawnTaskID(result); extractedTaskID != "" {
+		if toolResult.Metadata == nil {
+			toolResult.Metadata = map[string]string{}
+		}
+		toolResult.Metadata["task_id"] = extractedTaskID
+		toolResult.Metadata["subagent_session_key"] = "subagent:" + extractedTaskID
+	}
+
+	return toolResult
+}
+
+func extractSpawnTaskID(result string) string {
+	idx := strings.Index(result, "subagent-")
+	if idx < 0 {
+		return ""
+	}
+	trimmed := result[idx:]
+	if end := strings.IndexAny(trimmed, " \t\n('\""); end > 0 {
+		return trimmed[:end]
+	}
+	return trimmed
 }

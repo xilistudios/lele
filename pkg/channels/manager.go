@@ -18,25 +18,29 @@ import (
 )
 
 type Manager struct {
-	channels     map[string]Channel
-	bus          *bus.MessageBus
-	config       *config.Config
-	agentLoop    AgentProvidable
-	dispatchTask *asyncTask
-	runCtx       context.Context
-	mu           sync.RWMutex
+	channels        map[string]Channel
+	dispatchQueues  map[string]chan bus.OutboundMessage
+	bus             *bus.MessageBus
+	config          *config.Config
+	agentLoop       AgentProvidable
+	approvalManager *ApprovalManager
+	dispatchTask    *asyncTask
+	runCtx          context.Context
+	mu              sync.RWMutex
 }
 
 type asyncTask struct {
 	cancel context.CancelFunc
 }
 
-func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable) (*Manager, error) {
+func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*Manager, error) {
 	m := &Manager{
-		channels:  make(map[string]Channel),
-		bus:       messageBus,
-		config:    cfg,
-		agentLoop: agentLoop,
+		channels:        make(map[string]Channel),
+		dispatchQueues:  make(map[string]chan bus.OutboundMessage),
+		bus:             messageBus,
+		config:          cfg,
+		agentLoop:       agentLoop,
+		approvalManager: approvalManager,
 	}
 
 	if err := m.initChannels(); err != nil {
@@ -51,13 +55,14 @@ func (m *Manager) initChannels() error {
 
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
 		logger.DebugC("channels", "Attempting to initialize Telegram channel")
-		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop)
+		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Telegram channel", map[string]interface{}{
 				"error": err.Error(),
 			})
 		} else {
 			m.channels["telegram"] = telegram
+			m.dispatchQueues["telegram"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "Telegram channel enabled successfully")
 		}
 	}
@@ -71,6 +76,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["whatsapp"] = whatsapp
+			m.dispatchQueues["whatsapp"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "WhatsApp channel enabled successfully")
 		}
 	}
@@ -84,6 +90,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["feishu"] = feishu
+			m.dispatchQueues["feishu"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "Feishu channel enabled successfully")
 		}
 	}
@@ -97,6 +104,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["discord"] = discord
+			m.dispatchQueues["discord"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "Discord channel enabled successfully")
 		}
 	}
@@ -110,6 +118,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["maixcam"] = maixcam
+			m.dispatchQueues["maixcam"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "MaixCam channel enabled successfully")
 		}
 	}
@@ -123,6 +132,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["qq"] = qq
+			m.dispatchQueues["qq"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "QQ channel enabled successfully")
 		}
 	}
@@ -136,6 +146,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["dingtalk"] = dingtalk
+			m.dispatchQueues["dingtalk"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "DingTalk channel enabled successfully")
 		}
 	}
@@ -149,6 +160,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["slack"] = slackCh
+			m.dispatchQueues["slack"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "Slack channel enabled successfully")
 		}
 	}
@@ -162,6 +174,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["line"] = line
+			m.dispatchQueues["line"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "LINE channel enabled successfully")
 		}
 	}
@@ -175,7 +188,22 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["onebot"] = onebot
+			m.dispatchQueues["onebot"] = make(chan bus.OutboundMessage, 50)
 			logger.InfoC("channels", "OneBot channel enabled successfully")
+		}
+	}
+
+	if m.config.Channels.Native.Enabled {
+		logger.DebugC("channels", "Attempting to initialize Native channel")
+		native, err := NewNativeChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
+		if err != nil {
+			logger.ErrorCF("channels", "Failed to initialize Native channel", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else {
+			m.channels["native"] = native
+			m.dispatchQueues["native"] = make(chan bus.OutboundMessage, 50)
+			logger.InfoC("channels", "Native channel enabled successfully")
 		}
 	}
 
@@ -213,6 +241,9 @@ func (m *Manager) StartAll(ctx context.Context) error {
 				"error":   err.Error(),
 			})
 		}
+
+		queue := m.dispatchQueues[name]
+		go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
 	}
 
 	logger.InfoC("channels", "All channels started")
@@ -258,12 +289,14 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 		m.dispatchTask = &asyncTask{cancel: cancel}
 		m.mu.Unlock()
 		go m.dispatchOutbound(dispatchCtx)
-		for _, channel := range newChannels {
+		for name, channel := range m.channels {
 			if err := channel.Start(ctx); err != nil {
 				logger.ErrorCF("channels", "Failed to restart channel during reload", map[string]interface{}{
 					"error": err.Error(),
 				})
 			}
+			queue := m.dispatchQueues[name]
+			go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
 		}
 		logger.InfoC("channels", "Channels reloaded")
 		return nil
@@ -314,13 +347,12 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 				continue
 			}
 
-			// Silently skip internal channels
 			if constants.IsInternalChannel(msg.Channel) {
 				continue
 			}
 
 			m.mu.RLock()
-			channel, exists := m.channels[msg.Channel]
+			queue, exists := m.dispatchQueues[msg.Channel]
 			m.mu.RUnlock()
 
 			if !exists {
@@ -330,9 +362,24 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 				continue
 			}
 
-			if err := sendOutboundMessage(ctx, channel, msg); err != nil {
+			select {
+			case queue <- msg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (m *Manager) startChannelDispatcher(ctx context.Context, name string, ch Channel, queue chan bus.OutboundMessage) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-queue:
+			if err := sendOutboundMessage(ctx, ch, msg); err != nil {
 				logger.ErrorCF("channels", "Error sending message to channel", map[string]interface{}{
-					"channel": msg.Channel,
+					"channel": name,
 					"error":   err.Error(),
 				})
 			}

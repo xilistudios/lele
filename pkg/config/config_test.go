@@ -38,14 +38,21 @@ func TestAgentModelConfig_UnmarshalObject(t *testing.T) {
 	}
 }
 
-func TestAgentModelConfig_MarshalString(t *testing.T) {
+func TestAgentModelConfig_MarshalObjectNoFallbacks(t *testing.T) {
+	// Now always serializes as object, even without fallbacks
 	m := AgentModelConfig{Primary: "gpt-4"}
 	data, err := json.Marshal(m)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if string(data) != `"gpt-4"` {
-		t.Errorf("marshal = %s, want '\"gpt-4\"'", string(data))
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	if result["primary"] != "gpt-4" {
+		t.Errorf("primary = %v, want 'gpt-4'", result["primary"])
+	}
+	// Should not have fallbacks key when empty
+	if _, ok := result["fallbacks"]; ok {
+		t.Errorf("fallbacks key present, want omitted")
 	}
 }
 

@@ -2,8 +2,11 @@ package channels
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -80,10 +83,58 @@ func outboundChannelSeparatesAttachments(channel string) bool {
 
 func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundMessage) error {
 	for _, chunk := range splitOutboundMessage(msg) {
-		if err := channel.Send(ctx, chunk); err != nil {
+		if err := sendChunkWithRetry(ctx, channel, chunk); err != nil {
 			return err
 		}
 	}
-
 	return nil
+}
+
+func sendChunkWithRetry(ctx context.Context, channel Channel, msg bus.OutboundMessage) error {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			waitTime := time.Duration(attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(waitTime):
+			}
+		}
+
+		err := channel.Send(ctx, msg)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if !isTransientError(err) {
+			return err
+		}
+
+		logger.WarnCF("channels", "Retrying outbound message", map[string]interface{}{
+			"channel": msg.Channel,
+			"attempt": attempt + 1,
+			"error":   err.Error(),
+		})
+	}
+	return lastErr
+}
+
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "timeout") ||
+		strings.Contains(lower, "deadline exceeded") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "temporary") ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "429") ||
+		strings.Contains(lower, "503") ||
+		strings.Contains(lower, "502") ||
+		strings.Contains(lower, "network") ||
+		strings.Contains(lower, "i/o timeout")
 }

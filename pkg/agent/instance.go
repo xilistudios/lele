@@ -205,6 +205,9 @@ func NewAgentInstance(
 	if defaults.Temperature != nil {
 		temperature = *defaults.Temperature
 	}
+	if agentCfg != nil && agentCfg.Temperature != nil {
+		temperature = *agentCfg.Temperature
+	}
 
 	// Resolve fallback candidates using the agent's provider
 	modelCfg := providers.ModelConfig{

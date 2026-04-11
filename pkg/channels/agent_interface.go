@@ -1,5 +1,12 @@
 package channels
 
+import (
+	"time"
+
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
+)
+
 // AgentSessionManager define la interfaz necesaria para gestionar agentes por sesión
 // Esta interfaz es implementada por agent.AgentLoop para evitar ciclos de importación
 type AgentSessionManager interface {
@@ -14,6 +21,16 @@ type AgentProvidable interface {
 	AgentSessionManager
 	// GetAgentInfo devuelve información básica de un agente
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
+	// GetSessionHistory devuelve el historial persistido de una sesión
+	GetSessionHistory(sessionKey string) []providers.Message
+	// GetSessionModel devuelve el modelo efectivo de una sesión
+	GetSessionModel(sessionKey string) string
+	// SetSessionModel establece el modelo de una sesión
+	SetSessionModel(sessionKey, model string) string
+	// ListAvailableModels devuelve los modelos configurados para un agente/sesión
+	ListAvailableModels(agentID string) []string
+	// GetConfigSnapshot devuelve la configuración actual
+	GetConfigSnapshot() *config.Config
 	// GetStatus devuelve el estado actual del agente para una sesión
 	GetStatus(sessionKey string) string
 	// StopAgent detiene el procesamiento del agente para una sesión
@@ -34,6 +51,16 @@ type AgentProvidable interface {
 	GetSubagents() string
 	// ClearSession limpia el historial de una sesión
 	ClearSession(sessionKey string) string
+	// GetName devuelve el nombre de una sesión
+	GetName(sessionKey string) string
+	// GetUpdated devuelve el timestamp de última actualización de una sesión
+	GetUpdated(sessionKey string) time.Time
+	// SetName establece el nombre de una sesión
+	SetName(sessionKey string, name string) error
+	// ResolveSessionKey resuelve el alias de session_key si existe
+	ResolveSessionKey(sessionKey string) string
+	// IsSessionProcessing devuelve true si hay un procesamiento LLM activo para la sesión
+	IsSessionProcessing(sessionKey string) bool
 }
 
 // AgentBasicInfo contiene información pública de un agente
