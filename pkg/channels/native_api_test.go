@@ -144,6 +144,10 @@ func (m *nativeTestAgentLoop) GetName(sessionKey string) string {
 	return ""
 }
 
+func (m *nativeTestAgentLoop) GetUpdated(sessionKey string) time.Time {
+	return time.Time{}
+}
+
 func (m *nativeTestAgentLoop) SetName(sessionKey string, name string) error {
 	return nil
 }
@@ -208,14 +212,15 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 
 	channel := &NativeChannel{
-		cfg:         &cfg.Channels.Native,
-		auth:        auth,
-		bus:         msgBus,
-		agentLoop:   loop,
-		wsClients:   make(map[string]*WSClient),
-		pinLimiter:  newRateLimiter(10, time.Minute),
-		pairLimiter: newRateLimiter(5, time.Minute),
-		apiLimiter:  newRateLimiter(120, time.Minute),
+		cfg:              &cfg.Channels.Native,
+		auth:             auth,
+		bus:              msgBus,
+		agentLoop:        loop,
+		wsClients:        make(map[string]*WSClient),
+		pinLimiter:       newRateLimiter(10, time.Minute),
+		pairLimiter:      newRateLimiter(5, time.Minute),
+		apiLimiter:       newRateLimiter(120, time.Minute),
+		wsMessageLimiter: newRateLimiter(30, time.Minute),
 	}
 
 	mux := http.NewServeMux()
@@ -286,15 +291,16 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	}
 
 	channel := &NativeChannel{
-		cfg:         &cfg.Channels.Native,
-		auth:        auth,
-		bus:         msgBus,
-		agentLoop:   loop,
-		wsClients:   make(map[string]*WSClient),
-		pinLimiter:  newRateLimiter(10, time.Minute),
-		pairLimiter: newRateLimiter(5, time.Minute),
-		apiLimiter:  newRateLimiter(120, time.Minute),
-		configPath:  configPath,
+		cfg:              &cfg.Channels.Native,
+		auth:             auth,
+		bus:              msgBus,
+		agentLoop:        loop,
+		wsClients:        make(map[string]*WSClient),
+		pinLimiter:       newRateLimiter(10, time.Minute),
+		pairLimiter:      newRateLimiter(5, time.Minute),
+		apiLimiter:       newRateLimiter(120, time.Minute),
+		wsMessageLimiter: newRateLimiter(30, time.Minute),
+		configPath:       configPath,
 	}
 
 	mux := http.NewServeMux()
@@ -502,6 +508,76 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 
 	if !found {
 		t.Fatalf("expected session %q in payload %#v", trackedSession, payload.Sessions)
+	}
+}
+
+func TestNativeChannelCreateSession(t *testing.T) {
+	ts := newNativeTestServer(t)
+	sessionKey := "native:" + ts.clientID + ":" + "1234567890"
+
+	body, _ := json.Marshal(CreateSessionRequest{SessionKey: sessionKey})
+	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload CreateSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if payload.SessionKey != sessionKey {
+		t.Fatalf("session_key = %q, want %q", payload.SessionKey, sessionKey)
+	}
+
+	client, ok := ts.channel.auth.GetClient(ts.clientID)
+	if !ok {
+		t.Fatal("client not found")
+	}
+
+	var found bool
+	for _, sk := range client.SessionKeys {
+		if sk == sessionKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("session key %q not tracked in client SessionKeys", sessionKey)
+	}
+}
+
+func TestNativeChannelCreateSessionRejectsForeignSession(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body, _ := json.Marshal(CreateSessionRequest{SessionKey: "native:otherclient:123"})
+	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
 	}
 }
 

@@ -243,13 +243,44 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 			Key:          sk,
 			Name:         n.agentLoop.GetName(sk),
 			Created:      client.Created,
-			Updated:      client.LastSeen,
+			Updated:      n.agentLoop.GetUpdated(sk),
 			MessageCount: messageCount,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, ChatSessionsResponse{
 		Sessions: sessions,
+	})
+}
+
+func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+		return
+	}
+
+	var req CreateSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+		return
+	}
+
+	if req.SessionKey == "" {
+		writeError(w, http.StatusBadRequest, "session_key is required", "session_key_missing")
+		return
+	}
+
+	clientID := getClientID(r)
+	expectedPrefix := "native:" + clientID
+	if req.SessionKey != expectedPrefix && !strings.HasPrefix(req.SessionKey, expectedPrefix+":") {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
+	n.auth.TrackSessionKey(clientID, req.SessionKey)
+
+	writeJSON(w, http.StatusOK, CreateSessionResponse{
+		SessionKey: req.SessionKey,
 	})
 }
 
