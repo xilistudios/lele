@@ -71,15 +71,17 @@ type WSApprovalRequestPayload struct {
 }
 
 type WSToolExecutingPayload struct {
-	SessionKey string `json:"session_key,omitempty"`
-	Tool       string `json:"tool"`
-	Action     string `json:"action"`
+	SessionKey         string `json:"session_key,omitempty"`
+	Tool               string `json:"tool"`
+	Action             string `json:"action"`
+	SubagentSessionKey string `json:"subagent_session_key,omitempty"`
 }
 
 type WSToolResultPayload struct {
-	SessionKey string `json:"session_key,omitempty"`
-	Tool       string `json:"tool"`
-	Result     string `json:"result"`
+	SessionKey         string `json:"session_key,omitempty"`
+	Tool               string `json:"tool"`
+	Result             string `json:"result"`
+	SubagentSessionKey string `json:"subagent_session_key,omitempty"`
 }
 
 type WSErrorPayload struct {
@@ -168,6 +170,14 @@ type ChatSession struct {
 
 type ChatSessionsResponse struct {
 	Sessions []ChatSession `json:"sessions"`
+}
+
+type CreateSessionRequest struct {
+	SessionKey string `json:"session_key"`
+}
+
+type CreateSessionResponse struct {
+	SessionKey string `json:"session_key"`
 }
 
 type SessionModelResponse struct {
