@@ -13,9 +13,10 @@ import { MarkdownText } from './molecules/MarkdownText'
 type Props = {
   message: ChatMessage
   isLast?: boolean
+  onNavigateToSession?: (sessionKey: string) => void
 }
 
-export function MessageBubble({ message, isLast }: Props) {
+export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -33,37 +34,67 @@ export function MessageBubble({ message, isLast }: Props) {
   }, [isUser, isTool, message.content])
 
   if (isTool) {
+    const subagentSessionKey = message.subagentSessionKey
+
     return (
       <div className="py-1.5">
-        <div
-          className="flex items-center gap-2 rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] px-3 py-2 cursor-pointer hover:bg-[#1e1e1e] transition-colors"
-          onClick={() => setExpanded(!expanded)}
-          onKeyDown={(e) => e.key === 'Enter' && setExpanded(!expanded)}
-          role="button"
-          tabIndex={0}
-        >
-          <svg
-            className="h-4 w-4 text-[#666]"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
+        <div className="flex items-center gap-2 rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] px-3 py-2">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
           >
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-          </svg>
-          <span className="text-sm font-medium text-[#ccc] font-mono">{message.toolName}</span>
-          {message.toolStatus && <StatusBadge status={message.toolStatus} />}
-          <svg
-            className={`h-3 w-3 text-[#666] transition-transform ${expanded ? 'rotate-180' : ''}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
+            <svg
+              className="h-4 w-4 text-[#666]"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+            </svg>
+            <span className="text-sm font-medium text-[#ccc] font-mono">{message.toolName}</span>
+            {message.toolStatus && <StatusBadge status={message.toolStatus} />}
+          </button>
+          {subagentSessionKey && message.toolStatus !== 'executing' && onNavigateToSession ? (
+            <button
+              type="button"
+              aria-label="Open subagent chat"
+              className="ml-auto p-0.5 rounded hover:bg-[#2a2a2a] transition-colors"
+              onClick={() => onNavigateToSession(subagentSessionKey)}
+            >
+              <svg
+                className="h-3.5 w-3.5 text-[#555] hover:text-[#aaa]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+                <path d="m12 5 7 7-7 7" />
+              </svg>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="p-0.5"
+            aria-label={expanded ? 'Collapse tool details' : 'Expand tool details'}
+            onClick={() => setExpanded(!expanded)}
           >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+            <svg
+              className={`h-3 w-3 text-[#666] transition-transform ${expanded ? 'rotate-180' : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
         </div>
         {expanded && (
           <div className="mt-2 space-y-2 rounded-lg border border-[#2e2e2e] bg-[#151515] p-3">
