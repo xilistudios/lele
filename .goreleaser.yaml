@@ -36,22 +36,26 @@ builds:
     ignore:
       - goos: windows
         goarch: arm
-
-dockers_v2:
-  - id: lele
-    dockerfile: Dockerfile.goreleaser
-    ids:
-      - lele
-    images:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/lele"
-      - "docker.io/{{ .Env.DOCKERHUB_IMAGE_NAME }}"
-    tags:
-      - "{{ .Tag }}"
-      - "latest"
-    platforms:
-      - linux/amd64
-      - linux/arm64
-      - linux/riscv64
+      - goos: windows
+        goarch: riscv64
+      - goos: windows
+        goarch: s390x
+      - goos: windows
+        goarch: mips64
+      - goos: freebsd
+        goarch: s390x
+      - goos: freebsd
+        goarch: mips64
+      - goos: freebsd
+        goarch: arm
+      - goos: darwin
+        goarch: riscv64
+      - goos: darwin
+        goarch: s390x
+      - goos: darwin
+        goarch: mips64
+      - goos: darwin
+        goarch: arm
 
 archives:
   - formats: [tar.gz]
@@ -85,4 +89,15 @@ release:
 
     ---
 
-    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
+
+    **Install with one command:**
+
+
+    ```sh
+
+    curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+
+    ```
+
+
+    Or download the binaries directly from the assets below.
