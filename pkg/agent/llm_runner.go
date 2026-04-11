@@ -89,7 +89,11 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	)
 
 	// 3. Save user message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+	if !opts.SkipUserMessage {
+		agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+	} else if opts.Channel == "system" {
+		agent.Sessions.AddMessage(opts.SessionKey, "system", renderedUserMessage)
+	}
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
@@ -603,7 +607,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						"tool": tc.Name,
 					})
 
-				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, result)
+				taskID := ""
+				if result.Metadata != nil {
+					taskID = result.Metadata["task_id"]
+				}
+				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, taskID, result)
 			}
 
 			// Special handling for exec tool with approval
@@ -712,17 +720,21 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				if resultPreview == "" && toolResult.Err != nil {
 					resultPreview = toolResult.Err.Error()
 				}
-				if len(resultPreview) > 300 {
-					resultPreview = resultPreview[:300] + "..."
+				resultPreview = utils.Truncate(resultPreview, 300)
+				metadata := map[string]string{
+					"tool":   tc.Name,
+					"result": resultPreview,
+				}
+				if tc.Name == "spawn" && toolResult.Metadata != nil {
+					if subagentSessionKey := toolResult.Metadata["subagent_session_key"]; subagentSessionKey != "" {
+						metadata["subagent_session_key"] = subagentSessionKey
+					}
 				}
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.SessionKey,
-					Event:   "tool.result",
-					Metadata: map[string]string{
-						"tool":   tc.Name,
-						"result": resultPreview,
-					},
+					Channel:  opts.Channel,
+					ChatID:   opts.SessionKey,
+					Event:    "tool.result",
+					Metadata: metadata,
 				})
 			} else if lr.al.verboseManager.IsFull(opts.SessionKey) {
 				status := "✅"
@@ -730,9 +742,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					status = "❌"
 				}
 				resultPreview := toolResult.ForLLM
-				if len(resultPreview) > 300 {
-					resultPreview = resultPreview[:300] + "..."
-				}
+				resultPreview = utils.Truncate(resultPreview, 300)
 				verboseResult := fmt.Sprintf("%s **Result:** `%s`\n```\n%s\n```", status, tc.Name, resultPreview)
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel:        opts.Channel,
