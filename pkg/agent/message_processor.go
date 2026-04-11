@@ -687,25 +687,7 @@ func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, session
 	}
 	currentModel := mp.modelForSession(agent, sessionKey)
 	if len(args) == 0 {
-		var models []string
-		if provider, ok := mp.al.cfg().Providers.GetNamed(mp.al.cfg().Agents.Defaults.Provider); ok {
-			models = make([]string, 0, len(provider.Models))
-			for alias := range provider.Models {
-				models = append(models, alias)
-			}
-			// Sort for consistent output
-			for i := 0; i < len(models)-1; i++ {
-				for j := i + 1; j < len(models); j++ {
-					if models[i] > models[j] {
-						models[i], models[j] = models[j], models[i]
-					}
-				}
-			}
-		}
-		if len(models) == 0 {
-			return fmt.Sprintf("Current model: %s", currentModel)
-		}
-		return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", currentModel, strings.Join(models, ", "))
+		return fmt.Sprintf("Current model: %s\n\nUse /model <name> to change.\nUse /models to see available options.", currentModel)
 	}
 	next := mp.al.cfg().Providers.ResolveModelAlias(args[0], mp.al.cfg().Agents.Defaults.Provider)
 	if sessionKey == "" {

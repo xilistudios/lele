@@ -237,21 +237,27 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		done <- cmd.Wait()
 	}()
 
-	// Wait for command to complete or timeout, with feedback after 5 seconds
+	// Wait for command to complete with periodic heartbeats
 	var execErr error
 	feedbackSent := false
-	select {
-	case execErr = <-done:
-		// Command completed quickly (within 5 seconds)
-	case <-time.After(5 * time.Second):
-		// Command is taking longer than 5 seconds, send feedback
-		if t.verbose && t.feedbackCallback != nil && t.channel != "" && t.chatID != "" {
-			feedbackMsg := fmt.Sprintf("🧰 Process: %s", processName)
-			t.feedbackCallback(t.channel, t.chatID, feedbackMsg)
-			feedbackSent = true
+	heartbeatInterval := 5 * time.Second
+	
+	for {
+		select {
+		case execErr = <-done:
+			// Command completed
+			break
+		case <-time.After(heartbeatInterval):
+			// Send heartbeat feedback
+			if t.verbose && t.feedbackCallback != nil && t.channel != "" && t.chatID != "" {
+				elapsedSoFar := time.Since(startTime).Round(time.Second)
+				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
+				t.feedbackCallback(t.channel, t.chatID, feedbackMsg)
+				feedbackSent = true
+			}
+			continue
 		}
-		// Wait for the actual command completion
-		execErr = <-done
+		break // Exit the loop when command completes
 	}
 
 	elapsed := time.Since(startTime)
