@@ -55,6 +55,18 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		sessionKey = "native:" + clientInfo.ClientID
 	}
 
+	// Validate session key before the upgrade side effects continue.
+	if !isValidSessionKeyFormat(sessionKey) {
+		writeError(w, http.StatusBadRequest, "invalid session_key format", "session_key_invalid")
+		conn.Close()
+		return
+	}
+	if !n.validateSessionOwnership(clientInfo.ClientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "forbidden")
+		conn.Close()
+		return
+	}
+
 	client := &WSClient{
 		ID:         clientID,
 		Conn:       conn,
@@ -63,8 +75,8 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		SendChan:   make(chan []byte, 100),
 	}
 
-	n.auth.TrackSessionKey(clientInfo.ClientID, sessionKey)
 	n.addWSClient(client)
+	n.auth.TrackSessionKey(clientInfo.ClientID, sessionKey)
 	n.auth.UpdateLastSeen(clientInfo.ClientID)
 
 	logger.InfoCF("native", "WebSocket client connected", map[string]interface{}{
@@ -198,6 +210,12 @@ func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
 }
 
 func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMessage) {
+	// Check rate limit for message events
+	if !n.wsMessageLimiter.allow(client.ClientInfo.ClientID) {
+		n.sendError(client, "rate_limit_exceeded", "rate limit exceeded, please slow down")
+		return
+	}
+
 	var payload WSMessagePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid message payload")
@@ -213,12 +231,18 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	if sessionKey == "" {
 		sessionKey = client.SessionKey
 	}
-	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
+
+	// Validate session key format if provided
+	if payload.SessionKey != "" && !isValidSessionKeyFormat(payload.SessionKey) {
+		n.sendError(client, "session_key_invalid", "invalid session_key format")
+		return
+	}
 
 	if payload.SessionKey != "" && !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
 		return
 	}
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
 	if payload.AgentID != "" {
 		n.agentLoop.SetSessionAgent(sessionKey, payload.AgentID)
@@ -273,6 +297,12 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid subscribe payload")
+		return
+	}
+
+	// Validate session key format
+	if !isValidSessionKeyFormat(payload.SessionKey) {
+		n.sendError(client, "session_key_invalid", "invalid session_key format")
 		return
 	}
 
@@ -441,16 +471,18 @@ func (n *NativeChannel) RegisterOutboundHandler(ctx context.Context) {
 
 			case "tool.executing":
 				n.broadcastToSession(msg.ChatID, "tool.executing", WSToolExecutingPayload{
-					SessionKey: msg.ChatID,
-					Tool:       msg.Metadata["tool"],
-					Action:     msg.Metadata["action"],
+					SessionKey:         msg.ChatID,
+					Tool:               msg.Metadata["tool"],
+					Action:             msg.Metadata["action"],
+					SubagentSessionKey: msg.Metadata["subagent_session_key"],
 				})
 
 			case "tool.result":
 				n.broadcastToSession(msg.ChatID, "tool.result", WSToolResultPayload{
-					SessionKey: msg.ChatID,
-					Tool:       msg.Metadata["tool"],
-					Result:     msg.Metadata["result"],
+					SessionKey:         msg.ChatID,
+					Tool:               msg.Metadata["tool"],
+					Result:             msg.Metadata["result"],
+					SubagentSessionKey: msg.Metadata["subagent_session_key"],
 				})
 
 			case "approval.request":
@@ -480,4 +512,50 @@ func (n *NativeChannel) RegisterOutboundHandler(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// isValidSessionKeyFormat validates that a session key follows the expected format:
+// - native:{client_id}
+// - native:{client_id}:{timestamp}
+// Returns true if the format is valid, false otherwise.
+func isValidSessionKeyFormat(sessionKey string) bool {
+	if strings.TrimSpace(sessionKey) == "" {
+		return false
+	}
+	if strings.HasPrefix(sessionKey, "subagent:") {
+		taskID := strings.TrimPrefix(sessionKey, "subagent:")
+		if !strings.HasPrefix(taskID, "subagent-") {
+			return false
+		}
+		if len(taskID) <= len("subagent-") {
+			return false
+		}
+		for _, c := range taskID[len("subagent-"):] {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	if !strings.HasPrefix(sessionKey, "native:") {
+		return false
+	}
+	parts := strings.Split(sessionKey[7:], ":")
+	if len(parts) < 1 || len(parts) > 2 {
+		return false
+	}
+	if parts[0] == "" {
+		return false
+	}
+	if len(parts) == 2 {
+		if parts[1] == "" {
+			return false
+		}
+		for _, c := range parts[1] {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
