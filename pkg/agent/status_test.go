@@ -1,10 +1,10 @@
 package agent
 
 import (
-	"testing"
-	"os"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"os"
+	"testing"
 )
 
 func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
@@ -30,7 +30,7 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 
 	// Use a session key without agent prefix (e.g., "telegram:12345")
 	sessionKey := "telegram:12345"
-	
+
 	// Add some token counts directly to simulate LLM usage
 	defaultAgent := al.registry.GetDefaultAgent()
 	defaultAgent.Sessions.AddTokenCounts(sessionKey, 100, 50)

@@ -47,8 +47,8 @@ func escapeRawHTMLForTelegram(text string) string {
 		"u": true, "ins": true,
 		"s": true, "strike": true, "del": true,
 		"code": true,
-		"pre": true,
-		"a": true,
+		"pre":  true,
+		"a":    true,
 	}
 
 	// Pattern to match HTML tags

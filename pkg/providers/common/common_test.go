@@ -141,7 +141,6 @@ func TestSerializeMessages_MediaWithToolCallID(t *testing.T) {
 	}
 }
 
-
 // --- ParseResponse tests ---
 
 func TestParseResponse_BasicContent(t *testing.T) {

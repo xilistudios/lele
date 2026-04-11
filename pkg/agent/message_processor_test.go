@@ -73,7 +73,7 @@ func TestProcessSystemMessage_ClearCommand(t *testing.T) {
 	if len(history) > 0 {
 		t.Logf("History after clear: %d messages (may include system prompt)", len(history))
 	}
-	
+
 	// Verify summary was cleared
 	summary := agent.Sessions.GetSummary(sessionKey)
 	if summary != "" {
@@ -212,7 +212,7 @@ func TestProcessSystemMessage_SummarizeSessionWithError(t *testing.T) {
 		if stats == nil {
 			t.Error("Expected stats when no error")
 		} else if stats.BeforeMessages <= stats.AfterMessages {
-			t.Errorf("Expected fewer messages after compaction: before=%d, after=%d", 
+			t.Errorf("Expected fewer messages after compaction: before=%d, after=%d",
 				stats.BeforeMessages, stats.AfterMessages)
 		}
 	}

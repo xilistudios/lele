@@ -77,13 +77,13 @@ type ContentPart struct {
 
 // Message represents a message in a conversation.
 type Message struct {
-	Role             string          `json:"-"`
-	Content          string          `json:"-"`
-	ContentParts     []ContentPart   `json:"-"`
-	ToolCalls        []ToolCall      `json:"-"`
-	ToolCallID       string          `json:"-"`
-	Media            []string        `json:"-"`
-	ReasoningContent string          `json:"-"`
+	Role             string        `json:"-"`
+	Content          string        `json:"-"`
+	ContentParts     []ContentPart `json:"-"`
+	ToolCalls        []ToolCall    `json:"-"`
+	ToolCallID       string        `json:"-"`
+	Media            []string      `json:"-"`
+	ReasoningContent string        `json:"-"`
 }
 
 func (m Message) MarshalJSON() ([]byte, error) {

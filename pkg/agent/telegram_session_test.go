@@ -2,12 +2,12 @@ package agent
 
 import (
 	"context"
-	"strings"
-	"testing"
-	"os"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/providers"
+	"os"
+	"strings"
+	"testing"
 )
 
 func TestTelegramSessionFlow(t *testing.T) {
@@ -56,7 +56,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 		Content:    "Hello, how are you?",
 		SessionKey: sessionKey,
 	}
-	
+
 	response1, err := al.messageProcessor.processMessage(context.Background(), msg1)
 	if err != nil {
 		t.Fatalf("Failed to process first message: %v", err)
@@ -81,7 +81,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 		Content:    "/new",
 		SessionKey: sessionKey,
 	}
-	
+
 	response2, err := al.messageProcessor.processMessage(context.Background(), msg2)
 	if err != nil {
 		t.Fatalf("Failed to process /new command: %v", err)
@@ -110,7 +110,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 		Content:    "What's the weather today?",
 		SessionKey: sessionKey,
 	}
-	
+
 	response3, err := al.messageProcessor.processMessage(context.Background(), msg3)
 	if err != nil {
 		t.Fatalf("Failed to process third message: %v", err)

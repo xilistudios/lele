@@ -1,4 +1,4 @@
-﻿package tools
+package tools
 
 import (
 	"bytes"
@@ -22,13 +22,13 @@ type ExecTool struct {
 	denyPatterns        []*regexp.Regexp
 	allowPatterns       []*regexp.Regexp
 	restrictToWorkspace bool
-	approvalMode        bool                           // Activa modo aprobación
-	approvalCallback    func(cmd string) (bool, error) // Callback para solicitar aprobación
-	bypassGuard         bool                           // Bypass all safety guards when command is approved
-	channel             string                         // Channel for feedback messages
-	chatID              string                         // ChatID for feedback messages
+	approvalMode        bool                                  // Activa modo aprobación
+	approvalCallback    func(cmd string) (bool, error)        // Callback para solicitar aprobación
+	bypassGuard         bool                                  // Bypass all safety guards when command is approved
+	channel             string                                // Channel for feedback messages
+	chatID              string                                // ChatID for feedback messages
 	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
-	verbose             bool                           // Whether verbose mode is enabled
+	verbose             bool                                  // Whether verbose mode is enabled
 }
 
 // SetContext implements ContextualTool interface
@@ -241,7 +241,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	var execErr error
 	feedbackSent := false
 	heartbeatInterval := 5 * time.Second
-	
+
 	for {
 		select {
 		case execErr = <-done:
