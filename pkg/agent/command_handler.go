@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"sort"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -236,18 +235,7 @@ func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKe
 	}
 	currentModel := ch.al.sessionManager.(*sessionManagerImpl).modelForSession(agent, sessionKey)
 	if len(args) == 0 {
-		var models []string
-		if provider, ok := ch.al.cfg().Providers.GetNamed(ch.al.cfg().Agents.Defaults.Provider); ok {
-			models = make([]string, 0, len(provider.Models))
-			for alias := range provider.Models {
-				models = append(models, alias)
-			}
-			sort.Strings(models)
-		}
-		if len(models) == 0 {
-			return fmt.Sprintf("Current model: %s", currentModel)
-		}
-		return fmt.Sprintf("Current model: %s\nAvailable models: %s\nUse /model <name> to change.", currentModel, strings.Join(models, ", "))
+		return fmt.Sprintf("Current model: %s\n\nUse /model <name> to change.\nUse /models to see available options.", currentModel)
 	}
 	next := ch.al.cfg().Providers.ResolveModelAlias(args[0], ch.al.cfg().Agents.Defaults.Provider)
 	if sessionKey == "" {

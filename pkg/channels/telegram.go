@@ -32,6 +32,8 @@ type TelegramChannel struct {
 	lastSend        time.Time
 	cancel          context.CancelFunc
 	botHandler      *th.BotHandler
+	reconnectMu     sync.Mutex
+	stopped         bool // Flag to prevent reconnect after explicit Stop()
 }
 
 type telegramCommandSpec struct {
@@ -128,26 +130,23 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
-func (c *TelegramChannel) Start(ctx context.Context) error {
-	logger.InfoC("telegram", "Starting Telegram bot (polling mode)...")
-
+// setupBotHandler initializes the bot handler with all command and callback handlers
+func (c *TelegramChannel) setupBotHandler(ctx context.Context) (*th.BotHandler, context.CancelFunc, error) {
 	cancelCtx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
 
 	updates, err := c.bot.UpdatesViaLongPolling(cancelCtx, &telego.GetUpdatesParams{
 		Timeout: 30,
 	})
 	if err != nil {
 		cancel()
-		return fmt.Errorf("failed to start long polling: %w", err)
+		return nil, nil, fmt.Errorf("failed to start long polling: %w", err)
 	}
 
 	bh, err := th.NewBotHandler(c.bot, updates)
 	if err != nil {
 		cancel()
-		return fmt.Errorf("failed to create bot handler: %w", err)
+		return nil, nil, fmt.Errorf("failed to create bot handler: %w", err)
 	}
-	c.botHandler = bh
 
 	for _, command := range telegramCommandRegistry {
 		commandName := command.name
@@ -177,25 +176,102 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		return c.handleMessage(ctx, &message)
 	}, th.AnyMessage())
 
-	c.setRunning(true)
-	logger.InfoCF("telegram", "Telegram bot connected", map[string]interface{}{
-		"username": c.bot.Username(),
-	})
+	return bh, cancel, nil
+}
 
-	go bh.Start()
+func (c *TelegramChannel) Start(ctx context.Context) error {
+	logger.InfoC("telegram", "Starting Telegram bot (polling mode with auto-reconnect)...")
+
+	c.stopped = false
+	c.setRunning(true)
+
+	// Start polling loop with auto-reconnect
+	go c.pollingLoop(ctx)
 
 	return nil
 }
 
+// pollingLoop manages the bot handler lifecycle with automatic reconnect
+func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
+	reconnectDelay := 5 * time.Second
+	maxReconnectDelay := 60 * time.Second
+	currentDelay := reconnectDelay
+
+	for {
+		c.reconnectMu.Lock()
+		if c.stopped {
+			c.reconnectMu.Unlock()
+			logger.InfoC("telegram", "Polling loop stopped (explicit Stop() called)")
+			return
+		}
+		c.reconnectMu.Unlock()
+
+		bh, cancel, err := c.setupBotHandler(parentCtx)
+		if err != nil {
+			logger.ErrorCF("telegram", "Failed to setup bot handler", map[string]interface{}{
+				"error": err.Error(),
+			})
+
+			// Wait before retry with exponential backoff
+			time.Sleep(currentDelay)
+			currentDelay = min(currentDelay * 2, maxReconnectDelay)
+			continue
+		}
+
+		c.botHandler = bh
+		c.cancel = cancel
+
+		logger.InfoCF("telegram", "Telegram bot connected", map[string]interface{}{
+			"username": c.bot.Username(),
+		})
+
+		// Reset reconnect delay on successful connection
+		currentDelay = reconnectDelay
+
+		// Run the handler - this blocks until it stops
+		bh.Start()
+
+		// Check if we should stop reconnecting
+		c.reconnectMu.Lock()
+		if c.stopped {
+			c.reconnectMu.Unlock()
+			logger.InfoC("telegram", "Bot handler stopped (explicit Stop() called)")
+			return
+		}
+		c.reconnectMu.Unlock()
+
+		// Handler stopped unexpectedly - log and reconnect
+		logger.WarnCF("telegram", "BotHandler stopped unexpectedly - reconnecting in %s", map[string]interface{}{
+			"delay": currentDelay.String(),
+		})
+
+		// Clean up before reconnect
+		if cancel != nil {
+			cancel()
+		}
+
+		time.Sleep(currentDelay)
+		currentDelay = min(currentDelay * 2, maxReconnectDelay)
+	}
+}
+
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 	logger.InfoC("telegram", "Stopping Telegram bot...")
+
+	// Mark as stopped to prevent reconnect
+	c.reconnectMu.Lock()
+	c.stopped = true
+	c.reconnectMu.Unlock()
+
 	c.setRunning(false)
+
 	if c.cancel != nil {
 		c.cancel()
 	}
 	if c.botHandler != nil {
 		c.botHandler.Stop()
 	}
+
 	return nil
 }
 
