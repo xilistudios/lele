@@ -20,6 +20,25 @@ const formatToolCallArgs = (toolCall: HistoryToolCall) => {
     : JSON.stringify(toolCall.arguments)
 }
 
+const parseSubagentSessionKey = (value: string | undefined) => {
+  if (!value) return undefined
+
+  const trimmed = value.trim()
+  if (trimmed === '') return undefined
+
+  const directMatch = trimmed.match(/subagent:([A-Za-z0-9_-]+)/i)
+  if (directMatch) {
+    return `subagent:${directMatch[1]}`
+  }
+
+  const taskMatch = trimmed.match(/\btask(?:\s+id)?\s*:?[ \t]+([A-Za-z0-9_-]+)/i)
+  if (taskMatch) {
+    return `subagent:${taskMatch[1]}`
+  }
+
+  return undefined
+}
+
 export const toChatMessages = (
   history: Array<{
     role: 'user' | 'assistant' | 'tool'
@@ -28,8 +47,20 @@ export const toChatMessages = (
     tool_call_id?: string
   }>,
   sessionKey: string,
-): ChatMessage[] =>
-  history.flatMap((message, index) => {
+): ChatMessage[] => {
+  // Build a map of tool_call_id -> HistoryToolCall from all assistant messages
+  const toolCallMap = new Map<string, HistoryToolCall>()
+  for (const message of history) {
+    if (message.role === 'assistant' && message.tool_calls?.length) {
+      for (const tc of message.tool_calls) {
+        if (tc.id) {
+          toolCallMap.set(tc.id, tc)
+        }
+      }
+    }
+  }
+
+  return history.flatMap((message, index) => {
     const baseMessage: ChatMessage = {
       id: `${sessionKey}:${index}:${message.role}`,
       role: message.role,
@@ -40,39 +71,43 @@ export const toChatMessages = (
     }
 
     if (message.role === 'assistant' && message.tool_calls?.length) {
-      const toolMessages = message.tool_calls.map((toolCall, toolIndex) => ({
-        id: `${sessionKey}:${index}:tool:${toolCall.id || toolIndex}`,
-        role: 'tool' as const,
-        content: '',
-        streaming: false,
-        createdAt: new Date().toISOString(),
-        sessionKey,
-        toolName: toolCall.name ?? toolCall.id,
-        toolArgs: formatToolCallArgs(toolCall),
-        toolStatus: 'completed' as const,
-      }))
-      // Si el assistant tiene tool_calls pero content vacío, mostrar tools PRIMERO
-      // para mantener orden cronológico visual (tools ejecutan antes del texto final)
-      if (!message.content || message.content === '') {
-        return [...toolMessages, baseMessage]
+      // Don't create separate tool messages from tool_calls;
+      // they will be created when the corresponding tool response messages are processed.
+      // Only return the assistant text message if it has content.
+      if (message.content && message.content !== '') {
+        return [baseMessage]
       }
-      return [baseMessage, ...toolMessages]
+      return []
     }
 
     if (message.role === 'tool') {
+      // Look up the corresponding tool_call to get the real tool name and args
+      const matchedToolCall = message.tool_call_id
+        ? toolCallMap.get(message.tool_call_id)
+        : undefined
+      const toolName = matchedToolCall?.name ?? message.tool_call_id ?? 'tool'
+      const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
+      const isSpawn = toolName === 'spawn'
+      const inferredSubagentSessionKey = isSpawn
+        ? parseSubagentSessionKey(message.content)
+        : undefined
+
       return [
         {
           ...baseMessage,
-          role: 'tool',
-          toolName: message.tool_call_id ?? 'tool',
+          role: 'tool' as const,
+          toolName,
+          toolArgs,
           toolResult: message.content,
-          toolStatus: 'completed',
+          toolStatus: 'completed' as const,
+          subagentSessionKey: inferredSubagentSessionKey,
         },
       ]
     }
 
     return [baseMessage]
   })
+}
 
 export function useMessages(
   api: ApiClient,
@@ -87,6 +122,7 @@ export function useMessages(
   const messagesRef = useRef(messages)
   const lastLoadedSessionKeyRef = useRef<string | null>(null)
   const processingSessionKeyRef = useRef<string | null>(null)
+  const historySeqRef = useRef(0)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -96,6 +132,9 @@ export function useMessages(
     async (sessionKey: string) => {
       if (!token) return
 
+      // Increment sequence number to track this request
+      const seq = ++historySeqRef.current
+      
       console.log('[HTTP] Loading history for session', sessionKey)
       try {
         const history = await api.history(sessionKey)
@@ -103,6 +142,14 @@ export function useMessages(
           console.log('[HTTP] Session changed during load, skipping', {
             current: currentSessionKeyRef.current,
             expected: sessionKey,
+          })
+          return
+        }
+        // Check if this is still the latest history request
+        if (historySeqRef.current !== seq) {
+          console.log('[HTTP] Stale history response, ignoring', {
+            seq,
+            currentSeq: historySeqRef.current,
           })
           return
         }
@@ -124,6 +171,10 @@ export function useMessages(
         console.error('[HTTP] Failed to load history', error)
         if (lastLoadedSessionKeyRef.current === sessionKey) {
           lastLoadedSessionKeyRef.current = null
+        }
+        // Clear processing ref on error
+        if (processingSessionKeyRef.current === sessionKey) {
+          processingSessionKeyRef.current = null
         }
         throw error
       }
@@ -357,6 +408,7 @@ export function useMessages(
             toolName: data.tool as string,
             toolArgs: data.action as string,
             toolStatus: 'executing',
+            subagentSessionKey: data.subagent_session_key as string | undefined,
           }
           setMessages((current) => {
             const lastAssistantIndex = [...current]
@@ -410,6 +462,43 @@ export function useMessages(
                     ...message,
                     toolResult: data.result as string,
                     toolStatus: isError ? 'error' : 'completed',
+                    subagentSessionKey:
+                      (data.subagent_session_key as string) ||
+                      message.subagentSessionKey ||
+                      ((data.tool as string) === 'spawn'
+                        ? parseSubagentSessionKey(data.result as string | undefined)
+                        : undefined),
+                  }
+                : message,
+            )
+          })
+          break
+        case 'subagent.result':
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped subagent.result: session mismatch', {
+              event: eventSessionKey,
+              current: currentSessionKeyRef.current,
+            })
+            break
+          }
+          setMessages((current) => {
+            const lastSpawnIndex = [...current]
+              .reverse()
+              .findIndex(
+                (message) =>
+                  message.role === 'tool' &&
+                  message.toolName === 'spawn',
+              )
+            if (lastSpawnIndex < 0) return current
+            const targetIndex = current.length - lastSpawnIndex - 1
+            return current.map((message, index) =>
+              index === targetIndex
+                ? {
+                    ...message,
+                    subagentSessionKey:
+                      (data.subagent_session_key as string) ||
+                      message.subagentSessionKey,
+                    toolResult: message.toolResult || (data.result as string),
                   }
                 : message,
             )
@@ -456,6 +545,7 @@ export function useMessages(
     setPendingAttachments([])
     lastLoadedSessionKeyRef.current = null
     processingSessionKeyRef.current = null
+    historySeqRef.current = 0
   }, [])
 
   const reset = useCallback(() => {
