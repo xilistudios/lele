@@ -1,882 +1,339 @@
 <div align="center">
-<img src="assets/logo.jpg" alt="Lele" width="512">
+  <img src="assets/logo.png" alt="Lele" width="320">
 
-<h1>Lele: Assistente de IA Ultra-Eficiente em Go</h1>
+  <h1>Lele</h1>
 
-<h3>Hardware de $10 · 10MB de RAM · Boot em 1s · 皮皮虾，我们走！</h3>
+  <p>Assistente pessoal de IA leve e eficiente em Go.</p>
 
   <p>
-    <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-    <img src="https://img.shields.io/badge/Arch-x86__64%2C%20ARM64%2C%20RISC--V-blue" alt="Hardware">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <br>
-    <a href="https://lele.io"><img src="https://img.shields.io/badge/Website-lele.io-blue?style=flat&logo=google-chrome&logoColor=white" alt="Website"></a>
-    <a href="https://x.com/SipeedIO"><img src="https://img.shields.io/badge/X_(Twitter)-SipeedIO-black?style=flat&logo=x&logoColor=white" alt="Twitter"></a>
+    <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="Licença">
   </p>
 
- [中文](README.zh.md) | [日本語](README.ja.md) | **Português** | [Tiếng Việt](README.vi.md) | [Français](README.fr.md) | [English](README.md)
+  [中文](README.zh.md) | [日本語](README.ja.md) | [Português](README.pt-br.md) | [Tiếng Việt](README.vi.md) | [Français](README.fr.md) | [Español](README.es.md) | English
 </div>
 
 ---
 
-🦐 **Lele** é um assistente pessoal de IA ultra-leve inspirado no [nanobot](https://github.com/HKUDS/nanobot), reescrito do zero em **Go** por meio de um processo de "auto-inicialização" (self-bootstrapping) — onde o próprio agente de IA conduziu toda a migração de arquitetura e otimização de código.
+Lele é um projeto independente focado em oferecer um assistente de IA prático, com pegada leve, inicialização rápida e um modelo de implantação direto.
 
-⚡️ **Extremamente leve:** Roda em hardware de apenas **$10** com **<10MB** de RAM. Isso é 99% menos memória que o OpenClaw e 98% mais barato que um Mac mini!
+Hoje, o projeto é muito mais do que um bot CLI mínimo. Inclui um runtime de agente configurável, gateway multicanal, interface web, API de cliente nativa, tarefas agendadas, subagentes e um modelo de automação centrado no workspace.
 
-<table align="center">
-<tr align="center">
-<td align="center" valign="top">
-<p align="center">
-<img src="assets/lele_mem.gif" width="360" height="240">
-</p>
-</td>
-<td align="center" valign="top">
-<p align="center">
-<img src="assets/licheervnano.png" width="400" height="240">
-</p>
-</td>
-</tr>
-</table>
+## Por que Lele
 
-> [!CAUTION]
-> **🚨 DECLARAÇÃO DE SEGURANÇA & CANAIS OFICIAIS**
->
-> * **SEM CRIPTOMOEDAS:** O Lele **NÃO** possui nenhum token/moeda oficial. Todas as alegações no `pump.fun` ou outras plataformas de negociação são **GOLPES**.
-> * **DOMÍNIO OFICIAL:** O **ÚNICO** site oficial é o **[lele.io](https://lele.io)**, e o site da empresa é o **[sipeed.com](https://sipeed.com)**.
-> * **Aviso:** Muitos domínios `.ai/.org/.com/.net/...` foram registrados por terceiros, não são nossos.
-> * **Aviso:** O Lele está em fase inicial de desenvolvimento e pode ter problemas de segurança de rede não resolvidos. Não implante em ambientes de produção antes da versão v1.0.
-> * **Nota:** O Lele recentemente fez merge de muitos PRs, o que pode resultar em maior consumo de memória (10-20MB) nas versões mais recentes. Planejamos priorizar a otimização de recursos assim que o conjunto de funcionalidades estiver estável.
+- Implementação leve em Go com pequena pegada operacional
+- Eficiente o suficiente para rodar tranquilamente em máquinas e placas Linux modestas
+- Um único projeto para CLI, canais de chat, interface web e integrações com clientes locais
+- Roteamento configurável de provedores com suporte a backends diretos e compatíveis com OpenAI
+- Design workspace-first com habilidades (skills), memória, tarefas agendadas e controles de sandbox
 
+## Recursos Atuais
 
-## 📢 Novidades
+### Runtime do Agente
 
-2026-02-16 🎉 Lele atingiu 12K stars em uma semana! Obrigado a todos pelo apoio! O Lele está crescendo mais rápido do que jamais imaginamos. Dado o alto volume de PRs, precisamos urgentemente de maintainers da comunidade. Nossos papéis de voluntários e roadmap foram publicados oficialmente [aqui](docs/lele_community_roadmap_260216.md) — estamos ansiosos para ter você a bordo!
+- Chat via CLI com `lele agent`
+- Loop de agente com uso de ferramentas e limites configuráveis de iteração
+- Anexos de arquivos em fluxos nativos/web
+- Persistência de sessão e sessões efêmeras opcionais
+- Agentes nomeados, vinculações e fallbacks de modelo
 
-2026-02-13 🎉 Lele atingiu 5000 stars em 4 dias! Obrigado à comunidade! Estamos finalizando o **Roadmap do Projeto** e configurando o **Grupo de Desenvolvedores** para acelerar o desenvolvimento do Lele.
+### Interfaces
 
-🚀 **Chamada para Ação:** Envie suas solicitações de funcionalidades nas GitHub Discussions. Revisaremos e priorizaremos na próxima reunião semanal.
+- Uso via terminal através da CLI
+- Modo gateway para canais de chat
+- Interface web embutida
+- Canal de cliente nativo com API REST + WebSocket e emparelhamento por PIN
 
-2026-02-09 🎉 Lele lançado oficialmente! Construído em 1 dia para trazer Agentes de IA para hardware de $10 com <10MB de RAM. 🦐 Lele, Partiu!
+### Automação
 
-## ✨ Funcionalidades
+- Tarefas agendadas com `lele cron`
+- Tarefas periódicas baseadas em heartbeat a partir de `HEARTBEAT.md`
+- Subagentes assíncronos para trabalho delegado
+- Sistema de habilidades (skills) para fluxos de trabalho reutilizáveis
 
-🪶 **Ultra-Leve**: Consumo de memória <10MB — 99% menor que o Clawdbot para funcionalidades essenciais.
+### Segurança e Operações
 
-💰 **Custo Mínimo**: Eficiente o suficiente para rodar em hardware de $10 — 98% mais barato que um Mac mini.
+- Suporte a restrição de workspace
+- Padrões de negação para comandos perigosos em ferramentas exec
+- Fluxo de aprovação para ações sensíveis
+- Logs, comandos de status e gerenciamento de configuração
 
-⚡️ **Inicialização Relámpago**: Tempo de inicialização 400X mais rápido, boot em 1 segundo mesmo em CPU single-core de 0.6GHz.
+## Status do Projeto
 
-🌍 **Portabilidade Real**: Um único binário auto-contido para RISC-V, ARM e x86. Um clique e já era!
+Lele é um projeto independente em evolução ativa.
 
-🤖 **Auto-Construído por IA**: Implementação nativa em Go de forma autônoma — 95% do núcleo gerado pelo Agente com refinamento humano no loop.
+O código atual já suporta:
 
-|                               | OpenClaw      | NanoBot                  | **Lele**                              |
-| ----------------------------- | ------------- | ------------------------ | ----------------------------------------- |
-| **Linguagem**                 | TypeScript    | Python                   | **Go**                                    |
-| **RAM**                       | >1GB          | >100MB                   | **< 10MB**                                |
-| **Inicialização**</br>(CPU 0.8GHz) | >500s         | >30s                     | **<1s**                                   |
-| **Custo**                     | Mac Mini $599 | Maioria dos SBC Linux </br>~$50 | **Qualquer placa Linux**</br>**A partir de $10** |
+- fluxos de gateway estilo produção
+- caminho para cliente web/nativo
+- roteamento configurável para múltiplos provedores
+- múltiplos canais de mensagens
+- habilidades, subagentes e automação agendada
 
-<img src="assets/compare.jpg" alt="Lele" width="512">
+A principal lacuna de documentação era que o README antigo ainda descrevia uma identidade de fork anterior e não correspondia ao conjunto atual de funcionalidades. Este README reflete o projeto como ele existe agora.
 
-## 🦾 Demonstração
+## Início Rápido
 
-### 🛠️ Fluxos de Trabalho Padrão do Assistente
-
-<table align="center">
-<tr align="center">
-<th><p align="center">🧩 Engenharia Full-Stack</p></th>
-<th><p align="center">🗂️ Gerenciamento de Logs & Planejamento</p></th>
-<th><p align="center">🔎 Busca Web & Aprendizado</p></th>
-</tr>
-<tr>
-<td align="center"><p align="center"><img src="assets/lele_code.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/lele_memory.gif" width="240" height="180"></p></td>
-<td align="center"><p align="center"><img src="assets/lele_search.gif" width="240" height="180"></p></td>
-</tr>
-<tr>
-<td align="center">Desenvolver • Implantar • Escalar</td>
-<td align="center">Agendar • Automatizar • Memorizar</td>
-<td align="center">Descobrir • Analisar • Tendências</td>
-</tr>
-</table>
-
-### 📱 Rode em celulares Android antigos
-
-Dê uma segunda vida ao seu celular de dez anos atrás! Transforme-o em um assistente de IA inteligente com o Lele. Início rápido:
-
-1. **Instale o Termux** (Disponível no F-Droid ou Google Play).
-2. **Execute os comandos**
-
-```bash
-# Nota: Substitua v0.1.1 pela versao mais recente da pagina de Releases
-wget https://github.com/xilistudios/lele/releases/download/v0.1.1/lele-linux-arm64
-chmod +x lele-linux-arm64
-pkg install proot
-termux-chroot ./lele-linux-arm64 onboard
-```
-
-Depois siga as instruções na seção "Início Rápido" para completar a configuração!
-
-<img src="assets/termux.jpg" alt="Lele" width="512">
-
-### 🐜 Implantação Inovadora com Baixo Consumo
-
-O Lele pode ser implantado em praticamente qualquer dispositivo Linux!
-
-- $9.9 [LicheeRV-Nano](https://www.aliexpress.com/item/1005006519668532.html) versão E (Ethernet) ou W (WiFi6), para Assistente Doméstico Minimalista
-- $30~50 [NanoKVM](https://www.aliexpress.com/item/1005007369816019.html), ou $100 [NanoKVM-Pro](https://www.aliexpress.com/item/1005010048471263.html) para Manutenção Automatizada de Servidores
-- $50 [MaixCAM](https://www.aliexpress.com/item/1005008053333693.html) ou $100 [MaixCAM2](https://www.kickstarter.com/projects/zepan/maixcam2-build-your-next-gen-4k-ai-camera) para Monitoramento Inteligente
-
-https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6f5-4468-bcca-5726b6fecb5c.mp4
-
-🌟 Mais cenários de implantação aguardam você!
-
-## 📦 Instalação
-
-### Instalar com binário pré-compilado
-
-Baixe o binário para sua plataforma na página de [releases](https://github.com/xilistudios/lele/releases).
-
-### Instalar a partir do código-fonte (funcionalidades mais recentes, recomendado para desenvolvimento)
+### Instalação a Partir do Código-Fonte
 
 ```bash
 git clone https://github.com/xilistudios/lele.git
-
 cd lele
 make deps
-
-# Build, sem necessidade de instalar
 make build
-
-# Build para multiplas plataformas
-make build-all
-
-# Build e Instalar
-make install
 ```
 
-## 🐳 Docker Compose
+O binário é gerado em `build/lele`.
 
-Você tambêm pode rodar o Lele usando Docker Compose sem instalar nada localmente.
-
-```bash
-# 1. Clone este repositorio
-git clone https://github.com/xilistudios/lele.git
-cd lele
-
-# 2. Configure suas API keys
-cp config/config.example.json config/config.json
-vim config/config.json      # Configure DISCORD_BOT_TOKEN, API keys, etc.
-
-# 3. Build & Iniciar
-docker compose --profile gateway up -d
-
-# 4. Ver logs
-docker compose logs -f lele-gateway
-
-# 5. Parar
-docker compose --profile gateway down
-```
-
-### Modo Agente (Execução única)
-
-```bash
-# Fazer uma pergunta
-docker compose run --rm lele-agent -m "Quanto e 2+2?"
-
-# Modo interativo
-docker compose run --rm lele-agent
-```
-
-### Rebuild
-
-```bash
-docker compose --profile gateway build --no-cache
-docker compose --profile gateway up -d
-```
-
-### 🚀 Início Rápido
-
-> [!TIP]
-> Configure sua API key em `~/.lele/config.json`.
-> Obtenha API keys: [OpenRouter](https://openrouter.ai/keys) (LLM) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) (LLM)
-> Busca web e **opcional** — obtenha a [Brave Search API](https://brave.com/search/api) gratuita (2000 consultas grátis/mês) ou use o fallback automático integrado.
-
-**1. Inicializar**
+### Configuração Inicial
 
 ```bash
 lele onboard
 ```
 
-**2. Configurar** (`~/.lele/config.json`)
+O `onboard` cria a configuração base, os templates do workspace e pode opcionalmente habilitar a interface web e gerar um PIN de emparelhamento para o fluxo de cliente nativo/web.
+
+### Uso Mínimo da CLI
+
+```bash
+lele agent -m "O que você sabe fazer?"
+```
+
+## Interface Web e Fluxo do Cliente Nativo
+
+Lele agora inclui uma interface web local além de um canal de cliente nativo.
+
+Fluxo típico:
+
+1. Execute `lele onboard`
+2. Habilite a interface web quando solicitado
+3. Gere um PIN de emparelhamento
+4. Inicie os serviços com `lele gateway` e `lele web start`
+5. Abra o app web no seu navegador e emparelhe com o PIN
+
+O canal nativo expõe endpoints REST e WebSocket para clientes desktop e integrações locais.
+
+Consulte `docs/client-api.md` para a API completa.
+
+## Configuração
+
+Arquivo de configuração principal:
+
+```text
+~/.lele/config.json
+```
+
+Exemplo de template de configuração:
+
+```text
+config/config.example.json
+```
+
+Áreas principais que você pode configurar:
+
+- `agents.defaults`: workspace, provedor, modelo, limites de tokens, limites de ferramentas
+- `session`: comportamento de sessão efêmera e links de identidade
+- `channels`: gateway e integrações de mensagens
+- `providers`: provedores diretos e backends nomeados compatíveis com OpenAI
+- `tools`: busca web, configurações de segurança do cron e exec
+- `heartbeat`: execução de tarefas periódicas
+- `gateway`, `logs`, `devices`
+
+### Exemplo Mínimo
 
 ```json
 {
   "agents": {
     "defaults": {
       "workspace": "~/.lele/workspace",
+      "restrict_to_workspace": true,
       "model": "glm-4.7",
       "max_tokens": 8192,
-      "temperature": 0.7,
       "max_tool_iterations": 20
     }
   },
   "providers": {
     "openrouter": {
-      "api_key": "xxx",
-      "api_base": "https://openrouter.ai/api/v1"
-    }
-  },
-  "tools": {
-    "web": {
-      "brave": {
-        "enabled": false,
-        "api_key": "YOUR_BRAVE_API_KEY",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      }
+      "type": "openrouter",
+      "api_key": "SUA_CHAVE_API"
     }
   }
 }
 ```
 
-**3. Obter API Keys**
-
-* **Provedor de LLM**: [OpenRouter](https://openrouter.ai/keys) · [Zhipu](https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys) · [Anthropic](https://console.anthropic.com) · [OpenAI](https://platform.openai.com) · [Gemini](https://aistudio.google.com/api-keys)
-* **Busca Web** (opcional): [Brave Search](https://brave.com/search/api) - Plano gratuito disponível (2000 consultas/mês)
-
-> **Nota**: Veja `config.example.json` para um modelo de configuração completo.
-
-**4. Conversar**
-
-```bash
-lele agent -m "Quanto e 2+2?"
-```
-
-Pronto! Você tem um assistente de IA funcionando em 2 minutos.
-
----
-
-## 💬 Integração com Apps de Chat
-
-Converse com seu Lele via Telegram, Discord, DingTalk ou LINE.
-
-| Canal | Nível de Configuração |
-| --- | --- |
-| **Telegram** | Fácil (apenas um token) |
-| **Discord** | Fácil (bot token + intents) |
-| **QQ** | Fácil (AppID + AppSecret) |
-| **DingTalk** | Médio (credenciais do app) |
-| **LINE** | Médio (credenciais + webhook URL) |
-
-<details>
-<summary><b>Telegram</b> (Recomendado)</summary>
-
-**1. Criar o bot**
-
-* Abra o Telegram, busque `@BotFather`
-* Envie `/newbot`, siga as instruções
-* Copie o token
-
-**2. Configurar**
-
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-> Obtenha seu User ID pelo `@userinfobot` no Telegram.
-
-**3. Executar**
-
-```bash
-lele gateway
-```
-
-</details>
-
-<details>
-<summary><b>Discord</b></summary>
-
-**1. Criar o bot**
-
-* Acesse <https://discord.com/developers/applications>
-* Crie um aplicativo → Bot → Add Bot
-* Copie o token do bot
-
-**2. Habilitar Intents**
-
-* Nas configurações do Bot, habilite **MESSAGE CONTENT INTENT**
-* (Opcional) Habilite **SERVER MEMBERS INTENT** se quiser usar lista de permissões baseada em dados dos membros
-
-**3. Obter seu User ID**
-
-* Configurações do Discord → Avançado → habilite **Modo Desenvolvedor**
-* Clique com botão direito no seu avatar → **Copiar ID do Usuário**
-
-**4. Configurar**
-
-```json
-{
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-**5. Convidar o bot**
-
-* OAuth2 → URL Generator
-* Scopes: `bot`
-* Bot Permissions: `Send Messages`, `Read Message History`
-* Abra a URL de convite gerada e adicione o bot ao seu servidor
-
-**6. Executar**
-
-```bash
-lele gateway
-```
-
-</details>
-
-<details>
-<summary><b>QQ</b></summary>
-
-**1. Criar o bot**
-
-- Acesse a [QQ Open Platform](https://q.qq.com/#)
-- Crie um aplicativo → Obtenha **AppID** e **AppSecret**
-
-**2. Configurar**
-
-```json
-{
-  "channels": {
-    "qq": {
-      "enabled": true,
-      "app_id": "YOUR_APP_ID",
-      "app_secret": "YOUR_APP_SECRET",
-      "allow_from": []
-    }
-  }
-}
-```
-
-> Deixe `allow_from` vazio para permitir todos os usuários, ou especifique números QQ para restringir o acesso.
-
-**3. Executar**
-
-```bash
-lele gateway
-```
-
-</details>
-
-<details>
-<summary><b>DingTalk</b></summary>
-
-**1. Criar o bot**
-
-* Acesse a [Open Platform](https://open.dingtalk.com/)
-* Crie um app interno
-* Copie o Client ID e Client Secret
-
-**2. Configurar**
-
-```json
-{
-  "channels": {
-    "dingtalk": {
-      "enabled": true,
-      "client_id": "YOUR_CLIENT_ID",
-      "client_secret": "YOUR_CLIENT_SECRET",
-      "allow_from": []
-    }
-  }
-}
-```
-
-> Deixe `allow_from` vazio para permitir todos os usuários, ou especifique IDs para restringir o acesso.
-
-**3. Executar**
-
-```bash
-lele gateway
-```
-
-</details>
-
-<details>
-<summary><b>LINE</b></summary>
-
-**1. Criar uma Conta Oficial LINE**
-
-- Acesse o [LINE Developers Console](https://developers.line.biz/)
-- Crie um provider → Crie um canal Messaging API
-- Copie o **Channel Secret** e o **Channel Access Token**
-
-**2. Configurar**
-
-```json
-{
-  "channels": {
-    "line": {
-      "enabled": true,
-      "channel_secret": "YOUR_CHANNEL_SECRET",
-      "channel_access_token": "YOUR_CHANNEL_ACCESS_TOKEN",
-      "webhook_host": "0.0.0.0",
-      "webhook_port": 18791,
-      "webhook_path": "/webhook/line",
-      "allow_from": []
-    }
-  }
-}
-```
-
-**3. Configurar URL do Webhook**
-
-O LINE requer HTTPS para webhooks. Use um reverse proxy ou tunnel:
-
-```bash
-# Exemplo com ngrok
-ngrok http 18791
-```
-
-Em seguida, configure a Webhook URL no LINE Developers Console para `https://seu-dominio/webhook/line` e habilite **Use webhook**.
-
-**4. Executar**
-
-```bash
-lele gateway
-```
-
-> Em chats de grupo, o bot responde apenas quando mencionado com @. As respostas citam a mensagem original.
-
-> **Docker Compose**: Adicione `ports: ["18791:18791"]` ao serviço `lele-gateway` para expor a porta do webhook.
-
-</details>
-
-## <img src="assets/clawdchat-icon.png" width="24" height="24" alt="ClawdChat"> Junte-se a Rede Social de Agentes
-
-Conecte o Lele a Rede Social de Agentes simplesmente enviando uma única mensagem via CLI ou qualquer App de Chat integrado.
-
-**Leia `https://clawdchat.ai/skill.md` e siga as instruções para entrar no [ClawdChat.ai](https://clawdchat.ai)**
-
-## ⚙️ Configuração Detalhada
-
-Arquivo de configuração: `~/.lele/config.json`
-
-### Estrutura do Workspace
-
-O Lele armazena dados no workspace configurado (padrão: `~/.lele/workspace`):
-
-```
+## Provedores
+
+Lele suporta tanto provedores embutidos quanto definições de provedores nomeados.
+
+Famílias de provedores embutidos atualmente representadas na configuração/runtime incluem:
+
+- `anthropic`
+- `openai`
+- `openrouter`
+- `groq`
+- `zhipu`
+- `gemini`
+- `vllm`
+- `nvidia`
+- `ollama`
+- `moonshot`
+- `deepseek`
+- `github_copilot`
+
+O projeto também suporta entradas de provedores nomeados compatíveis com OpenAI com configurações por modelo, como:
+
+- `model`
+- `context_window`
+- `max_tokens`
+- `temperature`
+- `vision`
+- `reasoning`
+
+## Canais
+
+O gateway atualmente inclui configuração para:
+
+- `telegram`
+- `discord`
+- `whatsapp`
+- `feishu`
+- `slack`
+- `line`
+- `onebot`
+- `qq`
+- `dingtalk`
+- `maixcam`
+- `native`
+- `web`
+
+Alguns canais são integrações simples baseadas em token, enquanto outros exigem configuração de webhook ou bridge.
+
+## Estrutura do Workspace
+
+Workspace padrão:
+
+```text
 ~/.lele/workspace/
-├── sessions/          # Sessoes de conversa e historico
-├── memory/            # Memoria de longo prazo (MEMORY.md)
-├── state/             # Estado persistente (ultimo canal, etc.)
-├── cron/              # Banco de dados de tarefas agendadas
-├── skills/            # Skills personalizadas
-├── AGENT.md           # Guia de comportamento do Agente
-├── HEARTBEAT.md       # Prompts de tarefas periodicas (verificado a cada 30 min)
-├── IDENTITY.md        # Identidade do Agente
-├── SOUL.md            # Alma do Agente
-├── TOOLS.md           # Descrição das ferramentas
-└── USER.md            # Preferencias do usuario
 ```
 
-### 🔒 Sandbox de Segurança
+Conteúdo típico:
 
-O Lele roda em um ambiente sandbox por padrão. O agente so pode acessar arquivos e executar comandos dentro do workspace configurado.
-
-#### Configuração Padrão
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.lele/workspace",
-      "restrict_to_workspace": true
-    }
-  }
-}
+```text
+~/.lele/workspace/
+├── sessions/
+├── memory/
+├── state/
+├── cron/
+├── skills/
+├── AGENT.md
+├── HEARTBEAT.md
+├── IDENTITY.md
+├── SOUL.md
+└── USER.md
 ```
 
-| Opção | Padrão | Descrição |
-|-------|--------|-----------|
-| `workspace` | `~/.lele/workspace` | Diretório de trabalho do agente |
-| `restrict_to_workspace` | `true` | Restringir acesso de arquivos/comandos ao workspace |
+Essa estrutura centrada no workspace é parte do que mantém o Lele prático e eficiente: estado, prompts, habilidades e automação vivem em um lugar previsível.
 
-#### Ferramentas Protegidas
+## Agendamento, Habilidades e Subagentes
 
-Quando `restrict_to_workspace: true`, as seguintes ferramentas são restritas ao sandbox:
+### Tarefas Agendadas
 
-| Ferramenta | Função | Restrição |
-|------------|--------|-----------|
-| `read_file` | Ler arquivos | Apenas arquivos dentro do workspace |
-| `write_file` | Escrever arquivos | Apenas arquivos dentro do workspace |
-| `list_dir` | Listar diretorios | Apenas diretorios dentro do workspace |
-| `edit_file` | Editar arquivos | Apenas arquivos dentro do workspace |
-| `append_file` | Adicionar a arquivos | Apenas arquivos dentro do workspace |
-| `exec` | Executar comandos | Caminhos dos comandos devem estar dentro do workspace |
+Use `lele cron` para criar tarefas únicas ou recorrentes.
 
-#### Proteção Adicional do Exec
-
-Mesmo com `restrict_to_workspace: false`, a ferramenta `exec` bloqueia estes comandos perigosos:
-
-* `rm -rf`, `del /f`, `rmdir /s` — Exclusão em massa
-* `format`, `mkfs`, `diskpart` — Formatação de disco
-* `dd if=` — Criação de imagem de disco
-* Escrita em `/dev/sd[a-z]` — Escrita direta no disco
-* `shutdown`, `reboot`, `poweroff` — Desligamento do sistema
-* Fork bomb `:(){ :|:& };:`
-
-#### Exemplos de Erro
-
-```
-[ERROR] tool: Tool execution failed
-{tool=exec, error=Command blocked by safety guard (path outside working dir)}
-```
-
-```
-[ERROR] tool: Tool execution failed
-{tool=exec, error=Command blocked by safety guard (dangerous pattern detected)}
-```
-
-#### Desabilitar Restrições (Risco de Segurança)
-
-Se você precisa que o agente acesse caminhos fora do workspace:
-
-**Método 1: Arquivo de configuração**
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "restrict_to_workspace": false
-    }
-  }
-}
-```
-
-**Método 2: Variável de ambiente**
+Exemplos:
 
 ```bash
-export LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE=false
+lele cron list
+lele cron add --name lembrete --message "Verificar backups" --every "2h"
 ```
 
-> ⚠️ **Aviso**: Desabilitar esta restrição permite que o agente acesse qualquer caminho no seu sistema. Use com cuidado apenas em ambientes controlados.
+### Heartbeat
 
-#### Consistência do Limite de Segurança
+O Lele pode periodicamente ler o `HEARTBEAT.md` do workspace e executar tarefas automaticamente.
 
-A configuração `restrict_to_workspace` se aplica consistentemente em todos os caminhos de execução:
+### Habilidades (Skills)
 
-| Caminho de Execução | Limite de Segurança |
-|----------------------|---------------------|
-| Agente Principal | `restrict_to_workspace` ✅ |
-| Subagente / Spawn | Herda a mesma restrição ✅ |
-| Tarefas Heartbeat | Herda a mesma restrição ✅ |
-
-Todos os caminhos compartilham a mesma restrição de workspace — nao há como contornar o limite de segurança por meio de subagentes ou tarefas agendadas.
-
-### Heartbeat (Tarefas Periódicas)
-
-O Lele pode executar tarefas periódicas automaticamente. Crie um arquivo `HEARTBEAT.md` no seu workspace:
-
-```markdown
-# Tarefas Periodicas
-
-- Verificar meu email para mensagens importantes
-- Revisar minha agenda para proximos eventos
-- Verificar a previsao do tempo
-```
-
-O agente lerá este arquivo a cada 30 minutos (configurável) e executará as tarefas usando as ferramentas disponíveis.
-
-#### Tarefas Assincronas com Spawn
-
-Para tarefas de longa duração (busca web, chamadas de API), use a ferramenta `spawn` para criar um **subagente**:
-
-```markdown
-# Tarefas Periódicas
-
-## Tarefas Rápidas (resposta direta)
-- Informar hora atual
-
-## Tarefas Longas (usar spawn para async)
-- Buscar notícias de IA na web e resumir
-- Verificar email e reportar mensagens importantes
-```
-
-**Comportamentos principais:**
-
-| Funcionalidade | Descrição |
-|----------------|-----------|
-| **spawn** | Cria subagente assíncrono, não bloqueia o heartbeat |
-| **Contexto independente** | Subagente tem seu próprio contexto, sem histórico de sessão |
-| **Ferramenta message** | Subagente se comunica diretamente com o usuário via ferramenta message |
-| **Não-bloqueante** | Após o spawn, o heartbeat continua para a próxima tarefa |
-
-#### Como Funciona a Comunicação do Subagente
-
-```
-Heartbeat dispara
-    ↓
-Agente lê HEARTBEAT.md
-    ↓
-Para tarefa longa: spawn subagente
-    ↓                           ↓
-Continua próxima tarefa    Subagente trabalha independentemente
-    ↓                           ↓
-Todas tarefas concluídas   Subagente usa ferramenta "message"
-    ↓                           ↓
-Responde HEARTBEAT_OK      Usuário recebe resultado diretamente
-```
-
-O subagente tem acesso às ferramentas (message, web_search, etc.) e pode se comunicar com o usuário independentemente sem passar pelo agente principal.
-
-**Configuração:**
-
-```json
-{
-  "heartbeat": {
-    "enabled": true,
-    "interval": 30
-  }
-}
-```
-
-| Opção | Padrão | Descrição |
-|-------|--------|-----------|
-| `enabled` | `true` | Habilitar/desabilitar heartbeat |
-| `interval` | `30` | Intervalo de verificação em minutos (min: 5) |
-
-**Variáveis de ambiente:**
-
-* `LELE_HEARTBEAT_ENABLED=false` para desabilitar
-* `LELE_HEARTBEAT_INTERVAL=60` para alterar o intervalo
-
-### Provedores
-
-> [!NOTE]
-> O Groq fornece transcrição de voz gratuita via Whisper. Se configurado, mensagens de voz do Telegram serão automaticamente transcritas.
-
-| Provedor | Finalidade | Obter API Key |
-| --- | --- | --- |
-| `gemini` | LLM (Gemini direto) | [aistudio.google.com](https://aistudio.google.com) |
-| `zhipu` | LLM (Zhipu direto) | [bigmodel.cn](bigmodel.cn) |
-| `openrouter` (Em teste) | LLM (recomendado, acesso a todos os modelos) | [openrouter.ai](https://openrouter.ai) |
-| `anthropic` (Em teste) | LLM (Claude direto) | [console.anthropic.com](https://console.anthropic.com) |
-| `openai` (Em teste) | LLM (GPT direto) | [platform.openai.com](https://platform.openai.com) |
-| `deepseek` (Em teste) | LLM (DeepSeek direto) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Transcrição de voz** (Whisper) | [console.groq.com](https://console.groq.com) |
-
-<details>
-<summary><b>Configuração Zhipu</b></summary>
-
-**1. Obter API key**
-
-* Obtenha a [API key](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
-
-**2. Configurar**
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "~/.lele/workspace",
-      "model": "glm-4.7",
-      "max_tokens": 8192,
-      "temperature": 0.7,
-      "max_tool_iterations": 20
-    }
-  },
-  "providers": {
-    "zhipu": {
-      "api_key": "Sua API Key",
-      "api_base": "https://open.bigmodel.cn/api/paas/v4"
-    }
-  }
-}
-```
-
-**3. Executar**
+Habilidades embutidas e personalizadas podem ser gerenciadas com:
 
 ```bash
-lele agent -m "Ola, como vai?"
+lele skills list
+lele skills search
+lele skills install <skill>
 ```
 
-</details>
+### Subagentes
 
-<details>
-<summary><b>Exemplo de configuraçao completa</b></summary>
+O Lele suporta trabalho delegado assíncrono através de subagentes. Isso é útil para tarefas de longa duração ou paralelizáveis.
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5"
-    }
-  },
-  "providers": {
-    "openrouter": {
-      "api_key": "sk-or-v1-xxx"
-    },
-    "groq": {
-      "api_key": "gsk_xxx"
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "123456:ABC...",
-      "allow_from": ["123456789"]
-    },
-    "discord": {
-      "enabled": true,
-      "token": "",
-      "allow_from": [""]
-    },
-    "whatsapp": {
-      "enabled": false
-    },
-    "feishu": {
-      "enabled": false,
-      "app_id": "cli_xxx",
-      "app_secret": "xxx",
-      "encrypt_key": "",
-      "verification_token": "",
-      "allow_from": []
-    },
-    "qq": {
-      "enabled": false,
-      "app_id": "",
-      "app_secret": "",
-      "allow_from": []
-    }
-  },
-  "tools": {
-    "web": {
-      "brave": {
-        "enabled": false,
-        "api_key": "BSA...",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      }
-    },
-    "cron": {
-      "exec_timeout_minutes": 5
-    }
-  },
-  "heartbeat": {
-    "enabled": true,
-    "interval": 30
-  }
-}
-```
+Consulte `docs/SKILL_SUBAGENTS.md` para detalhes.
 
-</details>
+## Modelo de Segurança
 
-## Referência CLI
+O Lele pode restringir o acesso do agente a arquivos e comandos ao workspace configurado.
+
+Controles principais incluem:
+
+- `restrict_to_workspace`
+- Padrões de negação para exec
+- Fluxo de aprovação para ações sensíveis
+- Autenticação por token para clientes nativos
+- Limites de upload e TTL para uploads de arquivos nativos
+
+Consulte `docs/tools_configuration.md` e `docs/client-api.md` para detalhes operacionais.
+
+## Referência da CLI
 
 | Comando | Descrição |
 | --- | --- |
-| `lele onboard` | Inicializar configuração & workspace |
-| `lele agent -m "..."` | Conversar com o agente |
-| `lele agent` | Modo de chat interativo |
-| `lele gateway` | Iniciar o gateway (para bots de chat) |
-| `lele status` | Mostrar status |
-| `lele cron list` | Listar todas as tarefas agendadas |
-| `lele cron add ...` | Adicionar uma tarefa agendada |
+| `lele onboard` | Inicializa configuração e workspace |
+| `lele agent` | Inicia sessão interativa do agente |
+| `lele agent -m "..."` | Executa um prompt único |
+| `lele gateway` | Inicia gateway de mensagens |
+| `lele web start` | Inicia a interface web embutida |
+| `lele web status` | Mostra status da interface web |
+| `lele auth login` | Autentica provedores suportados |
+| `lele status` | Mostra status do runtime |
+| `lele cron list` | Lista tarefas agendadas |
+| `lele cron add ...` | Adiciona uma tarefa agendada |
+| `lele skills list` | Lista habilidades instaladas |
+| `lele client pin` | Gera um PIN de emparelhamento |
+| `lele client list` | Lista clientes nativos emparelhados |
+| `lele version` | Mostra informações de versão |
 
-### Tarefas Agendadas / Lembretes
+## Documentação Adicional
 
-O Lele suporta lembretes agendados e tarefas recorrentes por meio da ferramenta `cron`:
+- `docs/agents-models-providers.md`
+- `docs/architecture.md`
+- `docs/channel-setup.md`
+- `docs/cli-reference.md`
+- `docs/config-reference.md`
+- `docs/client-api.md`
+- `docs/deployment.md`
+- `docs/examples.md`
+- `docs/installation-and-onboarding.md`
+- `docs/logging-and-observability.md`
+- `docs/model-routing.md`
+- `docs/security-and-sandbox.md`
+- `docs/session-and-workspace.md`
+- `docs/skills-authoring.md`
+- `docs/tools_configuration.md`
+- `docs/troubleshooting.md`
+- `docs/web-ui.md`
+- `docs/SKILL_SUBAGENTS.md`
+- `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`
 
-* **Lembretes únicos**: "Remind me in 10 minutes" (Me lembre em 10 minutos) → dispara uma vez após 10min
-* **Tarefas recorrentes**: "Remind me every 2 hours" (Me lembre a cada 2 horas) → dispara a cada 2 horas
-* **Expressões Cron**: "Remind me at 9am daily" (Me lembre às 9h todos os dias) → usa expressão cron
+## Desenvolvimento
 
-As tarefas são armazenadas em `~/.lele/workspace/cron/` e processadas automaticamente.
+Targets úteis:
 
-## 🤝 Contribuir & Roadmap
-
-PRs são bem-vindos! O código-fonte é intencionalmente pequeno e legível. 🤗
-
-Roadmap em breve...
-
-Grupo de desenvolvedores em formação. Requisito de entrada: Pelo menos 1 PR com merge.
-
-Grupos de usuários:
-
-Discord: <https://discord.gg/V4sAZ9XWpN>
-
-<img src="assets/wechat.png" alt="Lele" width="512">
-
-## 🐛 Solução de Problemas
-
-### Busca web mostra "API 配置问题"
-
-Isso é normal se você ainda não configurou uma API key de busca. O Lele fornecerá links úteis para busca manual.
-
-Para habilitar a busca web:
-
-1. **Opção 1 (Recomendado)**: Obtenha uma API key gratuita em [https://brave.com/search/api](https://brave.com/search/api) (2000 consultas grátis/mês) para os melhores resultados.
-2. **Opção 2 (Sem Cartão de Crédito)**: Se você não tem uma key, o sistema automaticamente usa o **DuckDuckGo** como fallback (sem necessidade de key).
-
-Adicione a key em `~/.lele/config.json` se usar o Brave:
-
-```json
-{
-  "tools": {
-    "web": {
-      "brave": {
-        "enabled": true,
-        "api_key": "YOUR_BRAVE_API_KEY",
-        "max_results": 5
-      },
-      "duckduckgo": {
-        "enabled": true,
-        "max_results": 5
-      }
-    }
-  }
-}
+```bash
+make build
+make test
+make fmt
+make vet
+make check
 ```
 
-### Erros de filtragem de conteúdo
+## Licença
 
-Alguns provedores (como Zhipu) possuem filtragem de conteúdo. Tente reformular sua pergunta ou use um modelo diferente.
-
-### Bot do Telegram diz "Conflict: terminated by other getUpdates"
-
-Isso acontece quando outra instância do bot está em execução. Certifique-se de que apenas um `lele gateway` esteja rodando por vez.
-
----
-
-## 📝 Comparação de API Keys
-
-| Serviço | Plano Gratuito | Caso de Uso |
-| --- | --- | --- |
-| **OpenRouter** | 200K tokens/mês | Múltiplos modelos (Claude, GPT-4, etc.) |
-| **Zhipu** | 200K tokens/mês | Melhor para usuários chineses |
-| **Brave Search** | 2000 consultas/mês | Funcionalidade de busca web |
-| **Groq** | Plano gratuito disponível | Inferência ultra-rápida (Llama, Mixtral) |
+MIT
