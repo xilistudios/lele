@@ -1,15 +1,29 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { MessageBubble } from '../MessageBubble'
 
 export function MessageList() {
-  const { messages, approvalRequest, onApprove } = useAppLogicContext()
+  const navigate = useNavigate()
+  const { messages, approvalRequest, onApprove, currentSessionKey } = useAppLogicContext()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const lastMessageId = messages[messages.length - 1]?.id
+
+  const handleNavigateToSession = useCallback(
+    (sessionKey: string) => {
+      if (!currentSessionKey) return
+
+      navigate(
+        `/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`,
+      )
+    },
+    [currentSessionKey, navigate],
+  )
 
   useEffect(() => {
+    if (!lastMessageId && messages.length === 0) return
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages])
+  }, [lastMessageId, messages.length])
 
   if (messages.length === 0) {
     return (
@@ -22,7 +36,12 @@ export function MessageList() {
   return (
     <div className="mx-auto max-w-3xl space-y-1">
       {messages.map((message, index) => (
-        <MessageBubble key={message.id} message={message} isLast={index === messages.length - 1} />
+        <MessageBubble
+          key={message.id}
+          message={message}
+          isLast={index === messages.length - 1}
+          onNavigateToSession={handleNavigateToSession}
+        />
       ))}
       {approvalRequest && (
         <div className="py-2">
