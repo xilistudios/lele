@@ -6,6 +6,7 @@ before:
   hooks:
     - go mod tidy
     - sh -c "cd web && bun run build"
+    - sh -c "rm -rf cmd/lele/web && mkdir -p cmd/lele/web && cp -R web/dist cmd/lele/web/dist"
     - go generate ./cmd/lele
 
 builds:
