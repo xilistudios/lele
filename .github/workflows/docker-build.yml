@@ -1,6 +1,17 @@
 name: 🐳 Build & Push Docker Image
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git ref to build (tag, branch, or SHA, e.g. v0.2.0 or main)"
+        required: true
+        type: string
+      push_latest:
+        description: "Also tag as :latest"
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       tag:
@@ -29,6 +40,10 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      # ── QEMU for multi-arch ───────────────────
+      - name: 🔧 Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       # ── Docker Buildx ─────────────────────────
       - name: 🔧 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,10 +70,17 @@ jobs:
         shell: bash
         run: |
           tag="${{ inputs.tag }}"
-          echo "ghcr_tag=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
-          echo "dockerhub_tag=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "dockerhub_latest=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+          push_latest="${{ inputs.push_latest }}"
+
+          tags="${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:${tag}"
+          tags="${tags},${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:${tag}"
+
+          if [ "$push_latest" = "true" ] || [ "${{ github.event_name }}" = "workflow_call" ]; then
+            tags="${tags},${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:latest"
+            tags="${tags},${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
+          fi
+
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
 
       # ── Build & Push ──────────────────────────
       - name: 🚀 Build and push Docker image
@@ -66,11 +88,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.tags.outputs.ghcr_tag }}
-            ${{ steps.tags.outputs.ghcr_latest }}
-            ${{ steps.tags.outputs.dockerhub_tag }}
-            ${{ steps.tags.outputs.dockerhub_latest }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64,linux/riscv64

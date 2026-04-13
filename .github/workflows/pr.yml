@@ -16,6 +16,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Build web app
+        run: cd web && bun run build
+
+      - name: Copy web dist for embed
+        run: rm -rf cmd/lele/web && mkdir -p cmd/lele/web && cp -R web/dist cmd/lele/web/dist
+
       - name: Run go generate
         run: go generate ./...
 
@@ -56,6 +68,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Build web app
+        run: cd web && bun run build
+
+      - name: Copy web dist for embed
+        run: rm -rf cmd/lele/web && mkdir -p cmd/lele/web && cp -R web/dist cmd/lele/web/dist
+
       - name: Run go generate
         run: go generate ./...
 
@@ -74,6 +98,18 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install web dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Build web app
+        run: cd web && bun run build
+
+      - name: Copy web dist for embed
+        run: rm -rf cmd/lele/web && mkdir -p cmd/lele/web && cp -R web/dist cmd/lele/web/dist
 
       - name: Run go generate
         run: go generate ./...
