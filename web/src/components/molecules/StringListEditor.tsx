@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SearchableSelect } from '../molecules/SearchableSelect'
+import { SearchableSelect } from './SearchableSelect'
 
 type Option = {
   value: string
@@ -77,7 +77,7 @@ export function StringListEditor({
               buttonLabel={placeholder || t('common.add')}
               direction="down"
               disabled={disabled}
-              emptyLabel={loading ? t('settings.loading') : (emptyLabel || t('settings.noModels'))}
+              emptyLabel={loading ? t('settings.loading') : emptyLabel || t('settings.noModels')}
               groups={groups}
               onChange={handleSelect}
               options={options}
@@ -132,7 +132,9 @@ export function StringListEditor({
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
+                  role="img"
                 >
+                  <title>{removeTitle}</title>
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
