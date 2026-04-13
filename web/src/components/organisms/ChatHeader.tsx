@@ -60,7 +60,9 @@ export function ChatHeader() {
               <h2 className="truncate text-sm font-medium text-white">{currentTitle}</h2>
             </div>
           ) : null}
-          {!parentSession ? <h2 className="truncate text-sm font-medium text-white">{currentTitle}</h2> : null}
+          {!parentSession ? (
+            <h2 className="truncate text-sm font-medium text-white">{currentTitle}</h2>
+          ) : null}
           <p className="truncate text-[11px] text-[#666]">
             {currentAgent?.name ?? t('chat.default')}
           </p>

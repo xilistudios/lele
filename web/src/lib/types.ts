@@ -449,6 +449,8 @@ export type ChatMessage = {
   content: string
   streaming: boolean
   createdAt: string
+  optimistic?: boolean
+  optimisticBaseCount?: number
   attachments?: Attachment[]
   sessionKey?: string
   toolName?: string

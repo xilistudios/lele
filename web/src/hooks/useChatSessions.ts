@@ -65,13 +65,12 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       ? defaultSessionKey
       : (nextSessions[0]?.key ?? null)
     const storedSessionKey = loadCurrentSessionKey()
-    const nextSessionKey =
-      isSubagentSessionKey(currentSessionKeyRef.current)
-        ? currentSessionKeyRef.current
-        : storedSessionKey && availableKeys.has(storedSessionKey)
-          ? storedSessionKey
-          : currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
-            ? currentSessionKeyRef.current
+    const nextSessionKey = isSubagentSessionKey(currentSessionKeyRef.current)
+      ? currentSessionKeyRef.current
+      : storedSessionKey && availableKeys.has(storedSessionKey)
+        ? storedSessionKey
+        : currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
+          ? currentSessionKeyRef.current
           : fallbackKey
 
     persistCurrentSessionKey(nextSessionKey)
