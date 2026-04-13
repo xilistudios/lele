@@ -346,7 +346,7 @@ func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 
 		n.auth.UpdateLastSeen(client.ClientID)
 
-		r.Header.Set("X-Client-ID", client.ClientID)
+		r.Header.Set("X-Client-Id", client.ClientID)
 		r.Header.Set("X-Device-Name", client.DeviceName)
 
 		next.ServeHTTP(w, r)
@@ -572,7 +572,7 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 			continue
 		}
 
-		if info.Size() > int64(n.cfg.MaxUploadSizeMB)*1024*1024 {
+		if info.Size() > n.cfg.MaxUploadSizeMB*1024*1024 {
 			logger.WarnCF("native", "Attachment file too large, skipping",
 				map[string]interface{}{
 					"session_key": sessionKey,
@@ -685,7 +685,7 @@ func writeError(w http.ResponseWriter, status int, message string, code string) 
 }
 
 func getClientID(r *http.Request) string {
-	return r.Header.Get("X-Client-ID")
+	return r.Header.Get("X-Client-Id")
 }
 
 func getQueryParam(r *http.Request, key string) string {

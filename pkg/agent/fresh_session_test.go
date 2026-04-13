@@ -1,8 +1,9 @@
 package agent
 
 import (
-	"testing"
 	"os"
+	"testing"
+
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 )
@@ -29,7 +30,7 @@ func TestStartFreshConversation_CreatesCleanSession(t *testing.T) {
 	al := NewAgentLoop(cfg, msgBus)
 
 	baseSessionKey := "telegram:12345"
-	
+
 	// Get the default agent
 	defaultAgent := al.registry.GetDefaultAgent()
 	if defaultAgent == nil {

@@ -10,7 +10,7 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
-// Mock provider for testing
+// MockProvider is a mock provider for testing.
 type MockProvider struct{}
 
 func (m *MockProvider) Chat(ctx context.Context, messages []providers.Message, toolDefs []providers.ToolDefinition, model string, options map[string]interface{}) (*providers.LLMResponse, error) {

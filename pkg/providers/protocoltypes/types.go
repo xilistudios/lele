@@ -77,16 +77,16 @@ type ContentPart struct {
 
 // Message represents a message in a conversation.
 type Message struct {
-	Role             string          `json:"-"`
-	Content          string          `json:"-"`
-	ContentParts     []ContentPart   `json:"-"`
-	ToolCalls        []ToolCall      `json:"-"`
-	ToolCallID       string          `json:"-"`
-	Media            []string        `json:"-"`
-	ReasoningContent string          `json:"-"`
+	Role             string        `json:"-"`
+	Content          string        `json:"-"`
+	ContentParts     []ContentPart `json:"-"`
+	ToolCalls        []ToolCall    `json:"-"`
+	ToolCallID       string        `json:"-"`
+	Media            []string      `json:"-"`
+	ReasoningContent string        `json:"-"`
 }
 
-func (m Message) MarshalJSON() ([]byte, error) {
+func (m *Message) MarshalJSON() ([]byte, error) {
 	type rawMessage struct {
 		Role             string      `json:"role"`
 		Content          interface{} `json:"content"`
@@ -151,14 +151,14 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (m Message) TextContent() string {
+func (m *Message) TextContent() string {
 	if strings.TrimSpace(m.Content) != "" {
 		return m.Content
 	}
 	return textFromParts(m.ContentParts)
 }
 
-func (m Message) HasImageContent() bool {
+func (m *Message) HasImageContent() bool {
 	for _, part := range m.ContentParts {
 		if part.Type == "image_url" && part.ImageURL != nil && strings.TrimSpace(part.ImageURL.URL) != "" {
 			return true

@@ -148,7 +148,7 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 				client.mu.Unlock()
 				return
 			}
-			conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 			client.mu.Lock()
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				client.mu.Unlock()
@@ -297,22 +297,41 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid subscribe payload")
+		logger.WarnCF("native", "Subscribe payload parse error", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
 		return
 	}
 
 	// Validate session key format
 	if !isValidSessionKeyFormat(payload.SessionKey) {
 		n.sendError(client, "session_key_invalid", "invalid session_key format")
+		logger.WarnCF("native", "Subscribe invalid session_key format", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": payload.SessionKey,
+		})
 		return
 	}
 
 	if !n.validateSessionOwnership(client.ClientInfo.ClientID, payload.SessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
+		logger.WarnCF("native", "Subscribe ownership validation failed", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": payload.SessionKey,
+		})
 		return
 	}
 
+	oldSessionKey := client.SessionKey
 	client.SessionKey = payload.SessionKey
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
+
+	logger.InfoCF("native", "Client subscribed to session", map[string]interface{}{
+		"client_id":       client.ID,
+		"old_session_key": oldSessionKey,
+		"new_session_key": payload.SessionKey,
+	})
 
 	processing := false
 	if n.agentLoop != nil {
@@ -332,14 +351,27 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid unsubscribe payload")
+		logger.WarnCF("native", "Unsubscribe payload parse error", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
 		return
 	}
+
+	oldSessionKey := client.SessionKey
 
 	// Only reset to default if unsubscribing from the current session
 	// or if no specific session_key is provided (full unsubscribe)
 	if payload.SessionKey == "" || payload.SessionKey == client.SessionKey {
 		client.SessionKey = "native:" + client.ClientInfo.ClientID
 	}
+
+	logger.InfoCF("native", "Client unsubscribed from session", map[string]interface{}{
+		"client_id":       client.ID,
+		"old_session_key": oldSessionKey,
+		"payload_key":     payload.SessionKey,
+		"new_session_key": client.SessionKey,
+	})
 
 	_ = client.Send(mustMarshal(WSMessage{
 		Event: "unsubscribe.ack",

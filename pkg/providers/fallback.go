@@ -15,7 +15,7 @@ const (
 
 // FallbackChain orchestrates model fallback across multiple candidates.
 type FallbackChain struct {
-	cooldown  *CooldownTracker
+	cooldown   *CooldownTracker
 	maxRetries int
 	maxBackoff time.Duration
 }

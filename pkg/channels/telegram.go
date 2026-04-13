@@ -214,7 +214,7 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 
 			// Wait before retry with exponential backoff
 			time.Sleep(currentDelay)
-			currentDelay = min(currentDelay * 2, maxReconnectDelay)
+			currentDelay = min(currentDelay*2, maxReconnectDelay)
 			continue
 		}
 
@@ -251,7 +251,7 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 		}
 
 		time.Sleep(currentDelay)
-		currentDelay = min(currentDelay * 2, maxReconnectDelay)
+		currentDelay = min(currentDelay*2, maxReconnectDelay)
 	}
 }
 

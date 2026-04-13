@@ -161,7 +161,6 @@ export function useAppLogic(
   useEffect(() => {
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
-    if (subscribedSessionRef.current === sessionsHook.currentSessionKey) return
 
     wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
     subscribedSessionRef.current = sessionsHook.currentSessionKey
