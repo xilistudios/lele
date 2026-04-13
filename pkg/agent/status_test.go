@@ -1,10 +1,11 @@
 package agent
 
 import (
-	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/config"
 	"os"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {

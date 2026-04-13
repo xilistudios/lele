@@ -1,14 +1,8 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
-
-const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    const v = c === 'x' ? r : (r & 0x3) | 0x8
-    return v.toString(16)
-  })
-}
+import { updateChatHistoryFromRaw } from './useChatHistory'
 
 const formatToolCallArgs = (toolCall: HistoryToolCall) => {
   if (typeof toolCall.arguments === 'undefined') {
@@ -48,7 +42,6 @@ export const toChatMessages = (
   }>,
   sessionKey: string,
 ): ChatMessage[] => {
-  // Build a map of tool_call_id -> HistoryToolCall from all assistant messages
   const toolCallMap = new Map<string, HistoryToolCall>()
   for (const message of history) {
     if (message.role === 'assistant' && message.tool_calls?.length) {
@@ -71,9 +64,6 @@ export const toChatMessages = (
     }
 
     if (message.role === 'assistant' && message.tool_calls?.length) {
-      // Don't create separate tool messages from tool_calls;
-      // they will be created when the corresponding tool response messages are processed.
-      // Only return the assistant text message if it has content.
       if (message.content && message.content !== '') {
         return [baseMessage]
       }
@@ -81,7 +71,6 @@ export const toChatMessages = (
     }
 
     if (message.role === 'tool') {
-      // Look up the corresponding tool_call to get the real tool name and args
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
@@ -115,97 +104,46 @@ export function useMessages(
   _currentSessionKey: string | null,
   currentSessionKeyRef: React.MutableRefObject<string | null>,
 ) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
-  const messagesRef = useRef(messages)
-  const lastLoadedSessionKeyRef = useRef<string | null>(null)
+  const streamingRef = useRef(streamingMessages)
   const processingSessionKeyRef = useRef<string | null>(null)
-  const historySeqRef = useRef(0)
+
+  const queryClient = useQueryClient()
+
+  const getHistoryUserCount = useCallback(
+    (sessionKey: string) => {
+      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(['chatHistory', sessionKey])
+      return history?.messages?.filter((message) => message.role === 'user').length ?? 0
+    },
+    [queryClient],
+  )
 
   useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
-
-  const loadHistory = useCallback(
-    async (sessionKey: string) => {
-      if (!token) return
-
-      // Increment sequence number to track this request
-      const seq = ++historySeqRef.current
-      
-      console.log('[HTTP] Loading history for session', sessionKey)
-      try {
-        const history = await api.history(sessionKey)
-        if (currentSessionKeyRef.current !== sessionKey) {
-          console.log('[HTTP] Session changed during load, skipping', {
-            current: currentSessionKeyRef.current,
-            expected: sessionKey,
-          })
-          return
-        }
-        // Check if this is still the latest history request
-        if (historySeqRef.current !== seq) {
-          console.log('[HTTP] Stale history response, ignoring', {
-            seq,
-            currentSeq: historySeqRef.current,
-          })
-          return
-        }
-        console.log('[HTTP] History loaded, messages:', history.messages.length)
-        lastLoadedSessionKeyRef.current = sessionKey
-        const chatMsgs = toChatMessages(history.messages, history.session_key)
-        if (processingSessionKeyRef.current === sessionKey) {
-          chatMsgs.push({
-            id: '__processing_placeholder__',
-            role: 'assistant',
-            content: '',
-            streaming: true,
-            createdAt: new Date().toISOString(),
-            sessionKey,
-          })
-        }
-        setMessages(chatMsgs)
-      } catch (error) {
-        console.error('[HTTP] Failed to load history', error)
-        if (lastLoadedSessionKeyRef.current === sessionKey) {
-          lastLoadedSessionKeyRef.current = null
-        }
-        // Clear processing ref on error
-        if (processingSessionKeyRef.current === sessionKey) {
-          processingSessionKeyRef.current = null
-        }
-        throw error
-      }
-    },
-    [api, token, currentSessionKeyRef],
-  )
+    streamingRef.current = streamingMessages
+  }, [streamingMessages])
 
   const ensureAssistantPlaceholder = useCallback(
     (messageId: string, sessionKey: string, chunk = '') => {
-      setMessages((current) => {
-        let filtered = current
-        const existingProcessing = current.findIndex(
-          (m) => m.id === '__processing_placeholder__' && m.sessionKey === sessionKey,
-        )
-        if (existingProcessing >= 0 && messageId !== '__processing_placeholder__') {
-          filtered = [...current.slice(0, existingProcessing), ...current.slice(existingProcessing + 1)]
-        }
-
-        if (filtered.some((message) => message.id === messageId)) {
-          return filtered.map((message) =>
-            message.id === messageId
+      setStreamingMessages((current) => {
+        const existing = current.find((m) => m.id === messageId)
+        if (existing) {
+          return current.map((m) =>
+            m.id === messageId
               ? {
-                  ...message,
-                  content: chunk ? `${message.content}${chunk}` : message.content,
+                  ...m,
+                  content: chunk ? `${m.content}${chunk}` : m.content,
                   streaming: true,
                   sessionKey,
                 }
-              : message,
+              : m,
           )
         }
-
+        const filtered = current.filter(
+          (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === sessionKey),
+        )
         return [
           ...filtered,
           {
@@ -229,11 +167,14 @@ export function useMessages(
       const normalizedContent = content.trim()
       if (normalizedContent.length === 0) return
 
+      const tempId = `temp-user-${Date.now()}`
       const userMessage: ChatMessage = {
-        id: generateUUID(),
+        id: tempId,
         role: 'user',
         content: normalizedContent,
         streaming: false,
+        optimistic: true,
+        optimisticBaseCount: getHistoryUserCount(sessionKey),
         createdAt: new Date().toISOString(),
         sessionKey,
         attachments: attachments.map((path) => ({
@@ -243,7 +184,7 @@ export function useMessages(
         })),
       }
 
-      setMessages((current) => [...current, userMessage])
+      setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
 
       const response = await api.sendMessage({
@@ -254,9 +195,10 @@ export function useMessages(
       })
 
       ensureAssistantPlaceholder(response.message_id, response.session_key)
+      console.log('[WS] Message sent, messageId:', response.message_id)
       return response
     },
-    [api, token, ensureAssistantPlaceholder],
+    [api, token, ensureAssistantPlaceholder, getHistoryUserCount],
   )
 
   const handleEvent = useCallback(
@@ -266,10 +208,7 @@ export function useMessages(
 
       switch (event.event) {
         case 'welcome': {
-          const welcomeData = data as {
-            session_key?: string
-            processing?: boolean
-          }
+          const welcomeData = data as { session_key?: string; processing?: boolean }
           if (welcomeData.processing && welcomeData.session_key) {
             processingSessionKeyRef.current = welcomeData.session_key
             if (welcomeData.session_key === currentSessionKeyRef.current) {
@@ -280,10 +219,7 @@ export function useMessages(
         }
         case 'message.stream':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped message.stream: session mismatch', {
-              event: eventSessionKey,
-              current: currentSessionKeyRef.current,
-            })
+            console.warn('[WS] Dropped message.stream: session mismatch')
             break
           }
           ensureAssistantPlaceholder(
@@ -297,46 +233,34 @@ export function useMessages(
           break
         case 'message.complete':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped message.complete: session mismatch', {
-              event: eventSessionKey,
-              current: currentSessionKeyRef.current,
-            })
+            console.warn('[WS] Dropped message.complete: session mismatch')
             break
           }
-          setMessages((current) => {
-            const filtered = current.filter(
-              (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === (eventSessionKey ?? currentSessionKeyRef.current)),
-            )
-            const targetId = data.message_id as string
-            const targetIndex = filtered.findIndex((message) => message.id === targetId)
-            if (targetIndex < 0) return filtered
-
-            const updatedMessage: ChatMessage = {
-              ...filtered[targetIndex],
-              content: data.content as string,
-              attachments: data.attachments as ChatMessage['attachments'],
-              sessionKey: (eventSessionKey ??
-                currentSessionKeyRef.current ??
-                filtered[targetIndex].sessionKey) as string,
-              streaming: false,
-            }
-
-            const hasToolsAfter = filtered.slice(targetIndex + 1).some((m) => m.role === 'tool')
-            if (hasToolsAfter) {
-              const messagesWithoutTarget = [
-                ...filtered.slice(0, targetIndex),
-                ...filtered.slice(targetIndex + 1),
-              ]
-              return [...messagesWithoutTarget, updatedMessage]
-            }
-
-            return filtered.map((message, index) =>
-              index === targetIndex ? updatedMessage : message,
-            )
-          })
+          setStreamingMessages((current) =>
+            current.filter((m) => {
+              const targetSessionKey = eventSessionKey ?? currentSessionKeyRef.current
+              if (m.id === '__processing_placeholder__' && m.sessionKey === targetSessionKey) {
+                return false
+              }
+              if (m.role === 'assistant' && m.id === (data.message_id as string)) {
+                return false
+              }
+              if (
+                m.role === 'user' &&
+                m.sessionKey === targetSessionKey &&
+                m.content.trim() === ''
+              ) {
+                return false
+              }
+              return true
+            }),
+          )
           setToolStatus(null)
           setPendingAttachments([])
           processingSessionKeyRef.current = null
+          queryClient.invalidateQueries({
+            queryKey: ['chatHistory', eventSessionKey ?? currentSessionKeyRef.current ?? ''],
+          })
           break
         case 'messages.catchup': {
           const catchupData = data as {
@@ -350,53 +274,45 @@ export function useMessages(
             }>
           }
           const targetSessionKey = catchupData.session_key || currentSessionKeyRef.current || ''
-          if (catchupData.is_initial) {
-            if (targetSessionKey === currentSessionKeyRef.current) {
-              setMessages(toChatMessages(catchupData.messages, targetSessionKey))
-            }
-          } else {
-            if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) break
-            // Usar la misma transformación que history para consistencia
-            const existingIds = new Set(messagesRef.current.map((m) => m.id))
-            const newMessages = toChatMessages(
-              catchupData.messages,
-              eventSessionKey as string,
-            ).filter((m) => !existingIds.has(m.id))
-            if (newMessages.length > 0) {
-              setMessages((current) => [...current, ...newMessages])
-            }
+          if (catchupData.is_initial && targetSessionKey === currentSessionKeyRef.current) {
+            updateChatHistoryFromRaw(queryClient, targetSessionKey, catchupData.messages)
+            setStreamingMessages((current) =>
+              current.filter((message) => {
+                if (message.sessionKey !== targetSessionKey) {
+                  return true
+                }
+                if (message.role === 'assistant') {
+                  return message.streaming
+                }
+                if (message.role === 'tool') {
+                  return message.toolStatus === 'executing'
+                }
+                return true
+              }),
+            )
           }
           break
         }
         case 'attachments':
-          setMessages((current) => {
-            const lastAssistantIndex = [...current]
-              .reverse()
-              .findIndex((message) => message.role === 'assistant')
-            if (lastAssistantIndex < 0) return current
-            const targetIndex = current.length - lastAssistantIndex - 1
-            return current.map((message, index) =>
-              index === targetIndex
-                ? {
-                    ...message,
-                    attachments: event.data as ChatMessage['attachments'],
-                    streaming: false,
-                  }
-                : message,
+          setStreamingMessages((current) => {
+            const idx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+            if (idx < 0) return current
+            const targetIndex = current.length - idx - 1
+            return current.map((m, i) =>
+              i === targetIndex
+                ? { ...m, attachments: event.data as ChatMessage['attachments'], streaming: false }
+                : m,
             )
           })
           break
         case 'tool.executing': {
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped tool.executing: session mismatch', {
-              event: eventSessionKey,
-              current: currentSessionKeyRef.current,
-            })
+            console.warn('[WS] Dropped tool.executing: session mismatch')
             break
           }
           setToolStatus(event.data as ToolStatus)
           const toolId = `tool-${data.tool as string}-${Date.now()}`
-          const newToolMessage: ChatMessage = {
+          const newTool: ChatMessage = {
             id: toolId,
             role: 'tool',
             content: '',
@@ -410,97 +326,79 @@ export function useMessages(
             toolStatus: 'executing',
             subagentSessionKey: data.subagent_session_key as string | undefined,
           }
-          setMessages((current) => {
-            const lastAssistantIndex = [...current]
-              .reverse()
-              .findIndex((message) => message.role === 'assistant')
-            if (lastAssistantIndex < 0) {
-              return [...current, newToolMessage]
-            }
-            const lastAssistant = current[current.length - lastAssistantIndex - 1]
-            // Si el último assistant está vacío (streaming sin contenido aún),
-            // insertar el tool ANTES de él para mantener orden cronológico
-            const insertBeforeLastAssistant =
-              lastAssistant.content === '' && lastAssistant.streaming
-            const targetIndex = insertBeforeLastAssistant
-              ? current.length - lastAssistantIndex - 1
-              : current.length - lastAssistantIndex
-            const newMessages = [...current]
-            newMessages.splice(targetIndex, 0, newToolMessage)
-            return newMessages
+          setStreamingMessages((current) => {
+            const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+            if (lastAssistantIdx < 0) return [...current, newTool]
+            const lastAssistant = current[current.length - lastAssistantIdx - 1]
+            const insertBefore = lastAssistant.content === '' && lastAssistant.streaming
+            const targetIndex = insertBefore
+              ? current.length - lastAssistantIdx - 1
+              : current.length - lastAssistantIdx
+            const arr = [...current]
+            arr.splice(targetIndex, 0, newTool)
+            return arr
           })
           break
         }
         case 'tool.result':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped tool.result: session mismatch', {
-              event: eventSessionKey,
-              current: currentSessionKeyRef.current,
-            })
+            console.warn('[WS] Dropped tool.result: session mismatch')
             break
           }
           setToolStatus(null)
-          setMessages((current) => {
-            const lastToolIndex = [...current]
+          setStreamingMessages((current) => {
+            const lastToolIdx = [...current]
               .reverse()
               .findIndex(
-                (message) =>
-                  message.role === 'tool' &&
-                  message.toolStatus === 'executing' &&
-                  message.toolName === (data.tool as string),
+                (m) =>
+                  m.role === 'tool' &&
+                  m.toolStatus === 'executing' &&
+                  m.toolName === (data.tool as string),
               )
-            if (lastToolIndex < 0) return current
-            const targetIndex = current.length - lastToolIndex - 1
+            if (lastToolIdx < 0) return current
+            const targetIndex = current.length - lastToolIdx - 1
             const isError =
               data.result &&
               typeof data.result === 'string' &&
               (data.result.toLowerCase().includes('error') ||
                 data.result.toLowerCase().includes('failed'))
-            return current.map((message, index) =>
-              index === targetIndex
+            return current.map((m, i) =>
+              i === targetIndex
                 ? {
-                    ...message,
+                    ...m,
                     toolResult: data.result as string,
                     toolStatus: isError ? 'error' : 'completed',
                     subagentSessionKey:
                       (data.subagent_session_key as string) ||
-                      message.subagentSessionKey ||
+                      m.subagentSessionKey ||
                       ((data.tool as string) === 'spawn'
                         ? parseSubagentSessionKey(data.result as string | undefined)
                         : undefined),
                   }
-                : message,
+                : m,
             )
           })
           break
         case 'subagent.result':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped subagent.result: session mismatch', {
-              event: eventSessionKey,
-              current: currentSessionKeyRef.current,
-            })
+            console.warn('[WS] Dropped subagent.result: session mismatch')
             break
           }
-          setMessages((current) => {
-            const lastSpawnIndex = [...current]
+          setStreamingMessages((current) => {
+            const lastSpawnIdx = [...current]
               .reverse()
-              .findIndex(
-                (message) =>
-                  message.role === 'tool' &&
-                  message.toolName === 'spawn',
-              )
-            if (lastSpawnIndex < 0) return current
-            const targetIndex = current.length - lastSpawnIndex - 1
-            return current.map((message, index) =>
-              index === targetIndex
+              .findIndex((m) => m.role === 'tool' && m.toolName === 'spawn')
+            if (lastSpawnIdx < 0) return current
+            const targetIndex = current.length - lastSpawnIdx - 1
+            return current.map((m, i) =>
+              i === targetIndex
                 ? {
-                    ...message,
+                    ...m,
                     subagentSessionKey:
-                      (data.subagent_session_key as string) ||
-                      message.subagentSessionKey,
-                    toolResult: message.toolResult || (data.result as string),
+                      (data.subagent_session_key as string) || m.subagentSessionKey,
+                    toolResult: m.toolResult || (data.result as string),
                   }
-                : message,
+                : m,
             )
           })
           break
@@ -510,14 +408,13 @@ export function useMessages(
         case 'cancel.ack':
           setToolStatus(null)
           processingSessionKeyRef.current = null
-          setMessages((current) =>
+          setStreamingMessages((current) =>
             current
               .filter((m) => m.id !== '__processing_placeholder__')
-              .map((message) => ({ ...message, streaming: false })),
+              .map((m) => ({ ...m, streaming: false })),
           )
           break
         case 'subscribe.ack': {
-          lastLoadedSessionKeyRef.current = (data.session_key as string) ?? null
           const ackSessionKey = (data.session_key as string) ?? ''
           const ackProcessing = data.processing === true
           if (ackProcessing && ackSessionKey === currentSessionKeyRef.current) {
@@ -530,7 +427,7 @@ export function useMessages(
           break
       }
     },
-    [currentSessionKeyRef, ensureAssistantPlaceholder],
+    [currentSessionKeyRef, ensureAssistantPlaceholder, queryClient],
   )
 
   const approveRequest = useCallback((approved: boolean, requestId: string) => {
@@ -538,35 +435,26 @@ export function useMessages(
     return { request_id: requestId, approved }
   }, [])
 
-  const clearMessages = useCallback(() => {
-    setMessages([])
+  const clearStreaming = useCallback(() => {
+    setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
     setPendingAttachments([])
-    lastLoadedSessionKeyRef.current = null
     processingSessionKeyRef.current = null
-    historySeqRef.current = 0
   }, [])
 
-  const reset = useCallback(() => {
-    clearMessages()
-  }, [clearMessages])
-
   return {
-    messages,
-    setMessages,
-    messagesRef,
+    streamingMessages,
+    streamingRef,
     toolStatus,
     approvalRequest,
     pendingAttachments,
-    lastLoadedSessionKeyRef,
-    loadHistory,
+    processingSessionKeyRef,
     ensureAssistantPlaceholder,
     sendMessage,
     handleEvent,
     approveRequest,
     setPendingAttachments,
-    clearMessages,
-    reset,
+    clearStreaming,
   }
 }

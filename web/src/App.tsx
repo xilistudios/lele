@@ -123,7 +123,9 @@ function ChatRoute() {
     }
 
     const isNestedSubagent = Boolean(child_chat_id)
-    const hasValidParent = !isNestedSubagent || (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
+    const hasValidParent =
+      !isNestedSubagent ||
+      (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
     const hasValidTarget = isNestedSubagent
       ? targetSessionKey.startsWith('subagent:')
       : !targetSessionKey.startsWith('subagent:') && availableKeys.has(targetSessionKey)

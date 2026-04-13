@@ -2,12 +2,13 @@ package agent
 
 import (
 	"context"
-	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/config"
-	"github.com/xilistudios/lele/pkg/providers"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 func TestTelegramSessionFlow(t *testing.T) {

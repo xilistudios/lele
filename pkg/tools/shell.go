@@ -247,6 +247,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		case execErr = <-done:
 			// Command completed
 			break
+		case <-cmdCtx.Done():
+			// Context cancelled (e.g., /stop command) - command process will be killed by CommandContext
+			execErr = cmdCtx.Err()
+			break
 		case <-time.After(heartbeatInterval):
 			// Send heartbeat feedback
 			if t.verbose && t.feedbackCallback != nil && t.channel != "" && t.chatID != "" {
@@ -262,9 +266,17 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	elapsed := time.Since(startTime)
 
-	// Check if context was cancelled due to timeout
+	// Check if context was cancelled due to timeout or user stop
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		msg := fmt.Sprintf("Command timed out after %v", t.timeout)
+		return &ToolResult{
+			ForLLM:  msg,
+			ForUser: msg,
+			IsError: true,
+		}
+	}
+	if cmdCtx.Err() == context.Canceled {
+		msg := "Command was stopped by user"
 		return &ToolResult{
 			ForLLM:  msg,
 			ForUser: msg,

@@ -32,7 +32,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const sortedSessions = useMemo(() => {
     const visibleSessions = sessions.filter((session) => !session.key.startsWith('subagent:'))
-    return [...visibleSessions].sort((b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime())
+    return [...visibleSessions].sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
   }, [sessions])
 
   const selectedSidebarSessionKey = parentSessionKey ?? currentSessionKey
