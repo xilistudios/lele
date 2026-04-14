@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '../lib/api'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
@@ -60,6 +61,14 @@ export function useChatHistory(
       if (!sessionKey || !token) return null
       console.log('[RQ] Fetching history for session', sessionKey)
       const history = await api.history(sessionKey)
+      if (!history) {
+        console.log('[RQ] History fetched, empty response')
+        return {
+          sessionKey,
+          messages: [],
+          rawMessages: [],
+        }
+      }
       console.log('[RQ] History fetched, messages:', history.messages.length)
       return {
         sessionKey: history.session_key,
@@ -70,12 +79,16 @@ export function useChatHistory(
     enabled: sessionKey !== null && token !== null,
     staleTime: 5_000,
     refetchInterval: POLLING_INTERVAL,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchIntervalInBackground: true,
+    retry: false,
   })
 
   const baseMessages = query.data?.messages ?? []
-  const messages = mergeMessages(baseMessages, streamingMessages)
+  const messages = useMemo(
+    () => mergeMessages(baseMessages, streamingMessages),
+    [baseMessages, streamingMessages],
+  )
 
   const invalidateHistory = () => {
     if (!sessionKey) return

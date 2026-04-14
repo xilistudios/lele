@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useMemo } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
@@ -33,11 +34,41 @@ type SettingsTab =
   | 'advanced'
   | 'diagnostics'
 
+const VALID_TABS: SettingsTab[] = [
+  'general',
+  'agents',
+  'session',
+  'providers',
+  'channels',
+  'tools',
+  'system',
+  'advanced',
+  'diagnostics',
+]
+
 export function SettingsPage({ onLogout }: Props) {
   const { t } = useTranslation()
   const { api } = useAuthContext()
   const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  const navigate = useNavigate()
+  const { tab: tabParam } = useParams<{ tab?: string }>()
+
+  const activeTab = useMemo<SettingsTab>(() => {
+    if (tabParam && VALID_TABS.includes(tabParam as SettingsTab)) {
+      return tabParam as SettingsTab
+    }
+    return 'general'
+  }, [tabParam])
+
+  useEffect(() => {
+    if (!tabParam || !VALID_TABS.includes(tabParam as SettingsTab)) {
+      navigate('/settings/general', { replace: true })
+    }
+  }, [tabParam, navigate])
+
+  const handleTabChange = (tab: SettingsTab) => {
+    navigate(`/settings/${tab}`)
+  }
 
   const settingsState = useSettingsConfig(api)
 
@@ -97,7 +128,7 @@ export function SettingsPage({ onLogout }: Props) {
           />
 
           <div className="flex flex-1 overflow-hidden">
-            <SettingsTabs activeTab={activeTab} onTabChange={setActiveTab} />
+            <SettingsTabs activeTab={activeTab} onTabChange={handleTabChange} />
 
             <div className="flex flex-1 flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto p-6">{renderTabContent()}</div>

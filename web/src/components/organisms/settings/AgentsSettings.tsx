@@ -68,115 +68,116 @@ export function AgentsSettings() {
             },
             index: number,
           ) => (
-          <NamedItemCard
-            key={agent.id}
-            title={agent.id}
-            onRemove={() => removeAgent(index)}
-            removeLabel={t('settings.removeAgent')}
-          >
-            <SettingsField
-              label={t('settings.fields.agentName')}
-              path={`agents.list.${index}.name`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.name`)}
+            <NamedItemCard
+              key={agent.id}
+              title={agent.id}
+              onRemove={() => removeAgent(index)}
+              removeLabel={t('settings.removeAgent')}
             >
-              <TextInput
-                id={`agents.list.${index}.name`}
-                value={agent.name || ''}
-                onChange={(v) => updateField(`agents.list.${index}.name`, v || undefined)}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentDefault')}
-              path={`agents.list.${index}.default`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.default`)}
-            >
-              <BooleanInput
-                id={`agents.list.${index}.default`}
-                value={agent.default || false}
-                onChange={(v) => updateField(`agents.list.${index}.default`, v)}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentWorkspace')}
-              path={`agents.list.${index}.workspace`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.workspace`)}
-            >
-              <TextInput
-                id={`agents.list.${index}.workspace`}
-                value={agent.workspace || ''}
-                onChange={(v) => updateField(`agents.list.${index}.workspace`, v || undefined)}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentModelPrimary')}
-              path={`agents.list.${index}.model.primary`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.model.primary`)}
-            >
-              <SearchableSelect
-                ariaLabel={t('settings.fields.agentModelPrimary')}
-                buttonLabel={t('settings.fields.agentModelPrimary')}
-                direction="down"
-                emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
-                groups={getGroupsForAgent}
-                onChange={(v) =>
-                  updateField(`agents.list.${index}.model`, { ...agent.model, primary: v })
-                }
-                options={getOptionsForAgent}
-                placeholder={getAgentModelPrimary(agent.model) || t('settings.selectModel')}
-                searchAriaLabel={`${t('settings.fields.agentModelPrimary')} buscar`}
-                searchPlaceholder={t('settings.fields.agentModelPrimary')}
-                value={getAgentModelPrimary(agent.model)}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentModelFallbacks')}
-              path={`agents.list.${index}.model.fallbacks`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.model.fallbacks`)}
-            >
-              <StringListEditor
-                id={`agents.list.${index}.model.fallbacks`}
-                value={agent.model?.fallbacks || []}
-                onChange={(v) =>
-                  updateField(`agents.list.${index}.model`, {
-                    primary: agent.model?.primary || '',
-                    fallbacks: v,
-                  })
-                }
-                options={getOptionsForAgent}
-                groups={getGroupsForAgent}
-                emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
-                loading={isLoadingModels}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentSkills')}
-              path={`agents.list.${index}.skills`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.skills`)}
-            >
-              <StringListEditor
-                id={`agents.list.${index}.skills`}
-                value={agent.skills || []}
-                onChange={(v) => updateField(`agents.list.${index}.skills`, v)}
-              />
-            </SettingsField>
-            <SettingsField
-              label={t('settings.fields.agentTemperature')}
-              path={`agents.list.${index}.temperature`}
-              isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.temperature`)}
-            >
-              <NumberInput
-                id={`agents.list.${index}.temperature`}
-                value={agent.temperature ?? 0}
-                min={0}
-                max={2}
-                step={0.1}
-                onChange={(v) =>
-                  updateField(`agents.list.${index}.temperature`, v === 0 ? undefined : v)
-                }
-              />
-            </SettingsField>
-          </NamedItemCard>
-        ))}
+              <SettingsField
+                label={t('settings.fields.agentName')}
+                path={`agents.list.${index}.name`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.name`)}
+              >
+                <TextInput
+                  id={`agents.list.${index}.name`}
+                  value={agent.name || ''}
+                  onChange={(v) => updateField(`agents.list.${index}.name`, v || undefined)}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentDefault')}
+                path={`agents.list.${index}.default`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.default`)}
+              >
+                <BooleanInput
+                  id={`agents.list.${index}.default`}
+                  value={agent.default || false}
+                  onChange={(v) => updateField(`agents.list.${index}.default`, v)}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentWorkspace')}
+                path={`agents.list.${index}.workspace`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.workspace`)}
+              >
+                <TextInput
+                  id={`agents.list.${index}.workspace`}
+                  value={agent.workspace || ''}
+                  onChange={(v) => updateField(`agents.list.${index}.workspace`, v || undefined)}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentModelPrimary')}
+                path={`agents.list.${index}.model.primary`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.model.primary`)}
+              >
+                <SearchableSelect
+                  ariaLabel={t('settings.fields.agentModelPrimary')}
+                  buttonLabel={t('settings.fields.agentModelPrimary')}
+                  direction="down"
+                  emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+                  groups={getGroupsForAgent}
+                  onChange={(v) =>
+                    updateField(`agents.list.${index}.model`, { ...agent.model, primary: v })
+                  }
+                  options={getOptionsForAgent}
+                  placeholder={getAgentModelPrimary(agent.model) || t('settings.selectModel')}
+                  searchAriaLabel={`${t('settings.fields.agentModelPrimary')} buscar`}
+                  searchPlaceholder={t('settings.fields.agentModelPrimary')}
+                  value={getAgentModelPrimary(agent.model)}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentModelFallbacks')}
+                path={`agents.list.${index}.model.fallbacks`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.model.fallbacks`)}
+              >
+                <StringListEditor
+                  id={`agents.list.${index}.model.fallbacks`}
+                  value={agent.model?.fallbacks || []}
+                  onChange={(v) =>
+                    updateField(`agents.list.${index}.model`, {
+                      primary: agent.model?.primary || '',
+                      fallbacks: v,
+                    })
+                  }
+                  options={getOptionsForAgent}
+                  groups={getGroupsForAgent}
+                  emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+                  loading={isLoadingModels}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentSkills')}
+                path={`agents.list.${index}.skills`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.skills`)}
+              >
+                <StringListEditor
+                  id={`agents.list.${index}.skills`}
+                  value={agent.skills || []}
+                  onChange={(v) => updateField(`agents.list.${index}.skills`, v)}
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentTemperature')}
+                path={`agents.list.${index}.temperature`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.temperature`)}
+              >
+                <NumberInput
+                  id={`agents.list.${index}.temperature`}
+                  value={agent.temperature ?? 0}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  onChange={(v) =>
+                    updateField(`agents.list.${index}.temperature`, v === 0 ? undefined : v)
+                  }
+                />
+              </SettingsField>
+            </NamedItemCard>
+          ),
+        )}
       </SettingsSection>
     </div>
   )
