@@ -49,103 +49,106 @@ export function AdvancedSettings() {
             },
             index: number,
           ) => (
-          <div key={`${binding.agent_id}-${binding.match.channel}-${index}`} className={CARD_CLS}>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-medium text-[#ccc]">
-                {t('settings.sections.bindings')} #{index + 1}
-              </span>
-              <RemoveButton
-                onClick={() => removeBinding(index)}
-                ariaLabel={t('settings.removeBinding')}
-              />
+            <div key={`${binding.agent_id}-${binding.match.channel}-${index}`} className={CARD_CLS}>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-medium text-[#ccc]">
+                  {t('settings.sections.bindings')} #{index + 1}
+                </span>
+                <RemoveButton
+                  onClick={() => removeBinding(index)}
+                  ariaLabel={t('settings.removeBinding')}
+                />
+              </div>
+              <div className="space-y-3">
+                <SettingsField
+                  label={t('settings.fields.bindingAgentId')}
+                  path={`bindings.${index}.agent_id`}
+                  isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.agent_id`)}
+                >
+                  <TextInput
+                    id={`bindings.${index}.agent_id`}
+                    value={binding.agent_id}
+                    onChange={(v) => updateField(`bindings.${index}.agent_id`, v)}
+                  />
+                </SettingsField>
+                <SettingsField
+                  label={t('settings.fields.bindingChannel')}
+                  path={`bindings.${index}.match.channel`}
+                  isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.channel`)}
+                >
+                  <TextInput
+                    id={`bindings.${index}.match.channel`}
+                    value={binding.match.channel}
+                    onChange={(v) => updateField(`bindings.${index}.match.channel`, v)}
+                  />
+                </SettingsField>
+                <SettingsField
+                  label={t('settings.fields.bindingAccountId')}
+                  path={`bindings.${index}.match.account_id`}
+                  isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.account_id`)}
+                >
+                  <TextInput
+                    id={`bindings.${index}.match.account_id`}
+                    value={binding.match.account_id || ''}
+                    onChange={(v) =>
+                      updateField(`bindings.${index}.match.account_id`, v || undefined)
+                    }
+                  />
+                </SettingsField>
+                <SettingsField
+                  label={t('settings.fields.bindingGuildId')}
+                  path={`bindings.${index}.match.guild_id`}
+                  isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.guild_id`)}
+                >
+                  <TextInput
+                    id={`bindings.${index}.match.guild_id`}
+                    value={binding.match.guild_id || ''}
+                    onChange={(v) =>
+                      updateField(`bindings.${index}.match.guild_id`, v || undefined)
+                    }
+                  />
+                </SettingsField>
+                <SettingsField
+                  label={t('settings.fields.bindingTeamId')}
+                  path={`bindings.${index}.match.team_id`}
+                  isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.team_id`)}
+                >
+                  <TextInput
+                    id={`bindings.${index}.match.team_id`}
+                    value={binding.match.team_id || ''}
+                    onChange={(v) => updateField(`bindings.${index}.match.team_id`, v || undefined)}
+                  />
+                </SettingsField>
+                {binding.match.peer && (
+                  <>
+                    <SettingsField
+                      label={t('settings.fields.bindingPeerKind')}
+                      path={`bindings.${index}.match.peer.kind`}
+                      isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.peer.kind`)}
+                    >
+                      <TextInput
+                        id={`bindings.${index}.match.peer.kind`}
+                        value={binding.match.peer.kind}
+                        onChange={(v) => updateField(`bindings.${index}.match.peer.kind`, v)}
+                      />
+                    </SettingsField>
+                    <SettingsField
+                      label={t('settings.fields.bindingPeerId')}
+                      path={`bindings.${index}.match.peer.id`}
+                      isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.peer.id`)}
+                    >
+                      <TextInput
+                        id={`bindings.${index}.match.peer.id`}
+                        value={binding.match.peer.id}
+                        onChange={(v) => updateField(`bindings.${index}.match.peer.id`, v)}
+                      />
+                    </SettingsField>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="space-y-3">
-              <SettingsField
-                label={t('settings.fields.bindingAgentId')}
-                path={`bindings.${index}.agent_id`}
-                isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.agent_id`)}
-              >
-                <TextInput
-                  id={`bindings.${index}.agent_id`}
-                  value={binding.agent_id}
-                  onChange={(v) => updateField(`bindings.${index}.agent_id`, v)}
-                />
-              </SettingsField>
-              <SettingsField
-                label={t('settings.fields.bindingChannel')}
-                path={`bindings.${index}.match.channel`}
-                isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.channel`)}
-              >
-                <TextInput
-                  id={`bindings.${index}.match.channel`}
-                  value={binding.match.channel}
-                  onChange={(v) => updateField(`bindings.${index}.match.channel`, v)}
-                />
-              </SettingsField>
-              <SettingsField
-                label={t('settings.fields.bindingAccountId')}
-                path={`bindings.${index}.match.account_id`}
-                isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.account_id`)}
-              >
-                <TextInput
-                  id={`bindings.${index}.match.account_id`}
-                  value={binding.match.account_id || ''}
-                  onChange={(v) =>
-                    updateField(`bindings.${index}.match.account_id`, v || undefined)
-                  }
-                />
-              </SettingsField>
-              <SettingsField
-                label={t('settings.fields.bindingGuildId')}
-                path={`bindings.${index}.match.guild_id`}
-                isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.guild_id`)}
-              >
-                <TextInput
-                  id={`bindings.${index}.match.guild_id`}
-                  value={binding.match.guild_id || ''}
-                  onChange={(v) => updateField(`bindings.${index}.match.guild_id`, v || undefined)}
-                />
-              </SettingsField>
-              <SettingsField
-                label={t('settings.fields.bindingTeamId')}
-                path={`bindings.${index}.match.team_id`}
-                isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.team_id`)}
-              >
-                <TextInput
-                  id={`bindings.${index}.match.team_id`}
-                  value={binding.match.team_id || ''}
-                  onChange={(v) => updateField(`bindings.${index}.match.team_id`, v || undefined)}
-                />
-              </SettingsField>
-              {binding.match.peer && (
-                <>
-                  <SettingsField
-                    label={t('settings.fields.bindingPeerKind')}
-                    path={`bindings.${index}.match.peer.kind`}
-                    isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.peer.kind`)}
-                  >
-                    <TextInput
-                      id={`bindings.${index}.match.peer.kind`}
-                      value={binding.match.peer.kind}
-                      onChange={(v) => updateField(`bindings.${index}.match.peer.kind`, v)}
-                    />
-                  </SettingsField>
-                  <SettingsField
-                    label={t('settings.fields.bindingPeerId')}
-                    path={`bindings.${index}.match.peer.id`}
-                    isDirty={isDirtyPath(dirtyPaths, `bindings.${index}.match.peer.id`)}
-                  >
-                    <TextInput
-                      id={`bindings.${index}.match.peer.id`}
-                      value={binding.match.peer.id}
-                      onChange={(v) => updateField(`bindings.${index}.match.peer.id`, v)}
-                    />
-                  </SettingsField>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
+          ),
+        )}
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.rawJson')}>

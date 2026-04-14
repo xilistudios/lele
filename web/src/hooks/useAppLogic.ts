@@ -68,8 +68,12 @@ export function useAppLogic(
   const wsStatusRef = useRef(wsStatus)
   wsStatusRef.current = wsStatus
 
+  const hasMessagesRef = useRef(false)
+  hasMessagesRef.current = chatHistory.messages.length > 0
+
   const subscribedSessionRef = useRef<string | null>(null)
   const sessionAgentSeqRef = useRef(0)
+  const modelLoadKeyRef = useRef<string | null>(null)
 
   const agentsRef = useRef(agents)
   useEffect(() => {
@@ -162,9 +166,20 @@ export function useAppLogic(
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
 
-    wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
-    subscribedSessionRef.current = sessionsHook.currentSessionKey
-    loadModels(currentAgentId, sessionsHook.currentSessionKey, chatHistory.messages.length > 0)
+    const alreadySubscribed = subscribedSessionRef.current === sessionsHook.currentSessionKey
+    if (!alreadySubscribed) {
+      wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
+      subscribedSessionRef.current = sessionsHook.currentSessionKey
+    }
+
+    const hasConversation = chatHistory.rawMessages.length > 0 || hasMessagesRef.current
+    const modelLoadKey = `${sessionsHook.currentSessionKey}:${currentAgentId}:${hasConversation ? 'history' : 'empty'}`
+    if (modelLoadKeyRef.current === modelLoadKey) {
+      return
+    }
+
+    modelLoadKeyRef.current = modelLoadKey
+    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation)
   }, [
     sessionsHook.currentSessionKey,
     currentAgentId,
@@ -172,11 +187,12 @@ export function useAppLogic(
     wsStatus,
     wsSend,
     loadModels,
-    chatHistory.messages,
+    chatHistory.rawMessages.length,
   ])
 
   const handleLogout = useCallback(() => {
     subscribedSessionRef.current = null
+    modelLoadKeyRef.current = null
     wsClose()
     messagesHook.clearStreaming()
     persistSession(null)

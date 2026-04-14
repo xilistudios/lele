@@ -115,7 +115,10 @@ export function useMessages(
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
-      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(['chatHistory', sessionKey])
+      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>([
+        'chatHistory',
+        sessionKey,
+      ])
       return history?.messages?.filter((message) => message.role === 'user').length ?? 0
     },
     [queryClient],

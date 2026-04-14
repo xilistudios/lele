@@ -190,7 +190,7 @@ function ProtectedLayout() {
   )
 }
 
-// Settings route component
+// Settings route component (layout wrapper with shared state)
 function SettingsRoute() {
   const navigate = useNavigate()
   const { onLogout } = useAppLogicContext()
@@ -225,7 +225,7 @@ function AppContent() {
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
-        <Route path="settings" element={<SettingsRoute />} />
+        <Route path="settings/:tab?" element={<SettingsRoute />} />
       </Route>
 
       {/* Fallback */}

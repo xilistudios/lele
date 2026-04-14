@@ -612,8 +612,51 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		}
 		return false
 	}
+	// Extract base session key (without timestamp suffix)
+	baseSessionKey := sessionKey
+	if idx := strings.LastIndex(sessionKey, ":"); idx > len("native:") {
+		// Check if suffix is a timestamp (all digits)
+		suffix := sessionKey[idx+1:]
+		if len(suffix) > 0 {
+			allDigits := true
+			for _, c := range suffix {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				baseSessionKey = sessionKey[:idx]
+			}
+		}
+	}
 	for _, sk := range client.SessionKeys {
+		// Exact match
 		if sk == sessionKey {
+			return true
+		}
+		// Allow base session key to match timestamped versions
+		if sk == baseSessionKey {
+			return true
+		}
+		// Allow timestamped session key to match base
+		skBase := sk
+		if idx := strings.LastIndex(sk, ":"); idx > len("native:") {
+			suffix := sk[idx+1:]
+			if len(suffix) > 0 {
+				allDigits := true
+				for _, c := range suffix {
+					if c < '0' || c > '9' {
+						allDigits = false
+						break
+					}
+				}
+				if allDigits {
+					skBase = sk[:idx]
+				}
+			}
+		}
+		if skBase == baseSessionKey || skBase == sessionKey {
 			return true
 		}
 	}
