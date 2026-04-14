@@ -278,6 +278,7 @@
     "saving": "Saving...",
     "reset": "Reset",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "status": "Status"
   }
 }

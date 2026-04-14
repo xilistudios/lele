@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
@@ -11,6 +12,7 @@ export function ChatHeader() {
   const navigate = useNavigate()
   const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar, wsStatus } =
     useAppLogicContext()
+  const { apiUrl } = useAuthContext()
   const { currentSession, parentSession, canCancel } = useChatPageContext()
   const currentTitle = currentSession
     ? formatSessionTitle(currentSession.key, currentSession.name, currentSession.message_count)
@@ -95,7 +97,7 @@ export function ChatHeader() {
           ) : null}
         </div>
       </div>
-      <ConnectionIndicator status={wsStatus} showLabel />
+      <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
     </div>
   )
 }

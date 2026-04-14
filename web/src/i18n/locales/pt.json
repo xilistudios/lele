@@ -278,6 +278,7 @@
     "saving": "Salvando...",
     "reset": "Restaurar",
     "enabled": "Habilitado",
-    "disabled": "Desabilitado"
+    "disabled": "Desabilitado",
+    "status": "Estado"
   }
 }

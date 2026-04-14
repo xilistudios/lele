@@ -15,7 +15,7 @@ type SidebarProps = {
 export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { apiUrl, session } = useAuthContext()
+  const { session } = useAuthContext()
   const {
     sessions,
     currentSessionKey,
@@ -72,7 +72,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             className={`min-w-0 flex-1 transition-opacity duration-200 ${hideText ? 'opacity-0' : 'opacity-100'}`}
           >
             <p className="truncate text-sm font-medium text-white">{deviceName}</p>
-            <p className="truncate text-[10px] text-[#666]">{apiUrl.replace(/^https?:\/\//, '')}</p>
           </div>
         </div>
 
