@@ -13,7 +13,8 @@ import (
 func TestTelegramHandleCommandWithSession_SubagentsPreservesArguments(t *testing.T) {
 	msgBus := bus.NewMessageBus()
 	channel := &TelegramChannel{
-		BaseChannel: NewBaseChannel("telegram", nil, msgBus, nil),
+		BaseChannel:   NewBaseChannel("telegram", nil, msgBus, nil),
+		processedIDs:  make(map[string]struct{}),
 	}
 
 	message := &telego.Message{

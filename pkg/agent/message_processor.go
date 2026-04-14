@@ -131,7 +131,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		Attachments:     msg.Attachments,
 		DefaultResponse: "I've completed processing but have no response to give.",
 		EnableSummary:   true,
-		SendResponse:    false,
+		SendResponse:    true,
 		ReplyTo:         replyTo,
 	})
 	if err != nil {

@@ -91,6 +91,13 @@ func (t *SendFileTool) Execute(ctx context.Context, args map[string]interface{})
 	if chatID == "" {
 		chatID = t.defaultChatID
 	}
+	ctxCh, ctxCid := ToolContextFromCtx(ctx)
+	if channel == "" {
+		channel = ctxCh
+	}
+	if chatID == "" {
+		chatID = ctxCid
+	}
 	if channel == "" || chatID == "" {
 		return &ToolResult{ForLLM: "No target channel/chat specified", IsError: true}
 	}

@@ -759,13 +759,20 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		}
 	}
 
+	originChannel := t.originChannel
+	originChatID := t.originChatID
+	if ch, cid := ToolContextFromCtx(ctx); ch != "" {
+		originChannel = ch
+		originChatID = cid
+	}
+
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
 		Provider:      sm.provider,
 		Model:         sm.defaultModel,
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,
-	}, messages, t.originChannel, t.originChatID)
+	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 	}

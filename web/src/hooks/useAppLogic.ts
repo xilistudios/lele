@@ -376,11 +376,7 @@ export function useAppLogic(
       ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
     }
 
-    if (
-      !chatHistory.processing &&
-      prevProcessingRef.current &&
-      !streamingMessagesRef.current.some((m) => m.streaming)
-    ) {
+    if (!chatHistory.processing && prevProcessingRef.current) {
       clearStreamingRef.current()
     }
 

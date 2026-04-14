@@ -2,8 +2,20 @@ import './test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
 import './test/i18n'
 import App from './App'
+import { queryClient } from './lib/queryClient'
+import type { ReactElement } from 'react'
+
+// Helper to render with required providers
+const renderWithProviders = (ui: ReactElement) => {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  )
+}
 
 type FetchResponseBody = Record<string, unknown>
 
@@ -308,11 +320,7 @@ describe('App', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('Session 2')).not.toBeNull())
 
@@ -438,11 +446,7 @@ describe('App', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(MockWebSocket.instances.length).toBe(1))
 
@@ -644,11 +648,7 @@ describe('Routing', () => {
   test('redirects to /pair when not authenticated', async () => {
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     // Wait for auth form to appear - look for the submit button instead of translated text
     await waitFor(() => {
@@ -659,11 +659,7 @@ describe('Routing', () => {
   test('shows auth page at /pair', async () => {
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/pair']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     // Look for submit button instead of translated text
     await waitFor(() => {
@@ -675,11 +671,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/pair']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => {
       expect(view.container.querySelector('input[inputmode="numeric"]')).toBeNull()
@@ -692,11 +684,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/settings']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     // Look for logout button by class instead of text
     await waitFor(() => {
@@ -708,11 +696,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:2']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
   })
@@ -721,11 +705,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1/subagent/subagent:task-1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('Subagent result')).not.toBeNull())
     expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
@@ -738,11 +718,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/invalid:session']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     // Should redirect to home and show the selected fallback session
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
@@ -752,11 +728,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => {
       const sessionItems = Array.from(view.container.querySelectorAll('nav span'))
@@ -780,11 +752,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('mensaje A')).not.toBeNull())
 
@@ -873,11 +841,7 @@ describe('Routing', () => {
     })
     globalThis.fetch = historyFetchMock as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('Parent response after reload')).not.toBeNull())
     await waitFor(() =>
@@ -895,11 +859,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => expect(view.getByText('mensaje A')).not.toBeNull())
 
@@ -1075,11 +1035,7 @@ describe('Auto-pairing', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    render(
-      <MemoryRouter initialEntries={['/pair?code=123456']}>
-        <App />
-      </MemoryRouter>,
-    )
+    renderWithProviders(<App />)
 
     await waitFor(() => expect(pairCalled).toBe(true))
   })
@@ -1145,11 +1101,7 @@ describe('Auto-pairing', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/pair?code=999999']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     // Wait for loading state to finish and form to appear
     await waitFor(
@@ -1174,11 +1126,7 @@ describe('Auto-pairing', () => {
   test('pre-fills PIN from URL code parameter', async () => {
     globalThis.fetch = mock(() => Promise.resolve(jsonResponse({}))) as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/pair?code=654321']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     await waitFor(() => {
       expect(view.container.querySelector('form')).not.toBeNull()
@@ -1333,11 +1281,7 @@ describe('Session deletion', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    const view = renderWithProviders(<App />)
 
     let sessionOneDeleteButton: Element | undefined
     await waitFor(() => {
@@ -1454,11 +1398,7 @@ describe('Session deletion', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    render(
-      <MemoryRouter initialEntries={['/chat/native:client-1:1']}>
-        <App />
-      </MemoryRouter>,
-    )
+    renderWithProviders(<App />)
 
     // Test that the component renders without errors
     await waitFor(() => {

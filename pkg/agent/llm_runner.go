@@ -43,6 +43,17 @@ func newLLMRunner(al *AgentLoop) *llmRunnerImpl {
 
 // runAgentLoop is the core message processing logic.
 func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error) {
+	if opts.SessionKey != "" {
+		sem, _ := lr.al.sessionProcessing.LoadOrStore(opts.SessionKey, make(chan struct{}, 1))
+		semCh := sem.(chan struct{})
+		select {
+		case semCh <- struct{}{}:
+			defer func() { <-semCh }()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels)
 	if opts.Channel != "" && opts.ChatID != "" {
 		// Don't record internal channels (cli, system, subagent)
@@ -130,6 +141,8 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 			outboundMsg.ReplyTo = opts.ReplyTo
 		}
 		lr.al.bus.PublishOutbound(outboundMsg)
+		// Return empty string to prevent duplicate publish in loop.go
+		return "", nil
 	}
 
 	// 9. Log response
@@ -753,7 +766,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			}
 
 			// Send ForUser content to user immediately if not Silent
-			if !toolResult.Silent && toolResult.ForUser != "" && opts.SendResponse {
+			// Native channel always receives results (handles them via structured events)
+			// Other channels only receive results in verbose full mode
+			if !toolResult.Silent && toolResult.ForUser != "" && opts.SendResponse && (opts.Channel == channels.ChannelName || lr.al.verboseManager.IsFull(opts.SessionKey)) {
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
 					ChatID:  opts.ChatID,

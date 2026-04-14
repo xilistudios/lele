@@ -23,7 +23,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     currentSessionKey,
     parentSessionKey,
     onCreateSession,
-    onClearSession,
     onDeleteSession,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
@@ -59,13 +58,13 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
       />
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 flex flex-col border-r border-[#2e2e2e] bg-[#222222] transition-all duration-300 ease-in-out md:relative md:translate-x-0
+          fixed inset-y-0 left-0 z-50 flex flex-col border-r border-[#2e2e2e] bg-[#222222] transition-all duration-300 ease-in-out md:relative md:translate-x-0 overflow-hidden
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-          ${collapsed ? 'w-[60px]' : 'w-[280px]'}
+          ${collapsed ? 'w-0' : 'w-[280px]'}
         `}
       >
         <div
-          className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} border-b border-[#2e2e2e] px-4 py-3`}
+          className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'opacity-0' : ''}`}
         >
           <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[#3a3a3a] text-xs font-bold text-white">
             {deviceName?.[0]?.toUpperCase() ?? 'L'}
@@ -122,30 +121,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               </svg>
               {t('chat.newSession')}
             </button>
-            <button
-              onClick={onClearSession}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#999] transition-colors hover:bg-[#2a2a2a] hover:text-white"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M3 6h18" />
-                <path d="M8 6V4h8v2" />
-                <path d="M19 6l-1 14H6L5 6" />
-              </svg>
-              {t('chat.clearSession')}
-            </button>
           </div>
         </div>
 
-        <div className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3`}>
+        <div
+          className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3 ${collapsed ? 'hidden' : ''}`}
+        >
           <div
             className={`overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'max-h-0 opacity-0' : 'max-h-8 opacity-100'}`}
           >
@@ -175,7 +156,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <div
-          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-t border-[#2e2e2e] px-4 py-3`}
+          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'hidden' : ''}`}
         >
           <div
             className={`flex items-center gap-1.5 overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}

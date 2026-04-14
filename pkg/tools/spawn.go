@@ -94,6 +94,13 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 		return ErrorResult("Subagent manager not configured")
 	}
 
+	originChannel := t.originChannel
+	originChatID := t.originChatID
+	if ch, cid := ToolContextFromCtx(ctx); ch != "" {
+		originChannel = ch
+		originChatID = cid
+	}
+
 	var (
 		result string
 		err    error
@@ -102,7 +109,7 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	if strings.TrimSpace(taskID) != "" {
 		result, err = t.manager.ContinueTask(ctx, taskID, guidance, t.callback)
 	} else {
-		result, err = t.manager.Spawn(ctx, task, label, agentID, t.originChannel, t.originChatID, t.callback)
+		result, err = t.manager.Spawn(ctx, task, label, agentID, originChannel, originChatID, t.callback)
 	}
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to manage subagent: %v", err))

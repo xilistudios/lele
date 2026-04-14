@@ -165,6 +165,16 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		return ErrorResult("command is required")
 	}
 
+	channel, chatID := ToolContextFromCtx(ctx)
+	if channel == "" {
+		channel = t.channel
+	}
+	if chatID == "" {
+		chatID = t.chatID
+	}
+	feedbackCallback := t.feedbackCallback
+	verbose := t.verbose
+
 	cwd := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
 		cwd = wd
@@ -252,11 +262,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			execErr = cmdCtx.Err()
 			break
 		case <-time.After(heartbeatInterval):
-			// Send heartbeat feedback
-			if t.verbose && t.feedbackCallback != nil && t.channel != "" && t.chatID != "" {
+			if verbose && feedbackCallback != nil && channel != "" && chatID != "" {
 				elapsedSoFar := time.Since(startTime).Round(time.Second)
 				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
-				t.feedbackCallback(t.channel, t.chatID, feedbackMsg)
+				feedbackCallback(channel, chatID, feedbackMsg)
 				feedbackSent = true
 			}
 			continue
