@@ -47,7 +47,15 @@
     "disconnected": "Disconnected",
     "showMore": "Show more",
     "showLess": "Show less",
-    "deleteSession": "Delete session"
+    "deleteSession": "Delete session",
+    "toggleSidebar": "Toggle sidebar",
+    "backTo": "Back to {{title}}"
+  },
+  "connection": {
+    "connected": "Connected",
+    "connecting": "Connecting",
+    "disconnected": "Disconnected",
+    "statusAria": "Connection status: {{status}}. Click for details."
   },
   "approval": {
     "inlineTitle": "Approval required",

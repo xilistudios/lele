@@ -47,7 +47,15 @@
     "disconnected": "Desconectado",
     "showMore": "Ver más",
     "showLess": "Ver menos",
-    "deleteSession": "Eliminar sesión"
+    "deleteSession": "Eliminar sesión",
+    "toggleSidebar": "Mostrar/ocultar sidebar",
+    "backTo": "Volver a {{title}}"
+  },
+  "connection": {
+    "connected": "Conectado",
+    "connecting": "Conectando",
+    "disconnected": "Desconectado",
+    "statusAria": "Estado de conexión: {{status}}. Click para detalles."
   },
   "approval": {
     "inlineTitle": "Aprobación requerida",
