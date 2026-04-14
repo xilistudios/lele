@@ -190,8 +190,8 @@ func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg
 // sendFormattedText sends text with HTML formatting
 func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, msg bus.OutboundMessage, htmlContent string, linkPreview bool) error {
 	logger.DebugCF("telegram", "sendFormattedText called", map[string]interface{}{
-		"chat_id":        chatID,
-		"msg_chat_id":    msg.ChatID,
+		"chat_id":         chatID,
+		"msg_chat_id":     msg.ChatID,
 		"has_placeholder": c.hasPlaceholder(msg.ChatID),
 	})
 
@@ -210,7 +210,7 @@ func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, m
 			return nil
 		} else {
 			logger.WarnCF("telegram", "Failed to edit placeholder, will send new message", map[string]interface{}{
-				"error":         err.Error(),
+				"error":          err.Error(),
 				"placeholder_id": pID,
 			})
 		}
