@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import type { ApiClient } from '../lib/api'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
 import { toChatMessages } from './useMessages'
@@ -74,6 +74,7 @@ export function useChatHistory(
         sessionKey: history.session_key,
         messages: toChatMessages(history.messages, history.session_key),
         rawMessages: history.messages,
+        processing: history.processing,
       }
     },
     enabled: sessionKey !== null && token !== null,
@@ -98,6 +99,7 @@ export function useChatHistory(
   return {
     messages,
     rawMessages: query.data?.rawMessages ?? [],
+    processing: query.data?.processing ?? false,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,

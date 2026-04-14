@@ -8,8 +8,8 @@ import { Spinner } from '../atoms/Spinner'
 export function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar } = useAppLogicContext()
-  const { currentSession, parentSession, canCancel } = useChatPageContext()
+  const { currentAgent, toolStatus, isStreaming, onToggleSidebar } = useAppLogicContext()
+  const { currentSession, parentSession } = useChatPageContext()
   const currentTitle = currentSession
     ? formatSessionTitle(currentSession.key, currentSession.name, currentSession.message_count)
     : t('chat.session')
@@ -82,15 +82,6 @@ export function ChatHeader() {
               )}
             </div>
           )}
-          {canCancel ? (
-            <button
-              type="button"
-              className="rounded-md border border-[#5a2b2b] px-3 py-1 text-xs text-[#f0b4b4] transition-colors hover:bg-[#351717]"
-              onClick={onCancel}
-            >
-              {t('chat.cancel')}
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

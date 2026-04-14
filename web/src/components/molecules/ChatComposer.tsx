@@ -80,15 +80,6 @@ export function ChatComposer() {
         <div className="flex items-center justify-between px-3 pb-2 pt-1">
           <div className="flex items-center gap-3">
             <AttachmentInput onUpload={onUploadAttachments} onAttach={onAttachmentsChange} />
-            {canCancel && (
-              <button
-                type="button"
-                className="rounded-md border border-[#5a2b2b] px-3 py-1 text-xs text-[#f0b4b4] transition-colors hover:bg-[#351717]"
-                onClick={onCancel}
-              >
-                {t('chat.cancel')}
-              </button>
-            )}
             <div className="flex items-center gap-2 text-[10px] text-[#555]">
               <SearchableSelect
                 ariaLabel={t('chat.model')}
@@ -119,23 +110,38 @@ export function ChatComposer() {
             </div>
           </div>
           <button
-            type="submit"
+            type={canCancel ? 'button' : 'submit'}
             disabled={false}
-            aria-label={t('chat.send')}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-black transition-colors hover:bg-[#ddd] disabled:opacity-20"
+            aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-20"
+            onClick={canCancel ? onCancel : undefined}
+            style={canCancel ? { backgroundColor: '#351717', border: '1px solid #5a2b2b' } : {}}
+            onMouseEnter={(e) => {
+              if (canCancel) e.currentTarget.style.backgroundColor = '#4a2020'
+            }}
+            onMouseLeave={(e) => {
+              if (canCancel) e.currentTarget.style.backgroundColor = '#351717'
+            }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              aria-hidden="true"
-            >
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
+            {canCancel ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="#f0b4b4" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            ) : (
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                aria-hidden="true"
+                className="text-black hover:text-black"
+              >
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            )}
           </button>
         </div>
       </div>

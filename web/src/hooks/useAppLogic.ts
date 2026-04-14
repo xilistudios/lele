@@ -356,8 +356,40 @@ export function useAppLogic(
     setSidebarOpen((current) => !current)
   }, [])
 
+  const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
+  ensurePlaceholderRef.current = messagesHook.ensureAssistantPlaceholder
+  const clearStreamingRef = useRef(messagesHook.clearStreaming)
+  clearStreamingRef.current = messagesHook.clearStreaming
+  const streamingMessagesRef = useRef(messagesHook.streamingMessages)
+  streamingMessagesRef.current = messagesHook.streamingMessages
+
+  const prevProcessingRef = useRef(false)
+  useEffect(() => {
+    const sessionKey = sessionsHook.currentSessionKey
+    if (!sessionKey) return
+
+    const hasStreamingPlaceholder = streamingMessagesRef.current.some(
+      (m) => m.sessionKey === sessionKey && (m.streaming || m.id === '__processing_placeholder__'),
+    )
+
+    if (chatHistory.processing && !hasStreamingPlaceholder) {
+      ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
+    }
+
+    if (
+      !chatHistory.processing &&
+      prevProcessingRef.current &&
+      !streamingMessagesRef.current.some((m) => m.streaming)
+    ) {
+      clearStreamingRef.current()
+    }
+
+    prevProcessingRef.current = chatHistory.processing
+  }, [chatHistory.processing, sessionsHook.currentSessionKey])
+
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
-  const isStreaming = messagesHook.streamingMessages.some((m) => m.streaming)
+  const isStreaming =
+    messagesHook.streamingMessages.some((m) => m.streaming) || chatHistory.processing
 
   return {
     error,

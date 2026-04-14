@@ -143,6 +143,7 @@ type ChatSendResponse struct {
 type ChatHistoryResponse struct {
 	SessionKey string               `json:"session_key"`
 	Messages   []ChatHistoryMessage `json:"messages"`
+	Processing bool                 `json:"processing"`
 }
 
 type ChatHistoryMessage struct {
