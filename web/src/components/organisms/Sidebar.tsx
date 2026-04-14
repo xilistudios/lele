@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { SessionItem } from '../molecules/SessionItem'
 
 type SidebarProps = {
@@ -18,7 +17,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const navigate = useNavigate()
   const { apiUrl, session } = useAuthContext()
   const {
-    wsStatus,
     sessions,
     currentSessionKey,
     parentSessionKey,
@@ -76,27 +74,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             <p className="truncate text-sm font-medium text-white">{deviceName}</p>
             <p className="truncate text-[10px] text-[#666]">{apiUrl.replace(/^https?:\/\//, '')}</p>
           </div>
-          <button
-            onClick={() => navigate('/pair')}
-            title={t('chat.logout')}
-            type="button"
-            aria-label={t('chat.logout')}
-            className="text-[#555] transition-colors hover:text-[#aaa]"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
         </div>
 
         <div
@@ -155,16 +132,8 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <div
-          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-t border-[#2e2e2e] px-4 py-3`}
+          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-end'} border-t border-[#2e2e2e] px-4 py-3`}
         >
-          <div
-            className={`flex items-center gap-1.5 overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}
-          >
-            <ConnectionIndicator status={wsStatus} />
-            <span className="text-[10px] text-[#555] whitespace-nowrap">
-              {t(`chat.${wsStatus}`)}
-            </span>
-          </div>
           <button
             type="button"
             title={t('chat.settings')}
@@ -187,6 +156,33 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
+          </button>
+        </div>
+
+        <div
+          className={`mt-auto border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}
+        >
+          <button
+            onClick={() => navigate('/pair')}
+            title={t('chat.logout')}
+            type="button"
+            aria-label={t('chat.logout')}
+            className="flex items-center gap-2 text-[#555] transition-colors hover:text-[#aaa]"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            {!collapsed && <span className="text-xs">{t('chat.logout')}</span>}
           </button>
         </div>
       </aside>

@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { formatSessionTitle } from '../../lib/utils'
+import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { Spinner } from '../atoms/Spinner'
 
 export function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar } = useAppLogicContext()
+  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar, wsStatus } =
+    useAppLogicContext()
   const { currentSession, parentSession, canCancel } = useChatPageContext()
   const currentTitle = currentSession
     ? formatSessionTitle(currentSession.key, currentSession.name, currentSession.message_count)
@@ -93,6 +95,7 @@ export function ChatHeader() {
           ) : null}
         </div>
       </div>
+      <ConnectionIndicator status={wsStatus} showLabel />
     </div>
   )
 }
