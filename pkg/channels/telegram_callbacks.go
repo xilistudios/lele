@@ -113,7 +113,7 @@ func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query teleg
 	if err := c.config.PersistTelegramVerbose(config.DefaultConfigPath(), config.VerboseLevel(level)); err != nil {
 		_ = c.agentLoop.SetVerboseLevel(sessionKey, previousLevel)
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to update config.json"))
-		return nil
+		return err
 	}
 
 	var emoji string

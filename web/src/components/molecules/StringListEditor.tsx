@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SearchableSelect } from '../molecules/SearchableSelect'
+import { SearchableSelect } from './SearchableSelect'
 
 type Option = {
   value: string
@@ -132,8 +132,9 @@ export function StringListEditor({
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
-                  aria-hidden="true"
+aria-hidden="true"
                 >
+                  <title>{removeTitle}</title>
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>

@@ -6,16 +6,14 @@ import type {
   Agent,
   AgentDetails,
   ChannelInfo,
-  ChatMessage,
   ConfigResponse,
-  HistoryResponse,
   SystemStatus,
   ToolInfo,
 } from '../lib/types'
+import { useChatHistory } from './useChatHistory'
 import { useChatSessions } from './useChatSessions'
-import { toChatMessages, useMessages } from './useMessages'
+import { useMessages } from './useMessages'
 import { useModels } from './useModels'
-import { usePollingFallback } from './usePollingFallback'
 import type { SocketStatus } from './useSocket'
 
 type DiagnosticsState = {
@@ -60,30 +58,27 @@ export function useAppLogic(
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
   )
+  const chatHistory = useChatHistory(
+    api,
+    sessionsHook.currentSessionKey,
+    token,
+    messagesHook.streamingMessages,
+  )
 
   const wsStatusRef = useRef(wsStatus)
   wsStatusRef.current = wsStatus
 
+  const hasMessagesRef = useRef(false)
+  hasMessagesRef.current = chatHistory.messages.length > 0
+
   const subscribedSessionRef = useRef<string | null>(null)
   const sessionAgentSeqRef = useRef(0)
+  const modelLoadKeyRef = useRef<string | null>(null)
 
   const agentsRef = useRef(agents)
   useEffect(() => {
     agentsRef.current = agents
   }, [agents])
-
-  usePollingFallback({
-    api,
-    currentSessionKey: sessionsHook.currentSessionKey,
-    wsStatus,
-    onMessages: (newMessages: ChatMessage[]) => {
-      if (sessionsHook.currentSessionKeyRef.current === sessionsHook.currentSessionKey) {
-        messagesHook.setMessages(newMessages)
-      }
-    },
-    sessionToken: token ?? undefined,
-    toChatMessages,
-  })
 
   const currentAgentIdRef = useRef(currentAgentId)
   useEffect(() => {
@@ -155,12 +150,10 @@ export function useAppLogic(
     loadAgentData()
   }, [currentAgentId, token, api])
 
-  // Cleanup effect: unsubscribe from previous session when session/agent changes
   useEffect(() => {
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
 
-    // Cleanup: unsubscribe from previous session before subscribing to new one
     return () => {
       if (subscribedSessionRef.current) {
         wsSend('unsubscribe', { session_key: subscribedSessionRef.current })
@@ -169,21 +162,24 @@ export function useAppLogic(
     }
   }, [sessionsHook.currentSessionKey, currentAgentId, token, wsStatus, wsSend])
 
-  // Subscribe effect: subscribe to current session
   useEffect(() => {
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
-    // Skip if already subscribed to this session
-    if (subscribedSessionRef.current === sessionsHook.currentSessionKey) return
 
-    wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
-    subscribedSessionRef.current = sessionsHook.currentSessionKey
-    messagesHook.loadHistory(sessionsHook.currentSessionKey)
-    loadModels(
-      currentAgentId,
-      sessionsHook.currentSessionKey,
-      messagesHook.messagesRef.current.length > 0,
-    )
+    const alreadySubscribed = subscribedSessionRef.current === sessionsHook.currentSessionKey
+    if (!alreadySubscribed) {
+      wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
+      subscribedSessionRef.current = sessionsHook.currentSessionKey
+    }
+
+    const hasConversation = chatHistory.rawMessages.length > 0 || hasMessagesRef.current
+    const modelLoadKey = `${sessionsHook.currentSessionKey}:${currentAgentId}:${hasConversation ? 'history' : 'empty'}`
+    if (modelLoadKeyRef.current === modelLoadKey) {
+      return
+    }
+
+    modelLoadKeyRef.current = modelLoadKey
+    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation)
   }, [
     sessionsHook.currentSessionKey,
     currentAgentId,
@@ -191,21 +187,21 @@ export function useAppLogic(
     wsStatus,
     wsSend,
     loadModels,
-    messagesHook.loadHistory,
-    messagesHook.messagesRef,
+    chatHistory.rawMessages.length,
   ])
 
   const handleLogout = useCallback(() => {
     subscribedSessionRef.current = null
+    modelLoadKeyRef.current = null
     wsClose()
-    messagesHook.clearMessages()
+    messagesHook.clearStreaming()
     persistSession(null)
     clearCurrentSessionKey()
     setAgents([])
     setCurrentAgentId(null)
     setDiagnostics({ status: null, channels: [], tools: [], config: null, agentInfo: null })
     setError(null)
-  }, [wsClose, messagesHook.clearMessages, persistSession])
+  }, [wsClose, messagesHook.clearStreaming, persistSession])
 
   const handleSend = useCallback(
     async (content: string, attachments: string[]) => {
@@ -256,7 +252,7 @@ export function useAppLogic(
       subscribedSessionRef.current = null
       setParentSessionKey(options?.parentSessionKey ?? null)
       sessionsHook.selectSession(sessionKey)
-      messagesHook.clearMessages()
+      messagesHook.clearStreaming()
       const requestSeq = ++sessionAgentSeqRef.current
       try {
         const agentResult = await api.sessionAgent(sessionKey)
@@ -277,7 +273,7 @@ export function useAppLogic(
       sessionsHook.selectSession,
       sessionsHook.currentSessionKey,
       sessionsHook.currentSessionKeyRef,
-      messagesHook.clearMessages,
+      messagesHook.clearStreaming,
       api,
       parentSessionKey,
     ],
@@ -300,10 +296,10 @@ export function useAppLogic(
     setParentSessionKey(null)
     const newKey = sessionsHook.createSession()
     if (newKey) {
-      messagesHook.clearMessages()
+      messagesHook.clearStreaming()
       navigate(`/chat/${encodeURIComponent(newKey)}`)
     }
-  }, [wsSend, sessionsHook, messagesHook.clearMessages, navigate])
+  }, [wsSend, sessionsHook, messagesHook.clearStreaming, navigate])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -315,8 +311,8 @@ export function useAppLogic(
   const handleClearSession = useCallback(async () => {
     if (!sessionsHook.currentSessionKey) return
     await sessionsHook.clearSession(sessionsHook.currentSessionKey)
-    messagesHook.clearMessages()
-  }, [sessionsHook.currentSessionKey, sessionsHook.clearSession, messagesHook.clearMessages])
+    messagesHook.clearStreaming()
+  }, [sessionsHook.currentSessionKey, sessionsHook.clearSession, messagesHook.clearStreaming])
 
   const handleSelectAgent = useCallback(
     async (agentId: string) => {
@@ -361,7 +357,7 @@ export function useAppLogic(
   }, [])
 
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
-  const isStreaming = messagesHook.messages.some((m) => m.streaming)
+  const isStreaming = messagesHook.streamingMessages.some((m) => m.streaming)
 
   return {
     error,
@@ -375,7 +371,7 @@ export function useAppLogic(
     sessions: sessionsHook.sessions,
     currentSessionKey: sessionsHook.currentSessionKey,
     parentSessionKey,
-    messages: messagesHook.messages,
+    messages: chatHistory.messages,
     approvalRequest: messagesHook.approvalRequest,
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,

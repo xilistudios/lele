@@ -171,7 +171,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             aria-label={t('chat.settings')}
             className="text-[#444] transition-colors hover:text-[#888]"
             onClick={() => {
-              navigate('/settings')
+              navigate('/settings/general')
               if (isMobile) onClose()
             }}
           >

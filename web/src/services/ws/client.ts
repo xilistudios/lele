@@ -217,17 +217,19 @@ export class LeleSocket {
         window.clearInterval(this.pingIntervalId)
         this.pingIntervalId = null
       }
-      this.setState('disconnected')
       this.emit('close')
       if (!this.shouldReconnect) {
+        this.setState('disconnected')
         return
       }
 
       if (this.reconnectAttempts >= this.reconnectStrategy.maxRetries) {
+        this.setState('disconnected')
         this.emit('error', new Event('max_reconnect_attempts'))
         return
       }
 
+      this.setState('connecting')
       window.setTimeout(() => this.open(), this.reconnectDelay)
       this.reconnectDelay = this.reconnectStrategy.nextDelay(this.reconnectDelay)
     })
