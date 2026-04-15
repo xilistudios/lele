@@ -5,8 +5,8 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { formatSessionTitle } from '../../lib/utils'
-import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
+import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
 import { Spinner } from '../atoms/Spinner'
 
 function ToolStatus({ tool, action }: { tool: string; action: string }) {
@@ -23,7 +23,8 @@ function ToolStatus({ tool, action }: { tool: string; action: string }) {
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar, wsStatus } = useAppLogicContext()
+  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar, wsStatus } =
+    useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession, canCancel } = useChatPageContext()
 
@@ -66,7 +67,11 @@ export const ChatHeader = memo(function ChatHeader() {
 
         {(isStreaming || toolStatus) && (
           <div className="flex items-center gap-1.5 text-xs text-[#666]">
-            {toolStatus ? <ToolStatus tool={toolStatus.tool} action={toolStatus.action} /> : <Spinner size="sm" />}
+            {toolStatus ? (
+              <ToolStatus tool={toolStatus.tool} action={toolStatus.action} />
+            ) : (
+              <Spinner size="sm" />
+            )}
           </div>
         )}
 

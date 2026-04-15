@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { usePopoverPosition } from '../../hooks/usePopoverPosition'
 import { ServerIcon } from './Icons'
 
 type Props = {
@@ -7,101 +8,51 @@ type Props = {
   apiUrl?: string
 }
 
-type Position = {
-  horizontal: 'left-align' | 'right-align'
-  vertical: 'below' | 'above'
-}
-
 const POPOVER_WIDTH = 180
 const POPOVER_HEIGHT = 80
-const PADDING = 8
 
 const STATUS_CONFIG = {
   connected: { dot: 'bg-emerald-400', text: 'text-emerald-400' },
   connecting: { dot: 'bg-yellow-400 animate-pulse-dot', text: 'text-yellow-400' },
   disconnected: { dot: 'bg-red-400', text: 'text-gray-500' },
-}
+} as const
 
-const ORIGIN_MAP: Record<Position['vertical'], Record<Position['horizontal'], string>> = {
+const ORIGIN_MAP = {
   below: { 'right-align': 'origin-top-right', 'left-align': 'origin-top-left' },
   above: { 'right-align': 'origin-bottom-right', 'left-align': 'origin-bottom-left' },
-}
+} as const
 
 export function ConnectionIndicator({ status, apiUrl }: Props) {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
-  const [position, setPosition] = useState<Position>({ horizontal: 'right-align', vertical: 'below' })
-  const containerRef = useRef<HTMLDivElement>(null)
+  const { position, ref } = usePopoverPosition({
+    isOpen,
+    popoverWidth: POPOVER_WIDTH,
+    popoverHeight: POPOVER_HEIGHT,
+  })
 
   const config = STATUS_CONFIG[status]
   const displayUrl = apiUrl?.replace(/^https?:\/\//, '') ?? 'N/A'
-
-  useLayoutEffect(() => {
-    if (!isOpen || !containerRef.current) return
-
-    const rect = containerRef.current.getBoundingClientRect()
-    const spaceLeft = rect.left
-    const spaceRight = window.innerWidth - rect.right
-    const spaceBelow = window.innerHeight - rect.bottom
-    const spaceAbove = rect.top
-
-    const horizontal = spaceLeft < POPOVER_WIDTH + PADDING && spaceRight >= POPOVER_WIDTH + PADDING
-      ? 'left-align'
-      : 'right-align'
-
-    const vertical = spaceBelow < POPOVER_HEIGHT + PADDING && spaceAbove >= POPOVER_HEIGHT + PADDING
-      ? 'above'
-      : 'below'
-
-    setPosition({ horizontal, vertical })
-  }, [isOpen])
-
-  useEffect(() => {
-    if (!isOpen) return
-
-    const onResize = () => {
-      if (!containerRef.current) return
-
-      const rect = containerRef.current.getBoundingClientRect()
-      const spaceLeft = rect.left
-      const spaceRight = window.innerWidth - rect.right
-      const spaceBelow = window.innerHeight - rect.bottom
-      const spaceAbove = rect.top
-
-      const horizontal = spaceLeft < POPOVER_WIDTH + PADDING && spaceRight >= POPOVER_WIDTH + PADDING
-        ? 'left-align'
-        : 'right-align'
-
-      const vertical = spaceBelow < POPOVER_HEIGHT + PADDING && spaceAbove >= POPOVER_HEIGHT + PADDING
-        ? 'above'
-        : 'below'
-
-      setPosition({ horizontal, vertical })
-    }
-
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
 
     const onClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
         setIsOpen(false)
       }
     }
 
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [isOpen])
+  }, [isOpen, ref])
 
   const origin = ORIGIN_MAP[position.vertical][position.horizontal]
   const verticalClass = position.vertical === 'below' ? 'top-full mt-1' : 'bottom-full mb-1'
   const horizontalClass = position.horizontal === 'right-align' ? 'right-0' : 'left-0'
 
   return (
-    <div ref={containerRef} className={`relative ${!isOpen ? 'group' : ''}`}>
+    <div ref={ref} className={`relative ${!isOpen ? 'group' : ''}`}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}

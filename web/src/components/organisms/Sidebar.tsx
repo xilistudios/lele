@@ -5,6 +5,7 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { LogoutIcon, PlusIcon, SettingsIcon } from '../atoms/Icons'
+import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
 
 const MAX_VISIBLE_SESSIONS = 5
@@ -19,18 +20,22 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { session } = useAuthContext()
-  const { sessions, currentSessionKey, parentSessionKey, onCreateSession, onDeleteSession } = useAppLogicContext()
+  const { sessions, currentSessionKey, parentSessionKey, onCreateSession, onDeleteSession } =
+    useAppLogicContext()
   const isMobile = useIsMobile()
 
   const deviceName = session?.device_name ?? 'lele'
 
   const sortedSessions = useMemo(() => {
     const visible = sessions.filter((s) => !s.key.startsWith('subagent:'))
-    return [...visible].sort((b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime())
+    return [...visible].sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
   }, [sessions])
 
   const selectedKey = parentSessionKey ?? currentSessionKey
-  const currentSession = sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null
+  const currentSession =
+    sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null
 
   const handleSessionSelect = (key: string) => {
     navigate(`/chat/${encodeURIComponent(key)}`)
@@ -60,16 +65,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
-        <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} border-b border-[#2e2e2e] px-4 py-3`}>
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[#3a3a3a] text-xs font-bold text-white">
-            {deviceName?.[0]?.toUpperCase() ?? 'L'}
-          </div>
-          <div className={`min-w-0 flex-1 transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-            <p className="truncate text-sm font-medium text-white">{deviceName}</p>
-          </div>
-        </div>
-
-        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0 border-b-0' : 'max-h-24 opacity-100 border-b border-[#2e2e2e]'}`}>
+        <div
+          className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0 border-b-0' : 'max-h-24 opacity-100 border-b border-[#2e2e2e]'}`}
+        >
           <div className="space-y-2 px-3 py-3">
             <button
               onClick={onCreateSession}
@@ -83,10 +81,16 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <div className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3`}>
-          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0' : 'max-h-8 opacity-100'}`}>
-            <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.sessions')}</p>
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0' : 'max-h-8 opacity-100'}`}
+          >
+            <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">
+              {t('chat.sessions')}
+            </p>
           </div>
-          <nav className={`mt-2 space-y-0.5 overflow-y-auto transition-[max-height] duration-300 ease-in-out ${collapsed ? 'max-h-[300px]' : 'max-h-[240px]'}`}>
+          <nav
+            className={`mt-2 space-y-0.5 overflow-y-auto transition-[max-height] duration-300 ease-in-out ${collapsed ? 'max-h-[300px]' : 'max-h-[240px]'}`}
+          >
             {sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
               <SessionItem
                 key={s.key}
@@ -102,29 +106,50 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           </nav>
         </div>
 
-        <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-end'} border-t border-[#2e2e2e] px-4 py-3`}>
-          <button
-            type="button"
-            title={t('chat.settings')}
-            aria-label={t('chat.settings')}
-            className="text-[#444] transition-colors hover:text-[#888]"
-            onClick={handleSettingsClick}
+        <div
+          className={`mt-auto border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}
+        >
+          <Popover
+            trigger={
+              <div
+                className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} cursor-pointer`}
+              >
+                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[#3a3a3a] text-xs font-bold text-white">
+                  {deviceName?.[0]?.toUpperCase() ?? 'L'}
+                </div>
+                {!collapsed && (
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-white">{deviceName}</p>
+                  </div>
+                )}
+              </div>
+            }
+            popoverWidth={150}
+            popoverHeight={80}
           >
-            <SettingsIcon />
-          </button>
-        </div>
-
-        <div className={`mt-auto border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
-          <button
-            onClick={() => navigate('/pair')}
-            title={t('chat.logout')}
-            type="button"
-            aria-label={t('chat.logout')}
-            className="flex items-center gap-2 text-[#555] transition-colors hover:text-[#aaa]"
-          >
-            <LogoutIcon />
-            {!collapsed && <span className="text-xs">{t('chat.logout')}</span>}
-          </button>
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                title={t('chat.settings')}
+                aria-label={t('chat.settings')}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white"
+                onClick={handleSettingsClick}
+              >
+                <SettingsIcon />
+                <span>{t('chat.settings')}</span>
+              </button>
+              <button
+                onClick={() => navigate('/pair')}
+                title={t('chat.logout')}
+                type="button"
+                aria-label={t('chat.logout')}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#555] transition-colors hover:bg-[#2a2a2a] hover:text-[#aaa]"
+              >
+                <LogoutIcon />
+                <span>{t('chat.logout')}</span>
+              </button>
+            </div>
+          </Popover>
         </div>
       </aside>
     </>
