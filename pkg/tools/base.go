@@ -2,6 +2,27 @@ package tools
 
 import "context"
 
+type contextKey string
+
+const (
+	channelCtxKey contextKey = "tool_channel"
+	chatIDCtxKey  contextKey = "tool_chat_id"
+)
+
+// WithToolContext returns a context with channel and chatID stored as values.
+func WithToolContext(ctx context.Context, channel, chatID string) context.Context {
+	ctx = context.WithValue(ctx, channelCtxKey, channel)
+	ctx = context.WithValue(ctx, chatIDCtxKey, chatID)
+	return ctx
+}
+
+// ToolContextFromCtx extracts channel and chatID from a context.
+func ToolContextFromCtx(ctx context.Context) (channel, chatID string) {
+	ch, _ := ctx.Value(channelCtxKey).(string)
+	cid, _ := ctx.Value(chatIDCtxKey).(string)
+	return ch, cid
+}
+
 // Tool is the interface that all tools must implement.
 type Tool interface {
 	Name() string

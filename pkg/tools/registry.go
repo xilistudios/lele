@@ -57,9 +57,11 @@ func (r *ToolRegistry) ExecuteWithContext(ctx context.Context, name string, args
 		return ErrorResult(fmt.Sprintf("tool %q not found", name)).WithError(fmt.Errorf("tool not found"))
 	}
 
-	// If tool implements ContextualTool, set context
-	if contextualTool, ok := tool.(ContextualTool); ok && channel != "" && chatID != "" {
-		contextualTool.SetContext(channel, chatID)
+	if channel != "" && chatID != "" {
+		if contextualTool, ok := tool.(ContextualTool); ok {
+			contextualTool.SetContext(channel, chatID)
+		}
+		ctx = WithToolContext(ctx, channel, chatID)
 	}
 
 	// If tool implements AsyncTool and callback is provided, set callback

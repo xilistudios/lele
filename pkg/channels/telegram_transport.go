@@ -189,6 +189,12 @@ func (c *TelegramChannel) sendTextMessage(ctx context.Context, chatID int64, msg
 
 // sendFormattedText sends text with HTML formatting
 func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, msg bus.OutboundMessage, htmlContent string, linkPreview bool) error {
+	logger.DebugCF("telegram", "sendFormattedText called", map[string]interface{}{
+		"chat_id":        chatID,
+		"msg_chat_id":    msg.ChatID,
+		"has_placeholder": c.hasPlaceholder(msg.ChatID),
+	})
+
 	if pID, ok := c.placeholders.Load(msg.ChatID); ok {
 		c.placeholders.Delete(msg.ChatID)
 		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), htmlContent)
@@ -198,7 +204,15 @@ func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, m
 		}
 
 		if _, err := c.bot.EditMessageText(ctx, editMsg); err == nil {
+			logger.DebugCF("telegram", "Placeholder edited successfully", map[string]interface{}{
+				"placeholder_id": pID,
+			})
 			return nil
+		} else {
+			logger.WarnCF("telegram", "Failed to edit placeholder, will send new message", map[string]interface{}{
+				"error":         err.Error(),
+				"placeholder_id": pID,
+			})
 		}
 	}
 
@@ -263,6 +277,11 @@ func (c *TelegramChannel) sendPlainTextFallback(ctx context.Context, chatID int6
 
 	_, err := c.bot.SendMessage(ctx, tgMsg)
 	return err
+}
+
+func (c *TelegramChannel) hasPlaceholder(chatID string) bool {
+	_, ok := c.placeholders.Load(chatID)
+	return ok
 }
 
 func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID int64, chatKey, content string) bool {

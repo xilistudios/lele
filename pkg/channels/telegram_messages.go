@@ -20,6 +20,16 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 		return fmt.Errorf("message is nil")
 	}
 
+	// Deduplication: check if we've already processed this message
+	messageKey := fmt.Sprintf("%d:%d", message.Chat.ID, message.MessageID)
+	if c.isDuplicate(messageKey) {
+		logger.DebugCF("telegram", "Duplicate message ignored", map[string]interface{}{
+			"message_id": message.MessageID,
+			"chat_id":    message.Chat.ID,
+		})
+		return nil
+	}
+
 	if message.Text != "" && strings.HasPrefix(message.Text, "/") {
 		text := strings.TrimPrefix(message.Text, "/")
 		parts := strings.Fields(text)
@@ -187,6 +197,17 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message *telego.Message, cmd string) error {
 	if message == nil {
 		return fmt.Errorf("message is nil")
+	}
+
+	// Deduplication: check if we've already processed this message
+	messageKey := fmt.Sprintf("%d:%d", message.Chat.ID, message.MessageID)
+	if c.isDuplicate(messageKey) {
+		logger.DebugCF("telegram", "Duplicate command ignored", map[string]interface{}{
+			"message_id": message.MessageID,
+			"chat_id":    message.Chat.ID,
+			"command":    cmd,
+		})
+		return nil
 	}
 
 	user := message.From

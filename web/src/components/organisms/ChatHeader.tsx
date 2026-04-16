@@ -65,25 +65,27 @@ export const ChatHeader = memo(function ChatHeader() {
           </p>
         </div>
 
-        {(isStreaming || toolStatus) && (
-          <div className="flex items-center gap-1.5 text-xs text-[#666]">
-            {toolStatus ? (
-              <ToolStatus tool={toolStatus.tool} action={toolStatus.action} />
-            ) : (
-              <Spinner size="sm" />
-            )}
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {(isStreaming || toolStatus) && (
+            <div className="flex items-center gap-1.5 text-xs text-[#666]">
+              {toolStatus ? (
+                <ToolStatus tool={toolStatus.tool} action={toolStatus.action} />
+              ) : (
+                <Spinner size="sm" />
+              )}
+            </div>
+          )}
 
-        {canCancel && (
-          <button
-            type="button"
-            className="rounded-md border border-[#5a2b2b] px-3 py-1 text-xs text-[#f0b4b4] transition-colors hover:bg-[#351717]"
-            onClick={onCancel}
-          >
-            {t('chat.cancel')}
-          </button>
-        )}
+          {canCancel && (
+            <button
+              type="button"
+              className="rounded-md border border-[#5a2b2b] px-3 py-1 text-xs text-[#f0b4b4] transition-colors hover:bg-[#351717]"
+              onClick={onCancel}
+            >
+              {t('chat.cancel')}
+            </button>
+          )}
+        </div>
       </div>
 
       <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />

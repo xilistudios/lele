@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
@@ -58,12 +59,35 @@ func TestTelegramSessionFlow(t *testing.T) {
 		SessionKey: sessionKey,
 	}
 
-	response1, err := al.messageProcessor.processMessage(context.Background(), msg1)
-	if err != nil {
-		t.Fatalf("Failed to process first message: %v", err)
+	// Use goroutine to process and receive message simultaneously
+	var processErr1 error
+	processDone1 := make(chan struct{})
+	go func() {
+		_, processErr1 = al.messageProcessor.processMessage(context.Background(), msg1)
+		close(processDone1)
+	}()
+
+	// Wait for outbound message (SubscribeOutbound blocks until message arrives)
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel1()
+	outbound1, ok1 := msgBus.SubscribeOutbound(ctx1)
+	if !ok1 {
+		t.Fatal("Expected outbound message for first message")
 	}
-	if response1 == "" {
-		t.Fatal("Expected response for first message")
+
+	// Wait for processing to complete
+	select {
+	case <-processDone1:
+		if processErr1 != nil {
+			t.Fatalf("Failed to process first message: %v", processErr1)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Processing took too long")
+	}
+
+	// Verify outbound message content
+	if !strings.Contains(outbound1.Content, "I'm doing well") {
+		t.Fatalf("Expected response content in outbound message, got: %s", outbound1.Content)
 	}
 
 	// Get the active session key
@@ -87,6 +111,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to process /new command: %v", err)
 	}
+	// Commands return their response directly
 	if response2 == "" || !strings.Contains(response2, "New conversation") {
 		t.Fatalf("Expected new conversation response, got: %s", response2)
 	}
@@ -112,12 +137,35 @@ func TestTelegramSessionFlow(t *testing.T) {
 		SessionKey: sessionKey,
 	}
 
-	response3, err := al.messageProcessor.processMessage(context.Background(), msg3)
-	if err != nil {
-		t.Fatalf("Failed to process third message: %v", err)
+	// Use goroutine to process and receive message simultaneously
+	var processErr3 error
+	processDone3 := make(chan struct{})
+	go func() {
+		_, processErr3 = al.messageProcessor.processMessage(context.Background(), msg3)
+		close(processDone3)
+	}()
+
+	// Wait for outbound message
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel3()
+	outbound3, ok3 := msgBus.SubscribeOutbound(ctx3)
+	if !ok3 {
+		t.Fatal("Expected outbound message for third message")
 	}
-	if response3 == "" {
-		t.Fatal("Expected response for third message")
+
+	// Wait for processing to complete
+	select {
+	case <-processDone3:
+		if processErr3 != nil {
+			t.Fatalf("Failed to process third message: %v", processErr3)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Processing took too long")
+	}
+
+	// Verify outbound message content
+	if outbound3.Content == "" {
+		t.Fatal("Expected non-empty response in outbound message")
 	}
 
 	// Verify new session now has 2 messages (user + assistant)

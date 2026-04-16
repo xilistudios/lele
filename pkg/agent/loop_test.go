@@ -200,7 +200,8 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 		},
 	}
 
-	al := NewAgentLoop(cfg, bus.NewMessageBus())
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
 	agent := al.registry.GetDefaultAgent()
 	if agent == nil {
 		t.Fatal("No default agent found")
@@ -220,15 +221,41 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 	agent.Sessions.SetSummary(sessionKey, "old summary")
 	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
 
-	response, err := al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
-	if err != nil {
-		t.Fatalf("ProcessDirectWithChannel failed: %v", err)
+	// Process in goroutine and consume from bus simultaneously
+	var response string
+	var processErr error
+	processDone := make(chan struct{})
+	go func() {
+		response, processErr = al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
+		close(processDone)
+	}()
+
+	// Get outbound message (model response)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	outbound, ok := msgBus.SubscribeOutbound(ctx)
+	if !ok {
+		t.Fatal("Expected outbound message")
 	}
+
+	// Wait for processing to complete
+	select {
+	case <-processDone:
+		if processErr != nil {
+			t.Fatalf("ProcessDirectWithChannel failed: %v", processErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("Timeout waiting for ProcessDirectWithChannel")
+	}
+
+	// Check ephemeral notice in return value
 	if !strings.Contains(response, "New ephemeral session created") {
 		t.Fatalf("expected ephemeral notice, got: %s", response)
 	}
-	if !strings.Contains(response, "Fresh response") {
-		t.Fatalf("expected model response, got: %s", response)
+
+	// Check model response in outbound message
+	if !strings.Contains(outbound.Content, "Fresh response") {
+		t.Fatalf("expected model response in outbound, got: %s", outbound.Content)
 	}
 
 	history := agent.Sessions.GetHistory(sessionKey)
@@ -512,7 +539,8 @@ func (m *mockContextualTool) SetContext(channel, chatID string) {
 
 // testHelper executes a message and returns the response
 type testHelper struct {
-	al *AgentLoop
+	al     *AgentLoop
+	msgBus *bus.MessageBus
 }
 
 func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, msg bus.InboundMessage) string {
@@ -524,11 +552,45 @@ func (h testHelper) executeAndGetResponse(tb testing.TB, ctx context.Context, ms
 	if !ok {
 		tb.Fatalf("message processor is not *messageProcessorImpl")
 	}
-	response, err := mp.processMessage(timeoutCtx, msg)
-	if err != nil {
-		tb.Fatalf("processMessage failed: %v", err)
+
+	// Process message in goroutine and consume from bus simultaneously
+	var processErr error
+	var returnedResponse string
+	processDone := make(chan struct{})
+	go func() {
+		returnedResponse, processErr = mp.processMessage(timeoutCtx, msg)
+		close(processDone)
+	}()
+
+	// When SendResponse is true (default for non-command messages),
+	// the response goes to the outbound bus and processMessage returns empty
+	if h.msgBus != nil {
+		outbound, ok := h.msgBus.SubscribeOutbound(timeoutCtx)
+		if ok && outbound.Content != "" {
+			// Wait for processing to complete to catch any errors
+			select {
+			case <-processDone:
+				if processErr != nil {
+					tb.Fatalf("processMessage failed: %v", processErr)
+				}
+			case <-timeoutCtx.Done():
+				tb.Fatalf("timeout waiting for processMessage")
+			}
+			return outbound.Content
+		}
 	}
-	return response
+
+	// Wait for processing to complete
+	select {
+	case <-processDone:
+		if processErr != nil {
+			tb.Fatalf("processMessage failed: %v", processErr)
+		}
+	case <-timeoutCtx.Done():
+		tb.Fatalf("timeout waiting for processMessage")
+	}
+
+	return returnedResponse
 }
 
 const responseTimeout = 3 * time.Second
@@ -568,7 +630,7 @@ func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 			},
 		}
 	}
-	helper := testHelper{al: al}
+	helper := testHelper{al: al, msgBus: msgBus}
 
 	// ReadFileTool returns SilentResult, which should not send user message
 	ctx := context.Background()
@@ -623,7 +685,7 @@ func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 			},
 		}
 	}
-	helper := testHelper{al: al}
+	helper := testHelper{al: al, msgBus: msgBus}
 
 	// ExecTool returns UserResult, which should send user message
 	ctx := context.Background()
@@ -739,15 +801,44 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	defaultAgent.Provider = provider
 	defaultAgent.Sessions.SetHistory(sessionKey, history)
 
-	// Call ProcessDirectWithChannel
-	// Note: ProcessDirectWithChannel calls processMessage which will execute runLLMIteration
-	response, err := al.ProcessDirectWithChannel(context.Background(), "Trigger message", sessionKey, "test", "test-chat")
-	if err != nil {
-		t.Fatalf("Expected success after retry, got error: %v", err)
+	// Process in goroutine and consume from bus simultaneously
+	var processErr error
+	processDone := make(chan struct{})
+	go func() {
+		_, processErr = al.ProcessDirectWithChannel(context.Background(), "Trigger message", sessionKey, "test", "test-chat")
+		close(processDone)
+	}()
+
+	// Get first outbound message (context window notification)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	outbound1, ok := msgBus.SubscribeOutbound(ctx)
+	if !ok {
+		t.Fatal("Expected first outbound message")
+	}
+	// First message should be the notification
+	if outbound1.Content != "Context window exceeded. Summarizing history and retrying..." {
+		t.Errorf("Expected context window notification first, got '%s'", outbound1.Content)
 	}
 
-	if response != "Recovered from context error" {
-		t.Errorf("Expected 'Recovered from context error', got '%s'", response)
+	// Get second outbound message (final model response)
+	outbound2, ok := msgBus.SubscribeOutbound(ctx)
+	if !ok {
+		t.Fatal("Expected second outbound message")
+	}
+
+	// Wait for processing to complete
+	select {
+	case <-processDone:
+		if processErr != nil {
+			t.Fatalf("Expected success after retry, got error: %v", processErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("Timeout waiting for ProcessDirectWithChannel")
+	}
+
+	if outbound2.Content != "Recovered from context error" {
+		t.Errorf("Expected 'Recovered from context error', got '%s'", outbound2.Content)
 	}
 
 	// We expect 2 calls: 1st failed, 2nd succeeded

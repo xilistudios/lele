@@ -506,6 +506,7 @@ export type SendMessageResponse = {
 
 export type HistoryResponse = {
   session_key: string
+  processing: boolean
   messages: Array<{
     role: 'user' | 'assistant' | 'tool'
     content: string

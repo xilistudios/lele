@@ -210,9 +210,15 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		messages = append(messages, historyMsg)
 	}
 
+	processing := false
+	if n.agentLoop != nil {
+		processing = n.agentLoop.IsSessionProcessing(sessionKey)
+	}
+
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
 		SessionKey: sessionKey,
 		Messages:   messages,
+		Processing: processing,
 	})
 }
 

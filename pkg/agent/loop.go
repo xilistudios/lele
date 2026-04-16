@@ -28,24 +28,26 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus              *bus.MessageBus
-	cfgPtr           atomic.Pointer[config.Config]
-	registry         *AgentRegistry
-	state            *state.Manager
-	running          atomic.Bool
-	summarizing      sync.Map
-	sessionAliases   sync.Map // base session key -> active session key
-	sessionModels    sync.Map
-	sessionAgents    sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking  sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback         *providers.FallbackChain
-	channelManager   *channels.Manager
-	subagents        map[string]*tools.SubagentManager
-	verboseManager   *session.VerboseManager
-	sessionCancels   sync.Map // sessionKey -> context.CancelFunc
-	sessionKeySeq    atomic.Uint64
-	sessionCancelSeq atomic.Uint64
-	approvalManager  *channels.ApprovalManager // Manager for command approvals
+	bus               *bus.MessageBus
+	cfgPtr            atomic.Pointer[config.Config]
+	registry          *AgentRegistry
+	state             *state.Manager
+	running           atomic.Bool
+	summarizing       sync.Map
+	sessionAliases    sync.Map // base session key -> active session key
+	sessionModels     sync.Map
+	sessionAgents     sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking   sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
+	fallback          *providers.FallbackChain
+	channelManager    *channels.Manager
+	subagents         map[string]*tools.SubagentManager
+	verboseManager    *session.VerboseManager
+	sessionCancels    sync.Map // sessionKey -> context.CancelFunc
+	sessionKeySeq     atomic.Uint64
+	sessionCancelSeq  atomic.Uint64
+	approvalManager   *channels.ApprovalManager // Manager for command approvals
+	sessionProcessing sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
+	wg                sync.WaitGroup            // tracks in-flight message goroutines
 
 	// Internal components (delegated operations)
 	messageProcessor messageProcessor
@@ -434,41 +436,47 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				continue
 			}
 
-			response, err := al.messageProcessor.processMessage(ctx, msg)
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					logger.InfoCF("agent", "Message processing canceled",
-						map[string]interface{}{
-							"channel":     msg.Channel,
-							"chat_id":     msg.ChatID,
-							"session_key": msg.SessionKey,
-						})
-					continue
-				}
-				response = fmt.Sprintf("Error processing message: %v", err)
-			}
+			al.wg.Add(1)
+			go func(m bus.InboundMessage) {
+				defer al.wg.Done()
 
-			if response != "" {
-				outboundMsg := bus.OutboundMessage{
-					Channel: msg.Channel,
-					ChatID:  msg.ChatID,
-					Content: response,
+				response, err := al.messageProcessor.processMessage(ctx, m)
+				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						logger.InfoCF("agent", "Message processing canceled",
+							map[string]interface{}{
+								"channel":     m.Channel,
+								"chat_id":     m.ChatID,
+								"session_key": m.SessionKey,
+							})
+						return
+					}
+					response = fmt.Sprintf("Error processing message: %v", err)
 				}
-				if msg.Metadata != nil && msg.Metadata["message_id"] != "" {
-					outboundMsg.MessageID = msg.Metadata["message_id"]
-					outboundMsg.ReplyTo = msg.Metadata["message_id"]
+
+				if response != "" {
+					outboundMsg := bus.OutboundMessage{
+						Channel: m.Channel,
+						ChatID:  m.ChatID,
+						Content: response,
+					}
+					if m.Metadata != nil && m.Metadata["message_id"] != "" {
+						outboundMsg.MessageID = m.Metadata["message_id"]
+						outboundMsg.ReplyTo = m.Metadata["message_id"]
+					}
+					al.bus.PublishOutbound(outboundMsg)
 				}
-				al.bus.PublishOutbound(outboundMsg)
-			}
+			}(msg)
 		}
 	}
 
 	return nil
 }
 
-// Stop stops the agent loop.
+// Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	al.wg.Wait()
 }
 
 // SetChannelManager sets the channel manager for the agent loop.

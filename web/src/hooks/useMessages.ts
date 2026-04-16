@@ -255,6 +255,9 @@ export function useMessages(
               ) {
                 return false
               }
+              if (m.role === 'tool' && m.sessionKey === targetSessionKey) {
+                return false
+              }
               return true
             }),
           )

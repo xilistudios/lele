@@ -74,6 +74,7 @@ export function useChatHistory(
         sessionKey: history.session_key,
         messages: toChatMessages(history.messages, history.session_key),
         rawMessages: history.messages,
+        processing: history.processing,
       }
     },
     enabled: sessionKey !== null && token !== null,
@@ -98,6 +99,7 @@ export function useChatHistory(
   return {
     messages,
     rawMessages: query.data?.rawMessages ?? [],
+    processing: query.data?.processing ?? false,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,
