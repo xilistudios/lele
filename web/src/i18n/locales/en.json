@@ -14,6 +14,7 @@
   },
   "chat": {
     "newSession": "New session",
+    "newChat": "New chat",
     "clearSession": "Clear session",
     "logout": "Logout",
     "settings": "Settings",

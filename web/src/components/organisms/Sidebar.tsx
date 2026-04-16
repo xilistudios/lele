@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { LogoutIcon, PlusIcon, SettingsIcon } from '../atoms/Icons'
+import { EditIcon, LogoutIcon, SettingsIcon } from '../atoms/Icons'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
 
@@ -65,9 +65,13 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
-        <div className={`border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
+        <div
+          className={`border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}
+        >
           {collapsed ? (
-            <span className="text-lg font-bold uppercase tracking-wider text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">L</span>
+            <span className="text-lg font-bold uppercase tracking-wider text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">
+              L
+            </span>
           ) : (
             <span className="text-lg font-bold uppercase tracking-wider">
               <span className="text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">L</span>
@@ -78,19 +82,16 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0 border-b-0' : 'max-h-24 opacity-100 border-b border-[#2e2e2e]'}`}
-        >
-          <div className="space-y-2 px-3 py-3">
-            <button
-              onClick={onCreateSession}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white"
-            >
-              <PlusIcon />
-              {t('chat.newSession')}
-            </button>
-          </div>
+        <div className="border-b border-[#2e2e2e] px-2 py-3">
+          <button
+            onClick={onCreateSession}
+            type="button"
+            className={`flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white ${collapsed ? 'justify-center' : ''}`}
+            title={collapsed ? t('chat.newChat') : undefined}
+          >
+            <EditIcon />
+            {!collapsed && <span>{t('chat.newChat')}</span>}
+          </button>
         </div>
 
         <div className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3`}>
