@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { formatSessionTitle } from '../../lib/utils'
+import { TrashIcon } from '../atoms/Icons'
 
 type Props = {
   sessionKey: string
@@ -32,7 +33,9 @@ export function SessionItem({
           selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
         }`}
       >
-        <span className="text-xs text-[#555]">#</span>
+        <span className="text-xs">
+          {sessionName?.[0]?.toUpperCase() ?? sessionKey[0]?.toUpperCase() ?? '#'}
+        </span>
       </button>
     )
   }
@@ -45,7 +48,6 @@ export function SessionItem({
         selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
       }`}
     >
-      <span className="mt-0.5 text-xs text-[#555]">#</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs leading-5">
           {formatSessionTitle(sessionKey, sessionName, messageCount)}
@@ -65,18 +67,7 @@ export function SessionItem({
         aria-label={t('chat.deleteSession')}
         className="ml-auto text-[#666] opacity-0 transition-opacity hover:text-[#f0b4b4] group-hover:opacity-100"
       >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-        >
-          <path d="M3 6h18" />
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-        </svg>
+        <TrashIcon />
       </button>
     </button>
   )

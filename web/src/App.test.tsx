@@ -1,12 +1,12 @@
 import './test/setup'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { QueryClientProvider } from '@tanstack/react-query'
 import './test/i18n'
+import type { ReactElement } from 'react'
 import App from './App'
 import { queryClient } from './lib/queryClient'
-import type { ReactElement } from 'react'
 
 // Helper to render with required providers
 const renderWithProviders = (ui: ReactElement) => {

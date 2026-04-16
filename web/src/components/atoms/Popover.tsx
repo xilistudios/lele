@@ -6,6 +6,7 @@ type Props = {
   children: ReactNode
   popoverWidth?: number
   popoverHeight?: number
+  block?: boolean
 }
 
 const DEFAULT_POPOVER_WIDTH = 180
@@ -21,6 +22,7 @@ export function Popover({
   children,
   popoverWidth = DEFAULT_POPOVER_WIDTH,
   popoverHeight = DEFAULT_POPOVER_HEIGHT,
+  block = false,
 }: Props) {
   const [isOpen, setIsOpen] = useState(false)
   const { position, ref } = usePopoverPosition({
@@ -47,11 +49,11 @@ export function Popover({
   const horizontalClass = position.horizontal === 'right-align' ? 'right-0' : 'left-0'
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={ref} className={`relative ${block ? 'block w-full' : 'inline-block'}`}>
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="p-0 border-none bg-transparent cursor-pointer"
+        className={`p-0 border-none bg-transparent cursor-pointer ${block ? 'block w-full' : ''}`}
       >
         {trigger}
       </button>

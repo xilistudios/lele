@@ -15,6 +15,7 @@
   "chat": {
     "newSession": "New session",
     "newChat": "New chat",
+    "noSessions": "No chats yet",
     "clearSession": "Clear session",
     "logout": "Logout",
     "settings": "Settings",
@@ -50,7 +51,9 @@
     "showLess": "Show less",
     "deleteSession": "Delete session",
     "toggleSidebar": "Toggle sidebar",
-    "backTo": "Back to {{title}}"
+    "backTo": "Back to {{title}}",
+    "recent": "Recent",
+    "recentChats": "Recent chats"
   },
   "connection": {
     "connected": "Connected",
