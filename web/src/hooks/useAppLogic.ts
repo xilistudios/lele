@@ -154,20 +154,11 @@ export function useAppLogic(
     if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
     if (wsStatus !== 'connected') return
 
-    return () => {
-      if (subscribedSessionRef.current) {
-        wsSend('unsubscribe', { session_key: subscribedSessionRef.current })
-        subscribedSessionRef.current = null
-      }
-    }
-  }, [sessionsHook.currentSessionKey, currentAgentId, token, wsStatus, wsSend])
-
-  useEffect(() => {
-    if (!sessionsHook.currentSessionKey || !currentAgentId || !token) return
-    if (wsStatus !== 'connected') return
-
     const alreadySubscribed = subscribedSessionRef.current === sessionsHook.currentSessionKey
     if (!alreadySubscribed) {
+      if (subscribedSessionRef.current) {
+        wsSend('unsubscribe', { session_key: subscribedSessionRef.current })
+      }
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
       subscribedSessionRef.current = sessionsHook.currentSessionKey
     }
