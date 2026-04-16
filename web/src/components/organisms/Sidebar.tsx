@@ -65,6 +65,19 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
+        <div className={`border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
+          {collapsed ? (
+            <span className="text-lg font-bold uppercase tracking-wider text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">L</span>
+          ) : (
+            <span className="text-lg font-bold uppercase tracking-wider">
+              <span className="text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">L</span>
+              <span className="text-cyan-400 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">E</span>
+              <span className="text-yellow-400 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">L</span>
+              <span className="text-pink-500 drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]">E</span>
+            </span>
+          )}
+        </div>
+
         <div
           className={`overflow-hidden transition-all duration-300 ease-in-out ${collapsed ? 'max-h-0 opacity-0 border-b-0' : 'max-h-24 opacity-100 border-b border-[#2e2e2e]'}`}
         >
