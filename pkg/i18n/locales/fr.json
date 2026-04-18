@@ -1,0 +1,920 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "Erreur lors du chargement de la configuration : {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "Commande inconnue : {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "Sous-commande {{.category}} inconnue : {{.command}}"
+      },
+      "goodbye": {
+        "other": "Au revoir !"
+      },
+      "aborted": {
+        "other": "Abandonné."
+      },
+      "overwritePrompt": {
+        "other": "La configuration existe déjà à {{.path}}\nÉcraser ? (o/n) : "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - Assistant IA Personnel v{{.version}}"
+      },
+      "usage": {
+        "other": "Utilisation : lele <commande>"
+      },
+      "commands": {
+        "other": "Commandes :"
+      },
+      "onboard": {
+        "other": "Initialiser la configuration et l'espace de travail lele"
+      },
+      "agent": {
+        "other": "Interagir avec l'agent directement"
+      },
+      "auth": {
+        "other": "Gérer l'authentification (connexion, déconnexion, statut)"
+      },
+      "gateway": {
+        "other": "Démarrer la passerelle lele"
+      },
+      "web": {
+        "other": "Démarrer ou arrêter le serveur d'application web"
+      },
+      "status": {
+        "other": "Afficher le statut de lele"
+      },
+      "cron": {
+        "other": "Gérer les tâches planifiées"
+      },
+      "migrate": {
+        "other": "Migrer depuis OpenClaw vers Lele"
+      },
+      "skills": {
+        "other": "Gérer les compétences (installer, lister, supprimer)"
+      },
+      "client": {
+        "other": "Gérer les clients de canal natif (associer, lister, supprimer)"
+      },
+      "version": {
+        "other": "Afficher les informations de version"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "{{.logo}} lele {{.version}}"
+      },
+      "build": {
+        "other": "Compilation : {{.date}}"
+      },
+      "go": {
+        "other": "Go : {{.version}}"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Configuration de l'interface Web ==="
+      },
+      "webPort": {
+        "other": "Port Web"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Interface Web activée sur le port"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ Canal natif activé automatiquement (requis pour l'interface Web)"
+      },
+      "configureNativeAdvanced": {
+        "other": "[Avancé] Configurer le canal natif ?"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== Configuration du Canal Natif (Avancé) ==="
+      },
+      "apiHost": {
+        "other": "Hôte API"
+      },
+      "apiPort": {
+        "other": "Port API"
+      },
+      "maxPairedClients": {
+        "other": "Nombre max de clients associés"
+      },
+      "tokenExpiryDays": {
+        "other": "Jours d'expiration du jeton"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ Canal natif configuré"
+      },
+      "generatePairingPIN": {
+        "other": "Générer un code PIN d'appairage ?"
+      },
+      "deviceName": {
+        "other": "Nom de l'appareil"
+      },
+      "errorCreatingAuthManager": {
+        "other": "Erreur lors de la création du gestionnaire d'authentification : {{.error}}"
+      },
+      "errorGeneratingPIN": {
+        "other": "Erreur lors de la génération du code PIN : {{.error}}"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ Code PIN d'appairage généré"
+      },
+      "pinLabel": {
+        "other": "  Code PIN : {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  Expire : {{.date}} ({{.minutes}} minutes)"
+      },
+      "startServicesNow": {
+        "other": "Démarrer les services maintenant ?"
+      },
+      "manualStartInstructions": {
+        "other": "\nPour démarrer les services manuellement :"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "startingGateway": {
+        "other": "\n[+] Démarrage de la passerelle..."
+      },
+      "startingWebServer": {
+        "other": "[+] Démarrage du serveur web..."
+      },
+      "servicesStarted": {
+        "other": "\n✓ Services démarrés"
+      },
+      "openBrowser": {
+        "other": "\nOuvrez http://127.0.0.1:{{.port}} dans votre navigateur"
+      },
+      "enterPINToConnect": {
+        "other": "Entrez le code PIN pour connecter votre appareil."
+      },
+      "configExists": {
+        "other": "La configuration existe déjà à {{.path}}"
+      },
+      "errorSavingConfig": {
+        "other": "Erreur lors de la sauvegarde de la configuration : {{.error}}"
+      },
+      "warningCreateLogsDir": {
+        "other": "Avertissement : impossible de créer le répertoire des journaux : {{.error}}"
+      },
+      "warningCreateInfoLog": {
+        "other": "Avertissement : impossible de créer le fichier journal d'informations : {{.error}}"
+      },
+      "warningCreateErrorsLog": {
+        "other": "Avertissement : impossible de créer le fichier journal des erreurs : {{.error}}"
+      },
+      "ready": {
+        "other": "{{.logo}} lele est prêt !"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 Mode débogage activé"
+      },
+      "warningEnableFileLogging": {
+        "other": "Avertissement : impossible d'activer la journalisation des fichiers : {{.error}}"
+      },
+      "warningCleanupOldLogs": {
+        "other": "Avertissement : impossible de nettoyer les anciens journaux : {{.error}}"
+      },
+      "agentStatus": {
+        "other": "\n📦 Statut de l'agent :"
+      },
+      "toolsLoaded": {
+        "other": "  • Outils : {{.count}} chargés"
+      },
+      "skillsAvailable": {
+        "other": "  • Compétences : {{.available}}/{{.total}} disponibles"
+      },
+      "errorCreatingChannelManager": {
+        "other": "Erreur lors de la création du gestionnaire de canal : {{.error}}"
+      },
+      "channelsEnabled": {
+        "other": "✓ Canaux activés : {{.channels}}"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ Avertissement : Aucun canal activé"
+      },
+      "gatewayStarted": {
+        "other": "✓ Passerelle démarrée sur {{.host}}:{{.port}}"
+      },
+      "pressCtrlC": {
+        "other": "Appuyez sur Ctrl+C pour arrêter"
+      },
+      "errorStartingCronService": {
+        "other": "Erreur lors du démarrage du service cron : {{.error}}"
+      },
+      "cronServiceStarted": {
+        "other": "✓ Service cron démarré"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "Erreur lors du démarrage du service de pulsation : {{.error}}"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ Service de pulsation démarré"
+      },
+      "errorStartingDeviceService": {
+        "other": "Erreur lors du démarrage du service d'appareil : {{.error}}"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ Service d'événement d'appareil démarré"
+      },
+      "errorStartingChannels": {
+        "other": "Erreur lors du démarrage des canaux : {{.error}}"
+      },
+      "healthEndpoints": {
+        "other": "✓ Points de terminaison de santé disponibles à http://{{.host}}:{{.port}}/health et /ready"
+      },
+      "shuttingDown": {
+        "other": "\nArrêt en cours..."
+      },
+      "gatewayStopped": {
+        "other": "✓ Passerelle arrêtée"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\nCommande d'authentification :"
+        },
+        "login": {
+          "other": "  login       Connexion via OAuth ou saisie de jeton"
+        },
+        "logout": {
+          "other": "  logout      Supprimer les identifiants stockés"
+        },
+        "status": {
+          "other": "  status      Afficher le statut d'authentification actuel"
+        },
+        "loginOptions": {
+          "other": "\nOptions de connexion :"
+        },
+        "provider": {
+          "other": "  --provider <nom>    Fournisseur avec lequel se connecter (openai, anthropic)"
+        },
+        "deviceCode": {
+          "other": "  --device-code        Utiliser le flux de code d'appareil (pour les environnements sans interface)"
+        },
+        "examples": {
+          "other": "\nExemples :"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "Erreur : --provider est requis"
+      },
+      "supportedProviders": {
+        "other": "Fournisseurs pris en charge : openai, anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "Fournisseur non pris en charge : {{.provider}}"
+      },
+      "loginFailed": {
+        "other": "Échec de la connexion : {{.error}}"
+      },
+      "failedSaveCredentials": {
+        "other": "Échec de la sauvegarde des identifiants : {{.error}}"
+      },
+      "warningUpdateConfig": {
+        "other": "Avertissement : impossible de mettre à jour la configuration : {{.error}}"
+      },
+      "loginSuccessful": {
+        "other": "Connexion réussie !"
+      },
+      "account": {
+        "other": "Compte : {{.accountId}}"
+      },
+      "tokenSaved": {
+        "other": "Jeton enregistré pour {{.provider}} !"
+      },
+      "failedRemoveCredentials": {
+        "other": "Échec de la suppression des identifiants : {{.error}}"
+      },
+      "loggedOutFrom": {
+        "other": "Déconnecté de {{.provider}}"
+      },
+      "loggedOutFromAll": {
+        "other": "Déconnecté de tous les fournisseurs"
+      },
+      "errorLoadingAuthStore": {
+        "other": "Erreur lors du chargement du magasin d'authentification : {{.error}}"
+      },
+      "noAuthenticatedProviders": {
+        "other": "Aucun fournisseur authentifié."
+      },
+      "runAuthLogin": {
+        "other": "Exécutez : lele auth login --provider <nom>"
+      },
+      "authenticatedProviders": {
+        "other": "\nFournisseurs authentifiés :"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    Méthode : {{.method}}"
+      },
+      "status": {
+        "other": "    Statut : {{.status}}"
+      },
+      "accountInfo": {
+        "other": "    Compte : {{.accountId}}"
+      },
+      "expires": {
+        "other": "    Expire : {{.date}}"
+      },
+      "statusActive": {
+        "other": "actif"
+      },
+      "statusExpired": {
+        "other": "expiré"
+      },
+      "statusNeedsRefresh": {
+        "other": "nécessite une actualisation"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\nCommandes de compétences :"
+        },
+        "list": {
+          "other": "  list                    Lister les compétences installées"
+        },
+        "install": {
+          "other": "  install <dépôt>         Installer une compétence depuis GitHub"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          Installer toutes les compétences intégrées dans l'espace de travail"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             Lister les compétences intégrées disponibles"
+        },
+        "remove": {
+          "other": "  remove <nom>            Supprimer une compétence installée"
+        },
+        "search": {
+          "other": "  search                  Rechercher des compétences disponibles"
+        },
+        "show": {
+          "other": "  show <nom>              Afficher les détails de la compétence"
+        },
+        "examples": {
+          "other": "\nExemples :"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "Aucune compétence installée."
+      },
+      "installedSkills": {
+        "other": "\nCompétences installées :"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ {{.name}} ({{.source}})"
+      },
+      "skillDescription": {
+        "other": "    {{.description}}"
+      },
+      "usageInstall": {
+        "other": "Utilisation : lele skills install <dépôt-github>"
+      },
+      "exampleInstallUsage": {
+        "other": "Exemple : lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "Installation de la compétence depuis {{.repo}}..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ Échec de l'installation de la compétence : {{.error}}"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ Compétence '{{.name}}' installée avec succès !"
+      },
+      "removingSkill": {
+        "other": "Suppression de la compétence '{{.name}}'..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ Échec de la suppression de la compétence : {{.error}}"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ Compétence '{{.name}}' supprimée avec succès !"
+      },
+      "usageRemove": {
+        "other": "Utilisation : lele skills remove <nom-compétence>"
+      },
+      "usageShow": {
+        "other": "Utilisation : lele skills show <nom-compétence>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "Copie des compétences intégrées vers l'espace de travail..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ Compétence intégrée '{{.name}}' introuvable : {{.error}}"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ Échec de la création du répertoire pour {{.name}} : {{.error}}"
+      },
+      "failedCopySkill": {
+        "other": "✗ Échec de la copie de {{.name}} : {{.error}}"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ Toutes les compétences intégrées sont installées !"
+      },
+      "useInWorkspace": {
+        "other": "Vous pouvez maintenant les utiliser dans votre espace de travail."
+      },
+      "availableBuiltinSkills": {
+        "other": "\nCompétences intégrées disponibles :"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "Erreur lors de la lecture des compétences intégrées : {{.error}}"
+      },
+      "noBuiltinSkills": {
+        "other": "Aucune compétence intégrée disponible."
+      },
+      "searchingSkills": {
+        "other": "Recherche de compétences disponibles..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ Échec de la récupération de la liste des compétences : {{.error}}"
+      },
+      "noSkillsAvailable": {
+        "other": "Aucune compétence disponible."
+      },
+      "availableSkills": {
+        "other": "\nCompétences disponibles ({{.count}}) :"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 {{.name}}"
+      },
+      "skillRepo": {
+        "other": "     Dépôt : {{.repo}}"
+      },
+      "skillAuthor": {
+        "other": "     Auteur : {{.source}}"
+      },
+      "skillTags": {
+        "other": "     Étiquettes : {{.source}}"
+      },
+      "skillNotFound": {
+        "other": "✗ Compétence '{{.name}}' introuvable"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 Compétence : {{.name}}"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nCommandes Web :"
+        },
+        "start": {
+          "other": "  start              Démarrer le serveur web en arrière-plan"
+        },
+        "stop": {
+          "other": "  stop               Arrêter le serveur web"
+        },
+        "status": {
+          "other": "  status             Afficher le statut du serveur web"
+        },
+        "options": {
+          "other": "\nOptions :"
+        },
+        "host": {
+          "other": "  --host <hôte>       Hôte de liaison (par défaut : 0.0.0.0)"
+        },
+        "port": {
+          "other": "  --port <port>       Port de liaison (par défaut : 3005)"
+        },
+        "examples": {
+          "other": "\nExemples :"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Le serveur web est déjà en cours d'exécution (pid {{.pid}})"
+      },
+      "errorResolvingExecutable": {
+        "other": "Erreur lors de la résolution de l'exécutable : {{.error}}"
+      },
+      "errorPrepareLogDir": {
+        "other": "Erreur lors de la préparation du répertoire des journaux : {{.error}}"
+      },
+      "errorOpenLogFile": {
+        "other": "Erreur lors de l'ouverture du fichier journal web : {{.error}}"
+      },
+      "errorStartWebServer": {
+        "other": "Erreur lors du démarrage du serveur web : {{.error}}"
+      },
+      "errorWritePID": {
+        "other": "Erreur lors de l'écriture du fichier pid : {{.error}}"
+      },
+      "webServerStarted": {
+        "other": "✓ Serveur web démarré sur http://{{.host}}:{{.port}} (pid {{.pid}})"
+      },
+      "webServerNotRunning": {
+        "other": "Le serveur web n'est pas en cours d'exécution"
+      },
+      "errorFindProcess": {
+        "other": "Erreur lors de la recherche du processus du serveur web : {{.error}}"
+      },
+      "webServerStopped": {
+        "other": "✓ Serveur web arrêté (pid {{.pid}})"
+      },
+      "webServerStatusStopped": {
+        "other": "Serveur web : arrêté"
+      },
+      "webServerStatusRunning": {
+        "other": "Serveur web : en cours d'exécution (pid {{.pid}})"
+      },
+      "webAssetsMissing": {
+        "other": "Les ressources de l'application web sont manquantes. Compilez le frontend avec `make build` ou `npm run build --prefix web`."
+      },
+      "servingWebApp": {
+        "other": "Application web servie sur http://{{.addr}}"
+      },
+      "webServerError": {
+        "other": "Erreur du serveur web : {{.error}}"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\nCommandes client :"
+        },
+        "pin": {
+          "other": "  pin         Générer un nouveau code PIN d'appairage"
+        },
+        "list": {
+          "other": "  list        Lister tous les clients appariés"
+        },
+        "pending": {
+          "other": "  pending     Lister les demandes d'appairage en attente"
+        },
+        "remove": {
+          "other": "  remove      Supprimer un client apparié"
+        },
+        "status": {
+          "other": "  status      Afficher le statut du canal client"
+        },
+        "examples": {
+          "other": "\nExemples :"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <id_client>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "Utilisation : lele client remove <id_client>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ Erreur lors de la génération du code PIN : {{.error}}"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n{{.logo}} Code PIN d'appairage généré"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  Code PIN : {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  Expire : {{.date}}"
+      },
+      "pinExpires": {
+        "other": "    Expire : {{.date}}"
+      },
+      "enterPINToPair": {
+        "other": "Entrez ce code PIN dans votre client natif pour l'appairer."
+      },
+      "noPairedClients": {
+        "other": "Aucun client apparié."
+      },
+      "pairedClientsTitle": {
+        "other": "\n{{.logo}} Clients appariés ({{.count}})"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ actif"
+      },
+      "clientStatusExpired": {
+        "other": "✗ expiré"
+      },
+      "clientID": {
+        "other": "\n  {{.id}}"
+      },
+      "clientDevice": {
+        "other": "    Appareil :  {{.name}}"
+      },
+      "clientStatus": {
+        "other": "    Statut : {{.status}}"
+      },
+      "clientCreated": {
+        "other": "    Créé : {{.date}}"
+      },
+      "clientExpires": {
+        "other": "    Expire : {{.date}}"
+      },
+      "clientLastSeen": {
+        "other": "    Dernier :    {{.date}}"
+      },
+      "noPendingPairing": {
+        "other": "Aucune demande d'appairage en attente."
+      },
+      "pendingPairingTitle": {
+        "other": "\n{{.logo}} Demandes d'appairage en attente ({{.count}})"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  Code PIN : {{.pin}}"
+      },
+      "pendingDevice": {
+        "other": "    Appareil :    {{.name}}"
+      },
+      "pendingStatus": {
+        "other": "    Statut :    {{.status}}"
+      },
+      "pendingRemaining": {
+        "other": "    Restant : {{.time}}"
+      },
+      "pendingStatusValid": {
+        "other": "✓ valide"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ expiré"
+      },
+      "errorRemovingClient": {
+        "other": "✗ Erreur lors de la suppression du client : {{.error}}"
+      },
+      "clientRemoved": {
+        "other": "✓ Client '{{.id}}' supprimé"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n{{.logo}} Statut du canal client"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  Activé :     {{.enabled}}"
+      },
+      "clientHost": {
+        "other": "  Hôte :        {{.host}}"
+      },
+      "clientPort": {
+        "other": "  Port :        {{.port}}"
+      },
+      "clientMaxClients": {
+        "other": "  Clients max : {{.count}}"
+      },
+      "clientTokenExpiry": {
+        "other": "  Expiration du jeton : {{.count}} jours"
+      },
+      "clientPINExpiry": {
+        "other": "  Expiration du code PIN :   {{.count}} minutes"
+      },
+      "clientPairedCount": {
+        "other": "  Clients appariés : {{.count}} ({{.enabled}} actifs)"
+      },
+      "clientPendingPINs": {
+        "other": "  Codes PIN en attente :   {{.count}}"
+      },
+      "clientConnectWS": {
+        "other": "  Connexion : ws://{{.host}}:{{.port}}/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST :    http://{{.host}}:{{.port}}/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\nCommandes Cron :"
+        },
+        "list": {
+          "other": "  list              Lister toutes les tâches planifiées"
+        },
+        "add": {
+          "other": "  add              Ajouter une nouvelle tâche planifiée"
+        },
+        "remove": {
+          "other": "  remove <id>       Supprimer une tâche par ID"
+        },
+        "enable": {
+          "other": "  enable <id>      Activer une tâche"
+        },
+        "disable": {
+          "other": "  disable <id>     Désactiver une tâche"
+        },
+        "addOptions": {
+          "other": "\nOptions d'ajout :"
+        },
+        "name": {
+          "other": "  -n, --name       Nom de la tâche"
+        },
+        "message": {
+          "other": "  -m, --message    Message pour l'agent"
+        },
+        "every": {
+          "other": "  -e, --every      Exécuter toutes les N secondes"
+        },
+        "cron": {
+          "other": "  -c, --cron       Expression cron (ex. '0 9 * * *')"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     Livrer la réponse au canal"
+        },
+        "to": {
+          "other": "  --to             Destinataire pour la livraison"
+        },
+        "channel": {
+          "other": "  --channel        Canal pour la livraison"
+        }
+      },
+      "usageRemove": {
+        "other": "Utilisation : lele cron remove <id_tâche>"
+      },
+      "usageEnableDisable": {
+        "other": "Utilisation : lele cron enable/disable <id_tâche>"
+      },
+      "noScheduledJobs": {
+        "other": "Aucune tâche planifiée."
+      },
+      "scheduledJobs": {
+        "other": "\nTâches planifiées :"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  {{.name}} ({{.id}})"
+      },
+      "jobSchedule": {
+        "other": "    Planification : {{.schedule}}"
+      },
+      "jobStatus": {
+        "other": "    Statut : {{.status}}"
+      },
+      "jobNextRun": {
+        "other": "    Prochaine exécution : {{.time}}"
+      },
+      "jobScheduleEvery": {
+        "other": "toutes les {{.count}}s"
+      },
+      "jobScheduleOneTime": {
+        "other": "ponctuelle"
+      },
+      "jobStatusEnabled": {
+        "other": "activée"
+      },
+      "jobStatusDisabled": {
+        "other": "désactivée"
+      },
+      "errorNameRequired": {
+        "other": "Erreur : --name est requis"
+      },
+      "errorMessageRequired": {
+        "other": "Erreur : --message est requis"
+      },
+      "errorScheduleRequired": {
+        "other": "Erreur : --every ou --cron doit être spécifié"
+      },
+      "errorAddingJob": {
+        "other": "Erreur lors de l'ajout de la tâche : {{.error}}"
+      },
+      "jobAdded": {
+        "other": "✓ Tâche '{{.name}}' ajoutée ({{.id}})"
+      },
+      "jobRemoved": {
+        "other": "✓ Tâche {{.id}} supprimée"
+      },
+      "jobNotFound": {
+        "other": "✗ Tâche {{.id}} introuvable"
+      },
+      "jobEnabled": {
+        "other": "✓ Tâche '{{.name}}' {{.status}}"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 Mode débogage activé"
+      },
+      "errorMessage": {
+        "other": "Erreur : {{.error}}"
+      },
+      "interactiveMode": {
+        "other": "{{.logo}} Mode interactif (Ctrl+C pour quitter)"
+      },
+      "youPrompt": {
+        "other": "{{.logo}} Vous : "
+      },
+      "errorInitReadline": {
+        "other": "Erreur lors de l'initialisation de readline : {{.error}}"
+      },
+      "fallbackSimpleInput": {
+        "other": "Retour au mode de saisie simple..."
+      },
+      "errorReadingInput": {
+        "other": "Erreur lors de la lecture de l'entrée : {{.error}}"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "Erreur lors de la copie des modèles d'espace de travail : {{.error}}"
+      },
+      "errorCreateTargetDir": {
+        "other": "Échec de la création du répertoire cible : {{.error}}"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "Échec de la lecture du fichier intégré {{.name}} : {{.error}}"
+      },
+      "errorGetRelativePath": {
+        "other": "Échec de l'obtention du chemin relatif pour {{.name}} : {{.error}}"
+      },
+      "errorCreateDirectory": {
+        "other": "Échec de la création du répertoire {{.name}} : {{.error}}"
+      },
+      "errorWriteFile": {
+        "other": "Échec de l'écriture du fichier {{.name}} : {{.error}}"
+      }
+    }
+  }
+}

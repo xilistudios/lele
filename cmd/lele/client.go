@@ -8,6 +8,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 func clientCmd() {
@@ -23,13 +24,13 @@ func clientCmd() {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.common.errorLoadingConfig", err))
 		os.Exit(1)
 	}
 
 	authMgr, err := channels.NewAuthManager(&cfg.Channels.Native, leleDir)
 	if err != nil {
-		fmt.Printf("Error creating auth manager: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.onboard.errorCreatingAuthManager", err))
 		os.Exit(1)
 	}
 
@@ -42,32 +43,32 @@ func clientCmd() {
 		clientPendingCmd(authMgr)
 	case "remove":
 		if len(os.Args) < 4 {
-			fmt.Println("Usage: lele client remove <client_id>")
+			fmt.Println(i18n.T("cli.client.usageRemove"))
 			return
 		}
 		clientRemoveCmd(authMgr, os.Args[3])
 	case "status":
 		clientStatusCmd(authMgr, cfg)
 	default:
-		fmt.Printf("Unknown client command: %s\n", subcommand)
+		fmt.Println(i18n.TPrintf("cli.common.unknownSubcommand", "client", subcommand))
 		clientHelp()
 	}
 }
 
 func clientHelp() {
-	fmt.Println("\nClient commands:")
-	fmt.Println("  pin         Generate a new pairing PIN")
-	fmt.Println("  list        List all paired clients")
-	fmt.Println("  pending     List pending pairing requests")
-	fmt.Println("  remove      Remove a paired client")
-	fmt.Println("  status      Show client channel status")
+	fmt.Println(i18n.T("cli.client.help.title"))
+	fmt.Println(i18n.T("cli.client.help.pin"))
+	fmt.Println(i18n.T("cli.client.help.list"))
+	fmt.Println(i18n.T("cli.client.help.pending"))
+	fmt.Println(i18n.T("cli.client.help.remove"))
+	fmt.Println(i18n.T("cli.client.help.status"))
 	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  lele client pin")
-	fmt.Println("  lele client list")
-	fmt.Println("  lele client pending")
-	fmt.Println("  lele client remove <client_id>")
-	fmt.Println("  lele client status")
+	fmt.Println(i18n.T("cli.client.help.examples"))
+	fmt.Println(i18n.T("cli.client.help.examplePin"))
+	fmt.Println(i18n.T("cli.client.help.exampleList"))
+	fmt.Println(i18n.T("cli.client.help.examplePending"))
+	fmt.Println(i18n.T("cli.client.help.exampleRemove"))
+	fmt.Println(i18n.T("cli.client.help.exampleStatus"))
 }
 
 func clientPinCmd(authMgr *channels.AuthManager) {
@@ -85,40 +86,40 @@ func clientPinCmd(authMgr *channels.AuthManager) {
 
 	pending, err := authMgr.GeneratePIN(deviceName)
 	if err != nil {
-		fmt.Printf("✗ Error generating PIN: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.client.errorGeneratingPIN", err))
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n%s Pairing PIN Generated\n", logo)
-	fmt.Println("------------------------")
-	fmt.Printf("  PIN:     %s\n", pending.PIN)
-	fmt.Printf("  Expires: %s\n", pending.Expires.Format("2006-01-02 15:04:05"))
+	fmt.Println(i18n.TPrintf("cli.client.pinGeneratedTitle", logo))
+	fmt.Println(i18n.T("cli.client.pinSeparator"))
+	fmt.Println(i18n.TPrintf("cli.client.pinLabel", pending.PIN))
+	fmt.Println(i18n.TPrintf("cli.client.pinExpires", pending.Expires.Format("2006-01-02 15:04:05")))
 	fmt.Println()
-	fmt.Println("Enter this PIN in your native client to pair.")
+	fmt.Println(i18n.T("cli.client.enterPINToPair"))
 }
 
 func clientListCmd(authMgr *channels.AuthManager) {
 	clients := authMgr.ListClients()
 
 	if len(clients) == 0 {
-		fmt.Println("No paired clients.")
+		fmt.Println(i18n.T("cli.client.noPairedClients"))
 		return
 	}
 
-	fmt.Printf("\n%s Paired Clients (%d)\n", logo, len(clients))
-	fmt.Println("----------------------")
+	fmt.Println(i18n.TPrintf("cli.client.pairedClientsTitle", logo, len(clients)))
+	fmt.Println(i18n.T("cli.client.pairedClientsSeparator"))
 	for _, client := range clients {
-		status := "✓ active"
+		status := i18n.T("cli.client.clientStatusActive")
 		if client.Expires.Before(time.Now()) {
-			status = "✗ expired"
+			status = i18n.T("cli.client.clientStatusExpired")
 		}
 
-		fmt.Printf("\n  %s\n", client.ClientID)
-		fmt.Printf("    Device:  %s\n", client.DeviceName)
-		fmt.Printf("    Status:  %s\n", status)
-		fmt.Printf("    Created: %s\n", client.Created.Format("2006-01-02 15:04"))
-		fmt.Printf("    Expires: %s\n", client.Expires.Format("2006-01-02 15:04"))
-		fmt.Printf("    Last:    %s\n", client.LastSeen.Format("2006-01-02 15:04"))
+		fmt.Println(i18n.TPrintf("cli.client.clientID", client.ClientID))
+		fmt.Println(i18n.TPrintf("cli.client.clientDevice", client.DeviceName))
+		fmt.Println(i18n.TPrintf("cli.client.clientStatus", status))
+		fmt.Println(i18n.TPrintf("cli.client.clientCreated", client.Created.Format("2006-01-02 15:04")))
+		fmt.Println(i18n.TPrintf("cli.client.clientExpires", client.Expires.Format("2006-01-02 15:04")))
+		fmt.Println(i18n.TPrintf("cli.client.clientLastSeen", client.LastSeen.Format("2006-01-02 15:04")))
 	}
 	fmt.Println()
 }
@@ -127,69 +128,68 @@ func clientPendingCmd(authMgr *channels.AuthManager) {
 	pins := authMgr.GetPendingPINs()
 
 	if len(pins) == 0 {
-		fmt.Println("No pending pairing requests.")
+		fmt.Println(i18n.T("cli.client.noPendingPairing"))
 		return
 	}
 
-	fmt.Printf("\n%s Pending Pairing Requests (%d)\n", logo, len(pins))
-	fmt.Println("---------------------------------")
+	fmt.Println(i18n.TPrintf("cli.client.pendingPairingTitle", logo, len(pins)))
+	fmt.Println(i18n.T("cli.client.pendingPairingSeparator"))
 	for _, pending := range pins {
 		remaining := time.Until(pending.Expires)
-		status := "✓ valid"
+		status := i18n.T("cli.client.pendingStatusValid")
 		if remaining <= 0 {
-			status = "✗ expired"
+			status = i18n.T("cli.client.pendingStatusExpired")
 		}
 
-		fmt.Printf("\n  PIN: %s\n", pending.PIN)
-		fmt.Printf("    Device:    %s\n", pending.DeviceName)
-		fmt.Printf("    Status:    %s\n", status)
-		fmt.Printf("    Remaining: %v\n", remaining.Round(time.Second))
+		fmt.Println(i18n.TPrintf("cli.client.pendingPIN", pending.PIN))
+		fmt.Println(i18n.TPrintf("cli.client.pendingDevice", pending.DeviceName))
+		fmt.Println(i18n.TPrintf("cli.client.pendingStatus", status))
+		fmt.Println(i18n.TPrintf("cli.client.pendingRemaining", remaining.Round(time.Second)))
 	}
 	fmt.Println()
 }
 
 func clientRemoveCmd(authMgr *channels.AuthManager, clientID string) {
 	if err := authMgr.RemoveClient(clientID); err != nil {
-		fmt.Printf("✗ Error removing client: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.client.errorRemovingClient", err))
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Client '%s' removed\n", clientID)
+	fmt.Println(i18n.TPrintf("cli.client.clientRemoved", clientID))
 }
 
 func clientStatusCmd(authMgr *channels.AuthManager, cfg *config.Config) {
 	clients := authMgr.ListClients()
 	pins := authMgr.GetPendingPINs()
 
-	fmt.Printf("\n%s Client Channel Status\n", logo)
-	fmt.Println("-----------------------")
+	fmt.Println(i18n.TPrintf("cli.client.clientChannelStatusTitle", logo))
+	fmt.Println(i18n.T("cli.client.clientChannelStatusSeparator"))
 
 	nativeCfg := cfg.Channels.Native
-	fmt.Printf("  Enabled:     %v\n", nativeCfg.Enabled)
+	fmt.Println(i18n.TPrintf("cli.client.clientEnabled", nativeCfg.Enabled))
 	if nativeCfg.Enabled {
-		fmt.Printf("  Host:        %s\n", nativeCfg.Host)
-		fmt.Printf("  Port:        %d\n", nativeCfg.Port)
+		fmt.Println(i18n.TPrintf("cli.client.clientHost", nativeCfg.Host))
+		fmt.Println(i18n.TPrintf("cli.client.clientPort", nativeCfg.Port))
 	}
-	fmt.Printf("  Max Clients: %d\n", nativeCfg.MaxClients)
-	fmt.Printf("  Token Expiry: %d days\n", nativeCfg.TokenExpiryDays)
-	fmt.Printf("  PIN Expiry:   %d minutes\n", nativeCfg.PinExpiryMinutes)
+	fmt.Println(i18n.TPrintf("cli.client.clientMaxClients", nativeCfg.MaxClients))
+	fmt.Println(i18n.TPrintf("cli.client.clientTokenExpiry", nativeCfg.TokenExpiryDays))
+	fmt.Println(i18n.TPrintf("cli.client.clientPINExpiry", nativeCfg.PinExpiryMinutes))
 
 	fmt.Println()
-	fmt.Printf("  Paired Clients: %d", len(clients))
 	activeClients := 0
 	for _, c := range clients {
 		if c.Expires.After(time.Now()) {
 			activeClients++
 		}
 	}
-	fmt.Printf(" (%d active)\n", activeClients)
+	fmt.Println(i18n.TPrintf("cli.client.clientPairedCount", len(clients), activeClients))
 
-	fmt.Printf("  Pending PINs:   %d\n", len(pins))
+	fmt.Println(i18n.TPrintf("cli.client.clientPendingPINs", len(pins)))
 
 	if nativeCfg.Enabled {
 		fmt.Println()
-		fmt.Printf("  Connect: ws://%s:%d/api/v1/ws\n", nativeCfg.Host, nativeCfg.Port)
-		fmt.Printf("  REST:    http://%s:%d/api/v1/\n", nativeCfg.Host, nativeCfg.Port)
+		fmt.Println(i18n.TPrintf("cli.client.clientConnectWS", nativeCfg.Host, nativeCfg.Port))
+		fmt.Println(i18n.TPrintf("cli.client.clientConnectREST", nativeCfg.Host, nativeCfg.Port))
 	}
 	fmt.Println()
 }

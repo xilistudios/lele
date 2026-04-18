@@ -6,6 +6,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 func authCmd() {
@@ -22,27 +23,25 @@ func authCmd() {
 	case "status":
 		authStatusCmd()
 	default:
-		fmt.Printf("Unknown auth command: %s\n", os.Args[2])
+		fmt.Println(i18n.TPrintf("cli.common.unknownSubcommand", "auth", os.Args[2]))
 		authHelp()
 	}
 }
 
 func authHelp() {
-	fmt.Println("\nAuth commands:")
-	fmt.Println("  login       Login via OAuth or paste token")
-	fmt.Println("  logout      Remove stored credentials")
-	fmt.Println("  status      Show current auth status")
-	fmt.Println()
-	fmt.Println("Login options:")
-	fmt.Println("  --provider <name>    Provider to login with (openai, anthropic)")
-	fmt.Println("  --device-code        Use device code flow (for headless environments)")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  lele auth login --provider openai")
-	fmt.Println("  lele auth login --provider openai --device-code")
-	fmt.Println("  lele auth login --provider anthropic")
-	fmt.Println("  lele auth logout --provider openai")
-	fmt.Println("  lele auth status")
+	fmt.Println(i18n.T("cli.auth.help.title"))
+	fmt.Println(i18n.T("cli.auth.help.login"))
+	fmt.Println(i18n.T("cli.auth.help.logout"))
+	fmt.Println(i18n.T("cli.auth.help.status"))
+	fmt.Println(i18n.T("cli.auth.help.loginOptions"))
+	fmt.Println(i18n.T("cli.auth.help.provider"))
+	fmt.Println(i18n.T("cli.auth.help.deviceCode"))
+	fmt.Println(i18n.T("cli.auth.help.examples"))
+	fmt.Println(i18n.T("cli.auth.help.exampleLoginOpenAI"))
+	fmt.Println(i18n.T("cli.auth.help.exampleLoginDeviceCode"))
+	fmt.Println(i18n.T("cli.auth.help.exampleLoginAnthropic"))
+	fmt.Println(i18n.T("cli.auth.help.exampleLogoutOpenAI"))
+	fmt.Println(i18n.T("cli.auth.help.exampleStatus"))
 }
 
 func authLoginCmd() {
@@ -63,8 +62,8 @@ func authLoginCmd() {
 	}
 
 	if provider == "" {
-		fmt.Println("Error: --provider is required")
-		fmt.Println("Supported providers: openai, anthropic")
+		fmt.Println(i18n.T("cli.auth.errorProviderRequired"))
+		fmt.Println(i18n.T("cli.auth.supportedProviders"))
 		return
 	}
 
@@ -74,8 +73,8 @@ func authLoginCmd() {
 	case "anthropic":
 		authLoginPasteToken(provider)
 	default:
-		fmt.Printf("Unsupported provider: %s\n", provider)
-		fmt.Println("Supported providers: openai, anthropic")
+		fmt.Println(i18n.TPrintf("cli.auth.unsupportedProvider", provider))
+		fmt.Println(i18n.T("cli.auth.supportedProviders"))
 	}
 }
 
@@ -92,12 +91,12 @@ func authLoginOpenAI(useDeviceCode bool) {
 	}
 
 	if err != nil {
-		fmt.Printf("Login failed: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.auth.loginFailed", err))
 		os.Exit(1)
 	}
 
 	if err := auth.SetCredential("openai", cred); err != nil {
-		fmt.Printf("Failed to save credentials: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.auth.failedSaveCredentials", err))
 		os.Exit(1)
 	}
 
@@ -105,25 +104,25 @@ func authLoginOpenAI(useDeviceCode bool) {
 	if err == nil {
 		appCfg.Providers.OpenAI.AuthMethod = "oauth"
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
-			fmt.Printf("Warning: could not update config: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.auth.warningUpdateConfig", err))
 		}
 	}
 
-	fmt.Println("Login successful!")
+	fmt.Println(i18n.T("cli.auth.loginSuccessful"))
 	if cred.AccountID != "" {
-		fmt.Printf("Account: %s\n", cred.AccountID)
+		fmt.Println(i18n.TPrintf("cli.auth.account", cred.AccountID))
 	}
 }
 
 func authLoginPasteToken(provider string) {
 	cred, err := auth.LoginPasteToken(provider, os.Stdin)
 	if err != nil {
-		fmt.Printf("Login failed: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.auth.loginFailed", err))
 		os.Exit(1)
 	}
 
 	if err := auth.SetCredential(provider, cred); err != nil {
-		fmt.Printf("Failed to save credentials: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.auth.failedSaveCredentials", err))
 		os.Exit(1)
 	}
 
@@ -136,11 +135,11 @@ func authLoginPasteToken(provider string) {
 			appCfg.Providers.OpenAI.AuthMethod = "token"
 		}
 		if err := config.SaveConfig(getConfigPath(), appCfg); err != nil {
-			fmt.Printf("Warning: could not update config: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.auth.warningUpdateConfig", err))
 		}
 	}
 
-	fmt.Printf("Token saved for %s!\n", provider)
+	fmt.Println(i18n.TPrintf("cli.auth.tokenSaved", provider))
 }
 
 func authLogoutCmd() {
@@ -159,7 +158,7 @@ func authLogoutCmd() {
 
 	if provider != "" {
 		if err := auth.DeleteCredential(provider); err != nil {
-			fmt.Printf("Failed to remove credentials: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.auth.failedRemoveCredentials", err))
 			os.Exit(1)
 		}
 
@@ -174,10 +173,10 @@ func authLogoutCmd() {
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
 
-		fmt.Printf("Logged out from %s\n", provider)
+		fmt.Println(i18n.TPrintf("cli.auth.loggedOutFrom", provider))
 	} else {
 		if err := auth.DeleteAllCredentials(); err != nil {
-			fmt.Printf("Failed to remove credentials: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.auth.failedRemoveCredentials", err))
 			os.Exit(1)
 		}
 
@@ -188,41 +187,41 @@ func authLogoutCmd() {
 			config.SaveConfig(getConfigPath(), appCfg)
 		}
 
-		fmt.Println("Logged out from all providers")
+		fmt.Println(i18n.T("cli.auth.loggedOutFromAll"))
 	}
 }
 
 func authStatusCmd() {
 	store, err := auth.LoadStore()
 	if err != nil {
-		fmt.Printf("Error loading auth store: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.auth.errorLoadingAuthStore", err))
 		return
 	}
 
 	if len(store.Credentials) == 0 {
-		fmt.Println("No authenticated providers.")
-		fmt.Println("Run: lele auth login --provider <name>")
+		fmt.Println(i18n.T("cli.auth.noAuthenticatedProviders"))
+		fmt.Println(i18n.T("cli.auth.runAuthLogin"))
 		return
 	}
 
-	fmt.Println("\nAuthenticated Providers:")
-	fmt.Println("------------------------")
+	fmt.Println(i18n.T("cli.auth.authenticatedProviders"))
+	fmt.Println(i18n.T("cli.auth.separator"))
 	for provider, cred := range store.Credentials {
-		status := "active"
+		status := i18n.T("cli.auth.statusActive")
 		if cred.IsExpired() {
-			status = "expired"
+			status = i18n.T("cli.auth.statusExpired")
 		} else if cred.NeedsRefresh() {
-			status = "needs refresh"
+			status = i18n.T("cli.auth.statusNeedsRefresh")
 		}
 
 		fmt.Printf("  %s:\n", provider)
-		fmt.Printf("    Method: %s\n", cred.AuthMethod)
-		fmt.Printf("    Status: %s\n", status)
+		fmt.Println(i18n.TPrintf("cli.auth.method", cred.AuthMethod))
+		fmt.Println(i18n.TPrintf("cli.auth.status", status))
 		if cred.AccountID != "" {
-			fmt.Printf("    Account: %s\n", cred.AccountID)
+			fmt.Println(i18n.TPrintf("cli.auth.accountInfo", cred.AccountID))
 		}
 		if !cred.ExpiresAt.IsZero() {
-			fmt.Printf("    Expires: %s\n", cred.ExpiresAt.Format("2006-01-02 15:04"))
+			fmt.Println(i18n.TPrintf("cli.auth.expires", cred.ExpiresAt.Format("2006-01-02 15:04")))
 		}
 	}
 }

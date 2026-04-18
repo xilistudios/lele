@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/devices"
 	"github.com/xilistudios/lele/pkg/health"
 	"github.com/xilistudios/lele/pkg/heartbeat"
+	"github.com/xilistudios/lele/pkg/i18n"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -28,25 +29,25 @@ func gatewayCmd() {
 	for _, arg := range args {
 		if arg == "--debug" || arg == "-d" {
 			logger.SetLevel(logger.DEBUG)
-			fmt.Println("🔍 Debug mode enabled")
+			fmt.Println(i18n.T("cli.gateway.debugModeEnabled"))
 			break
 		}
 	}
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.common.errorLoadingConfig", err))
 		os.Exit(1)
 	}
 
 	if cfg.Logs.Enabled {
 		logsPath := cfg.LogsPath()
 		if err := logger.EnableMultiFileLogging(logsPath); err != nil {
-			fmt.Printf("Warning: could not enable file logging: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.gateway.warningEnableFileLogging", err))
 		} else {
 			if cfg.Logs.MaxDays > 0 {
 				if err := logger.CleanupOldLogs(cfg.Logs.MaxDays); err != nil {
-					fmt.Printf("Warning: could not cleanup old logs: %v\n", err)
+					fmt.Println(i18n.TPrintf("cli.gateway.warningCleanupOldLogs", err))
 				}
 			}
 		}
@@ -55,14 +56,14 @@ func gatewayCmd() {
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
-	fmt.Println("\n📦 Agent Status:")
+	fmt.Println(i18n.T("cli.gateway.agentStatus"))
 	startupInfo := agentLoop.GetStartupInfo()
 	toolsInfo := startupInfo["tools"].(map[string]interface{})
 	skillsInfo := startupInfo["skills"].(map[string]interface{})
-	fmt.Printf("  • Tools: %d loaded\n", toolsInfo["count"])
-	fmt.Printf("  • Skills: %d/%d available\n",
+	fmt.Println(i18n.TPrintf("cli.gateway.toolsLoaded", toolsInfo["count"]))
+	fmt.Println(i18n.TPrintf("cli.gateway.skillsAvailable",
 		skillsInfo["available"],
-		skillsInfo["total"])
+		skillsInfo["total"]))
 
 	logger.InfoCF("agent", "Agent initialized",
 		map[string]interface{}{
@@ -99,7 +100,7 @@ func gatewayCmd() {
 
 	channelManager, err := channels.NewManager(cfg, msgBus, agentLoop, approvalManager)
 	if err != nil {
-		fmt.Printf("Error creating channel manager: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.gateway.errorCreatingChannelManager", err))
 		os.Exit(1)
 	}
 
@@ -140,26 +141,26 @@ func gatewayCmd() {
 
 	enabledChannels := channelManager.GetEnabledChannels()
 	if len(enabledChannels) > 0 {
-		fmt.Printf("✓ Channels enabled: %s\n", enabledChannels)
+		fmt.Println(i18n.TPrintf("cli.gateway.channelsEnabled", enabledChannels))
 	} else {
-		fmt.Println("⚠ Warning: No channels enabled")
+		fmt.Println(i18n.T("cli.gateway.warningNoChannelsEnabled"))
 	}
 
-	fmt.Printf("✓ Gateway started on %s:%d\n", cfg.Gateway.Host, cfg.Gateway.Port)
-	fmt.Println("Press Ctrl+C to stop")
+	fmt.Println(i18n.TPrintf("cli.gateway.gatewayStarted", cfg.Gateway.Host, cfg.Gateway.Port))
+	fmt.Println(i18n.T("cli.gateway.pressCtrlC"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := cronService.Start(); err != nil {
-		fmt.Printf("Error starting cron service: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.gateway.errorStartingCronService", err))
 	}
-	fmt.Println("✓ Cron service started")
+	fmt.Println(i18n.T("cli.gateway.cronServiceStarted"))
 
 	if err := heartbeatService.Start(); err != nil {
-		fmt.Printf("Error starting heartbeat service: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.gateway.errorStartingHeartbeatService", err))
 	}
-	fmt.Println("✓ Heartbeat service started")
+	fmt.Println(i18n.T("cli.gateway.heartbeatServiceStarted"))
 
 	stateManager := state.NewManager(cfg.WorkspacePath())
 	deviceService := devices.NewService(devices.Config{
@@ -168,13 +169,13 @@ func gatewayCmd() {
 	}, stateManager)
 	deviceService.SetBus(msgBus)
 	if err := deviceService.Start(ctx); err != nil {
-		fmt.Printf("Error starting device service: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.gateway.errorStartingDeviceService", err))
 	} else if cfg.Devices.Enabled {
-		fmt.Println("✓ Device event service started")
+		fmt.Println(i18n.T("cli.gateway.deviceServiceStarted"))
 	}
 
 	if err := channelManager.StartAll(ctx); err != nil {
-		fmt.Printf("Error starting channels: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.gateway.errorStartingChannels", err))
 	}
 
 	configWatcher := config.NewConfigWatcher(getConfigPath())
@@ -198,7 +199,7 @@ func gatewayCmd() {
 			logger.ErrorCF("health", "Health server error", map[string]interface{}{"error": err.Error()})
 		}
 	}()
-	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	fmt.Println(i18n.TPrintf("cli.gateway.healthEndpoints", cfg.Gateway.Host, cfg.Gateway.Port))
 
 	go agentLoop.Run(ctx)
 
@@ -206,7 +207,7 @@ func gatewayCmd() {
 	signal.Notify(sigChan, os.Interrupt)
 	<-sigChan
 
-	fmt.Println("\nShutting down...")
+	fmt.Println(i18n.T("cli.gateway.shuttingDown"))
 	cancel()
 	configWatcher.Stop()
 	healthServer.Stop(context.Background())
@@ -215,7 +216,7 @@ func gatewayCmd() {
 	cronService.Stop()
 	agentLoop.Stop()
 	channelManager.StopAll(ctx)
-	fmt.Println("✓ Gateway stopped")
+	fmt.Println(i18n.T("cli.gateway.gatewayStopped"))
 }
 
 func setupCronTool(agentLoop *agent.AgentLoop, msgBus *bus.MessageBus, workspace string, restrict bool, execTimeout time.Duration, config *config.Config) *cron.CronService {

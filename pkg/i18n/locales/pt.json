@@ -1,0 +1,917 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "Erro ao carregar configuração: {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "Comando desconhecido: {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "Subcomando desconhecido de {{.category}}: {{.command}}"
+      },
+      "goodbye": {
+        "other": "Até logo!"
+      },
+      "aborted": {
+        "other": "Abortado."
+      },
+      "overwritePrompt": {
+        "other": "A configuração já existe em {{.path}}\nSobrescrever? (s/n): "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - Assistente Pessoal de IA v{{.version}}"
+      },
+      "usage": {
+        "other": "Uso: lele <comando>"
+      },
+      "commands": {
+        "other": "Comandos:"
+      },
+      "onboard": {
+        "other": "Inicializar configuração e espaço de trabalho do lele"
+      },
+      "agent": {
+        "other": "Interagir diretamente com o agente"
+      },
+      "auth": {
+        "other": "Gerenciar autenticação (login, logout, status)"
+      },
+      "gateway": {
+        "other": "Iniciar o gateway lele"
+      },
+      "web": {
+        "other": "Iniciar ou parar o servidor do aplicativo web"
+      },
+      "status": {
+        "other": "Mostrar status do lele"
+      },
+      "cron": {
+        "other": "Gerenciar tarefas agendadas"
+      },
+      "migrate": {
+        "other": "Migrar do OpenClaw para o Lele"
+      },
+      "skills": {
+        "other": "Gerenciar habilidades (instalar, listar, remover)"
+      },
+      "client": {
+        "other": "Gerenciar clientes de canal nativo (parear, listar, remover)"
+      },
+      "version": {
+        "other": "Mostrar informações de versão"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "{{.version}} lele {{.build}}"
+      },
+      "build": {
+        "other": "Compilação: {{.build}}"
+      },
+      "go": {
+        "other": "Go: {{.version}}"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Configuração da Interface Web ==="
+      },
+      "webPort": {
+        "other": "Porta web"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Interface web habilitada na porta"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ Canal nativo habilitado automaticamente (obrigatório para Interface Web)"
+      },
+      "configureNativeAdvanced": {
+        "other": "[Avançado] Configurar canal nativo?"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== Configuração do Canal Nativo (Avançado) ==="
+      },
+      "apiHost": {
+        "other": "Host da API"
+      },
+      "apiPort": {
+        "other": "Porta da API"
+      },
+      "maxPairedClients": {
+        "other": "Máximo de clientes pareados"
+      },
+      "tokenExpiryDays": {
+        "other": "Dias de expiração do token"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ Canal nativo configurado"
+      },
+      "generatePairingPIN": {
+        "other": "Gerar PIN de pareamento?"
+      },
+      "deviceName": {
+        "other": "Nome do dispositivo"
+      },
+      "errorCreatingAuthManager": {
+        "other": "Erro ao criar gerenciador de autenticação: {{.error}}"
+      },
+      "errorGeneratingPIN": {
+        "other": "Erro ao gerar PIN: {{.error}}"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ PIN de pareamento gerado"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  Expira: {{.date}} ({{.minutes}} minutos)"
+      },
+      "startServicesNow": {
+        "other": "Iniciar serviços agora?"
+      },
+      "manualStartInstructions": {
+        "other": "\nPara iniciar os serviços manualmente:"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "startingGateway": {
+        "other": "\n[+] Iniciando gateway..."
+      },
+      "startingWebServer": {
+        "other": "[+] Iniciando servidor web..."
+      },
+      "servicesStarted": {
+        "other": "\n✓ Serviços iniciados"
+      },
+      "openBrowser": {
+        "other": "\nAbra http://127.0.0.1:{{.port}} no seu navegador"
+      },
+      "enterPINToConnect": {
+        "other": "Digite o PIN para conectar seu dispositivo."
+      },
+      "configExists": {
+        "other": "A configuração já existe em {{.path}}"
+      },
+      "errorSavingConfig": {
+        "other": "Erro ao salvar configuração: {{.error}}"
+      },
+      "warningCreateLogsDir": {
+        "other": "Aviso: não foi possível criar o diretório de logs: {{.error}}"
+      },
+      "warningCreateInfoLog": {
+        "other": "Aviso: não foi possível criar o arquivo de log de informações: {{.error}}"
+      },
+      "warningCreateErrorsLog": {
+        "other": "Aviso: não foi possível criar o arquivo de log de erros: {{.error}}"
+      },
+      "ready": {
+        "other": "{{.logo}} lele está pronto!"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 Modo de depuração habilitado"
+      },
+      "warningEnableFileLogging": {
+        "other": "Aviso: não foi possível habilitar o registro em arquivo: {{.error}}"
+      },
+      "warningCleanupOldLogs": {
+        "other": "Aviso: não foi possível limpar logs antigos: {{.error}}"
+      },
+      "agentStatus": {
+        "other": "\n📦 Status do Agente:"
+      },
+      "toolsLoaded": {
+        "other": "  • Ferramentas: {{.count}} carregadas"
+      },
+      "skillsAvailable": {
+        "other": "  • Habilidades: {{.available}}/{{.total}} disponíveis"
+      },
+      "errorCreatingChannelManager": {
+        "other": "Erro ao criar gerenciador de canal: {{.error}}"
+      },
+      "channelsEnabled": {
+        "other": "✓ Canais habilitados: {{.channels}}"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ Aviso: Nenhum canal habilitado"
+      },
+      "gatewayStarted": {
+        "other": "✓ Gateway iniciado em {{.host}}:{{.port}}"
+      },
+      "pressCtrlC": {
+        "other": "Pressione Ctrl+C para parar"
+      },
+      "errorStartingCronService": {
+        "other": "Erro ao iniciar serviço de agendamento: {{.error}}"
+      },
+      "cronServiceStarted": {
+        "other": "✓ Serviço de agendamento iniciado"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "Erro ao iniciar serviço de heartbeat: {{.error}}"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ Serviço de heartbeat iniciado"
+      },
+      "errorStartingDeviceService": {
+        "other": "Erro ao iniciar serviço de dispositivo: {{.error}}"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ Serviço de evento de dispositivo iniciado"
+      },
+      "errorStartingChannels": {
+        "other": "Erro ao iniciar canais: {{.error}}"
+      },
+      "healthEndpoints": {
+        "other": "✓ Endpoints de saúde disponíveis em http://{{.host}}:{{.port}}/health e /ready"
+      },
+      "shuttingDown": {
+        "other": "\nEncerrando..."
+      },
+      "gatewayStopped": {
+        "other": "✓ Gateway parado"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\nComandos de autenticação:"
+        },
+        "login": {
+          "other": "  login       Fazer login via OAuth ou colar token"
+        },
+        "logout": {
+          "other": "  logout      Remover credenciais armazenadas"
+        },
+        "status": {
+          "other": "  status      Mostrar status de autenticação atual"
+        },
+        "loginOptions": {
+          "other": "\nOpções de login:"
+        },
+        "provider": {
+          "other": "  --provider <nome>    Provedor para fazer login (openai, anthropic)"
+        },
+        "deviceCode": {
+          "other": "  --device-code        Usar fluxo de código de dispositivo (para ambientes sem interface gráfica)"
+        },
+        "examples": {
+          "other": "\nExemplos:"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "Erro: --provider é obrigatório"
+      },
+      "supportedProviders": {
+        "other": "Provedores suportados: openai, anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "Provedor não suportado: {{.provider}}"
+      },
+      "loginFailed": {
+        "other": "Falha no login: {{.error}}"
+      },
+      "failedSaveCredentials": {
+        "other": "Falha ao salvar credenciais: {{.error}}"
+      },
+      "warningUpdateConfig": {
+        "other": "Aviso: não foi possível atualizar a configuração: {{.error}}"
+      },
+      "loginSuccessful": {
+        "other": "Login realizado com sucesso!"
+      },
+      "account": {
+        "other": "Conta: {{.accountId}}"
+      },
+      "tokenSaved": {
+        "other": "Token salvo para {{.provider}}!"
+      },
+      "failedRemoveCredentials": {
+        "other": "Falha ao remover credenciais: {{.error}}"
+      },
+      "loggedOutFrom": {
+        "other": "Logout realizado de {{.provider}}"
+      },
+      "loggedOutFromAll": {
+        "other": "Logout realizado de todos os provedores"
+      },
+      "errorLoadingAuthStore": {
+        "other": "Erro ao carregar armazenamento de autenticação: {{.error}}"
+      },
+      "noAuthenticatedProviders": {
+        "other": "Nenhum provedor autenticado."
+      },
+      "runAuthLogin": {
+        "other": "Execute: lele auth login --provider <nome>"
+      },
+      "authenticatedProviders": {
+        "other": "\nProvedores Autenticados:"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    Método: {{.method}}"
+      },
+      "status": {
+        "other": "    Status: {{.status}}"
+      },
+      "accountInfo": {
+        "other": "    Conta: {{.accountId}}"
+      },
+      "expires": {
+        "other": "    Expira: {{.date}}"
+      },
+      "statusActive": {
+        "other": "ativo"
+      },
+      "statusExpired": {
+        "other": "expirado"
+      },
+      "statusNeedsRefresh": {
+        "other": "precisa ser atualizado"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\nComandos de habilidades:"
+        },
+        "list": {
+          "other": "  list                    Listar habilidades instaladas"
+        },
+        "install": {
+          "other": "  install <repo>          Instalar habilidade do GitHub"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          Instalar todas as habilidades nativas no espaço de trabalho"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             Listar habilidades nativas disponíveis"
+        },
+        "remove": {
+          "other": "  remove <nome>           Remover habilidade instalada"
+        },
+        "search": {
+          "other": "  search                  Pesquisar habilidades disponíveis"
+        },
+        "show": {
+          "other": "  show <nome>             Mostrar detalhes da habilidade"
+        },
+        "examples": {
+          "other": "\nExemplos:"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "Nenhuma habilidade instalada."
+      },
+      "installedSkills": {
+        "other": "\nHabilidades Instaladas:"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ {{.name}} ({{.description}})"
+      },
+      "skillDescription": {
+        "other": "    {{.description}}"
+      },
+      "usageInstall": {
+        "other": "Uso: lele skills install <repositorio-github>"
+      },
+      "exampleInstallUsage": {
+        "other": "Exemplo: lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "Instalando habilidade de {{.repo}}..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ Falha ao instalar habilidade: {{.error}}"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ Habilidade '{{.name}}' instalada com sucesso!"
+      },
+      "removingSkill": {
+        "other": "Removendo habilidade '{{.name}}'..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ Falha ao remover habilidade: {{.error}}"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ Habilidade '{{.name}}' removida com sucesso!"
+      },
+      "usageRemove": {
+        "other": "Uso: lele skills remove <nome-da-habilidade>"
+      },
+      "usageShow": {
+        "other": "Uso: lele skills show <nome-da-habilidade>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "Copiando habilidades nativas para o espaço de trabalho..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ Habilidade nativa '{{.name}}' não encontrada: {{.error}}"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ Falha ao criar diretório para {{.name}}: {{.error}}"
+      },
+      "failedCopySkill": {
+        "other": "✗ Falha ao copiar {{.name}}: {{.error}}"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ Todas as habilidades nativas instaladas!"
+      },
+      "useInWorkspace": {
+        "other": "Agora você pode usá-las no seu espaço de trabalho."
+      },
+      "availableBuiltinSkills": {
+        "other": "\nHabilidades Nativas Disponíveis:"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "Erro ao ler habilidades nativas: {{.error}}"
+      },
+      "noBuiltinSkills": {
+        "other": "Nenhuma habilidade nativa disponível."
+      },
+      "searchingSkills": {
+        "other": "Pesquisando habilidades disponíveis..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ Falha ao buscar lista de habilidades: {{.error}}"
+      },
+      "noSkillsAvailable": {
+        "other": "Nenhuma habilidade disponível."
+      },
+      "availableSkills": {
+        "other": "\nHabilidades Disponíveis ({{.count}}):"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 {{.name}}"
+      },
+      "skillRepo": {
+        "other": "     Repositório: {{.repo}}"
+      },
+      "skillAuthor": {
+        "other": "     Autor: {{.author}}"
+      },
+      "skillTags": {
+        "other": "     Tags: {{.tags}}"
+      },
+      "skillNotFound": {
+        "other": "✗ Habilidade '{{.name}}' não encontrada"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 Habilidade: {{.name}}"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nComandos web:"
+        },
+        "start": {
+          "other": "  start              Iniciar o servidor web em segundo plano"
+        },
+        "stop": {
+          "other": "  stop               Parar o servidor web"
+        },
+        "status": {
+          "other": "  status             Mostrar status do servidor web"
+        },
+        "options": {
+          "other": "\nOpções:"
+        },
+        "host": {
+          "other": "  --host <host>     Host de vinculação (padrão: 0.0.0.0)"
+        },
+        "port": {
+          "other": "  --port <port>     Porta de vinculação (padrão: 3005)"
+        },
+        "examples": {
+          "other": "\nExemplos:"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Servidor web já está em execução (pid {{.pid}})"
+      },
+      "errorResolvingExecutable": {
+        "other": "Erro ao resolver executável: {{.error}}"
+      },
+      "errorPrepareLogDir": {
+        "other": "Erro ao preparar diretório de logs: {{.error}}"
+      },
+      "errorOpenLogFile": {
+        "other": "Erro ao abrir arquivo de log web: {{.error}}"
+      },
+      "errorStartWebServer": {
+        "other": "Erro ao iniciar servidor web: {{.error}}"
+      },
+      "errorWritePID": {
+        "other": "Erro ao gravar arquivo pid: {{.error}}"
+      },
+      "webServerStarted": {
+        "other": "✓ Servidor web iniciado em http://{{.host}}:{{.port}} (pid {{.pid}})"
+      },
+      "webServerNotRunning": {
+        "other": "Servidor web não está em execução"
+      },
+      "errorFindProcess": {
+        "other": "Erro ao encontrar processo do servidor web: {{.error}}"
+      },
+      "webServerStopped": {
+        "other": "✓ Servidor web parado (pid {{.pid}})"
+      },
+      "webServerStatusStopped": {
+        "other": "Servidor web: parado"
+      },
+      "webServerStatusRunning": {
+        "other": "Servidor web: em execução (pid {{.pid}})"
+      },
+      "webAssetsMissing": {
+        "other": "Os recursos do aplicativo web estão ausentes. Compile o frontend com `make build` ou `npm run build --prefix web`."
+      },
+      "servingWebApp": {
+        "other": "Servindo aplicativo web em http://{{.addr}}"
+      },
+      "webServerError": {
+        "other": "Erro do servidor web: {{.error}}"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\nComandos de cliente:"
+        },
+        "pin": {
+          "other": "  pin         Gerar um novo PIN de pareamento"
+        },
+        "list": {
+          "other": "  list        Listar todos os clientes pareados"
+        },
+        "pending": {
+          "other": "  pending     Listar solicitações de pareamento pendentes"
+        },
+        "remove": {
+          "other": "  remove      Remover um cliente pareado"
+        },
+        "status": {
+          "other": "  status      Mostrar status do canal do cliente"
+        },
+        "examples": {
+          "other": "\nExemplos:"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <id_do_cliente>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "Uso: lele client remove <id_do_cliente>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ Erro ao gerar PIN: {{.error}}"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n{{.name}} PIN de Pareamento Gerado"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  Expira: {{.date}}"
+      },
+      "enterPINToPair": {
+        "other": "Digite este PIN no seu cliente nativo para parear."
+      },
+      "noPairedClients": {
+        "other": "Nenhum cliente pareado."
+      },
+      "pairedClientsTitle": {
+        "other": "\n{{.count}} Clientes Pareados ({{.total}})"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ ativo"
+      },
+      "clientStatusExpired": {
+        "other": "✗ expirado"
+      },
+      "clientID": {
+        "other": "\n  {{.id}}"
+      },
+      "clientDevice": {
+        "other": "    Dispositivo:  {{.name}}"
+      },
+      "clientStatus": {
+        "other": "    Status:  {{.status}}"
+      },
+      "clientCreated": {
+        "other": "    Criado: {{.date}}"
+      },
+      "clientExpires": {
+        "other": "    Expira: {{.date}}"
+      },
+      "clientLastSeen": {
+        "other": "    Último:    {{.time}}"
+      },
+      "noPendingPairing": {
+        "other": "Nenhuma solicitação de pareamento pendente."
+      },
+      "pendingPairingTitle": {
+        "other": "\n{{.count}} Solicitações de Pareamento Pendentes ({{.total}})"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  PIN: {{.pin}}"
+      },
+      "pendingDevice": {
+        "other": "    Dispositivo:    {{.name}}"
+      },
+      "pendingStatus": {
+        "other": "    Status:    {{.status}}"
+      },
+      "pendingRemaining": {
+        "other": "    Restante: {{.time}}"
+      },
+      "pendingStatusValid": {
+        "other": "✓ válido"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ expirado"
+      },
+      "errorRemovingClient": {
+        "other": "✗ Erro ao remover cliente: {{.error}}"
+      },
+      "clientRemoved": {
+        "other": "✓ Cliente '{{.id}}' removido"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n{{.name}} Status do Canal do Cliente"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  Habilitado:     {{.enabled}}"
+      },
+      "clientHost": {
+        "other": "  Host:        {{.host}}"
+      },
+      "clientPort": {
+        "other": "  Porta:        {{.port}}"
+      },
+      "clientMaxClients": {
+        "other": "  Máx. Clientes: {{.max}}"
+      },
+      "clientTokenExpiry": {
+        "other": "  Expiração do Token: {{.days}} dias"
+      },
+      "clientPINExpiry": {
+        "other": "  Expiração do PIN:   {{.minutes}} minutos"
+      },
+      "clientPairedCount": {
+        "other": "  Clientes Pareados: {{.count}} ({{.active}} ativos)"
+      },
+      "clientPendingPINs": {
+        "other": "  PINs Pendentes:   {{.count}}"
+      },
+      "clientConnectWS": {
+        "other": "  Conectar: ws://{{.host}}:{{.port}}/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST:    http://{{.host}}:{{.port}}/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\nComandos de agendamento:"
+        },
+        "list": {
+          "other": "  list              Listar todos os trabalhos agendados"
+        },
+        "add": {
+          "other": "  add              Adicionar um novo trabalho agendado"
+        },
+        "remove": {
+          "other": "  remove <id>       Remover um trabalho por ID"
+        },
+        "enable": {
+          "other": "  enable <id>      Habilitar um trabalho"
+        },
+        "disable": {
+          "other": "  disable <id>     Desabilitar um trabalho"
+        },
+        "addOptions": {
+          "other": "\nOpções de adição:"
+        },
+        "name": {
+          "other": "  -n, --name       Nome do trabalho"
+        },
+        "message": {
+          "other": "  -m, --message    Mensagem para o agente"
+        },
+        "every": {
+          "other": "  -e, --every      Executar a cada N segundos"
+        },
+        "cron": {
+          "other": "  -c, --cron       Expressão cron (ex. '0 9 * * *')"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     Entregar resposta ao canal"
+        },
+        "to": {
+          "other": "  --to             Destinatário para entrega"
+        },
+        "channel": {
+          "other": "  --channel        Canal para entrega"
+        }
+      },
+      "usageRemove": {
+        "other": "Uso: lele cron remove <id_do_trabalho>"
+      },
+      "usageEnableDisable": {
+        "other": "Uso: lele cron enable/disable <id_do_trabalho>"
+      },
+      "noScheduledJobs": {
+        "other": "Nenhum trabalho agendado."
+      },
+      "scheduledJobs": {
+        "other": "\nTrabalhos Agendados:"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  {{.name}} ({{.schedule}})"
+      },
+      "jobSchedule": {
+        "other": "    Agendamento: {{.schedule}}"
+      },
+      "jobStatus": {
+        "other": "    Status: {{.status}}"
+      },
+      "jobNextRun": {
+        "other": "    Próxima execução: {{.time}}"
+      },
+      "jobScheduleEvery": {
+        "other": "a cada {{.seconds}}s"
+      },
+      "jobScheduleOneTime": {
+        "other": "única execução"
+      },
+      "jobStatusEnabled": {
+        "other": "habilitado"
+      },
+      "jobStatusDisabled": {
+        "other": "desabilitado"
+      },
+      "errorNameRequired": {
+        "other": "Erro: --name é obrigatório"
+      },
+      "errorMessageRequired": {
+        "other": "Erro: --message é obrigatório"
+      },
+      "errorScheduleRequired": {
+        "other": "Erro: --every ou --cron deve ser especificado"
+      },
+      "errorAddingJob": {
+        "other": "Erro ao adicionar trabalho: {{.error}}"
+      },
+      "jobAdded": {
+        "other": "✓ Trabalho '{{.name}}' adicionado ({{.schedule}})"
+      },
+      "jobRemoved": {
+        "other": "✓ Trabalho {{.id}} removido"
+      },
+      "jobNotFound": {
+        "other": "✗ Trabalho {{.id}} não encontrado"
+      },
+      "jobEnabled": {
+        "other": "✓ Trabalho '{{.name}}' {{.status}}"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 Modo de depuração habilitado"
+      },
+      "errorMessage": {
+        "other": "Erro: {{.error}}"
+      },
+      "interactiveMode": {
+        "other": "{{.logo}} Modo interativo (Ctrl+C para sair)"
+      },
+      "youPrompt": {
+        "other": "{{.logo}} Você: "
+      },
+      "errorInitReadline": {
+        "other": "Erro ao inicializar readline: {{.error}}"
+      },
+      "fallbackSimpleInput": {
+        "other": "Usando modo de entrada simples..."
+      },
+      "errorReadingInput": {
+        "other": "Erro ao ler entrada: {{.error}}"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "Erro ao copiar modelos do espaço de trabalho: {{.error}}"
+      },
+      "errorCreateTargetDir": {
+        "other": "Falha ao criar diretório de destino: {{.error}}"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "Falha ao ler arquivo embutido {{.path}}: {{.error}}"
+      },
+      "errorGetRelativePath": {
+        "other": "Falha ao obter caminho relativo para {{.path}}: {{.error}}"
+      },
+      "errorCreateDirectory": {
+        "other": "Falha ao criar diretório {{.path}}: {{.error}}"
+      },
+      "errorWriteFile": {
+        "other": "Falha ao gravar arquivo {{.path}}: {{.error}}"
+      }
+    }
+  }
+}

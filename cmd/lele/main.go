@@ -4,11 +4,40 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/xilistudios/lele/pkg/i18n"
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
+func parseGlobalFlags() {
+	args := os.Args[1:]
+	newArgs := []string{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--lang", "-l":
+			if i+1 < len(args) {
+				i18n.SetLanguage(args[i+1])
+				i++
+			}
+		case "--help", "-h":
+			printHelp()
+			os.Exit(0)
+		default:
+			if !strings.HasPrefix(args[i], "--lang=") {
+				newArgs = append(newArgs, args[i])
+			} else {
+				langVal := strings.TrimPrefix(args[i], "--lang=")
+				i18n.SetLanguage(langVal)
+			}
+		}
+	}
+	os.Args = append([]string{os.Args[0]}, newArgs...)
+}
+
 func main() {
+	parseGlobalFlags()
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(1)

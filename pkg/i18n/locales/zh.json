@@ -1,0 +1,917 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "加载配置时出错: {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "未知命令: {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "未知的 {{.category}} 命令: {{.command}}"
+      },
+      "goodbye": {
+        "other": "再见!"
+      },
+      "aborted": {
+        "other": "已中止。"
+      },
+      "overwritePrompt": {
+        "other": "配置已存在于 {{.path}}\n是否覆盖? (y/n): "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - 个人 AI 助手 v{{.version}}"
+      },
+      "usage": {
+        "other": "用法: lele <命令>"
+      },
+      "commands": {
+        "other": "命令:"
+      },
+      "onboard": {
+        "other": "初始化 lele 配置和工作空间"
+      },
+      "agent": {
+        "other": "直接与 AI 代理交互"
+      },
+      "auth": {
+        "other": "管理认证 (登录、登出、状态)"
+      },
+      "gateway": {
+        "other": "启动 lele 网关"
+      },
+      "web": {
+        "other": "启动或停止 Web 应用服务器"
+      },
+      "status": {
+        "other": "显示 lele 状态"
+      },
+      "cron": {
+        "other": "管理定时任务"
+      },
+      "migrate": {
+        "other": "从 OpenClaw 迁移到 Lele"
+      },
+      "skills": {
+        "other": "管理技能 (安装、列表、移除)"
+      },
+      "client": {
+        "other": "管理原生通道客户端 (配对、列表、移除)"
+      },
+      "version": {
+        "other": "显示版本信息"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "{{.name}} lele {{.version}}"
+      },
+      "build": {
+        "other": "构建: {{.build}}"
+      },
+      "go": {
+        "other": "Go: {{.goVersion}}"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Web UI 配置 ==="
+      },
+      "webPort": {
+        "other": "Web 端口"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Web UI 已在端口启用"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ 原生通道已自动启用 (Web UI 必需)"
+      },
+      "configureNativeAdvanced": {
+        "other": "[高级] 配置原生通道?"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== 原生通道配置 (高级) ==="
+      },
+      "apiHost": {
+        "other": "API 主机"
+      },
+      "apiPort": {
+        "other": "API 端口"
+      },
+      "maxPairedClients": {
+        "other": "最大配对客户端数"
+      },
+      "tokenExpiryDays": {
+        "other": "令牌过期天数"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ 原生通道已配置"
+      },
+      "generatePairingPIN": {
+        "other": "生成配对 PIN 码?"
+      },
+      "deviceName": {
+        "other": "设备名称"
+      },
+      "errorCreatingAuthManager": {
+        "other": "创建认证管理器时出错: {{.error}}"
+      },
+      "errorGeneratingPIN": {
+        "other": "生成 PIN 码时出错: {{.error}}"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ 配对 PIN 码已生成"
+      },
+      "pinLabel": {
+        "other": "  PIN 码:  {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  过期时间: {{.expires}} ({{.minutes}} 分钟)"
+      },
+      "startServicesNow": {
+        "other": "立即启动服务?"
+      },
+      "manualStartInstructions": {
+        "other": "\n手动启动服务:"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "startingGateway": {
+        "other": "\n[+] 正在启动网关..."
+      },
+      "startingWebServer": {
+        "other": "[+] 正在启动 Web 服务器..."
+      },
+      "servicesStarted": {
+        "other": "\n✓ 服务已启动"
+      },
+      "openBrowser": {
+        "other": "\n在浏览器中打开 http://127.0.0.1:{{.port}}"
+      },
+      "enterPINToConnect": {
+        "other": "输入 PIN 码以连接您的设备。"
+      },
+      "configExists": {
+        "other": "配置已存在于 {{.path}}"
+      },
+      "errorSavingConfig": {
+        "other": "保存配置时出错: {{.error}}"
+      },
+      "warningCreateLogsDir": {
+        "other": "警告: 无法创建日志目录: {{.error}}"
+      },
+      "warningCreateInfoLog": {
+        "other": "警告: 无法创建信息日志文件: {{.error}}"
+      },
+      "warningCreateErrorsLog": {
+        "other": "警告: 无法创建错误日志文件: {{.error}}"
+      },
+      "ready": {
+        "other": "{{.name}} lele 已准备就绪!"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 调试模式已启用"
+      },
+      "warningEnableFileLogging": {
+        "other": "警告: 无法启用文件日志: {{.error}}"
+      },
+      "warningCleanupOldLogs": {
+        "other": "警告: 无法清理旧日志: {{.error}}"
+      },
+      "agentStatus": {
+        "other": "\n📦 代理状态:"
+      },
+      "toolsLoaded": {
+        "other": "  • 工具: 已加载 {{.count}} 个"
+      },
+      "skillsAvailable": {
+        "other": "  • 技能: {{.available}}/{{.total}} 可用"
+      },
+      "errorCreatingChannelManager": {
+        "other": "创建通道管理器时出错: {{.error}}"
+      },
+      "channelsEnabled": {
+        "other": "✓ 已启用通道: {{.channels}}"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ 警告: 未启用任何通道"
+      },
+      "gatewayStarted": {
+        "other": "✓ 网关已启动于 {{.host}}:{{.port}}"
+      },
+      "pressCtrlC": {
+        "other": "按 Ctrl+C 停止"
+      },
+      "errorStartingCronService": {
+        "other": "启动定时服务时出错: {{.error}}"
+      },
+      "cronServiceStarted": {
+        "other": "✓ 定时服务已启动"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "启动心跳服务时出错: {{.error}}"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ 心跳服务已启动"
+      },
+      "errorStartingDeviceService": {
+        "other": "启动设备服务时出错: {{.error}}"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ 设备事件服务已启动"
+      },
+      "errorStartingChannels": {
+        "other": "启动通道时出错: {{.error}}"
+      },
+      "healthEndpoints": {
+        "other": "✓ 健康检查端点可用: http://{{.host}}:{{.port}}/health 和 /ready"
+      },
+      "shuttingDown": {
+        "other": "\n正在关闭..."
+      },
+      "gatewayStopped": {
+        "other": "✓ 网关已停止"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\n认证命令:"
+        },
+        "login": {
+          "other": "  login       通过 OAuth 登录或粘贴令牌"
+        },
+        "logout": {
+          "other": "  logout      移除存储的凭据"
+        },
+        "status": {
+          "other": "  status      显示当前认证状态"
+        },
+        "loginOptions": {
+          "other": "\n登录选项:"
+        },
+        "provider": {
+          "other": "  --provider <名称>    用于登录的提供商 (openai, anthropic)"
+        },
+        "deviceCode": {
+          "other": "  --device-code        使用设备码流程 (适用于无头环境)"
+        },
+        "examples": {
+          "other": "\n示例:"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "错误: 需要指定 --provider"
+      },
+      "supportedProviders": {
+        "other": "支持的提供商: openai, anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "不支持的提供商: {{.provider}}"
+      },
+      "loginFailed": {
+        "other": "登录失败: {{.error}}"
+      },
+      "failedSaveCredentials": {
+        "other": "保存凭据失败: {{.error}}"
+      },
+      "warningUpdateConfig": {
+        "other": "警告: 无法更新配置: {{.error}}"
+      },
+      "loginSuccessful": {
+        "other": "登录成功!"
+      },
+      "account": {
+        "other": "账户: {{.accountId}}"
+      },
+      "tokenSaved": {
+        "other": "令牌已为 {{.provider}} 保存!"
+      },
+      "failedRemoveCredentials": {
+        "other": "移除凭据失败: {{.error}}"
+      },
+      "loggedOutFrom": {
+        "other": "已从 {{.provider}} 登出"
+      },
+      "loggedOutFromAll": {
+        "other": "已从所有提供商登出"
+      },
+      "errorLoadingAuthStore": {
+        "other": "加载认证存储时出错: {{.error}}"
+      },
+      "noAuthenticatedProviders": {
+        "other": "没有已认证的提供商。"
+      },
+      "runAuthLogin": {
+        "other": "运行: lele auth login --provider <名称>"
+      },
+      "authenticatedProviders": {
+        "other": "\n已认证的提供商:"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    方式: {{.method}}"
+      },
+      "status": {
+        "other": "    状态: {{.status}}"
+      },
+      "accountInfo": {
+        "other": "    账户: {{.accountId}}"
+      },
+      "expires": {
+        "other": "    过期: {{.expires}}"
+      },
+      "statusActive": {
+        "other": "活跃"
+      },
+      "statusExpired": {
+        "other": "已过期"
+      },
+      "statusNeedsRefresh": {
+        "other": "需要刷新"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\n技能命令:"
+        },
+        "list": {
+          "other": "  list                    列出已安装的技能"
+        },
+        "install": {
+          "other": "  install <仓库>          从 GitHub 安装技能"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          安装所有内置技能到工作空间"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             列出可用的内置技能"
+        },
+        "remove": {
+          "other": "  remove <名称>           移除已安装的技能"
+        },
+        "search": {
+          "other": "  search                  搜索可用的技能"
+        },
+        "show": {
+          "other": "  show <名称>             显示技能详情"
+        },
+        "examples": {
+          "other": "\n示例:"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "未安装任何技能。"
+      },
+      "installedSkills": {
+        "other": "\n已安装的技能:"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ {{.name}} ({{.version}})"
+      },
+      "skillDescription": {
+        "other": "    {{.description}}"
+      },
+      "usageInstall": {
+        "other": "用法: lele skills install <github-仓库>"
+      },
+      "exampleInstallUsage": {
+        "other": "示例: lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "正在从 {{.repo}} 安装技能..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ 安装技能失败: {{.error}}"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ 技能 '{{.name}}' 安装成功!"
+      },
+      "removingSkill": {
+        "other": "正在移除技能 '{{.name}}'..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ 移除技能失败: {{.error}}"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ 技能 '{{.name}}' 移除成功!"
+      },
+      "usageRemove": {
+        "other": "用法: lele skills remove <技能名称>"
+      },
+      "usageShow": {
+        "other": "用法: lele skills show <技能名称>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "正在复制内置技能到工作空间..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ 未找到内置技能 '{{.name}}': {{.error}}"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ 创建 {{.dir}} 目录失败: {{.error}}"
+      },
+      "failedCopySkill": {
+        "other": "✗ 复制 {{.name}} 失败: {{.error}}"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ 所有内置技能已安装!"
+      },
+      "useInWorkspace": {
+        "other": "现在您可以在工作空间中使用它们了。"
+      },
+      "availableBuiltinSkills": {
+        "other": "\n可用的内置技能:"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "读取内置技能时出错: {{.error}}"
+      },
+      "noBuiltinSkills": {
+        "other": "没有可用的内置技能。"
+      },
+      "searchingSkills": {
+        "other": "正在搜索可用的技能..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ 获取技能列表失败: {{.error}}"
+      },
+      "noSkillsAvailable": {
+        "other": "没有可用的技能。"
+      },
+      "availableSkills": {
+        "other": "\n可用的技能 ({{.count}}):"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 {{.name}}"
+      },
+      "skillRepo": {
+        "other": "     仓库: {{.repo}}"
+      },
+      "skillAuthor": {
+        "other": "     作者: {{.author}}"
+      },
+      "skillTags": {
+        "other": "     标签: {{.tags}}"
+      },
+      "skillNotFound": {
+        "other": "✗ 未找到技能 '{{.name}}'"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 技能: {{.name}}"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nWeb 命令:"
+        },
+        "start": {
+          "other": "  start              在后台启动 Web 服务器"
+        },
+        "stop": {
+          "other": "  stop               停止 Web 服务器"
+        },
+        "status": {
+          "other": "  status             显示 Web 服务器状态"
+        },
+        "options": {
+          "other": "\n选项:"
+        },
+        "host": {
+          "other": "  --host <主机>     绑定主机 (默认: 0.0.0.0)"
+        },
+        "port": {
+          "other": "  --port <端口>     绑定端口 (默认: 3005)"
+        },
+        "examples": {
+          "other": "\n示例:"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Web 服务器已在运行 (pid {{.pid}})"
+      },
+      "errorResolvingExecutable": {
+        "other": "解析可执行文件时出错: {{.error}}"
+      },
+      "errorPrepareLogDir": {
+        "other": "准备日志目录时出错: {{.error}}"
+      },
+      "errorOpenLogFile": {
+        "other": "打开 Web 日志文件时出错: {{.error}}"
+      },
+      "errorStartWebServer": {
+        "other": "启动 Web 服务器时出错: {{.error}}"
+      },
+      "errorWritePID": {
+        "other": "写入 pid 文件时出错: {{.error}}"
+      },
+      "webServerStarted": {
+        "other": "✓ Web 服务器已启动于 http://{{.host}}:{{.port}} (pid {{.pid}})"
+      },
+      "webServerNotRunning": {
+        "other": "Web 服务器未运行"
+      },
+      "errorFindProcess": {
+        "other": "查找 Web 服务器进程时出错: {{.error}}"
+      },
+      "webServerStopped": {
+        "other": "✓ Web 服务器已停止 (pid {{.pid}})"
+      },
+      "webServerStatusStopped": {
+        "other": "Web 服务器: 已停止"
+      },
+      "webServerStatusRunning": {
+        "other": "Web 服务器: 运行中 (pid {{.pid}})"
+      },
+      "webAssetsMissing": {
+        "other": "Web 应用资源文件缺失。请使用 `make build` 或 `npm run build --prefix web` 构建前端。"
+      },
+      "servingWebApp": {
+        "other": "正在提供 Web 应用服务: http://{{.addr}}"
+      },
+      "webServerError": {
+        "other": "Web 服务器错误: {{.error}}"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\n客户端命令:"
+        },
+        "pin": {
+          "other": "  pin         生成新的配对 PIN 码"
+        },
+        "list": {
+          "other": "  list        列出所有已配对的客户端"
+        },
+        "pending": {
+          "other": "  pending     列出待处理的配对请求"
+        },
+        "remove": {
+          "other": "  remove      移除已配对的客户端"
+        },
+        "status": {
+          "other": "  status      显示客户端通道状态"
+        },
+        "examples": {
+          "other": "\n示例:"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <客户端ID>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "用法: lele client remove <客户端ID>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ 生成 PIN 码时出错: {{.error}}"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n{{.name}} 配对 PIN 码已生成"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  PIN 码:  {{.pin}}"
+      },
+      "pinExpires": {
+        "other": "  过期时间: {{.expires}}"
+      },
+      "enterPINToPair": {
+        "other": "在您的原生客户端中输入此 PIN 码以进行配对。"
+      },
+      "noPairedClients": {
+        "other": "没有已配对的客户端。"
+      },
+      "pairedClientsTitle": {
+        "other": "\n{{.name}} 已配对的客户端 ({{.count}})"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ 活跃"
+      },
+      "clientStatusExpired": {
+        "other": "✗ 已过期"
+      },
+      "clientID": {
+        "other": "\n  {{.id}}"
+      },
+      "clientDevice": {
+        "other": "    设备:  {{.device}}"
+      },
+      "clientStatus": {
+        "other": "    状态:  {{.status}}"
+      },
+      "clientCreated": {
+        "other": "    创建时间: {{.date}}"
+      },
+      "clientExpires": {
+        "other": "    过期时间: {{.expires}}"
+      },
+      "clientLastSeen": {
+        "other": "    最后在线: {{.date}}"
+      },
+      "noPendingPairing": {
+        "other": "没有待处理的配对请求。"
+      },
+      "pendingPairingTitle": {
+        "other": "\n{{.name}} 待处理的配对请求 ({{.count}})"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  PIN 码: {{.pin}}"
+      },
+      "pendingDevice": {
+        "other": "    设备:    {{.device}}"
+      },
+      "pendingStatus": {
+        "other": "    状态:    {{.status}}"
+      },
+      "pendingRemaining": {
+        "other": "    剩余时间: {{.time}}"
+      },
+      "pendingStatusValid": {
+        "other": "✓ 有效"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ 已过期"
+      },
+      "errorRemovingClient": {
+        "other": "✗ 移除客户端时出错: {{.error}}"
+      },
+      "clientRemoved": {
+        "other": "✓ 客户端 '{{.id}}' 已移除"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n{{.name}} 客户端通道状态"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  已启用:     {{.enabled}}"
+      },
+      "clientHost": {
+        "other": "  主机:        {{.host}}"
+      },
+      "clientPort": {
+        "other": "  端口:        {{.port}}"
+      },
+      "clientMaxClients": {
+        "other": "  最大客户端数: {{.max}}"
+      },
+      "clientTokenExpiry": {
+        "other": "  令牌过期: {{.days}} 天"
+      },
+      "clientPINExpiry": {
+        "other": "  PIN 码过期:   {{.minutes}} 分钟"
+      },
+      "clientPairedCount": {
+        "other": "  已配对客户端: {{.total}} ({{.active}} 活跃)"
+      },
+      "clientPendingPINs": {
+        "other": "  待处理 PIN 码:   {{.count}}"
+      },
+      "clientConnectWS": {
+        "other": "  连接: ws://{{.host}}:{{.port}}/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST:    http://{{.host}}:{{.port}}/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\n定时任务命令:"
+        },
+        "list": {
+          "other": "  list              列出所有定时任务"
+        },
+        "add": {
+          "other": "  add              添加新的定时任务"
+        },
+        "remove": {
+          "other": "  remove <id>       按 ID 移除任务"
+        },
+        "enable": {
+          "other": "  enable <id>      启用任务"
+        },
+        "disable": {
+          "other": "  disable <id>     禁用任务"
+        },
+        "addOptions": {
+          "other": "\n添加选项:"
+        },
+        "name": {
+          "other": "  -n, --name       任务名称"
+        },
+        "message": {
+          "other": "  -m, --message    发送给代理的消息"
+        },
+        "every": {
+          "other": "  -e, --every      每 N 秒执行一次"
+        },
+        "cron": {
+          "other": "  -c, --cron       Cron 表达式 (例如 '0 9 * * *')"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     将响应投递到通道"
+        },
+        "to": {
+          "other": "  --to             投递接收者"
+        },
+        "channel": {
+          "other": "  --channel        投递通道"
+        }
+      },
+      "usageRemove": {
+        "other": "用法: lele cron remove <任务ID>"
+      },
+      "usageEnableDisable": {
+        "other": "用法: lele cron enable/disable <任务ID>"
+      },
+      "noScheduledJobs": {
+        "other": "没有定时任务。"
+      },
+      "scheduledJobs": {
+        "other": "\n定时任务:"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  {{.name}} ({{.id}})"
+      },
+      "jobSchedule": {
+        "other": "    计划: {{.schedule}}"
+      },
+      "jobStatus": {
+        "other": "    状态: {{.status}}"
+      },
+      "jobNextRun": {
+        "other": "    下次运行: {{.time}}"
+      },
+      "jobScheduleEvery": {
+        "other": "每 {{.seconds}} 秒"
+      },
+      "jobScheduleOneTime": {
+        "other": "一次性"
+      },
+      "jobStatusEnabled": {
+        "other": "已启用"
+      },
+      "jobStatusDisabled": {
+        "other": "已禁用"
+      },
+      "errorNameRequired": {
+        "other": "错误: 需要指定 --name"
+      },
+      "errorMessageRequired": {
+        "other": "错误: 需要指定 --message"
+      },
+      "errorScheduleRequired": {
+        "other": "错误: 必须指定 --every 或 --cron"
+      },
+      "errorAddingJob": {
+        "other": "添加任务时出错: {{.error}}"
+      },
+      "jobAdded": {
+        "other": "✓ 已添加任务 '{{.name}}' ({{.id}})"
+      },
+      "jobRemoved": {
+        "other": "✓ 已移除任务 {{.id}}"
+      },
+      "jobNotFound": {
+        "other": "✗ 未找到任务 {{.id}}"
+      },
+      "jobEnabled": {
+        "other": "✓ 任务 '{{.name}}' {{.status}}"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 调试模式已启用"
+      },
+      "errorMessage": {
+        "other": "错误: {{.error}}"
+      },
+      "interactiveMode": {
+        "other": "{{.name}} 交互模式 (按 Ctrl+C 退出)"
+      },
+      "youPrompt": {
+        "other": "{{.name}} 您: "
+      },
+      "errorInitReadline": {
+        "other": "初始化 readline 时出错: {{.error}}"
+      },
+      "fallbackSimpleInput": {
+        "other": "回退到简单输入模式..."
+      },
+      "errorReadingInput": {
+        "other": "读取输入时出错: {{.error}}"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "复制工作空间模板时出错: {{.error}}"
+      },
+      "errorCreateTargetDir": {
+        "other": "创建目标目录失败: {{.error}}"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "读取嵌入文件 {{.file}} 失败: {{.error}}"
+      },
+      "errorGetRelativePath": {
+        "other": "获取 {{.path}} 的相对路径失败: {{.error}}"
+      },
+      "errorCreateDirectory": {
+        "other": "创建目录 {{.dir}} 失败: {{.error}}"
+      },
+      "errorWriteFile": {
+        "other": "写入文件 {{.file}} 失败: {{.error}}"
+      }
+    }
+  }
+}

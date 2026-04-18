@@ -1,0 +1,917 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "Lỗi khi tải cấu hình: {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "Lệnh không xác định: {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "Lệnh con không xác định {{.category}}: {{.command}}"
+      },
+      "goodbye": {
+        "other": "Tạm biệt!"
+      },
+      "aborted": {
+        "other": "Đã hủy."
+      },
+      "overwritePrompt": {
+        "other": "Cấu hình đã tồn tại tại {{.path}}\nGhi đè? (y/n): "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - Trợ lý AI cá nhân v{{.version}}"
+      },
+      "usage": {
+        "other": "Cách dùng: lele <lệnh>"
+      },
+      "commands": {
+        "other": "Các lệnh:"
+      },
+      "onboard": {
+        "other": "Khởi tạo cấu hình và không gian làm việc lele"
+      },
+      "agent": {
+        "other": "Tương tác trực tiếp với agent"
+      },
+      "auth": {
+        "other": "Quản lý xác thực (đăng nhập, đăng xuất, trạng thái)"
+      },
+      "gateway": {
+        "other": "Khởi động lele gateway"
+      },
+      "web": {
+        "other": "Khởi động hoặc dừng máy chủ web"
+      },
+      "status": {
+        "other": "Hiển thị trạng thái lele"
+      },
+      "cron": {
+        "other": "Quản lý tác vụ đã lên lịch"
+      },
+      "migrate": {
+        "other": "Di chuyển từ OpenClaw sang Lele"
+      },
+      "skills": {
+        "other": "Quản lý kỹ năng (cài đặt, danh sách, xóa)"
+      },
+      "client": {
+        "other": "Quản lý kênh client gốc (ghép nối, danh sách, xóa)"
+      },
+      "version": {
+        "other": "Hiển thị thông tin phiên bản"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "{{.Name}} lele {{.Version}}"
+      },
+      "build": {
+        "other": "Build: {{.Build}}"
+      },
+      "go": {
+        "other": "Go: {{.Version}}"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Cấu hình Web UI ==="
+      },
+      "webPort": {
+        "other": "Cổng web"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Web UI đã bật trên cổng"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ Kênh native đã tự động bật (bắt buộc cho Web UI)"
+      },
+      "configureNativeAdvanced": {
+        "other": "[Nâng cao] Cấu hình kênh native?"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== Cấu hình Kênh Native (Nâng cao) ==="
+      },
+      "apiHost": {
+        "other": "Máy chủ API"
+      },
+      "apiPort": {
+        "other": "Cổng API"
+      },
+      "maxPairedClients": {
+        "other": "Số client ghép nối tối đa"
+      },
+      "tokenExpiryDays": {
+        "other": "Số ngày hết hạn token"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ Kênh native đã được cấu hình"
+      },
+      "generatePairingPIN": {
+        "other": "Tạo PIN ghép nối?"
+      },
+      "deviceName": {
+        "other": "Tên thiết bị"
+      },
+      "errorCreatingAuthManager": {
+        "other": "Lỗi khi tạo trình quản lý xác thực: {{.Error}}"
+      },
+      "errorGeneratingPIN": {
+        "other": "Lỗi khi tạo PIN: {{.Error}}"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ PIN ghép nối đã được tạo"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.PIN}}"
+      },
+      "pinExpires": {
+        "other": "  Hết hạn: {{.Time}} ({{.Minutes}} phút)"
+      },
+      "startServicesNow": {
+        "other": "Khởi động dịch vụ ngay?"
+      },
+      "manualStartInstructions": {
+        "other": "\nĐể khởi động dịch vụ thủ công:"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "startingGateway": {
+        "other": "\n[+] Đang khởi động gateway..."
+      },
+      "startingWebServer": {
+        "other": "[+] Đang khởi động máy chủ web..."
+      },
+      "servicesStarted": {
+        "other": "\n✓ Dịch vụ đã khởi động"
+      },
+      "openBrowser": {
+        "other": "\nMở http://127.0.0.1:{{.Port}} trong trình duyệt của bạn"
+      },
+      "enterPINToConnect": {
+        "other": "Nhập PIN để kết nối thiết bị của bạn."
+      },
+      "configExists": {
+        "other": "Cấu hình đã tồn tại tại {{.Path}}"
+      },
+      "errorSavingConfig": {
+        "other": "Lỗi khi lưu cấu hình: {{.Error}}"
+      },
+      "warningCreateLogsDir": {
+        "other": "Cảnh báo: không thể tạo thư mục logs: {{.Error}}"
+      },
+      "warningCreateInfoLog": {
+        "other": "Cảnh báo: không thể tạo tệp nhật ký info: {{.Error}}"
+      },
+      "warningCreateErrorsLog": {
+        "other": "Cảnh báo: không thể tạo tệp nhật ký lỗi: {{.Error}}"
+      },
+      "ready": {
+        "other": "{{.Name}} lele đã sẵn sàng!"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 Chế độ gỡ lỗi đã bật"
+      },
+      "warningEnableFileLogging": {
+        "other": "Cảnh báo: không thể bật ghi nhật ký tệp: {{.Error}}"
+      },
+      "warningCleanupOldLogs": {
+        "other": "Cảnh báo: không thể dọn dẹp nhật ký cũ: {{.Error}}"
+      },
+      "agentStatus": {
+        "other": "\n📦 Trạng thái Agent:"
+      },
+      "toolsLoaded": {
+        "other": "  • Công cụ: {{.Count}} đã tải"
+      },
+      "skillsAvailable": {
+        "other": "  • Kỹ năng: {{.Available}}/{{.Total}} khả dụng"
+      },
+      "errorCreatingChannelManager": {
+        "other": "Lỗi khi tạo trình quản lý kênh: {{.Error}}"
+      },
+      "channelsEnabled": {
+        "other": "✓ Kênh đã bật: {{.Channels}}"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ Cảnh báo: Không có kênh nào được bật"
+      },
+      "gatewayStarted": {
+        "other": "✓ Gateway đã khởi động trên {{.Host}}:{{.Port}}"
+      },
+      "pressCtrlC": {
+        "other": "Nhấn Ctrl+C để dừng"
+      },
+      "errorStartingCronService": {
+        "other": "Lỗi khi khởi động dịch vụ cron: {{.Error}}"
+      },
+      "cronServiceStarted": {
+        "other": "✓ Dịch vụ cron đã khởi động"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "Lỗi khi khởi động dịch vụ heartbeat: {{.Error}}"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ Dịch vụ heartbeat đã khởi động"
+      },
+      "errorStartingDeviceService": {
+        "other": "Lỗi khi khởi động dịch vụ thiết bị: {{.Error}}"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ Dịch vụ sự kiện thiết bị đã khởi động"
+      },
+      "errorStartingChannels": {
+        "other": "Lỗi khi khởi động kênh: {{.Error}}"
+      },
+      "healthEndpoints": {
+        "other": "✓ Endpoint health khả dụng tại http://{{.Host}}:{{.Port}}/health và /ready"
+      },
+      "shuttingDown": {
+        "other": "\nĐang tắt..."
+      },
+      "gatewayStopped": {
+        "other": "✓ Gateway đã dừng"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\nLệnh xác thực:"
+        },
+        "login": {
+          "other": "  login       Đăng nhập qua OAuth hoặc dán token"
+        },
+        "logout": {
+          "other": "  logout      Xóa thông tin xác thực đã lưu"
+        },
+        "status": {
+          "other": "  status      Hiển thị trạng thái xác thực hiện tại"
+        },
+        "loginOptions": {
+          "other": "\nTùy chọn đăng nhập:"
+        },
+        "provider": {
+          "other": "  --provider <tên>    Nhà cung cấp để đăng nhập (openai, anthropic)"
+        },
+        "deviceCode": {
+          "other": "  --device-code        Sử dụng luồng device code (cho môi trường không giao diện)"
+        },
+        "examples": {
+          "other": "\nVí dụ:"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "Lỗi: --provider là bắt buộc"
+      },
+      "supportedProviders": {
+        "other": "Nhà cung cấp hỗ trợ: openai, anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "Nhà cung cấp không hỗ trợ: {{.Provider}}"
+      },
+      "loginFailed": {
+        "other": "Đăng nhập thất bại: {{.Error}}"
+      },
+      "failedSaveCredentials": {
+        "other": "Không thể lưu thông tin xác thực: {{.Error}}"
+      },
+      "warningUpdateConfig": {
+        "other": "Cảnh báo: không thể cập nhật cấu hình: {{.Error}}"
+      },
+      "loginSuccessful": {
+        "other": "Đăng nhập thành công!"
+      },
+      "account": {
+        "other": "Tài khoản: {{.Account}}"
+      },
+      "tokenSaved": {
+        "other": "Token đã lưu cho {{.Provider}}!"
+      },
+      "failedRemoveCredentials": {
+        "other": "Không thể xóa thông tin xác thực: {{.Error}}"
+      },
+      "loggedOutFrom": {
+        "other": "Đã đăng xuất khỏi {{.Provider}}"
+      },
+      "loggedOutFromAll": {
+        "other": "Đã đăng xuất khỏi tất cả nhà cung cấp"
+      },
+      "errorLoadingAuthStore": {
+        "other": "Lỗi khi tải kho xác thực: {{.Error}}"
+      },
+      "noAuthenticatedProviders": {
+        "other": "Không có nhà cung cấp đã xác thực."
+      },
+      "runAuthLogin": {
+        "other": "Chạy: lele auth login --provider <tên>"
+      },
+      "authenticatedProviders": {
+        "other": "\nNhà cung cấp đã xác thực:"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    Phương thức: {{.Method}}"
+      },
+      "status": {
+        "other": "    Trạng thái: {{.Status}}"
+      },
+      "accountInfo": {
+        "other": "    Tài khoản: {{.Account}}"
+      },
+      "expires": {
+        "other": "    Hết hạn: {{.Time}}"
+      },
+      "statusActive": {
+        "other": "hoạt động"
+      },
+      "statusExpired": {
+        "other": "đã hết hạn"
+      },
+      "statusNeedsRefresh": {
+        "other": "cần làm mới"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\nLệnh kỹ năng:"
+        },
+        "list": {
+          "other": "  list                    Liệt kê kỹ năng đã cài đặt"
+        },
+        "install": {
+          "other": "  install <repo>          Cài đặt kỹ năng từ GitHub"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          Cài đặt tất cả kỹ năng tích hợp sẵn vào không gian làm việc"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             Liệt kê kỹ năng tích hợp sẵn khả dụng"
+        },
+        "remove": {
+          "other": "  remove <tên>           Xóa kỹ năng đã cài đặt"
+        },
+        "search": {
+          "other": "  search                  Tìm kiếm kỹ năng khả dụng"
+        },
+        "show": {
+          "other": "  show <tên>             Hiển thị chi tiết kỹ năng"
+        },
+        "examples": {
+          "other": "\nVí dụ:"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "Chưa cài đặt kỹ năng nào."
+      },
+      "installedSkills": {
+        "other": "\nKỹ năng đã cài đặt:"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ {{.Name}} ({{.Version}})"
+      },
+      "skillDescription": {
+        "other": "    {{.Description}}"
+      },
+      "usageInstall": {
+        "other": "Cách dùng: lele skills install <github-repo>"
+      },
+      "exampleInstallUsage": {
+        "other": "Ví dụ: lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "Đang cài đặt kỹ năng từ {{.Repo}}..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ Không thể cài đặt kỹ năng: {{.Error}}"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ Kỹ năng '{{.Name}}' đã cài đặt thành công!"
+      },
+      "removingSkill": {
+        "other": "Đang xóa kỹ năng '{{.Name}}'..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ Không thể xóa kỹ năng: {{.Error}}"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ Kỹ năng '{{.Name}}' đã xóa thành công!"
+      },
+      "usageRemove": {
+        "other": "Cách dùng: lele skills remove <tên-kỹ-năng>"
+      },
+      "usageShow": {
+        "other": "Cách dùng: lele skills show <tên-kỹ-năng>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "Đang sao chép kỹ năng tích hợp sẵn vào không gian làm việc..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ Không tìm thấy kỹ năng tích hợp sẵn '{{.Name}}': {{.Error}}"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ Không thể tạo thư mục cho {{.Name}}: {{.Error}}"
+      },
+      "failedCopySkill": {
+        "other": "✗ Không thể sao chép {{.Name}}: {{.Error}}"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ Tất cả kỹ năng tích hợp sẵn đã cài đặt!"
+      },
+      "useInWorkspace": {
+        "other": "Bây giờ bạn có thể sử dụng chúng trong không gian làm việc."
+      },
+      "availableBuiltinSkills": {
+        "other": "\nKỹ năng tích hợp sẵn khả dụng:"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "Lỗi khi đọc kỹ năng tích hợp sẵn: {{.Error}}"
+      },
+      "noBuiltinSkills": {
+        "other": "Không có kỹ năng tích hợp sẵn khả dụng."
+      },
+      "searchingSkills": {
+        "other": "Đang tìm kiếm kỹ năng khả dụng..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ Không thể lấy danh sách kỹ năng: {{.Error}}"
+      },
+      "noSkillsAvailable": {
+        "other": "Không có kỹ năng khả dụng."
+      },
+      "availableSkills": {
+        "other": "\nKỹ năng khả dụng ({{.Count}}):"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 {{.Name}}"
+      },
+      "skillRepo": {
+        "other": "     Repo: {{.Repo}}"
+      },
+      "skillAuthor": {
+        "other": "     Tác giả: {{.Author}}"
+      },
+      "skillTags": {
+        "other": "     Thẻ: {{.Tags}}"
+      },
+      "skillNotFound": {
+        "other": "✗ Không tìm thấy kỹ năng '{{.Name}}'"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 Kỹ năng: {{.Name}}"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nLệnh web:"
+        },
+        "start": {
+          "other": "  start              Khởi động máy chủ web ở chế độ nền"
+        },
+        "stop": {
+          "other": "  stop               Dừng máy chủ web"
+        },
+        "status": {
+          "other": "  status             Hiển thị trạng thái máy chủ web"
+        },
+        "options": {
+          "other": "\nTùy chọn:"
+        },
+        "host": {
+          "other": "  --host <host>     Máy chủ liên kết (mặc định: 0.0.0.0)"
+        },
+        "port": {
+          "other": "  --port <port>     Cổng liên kết (mặc định: 3005)"
+        },
+        "examples": {
+          "other": "\nVí dụ:"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Máy chủ web đã chạy (pid {{.PID}})"
+      },
+      "errorResolvingExecutable": {
+        "other": "Lỗi khi giải quyết tệp thực thi: {{.Error}}"
+      },
+      "errorPrepareLogDir": {
+        "other": "Lỗi khi chuẩn bị thư mục nhật ký: {{.Error}}"
+      },
+      "errorOpenLogFile": {
+        "other": "Lỗi khi mở tệp nhật ký web: {{.Error}}"
+      },
+      "errorStartWebServer": {
+        "other": "Lỗi khi khởi động máy chủ web: {{.Error}}"
+      },
+      "errorWritePID": {
+        "other": "Lỗi khi ghi tệp pid: {{.Error}}"
+      },
+      "webServerStarted": {
+        "other": "✓ Máy chủ web đã khởi động trên http://{{.Host}}:{{.Port}} (pid {{.PID}})"
+      },
+      "webServerNotRunning": {
+        "other": "Máy chủ web không chạy"
+      },
+      "errorFindProcess": {
+        "other": "Lỗi khi tìm tiến trình máy chủ web: {{.Error}}"
+      },
+      "webServerStopped": {
+        "other": "✓ Máy chủ web đã dừng (pid {{.PID}})"
+      },
+      "webServerStatusStopped": {
+        "other": "Máy chủ web: đã dừng"
+      },
+      "webServerStatusRunning": {
+        "other": "Máy chủ web: đang chạy (pid {{.PID}})"
+      },
+      "webAssetsMissing": {
+        "other": "Tài sản web bị thiếu. Xây dựng frontend với `make build` hoặc `npm run build --prefix web`."
+      },
+      "servingWebApp": {
+        "other": "Phục vụ ứng dụng web trên http://{{.Addr}}"
+      },
+      "webServerError": {
+        "other": "Lỗi máy chủ web: {{.Error}}"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\nLệnh client:"
+        },
+        "pin": {
+          "other": "  pin         Tạo PIN ghép nối mới"
+        },
+        "list": {
+          "other": "  list        Liệt kê tất cả client đã ghép nối"
+        },
+        "pending": {
+          "other": "  pending     Liệt kê yêu cầu ghép nối đang chờ"
+        },
+        "remove": {
+          "other": "  remove      Xóa client đã ghép nối"
+        },
+        "status": {
+          "other": "  status      Hiển thị trạng thái kênh client"
+        },
+        "examples": {
+          "other": "\nVí dụ:"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <client_id>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "Cách dùng: lele client remove <client_id>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ Lỗi khi tạo PIN: {{.Error}}"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n{{.Brand}} PIN Ghép Nối Đã Được Tạo"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.PIN}}"
+      },
+      "pinExpires": {
+        "other": "  Hết hạn: {{.Time}}"
+      },
+      "enterPINToPair": {
+        "other": "Nhập PIN này trong client native của bạn để ghép nối."
+      },
+      "noPairedClients": {
+        "other": "Không có client nào đã ghép nối."
+      },
+      "pairedClientsTitle": {
+        "other": "\n{{.Brand}} Client Đã Ghép Nối ({{.Count}})"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ hoạt động"
+      },
+      "clientStatusExpired": {
+        "other": "✗ đã hết hạn"
+      },
+      "clientID": {
+        "other": "\n  {{.ID}}"
+      },
+      "clientDevice": {
+        "other": "    Thiết bị:  {{.Device}}"
+      },
+      "clientStatus": {
+        "other": "    Trạng thái:  {{.Status}}"
+      },
+      "clientCreated": {
+        "other": "    Đã tạo: {{.Time}}"
+      },
+      "clientExpires": {
+        "other": "    Hết hạn: {{.Time}}"
+      },
+      "clientLastSeen": {
+        "other": "    Lần cuối:    {{.Time}}"
+      },
+      "noPendingPairing": {
+        "other": "Không có yêu cầu ghép nối đang chờ."
+      },
+      "pendingPairingTitle": {
+        "other": "\n{{.Brand}} Yêu Cầu Ghép Nối Đang Chờ ({{.Count}})"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  PIN: {{.PIN}}"
+      },
+      "pendingDevice": {
+        "other": "    Thiết bị:    {{.Device}}"
+      },
+      "pendingStatus": {
+        "other": "    Trạng thái:    {{.Status}}"
+      },
+      "pendingRemaining": {
+        "other": "    Còn lại: {{.Time}}"
+      },
+      "pendingStatusValid": {
+        "other": "✓ hợp lệ"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ đã hết hạn"
+      },
+      "errorRemovingClient": {
+        "other": "✗ Lỗi khi xóa client: {{.Error}}"
+      },
+      "clientRemoved": {
+        "other": "✓ Client '{{.ID}}' đã xóa"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n{{.Brand}} Trạng Thái Kênh Client"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  Đã bật:     {{.Enabled}}"
+      },
+      "clientHost": {
+        "other": "  Máy chủ:        {{.Host}}"
+      },
+      "clientPort": {
+        "other": "  Cổng:        {{.Port}}"
+      },
+      "clientMaxClients": {
+        "other": "  Client tối đa: {{.Count}}"
+      },
+      "clientTokenExpiry": {
+        "other": "  Hết hạn Token: {{.Days}} ngày"
+      },
+      "clientPINExpiry": {
+        "other": "  Hết hạn PIN:   {{.Minutes}} phút"
+      },
+      "clientPairedCount": {
+        "other": "  Client đã ghép nối: {{.Total}} ({{.Active}} hoạt động)"
+      },
+      "clientPendingPINs": {
+        "other": "  PIN đang chờ:   {{.Count}}"
+      },
+      "clientConnectWS": {
+        "other": "  Kết nối: ws://{{.Host}}:{{.Port}}/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST:    http://{{.Host}}:{{.Port}}/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\nLệnh cron:"
+        },
+        "list": {
+          "other": "  list              Liệt kê tất cả tác vụ đã lên lịch"
+        },
+        "add": {
+          "other": "  add              Thêm tác vụ đã lên lịch mới"
+        },
+        "remove": {
+          "other": "  remove <id>       Xóa tác vụ theo ID"
+        },
+        "enable": {
+          "other": "  enable <id>      Bật tác vụ"
+        },
+        "disable": {
+          "other": "  disable <id>     Tắt tác vụ"
+        },
+        "addOptions": {
+          "other": "\nTùy chọn thêm:"
+        },
+        "name": {
+          "other": "  -n, --name       Tên tác vụ"
+        },
+        "message": {
+          "other": "  -m, --message    Tin nhắn cho agent"
+        },
+        "every": {
+          "other": "  -e, --every      Chạy mỗi N giây"
+        },
+        "cron": {
+          "other": "  -c, --cron       Biểu thức cron (vd. '0 9 * * *')"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     Gửi phản hồi đến kênh"
+        },
+        "to": {
+          "other": "  --to             Người nhận để gửi"
+        },
+        "channel": {
+          "other": "  --channel        Kênh để gửi"
+        }
+      },
+      "usageRemove": {
+        "other": "Cách dùng: lele cron remove <job_id>"
+      },
+      "usageEnableDisable": {
+        "other": "Cách dùng: lele cron enable/disable <job_id>"
+      },
+      "noScheduledJobs": {
+        "other": "Không có tác vụ đã lên lịch."
+      },
+      "scheduledJobs": {
+        "other": "\nTác Vụ Đã Lên Lịch:"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  {{.Name}} ({{.ID}})"
+      },
+      "jobSchedule": {
+        "other": "    Lịch trình: {{.Schedule}}"
+      },
+      "jobStatus": {
+        "other": "    Trạng thái: {{.Status}}"
+      },
+      "jobNextRun": {
+        "other": "    Lần chạy tiếp theo: {{.Time}}"
+      },
+      "jobScheduleEvery": {
+        "other": "mỗi {{.Seconds}}s"
+      },
+      "jobScheduleOneTime": {
+        "other": "một lần"
+      },
+      "jobStatusEnabled": {
+        "other": "đã bật"
+      },
+      "jobStatusDisabled": {
+        "other": "đã tắt"
+      },
+      "errorNameRequired": {
+        "other": "Lỗi: --name là bắt buộc"
+      },
+      "errorMessageRequired": {
+        "other": "Lỗi: --message là bắt buộc"
+      },
+      "errorScheduleRequired": {
+        "other": "Lỗi: Cần chỉ định --every hoặc --cron"
+      },
+      "errorAddingJob": {
+        "other": "Lỗi khi thêm tác vụ: {{.Error}}"
+      },
+      "jobAdded": {
+        "other": "✓ Đã thêm tác vụ '{{.Name}}' ({{.ID}})"
+      },
+      "jobRemoved": {
+        "other": "✓ Đã xóa tác vụ {{.ID}}"
+      },
+      "jobNotFound": {
+        "other": "✗ Không tìm thấy tác vụ {{.ID}}"
+      },
+      "jobEnabled": {
+        "other": "✓ Tác vụ '{{.Name}}' {{.Status}}"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 Chế độ gỡ lỗi đã bật"
+      },
+      "errorMessage": {
+        "other": "Lỗi: {{.Error}}"
+      },
+      "interactiveMode": {
+        "other": "{{.Brand}} Chế độ tương tác (Ctrl+C để thoát)"
+      },
+      "youPrompt": {
+        "other": "{{.Brand}} Bạn: "
+      },
+      "errorInitReadline": {
+        "other": "Lỗi khi khởi tạo readline: {{.Error}}"
+      },
+      "fallbackSimpleInput": {
+        "other": "Chuyển sang chế độ nhập đơn giản..."
+      },
+      "errorReadingInput": {
+        "other": "Lỗi khi đọc đầu vào: {{.Error}}"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "Lỗi khi sao chép mẫu không gian làm việc: {{.Error}}"
+      },
+      "errorCreateTargetDir": {
+        "other": "Không thể tạo thư mục đích: {{.Error}}"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "Không thể đọc tệp nhúng {{.File}}: {{.Error}}"
+      },
+      "errorGetRelativePath": {
+        "other": "Không thể lấy đường dẫn tương đối cho {{.File}}: {{.Error}}"
+      },
+      "errorCreateDirectory": {
+        "other": "Không thể tạo thư mục {{.Path}}: {{.Error}}"
+      },
+      "errorWriteFile": {
+        "other": "Không thể ghi tệp {{.Path}}: {{.Error}}"
+      }
+    }
+  }
+}

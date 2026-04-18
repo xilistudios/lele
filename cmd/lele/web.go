@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 type webServerOptions struct {
@@ -67,26 +69,24 @@ func webCmd() {
 	case "serve":
 		webServeCmd(parseWebServerOptions(os.Args[3:]))
 	default:
-		fmt.Printf("Unknown web command: %s\n", subcommand)
+		fmt.Println(i18n.TPrintf("cli.common.unknownSubcommand", "web", subcommand))
 		webHelp()
 	}
 }
 
 func webHelp() {
-	fmt.Println("\nWeb commands:")
-	fmt.Println("  start              Start the web server in background")
-	fmt.Println("  stop               Stop the web server")
-	fmt.Println("  status             Show web server status")
-	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Println("  --host <host>     Bind host (default: 0.0.0.0)")
-	fmt.Println("  --port <port>     Bind port (default: 3005)")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  lele web start")
-	fmt.Println("  lele web start --host 0.0.0.0 --port 3005")
-	fmt.Println("  lele web stop")
-	fmt.Println("  lele web status")
+	fmt.Println(i18n.T("cli.web.help.title"))
+	fmt.Println(i18n.T("cli.web.help.start"))
+	fmt.Println(i18n.T("cli.web.help.stop"))
+	fmt.Println(i18n.T("cli.web.help.status"))
+	fmt.Println(i18n.T("cli.web.help.options"))
+	fmt.Println(i18n.T("cli.web.help.host"))
+	fmt.Println(i18n.T("cli.web.help.port"))
+	fmt.Println(i18n.T("cli.web.help.examples"))
+	fmt.Println(i18n.T("cli.web.help.exampleStart"))
+	fmt.Println(i18n.T("cli.web.help.exampleStartWithOptions"))
+	fmt.Println(i18n.T("cli.web.help.exampleStop"))
+	fmt.Println(i18n.T("cli.web.help.exampleStatus"))
 }
 
 func webPIDPath() string {
@@ -99,24 +99,24 @@ func webLogPath() string {
 
 func webStartCmd(opts webServerOptions) {
 	if running, pid := webServerRunning(); running {
-		fmt.Printf("Web server already running (pid %d)\n", pid)
+		fmt.Println(i18n.TPrintf("cli.web.webServerAlreadyRunning", pid))
 		return
 	}
 
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Printf("Error resolving executable: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorResolvingExecutable", err))
 		os.Exit(1)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(webLogPath()), 0755); err != nil {
-		fmt.Printf("Error preparing log directory: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorPrepareLogDir", err))
 		os.Exit(1)
 	}
 
 	logFile, err := os.OpenFile(webLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Printf("Error opening web log file: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorOpenLogFile", err))
 		os.Exit(1)
 	}
 	defer logFile.Close()
@@ -127,58 +127,58 @@ func webStartCmd(opts webServerOptions) {
 	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
-		fmt.Printf("Error starting web server: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorStartWebServer", err))
 		os.Exit(1)
 	}
 
 	if err := os.WriteFile(webPIDPath(), []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {
 		_ = cmd.Process.Kill()
-		fmt.Printf("Error writing pid file: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorWritePID", err))
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Web server started on http://%s:%d (pid %d)\n", opts.Host, opts.Port, cmd.Process.Pid)
+	fmt.Println(i18n.TPrintf("cli.web.webServerStarted", opts.Host, opts.Port, cmd.Process.Pid))
 }
 
 func webStopCmd() {
 	pid, err := readWebPID()
 	if err != nil {
-		fmt.Println("Web server is not running")
+		fmt.Println(i18n.T("cli.web.webServerNotRunning"))
 		return
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Printf("Error finding web server process: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.errorFindProcess", err))
 		_ = os.Remove(webPIDPath())
 		return
 	}
 
 	_ = proc.Kill()
 	_ = os.Remove(webPIDPath())
-	fmt.Printf("✓ Web server stopped (pid %d)\n", pid)
+	fmt.Println(i18n.TPrintf("cli.web.webServerStopped", pid))
 }
 
 func webStatusCmd() {
 	pid, err := readWebPID()
 	if err != nil {
-		fmt.Println("Web server: stopped")
+		fmt.Println(i18n.T("cli.web.webServerStatusStopped"))
 		return
 	}
 
 	if pid > 0 {
-		fmt.Printf("Web server: running (pid %d)\n", pid)
+		fmt.Println(i18n.TPrintf("cli.web.webServerStatusRunning", pid))
 		return
 	}
 
 	_ = os.Remove(webPIDPath())
-	fmt.Println("Web server: stopped")
+	fmt.Println(i18n.T("cli.web.webServerStatusStopped"))
 }
 
 func webServeCmd(opts webServerOptions) {
 	distFS, err := fs.Sub(embeddedFiles, "web/dist")
 	if err != nil {
-		fmt.Println("Web app assets are missing. Build the frontend with `make build` or `npm run build --prefix web`.")
+		fmt.Println(i18n.T("cli.web.webAssetsMissing"))
 		os.Exit(1)
 	}
 
@@ -204,9 +204,9 @@ func webServeCmd(opts webServerOptions) {
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	fmt.Printf("Serving web app on http://%s\n", addr)
+	fmt.Println(i18n.TPrintf("cli.web.servingWebApp", addr))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Printf("Web server error: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.web.webServerError", err))
 		os.Exit(1)
 	}
 }

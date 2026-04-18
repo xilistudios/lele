@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/i18n"
 )
 
 func cronCmd() {
@@ -19,7 +20,7 @@ func cronCmd() {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.common.errorLoadingConfig", err))
 		return
 	}
 
@@ -32,7 +33,7 @@ func cronCmd() {
 		cronAddCmd(cronStorePath)
 	case "remove":
 		if len(os.Args) < 4 {
-			fmt.Println("Usage: lele cron remove <job_id>")
+			fmt.Println(i18n.T("cli.cron.usageRemove"))
 			return
 		}
 		cronRemoveCmd(cronStorePath, os.Args[3])
@@ -41,27 +42,26 @@ func cronCmd() {
 	case "disable":
 		cronEnableCmd(cronStorePath, true)
 	default:
-		fmt.Printf("Unknown cron command: %s\n", subcommand)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.common.unknownSubcommand", "cron", subcommand))
 		cronHelp()
 	}
 }
 
 func cronHelp() {
-	fmt.Println("\nCron commands:")
-	fmt.Println("  list              List all scheduled jobs")
-	fmt.Println("  add              Add a new scheduled job")
-	fmt.Println("  remove <id>       Remove a job by ID")
-	fmt.Println("  enable <id>      Enable a job")
-	fmt.Println("  disable <id>     Disable a job")
-	fmt.Println()
-	fmt.Println("Add options:")
-	fmt.Println("  -n, --name       Job name")
-	fmt.Println("  -m, --message    Message for agent")
-	fmt.Println("  -e, --every      Run every N seconds")
-	fmt.Println("  -c, --cron       Cron expression (e.g. '0 9 * * *')")
-	fmt.Println("  -d, --deliver     Deliver response to channel")
-	fmt.Println("  --to             Recipient for delivery")
-	fmt.Println("  --channel        Channel for delivery")
+	fmt.Println(i18n.T("cli.cron.help.title"))
+	fmt.Println(i18n.T("cli.cron.help.list"))
+	fmt.Println(i18n.T("cli.cron.help.add"))
+	fmt.Println(i18n.T("cli.cron.help.remove"))
+	fmt.Println(i18n.T("cli.cron.help.enable"))
+	fmt.Println(i18n.T("cli.cron.help.disable"))
+	fmt.Println(i18n.T("cli.cron.help.addOptions"))
+	fmt.Println(i18n.T("cli.cron.help.name"))
+	fmt.Println(i18n.T("cli.cron.help.message"))
+	fmt.Println(i18n.T("cli.cron.help.every"))
+	fmt.Println(i18n.T("cli.cron.help.cron"))
+	fmt.Println(i18n.T("cli.cron.help.deliver"))
+	fmt.Println(i18n.T("cli.cron.help.to"))
+	fmt.Println(i18n.T("cli.cron.help.channel"))
 }
 
 func cronListCmd(storePath string) {
@@ -69,20 +69,20 @@ func cronListCmd(storePath string) {
 	jobs := cs.ListJobs(true)
 
 	if len(jobs) == 0 {
-		fmt.Println("No scheduled jobs.")
+		fmt.Println(i18n.T("cli.cron.noScheduledJobs"))
 		return
 	}
 
-	fmt.Println("\nScheduled Jobs:")
-	fmt.Println("----------------")
+	fmt.Println(i18n.T("cli.cron.scheduledJobs"))
+	fmt.Println(i18n.T("cli.cron.scheduledJobsSeparator"))
 	for _, job := range jobs {
 		var schedule string
 		if job.Schedule.Kind == "every" && job.Schedule.EveryMS != nil {
-			schedule = fmt.Sprintf("every %ds", *job.Schedule.EveryMS/1000)
+			schedule = i18n.TPrintf("cli.cron.jobScheduleEvery", *job.Schedule.EveryMS/1000)
 		} else if job.Schedule.Kind == "cron" {
 			schedule = job.Schedule.Expr
 		} else {
-			schedule = "one-time"
+			schedule = i18n.T("cli.cron.jobScheduleOneTime")
 		}
 
 		nextRun := "scheduled"
@@ -91,15 +91,15 @@ func cronListCmd(storePath string) {
 			nextRun = nextTime.Format("2006-01-02 15:04")
 		}
 
-		status := "enabled"
+		status := i18n.T("cli.cron.jobStatusEnabled")
 		if !job.Enabled {
-			status = "disabled"
+			status = i18n.T("cli.cron.jobStatusDisabled")
 		}
 
-		fmt.Printf("  %s (%s)\n", job.Name, job.ID)
-		fmt.Printf("    Schedule: %s\n", schedule)
-		fmt.Printf("    Status: %s\n", status)
-		fmt.Printf("    Next run: %s\n", nextRun)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobName", job.Name, job.ID))
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobSchedule", schedule))
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobStatus", status))
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobNextRun", nextRun))
 	}
 }
 
@@ -153,17 +153,17 @@ func cronAddCmd(storePath string) {
 	}
 
 	if name == "" {
-		fmt.Println("Error: --name is required")
+		fmt.Println(i18n.T("cli.cron.errorNameRequired"))
 		return
 	}
 
 	if message == "" {
-		fmt.Println("Error: --message is required")
+		fmt.Println(i18n.T("cli.cron.errorMessageRequired"))
 		return
 	}
 
 	if everySec == nil && cronExpr == "" {
-		fmt.Println("Error: Either --every or --cron must be specified")
+		fmt.Println(i18n.T("cli.cron.errorScheduleRequired"))
 		return
 	}
 
@@ -184,25 +184,25 @@ func cronAddCmd(storePath string) {
 	cs := cron.NewCronService(storePath, nil)
 	job, err := cs.AddJob(name, schedule, message, deliver, channel, to)
 	if err != nil {
-		fmt.Printf("Error adding job: %v\n", err)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.errorAddingJob", err))
 		return
 	}
 
-	fmt.Printf("✓ Added job '%s' (%s)\n", job.Name, job.ID)
+	fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobAdded", job.Name, job.ID))
 }
 
 func cronRemoveCmd(storePath, jobID string) {
 	cs := cron.NewCronService(storePath, nil)
 	if cs.RemoveJob(jobID) {
-		fmt.Printf("✓ Removed job %s\n", jobID)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobRemoved", jobID))
 	} else {
-		fmt.Printf("✗ Job %s not found\n", jobID)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobNotFound", jobID))
 	}
 }
 
 func cronEnableCmd(storePath string, disable bool) {
 	if len(os.Args) < 4 {
-		fmt.Println("Usage: lele cron enable/disable <job_id>")
+		fmt.Println(i18n.T("cli.cron.usageEnableDisable"))
 		return
 	}
 
@@ -212,12 +212,12 @@ func cronEnableCmd(storePath string, disable bool) {
 
 	job := cs.EnableJob(jobID, enabled)
 	if job != nil {
-		status := "enabled"
+		status := i18n.T("cli.cron.jobStatusEnabled")
 		if disable {
-			status = "disabled"
+			status = i18n.T("cli.cron.jobStatusDisabled")
 		}
-		fmt.Printf("✓ Job '%s' %s\n", job.Name, status)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobEnabled", job.Name, status))
 	} else {
-		fmt.Printf("✗ Job %s not found\n", jobID)
+		fmt.Printf("%s\n", i18n.TPrintf("cli.cron.jobNotFound", jobID))
 	}
 }

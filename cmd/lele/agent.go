@@ -12,6 +12,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/i18n"
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
@@ -24,7 +25,7 @@ func agentCmd() {
 		switch args[i] {
 		case "--debug", "-d":
 			logger.SetLevel(logger.DEBUG)
-			fmt.Println("🔍 Debug mode enabled")
+			fmt.Println(i18n.T("cli.agent.debugModeEnabled"))
 		case "-m", "--message":
 			if i+1 < len(args) {
 				message = args[i+1]
@@ -40,7 +41,7 @@ func agentCmd() {
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		fmt.Println(i18n.TPrintf("cli.common.errorLoadingConfig", err))
 		os.Exit(1)
 	}
 
@@ -59,18 +60,19 @@ func agentCmd() {
 		ctx := context.Background()
 		response, err := agentLoop.ProcessDirect(ctx, message, sessionKey)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.agent.errorMessage", err))
 			os.Exit(1)
 		}
 		fmt.Printf("\n%s %s\n", logo, response)
 	} else {
-		fmt.Printf("%s Interactive mode (Ctrl+C to exit)\n\n", logo)
+		fmt.Println(i18n.TPrintf("cli.agent.interactiveMode", logo))
+		fmt.Println()
 		interactiveMode(agentLoop, sessionKey)
 	}
 }
 
 func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
-	prompt := fmt.Sprintf("%s You: ", logo)
+	prompt := i18n.TPrintf("cli.agent.youPrompt", logo)
 
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          prompt,
@@ -81,8 +83,8 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 	})
 
 	if err != nil {
-		fmt.Printf("Error initializing readline: %v\n", err)
-		fmt.Println("Falling back to simple input mode...")
+		fmt.Println(i18n.TPrintf("cli.agent.errorInitReadline", err))
+		fmt.Println(i18n.T("cli.agent.fallbackSimpleInput"))
 		simpleInteractiveMode(agentLoop, sessionKey)
 		return
 	}
@@ -92,10 +94,11 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 		line, err := rl.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt || err == io.EOF {
-				fmt.Println("\nGoodbye!")
+				fmt.Println()
+				fmt.Println(i18n.T("cli.common.goodbye"))
 				return
 			}
-			fmt.Printf("Error reading input: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.agent.errorReadingInput", err))
 			continue
 		}
 
@@ -105,14 +108,14 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 		}
 
 		if input == "exit" || input == "quit" {
-			fmt.Println("Goodbye!")
+			fmt.Println(i18n.T("cli.common.goodbye"))
 			return
 		}
 
 		ctx := context.Background()
 		response, err := agentLoop.ProcessDirect(ctx, input, sessionKey)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.agent.errorMessage", err))
 			continue
 		}
 
@@ -123,14 +126,15 @@ func interactiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 func simpleInteractiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Print(fmt.Sprintf("%s You: ", logo))
+		fmt.Print(i18n.TPrintf("cli.agent.youPrompt", logo))
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("\nGoodbye!")
+				fmt.Println()
+				fmt.Println(i18n.T("cli.common.goodbye"))
 				return
 			}
-			fmt.Printf("Error reading input: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.agent.errorReadingInput", err))
 			continue
 		}
 
@@ -140,14 +144,14 @@ func simpleInteractiveMode(agentLoop *agent.AgentLoop, sessionKey string) {
 		}
 
 		if input == "exit" || input == "quit" {
-			fmt.Println("Goodbye!")
+			fmt.Println(i18n.T("cli.common.goodbye"))
 			return
 		}
 
 		ctx := context.Background()
 		response, err := agentLoop.ProcessDirect(ctx, input, sessionKey)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Println(i18n.TPrintf("cli.agent.errorMessage", err))
 			continue
 		}
 

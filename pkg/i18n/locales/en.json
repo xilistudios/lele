@@ -1,0 +1,911 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "Error loading config: {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "Unknown command: {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "Unknown {{.category}} command: {{.command}}"
+      },
+      "goodbye": {
+        "other": "Goodbye!"
+      },
+      "aborted": {
+        "other": "Aborted."
+      },
+      "overwritePrompt": {
+        "other": "Config already exists at {{.path}}\nOverwrite? (y/n): "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - Personal AI Assistant v{{.version}}"
+      },
+      "usage": {
+        "other": "Usage: lele <command>"
+      },
+      "commands": {
+        "other": "Commands:"
+      },
+      "onboard": {
+        "other": "Initialize lele configuration and workspace"
+      },
+      "agent": {
+        "other": "Interact with the agent directly"
+      },
+      "auth": {
+        "other": "Manage authentication (login, logout, status)"
+      },
+      "gateway": {
+        "other": "Start lele gateway"
+      },
+      "web": {
+        "other": "Start or stop the web app server"
+      },
+      "status": {
+        "other": "Show lele status"
+      },
+      "cron": {
+        "other": "Manage scheduled tasks"
+      },
+      "migrate": {
+        "other": "Migrate from OpenClaw to Lele"
+      },
+      "skills": {
+        "other": "Manage skills (install, list, remove)"
+      },
+      "client": {
+        "other": "Manage native channel clients (pair, list, remove)"
+      },
+      "version": {
+        "other": "Show version information"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "%s lele %s"
+      },
+      "build": {
+        "other": "Build: %s"
+      },
+      "go": {
+        "other": "Go: %s"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Web UI Configuration ==="
+      },
+      "webPort": {
+        "other": "Web port"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Web UI enabled on port"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ Native channel auto-enabled (required for Web UI)"
+      },
+      "configureNativeAdvanced": {
+        "other": "[Advanced] Configure native channel?"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== Native Channel Configuration (Advanced) ==="
+      },
+      "apiHost": {
+        "other": "API host"
+      },
+      "apiPort": {
+        "other": "API port"
+      },
+      "maxPairedClients": {
+        "other": "Max paired clients"
+      },
+      "tokenExpiryDays": {
+        "other": "Token expiry days"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ Native channel configured"
+      },
+      "generatePairingPIN": {
+        "other": "Generate pairing PIN?"
+      },
+      "deviceName": {
+        "other": "Device name"
+      },
+      "errorCreatingAuthManager": {
+        "other": "Error creating auth manager: %v"
+      },
+      "errorGeneratingPIN": {
+        "other": "Error generating PIN: %v"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ Pairing PIN generated"
+      },
+      "pinLabel": {
+        "other": "  PIN:     %s"
+      },
+      "pinExpires": {
+        "other": "  Expires: %s (%d minutes)"
+      },
+      "startServicesNow": {
+        "other": "Start services now?"
+      },
+      "manualStartInstructions": {
+        "other": "\nTo start services manually:"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "servicesStarted": {
+        "other": "\n✓ Services started"
+      },
+      "openBrowser": {
+        "other": "\nOpen http://127.0.0.1:%d in your browser"
+      },
+      "enterPINToConnect": {
+        "other": "Enter the PIN to connect your device."
+      },
+      "configExists": {
+        "other": "Config already exists at %s"
+      },
+      "errorSavingConfig": {
+        "other": "Error saving config: %v"
+      },
+      "warningCreateLogsDir": {
+        "other": "Warning: could not create logs directory: %v"
+      },
+      "warningCreateInfoLog": {
+        "other": "Warning: could not create info log file: %v"
+      },
+      "warningCreateErrorsLog": {
+        "other": "Warning: could not create errors log file: %v"
+      },
+      "ready": {
+        "other": "%s lele is ready!"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 Debug mode enabled"
+      },
+      "warningEnableFileLogging": {
+        "other": "Warning: could not enable file logging: %v"
+      },
+      "warningCleanupOldLogs": {
+        "other": "Warning: could not cleanup old logs: %v"
+      },
+      "agentStatus": {
+        "other": "\n📦 Agent Status:"
+      },
+      "toolsLoaded": {
+        "other": "  • Tools: %d loaded"
+      },
+      "skillsAvailable": {
+        "other": "  • Skills: %d/%d available"
+      },
+      "errorCreatingChannelManager": {
+        "other": "Error creating channel manager: %v"
+      },
+      "channelsEnabled": {
+        "other": "✓ Channels enabled: %s"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ Warning: No channels enabled"
+      },
+      "gatewayStarted": {
+        "other": "✓ Gateway started on %s:%d"
+      },
+      "pressCtrlC": {
+        "other": "Press Ctrl+C to stop"
+      },
+      "errorStartingCronService": {
+        "other": "Error starting cron service: %v"
+      },
+      "cronServiceStarted": {
+        "other": "✓ Cron service started"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "Error starting heartbeat service: %v"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ Heartbeat service started"
+      },
+      "errorStartingDeviceService": {
+        "other": "Error starting device service: %v"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ Device event service started"
+      },
+      "errorStartingChannels": {
+        "other": "Error starting channels: %v"
+      },
+      "healthEndpoints": {
+        "other": "✓ Health endpoints available at http://%s:%d/health and /ready"
+      },
+      "shuttingDown": {
+        "other": "\nShutting down..."
+      },
+      "gatewayStopped": {
+        "other": "✓ Gateway stopped"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\nAuth commands:"
+        },
+        "login": {
+          "other": "  login       Login via OAuth or paste token"
+        },
+        "logout": {
+          "other": "  logout      Remove stored credentials"
+        },
+        "status": {
+          "other": "  status      Show current auth status"
+        },
+        "loginOptions": {
+          "other": "\nLogin options:"
+        },
+        "provider": {
+          "other": "  --provider <name>    Provider to login with (openai, anthropic)"
+        },
+        "deviceCode": {
+          "other": "  --device-code        Use device code flow (for headless environments)"
+        },
+        "examples": {
+          "other": "\nExamples:"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "Error: --provider is required"
+      },
+      "supportedProviders": {
+        "other": "Supported providers: openai, anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "Unsupported provider: %s"
+      },
+      "loginFailed": {
+        "other": "Login failed: %v"
+      },
+      "failedSaveCredentials": {
+        "other": "Failed to save credentials: %v"
+      },
+      "warningUpdateConfig": {
+        "other": "Warning: could not update config: %v"
+      },
+      "loginSuccessful": {
+        "other": "Login successful!"
+      },
+      "account": {
+        "other": "Account: %s"
+      },
+      "tokenSaved": {
+        "other": "Token saved for %s!"
+      },
+      "failedRemoveCredentials": {
+        "other": "Failed to remove credentials: %v"
+      },
+      "loggedOutFrom": {
+        "other": "Logged out from %s"
+      },
+      "loggedOutFromAll": {
+        "other": "Logged out from all providers"
+      },
+      "errorLoadingAuthStore": {
+        "other": "Error loading auth store: %v"
+      },
+      "noAuthenticatedProviders": {
+        "other": "No authenticated providers."
+      },
+      "runAuthLogin": {
+        "other": "Run: lele auth login --provider <name>"
+      },
+      "authenticatedProviders": {
+        "other": "\nAuthenticated Providers:"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    Method: %s"
+      },
+      "status": {
+        "other": "    Status: %s"
+      },
+      "accountInfo": {
+        "other": "    Account: %s"
+      },
+      "expires": {
+        "other": "    Expires: %s"
+      },
+      "statusActive": {
+        "other": "active"
+      },
+      "statusExpired": {
+        "other": "expired"
+      },
+      "statusNeedsRefresh": {
+        "other": "needs refresh"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\nSkills commands:"
+        },
+        "list": {
+          "other": "  list                    List installed skills"
+        },
+        "install": {
+          "other": "  install <repo>          Install skill from GitHub"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          Install all builtin skills to workspace"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             List available builtin skills"
+        },
+        "remove": {
+          "other": "  remove <name>           Remove installed skill"
+        },
+        "search": {
+          "other": "  search                  Search available skills"
+        },
+        "show": {
+          "other": "  show <name>             Show skill details"
+        },
+        "examples": {
+          "other": "\nExamples:"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "No skills installed."
+      },
+      "installedSkills": {
+        "other": "\nInstalled Skills:"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ %s (%s)"
+      },
+      "skillDescription": {
+        "other": "    %s"
+      },
+      "usageInstall": {
+        "other": "Usage: lele skills install <github-repo>"
+      },
+      "exampleInstallUsage": {
+        "other": "Example: lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "Installing skill from %s..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ Failed to install skill: %v"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ Skill '%s' installed successfully!"
+      },
+      "removingSkill": {
+        "other": "Removing skill '%s'..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ Failed to remove skill: %v"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ Skill '%s' removed successfully!"
+      },
+      "usageRemove": {
+        "other": "Usage: lele skills remove <skill-name>"
+      },
+      "usageShow": {
+        "other": "Usage: lele skills show <skill-name>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "Copying builtin skills to workspace..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ Builtin skill '%s' not found: %v"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ Failed to create directory for %s: %v"
+      },
+      "failedCopySkill": {
+        "other": "✗ Failed to copy %s: %v"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ All builtin skills installed!"
+      },
+      "useInWorkspace": {
+        "other": "Now you can use them in your workspace."
+      },
+      "availableBuiltinSkills": {
+        "other": "\nAvailable Builtin Skills:"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "Error reading builtin skills: %v"
+      },
+      "noBuiltinSkills": {
+        "other": "No builtin skills available."
+      },
+      "searchingSkills": {
+        "other": "Searching for available skills..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ Failed to fetch skills list: %v"
+      },
+      "noSkillsAvailable": {
+        "other": "No skills available."
+      },
+      "availableSkills": {
+        "other": "\nAvailable Skills (%d):"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 %s"
+      },
+      "skillRepo": {
+        "other": "     Repo: %s"
+      },
+      "skillAuthor": {
+        "other": "     Author: %s"
+      },
+      "skillTags": {
+        "other": "     Tags: %v"
+      },
+      "skillNotFound": {
+        "other": "✗ Skill '%s' not found"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 Skill: %s"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nWeb commands:"
+        },
+        "start": {
+          "other": "  start              Start the web server in background"
+        },
+        "stop": {
+          "other": "  stop               Stop the web server"
+        },
+        "status": {
+          "other": "  status             Show web server status"
+        },
+        "options": {
+          "other": "\nOptions:"
+        },
+        "host": {
+          "other": "  --host <host>     Bind host (default: 0.0.0.0)"
+        },
+        "port": {
+          "other": "  --port <port>     Bind port (default: 3005)"
+        },
+        "examples": {
+          "other": "\nExamples:"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Web server already running (pid %d)"
+      },
+      "errorResolvingExecutable": {
+        "other": "Error resolving executable: %v"
+      },
+      "errorPrepareLogDir": {
+        "other": "Error preparing log directory: %v"
+      },
+      "errorOpenLogFile": {
+        "other": "Error opening web log file: %v"
+      },
+      "errorStartWebServer": {
+        "other": "Error starting web server: %v"
+      },
+      "errorWritePID": {
+        "other": "Error writing pid file: %v"
+      },
+      "webServerStarted": {
+        "other": "✓ Web server started on http://%s:%d (pid %d)"
+      },
+      "webServerNotRunning": {
+        "other": "Web server is not running"
+      },
+      "errorFindProcess": {
+        "other": "Error finding web server process: %v"
+      },
+      "webServerStopped": {
+        "other": "✓ Web server stopped (pid %d)"
+      },
+      "webServerStatusStopped": {
+        "other": "Web server: stopped"
+      },
+      "webServerStatusRunning": {
+        "other": "Web server: running (pid %d)"
+      },
+      "webAssetsMissing": {
+        "other": "Web app assets are missing. Build the frontend with `make build` or `npm run build --prefix web`."
+      },
+      "servingWebApp": {
+        "other": "Serving web app on http://%s"
+      },
+      "webServerError": {
+        "other": "Web server error: %v"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\nClient commands:"
+        },
+        "pin": {
+          "other": "  pin         Generate a new pairing PIN"
+        },
+        "list": {
+          "other": "  list        List all paired clients"
+        },
+        "pending": {
+          "other": "  pending     List pending pairing requests"
+        },
+        "remove": {
+          "other": "  remove      Remove a paired client"
+        },
+        "status": {
+          "other": "  status      Show client channel status"
+        },
+        "examples": {
+          "other": "\nExamples:"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <client_id>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "Usage: lele client remove <client_id>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ Error generating PIN: %v"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n%s Pairing PIN Generated"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  PIN:     %s"
+      },
+      "pinExpires": {
+        "other": "  Expires: %s"
+      },
+      "enterPINToPair": {
+        "other": "Enter this PIN in your native client to pair."
+      },
+      "noPairedClients": {
+        "other": "No paired clients."
+      },
+      "pairedClientsTitle": {
+        "other": "\n%s Paired Clients (%d)"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ active"
+      },
+      "clientStatusExpired": {
+        "other": "✗ expired"
+      },
+      "clientID": {
+        "other": "\n  %s"
+      },
+      "clientDevice": {
+        "other": "    Device:  %s"
+      },
+      "clientStatus": {
+        "other": "    Status:  %s"
+      },
+      "clientCreated": {
+        "other": "    Created: %s"
+      },
+      "clientExpires": {
+        "other": "    Expires: %s"
+      },
+      "clientLastSeen": {
+        "other": "    Last:    %s"
+      },
+      "noPendingPairing": {
+        "other": "No pending pairing requests."
+      },
+      "pendingPairingTitle": {
+        "other": "\n%s Pending Pairing Requests (%d)"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  PIN: %s"
+      },
+      "pendingDevice": {
+        "other": "    Device:    %s"
+      },
+      "pendingStatus": {
+        "other": "    Status:    %s"
+      },
+      "pendingRemaining": {
+        "other": "    Remaining: %v"
+      },
+      "pendingStatusValid": {
+        "other": "✓ valid"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ expired"
+      },
+      "errorRemovingClient": {
+        "other": "✗ Error removing client: %v"
+      },
+      "clientRemoved": {
+        "other": "✓ Client '%s' removed"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n%s Client Channel Status"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  Enabled:     %v"
+      },
+      "clientHost": {
+        "other": "  Host:        %s"
+      },
+      "clientPort": {
+        "other": "  Port:        %d"
+      },
+      "clientMaxClients": {
+        "other": "  Max Clients: %d"
+      },
+      "clientTokenExpiry": {
+        "other": "  Token Expiry: %d days"
+      },
+      "clientPINExpiry": {
+        "other": "  PIN Expiry:   %d minutes"
+      },
+      "clientPairedCount": {
+        "other": "  Paired Clients: %d (%d active)"
+      },
+      "clientPendingPINs": {
+        "other": "  Pending PINs:   %d"
+      },
+      "clientConnectWS": {
+        "other": "  Connect: ws://%s:%d/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST:    http://%s:%d/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\nCron commands:"
+        },
+        "list": {
+          "other": "  list              List all scheduled jobs"
+        },
+        "add": {
+          "other": "  add              Add a new scheduled job"
+        },
+        "remove": {
+          "other": "  remove <id>       Remove a job by ID"
+        },
+        "enable": {
+          "other": "  enable <id>      Enable a job"
+        },
+        "disable": {
+          "other": "  disable <id>     Disable a job"
+        },
+        "addOptions": {
+          "other": "\nAdd options:"
+        },
+        "name": {
+          "other": "  -n, --name       Job name"
+        },
+        "message": {
+          "other": "  -m, --message    Message for agent"
+        },
+        "every": {
+          "other": "  -e, --every      Run every N seconds"
+        },
+        "cron": {
+          "other": "  -c, --cron       Cron expression (e.g. '0 9 * * *')"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     Deliver response to channel"
+        },
+        "to": {
+          "other": "  --to             Recipient for delivery"
+        },
+        "channel": {
+          "other": "  --channel        Channel for delivery"
+        }
+      },
+      "usageRemove": {
+        "other": "Usage: lele cron remove <job_id>"
+      },
+      "usageEnableDisable": {
+        "other": "Usage: lele cron enable/disable <job_id>"
+      },
+      "noScheduledJobs": {
+        "other": "No scheduled jobs."
+      },
+      "scheduledJobs": {
+        "other": "\nScheduled Jobs:"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  %s (%s)"
+      },
+      "jobSchedule": {
+        "other": "    Schedule: %s"
+      },
+      "jobStatus": {
+        "other": "    Status: %s"
+      },
+      "jobNextRun": {
+        "other": "    Next run: %s"
+      },
+      "jobScheduleEvery": {
+        "other": "every %ds"
+      },
+      "jobScheduleOneTime": {
+        "other": "one-time"
+      },
+      "jobStatusEnabled": {
+        "other": "enabled"
+      },
+      "jobStatusDisabled": {
+        "other": "disabled"
+      },
+      "errorNameRequired": {
+        "other": "Error: --name is required"
+      },
+      "errorMessageRequired": {
+        "other": "Error: --message is required"
+      },
+      "errorScheduleRequired": {
+        "other": "Error: Either --every or --cron must be specified"
+      },
+      "errorAddingJob": {
+        "other": "Error adding job: %v"
+      },
+      "jobAdded": {
+        "other": "✓ Added job '%s' (%s)"
+      },
+      "jobRemoved": {
+        "other": "✓ Removed job %s"
+      },
+      "jobNotFound": {
+        "other": "✗ Job %s not found"
+      },
+      "jobEnabled": {
+        "other": "✓ Job '%s' %s"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 Debug mode enabled"
+      },
+      "errorMessage": {
+        "other": "Error: %v"
+      },
+      "interactiveMode": {
+        "other": "%s Interactive mode (Ctrl+C to exit)"
+      },
+      "youPrompt": {
+        "other": "%s You: "
+      },
+      "errorInitReadline": {
+        "other": "Error initializing readline: %v"
+      },
+      "fallbackSimpleInput": {
+        "other": "Falling back to simple input mode..."
+      },
+      "errorReadingInput": {
+        "other": "Error reading input: %v"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "Error copying workspace templates: %v"
+      },
+      "errorCreateTargetDir": {
+        "other": "Failed to create target directory: %w"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "Failed to read embedded file %s: %w"
+      },
+      "errorGetRelativePath": {
+        "other": "Failed to get relative path for %s: %v"
+      },
+      "errorCreateDirectory": {
+        "other": "Failed to create directory %s: %w"
+      },
+      "errorWriteFile": {
+        "other": "Failed to write file %s: %w"
+      }
+    }
+  }
+}

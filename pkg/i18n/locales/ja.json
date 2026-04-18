@@ -1,0 +1,917 @@
+{
+  "cli": {
+    "common": {
+      "errorLoadingConfig": {
+        "other": "設定の読み込みエラー: {{.error}}"
+      },
+      "unknownCommand": {
+        "other": "不明なコマンド: {{.command}}"
+      },
+      "unknownSubcommand": {
+        "other": "不明な{{.category}}コマンド: {{.command}}"
+      },
+      "goodbye": {
+        "other": "さようなら！"
+      },
+      "aborted": {
+        "other": "中止しました。"
+      },
+      "overwritePrompt": {
+        "other": "{{.path}}に設定ファイルが既に存在します\n上書きしますか？ (y/n): "
+      }
+    },
+    "help": {
+      "title": {
+        "other": "{{.logo}} lele - パーソナルAIアシスタント v{{.version}}"
+      },
+      "usage": {
+        "other": "使用法: lele <command>"
+      },
+      "commands": {
+        "other": "コマンド:"
+      },
+      "onboard": {
+        "other": "leleの設定とワークスペースを初期化"
+      },
+      "agent": {
+        "other": "エージェントと直接対話"
+      },
+      "auth": {
+        "other": "認証の管理（ログイン、ログアウト、ステータス）"
+      },
+      "gateway": {
+        "other": "leleゲートウェイを起動"
+      },
+      "web": {
+        "other": "Webアプリサーバーの起動または停止"
+      },
+      "status": {
+        "other": "leleのステータスを表示"
+      },
+      "cron": {
+        "other": "スケジュールタスクの管理"
+      },
+      "migrate": {
+        "other": "OpenClawからLeleへ移行"
+      },
+      "skills": {
+        "other": "スキルの管理（インストール、一覧、削除）"
+      },
+      "client": {
+        "other": "ネイティブチャネルクライアントの管理（ペアリング、一覧、削除）"
+      },
+      "version": {
+        "other": "バージョン情報を表示"
+      }
+    },
+    "version": {
+      "versionLine": {
+        "other": "{{.Name}} lele {{.Version}}"
+      },
+      "build": {
+        "other": "ビルド: {{.Build}}"
+      },
+      "go": {
+        "other": "Go: {{.GoVersion}}"
+      }
+    },
+    "onboard": {
+      "webUIConfiguration": {
+        "other": "\n=== Web UI設定 ==="
+      },
+      "webPort": {
+        "other": "Webポート"
+      },
+      "webUIEnabled": {
+        "other": "\n✓ Web UIがポート上で有効になりました"
+      },
+      "nativeChannelAutoEnabled": {
+        "other": "✓ ネイティブチャネルが自動有効化されました（Web UIに必要）"
+      },
+      "configureNativeAdvanced": {
+        "other": "[詳細] ネイティブチャネルを設定しますか？"
+      },
+      "nativeChannelConfiguration": {
+        "other": "\n=== ネイティブチャネル設定（詳細） ==="
+      },
+      "apiHost": {
+        "other": "APIホスト"
+      },
+      "apiPort": {
+        "other": "APIポート"
+      },
+      "maxPairedClients": {
+        "other": "最大ペアリングクライアント数"
+      },
+      "tokenExpiryDays": {
+        "other": "トークン有効期限（日）"
+      },
+      "nativeChannelConfigured": {
+        "other": "\n✓ ネイティブチャネルが設定されました"
+      },
+      "generatePairingPIN": {
+        "other": "ペアリングPINを生成しますか？"
+      },
+      "deviceName": {
+        "other": "デバイス名"
+      },
+      "errorCreatingAuthManager": {
+        "other": "認証マネージャーの作成エラー: {{.Error}}"
+      },
+      "errorGeneratingPIN": {
+        "other": "PINの生成エラー: {{.Error}}"
+      },
+      "pairingPINGenerated": {
+        "other": "\n✓ ペアリングPINが生成されました"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.PIN}}"
+      },
+      "pinExpires": {
+        "other": "  有効期限: {{.Expires}} ({{.Minutes}}分)"
+      },
+      "startServicesNow": {
+        "other": "サービスを今すぐ起動しますか？"
+      },
+      "manualStartInstructions": {
+        "other": "\nサービスを手動で起動する場合:"
+      },
+      "manualStartGateway": {
+        "other": "  lele gateway"
+      },
+      "manualStartWeb": {
+        "other": "  lele web start"
+      },
+      "startingGateway": {
+        "other": "\n[+] ゲートウェイを起動中..."
+      },
+      "startingWebServer": {
+        "other": "[+] Webサーバーを起動中..."
+      },
+      "servicesStarted": {
+        "other": "\n✓ サービスが起動しました"
+      },
+      "openBrowser": {
+        "other": "\nブラウザで http://127.0.0.1:{{.Port}} を開いてください"
+      },
+      "enterPINToConnect": {
+        "other": "PINを入力してデバイスに接続してください。"
+      },
+      "configExists": {
+        "other": "{{.Path}}に設定ファイルが既に存在します"
+      },
+      "errorSavingConfig": {
+        "other": "設定の保存エラー: {{.Error}}"
+      },
+      "warningCreateLogsDir": {
+        "other": "警告: ログディレクトリを作成できませんでした: {{.Error}}"
+      },
+      "warningCreateInfoLog": {
+        "other": "警告: 情報ログファイルを作成できませんでした: {{.Error}}"
+      },
+      "warningCreateErrorsLog": {
+        "other": "警告: エラーログファイルを作成できませんでした: {{.Error}}"
+      },
+      "ready": {
+        "other": "{{.Name}} leleの準備ができました！"
+      }
+    },
+    "gateway": {
+      "debugModeEnabled": {
+        "other": "🔍 デバッグモードが有効です"
+      },
+      "warningEnableFileLogging": {
+        "other": "警告: ファイルログを有効にできませんでした: {{.Error}}"
+      },
+      "warningCleanupOldLogs": {
+        "other": "警告: 古いログのクリーンアップに失敗しました: {{.Error}}"
+      },
+      "agentStatus": {
+        "other": "\n📦 エージェントステータス:"
+      },
+      "toolsLoaded": {
+        "other": "• ツール: {{.Count}}件読み込み済み"
+      },
+      "skillsAvailable": {
+        "other": "  • スキル: {{.Available}}/{{.Total}}件利用可能"
+      },
+      "errorCreatingChannelManager": {
+        "other": "チャネルマネージャーの作成エラー: {{.Error}}"
+      },
+      "channelsEnabled": {
+        "other": "✓ 有効なチャネル: {{.Channels}}"
+      },
+      "warningNoChannelsEnabled": {
+        "other": "⚠ 警告: 有効なチャネルがありません"
+      },
+      "gatewayStarted": {
+        "other": "✓ ゲートウェイが {{.Host}}:{{.Port}} で起動しました"
+      },
+      "pressCtrlC": {
+        "other": "Ctrl+Cで停止"
+      },
+      "errorStartingCronService": {
+        "other": "cronサービスの起動エラー: {{.Error}}"
+      },
+      "cronServiceStarted": {
+        "other": "✓ cronサービスが起動しました"
+      },
+      "errorStartingHeartbeatService": {
+        "other": "ハートビートサービスの起動エラー: {{.Error}}"
+      },
+      "heartbeatServiceStarted": {
+        "other": "✓ ハートビートサービスが起動しました"
+      },
+      "errorStartingDeviceService": {
+        "other": "デバイスサービスの起動エラー: {{.Error}}"
+      },
+      "deviceServiceStarted": {
+        "other": "✓ デバイスイベントサービスが起動しました"
+      },
+      "errorStartingChannels": {
+        "other": "チャネルの起動エラー: {{.Error}}"
+      },
+      "healthEndpoints": {
+        "other": "✓ ヘルスエンドポイントは http://{{.Host}}:{{.Port}}/health および /ready で利用可能です"
+      },
+      "shuttingDown": {
+        "other": "\nシャットダウン中..."
+      },
+      "gatewayStopped": {
+        "other": "✓ ゲートウェイが停止しました"
+      }
+    },
+    "auth": {
+      "help": {
+        "title": {
+          "other": "\n認証コマンド:"
+        },
+        "login": {
+          "other": "  login       OAuthでログインまたはトークンを貼り付け"
+        },
+        "logout": {
+          "other": "  logout      保存された認証情報を削除"
+        },
+        "status": {
+          "other": "  status      現在の認証ステータスを表示"
+        },
+        "loginOptions": {
+          "other": "\nログインオプション:"
+        },
+        "provider": {
+          "other": "  --provider <name>    ログインするプロバイダー（openai、anthropic）"
+        },
+        "deviceCode": {
+          "other": "  --device-code        デバイスコードフローを使用（ヘッドレス環境用）"
+        },
+        "examples": {
+          "other": "\n例:"
+        },
+        "exampleLoginOpenAI": {
+          "other": "  lele auth login --provider openai"
+        },
+        "exampleLoginDeviceCode": {
+          "other": "  lele auth login --provider openai --device-code"
+        },
+        "exampleLoginAnthropic": {
+          "other": "  lele auth login --provider anthropic"
+        },
+        "exampleLogoutOpenAI": {
+          "other": "  lele auth logout --provider openai"
+        },
+        "exampleStatus": {
+          "other": "  lele auth status"
+        }
+      },
+      "errorProviderRequired": {
+        "other": "エラー: --providerが必要です"
+      },
+      "supportedProviders": {
+        "other": "対応プロバイダー: openai、anthropic"
+      },
+      "unsupportedProvider": {
+        "other": "非対応のプロバイダー: {{.Provider}}"
+      },
+      "loginFailed": {
+        "other": "ログインに失敗しました: {{.Error}}"
+      },
+      "failedSaveCredentials": {
+        "other": "認証情報の保存に失敗しました: {{.Error}}"
+      },
+      "warningUpdateConfig": {
+        "other": "警告: 設定を更新できませんでした: {{.Error}}"
+      },
+      "loginSuccessful": {
+        "other": "ログインに成功しました！"
+      },
+      "account": {
+        "other": "アカウント: {{.Account}}"
+      },
+      "tokenSaved": {
+        "other": "{{.Provider}}のトークンを保存しました！"
+      },
+      "failedRemoveCredentials": {
+        "other": "認証情報の削除に失敗しました: {{.Error}}"
+      },
+      "loggedOutFrom": {
+        "other": "{{.Provider}}からログアウトしました"
+      },
+      "loggedOutFromAll": {
+        "other": "すべてのプロバイダーからログアウトしました"
+      },
+      "errorLoadingAuthStore": {
+        "other": "認証ストアの読み込みエラー: {{.Error}}"
+      },
+      "noAuthenticatedProviders": {
+        "other": "認証済みのプロバイダーがありません。"
+      },
+      "runAuthLogin": {
+        "other": "実行: lele auth login --provider <name>"
+      },
+      "authenticatedProviders": {
+        "other": "\n認証済みのプロバイダー:"
+      },
+      "separator": {
+        "other": "------------------------"
+      },
+      "method": {
+        "other": "    方法: {{.Method}}"
+      },
+      "status": {
+        "other": "    ステータス: {{.Status}}"
+      },
+      "accountInfo": {
+        "other": "    アカウント: {{.Account}}"
+      },
+      "expires": {
+        "other": "    有効期限: {{.Expires}}"
+      },
+      "statusActive": {
+        "other": "有効"
+      },
+      "statusExpired": {
+        "other": "期限切れ"
+      },
+      "statusNeedsRefresh": {
+        "other": "更新が必要"
+      }
+    },
+    "skills": {
+      "help": {
+        "title": {
+          "other": "\nスキルコマンド:"
+        },
+        "list": {
+          "other": "  list                    インストール済みスキルを一覧表示"
+        },
+        "install": {
+          "other": "  install <repo>          GitHubからスキルをインストール"
+        },
+        "installBuiltin": {
+          "other": "  install-builtin          組み込みスキルをワークスペースにインストール"
+        },
+        "listBuiltin": {
+          "other": "  list-builtin             利用可能な組み込みスキルを一覧表示"
+        },
+        "remove": {
+          "other": "  remove <name>           インストール済みスキルを削除"
+        },
+        "search": {
+          "other": "  search                  利用可能なスキルを検索"
+        },
+        "show": {
+          "other": "  show <name>             スキルの詳細を表示"
+        },
+        "examples": {
+          "other": "\n例:"
+        },
+        "exampleList": {
+          "other": "  lele skills list"
+        },
+        "exampleInstall": {
+          "other": "  lele skills install sipeed/lele-skills/weather"
+        },
+        "exampleInstallBuiltin": {
+          "other": "  lele skills install-builtin"
+        },
+        "exampleListBuiltin": {
+          "other": "  lele skills list-builtin"
+        },
+        "exampleRemove": {
+          "other": "  lele skills remove weather"
+        }
+      },
+      "noSkillsInstalled": {
+        "other": "スキルがインストールされていません。"
+      },
+      "installedSkills": {
+        "other": "\nインストール済みスキル:"
+      },
+      "installedSkillsSeparator": {
+        "other": "------------------"
+      },
+      "skillInstalled": {
+        "other": "  ✓ {{.Name}} ({{.Version}})"
+      },
+      "skillDescription": {
+        "other": "    {{.Description}}"
+      },
+      "usageInstall": {
+        "other": "使用法: lele skills install <github-repo>"
+      },
+      "exampleInstallUsage": {
+        "other": "例: lele skills install sipeed/lele-skills/weather"
+      },
+      "installingSkill": {
+        "other": "{{.Repo}}からスキルをインストール中..."
+      },
+      "failedInstallSkill": {
+        "other": "✗ スキルのインストールに失敗しました: {{.Error}}"
+      },
+      "skillInstalledSuccess": {
+        "other": "✓ スキル「{{.Name}}」のインストールに成功しました！"
+      },
+      "removingSkill": {
+        "other": "スキル「{{.Name}}」を削除中..."
+      },
+      "failedRemoveSkill": {
+        "other": "✗ スキルの削除に失敗しました: {{.Error}}"
+      },
+      "skillRemovedSuccess": {
+        "other": "✓ スキル「{{.Name}}」の削除に成功しました！"
+      },
+      "usageRemove": {
+        "other": "使用法: lele skills remove <skill-name>"
+      },
+      "usageShow": {
+        "other": "使用法: lele skills show <skill-name>"
+      },
+      "copyingBuiltinSkills": {
+        "other": "組み込みスキルをワークスペースにコピー中..."
+      },
+      "builtinSkillNotFound": {
+        "other": "⊘ 組み込みスキル「{{.Name}}」が見つかりません: {{.Error}}"
+      },
+      "failedCreateSkillDir": {
+        "other": "✗ {{.Name}}のディレクトリ作成に失敗しました: {{.Error}}"
+      },
+      "failedCopySkill": {
+        "other": "✗ {{.Name}}のコピーに失敗しました: {{.Error}}"
+      },
+      "builtinSkillsInstalled": {
+        "other": "\n✓ すべての組み込みスキルがインストールされました！"
+      },
+      "useInWorkspace": {
+        "other": "これでワークスペースで使用できます。"
+      },
+      "availableBuiltinSkills": {
+        "other": "\n利用可能な組み込みスキル:"
+      },
+      "builtinSkillsSeparator": {
+        "other": "-----------------------"
+      },
+      "errorReadingBuiltinSkills": {
+        "other": "組み込みスキルの読み込みエラー: {{.Error}}"
+      },
+      "noBuiltinSkills": {
+        "other": "組み込みスキルが利用できません。"
+      },
+      "searchingSkills": {
+        "other": "利用可能なスキルを検索中..."
+      },
+      "failedFetchSkillsList": {
+        "other": "✗ スキル一覧の取得に失敗しました: {{.Error}}"
+      },
+      "noSkillsAvailable": {
+        "other": "利用可能なスキルがありません。"
+      },
+      "availableSkills": {
+        "other": "\n利用可能なスキル ({{.Count}}件):"
+      },
+      "availableSkillsSeparator": {
+        "other": "--------------------"
+      },
+      "skillPackage": {
+        "other": "  📦 {{.Name}}"
+      },
+      "skillRepo": {
+        "other": "     リポジトリ: {{.Repo}}"
+      },
+      "skillAuthor": {
+        "other": "     作者: {{.Author}}"
+      },
+      "skillTags": {
+        "other": "     タグ: {{.Tags}}"
+      },
+      "skillNotFound": {
+        "other": "✗ スキル「{{.Name}}」が見つかりません"
+      },
+      "skillShowTitle": {
+        "other": "\n📦 スキル: {{.Name}}"
+      },
+      "skillShowSeparator": {
+        "other": "----------------------"
+      }
+    },
+    "web": {
+      "help": {
+        "title": {
+          "other": "\nWebコマンド:"
+        },
+        "start": {
+          "other": "  start              Webサーバーをバックグラウンドで起動"
+        },
+        "stop": {
+          "other": "  stop               Webサーバーを停止"
+        },
+        "status": {
+          "other": "  status             Webサーバーのステータスを表示"
+        },
+        "options": {
+          "other": "\nオプション:"
+        },
+        "host": {
+          "other": "  --host <host>     バインドホスト（デフォルト: 0.0.0.0）"
+        },
+        "port": {
+          "other": "  --port <port>     バインドポート（デフォルト: 3005）"
+        },
+        "examples": {
+          "other": "\n例:"
+        },
+        "exampleStart": {
+          "other": "  lele web start"
+        },
+        "exampleStartWithOptions": {
+          "other": "  lele web start --host 0.0.0.0 --port 3005"
+        },
+        "exampleStop": {
+          "other": "  lele web stop"
+        },
+        "exampleStatus": {
+          "other": "  lele web status"
+        }
+      },
+      "webServerAlreadyRunning": {
+        "other": "Webサーバーは既に実行中です（pid {{.PID}}）"
+      },
+      "errorResolvingExecutable": {
+        "other": "実行ファイルの解決エラー: {{.Error}}"
+      },
+      "errorPrepareLogDir": {
+        "other": "ログディレクトリの準備エラー: {{.Error}}"
+      },
+      "errorOpenLogFile": {
+        "other": "Webログファイルのオープンエラー: {{.Error}}"
+      },
+      "errorStartWebServer": {
+        "other": "Webサーバーの起動エラー: {{.Error}}"
+      },
+      "errorWritePID": {
+        "other": "PIDファイルの書き込みエラー: {{.Error}}"
+      },
+      "webServerStarted": {
+        "other": "✓ Webサーバーが http://{{.Host}}:{{.Port}} で起動しました（pid {{.PID}}）"
+      },
+      "webServerNotRunning": {
+        "other": "Webサーバーは実行されていません"
+      },
+      "errorFindProcess": {
+        "other": "Webサーバープロセスの検索エラー: {{.Error}}"
+      },
+      "webServerStopped": {
+        "other": "✓ Webサーバーを停止しました（pid {{.PID}}）"
+      },
+      "webServerStatusStopped": {
+        "other": "Webサーバー: 停止中"
+      },
+      "webServerStatusRunning": {
+        "other": "Webサーバー: 実行中（pid {{.PID}}）"
+      },
+      "webAssetsMissing": {
+        "other": "Webアプリのアセットが見つかりません。`make build`または`npm run build --prefix web`でフロントエンドをビルドしてください。"
+      },
+      "servingWebApp": {
+        "other": "Webアプリを http://{{.Addr}} で提供中"
+      },
+      "webServerError": {
+        "other": "Webサーバーエラー: {{.Error}}"
+      }
+    },
+    "client": {
+      "help": {
+        "title": {
+          "other": "\nクライアントコマンド:"
+        },
+        "pin": {
+          "other": "  pin         新しいペアリングPINを生成"
+        },
+        "list": {
+          "other": "  list        ペアリング済みクライアントを一覧表示"
+        },
+        "pending": {
+          "other": "  pending     保留中のペアリングリクエストを一覧表示"
+        },
+        "remove": {
+          "other": "  remove      ペアリング済みクライアントを削除"
+        },
+        "status": {
+          "other": "  status      クライアントチャネルのステータスを表示"
+        },
+        "examples": {
+          "other": "\n例:"
+        },
+        "examplePin": {
+          "other": "  lele client pin"
+        },
+        "exampleList": {
+          "other": "  lele client list"
+        },
+        "examplePending": {
+          "other": "  lele client pending"
+        },
+        "exampleRemove": {
+          "other": "  lele client remove <client_id>"
+        },
+        "exampleStatus": {
+          "other": "  lele client status"
+        }
+      },
+      "usageRemove": {
+        "other": "使用法: lele client remove <client_id>"
+      },
+      "errorGeneratingPIN": {
+        "other": "✗ PINの生成エラー: {{.Error}}"
+      },
+      "pinGeneratedTitle": {
+        "other": "\n{{.Name}} ペアリングPINが生成されました"
+      },
+      "pinSeparator": {
+        "other": "------------------------"
+      },
+      "pinLabel": {
+        "other": "  PIN:     {{.PIN}}"
+      },
+      "pinExpires": {
+        "other": "  有効期限: {{.Expires}}"
+      },
+      "enterPINToPair": {
+        "other": "ネイティブクライアントでこのPINを入力してペアリングしてください。"
+      },
+      "noPairedClients": {
+        "other": "ペアリング済みクライアントはありません。"
+      },
+      "pairedClientsTitle": {
+        "other": "\n{{.Name}} ペアリング済みクライアント ({{.Count}}件)"
+      },
+      "pairedClientsSeparator": {
+        "other": "----------------------"
+      },
+      "clientStatusActive": {
+        "other": "✓ 有効"
+      },
+      "clientStatusExpired": {
+        "other": "✗ 期限切れ"
+      },
+      "clientID": {
+        "other": "\n  {{.ClientID}}"
+      },
+      "clientDevice": {
+        "other": "    デバイス:  {{.Device}}"
+      },
+      "clientStatus": {
+        "other": "    ステータス:  {{.Status}}"
+      },
+      "clientCreated": {
+        "other": "    作成日: {{.Created}}"
+      },
+      "clientExpires": {
+        "other": "    有効期限: {{.Expires}}"
+      },
+      "clientLastSeen": {
+        "other": "    最終接続:    {{.LastSeen}}"
+      },
+      "noPendingPairing": {
+        "other": "保留中のペアリングリクエストはありません。"
+      },
+      "pendingPairingTitle": {
+        "other": "\n{{.Name}} 保留中のペアリングリクエスト ({{.Count}}件)"
+      },
+      "pendingPairingSeparator": {
+        "other": "---------------------------------"
+      },
+      "pendingPIN": {
+        "other": "\n  PIN: {{.PIN}}"
+      },
+      "pendingDevice": {
+        "other": "    デバイス:    {{.Device}}"
+      },
+      "pendingStatus": {
+        "other": "    ステータス:    {{.Status}}"
+      },
+      "pendingRemaining": {
+        "other": "    残り時間: {{.Remaining}}"
+      },
+      "pendingStatusValid": {
+        "other": "✓ 有効"
+      },
+      "pendingStatusExpired": {
+        "other": "✗ 期限切れ"
+      },
+      "errorRemovingClient": {
+        "other": "✗ クライアントの削除エラー: {{.Error}}"
+      },
+      "clientRemoved": {
+        "other": "✓ クライアント「{{.ClientID}}」を削除しました"
+      },
+      "clientChannelStatusTitle": {
+        "other": "\n{{.Name}} クライアントチャネルステータス"
+      },
+      "clientChannelStatusSeparator": {
+        "other": "-----------------------"
+      },
+      "clientEnabled": {
+        "other": "  有効:     {{.Enabled}}"
+      },
+      "clientHost": {
+        "other": "  ホスト:        {{.Host}}"
+      },
+      "clientPort": {
+        "other": "  ポート:        {{.Port}}"
+      },
+      "clientMaxClients": {
+        "other": "  最大クライアント数: {{.MaxClients}}"
+      },
+      "clientTokenExpiry": {
+        "other": "  トークン有効期限: {{.Days}}日"
+      },
+      "clientPINExpiry": {
+        "other": "  PIN有効期限:   {{.Minutes}}分"
+      },
+      "clientPairedCount": {
+        "other": "  ペアリング済みクライアント: {{.Total}}件（{{.Active}}件アクティブ）"
+      },
+      "clientPendingPINs": {
+        "other": "  保留中のPIN:   {{.Count}}件"
+      },
+      "clientConnectWS": {
+        "other": "  接続: ws://{{.Host}}:{{.Port}}/api/v1/ws"
+      },
+      "clientConnectREST": {
+        "other": "  REST:    http://{{.Host}}:{{.Port}}/api/v1/"
+      }
+    },
+    "cron": {
+      "help": {
+        "title": {
+          "other": "\nCronコマンド:"
+        },
+        "list": {
+          "other": "  list              スケジュール済みジョブを一覧表示"
+        },
+        "add": {
+          "other": "  add              新しいスケジュール済みジョブを追加"
+        },
+        "remove": {
+          "other": "  remove <id>       IDでジョブを削除"
+        },
+        "enable": {
+          "other": "  enable <id>      ジョブを有効化"
+        },
+        "disable": {
+          "other": "  disable <id>     ジョブを無効化"
+        },
+        "addOptions": {
+          "other": "\n追加オプション:"
+        },
+        "name": {
+          "other": "  -n, --name       ジョブ名"
+        },
+        "message": {
+          "other": "  -m, --message    エージェントへのメッセージ"
+        },
+        "every": {
+          "other": "  -e, --every      N秒ごとに実行"
+        },
+        "cron": {
+          "other": "  -c, --cron       Cron式（例: '0 9 * * *'）"
+        },
+        "deliver": {
+          "other": "  -d, --deliver     レスポンスをチャネルに配信"
+        },
+        "to": {
+          "other": "  --to             配信先の受信者"
+        },
+        "channel": {
+          "other": "  --channel        配信チャネル"
+        }
+      },
+      "usageRemove": {
+        "other": "使用法: lele cron remove <job_id>"
+      },
+      "usageEnableDisable": {
+        "other": "使用法: lele cron enable/disable <job_id>"
+      },
+      "noScheduledJobs": {
+        "other": "スケジュール済みジョブはありません。"
+      },
+      "scheduledJobs": {
+        "other": "\nスケジュール済みジョブ:"
+      },
+      "scheduledJobsSeparator": {
+        "other": "----------------"
+      },
+      "jobName": {
+        "other": "  {{.Name}} ({{.ID}})"
+      },
+      "jobSchedule": {
+        "other": "    スケジュール: {{.Schedule}}"
+      },
+      "jobStatus": {
+        "other": "    ステータス: {{.Status}}"
+      },
+      "jobNextRun": {
+        "other": "    次回実行: {{.NextRun}}"
+      },
+      "jobScheduleEvery": {
+        "other": "{{.Seconds}}秒ごと"
+      },
+      "jobScheduleOneTime": {
+        "other": "一度きり"
+      },
+      "jobStatusEnabled": {
+        "other": "有効"
+      },
+      "jobStatusDisabled": {
+        "other": "無効"
+      },
+      "errorNameRequired": {
+        "other": "エラー: --nameが必要です"
+      },
+      "errorMessageRequired": {
+        "other": "エラー: --messageが必要です"
+      },
+      "errorScheduleRequired": {
+        "other": "エラー: --everyまたは--cronのいずれかを指定してください"
+      },
+      "errorAddingJob": {
+        "other": "ジョブの追加エラー: {{.Error}}"
+      },
+      "jobAdded": {
+        "other": "✓ ジョブ「{{.Name}}」を追加しました（{{.ID}}）"
+      },
+      "jobRemoved": {
+        "other": "✓ ジョブ{{.ID}}を削除しました"
+      },
+      "jobNotFound": {
+        "other": "✗ ジョブ{{.ID}}が見つかりません"
+      },
+      "jobEnabled": {
+        "other": "✓ ジョブ「{{.Name}}」{{.Status}}"
+      }
+    },
+    "agent": {
+      "debugModeEnabled": {
+        "other": "🔍 デバッグモードが有効です"
+      },
+      "errorMessage": {
+        "other": "エラー: {{.Error}}"
+      },
+      "interactiveMode": {
+        "other": "{{.Name}} インタラクティブモード（終了するにはCtrl+C）"
+      },
+      "youPrompt": {
+        "other": "{{.Name}} あなた: "
+      },
+      "errorInitReadline": {
+        "other": "readlineの初期化エラー: {{.Error}}"
+      },
+      "fallbackSimpleInput": {
+        "other": "シンプル入力モードにフォールバックします..."
+      },
+      "errorReadingInput": {
+        "other": "入力の読み込みエラー: {{.Error}}"
+      }
+    },
+    "shared": {
+      "errorCopyingWorkspaceTemplates": {
+        "other": "ワークスペーステンプレートのコピーエラー: {{.Error}}"
+      },
+      "errorCreateTargetDir": {
+        "other": "ターゲットディレクトリの作成に失敗しました: {{.Error}}"
+      },
+      "errorReadEmbeddedFile": {
+        "other": "埋め込みファイル{{.File}}の読み込みに失敗しました: {{.Error}}"
+      },
+      "errorGetRelativePath": {
+        "other": "{{.Path}}の相対パスの取得に失敗しました: {{.Error}}"
+      },
+      "errorCreateDirectory": {
+        "other": "ディレクトリ{{.Dir}}の作成に失敗しました: {{.Error}}"
+      },
+      "errorWriteFile": {
+        "other": "ファイル{{.File}}の書き込みに失敗しました: {{.Error}}"
+      }
+    }
+  }
+}
