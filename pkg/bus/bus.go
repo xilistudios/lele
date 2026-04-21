@@ -3,20 +3,23 @@ package bus
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 type MessageBus struct {
-	inbound  chan InboundMessage
-	outbound chan OutboundMessage
-	handlers map[string]MessageHandler
-	closed   bool
-	mu       sync.RWMutex
+	inbound         chan InboundMessage
+	outbound        chan OutboundMessage
+	handlers        map[string]MessageHandler
+	closed          bool
+	mu              sync.RWMutex
+	droppedInbound  atomic.Int64
+	droppedOutbound atomic.Int64
 }
 
 func NewMessageBus() *MessageBus {
 	return &MessageBus{
-		inbound:  make(chan InboundMessage, 100),
-		outbound: make(chan OutboundMessage, 100),
+		inbound:  make(chan InboundMessage, 500),
+		outbound: make(chan OutboundMessage, 500),
 		handlers: make(map[string]MessageHandler),
 	}
 }
@@ -27,7 +30,11 @@ func (mb *MessageBus) PublishInbound(msg InboundMessage) {
 	if mb.closed {
 		return
 	}
-	mb.inbound <- msg
+	select {
+	case mb.inbound <- msg:
+	default:
+		mb.droppedInbound.Add(1)
+	}
 }
 
 func (mb *MessageBus) ConsumeInbound(ctx context.Context) (InboundMessage, bool) {
@@ -45,7 +52,11 @@ func (mb *MessageBus) PublishOutbound(msg OutboundMessage) {
 	if mb.closed {
 		return
 	}
-	mb.outbound <- msg
+	select {
+	case mb.outbound <- msg:
+	default:
+		mb.droppedOutbound.Add(1)
+	}
 }
 
 func (mb *MessageBus) SubscribeOutbound(ctx context.Context) (OutboundMessage, bool) {
@@ -79,4 +90,9 @@ func (mb *MessageBus) Close() {
 	mb.closed = true
 	close(mb.inbound)
 	close(mb.outbound)
+}
+
+func (mb *MessageBus) Stats() (inboundLen, inboundCap, droppedInbound int64, outboundLen, outboundCap, droppedOutbound int64) {
+	return int64(len(mb.inbound)), int64(cap(mb.inbound)), mb.droppedInbound.Load(),
+		int64(len(mb.outbound)), int64(cap(mb.outbound)), mb.droppedOutbound.Load()
 }
