@@ -41,8 +41,8 @@ type TelegramChannel struct {
 	updateIDMu     sync.Mutex
 	offsetFilePath string // Path to persist last UpdateID
 	// Fallback deduplication using ChatID:MessageID
-	processedIDs   map[string]struct{}
-	processedMu    sync.Mutex
+	processedIDs map[string]struct{}
+	processedMu  sync.Mutex
 }
 
 type telegramCommandSpec struct {
@@ -416,7 +416,7 @@ func (c *TelegramChannel) isDuplicate(messageID string) bool {
 
 	if _, exists := c.processedIDs[messageID]; exists {
 		logger.InfoCF("telegram", "Duplicate message detected and ignored", map[string]interface{}{
-			"message_key": messageID,
+			"message_key":     messageID,
 			"processed_count": len(c.processedIDs),
 		})
 		return true
