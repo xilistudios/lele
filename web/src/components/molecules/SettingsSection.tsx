@@ -11,7 +11,7 @@ export function SettingsSection({ title, description, children, isRestartRequire
   const { t } = useTranslation()
 
   return (
-    <section className="rounded-lg border border-[#2e2e2e] bg-[#202020] p-6">
+    <section className="rounded-lg border border-border bg-background-primary p-6">
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-sm font-medium text-white">{title}</h2>
         {isRestartRequired && (
@@ -20,7 +20,7 @@ export function SettingsSection({ title, description, children, isRestartRequire
           </span>
         )}
       </div>
-      {description && <p className="mb-4 text-xs text-[#888]">{description}</p>}
+      {description && <p className="mb-4 text-xs text-text-secondary">{description}</p>}
       <div className="space-y-4">{children}</div>
     </section>
   )

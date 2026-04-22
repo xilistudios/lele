@@ -62,14 +62,14 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
         <div className="relative">
           <ServerIcon />
           <span
-            className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-[#1a1a1a] ${config.dot}`}
+            className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border border-border ${config.dot}`}
             aria-hidden="true"
           />
         </div>
       </button>
 
       <span
-        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-[#2a2a2a] text-xs text-[#ccc] transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
+        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-card text-xs text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
           isOpen ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'
         }`}
       >
@@ -77,7 +77,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
       </span>
 
       <div
-        className={`absolute z-50 w-[180px] rounded-lg border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-primary px-3 py-2 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         role="menu"
@@ -86,7 +86,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
           <span className={`h-2 w-2 rounded-full ${config.dot}`} />
           <span className={`text-xs font-medium ${config.text}`}>{t(`connection.${status}`)}</span>
         </div>
-        <div className="mt-2 rounded bg-[#2a2a2a] px-2 py-1.5 text-xs font-mono text-[#ccc]">
+        <div className="mt-2 rounded bg-surface-card px-2 py-1.5 text-xs font-mono text-text-secondary">
           {displayUrl}
         </div>
       </div>

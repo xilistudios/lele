@@ -12,7 +12,7 @@ import { Spinner } from '../atoms/Spinner'
 function ToolStatus({ tool, action }: { tool: string; action: string }) {
   return (
     <>
-      <span className="rounded bg-[#2a2a2a] px-2 py-0.5 font-mono text-[11px] text-[#aaa]">
+      <span className="rounded bg-surface-card px-2 py-0.5 font-mono text-[11px] text-text-secondary">
         {tool}
       </span>
       <span>{action}</span>
@@ -37,12 +37,12 @@ export const ChatHeader = memo(function ChatHeader() {
     : ''
 
   return (
-    <div className="flex items-center justify-between border-b border-[#2e2e2e] px-6 py-3">
+    <div className="flex items-center justify-between border-b border-border px-6 py-3">
       <div className="flex items-center gap-3 min-w-0">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="hidden md:flex text-[#888] transition-colors hover:text-white"
+          className="hidden md:flex text-text-secondary transition-colors hover:text-text-primary"
           aria-label={t('chat.toggleSidebar')}
         >
           <SidebarToggleIcon />
@@ -53,21 +53,21 @@ export const ChatHeader = memo(function ChatHeader() {
             <button
               type="button"
               onClick={() => navigate(`/chat/${encodeURIComponent(parentSession.key)}`)}
-              className="flex items-center text-[#888] transition-colors hover:text-white mr-2"
+              className="flex items-center text-text-secondary transition-colors hover:text-text-primary mr-2"
               aria-label={t('chat.backTo', { title: parentTitle })}
             >
               <ChevronLeftIcon />
             </button>
           )}
-          <h2 className="truncate text-sm font-medium text-white">{currentTitle}</h2>
-          <p className="truncate text-[11px] text-[#666]">
+          <h2 className="truncate text-sm font-medium text-text-primary">{currentTitle}</h2>
+          <p className="truncate text-[11px] text-text-tertiary">
             {currentAgent?.name ?? t('chat.default')}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {(isStreaming || toolStatus) && (
-            <div className="flex items-center gap-1.5 text-xs text-[#666]">
+            <div className="flex items-center gap-1.5 text-xs text-text-tertiary">
               {toolStatus ? (
                 <ToolStatus tool={toolStatus.tool} action={toolStatus.action} />
               ) : (
@@ -79,7 +79,7 @@ export const ChatHeader = memo(function ChatHeader() {
           {canCancel && (
             <button
               type="button"
-              className="rounded-md border border-[#5a2b2b] px-3 py-1 text-xs text-[#f0b4b4] transition-colors hover:bg-[#351717]"
+              className="rounded-md border border-border px-3 py-1 text-xs text-state-error transition-colors hover:bg-state-error-light"
               onClick={onCancel}
             >
               {t('chat.cancel')}

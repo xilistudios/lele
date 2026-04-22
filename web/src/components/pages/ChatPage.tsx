@@ -12,7 +12,7 @@ export function ChatPage() {
 
   return (
     <ChatPageProvider>
-      <div className="flex h-screen overflow-hidden bg-[#1a1a1a] text-[#e0e0e0]">
+      <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
           mobileOpen={sidebarOpen}
@@ -20,11 +20,11 @@ export function ChatPage() {
         />
 
         <main className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex items-center gap-3 border-b border-[#2e2e2e] px-6 py-3 md:hidden">
+          <div className="flex items-center gap-3 border-b border-border px-6 py-3 md:hidden">
             <button
               type="button"
               onClick={onToggleSidebar}
-              className="text-[#888] transition-colors hover:text-white"
+              className="text-text-secondary transition-colors hover:text-text-primary"
               aria-label="Toggle sidebar"
             >
               <svg
@@ -51,7 +51,7 @@ export function ChatPage() {
             <MessageList />
           </div>
 
-          <div className="border-t border-[#2e2e2e] px-6 py-4">
+          <div className="border-t border-border px-6 py-4">
             <div className="mx-auto max-w-3xl">
               <ChatComposer />
             </div>

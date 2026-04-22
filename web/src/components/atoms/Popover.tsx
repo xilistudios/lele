@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { cloneElement, isValidElement, type ReactNode, useEffect, useState } from 'react'
 import { usePopoverPosition } from '../../hooks/usePopoverPosition'
 
 type Props = {
@@ -48,17 +48,22 @@ export function Popover({
   const verticalClass = position.vertical === 'below' ? 'top-full mt-1' : 'bottom-full mb-1'
   const horizontalClass = position.horizontal === 'right-align' ? 'right-0' : 'left-0'
 
+  const triggerWithOnClick = isValidElement(trigger)
+    ? cloneElement(trigger as React.ReactElement<{ onClick?: () => void; onKeyDown?: (e: React.KeyboardEvent) => void }>, {
+        onClick: () => setIsOpen((prev) => !prev),
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            setIsOpen((prev) => !prev)
+          }
+        },
+      })
+    : trigger
+
   return (
-    <div ref={ref} className={`relative ${block ? 'block w-full' : 'inline-block'}`}>
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className={`p-0 border-none bg-transparent cursor-pointer ${block ? 'block w-full' : ''}`}
-      >
-        {trigger}
-      </button>
+    <div ref={ref} className={`group relative ${block ? 'block w-full' : 'inline-block'}`}>
+      {triggerWithOnClick}
       <div
-        className={`absolute z-50 bg-[#2e2e2e] border border-[#3a3a3a] rounded-md shadow-lg p-2 transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`absolute z-50 bg-background-tertiary border border-border rounded-md shadow-lg p-2 transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
       >

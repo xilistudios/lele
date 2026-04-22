@@ -35,31 +35,31 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
       <form
-        className="w-full max-w-md space-y-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-sky-950/30"
+        className="w-full max-w-md space-y-5 rounded-2xl border border-border bg-background-primary p-6 shadow-xl"
         onSubmit={handleSubmit}
       >
         <div className="space-y-2">
-          <p className="text-sm uppercase tracking-[0.3em] text-sky-400">{t('auth.subtitle')}</p>
-          <h1 className="text-3xl font-semibold text-white">{t('auth.title')}</h1>
+          <p className="text-sm uppercase tracking-wider text-brand-blue">{t('auth.subtitle')}</p>
+          <h1 className="text-2xl font-semibold text-text-primary">{t('auth.title')}</h1>
         </div>
 
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
+        <div className="rounded-xl border border-border-light bg-background-secondary p-4">
           <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-100">{t('auth.apiUrlLabel')}</span>
+            <span className="text-sm font-medium text-text-primary">{t('auth.apiUrlLabel')}</span>
             <input
-              className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-sky-500"
+              className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
               placeholder={t('auth.apiUrlPlaceholder')}
               value={apiInput}
               onChange={(event) => setApiInput(event.target.value)}
             />
-            <p className="text-xs text-slate-400">{t('auth.apiUrlHint')}</p>
+            <p className="text-xs text-text-tertiary">{t('auth.apiUrlHint')}</p>
           </label>
         </div>
 
         <label className="block space-y-2">
-          <span className="text-sm text-slate-300">{t('auth.pinLabel')}</span>
+          <span className="text-sm text-text-secondary">{t('auth.pinLabel')}</span>
           <input
-            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-sky-500"
+            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
             inputMode="numeric"
             maxLength={6}
             placeholder={t('auth.pinPlaceholder')}
@@ -69,9 +69,9 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
         </label>
 
         <label className="block space-y-2">
-          <span className="text-sm text-slate-300">{t('auth.deviceNameLabel')}</span>
+          <span className="text-sm text-text-secondary">{t('auth.deviceNameLabel')}</span>
           <input
-            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none ring-0 placeholder:text-slate-500 focus:border-sky-500"
+            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
             placeholder={t('auth.deviceNamePlaceholder')}
             value={deviceName}
             onChange={(event) => setDeviceName(event.target.value)}
@@ -79,13 +79,13 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
         </label>
 
         {error && (
-          <p className="rounded-2xl border border-rose-900 bg-rose-950/60 px-4 py-3 text-sm text-rose-200">
+          <p className="rounded-lg border border-border bg-state-error/20 px-4 py-2.5 text-sm text-state-error">
             {error}
           </p>
         )}
 
         <button
-          className="w-full rounded-2xl bg-sky-500 px-4 py-3 font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg bg-brand-blue px-4 py-2.5 font-medium text-text-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled}
           type="submit"
         >

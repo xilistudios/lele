@@ -66,7 +66,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           className={`rounded px-2 py-1 text-[11px] ${
             mode === 'literal'
               ? 'bg-blue-600 text-white'
-              : 'bg-[#2a2a2a] text-[#888] hover:bg-[#333]'
+              : 'bg-surface-card text-text-secondary hover:bg-surface-card-hover'
           }`}
         >
           {t('settings.literalValue')}
@@ -76,7 +76,9 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           onClick={() => handleModeChange('env')}
           disabled={disabled}
           className={`rounded px-2 py-1 text-[11px] ${
-            mode === 'env' ? 'bg-blue-600 text-white' : 'bg-[#2a2a2a] text-[#888] hover:bg-[#333]'
+            mode === 'env'
+              ? 'bg-blue-600 text-text-primary'
+              : 'bg-surface-card text-text-secondary hover:bg-surface-card-hover'
           }`}
         >
           {t('settings.envVariable')}
@@ -86,7 +88,9 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           onClick={() => handleModeChange('empty')}
           disabled={disabled}
           className={`rounded px-2 py-1 text-[11px] ${
-            mode === 'empty' ? 'bg-blue-600 text-white' : 'bg-[#2a2a2a] text-[#888] hover:bg-[#333]'
+            mode === 'empty'
+              ? 'bg-blue-600 text-text-primary'
+              : 'bg-surface-card text-text-secondary hover:bg-surface-card-hover'
           }`}
         >
           {t('settings.empty')}
@@ -102,13 +106,13 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
             onChange={(e) => handleLiteralChange(e.target.value)}
             disabled={disabled}
             placeholder={placeholder}
-            className="w-full rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 pr-10 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none"
+            className="w-full rounded border border-border bg-background-primary px-3 py-2 pr-10 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none"
           />
           <button
             type="button"
             onClick={() => setShowValue(!showValue)}
             title={titleText}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#666] hover:text-[#aaa]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
           >
             {showValue ? (
               <svg
@@ -145,7 +149,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
 
       {mode === 'env' && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[#666]">$</span>
+          <span className="text-xs text-text-tertiary">$</span>
           <input
             id={id}
             type="text"
@@ -153,13 +157,13 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
             onChange={(e) => handleEnvChange(e.target.value)}
             disabled={disabled}
             placeholder="ENV_VAR_NAME"
-            className="flex-1 rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none font-mono"
+            className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none font-mono"
           />
         </div>
       )}
 
       {mode === 'empty' && (
-        <p className="text-xs text-[#666] italic">{t('settings.emptySecretDescription')}</p>
+        <p className="text-xs text-text-tertiary italic">{t('settings.emptySecretDescription')}</p>
       )}
     </div>
   )

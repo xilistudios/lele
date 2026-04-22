@@ -62,21 +62,22 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-[#2e2e2e] bg-[#222222] transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
-          className={`flex items-center border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'justify-center' : ''}`}
+          className={`flex items-center border-b border-border px-4 py-3 ${collapsed ? 'justify-center' : ''}`}
         >
           <Logo collapsed={collapsed} />
         </div>
 
-        <div className="border-b border-[#2e2e2e] px-2 py-3">
+        <div className="border-b border-border px-2 py-3">
           <button
             onClick={onCreateSession}
             type="button"
-            className={`flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white ${collapsed ? 'justify-center' : ''}`}
+            className={`flex w-full items-center gap-2 rounded-md text-xs text-text-secondary hover-highlight ${collapsed ? 'px-2 justify-center' : 'px-3 py-2'}`}
+            style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
             title={collapsed ? t('chat.newChat') : undefined}
           >
             <EditIcon />
@@ -84,14 +85,18 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <div className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3`}>
+        <div className={`border-b border-border ${collapsed ? 'px-2' : 'px-3'} py-3`}>
           {collapsed ? (
             <Popover
               block
               trigger={
                 <div
-                  className="flex w-full items-center justify-center rounded-md border border-[#3a3a3a] py-3 text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  className="flex w-full items-center justify-center rounded-md px-2 text-text-secondary hover-highlight-group"
+                  style={{ paddingTop: '12px', paddingBottom: '12px' }}
                   title={t('chat.recent')}
+                  aria-label={t('chat.recent')}
                 >
                   <ChatBubbleIcon />
                 </div>
@@ -99,14 +104,14 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               popoverWidth={200}
               popoverHeight={250}
             >
-              <div className="border-b border-[#3a3a3a] pb-2 mb-2">
-                <p className="text-[10px] text-[#888] px-1 uppercase tracking-[0.2em]">
+              <div className="border-b border-border pb-2 mb-2">
+                <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
                   {t('chat.recentChats')}
                 </p>
               </div>
               <div className="flex flex-col gap-1 max-h-[200px] overflow-y-auto">
                 {sortedSessions.length === 0 ? (
-                  <p className="text-xs text-[#666] px-3 py-2">{t('chat.noSessions')}</p>
+                  <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
                   sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
                     <button
@@ -115,8 +120,8 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                       onClick={() => handleSessionSelect(s.key)}
                       className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
                         s.key === currentSession?.key
-                          ? 'bg-[#2e2e2e] text-white'
-                          : 'text-[#bbb] hover:bg-[#2a2a2a] hover:text-white'
+                          ? 'bg-surface-card text-text-primary'
+                          : 'text-text-secondary hover:bg-surface-card hover:text-text-primary'
                       }`}
                     >
                       <span className="truncate">{s.name || s.key}</span>
@@ -128,7 +133,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           ) : (
             <>
               <div className="overflow-hidden max-h-8 opacity-100">
-                <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                <p className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
               </div>
@@ -153,32 +158,37 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <div
-          className={`mt-auto border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'flex justify-center' : ''}`}
+          className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-4'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
         >
           <Popover
-            trigger={
-              <div
-                className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} cursor-pointer`}
-              >
-                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[#3a3a3a] text-xs font-bold text-white">
-                  {deviceName?.[0]?.toUpperCase() ?? 'L'}
-                </div>
-                {!collapsed && (
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-white">{deviceName}</p>
+              block
+              trigger={
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}
+                  style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
+                  aria-label={collapsed ? t('chat.deviceMenu') : undefined}
+                >
+                  <div className="flex flex-shrink-0 items-center justify-center rounded-md bg-surface-card text-xs font-bold text-text-primary h-7 w-7">
+                    {deviceName?.[0]?.toUpperCase() ?? 'L'}
                   </div>
-                )}
-              </div>
-            }
-            popoverWidth={150}
-            popoverHeight={80}
-          >
+                  {!collapsed && (
+                    <div className="min-w-0 flex-1 px-2">
+                      <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
+                    </div>
+                  )}
+                </div>
+              }
+              popoverWidth={150}
+              popoverHeight={80}
+            >
             <div className="flex flex-col gap-1">
               <button
                 type="button"
                 title={t('chat.settings')}
                 aria-label={t('chat.settings')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
                 onClick={handleSettingsClick}
               >
                 <SettingsIcon />
@@ -189,7 +199,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 title={t('chat.logout')}
                 type="button"
                 aria-label={t('chat.logout')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-[#555] transition-colors hover:bg-[#2a2a2a] hover:text-[#aaa]"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
               >
                 <LogoutIcon />
                 <span>{t('chat.logout')}</span>

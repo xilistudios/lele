@@ -30,7 +30,9 @@ export function SessionItem({
         type="button"
         title={formatSessionTitle(sessionKey, sessionName, messageCount)}
         className={`flex w-full items-center justify-center rounded-md p-2 transition-colors ${
-          selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
+          selected
+            ? 'bg-surface-card-hover text-text-primary'
+            : 'text-text-secondary hover:bg-surface-card hover:text-text-secondary'
         }`}
       >
         <span className="text-xs">
@@ -45,14 +47,16 @@ export function SessionItem({
       onClick={onSelect}
       type="button"
       className={`group flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition-colors ${
-        selected ? 'bg-[#2e2e2e] text-white' : 'text-[#999] hover:bg-[#272727] hover:text-[#ccc]'
+        selected
+          ? 'bg-surface-card-hover text-text-primary'
+          : 'text-text-secondary hover:bg-surface-card hover:text-text-secondary'
       }`}
     >
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs leading-5">
           {formatSessionTitle(sessionKey, sessionName, messageCount)}
         </span>
-        <span className="block text-[10px] text-[#666]">
+        <span className="block text-[10px] text-text-tertiary">
           {messageCount === 1
             ? t('chat.messageCount_one', { count: messageCount })
             : t('chat.messageCount_other', { count: messageCount })}
@@ -65,7 +69,7 @@ export function SessionItem({
         }}
         type="button"
         aria-label={t('chat.deleteSession')}
-        className="ml-auto text-[#666] opacity-0 transition-opacity hover:text-[#f0b4b4] group-hover:opacity-100"
+        className="ml-auto text-text-tertiary opacity-0 transition-opacity hover:text-state-error group-hover:opacity-100"
       >
         <TrashIcon />
       </button>

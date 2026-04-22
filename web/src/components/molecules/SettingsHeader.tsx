@@ -10,12 +10,12 @@ export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props)
   const { t } = useTranslation()
 
   return (
-    <div className="flex items-center justify-between border-b border-[#2e2e2e] px-6 py-4">
+    <div className="flex items-center justify-between border-b border-border px-6 py-4">
       <div className="flex items-center gap-4">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="text-[#888] transition-colors hover:text-white"
+          className="text-text-secondary transition-colors hover:text-text-primary"
           aria-label="Toggle sidebar"
         >
           <svg
@@ -33,7 +33,7 @@ export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props)
           </svg>
         </button>
         <h1 className="text-xl font-semibold text-white">{t('chat.settings')}</h1>
-        {configPath && <span className="text-xs text-[#666]">{configPath}</span>}
+        {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}
       </div>
       <button
         onClick={onLogout}

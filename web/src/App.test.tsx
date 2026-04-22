@@ -455,7 +455,7 @@ describe('App', () => {
       const sessionItems = Array.from(
         view.container.querySelectorAll('nav [role="button"]'),
       ) as HTMLElement[]
-      sessionTwoButton = sessionItems.find((button) => !button.className.includes('bg-[#2e2e2e]'))
+      sessionTwoButton = sessionItems.find((button) => !button.className.includes('bg-surface-card'))
       expect(sessionTwoButton).toBeDefined()
     })
 

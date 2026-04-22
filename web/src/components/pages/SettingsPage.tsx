@@ -83,7 +83,7 @@ export function SettingsPage({ onLogout }: Props) {
     if (settingsState.isLoading) {
       return (
         <div className="flex h-64 items-center justify-center">
-          <div className="text-sm text-[#888]">{t('common.loading')}</div>
+          <div className="text-sm text-text-secondary">{t('common.loading')}</div>
         </div>
       )
     }
@@ -114,7 +114,7 @@ export function SettingsPage({ onLogout }: Props) {
 
   return (
     <SettingsProvider settingsState={settingsState} api={api}>
-      <div className="flex h-screen overflow-hidden bg-[#1a1a1a] text-[#e0e0e0]">
+      <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
           mobileOpen={sidebarOpen}

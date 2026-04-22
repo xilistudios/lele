@@ -38,7 +38,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
 
     return (
       <div className="py-1.5">
-        <div className="flex items-center gap-2 rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-background-secondary px-3 py-2">
           <button
             type="button"
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -46,7 +46,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             onClick={() => setExpanded(!expanded)}
           >
             <svg
-              className="h-4 w-4 text-[#666]"
+              className="h-4 w-4 text-text-tertiary"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -55,18 +55,20 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             >
               <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
             </svg>
-            <span className="text-sm font-medium text-[#ccc] font-mono">{message.toolName}</span>
+            <span className="text-sm font-medium text-text-secondary font-mono">
+              {message.toolName}
+            </span>
             {message.toolStatus && <StatusBadge status={message.toolStatus} />}
           </button>
           {subagentSessionKey && message.toolStatus !== 'executing' && onNavigateToSession ? (
             <button
               type="button"
               aria-label="Open subagent chat"
-              className="ml-auto p-0.5 rounded hover:bg-[#2a2a2a] transition-colors"
+              className="ml-auto p-0.5 rounded-md hover:bg-surface-card transition-colors"
               onClick={() => onNavigateToSession(subagentSessionKey)}
             >
               <svg
-                className="h-3.5 w-3.5 text-[#555] hover:text-[#aaa]"
+                className="h-3.5 w-3.5 text-text-tertiary hover:text-text-primary"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -85,7 +87,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             onClick={() => setExpanded(!expanded)}
           >
             <svg
-              className={`h-3 w-3 text-[#666] transition-transform ${expanded ? 'rotate-180' : ''}`}
+              className={`h-3 w-3 text-text-tertiary transition-transform ${expanded ? 'rotate-180' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -97,17 +99,21 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
           </button>
         </div>
         {expanded && (
-          <div className="mt-2 space-y-2 rounded-lg border border-[#2e2e2e] bg-[#151515] p-3">
+          <div className="mt-2 space-y-2 rounded-lg border border-border bg-background-primary p-3">
             {message.toolArgs && (
               <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666] mb-1">Action</p>
-                <p className="text-xs text-[#aaa] font-mono">{message.toolArgs}</p>
+                <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
+                  Action
+                </p>
+                <p className="text-xs text-text-secondary font-mono">{message.toolArgs}</p>
               </div>
             )}
             {message.toolResult && (
               <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-[#666] mb-1">Result</p>
-                <pre className="text-xs text-[#888] font-mono whitespace-pre-wrap overflow-x-auto max-h-[200px]">
+                <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
+                  Result
+                </p>
+                <pre className="text-xs text-text-secondary font-mono whitespace-pre-wrap overflow-x-auto max-h-[200px]">
                   {message.toolResult}
                 </pre>
               </div>
@@ -121,14 +127,14 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
   if (isUser) {
     return (
       <div className="flex justify-end py-1">
-        <div className="max-w-[70%] space-y-2 rounded-xl bg-[#2e2e2e] px-4 py-2.5 text-sm text-[#e0e0e0] whitespace-pre-wrap">
+        <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {message.attachments?.length ? (
             <div className="flex flex-wrap gap-2">
               {message.attachments.map((attachment, index) => (
                 <span
                   key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
-                  className="rounded-full border border-[#4a4a4a] bg-[#252525] px-3 py-1 text-xs text-[#cfcfcf]"
+                  className="rounded-full border border-border bg-background-secondary px-3 py-1 text-xs text-text-primary"
                 >
                   {attachment.name ?? attachment.path ?? 'attachment'}
                 </span>
@@ -144,20 +150,20 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
     <div className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
       <div className="space-y-3">
         {message.streaming && message.content === '' ? (
-          <div className="flex items-center gap-2 text-[#555] text-sm">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#555] animate-pulse" />
-            <span className="inline-block h-2 w-2 rounded-full bg-[#555] animate-pulse [animation-delay:0.2s]" />
-            <span className="inline-block h-2 w-2 rounded-full bg-[#555] animate-pulse [animation-delay:0.4s]" />
+          <div className="flex items-center gap-2 text-text-tertiary text-sm">
+            <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
+            <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />
+            <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
           </div>
         ) : blocks && blocks.length > 0 ? (
-          blocks.map((block, i) => {
+          blocks.map((block, _i) => {
             if (block.type === 'tool') {
               return (
                 <div
                   key={`tool-${block.label}-${block.content.substring(0, 50)}`}
-                  className="flex items-center gap-3 text-sm text-[#888]"
+                  className="flex items-center gap-3 text-sm text-text-secondary"
                 >
-                  <span className="rounded bg-[#2a2a2a] px-2 py-0.5 text-[11px] font-medium text-[#aaa] font-mono">
+                  <span className="rounded-md bg-surface-card px-2 py-0.5 text-[11px] font-medium text-text-secondary font-mono">
                     {block.label}
                   </span>
                   <span>{block.content}</span>
@@ -169,14 +175,14 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
               return (
                 <div
                   key={`code-${block.label || ''}-${block.content.substring(0, 50)}`}
-                  className="rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] overflow-hidden"
+                  className="rounded-lg border border-border bg-background-primary overflow-hidden"
                 >
                   {block.label && (
-                    <div className="border-b border-[#2e2e2e] px-4 py-1.5 text-[10px] text-[#555] font-mono">
+                    <div className="border-b border-border px-4 py-1.5 text-[10px] text-text-tertiary font-mono">
                       {block.label}
                     </div>
                   )}
-                  <pre className="overflow-x-auto px-4 py-3 text-xs text-[#ccc] font-mono leading-5">
+                  <pre className="overflow-x-auto px-4 py-3 text-xs text-text-secondary font-mono leading-5">
                     <code>{block.content}</code>
                   </pre>
                 </div>
@@ -197,19 +203,19 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
 
             return (
               <div key={`special-${block.content.substring(0, 50)}`} className="space-y-2">
-                {lines.map((line, j) => {
+                {lines.map((line, _j) => {
                   if (isDiffStatLine(line)) {
                     const parsed = parseDiffStat(line)
                     if (!parsed) return null
                     return (
                       <div
                         key={`diffstat-${parsed.files}-${parsed.added}-${parsed.removed}`}
-                        className="text-sm text-[#ccc]"
+                        className="text-sm text-text-secondary"
                       >
                         <span>{parsed.files} Changed files </span>
-                        <span className="text-emerald-400">{parsed.added}</span>
+                        <span className="text-diff-addition">{parsed.added}</span>
                         <span> </span>
-                        <span className="text-red-400">{parsed.removed}</span>
+                        <span className="text-diff-deletion">{parsed.removed}</span>
                       </div>
                     )
                   }
@@ -219,12 +225,12 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                     return (
                       <div
                         key={`filediff-${parsed.filename}`}
-                        className="flex items-center justify-between rounded border border-[#2e2e2e] bg-[#1e1e1e] px-3 py-1.5 text-xs"
+                        className="flex items-center justify-between rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs"
                       >
-                        <span className="text-[#ccc] font-mono">{parsed.filename}</span>
+                        <span className="text-text-primary font-mono">{parsed.filename}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-emerald-400">{parsed.added}</span>
-                          <span className="text-red-400">{parsed.removed}</span>
+                          <span className="text-diff-addition">{parsed.added}</span>
+                          <span className="text-diff-deletion">{parsed.removed}</span>
                           <svg
                             width="12"
                             height="12"
@@ -232,7 +238,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                             fill="none"
                             stroke="currentColor"
                             strokeWidth="2"
-                            className="text-[#555]"
+                            className="text-text-tertiary"
                             aria-hidden="true"
                           >
                             <polyline points="9 18 15 12 9 6" />
@@ -256,16 +262,16 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             {message.attachments.map((attachment, index) => (
               <div
                 key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
-                className="rounded-lg border border-[#2e2e2e] bg-[#1e1e1e] px-3 py-2 text-xs text-[#bbb]"
+                className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
               >
-                <p className="font-medium text-[#ddd]">
+                <p className="font-medium text-text-primary">
                   {attachment.name ?? attachment.path ?? 'attachment'}
                 </p>
                 {attachment.caption ? (
-                  <p className="mt-1 text-[#888]">{attachment.caption}</p>
+                  <p className="mt-1 text-text-secondary">{attachment.caption}</p>
                 ) : null}
                 {attachment.path ? (
-                  <p className="mt-1 font-mono text-[#666]">{attachment.path}</p>
+                  <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
                 ) : null}
               </div>
             ))}
@@ -273,7 +279,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
         ) : null}
 
         {isLast && message.streaming && message.content !== '' && (
-          <span className="inline-block h-4 w-0.5 bg-[#ccc] animate-pulse ml-0.5" />
+          <span className="inline-block h-4 w-0.5 bg-text-secondary animate-pulse ml-0.5" />
         )}
       </div>
     </div>
