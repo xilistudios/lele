@@ -24,6 +24,17 @@ type mockChannel struct {
 	sent    []bus.OutboundMessage
 	sentMu  sync.Mutex
 	started atomic.Bool
+	sendFn  func(ctx context.Context, msg bus.OutboundMessage) error
+}
+
+type trackingMockChannel struct {
+	*mockChannel
+	sentCount atomic.Int32
+}
+
+func (t *trackingMockChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	t.sentCount.Add(1)
+	return t.mockChannel.Send(ctx, msg)
 }
 
 func newMockChannel(name string, messageBus *bus.MessageBus) *mockChannel {
@@ -49,6 +60,9 @@ func (m *mockChannel) Stop(ctx context.Context) error {
 }
 
 func (m *mockChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	if m.sendFn != nil {
+		return m.sendFn(ctx, msg)
+	}
 	m.sentMu.Lock()
 	defer m.sentMu.Unlock()
 	m.sent = append(m.sent, msg)
@@ -183,27 +197,31 @@ func TestNativeStreamingDoesNotBlockOtherChannels(t *testing.T) {
 	defer messageBus.Close()
 
 	agentLoop := newNativeTestAgentLoop(nativeCfg)
-	approvalMgr, _ := NewApprovalManager(nativeCfg)
+	approvalMgr := NewApprovalManager()
 
 	native, err := NewNativeChannel(nativeCfg, messageBus, agentLoop, approvalMgr)
 	if err != nil {
 		t.Fatalf("failed to create native channel: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := native.Start(ctx); err != nil {
 		t.Fatalf("failed to start native channel: %v", err)
 	}
-	defer native.Stop(ctx)
+	defer func() {
+		cancel()
+		native.Stop(ctx)
+	}()
 
 	time.Sleep(50 * time.Millisecond)
 
-	telegramSent := atomic.Int32(0)
+	// Create a mock channel and override send via sendFn
 	telegramCh := &mockChannel{name: "telegram"}
 	telegramCh.running = true
-	telegramCh.Send = func(ctx context.Context, msg bus.OutboundMessage) error {
+	var telegramSent atomic.Int32
+	telegramCh.sendFn = func(ctx context.Context, msg bus.OutboundMessage) error {
 		telegramSent.Add(1)
 		return nil
 	}
@@ -296,7 +314,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 	defer messageBus.Close()
 
 	agentLoop := newNativeTestAgentLoop(nativeCfg)
-	approvalMgr, _ := NewApprovalManager(nativeCfg)
+	approvalMgr := NewApprovalManager()
 
 	native, err := NewNativeChannel(nativeCfg, messageBus, agentLoop, approvalMgr)
 	if err != nil {

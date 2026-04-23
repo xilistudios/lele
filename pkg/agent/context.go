@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -20,7 +21,14 @@ type ContextBuilder struct {
 	workspace    string
 	skillsLoader *skills.SkillsLoader
 	memory       *MemoryStore
-	tools        *tools.ToolRegistry // Direct reference to tool registry
+	tools        *tools.ToolRegistry
+
+	// cachedSystemPrompt stores the built system prompt per session key.
+	// It is populated on the first call for a session and reused on every
+	// subsequent turn so that providers with prompt caching (Anthropic, etc.)
+	// see a byte-for-byte identical system message.
+	cachedSystemPrompt map[string]string
+	cacheMu            sync.RWMutex
 }
 
 func getGlobalConfigDir() string {
@@ -32,16 +40,15 @@ func getGlobalConfigDir() string {
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
-	// builtin skills: skills directory in current project
-	// Use the skills/ directory under the current working directory
 	wd, _ := os.Getwd()
 	builtinSkillsDir := filepath.Join(wd, "skills")
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
 	return &ContextBuilder{
-		workspace:    workspace,
-		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:       NewMemoryStore(workspace),
+		workspace:          workspace,
+		skillsLoader:       skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		memory:             NewMemoryStore(workspace),
+		cachedSystemPrompt: make(map[string]string),
 	}
 }
 
@@ -79,9 +86,8 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 }
 
 func (cb *ContextBuilder) getIdentity() string {
-	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	workspacePath, _ := filepath.Abs(filepath.Join(cb.workspace))
-	runtime := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
+	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
 	// Build tools section dynamically
 	toolsSection := cb.buildToolsSection()
@@ -89,9 +95,6 @@ func (cb *ContextBuilder) getIdentity() string {
 	return fmt.Sprintf(`# lele 🦞
 
 You are lele, a helpful AI assistant.
-
-## Current Time
-%s
 
 ## Runtime
 %s
@@ -110,7 +113,7 @@ Your workspace is at: %s
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
 3. **Memory** - When remembering something, write to %s/MEMORY.md`,
-		now, runtime, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
+		rt, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 
 func (cb *ContextBuilder) buildToolsSection() string {
@@ -147,6 +150,39 @@ func (cb *ContextBuilder) ResetMemoryContext() {
 	// But we could add caching here in the future if needed
 }
 
+// ResetSystemPromptCache clears the cached system prompt for the given session key,
+// forcing a fresh build on the next call. Call this on /new or ephemeral reset.
+func (cb *ContextBuilder) ResetSystemPromptCache(sessionKey string) {
+	cb.cacheMu.Lock()
+	defer cb.cacheMu.Unlock()
+	delete(cb.cachedSystemPrompt, sessionKey)
+}
+
+// ResetAllSystemPromptCaches clears every cached system prompt.
+func (cb *ContextBuilder) ResetAllSystemPromptCaches() {
+	cb.cacheMu.Lock()
+	defer cb.cacheMu.Unlock()
+	cb.cachedSystemPrompt = make(map[string]string)
+}
+
+func (cb *ContextBuilder) loadCachedSystemPrompt(sessionKey string) string {
+	if sessionKey == "" {
+		return ""
+	}
+	cb.cacheMu.RLock()
+	defer cb.cacheMu.RUnlock()
+	return cb.cachedSystemPrompt[sessionKey]
+}
+
+func (cb *ContextBuilder) storeCachedSystemPrompt(sessionKey, prompt string) {
+	if sessionKey == "" {
+		return
+	}
+	cb.cacheMu.Lock()
+	defer cb.cacheMu.Unlock()
+	cb.cachedSystemPrompt[sessionKey] = prompt
+}
+
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	bootstrapFiles := []string{"AGENT.md", "SOUL.md", "USER.md", "IDENTITY.md", "MEMORY.md"}
 
@@ -164,63 +200,120 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	return result
 }
 
-func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID string) []providers.Message {
+// BuildMessages constructs the full message list for the LLM.
+//
+// To keep prompt caching effective on providers like Anthropic, the system prompt
+// MUST be byte-for-byte identical across turns inside the same session.  We therefore
+// cache the computed system prompt per session key and reuse it on subsequent calls
+// (e.g. tool-turns).
+func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
 	messages := []providers.Message{}
 	renderedUserMessage := cb.RenderUserMessage(currentMessage, attachments)
 
-	systemPrompt := cb.BuildSystemPrompt()
-
-	// Add Current Session info if provided
-	if channel != "" && chatID != "" {
-		systemPrompt += fmt.Sprintf("\n\n## Current Session\nChannel: %s\nChat ID: %s", channel, chatID)
+	// --- Build the static system prompt ---
+	// On the first turn for a session we build it fresh and cache it.
+	// On every later turn we reuse the exact same string.
+	var systemPrompt string
+	if sessionKey != "" {
+		if cached := cb.loadCachedSystemPrompt(sessionKey); cached != "" {
+			systemPrompt = cached
+			logger.DebugCF("agent", "Reusing cached system prompt",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"length":      len(systemPrompt),
+				})
+		} else {
+			systemPrompt = cb.BuildSystemPrompt()
+			cb.storeCachedSystemPrompt(sessionKey, systemPrompt)
+			logger.DebugCF("agent", "Built and cached new system prompt",
+				map[string]interface{}{
+					"session_key": sessionKey,
+					"length":      len(systemPrompt),
+				})
+		}
+	} else {
+		// No session tracking — build fresh every time (safe fallback)
+		systemPrompt = cb.BuildSystemPrompt()
 	}
 
-	// Log system prompt summary for debugging (debug mode only)
-	logger.DebugCF("agent", "System prompt built",
+	// Debug logging
+	logger.DebugCF("agent", "System prompt ready",
 		map[string]interface{}{
 			"total_chars":   len(systemPrompt),
 			"total_lines":   strings.Count(systemPrompt, "\n") + 1,
 			"section_count": strings.Count(systemPrompt, "\n\n---\n\n") + 1,
 		})
-
-	// Log preview of system prompt (avoid logging huge content)
 	preview := systemPrompt
 	if len(preview) > 500 {
 		preview = preview[:500] + "... (truncated)"
 	}
 	logger.DebugCF("agent", "System prompt preview",
-		map[string]interface{}{
-			"preview": preview,
-		})
-
-	if summary != "" {
-		systemPrompt += "\n\n## Summary of Previous Conversation\n\n" + summary
-	}
-
-	//This fix prevents the session memory from LLM failure due to elimination of toolu_IDs required from LLM
-	// --- INICIO DEL FIX ---
-	//Diegox-17
-	for len(history) > 0 && (history[0].Role == "tool") {
-		logger.DebugCF("agent", "Removing orphaned tool message from history to prevent LLM error",
-			map[string]interface{}{"role": history[0].Role})
-		history = history[1:]
-	}
-	//Diegox-17
-	// --- FIN DEL FIX ---
+		map[string]interface{}{"preview": preview})
 
 	messages = append(messages, providers.Message{
 		Role:    "system",
 		Content: systemPrompt,
 	})
 
+	// --- Strip orphaned leading tool messages ---
+	for len(history) > 0 && history[0].Role == "tool" {
+		logger.DebugCF("agent", "Removing orphaned tool message from history to prevent LLM error",
+			map[string]interface{}{"role": history[0].Role})
+		history = history[1:]
+	}
+
 	messages = append(messages, history...)
 
-	messages = append(messages, providers.Message{
-		Role:    "user",
-		Content: renderedUserMessage,
-	})
+	if summary != "" {
+		messages = append(messages, providers.Message{
+			Role:    "user",
+			Content: "## Summary of Previous Conversation\n\n" + summary,
+		})
+	}
+
+	if sessionContext := cb.renderSessionContext(channel, chatID); sessionContext != "" {
+		if renderedUserMessage == "" {
+			renderedUserMessage = sessionContext
+		} else {
+			renderedUserMessage = sessionContext + "\n\n" + renderedUserMessage
+		}
+	}
+
+	// On the first real user turn, prepend the current time so the model
+	// knows "when" it is without polluting the cacheable system prompt.
+	if strings.TrimSpace(currentMessage) != "" {
+		timePrefix := fmt.Sprintf("Current Time: %s", time.Now().Format("2006-01-02 15:04 (Monday)"))
+		if renderedUserMessage == "" {
+			renderedUserMessage = timePrefix
+		} else {
+			renderedUserMessage = timePrefix + "\n\n" + renderedUserMessage
+		}
+	}
+
+	if renderedUserMessage != "" {
+		messages = append(messages, providers.Message{
+			Role:    "user",
+			Content: renderedUserMessage,
+		})
+	}
 
 	return messages
+}
+
+func (cb *ContextBuilder) renderSessionContext(channel, chatID string) string {
+	if channel == "" && chatID == "" {
+		return ""
+	}
+
+	lines := []string{"## Current Session"}
+	if channel != "" {
+		lines = append(lines, fmt.Sprintf("Channel: %s", channel))
+	}
+	if chatID != "" {
+		lines = append(lines, fmt.Sprintf("Chat ID: %s", chatID))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (cb *ContextBuilder) RenderUserMessage(currentMessage string, attachments []bus.FileAttachment) string {

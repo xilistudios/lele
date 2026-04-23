@@ -30,6 +30,7 @@ func providerRegistry() []providerInfo {
 		{name: "openai", displayName: "OpenAI (GPT)", typeKey: "openai", apiBase: "https://api.openai.com/v1", authHeader: "Bearer"},
 		{name: "openrouter", displayName: "OpenRouter", typeKey: "openrouter", apiBase: "https://openrouter.ai/api/v1", authHeader: "Bearer"},
 		{name: "groq", displayName: "Groq", typeKey: "groq", apiBase: "https://api.groq.com/openai/v1", authHeader: "Bearer"},
+		{name: "nanogpt", displayName: "NanoGPT", typeKey: "nanogpt", apiBase: "https://nano-gpt.com/api/v1", authHeader: "Bearer"},
 		{name: "deepseek", displayName: "DeepSeek", typeKey: "deepseek", apiBase: "https://api.deepseek.com/v1", authHeader: "Bearer"},
 		{name: "gemini", displayName: "Gemini (Google)", typeKey: "gemini", apiBase: "https://generativelanguage.googleapis.com/v1beta", authHeader: "Bearer"},
 		{name: "zhipu", displayName: "Zhipu (GLM)", typeKey: "zhipu", apiBase: "https://open.bigmodel.cn/api/paas/v4", authHeader: "Bearer"},
@@ -38,6 +39,7 @@ func providerRegistry() []providerInfo {
 		{name: "moonshot", displayName: "Moonshot (Kimi)", typeKey: "moonshot", apiBase: "https://api.moonshot.cn/v1", authHeader: "Bearer"},
 		{name: "vllm", displayName: "VLLM", typeKey: "vllm", apiBase: "", authHeader: "Bearer"},
 		{name: "shengsuanyun", displayName: "ShengSuanYun", typeKey: "shengsuanyun", apiBase: "https://router.shengsuanyun.com/api/v1", authHeader: "Bearer"},
+		{name: "alibaba_coding_plan", displayName: "Alibaba Coding Plan", typeKey: "alibaba_coding_plan", apiBase: "https://coding-intl.dashscope.aliyuncs.com/v1", authHeader: "Bearer"},
 		{name: "github_copilot", displayName: "GitHub Copilot", typeKey: "github_copilot", apiBase: "localhost:4321", authHeader: "Bearer"},
 		{name: "custom", displayName: "Custom (OpenAI-compatible)", typeKey: "", apiBase: "", authHeader: "Bearer"},
 	}
@@ -309,8 +311,12 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 		cfg.Providers.VLLM = named.ProviderConfig
 	case "shengsuanyun":
 		cfg.Providers.ShengSuanYun = named.ProviderConfig
+	case "alibaba_coding_plan":
+		cfg.Providers.AlibabaCodingPlan = named.ProviderConfig
 	case "github_copilot":
 		cfg.Providers.GitHubCopilot = named.ProviderConfig
+	case "nanogpt":
+		// nanogpt is handled via the Named map (openai_compat type)
 	}
 
 	fmt.Printf("\u2713 Provider %s configured\n", info.displayName)

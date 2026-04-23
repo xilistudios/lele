@@ -15,16 +15,14 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
-func agentCmd() {
-	message := ""
-	sessionKey := "cli:default"
-
-	args := os.Args[2:]
+// parseCLIArgs extracts the pure argument parsing logic from agentCmd for testability.
+// Returns: message, sessionKey, debugMode.
+func parseCLIArgs(args []string) (message, sessionKey string, debug bool) {
+	sessionKey = "cli:default"
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--debug", "-d":
-			logger.SetLevel(logger.DEBUG)
-			fmt.Println("🔍 Debug mode enabled")
+			debug = true
 		case "-m", "--message":
 			if i+1 < len(args) {
 				message = args[i+1]
@@ -36,6 +34,16 @@ func agentCmd() {
 				i++
 			}
 		}
+	}
+	return message, sessionKey, debug
+}
+
+func agentCmd() {
+	message, sessionKey, debug := parseCLIArgs(os.Args[2:])
+
+	if debug {
+		logger.SetLevel(logger.DEBUG)
+		fmt.Println("🔍 Debug mode enabled")
 	}
 
 	cfg, err := loadConfig()

@@ -8,6 +8,45 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
+// parseAuthSubcommand extracts the subcommand from auth arguments for testability.
+func parseAuthSubcommand(args []string) string {
+	if len(args) < 1 {
+		return ""
+	}
+	return args[0]
+}
+
+// parseLoginArgs extracts the login argument parsing logic for testability.
+// Returns: provider, useDeviceCode.
+func parseLoginArgs(args []string) (provider string, useDeviceCode bool) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--provider", "-p":
+			if i+1 < len(args) {
+				provider = args[i+1]
+				i++
+			}
+		case "--device-code":
+			useDeviceCode = true
+		}
+	}
+	return provider, useDeviceCode
+}
+
+// parseLogoutArgs extracts the logout argument parsing logic for testability.
+func parseLogoutArgs(args []string) (provider string) {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--provider", "-p":
+			if i+1 < len(args) {
+				provider = args[i+1]
+				i++
+			}
+		}
+	}
+	return provider
+}
+
 func authCmd() {
 	if len(os.Args) < 3 {
 		authHelp()
@@ -46,21 +85,7 @@ func authHelp() {
 }
 
 func authLoginCmd() {
-	provider := ""
-	useDeviceCode := false
-
-	args := os.Args[3:]
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--provider", "-p":
-			if i+1 < len(args) {
-				provider = args[i+1]
-				i++
-			}
-		case "--device-code":
-			useDeviceCode = true
-		}
-	}
+	provider, useDeviceCode := parseLoginArgs(os.Args[3:])
 
 	if provider == "" {
 		fmt.Println("Error: --provider is required")
@@ -144,18 +169,7 @@ func authLoginPasteToken(provider string) {
 }
 
 func authLogoutCmd() {
-	provider := ""
-
-	args := os.Args[3:]
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--provider", "-p":
-			if i+1 < len(args) {
-				provider = args[i+1]
-				i++
-			}
-		}
-	}
+	provider := parseLogoutArgs(os.Args[3:])
 
 	if provider != "" {
 		if err := auth.DeleteCredential(provider); err != nil {

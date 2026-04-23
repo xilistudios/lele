@@ -97,6 +97,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		persistedAttachments,
 		opts.Channel,
 		opts.ChatID,
+		opts.SessionKey,
 	)
 
 	// 3. Save user message to session
@@ -415,7 +416,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID,
+					nil, opts.Channel, opts.ChatID, opts.SessionKey,
 				)
 				continue
 			}
