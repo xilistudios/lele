@@ -19,9 +19,9 @@ export function BooleanInput({ id, value, onChange, disabled, label }: Props) {
         checked={value}
         onChange={(e) => onChange(e.target.checked)}
         disabled={disabled}
-        className="h-4 w-4 rounded border-[#3a3a3a] bg-[#1a1a1a] text-blue-600 focus:ring-blue-500 focus:ring-offset-[#1a1a1a] disabled:opacity-50"
+        className="h-4 w-4 rounded border-border bg-background-primary text-blue-600 focus:ring-blue-500 focus:ring-offset-background-primary disabled:opacity-50"
       />
-      <span className="text-xs text-[#ccc]">
+      <span className="text-xs text-text-secondary">
         {label ?? (value ? t('common.enabled') : t('common.disabled'))}
       </span>
     </label>

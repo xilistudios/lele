@@ -14,7 +14,7 @@ function InlineToken({ text, token }: { text: string; token?: { type: string; hr
   switch (token.type) {
     case 'code':
       return (
-        <code className="rounded bg-[#222] px-1 py-0.5 font-mono text-[0.95em] text-[#f0f0f0]">
+        <code className="rounded bg-background-secondary px-1 py-0.5 font-mono text-[0.95em] text-text-primary">
           {text}
         </code>
       )
@@ -28,7 +28,7 @@ function InlineToken({ text, token }: { text: string; token?: { type: string; hr
           href={token.href ?? '#'}
           target="_blank"
           rel="noreferrer"
-          className="text-cyan-300 underline decoration-[#345] underline-offset-2 hover:text-cyan-200"
+          className="text-brand-teal underline decoration-border underline-offset-2 hover:text-brand-teal/80"
         >
           {text}
         </a>
@@ -60,8 +60,8 @@ function MarkdownTable({
           <tr>
             {headers.map((header, i) => (
               <th
-                key={`header-${i}`}
-                className={`border border-[#2e2e2e] bg-[#252525] px-3 py-2 text-sm font-semibold text-[#f2f2f2] ${alignClass(alignments[i] ?? 'left')}`}
+                key={`header-${header}`}
+                className={`border border-border bg-surface-card px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
               >
                 <InlineMarkdown text={header} />
               </th>
@@ -69,12 +69,12 @@ function MarkdownTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={`row-${rowIndex}`}>
+          {rows.map((row, _rowIndex) => (
+            <tr key={`row-${row.join('-')}`}>
               {row.map((cell, cellIndex) => (
                 <td
-                  key={`cell-${rowIndex}-${cellIndex}`}
-                  className={`border border-[#2e2e2e] bg-[#1a1a1a] px-3 py-2 text-sm text-[#ccc] ${alignClass(alignments[cellIndex] ?? 'left')}`}
+                  key={`cell-${cell}`}
+                  className={`border border-border bg-background-primary px-3 py-2 text-sm text-text-secondary ${alignClass(alignments[cellIndex] ?? 'left')}`}
                 >
                   <InlineMarkdown text={cell} />
                 </td>
@@ -89,14 +89,14 @@ function MarkdownTable({
 
 function DiffStat({ text }: { text: string }) {
   const stat = parseDiffStat(text)
-  if (!stat) return <p className="text-sm text-[#ccc]">{text}</p>
+  if (!stat) return <p className="text-sm text-text-secondary">{text}</p>
 
   return (
-    <div className="text-sm text-[#ccc]">
+    <div className="text-sm text-text-secondary">
       <span>{stat.files} Changed files </span>
-      <span className="text-emerald-400">{stat.added}</span>
+      <span className="text-diff-addition">{stat.added}</span>
       <span> </span>
-      <span className="text-red-400">{stat.removed}</span>
+      <span className="text-diff-deletion">{stat.removed}</span>
     </div>
   )
 }
@@ -105,11 +105,11 @@ function FileDiffRow({ line }: { line: string }) {
   const diff = parseFileDiffRow(line)
   if (!diff) return null
   return (
-    <div className="flex items-center justify-between rounded border border-[#2e2e2e] bg-[#1e1e1e] px-3 py-1.5 text-xs">
-      <span className="text-[#ccc] font-mono">{diff.filename}</span>
+    <div className="flex items-center justify-between rounded border border-border bg-background-primary px-3 py-1.5 text-xs">
+      <span className="text-text-secondary font-mono">{diff.filename}</span>
       <div className="flex items-center gap-2">
-        <span className="text-emerald-400">{diff.added}</span>
-        <span className="text-red-400">{diff.removed}</span>
+        <span className="text-diff-addition">{diff.added}</span>
+        <span className="text-diff-deletion">{diff.removed}</span>
         <svg
           width="12"
           height="12"
@@ -117,7 +117,7 @@ function FileDiffRow({ line }: { line: string }) {
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className="text-[#555]"
+          className="text-text-tertiary"
           aria-hidden="true"
         >
           <polyline points="9 18 15 12 9 6" />
@@ -132,8 +132,12 @@ function InlineMarkdown({ text }: { text: string }) {
 
   return (
     <>
-      {tokens.map((item, i) => (
-        <InlineToken key={i} text={item.text} token={item.token} />
+      {tokens.map((item, _i) => (
+        <InlineToken
+          key={`${item.text}-${item.token?.type || ''}`}
+          text={item.text}
+          token={item.token}
+        />
       ))}
     </>
   )
@@ -156,7 +160,7 @@ export function MarkdownText({ content }: { content: string }) {
         const level = headingMatch[1].length
         const HeadingTag = level === 1 ? 'h3' : level === 2 ? 'h4' : 'h5'
         result.push(
-          <HeadingTag key={`heading-${index}`} className="font-semibold text-[#f2f2f2]">
+          <HeadingTag key={`heading-${index}`} className="font-semibold text-text-primary">
             <InlineMarkdown text={headingMatch[2]} />
           </HeadingTag>,
         )
@@ -166,8 +170,11 @@ export function MarkdownText({ content }: { content: string }) {
       const listMatch = line.match(/^[-*]\s+(.+)$/)
       if (listMatch) {
         result.push(
-          <div key={`list-${index}`} className="flex gap-2 pl-4 text-sm leading-6 text-[#ccc]">
-            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-[#666]" />
+          <div
+            key={`list-${index}`}
+            className="flex gap-2 pl-4 text-sm leading-6 text-text-secondary"
+          >
+            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-text-tertiary" />
             <InlineMarkdown text={listMatch[1]} />
           </div>,
         )
@@ -199,7 +206,7 @@ export function MarkdownText({ content }: { content: string }) {
       }
 
       result.push(
-        <p key={`p-${index}`} className="text-sm leading-6 text-[#ccc] whitespace-pre-wrap">
+        <p key={`p-${index}`} className="text-sm leading-6 text-text-secondary whitespace-pre-wrap">
           <InlineMarkdown text={line} />
         </p>,
       )

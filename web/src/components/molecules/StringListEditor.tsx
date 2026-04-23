@@ -96,7 +96,7 @@ export function StringListEditor({
             onKeyDown={handleKeyDown}
             disabled={disabled}
             placeholder={placeholder}
-            className="flex-1 rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none disabled:opacity-50"
+            className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none disabled:opacity-50"
           />
         )}
         {!hasDropdown && (
@@ -114,10 +114,10 @@ export function StringListEditor({
         <div className="space-y-1">
           {items.map((item, index) => (
             <div
-              key={`${item}-${index}`}
-              className="flex items-center justify-between rounded bg-[#2a2a2a] px-3 py-2"
+              key={item}
+              className="flex items-center justify-between rounded bg-surface-card px-3 py-2"
             >
-              <span className="text-xs text-[#ccc]">{item}</span>
+              <span className="text-xs text-text-secondary">{item}</span>
               <button
                 type="button"
                 onClick={() => removeItem(index)}
@@ -132,7 +132,7 @@ export function StringListEditor({
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
-                  role="img"
+                  aria-hidden="true"
                 >
                   <title>{removeTitle}</title>
                   <path d="M18 6L6 18M6 6l12 12" />

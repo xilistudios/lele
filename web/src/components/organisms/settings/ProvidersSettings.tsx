@@ -47,7 +47,9 @@ export function ProvidersSettings() {
           placeholder={t('settings.providerNamePlaceholder')}
         />
 
-        {names.length === 0 && <p className="text-xs text-[#666]">{t('settings.noProviders')}</p>}
+        {names.length === 0 && (
+          <p className="text-xs text-text-tertiary">{t('settings.noProviders')}</p>
+        )}
 
         {names.map((name) => {
           const prov = providers[name]

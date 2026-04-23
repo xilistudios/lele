@@ -14,6 +14,8 @@
   },
   "chat": {
     "newSession": "New session",
+    "newChat": "New chat",
+    "noSessions": "No chats yet",
     "clearSession": "Clear session",
     "logout": "Logout",
     "settings": "Settings",
@@ -47,7 +49,17 @@
     "disconnected": "Disconnected",
     "showMore": "Show more",
     "showLess": "Show less",
-    "deleteSession": "Delete session"
+    "deleteSession": "Delete session",
+    "toggleSidebar": "Toggle sidebar",
+    "backTo": "Back to {{title}}",
+    "recent": "Recent",
+    "recentChats": "Recent chats"
+  },
+  "connection": {
+    "connected": "Connected",
+    "connecting": "Connecting",
+    "disconnected": "Disconnected",
+    "statusAria": "Connection status: {{status}}. Click for details."
   },
   "approval": {
     "inlineTitle": "Approval required",
@@ -278,6 +290,7 @@
     "saving": "Saving...",
     "reset": "Reset",
     "enabled": "Enabled",
-    "disabled": "Disabled"
+    "disabled": "Disabled",
+    "status": "Status"
   }
 }

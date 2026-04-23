@@ -177,13 +177,13 @@ export function SearchableSelect({
     <div ref={rootRef} className="relative">
       <button
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-2 rounded-md border border-[#2f2f2f] bg-[#1a1a1a] px-3 py-2 text-sm text-[#ddd] transition-all duration-200 hover:border-[#4a4a4a] hover:bg-[#202020] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background-primary px-3 py-2 text-sm text-text-primary transition-all duration-200 hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}
       >
-        <span className="min-w-0 truncate text-sm text-[#888]">{buttonLabel}</span>
-        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-white">
+        <span className="min-w-0 truncate text-sm text-text-secondary">{buttonLabel}</span>
+        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-text-primary">
           {selectedOption?.label ?? placeholder}
         </span>
         <svg
@@ -200,17 +200,17 @@ export function SearchableSelect({
 
       {isMounted ? (
         <div
-          className={`absolute ${direction === 'down' ? 'top-full left-0 mt-2' : 'bottom-full left-0 mb-2'} z-30 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-[#3a3a3a] bg-[#1d1d1d] shadow-2xl transition-all duration-200 ease-out ${
+          className={`absolute ${direction === 'down' ? 'top-full left-0 mt-2' : 'bottom-full left-0 mb-2'} z-30 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-border bg-background-secondary shadow-xl transition-all duration-200 ease-out ${
             isOpen
               ? 'translate-y-0 scale-100 opacity-100'
               : 'pointer-events-none translate-y-2 scale-95 opacity-0'
           }`}
         >
-          <div className="border-b border-[#2f2f2f] p-3">
-            <div className="flex items-center gap-2 rounded-lg border border-[#2f2f2f] bg-[#141414] px-3 py-2 text-sm text-[#bbb] transition-colors focus-within:border-[#5a5a5a]">
+          <div className="border-b border-border p-3">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-border-focus">
               <svg
                 aria-hidden="true"
-                className="h-4 w-4 flex-none text-[#666]"
+                className="h-4 w-4 flex-none text-text-tertiary"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -222,7 +222,7 @@ export function SearchableSelect({
               <input
                 ref={searchRef}
                 aria-label={searchAriaLabel}
-                className="w-full bg-transparent text-sm text-white outline-none placeholder:text-[#555]"
+                className="w-full bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
                 placeholder={searchPlaceholder}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -236,7 +236,7 @@ export function SearchableSelect({
                 {filteredGroups.map((group) => (
                   <div key={group.label || 'default'} className="space-y-1">
                     {group.label ? (
-                      <p className="px-2 text-[10px] uppercase tracking-[0.2em] text-[#666]">
+                      <p className="px-2 text-[10px] uppercase tracking-wider text-text-tertiary">
                         {group.label}
                       </p>
                     ) : null}
@@ -249,15 +249,15 @@ export function SearchableSelect({
                             key={option.value}
                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-all duration-150 ${
                               active
-                                ? 'bg-[#2f2f2f] text-white'
-                                : 'text-[#c9c9c9] hover:bg-[#242424] hover:text-white'
+                                ? 'bg-surface-card text-text-primary'
+                                : 'text-text-secondary hover:bg-surface-card-hover hover:text-text-primary'
                             }`}
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
                             <span className="truncate">{option.label}</span>
                             {active ? (
-                              <span className="ml-3 text-xs text-emerald-400">●</span>
+                              <span className="ml-3 text-xs text-state-success">●</span>
                             ) : null}
                           </button>
                         )
@@ -267,7 +267,7 @@ export function SearchableSelect({
                 ))}
               </div>
             ) : (
-              <p className="px-3 py-4 text-sm text-[#666]">{emptyLabel}</p>
+              <p className="px-3 py-4 text-sm text-text-tertiary">{emptyLabel}</p>
             )}
           </div>
         </div>

@@ -32,7 +32,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
   ]
 
   return (
-    <nav className="w-[200px] flex-shrink-0 border-r border-[#2e2e2e] bg-[#222] p-4">
+    <nav className="w-[200px] flex-shrink-0 border-r border-border bg-background-secondary p-4">
       <div className="space-y-1">
         {tabs.map((tab) => (
           <button
@@ -40,7 +40,9 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
             onClick={() => onTabChange(tab.id)}
             type="button"
             className={`w-full rounded px-3 py-2 text-left text-xs transition-colors ${
-              activeTab === tab.id ? 'bg-blue-600 text-white' : 'text-[#bbb] hover:bg-[#2a2a2a]'
+              activeTab === tab.id
+                ? 'bg-blue-600 text-white'
+                : 'text-text-secondary hover:bg-surface-card'
             }`}
           >
             {tab.label}

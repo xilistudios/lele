@@ -34,13 +34,13 @@ export function ApprovalInline({ request, onApprove, onReject }: Props) {
               {t('approval.inlineTitle')}
             </p>
             <p className="mt-1 text-sm text-amber-200/80">{t('approval.pendingCommand')}</p>
-            <pre className="mt-3 rounded border border-amber-900/30 bg-[#1a1a1a] px-3 py-2.5 font-mono text-xs text-[#ccc] overflow-x-auto">
+            <pre className="mt-3 rounded border border-amber-900/30 bg-background-primary px-3 py-2.5 font-mono text-xs text-text-secondary overflow-x-auto">
               {request.command}
             </pre>
-            {request.reason && <p className="mt-2 text-sm text-[#888]">{request.reason}</p>}
+            {request.reason && <p className="mt-2 text-sm text-text-secondary">{request.reason}</p>}
             <div className="mt-4 flex gap-3">
               <button
-                className="flex-1 rounded-md border border-[#3a3a3a] px-4 py-2 text-sm text-[#aaa] hover:bg-[#2a2a2a] transition-colors"
+                className="flex-1 rounded-md border border-border px-4 py-2 text-sm text-text-secondary hover:bg-surface-card transition-colors"
                 onClick={onReject}
                 type="button"
               >
