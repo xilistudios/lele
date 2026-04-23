@@ -52,7 +52,7 @@ export function KeyValueEditor({ id, value, onChange, disabled, keyPlaceholder }
           onKeyDown={handleKeyDown}
           disabled={disabled}
           placeholder={keyPlaceholder}
-          className="flex-1 rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none disabled:opacity-50"
         />
         <button
           type="button"
@@ -64,7 +64,7 @@ export function KeyValueEditor({ id, value, onChange, disabled, keyPlaceholder }
         </button>
       </div>
       {entries.map(([key, values]) => (
-        <div key={key} className="rounded border border-[#2e2e2e] bg-[#1a1a1a] p-3">
+        <div key={key} className="rounded border border-border bg-background-primary p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-xs font-medium text-white">{key}</span>
             <button

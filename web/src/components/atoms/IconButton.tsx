@@ -24,7 +24,7 @@ export function IconButton({
       disabled={disabled}
       title={title}
       aria-label={ariaLabel ?? title}
-      className={`text-[#555] transition-colors hover:text-[#888] disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`text-text-tertiary transition-colors hover:text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
     >
       {children}
     </button>

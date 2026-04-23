@@ -28,7 +28,7 @@ export function MessageList() {
   if (messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-[#444]">Start a conversation</p>
+        <p className="text-sm text-text-tertiary">Start a conversation</p>
       </div>
     )
   }
@@ -45,21 +45,23 @@ export function MessageList() {
       ))}
       {approvalRequest && (
         <div className="py-2">
-          <div className="rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] p-4">
-            <p className="text-sm font-medium text-[#ccc] mb-2">{approvalRequest.command}</p>
-            <p className="text-xs text-[#888] mb-4">{approvalRequest.reason}</p>
+          <div className="rounded-lg border border-border bg-background-primary p-4">
+            <p className="text-sm font-medium text-text-secondary mb-2">
+              {approvalRequest.command}
+            </p>
+            <p className="text-xs text-text-secondary mb-4">{approvalRequest.reason}</p>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => onApprove(true)}
-                className="rounded-md bg-[#1a3a2a] px-3 py-1.5 text-xs text-[#80f080] hover:bg-[#2a4a3a]"
+                className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success-light/80"
               >
                 Approve
               </button>
               <button
                 type="button"
                 onClick={() => onApprove(false)}
-                className="rounded-md bg-[#3a1a1a] px-3 py-1.5 text-xs text-[#f08080] hover:bg-[#4a2a2a]"
+                className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error-light/80"
               >
                 Reject
               </button>

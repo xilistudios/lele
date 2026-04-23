@@ -4,8 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
+import { ChatBubbleIcon, EditIcon, LogoutIcon, SettingsIcon } from '../atoms/Icons'
+import { Logo } from '../atoms/Logo'
+import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
+
+const MAX_VISIBLE_SESSIONS = 5
 
 type SidebarProps = {
   collapsed: boolean
@@ -16,31 +20,33 @@ type SidebarProps = {
 export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { apiUrl, session } = useAuthContext()
-  const {
-    wsStatus,
-    sessions,
-    currentSessionKey,
-    parentSessionKey,
-    onCreateSession,
-    onDeleteSession,
-  } = useAppLogicContext()
+  const { session } = useAuthContext()
+  const { sessions, currentSessionKey, parentSessionKey, onCreateSession, onDeleteSession } =
+    useAppLogicContext()
   const isMobile = useIsMobile()
 
   const deviceName = session?.device_name ?? 'lele'
 
   const sortedSessions = useMemo(() => {
-    const visibleSessions = sessions.filter((session) => !session.key.startsWith('subagent:'))
-    return [...visibleSessions].sort(
+    const visible = sessions.filter((s) => !s.key.startsWith('subagent:'))
+    return [...visible].sort(
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
     )
   }, [sessions])
 
-  const selectedSidebarSessionKey = parentSessionKey ?? currentSessionKey
+  const selectedKey = parentSessionKey ?? currentSessionKey
   const currentSession =
-    sortedSessions.find((s) => s.key === selectedSidebarSessionKey) ?? sortedSessions[0] ?? null
+    sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null
 
-  const hideText = collapsed
+  const handleSessionSelect = (key: string) => {
+    navigate(`/chat/${encodeURIComponent(key)}`)
+    if (isMobile) onClose()
+  }
+
+  const handleSettingsClick = () => {
+    navigate('/settings/general')
+    if (isMobile) onClose()
+  }
 
   return (
     <>
@@ -49,146 +55,157 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose()
-        }}
+        onKeyDown={(e) => e.key === 'Escape' && onClose()}
         role="button"
         tabIndex={0}
         aria-hidden={!mobileOpen}
       />
+
       <aside
-        className={`
-          fixed inset-y-0 left-0 z-50 flex flex-col border-r border-[#2e2e2e] bg-[#222222] transition-all duration-300 ease-in-out md:relative md:translate-x-0 overflow-hidden
-          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-          ${collapsed ? 'w-0' : 'w-[280px]'}
-        `}
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
-          className={`flex items-center ${collapsed ? 'justify-center' : 'gap-2'} border-b border-[#2e2e2e] px-4 py-3 ${collapsed ? 'opacity-0' : ''}`}
+          className={`flex items-center border-b border-border px-4 py-3 ${collapsed ? 'justify-center' : ''}`}
         >
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[#3a3a3a] text-xs font-bold text-white">
-            {deviceName?.[0]?.toUpperCase() ?? 'L'}
-          </div>
-          <div
-            className={`min-w-0 flex-1 transition-opacity duration-200 ${hideText ? 'opacity-0' : 'opacity-100'}`}
-          >
-            <p className="truncate text-sm font-medium text-white">{deviceName}</p>
-            <p className="truncate text-[10px] text-[#666]">{apiUrl.replace(/^https?:\/\//, '')}</p>
-          </div>
+          <Logo collapsed={collapsed} />
+        </div>
+
+        <div className="border-b border-border px-2 py-3">
           <button
-            onClick={() => navigate('/pair')}
-            title={t('chat.logout')}
+            onClick={onCreateSession}
             type="button"
-            aria-label={t('chat.logout')}
-            className="text-[#555] transition-colors hover:text-[#aaa]"
+            className={`flex w-full items-center gap-2 rounded-md text-xs text-text-secondary hover-highlight ${collapsed ? 'px-2 justify-center' : 'px-3 py-2'}`}
+            style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
+            title={collapsed ? t('chat.newChat') : undefined}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
+            <EditIcon />
+            {!collapsed && <span>{t('chat.newChat')}</span>}
           </button>
         </div>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'max-h-0 opacity-0 border-b-0' : 'max-h-24 opacity-100 border-b border-[#2e2e2e]'}`}
-        >
-          <div className="space-y-2 px-3 py-3">
-            <button
-              onClick={onCreateSession}
-              type="button"
-              className="flex w-full items-center gap-2 rounded-md border border-[#3a3a3a] px-3 py-2 text-xs text-[#bbb] transition-colors hover:bg-[#2a2a2a] hover:text-white"
+        <div className={`border-b border-border ${collapsed ? 'px-2' : 'px-3'} py-3`}>
+          {collapsed ? (
+            <Popover
+              block
+              trigger={
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="flex w-full items-center justify-center rounded-md px-2 text-text-secondary hover-highlight-group"
+                  style={{ paddingTop: '12px', paddingBottom: '12px' }}
+                  title={t('chat.recent')}
+                  aria-label={t('chat.recent')}
+                >
+                  <ChatBubbleIcon />
+                </div>
+              }
+              popoverWidth={200}
+              popoverHeight={250}
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
+              <div className="border-b border-border pb-2 mb-2">
+                <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
+                  {t('chat.recentChats')}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1 max-h-[200px] overflow-y-auto">
+                {sortedSessions.length === 0 ? (
+                  <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
+                ) : (
+                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => handleSessionSelect(s.key)}
+                      className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
+                        s.key === currentSession?.key
+                          ? 'bg-surface-card text-text-primary'
+                          : 'text-text-secondary hover:bg-surface-card hover:text-text-primary'
+                      }`}
+                    >
+                      <span className="truncate">{s.name || s.key}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </Popover>
+          ) : (
+            <>
+              <div className="overflow-hidden max-h-8 opacity-100">
+                <p className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary">
+                  {t('chat.recent')}
+                </p>
+              </div>
+              {sortedSessions.length > 0 && (
+                <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
+                  {sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
+                    <SessionItem
+                      key={s.key}
+                      sessionKey={s.key}
+                      sessionName={s.name}
+                      messageCount={s.message_count}
+                      selected={s.key === currentSession?.key}
+                      onSelect={() => handleSessionSelect(s.key)}
+                      onDelete={() => onDeleteSession(s.key)}
+                      collapsed={false}
+                    />
+                  ))}
+                </nav>
+              )}
+            </>
+          )}
+        </div>
+
+        <div
+          className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-4'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
+        >
+          <Popover
+              block
+              trigger={
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}
+                  style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
+                  aria-label={collapsed ? t('chat.deviceMenu') : undefined}
+                >
+                  <div className="flex flex-shrink-0 items-center justify-center rounded-md bg-surface-card text-xs font-bold text-text-primary h-7 w-7">
+                    {deviceName?.[0]?.toUpperCase() ?? 'L'}
+                  </div>
+                  {!collapsed && (
+                    <div className="min-w-0 flex-1 px-2">
+                      <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
+                    </div>
+                  )}
+                </div>
+              }
+              popoverWidth={150}
+              popoverHeight={80}
+            >
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                title={t('chat.settings')}
+                aria-label={t('chat.settings')}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                onClick={handleSettingsClick}
               >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              {t('chat.newSession')}
-            </button>
-          </div>
-        </div>
-
-        <div
-          className={`border-b border-[#2e2e2e] ${collapsed ? 'px-2' : 'px-3'} py-3 ${collapsed ? 'hidden' : ''}`}
-        >
-          <div
-            className={`overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'max-h-0 opacity-0' : 'max-h-8 opacity-100'}`}
-          >
-            <p className="px-1 text-[10px] uppercase tracking-[0.2em] text-[#666]">
-              {t('chat.sessions')}
-            </p>
-          </div>
-          <nav
-            className={`mt-2 space-y-0.5 overflow-y-auto transition-[max-height] duration-300 ease-in-out ${collapsed ? 'max-h-[300px]' : 'max-h-[240px]'}`}
-          >
-            {sortedSessions.slice(0, 5).map((session) => (
-              <SessionItem
-                key={session.key}
-                sessionKey={session.key}
-                sessionName={session.name}
-                messageCount={session.message_count}
-                selected={session.key === currentSession?.key}
-                onSelect={() => {
-                  navigate(`/chat/${encodeURIComponent(session.key)}`)
-                  if (isMobile) onClose()
-                }}
-                onDelete={() => onDeleteSession(session.key)}
-                collapsed={collapsed}
-              />
-            ))}
-          </nav>
-        </div>
-
-        <div
-          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-t border-[#2e2e2e] px-4 py-3 ${collapsed ? 'hidden' : ''}`}
-        >
-          <div
-            className={`flex items-center gap-1.5 overflow-hidden transition-all duration-300 ease-in-out ${hideText ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}
-          >
-            <ConnectionIndicator status={wsStatus} />
-            <span className="text-[10px] text-[#555] whitespace-nowrap">
-              {t(`chat.${wsStatus}`)}
-            </span>
-          </div>
-          <button
-            type="button"
-            title={t('chat.settings')}
-            aria-label={t('chat.settings')}
-            className="text-[#444] transition-colors hover:text-[#888]"
-            onClick={() => {
-              navigate('/settings/general')
-              if (isMobile) onClose()
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
+                <SettingsIcon />
+                <span>{t('chat.settings')}</span>
+              </button>
+              <button
+                onClick={() => navigate('/pair')}
+                title={t('chat.logout')}
+                type="button"
+                aria-label={t('chat.logout')}
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+              >
+                <LogoutIcon />
+                <span>{t('chat.logout')}</span>
+              </button>
+            </div>
+          </Popover>
         </div>
       </aside>
     </>

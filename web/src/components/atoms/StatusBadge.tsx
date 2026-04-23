@@ -7,7 +7,7 @@ type Props = {
 export function StatusBadge({ status }: Props) {
   if (status === 'executing') {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-[#2a2a2a] px-1.5 py-0.5 text-[10px] text-[#888]">
+      <span className="inline-flex items-center gap-1 rounded bg-surface-card px-1.5 py-0.5 text-[10px] text-text-secondary">
         <svg
           className="h-3 w-3 animate-spin"
           viewBox="0 0 24 24"
@@ -24,7 +24,7 @@ export function StatusBadge({ status }: Props) {
   }
   if (status === 'error') {
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-[#3a1a1a] px-1.5 py-0.5 text-[10px] text-[#f08080]">
+      <span className="inline-flex items-center gap-1 rounded bg-state-error-light px-1.5 py-0.5 text-[10px] text-state-error">
         <svg
           className="h-3 w-3"
           viewBox="0 0 24 24"
@@ -41,7 +41,7 @@ export function StatusBadge({ status }: Props) {
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-[#1a3a2a] px-1.5 py-0.5 text-[10px] text-[#80f080]">
+    <span className="inline-flex items-center gap-1 rounded bg-state-success-light px-1.5 py-0.5 text-[10px] text-state-success">
       <svg
         className="h-3 w-3"
         viewBox="0 0 24 24"

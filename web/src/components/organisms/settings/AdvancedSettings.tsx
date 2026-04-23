@@ -6,7 +6,7 @@ import { AddButton } from '../../atoms/AddButton'
 import { RemoveButton } from '../../atoms/RemoveButton'
 import { SettingsField, SettingsSection, TextInput } from '../../molecules'
 
-const CARD_CLS = 'rounded border border-[#2e2e2e] bg-[#1a1a1a] p-4'
+const CARD_CLS = 'rounded border border-border bg-background-primary p-4'
 
 export function AdvancedSettings() {
   const { draftConfig, dirtyPaths, updateField, replaceDraft, t } = useSettings()
@@ -33,7 +33,9 @@ export function AdvancedSettings() {
           <AddButton onClick={addBinding}>{t('settings.addBinding')}</AddButton>
         </div>
 
-        {bindings.length === 0 && <p className="text-xs text-[#666]">{t('settings.noBindings')}</p>}
+        {bindings.length === 0 && (
+          <p className="text-xs text-text-tertiary">{t('settings.noBindings')}</p>
+        )}
 
         {bindings.map(
           (
@@ -51,7 +53,7 @@ export function AdvancedSettings() {
           ) => (
             <div key={`${binding.agent_id}-${binding.match.channel}-${index}`} className={CARD_CLS}>
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-[#ccc]">
+                <span className="text-xs font-medium text-text-secondary">
                   {t('settings.sections.bindings')} #{index + 1}
                 </span>
                 <RemoveButton
@@ -156,7 +158,7 @@ export function AdvancedSettings() {
           <button
             type="button"
             onClick={() => setShowRawJson(!showRawJson)}
-            className="rounded border border-[#3a3a3a] px-3 py-2 text-xs text-[#888] transition-colors hover:bg-[#2a2a2a]"
+            className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-card"
           >
             {showRawJson ? t('settings.hideRawJson') : t('settings.showRawJson')}
           </button>
@@ -172,7 +174,7 @@ export function AdvancedSettings() {
                 // ignore invalid JSON while typing
               }
             }}
-            className="h-[500px] w-full rounded border border-[#3a3a3a] bg-[#1a1a1a] p-3 font-mono text-xs text-[#e0e0e0] focus:border-blue-500 focus:outline-none"
+            className="h-[500px] w-full rounded border border-border bg-background-primary p-3 font-mono text-xs text-text-primary focus:border-blue-500 focus:outline-none"
             spellCheck={false}
           />
         )}

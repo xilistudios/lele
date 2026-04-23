@@ -6,10 +6,10 @@ export function DiagnosticsPanel() {
   const { diagnostics } = useAppLogicContext()
 
   return (
-    <section className="mx-6 mt-3 rounded-lg border border-[#2e2e2e] bg-[#202020] p-4 text-xs text-[#bbb]">
+    <section className="mx-6 mt-3 rounded-lg border border-border bg-background-primary p-4 text-xs text-text-secondary">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.systemStatus')}
           </p>
           <p>{diagnostics.status?.status ?? '-'}</p>
@@ -17,7 +17,7 @@ export function DiagnosticsPanel() {
           <p>{diagnostics.status?.version ?? '-'}</p>
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.agentInfo')}
           </p>
           <p>{diagnostics.agentInfo?.name ?? '-'}</p>
@@ -26,7 +26,9 @@ export function DiagnosticsPanel() {
           <p>{diagnostics.agentInfo?.status ?? '-'}</p>
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.channels')}</p>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+            {t('chat.channels')}
+          </p>
           {diagnostics.channels.map((channel) => (
             <p key={channel.name}>
               {channel.name} · {channel.running ? t('chat.running') : t('chat.stopped')}
@@ -34,7 +36,9 @@ export function DiagnosticsPanel() {
           ))}
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[#666]">{t('chat.tools')}</p>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+            {t('chat.tools')}
+          </p>
           {diagnostics.tools.map((tool) => (
             <p key={tool.name}>
               {tool.name} · {tool.enabled ? t('chat.enabled') : t('chat.disabled')}
@@ -42,11 +46,11 @@ export function DiagnosticsPanel() {
           ))}
         </div>
       </div>
-      <details className="mt-4 rounded border border-[#2a2a2a] bg-[#1a1a1a] p-3">
-        <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] text-[#666]">
+      <details className="mt-4 rounded border border-border bg-background-primary p-3">
+        <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
           {t('chat.config')}
         </summary>
-        <pre className="mt-3 overflow-x-auto text-[11px] leading-5 text-[#999]">
+        <pre className="mt-3 overflow-x-auto text-[11px] leading-5 text-text-secondary">
           {JSON.stringify(diagnostics.config?.config ?? {}, null, 2)}
         </pre>
       </details>

@@ -59,17 +59,17 @@ export function ChatComposer() {
           {pendingAttachments.map((attachment) => (
             <span
               key={attachment}
-              className="rounded-full border border-[#3a3a3a] bg-[#222] px-3 py-1 text-xs text-[#bbb]"
+              className="rounded-full border border-border bg-background-secondary px-3 py-1 text-xs text-text-secondary"
             >
               {attachment.split('/').pop() ?? attachment}
             </span>
           ))}
         </div>
       )}
-      <div className="rounded-lg border border-[#3a3a3a] bg-[#222] transition-colors focus-within:border-[#555]">
+      <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border-light">
         <textarea
           ref={textareaRef}
-          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-white outline-none placeholder:text-[#444]"
+          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
@@ -80,7 +80,7 @@ export function ChatComposer() {
         <div className="flex items-center justify-between px-3 pb-2 pt-1">
           <div className="flex items-center gap-3">
             <AttachmentInput onUpload={onUploadAttachments} onAttach={onAttachmentsChange} />
-            <div className="flex items-center gap-2 text-[10px] text-[#555]">
+            <div className="flex items-center gap-2 text-[10px] text-text-tertiary">
               <SearchableSelect
                 ariaLabel={t('chat.model')}
                 buttonLabel={t('chat.model')}
@@ -115,16 +115,27 @@ export function ChatComposer() {
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
             className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-20"
             onClick={canCancel ? onCancel : undefined}
-            style={canCancel ? { backgroundColor: '#351717', border: '1px solid #5a2b2b' } : {}}
+            style={
+              canCancel
+                ? { backgroundColor: 'rgba(255, 69, 58, 0.15)', border: '1px solid var(--border)' }
+                : {}
+            }
             onMouseEnter={(e) => {
-              if (canCancel) e.currentTarget.style.backgroundColor = '#4a2020'
+              if (canCancel) e.currentTarget.style.backgroundColor = 'rgba(255, 69, 58, 0.25)'
             }}
             onMouseLeave={(e) => {
-              if (canCancel) e.currentTarget.style.backgroundColor = '#351717'
+              if (canCancel) e.currentTarget.style.backgroundColor = 'rgba(255, 69, 58, 0.15)'
             }}
           >
             {canCancel ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="#f0b4b4" aria-hidden="true">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                className="text-state-error"
+                aria-hidden="true"
+              >
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             ) : (

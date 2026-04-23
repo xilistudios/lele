@@ -53,7 +53,9 @@ export function AgentsSettings() {
           placeholder={t('settings.agentIdPlaceholder')}
         />
 
-        {list.length === 0 && <p className="text-xs text-[#666]">{t('settings.noAgents')}</p>}
+        {list.length === 0 && (
+          <p className="text-xs text-text-tertiary">{t('settings.noAgents')}</p>
+        )}
 
         {list.map(
           (
