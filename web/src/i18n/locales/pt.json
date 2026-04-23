@@ -280,7 +280,21 @@
     "noBindings": "Nenhum binding configurado",
     "identityKeyPlaceholder": "padrão",
     "modelNamePlaceholder": "nome-modelo",
-    "noModels": "Nenhum modelo configurado"
+    "noModels": "Nenhum modelo configurado",
+    "noConfiguredProviders": "Nenhum provedor configurado. Adicione um para começar.",
+    "addProviderModal": {
+      "title": "Adicionar provedor",
+      "stepType": "Passo 1: Selecionar tipo de provedor",
+      "stepName": "Passo 2: Inserir nome do provedor",
+      "stepConfig": "Passo 3: Configurar provedor",
+      "selectType": "Selecione um tipo de provedor...",
+      "customTypePlaceholder": "tipo-personalizado",
+      "namePlaceholder": "meu-provedor",
+      "nameHint": "Este será o identificador usado para referenciar este provedor.",
+      "back": "Voltar",
+      "next": "Próximo",
+      "add": "Adicionar"
+    }
   },
   "common": {
     "loading": "Carregando...",

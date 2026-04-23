@@ -280,7 +280,21 @@
     "noBindings": "No bindings configured",
     "identityKeyPlaceholder": "pattern",
     "modelNamePlaceholder": "model-name",
-    "noModels": "No models configured"
+    "noModels": "No models configured",
+    "noConfiguredProviders": "No providers configured. Add one to get started.",
+    "addProviderModal": {
+      "title": "Add Provider",
+      "stepType": "Step 1: Select provider type",
+      "stepName": "Step 2: Enter provider name",
+      "stepConfig": "Step 3: Configure provider",
+      "selectType": "Select a provider type...",
+      "customTypePlaceholder": "custom-type",
+      "namePlaceholder": "my-provider",
+      "nameHint": "This will be the identifier used to reference this provider.",
+      "back": "Back",
+      "next": "Next",
+      "add": "Add"
+    }
   },
   "common": {
     "loading": "Loading...",
