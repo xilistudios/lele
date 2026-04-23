@@ -1,10 +1,13 @@
 package openai_compat
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
@@ -318,6 +321,128 @@ func TestProviderChat_SendsMultimodalContentParts(t *testing.T) {
 	}
 	if imagePart["type"] != "image_url" {
 		t.Fatalf("image part type = %v, want image_url", imagePart["type"])
+	}
+}
+
+func TestProviderChat_RepeatedEquivalentCallsProduceIdenticalRequests(t *testing.T) {
+	requestBodies := make([][]byte, 0, 2)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBodies = append(requestBodies, bytes.Clone(body))
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"message":       map[string]interface{}{"content": "ok"},
+				"finish_reason": "stop",
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	messages := []Message{
+		{Role: "system", Content: "cached system prompt"},
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "calling tool", ToolCalls: []ToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: &FunctionCall{
+				Name:      "get_weather",
+				Arguments: `{"city":"SF"}`,
+			},
+		}}},
+		{Role: "tool", Content: "sunny", ToolCallID: "call_1"},
+	}
+	tools := []ToolDefinition{{
+		Type: "function",
+		Function: ToolFunctionDefinition{
+			Name:        "get_weather",
+			Description: "Get weather",
+			Parameters: map[string]interface{}{
+				"type": "object",
+			},
+		},
+	}}
+	options := map[string]interface{}{
+		"max_tokens":  512,
+		"temperature": 0.7,
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := p.Chat(t.Context(), messages, tools, "gpt-4o", options); err != nil {
+			t.Fatalf("Chat() error = %v", err)
+		}
+	}
+
+	if len(requestBodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(requestBodies))
+	}
+	if !bytes.Equal(requestBodies[0], requestBodies[1]) {
+		t.Fatalf("expected equivalent Chat calls to produce identical request bodies\nfirst:  %s\nsecond: %s", requestBodies[0], requestBodies[1])
+	}
+}
+
+func TestProviderChat_ToolOrderAffectsRequestOnlyWhenInputOrderChanges(t *testing.T) {
+	var requestBodies []map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestBodies = append(requestBodies, body)
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"message":       map[string]interface{}{"content": "ok"},
+				"finish_reason": "stop",
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	toolsA := []ToolDefinition{
+		{Type: "function", Function: ToolFunctionDefinition{Name: "alpha", Description: "A", Parameters: map[string]interface{}{"type": "object"}}},
+		{Type: "function", Function: ToolFunctionDefinition{Name: "beta", Description: "B", Parameters: map[string]interface{}{"type": "object"}}},
+	}
+	toolsB := []ToolDefinition{
+		{Type: "function", Function: ToolFunctionDefinition{Name: "beta", Description: "B", Parameters: map[string]interface{}{"type": "object"}}},
+		{Type: "function", Function: ToolFunctionDefinition{Name: "alpha", Description: "A", Parameters: map[string]interface{}{"type": "object"}}},
+	}
+
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, toolsA, "gpt-4o", nil); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if _, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, toolsB, "gpt-4o", nil); err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if len(requestBodies) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(requestBodies))
+	}
+
+	toolsPayloadA, ok := requestBodies[0]["tools"].([]interface{})
+	if !ok {
+		t.Fatalf("requestBodies[0][tools] type = %T", requestBodies[0]["tools"])
+	}
+	toolsPayloadB, ok := requestBodies[1]["tools"].([]interface{})
+	if !ok {
+		t.Fatalf("requestBodies[1][tools] type = %T", requestBodies[1]["tools"])
+	}
+	if reflect.DeepEqual(toolsPayloadA, toolsPayloadB) {
+		t.Fatalf("expected differently ordered tool inputs to remain distinguishable in provider request payload")
+	}
+	if len(toolsPayloadA) != 2 || len(toolsPayloadB) != 2 {
+		t.Fatalf("unexpected tool payload lengths: %d and %d", len(toolsPayloadA), len(toolsPayloadB))
 	}
 }
 

@@ -151,7 +151,7 @@ func TestResolveProviderSelection(t *testing.T) {
 			setup: func(cfg *config.Config) {
 				cfg.Agents.Defaults.Model = "custom-model"
 			},
-			wantErrSubstr: "no API key configured for model",
+			wantErrSubstr: "no API key configured for provider",
 		},
 		{
 			name: "openrouter prefix without key returns provider key error",

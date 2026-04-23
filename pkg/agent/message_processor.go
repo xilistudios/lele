@@ -602,7 +602,10 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	history := agent.Sessions.GetHistory(sessionKey)
 	historyTokens := mp.estimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
-	summaryTokens := mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	summaryTokens := 0
+	if summary != "" && !hasSummaryMessage(history, summary) {
+		summaryTokens = mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	}
 
 	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()

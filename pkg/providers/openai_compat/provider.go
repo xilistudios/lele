@@ -38,6 +38,11 @@ type Provider struct {
 	httpClient *http.Client
 }
 
+func logOutgoingRequest(apiBase, model string, stream bool, jsonData []byte) {
+	log.Printf("[DEBUG] OpenAICompat outgoing request: apiBase=%s model=%s stream=%t body_bytes=%d body=%s",
+		apiBase, model, stream, len(jsonData), string(jsonData))
+}
+
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
 	client := &http.Client{
 		Timeout: 120 * time.Second,
@@ -118,6 +123,7 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 
 	modelStr, _ := requestBody["model"].(string)
 	log.Printf("[DEBUG] OpenAICompat ChatCompletion: apiBase=%s, model=%s, apiKey=%s", p.apiBase, modelStr, maskAPIKey(p.apiKey))
+	logOutgoingRequest(p.apiBase, modelStr, false, jsonData)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
 	if err != nil {
@@ -203,6 +209,10 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
+
+	modelStr, _ := requestBody["model"].(string)
+	log.Printf("[DEBUG] OpenAICompat ChatCompletionStream: apiBase=%s, model=%s, apiKey=%s", p.apiBase, modelStr, maskAPIKey(p.apiKey))
+	logOutgoingRequest(p.apiBase, modelStr, true, jsonData)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
 	if err != nil {

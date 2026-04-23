@@ -33,13 +33,17 @@ export function MessageList() {
     )
   }
 
+  const visibleMessages = messages.filter(
+    (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
+  )
+
   return (
     <div className="mx-auto max-w-3xl space-y-1">
-      {messages.map((message, index) => (
+      {visibleMessages.map((message, index) => (
         <MessageBubble
           key={message.id}
           message={message}
-          isLast={index === messages.length - 1}
+          isLast={index === visibleMessages.length - 1}
           onNavigateToSession={handleNavigateToSession}
         />
       ))}

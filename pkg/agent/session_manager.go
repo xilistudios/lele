@@ -88,9 +88,10 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
+	historyForSummary := stripSummaryMessages(history)
 
 	// Need at least 3 messages to summarize (keep last 2 for continuity)
-	if len(history) <= 2 {
+	if len(historyForSummary) <= 2 {
 		return nil
 	}
 
@@ -100,7 +101,7 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 
 	// Summarize everything except the last 2 messages (kept for continuity).
 	// Note: history contains only user/assistant/tool messages — no system prompt.
-	toSummarize := history[:len(history)-2]
+	toSummarize := historyForSummary[:len(historyForSummary)-2]
 
 	if len(toSummarize) == 0 {
 		return nil
@@ -304,10 +305,11 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
+	historyForSummary := stripSummaryMessages(history)
 
 	// Need at least 3 messages to summarize (keep last 2 for continuity)
-	if len(history) <= 2 {
-		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(history))
+	if len(historyForSummary) <= 2 {
+		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(historyForSummary))
 	}
 
 	// Calculate before stats
@@ -316,7 +318,7 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 
 	// Summarize everything except the last 2 messages (kept for continuity).
 	// Note: history contains only user/assistant/tool messages — no system prompt.
-	toSummarize := history[:len(history)-2]
+	toSummarize := historyForSummary[:len(historyForSummary)-2]
 
 	if len(toSummarize) == 0 {
 		return nil, fmt.Errorf("no messages available to summarize")

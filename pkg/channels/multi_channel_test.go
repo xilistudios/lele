@@ -306,6 +306,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 	nativeCfg := config.DefaultConfig()
 	nativeCfg.Channels.Native.Enabled = true
 	nativeCfg.Channels.Native.Port = 0
+	nativeCfg.Channels.Native.MaxClients = 100
 
 	tmpDir := t.TempDir()
 	nativeCfg.Channels.Native.LeleDir = tmpDir
@@ -383,6 +384,28 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 		}
 	}()
 
+	// Start a goroutine to consume messages from the bus and dispatch them
+	// to the native channel so they reach the websocket clients.
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				msg, ok := messageBus.SubscribeOutbound(ctx)
+				if !ok {
+					continue
+				}
+				if msg.Channel == "native" {
+					native.dispatchOutboundMessage(msg)
+				}
+			}
+		}
+	}()
+
 	for i := 0; i < 50; i++ {
 		messageBus.PublishOutbound(bus.OutboundMessage{
 			Channel:   "native",
@@ -397,6 +420,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	wsConn.Close()
 	<-done
+	wg.Wait()
 
 	count := received.Load()
 	if count == 0 {

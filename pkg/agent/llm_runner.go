@@ -81,6 +81,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		history = ensureSummaryMaterialized(agent, opts.SessionKey, history, summary)
 		// Initialize verbose mode from persistent storage
 		lr.al.verboseManager.InitializeFromSession(opts.SessionKey)
 	}
@@ -89,7 +90,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		logger.WarnCF("agent", "Failed to persist attachments to workspace", map[string]interface{}{"error": err.Error()})
 		persistedAttachments = opts.Attachments
 	}
-	renderedUserMessage := agent.ContextBuilder.RenderUserMessage(opts.UserMessage, persistedAttachments)
+	renderedUserMessage := agent.ContextBuilder.BuildCurrentUserMessage(opts.UserMessage, persistedAttachments, opts.Channel, opts.ChatID)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
 		summary,
@@ -414,6 +415,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
+				newHistory = ensureSummaryMaterialized(agent, opts.SessionKey, newHistory, newSummary)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
 					nil, opts.Channel, opts.ChatID, opts.SessionKey,
@@ -577,13 +579,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			// existing verbose text notifications.
 			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
 			if opts.Channel == channels.ChannelName {
+				actionDesc := formatBasicToolMessage(tc.Name, tc.Arguments)
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
 					ChatID:  opts.SessionKey,
 					Event:   "tool.executing",
 					Metadata: map[string]string{
 						"tool":   tc.Name,
-						"action": "Executing " + tc.Name,
+						"action": actionDesc,
 					},
 				})
 			} else if level != session.VerboseOff {
@@ -808,6 +811,19 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	}
 
 	return finalContent, iteration, nil
+}
+
+func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
+	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
+		return history
+	}
+
+	agent.Sessions.GetOrCreate(sessionKey)
+	updatedHistory := make([]providers.Message, 0, len(history)+1)
+	updatedHistory = append(updatedHistory, history...)
+	updatedHistory = append(updatedHistory, buildSummaryMessage(summary))
+	agent.Sessions.SetHistory(sessionKey, updatedHistory)
+	return updatedHistory
 }
 
 // updateToolContexts updates the context for tools that need channel/chatID info.

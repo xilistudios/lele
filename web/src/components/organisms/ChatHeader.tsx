@@ -10,12 +10,13 @@ import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
 import { Spinner } from '../atoms/Spinner'
 
 function ToolStatus({ tool, action }: { tool: string; action: string }) {
+  const displayAction = action.replace(/^[^\s]+\s/, '').split('\n')[0]
   return (
     <>
       <span className="rounded bg-surface-card px-2 py-0.5 font-mono text-[11px] text-text-secondary">
         {tool}
       </span>
-      <span>{action}</span>
+      <span className="truncate max-w-[200px]">{displayAction || action}</span>
     </>
   )
 }

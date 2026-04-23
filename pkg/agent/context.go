@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -30,6 +31,8 @@ type ContextBuilder struct {
 	cachedSystemPrompt map[string]string
 	cacheMu            sync.RWMutex
 }
+
+const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
 
 func getGlobalConfigDir() string {
 	home, err := os.UserHomeDir()
@@ -208,7 +211,7 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 // (e.g. tool-turns).
 func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
 	messages := []providers.Message{}
-	renderedUserMessage := cb.RenderUserMessage(currentMessage, attachments)
+	renderedUserMessage := cb.BuildCurrentUserMessage(currentMessage, attachments, channel, chatID)
 
 	// --- Build the static system prompt ---
 	// On the first turn for a session we build it fresh and cache it.
@@ -223,7 +226,7 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 					"length":      len(systemPrompt),
 				})
 		} else {
-			systemPrompt = cb.BuildSystemPrompt()
+			systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
 			cb.storeCachedSystemPrompt(sessionKey, systemPrompt)
 			logger.DebugCF("agent", "Built and cached new system prompt",
 				map[string]interface{}{
@@ -233,7 +236,7 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		}
 	} else {
 		// No session tracking — build fresh every time (safe fallback)
-		systemPrompt = cb.BuildSystemPrompt()
+		systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
 	}
 
 	// Debug logging
@@ -264,30 +267,8 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 
 	messages = append(messages, history...)
 
-	if summary != "" {
-		messages = append(messages, providers.Message{
-			Role:    "user",
-			Content: "## Summary of Previous Conversation\n\n" + summary,
-		})
-	}
-
-	if sessionContext := cb.renderSessionContext(channel, chatID); sessionContext != "" {
-		if renderedUserMessage == "" {
-			renderedUserMessage = sessionContext
-		} else {
-			renderedUserMessage = sessionContext + "\n\n" + renderedUserMessage
-		}
-	}
-
-	// On the first real user turn, prepend the current time so the model
-	// knows "when" it is without polluting the cacheable system prompt.
-	if strings.TrimSpace(currentMessage) != "" {
-		timePrefix := fmt.Sprintf("Current Time: %s", time.Now().Format("2006-01-02 15:04 (Monday)"))
-		if renderedUserMessage == "" {
-			renderedUserMessage = timePrefix
-		} else {
-			renderedUserMessage = timePrefix + "\n\n" + renderedUserMessage
-		}
+	if summary != "" && !hasSummaryMessage(history, summary) {
+		messages = append(messages, buildSummaryMessage(summary))
 	}
 
 	if renderedUserMessage != "" {
@@ -300,9 +281,72 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	return messages
 }
 
+func (cb *ContextBuilder) buildSystemPromptForTurn(currentMessage, channel, chatID string) string {
+	systemPrompt := cb.BuildSystemPrompt()
+	requestContext := cb.renderRequestContext(currentMessage, channel, chatID)
+	if requestContext == "" {
+		return systemPrompt
+	}
+	return systemPrompt + "\n\n" + requestContext
+}
+
+func buildSummaryMessage(summary string) providers.Message {
+	return providers.Message{
+		Role:    "user",
+		Content: summaryMessageHeader + summary,
+	}
+}
+
+func isSummaryMessage(msg providers.Message) bool {
+	return msg.Role == "user" && strings.HasPrefix(msg.Content, summaryMessageHeader)
+}
+
+func hasSummaryMessage(history []providers.Message, summary string) bool {
+	if summary == "" {
+		return false
+	}
+	expected := summaryMessageHeader + summary
+	for _, msg := range history {
+		if msg.Role == "user" && msg.Content == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func stripSummaryMessages(history []providers.Message) []providers.Message {
+	filtered := make([]providers.Message, 0, len(history))
+	for _, msg := range history {
+		if isSummaryMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
+func (cb *ContextBuilder) BuildCurrentUserMessage(currentMessage string, attachments []bus.FileAttachment, channel, chatID string) string {
+	return cb.RenderUserMessage(currentMessage, attachments)
+}
+
+func (cb *ContextBuilder) renderRequestContext(currentMessage, channel, chatID string) string {
+	parts := make([]string, 0, 2)
+	if strings.TrimSpace(currentMessage) != "" {
+		parts = append(parts, fmt.Sprintf("Current Time: %s", time.Now().Format("2006-01-02 15:04 (Monday)")))
+	}
+	if sessionContext := cb.renderSessionContext(channel, chatID); sessionContext != "" {
+		parts = append(parts, sessionContext)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func (cb *ContextBuilder) renderSessionContext(channel, chatID string) string {
 	if channel == "" && chatID == "" {
 		return ""
+	}
+
+	if channel == channels.ChannelName {
+		chatID = normalizeNativeChatID(chatID)
 	}
 
 	lines := []string{"## Current Session"}
@@ -316,6 +360,34 @@ func (cb *ContextBuilder) renderSessionContext(channel, chatID string) string {
 	return strings.Join(lines, "\n")
 }
 
+func normalizeNativeChatID(chatID string) string {
+	if !strings.HasPrefix(chatID, "native:") {
+		return chatID
+	}
+
+	parts := strings.Split(chatID, ":")
+	if len(parts) < 3 {
+		return chatID
+	}
+
+	last := parts[len(parts)-1]
+	allDigits := last != ""
+	for _, ch := range last {
+		if ch < '0' || ch > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		return strings.Join(parts[:len(parts)-1], ":")
+	}
+
+	if len(parts) >= 4 && parts[len(parts)-2] == "chat" {
+		return strings.Join(parts[:len(parts)-2], ":")
+	}
+
+	return chatID
+}
 func (cb *ContextBuilder) RenderUserMessage(currentMessage string, attachments []bus.FileAttachment) string {
 	content := strings.TrimSpace(currentMessage)
 	attachmentContext := utils.BuildAttachmentContext(attachments)

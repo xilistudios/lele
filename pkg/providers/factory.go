@@ -253,16 +253,16 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "openai", "gpt":
+			if cfg.Providers.OpenAI.AuthMethod == "codex-cli" && cfg.Providers.OpenAI.APIKey == "" {
+				sel.providerType = providerTypeCodexCLIToken
+				return sel, nil
+			}
+			if (cfg.Providers.OpenAI.AuthMethod == "oauth" || cfg.Providers.OpenAI.AuthMethod == "token") && cfg.Providers.OpenAI.APIKey == "" {
+				sel.providerType = providerTypeCodexAuth
+				return sel, nil
+			}
 			if cfg.Providers.OpenAI.APIKey != "" || cfg.Providers.OpenAI.AuthMethod != "" {
 				sel.enableWebSearch = cfg.Providers.OpenAI.WebSearch
-				if cfg.Providers.OpenAI.AuthMethod == "codex-cli" {
-					sel.providerType = providerTypeCodexCLIToken
-					return sel, nil
-				}
-				if cfg.Providers.OpenAI.AuthMethod == "oauth" || cfg.Providers.OpenAI.AuthMethod == "token" {
-					sel.providerType = providerTypeCodexAuth
-					return sel, nil
-				}
 				sel.apiKey = cfg.Providers.OpenAI.APIKey
 				sel.apiBase = cfg.Providers.OpenAI.APIBase
 				sel.proxy = cfg.Providers.OpenAI.Proxy
@@ -271,15 +271,15 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				}
 			}
 		case "anthropic", "claude":
-			if cfg.Providers.Anthropic.APIKey != "" || cfg.Providers.Anthropic.AuthMethod != "" {
-				if cfg.Providers.Anthropic.AuthMethod == "oauth" || cfg.Providers.Anthropic.AuthMethod == "token" {
-					sel.apiBase = cfg.Providers.Anthropic.APIBase
-					if sel.apiBase == "" {
-						sel.apiBase = defaultAnthropicAPIBase
-					}
-					sel.providerType = providerTypeClaudeAuth
-					return sel, nil
+			if (cfg.Providers.Anthropic.AuthMethod == "oauth" || cfg.Providers.Anthropic.AuthMethod == "token") && cfg.Providers.Anthropic.APIKey == "" {
+				sel.apiBase = cfg.Providers.Anthropic.APIBase
+				if sel.apiBase == "" {
+					sel.apiBase = defaultAnthropicAPIBase
 				}
+				sel.providerType = providerTypeClaudeAuth
+				return sel, nil
+			}
+			if cfg.Providers.Anthropic.APIKey != "" || cfg.Providers.Anthropic.AuthMethod != "" {
 				sel.apiKey = cfg.Providers.Anthropic.APIKey
 				sel.apiBase = cfg.Providers.Anthropic.APIBase
 				sel.proxy = cfg.Providers.Anthropic.Proxy
@@ -410,7 +410,9 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 	if sel.apiKey == "" && sel.apiBase == "" {
 		if ref := ParseModelRef(model, ""); ref != nil {
 			if named, ok := cfg.Providers.GetNamed(ref.Provider); ok {
-				return selectionFromNamedProvider(cfg, ref.Provider, ref.Model, named)
+				if named.APIKey != "" || ref.Provider == "openai" || ref.Provider == "anthropic" {
+					return selectionFromNamedProvider(cfg, ref.Provider, ref.Model, named)
+				}
 			}
 		}
 		switch {

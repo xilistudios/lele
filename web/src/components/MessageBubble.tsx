@@ -58,6 +58,11 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             <span className="text-sm font-medium text-text-secondary font-mono">
               {message.toolName}
             </span>
+            {message.toolArgs && (
+              <span className="min-w-0 truncate text-xs text-text-tertiary">
+                {message.toolArgs.split('\n')[0]}
+              </span>
+            )}
             {message.toolStatus && <StatusBadge status={message.toolStatus} />}
           </button>
           {subagentSessionKey && message.toolStatus !== 'executing' && onNavigateToSession ? (

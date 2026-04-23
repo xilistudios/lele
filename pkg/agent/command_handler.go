@@ -406,7 +406,10 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	history := agent.Sessions.GetHistory(sessionKey)
 	historyTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
-	summaryTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	summaryTokens := 0
+	if summary != "" && !hasSummaryMessage(history, summary) {
+		summaryTokens = ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	}
 
 	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
