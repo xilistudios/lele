@@ -165,6 +165,14 @@ func (m *nativeTestAgentLoop) IsSessionProcessing(sessionKey string) bool {
 	return false
 }
 
+func (m *nativeTestAgentLoop) GetTokenCounts(sessionKey string) (int, int, int) {
+	return 0, 0, 128000
+}
+
+func (m *nativeTestAgentLoop) GetCurrentContextUsage(sessionKey string) (int, int) {
+	return 0, 128000
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop
@@ -789,6 +797,12 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 	decodeWSData(t, complete.Data, &completePayload)
 	if completePayload.MessageID != "msg-1" || completePayload.SessionKey != sessionKey || completePayload.Content != "Hello back" {
 		t.Fatalf("complete payload = %#v, want msg-1/Hello back", completePayload)
+	}
+
+	// After message.complete, a history.updated event is emitted to signal persistence
+	historyUpdated := readWSMessage(t, conn)
+	if historyUpdated.Event != "history.updated" {
+		t.Fatalf("event after complete = %q, want history.updated", historyUpdated.Event)
 	}
 
 	ts.channel.Send(context.Background(), bus.OutboundMessage{

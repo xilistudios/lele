@@ -1,9 +1,9 @@
 import { type ReactNode, createContext, useContext, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ChatSession } from '../lib/types'
+import type { ChatSession, ReasoningConfig } from '../lib/types'
 import { useAppLogicContext } from './AppLogicContext'
 
-export type SelectOption = { value: string; label: string }
+export type SelectOption = { value: string; label: string; reasoning?: ReasoningConfig }
 
 type GroupedModels = { label: string; options: SelectOption[] }[] | undefined
 
@@ -19,12 +19,12 @@ const deriveSessionNameFromMessages = (currentSessionKey: string, content: strin
 }
 
 type ChatPageContextValue = {
-  // Computed state
   canCancel: boolean
   hasConversation: boolean
   availableModels: SelectOption[]
   groupedModels: GroupedModels
   selectedModel: string
+  thinkLevel: string
   currentSession: ChatSession | null
   parentSession: ChatSession | null
 }
@@ -38,6 +38,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     isStreaming,
     toolStatus,
     modelState,
+    thinkLevel,
     currentAgent,
     sessions,
     currentSessionKey,
@@ -96,6 +97,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
     availableModels,
     groupedModels,
     selectedModel,
+    thinkLevel,
     currentSession,
     parentSession,
   }

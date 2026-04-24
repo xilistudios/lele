@@ -118,9 +118,9 @@ func (t *ReadFileTool) Parameters() map[string]interface{} {
 
 const (
 	// maxLinesAuto is the threshold for auto-limiting large files
-	maxLinesAuto = 500
+	maxLinesAuto = 1000
 	// chunkSize is the number of lines to show when auto-limiting
-	chunkSize = 100
+	chunkSize = 500
 )
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {

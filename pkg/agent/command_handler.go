@@ -404,16 +404,16 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 
 	// Calculate context tokens including system prompt (initial context)
 	history := agent.Sessions.GetHistory(sessionKey)
-	historyTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens(history)
+	historyTokens := ch.al.sessionManager.EstimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
 	summaryTokens := 0
 	if summary != "" && !hasSummaryMessage(history, summary) {
-		summaryTokens = ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+		summaryTokens = ch.al.sessionManager.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
 	}
 
 	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
-	systemTokens := ch.al.sessionManager.(*sessionManagerImpl).estimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
+	systemTokens := ch.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	// Total context = system prompt + summary (if any) + history
 	contextTokens := systemTokens + summaryTokens + historyTokens

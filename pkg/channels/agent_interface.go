@@ -61,6 +61,12 @@ type AgentProvidable interface {
 	ResolveSessionKey(sessionKey string) string
 	// IsSessionProcessing devuelve true si hay un procesamiento LLM activo para la sesión
 	IsSessionProcessing(sessionKey string) bool
+	// GetTokenCounts returns the cumulative input/output token counts and context window for a session
+	GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int)
+	// GetCurrentContextUsage returns the actual current context size (history + summary + system prompt)
+	// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
+	// this reflects what would actually be sent to the LLM on the next turn.
+	GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int)
 }
 
 // AgentBasicInfo contiene información pública de un agente
@@ -74,4 +80,5 @@ type AgentBasicInfo struct {
 	Temperature   float64
 	Fallbacks     []string
 	SkillsFilter  []string
+	Reasoning     *config.ReasoningConfig
 }

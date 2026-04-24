@@ -420,6 +420,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	wsConn.Close()
 	<-done
+	cancel()
 	wg.Wait()
 
 	count := received.Load()

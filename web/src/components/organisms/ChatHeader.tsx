@@ -6,28 +6,15 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
+import { ContextIndicator } from '../atoms/ContextIndicator'
 import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
-import { Spinner } from '../atoms/Spinner'
-
-function ToolStatus({ tool, action }: { tool: string; action: string }) {
-  const displayAction = action.replace(/^[^\s]+\s/, '').split('\n')[0]
-  return (
-    <>
-      <span className="rounded bg-surface-card px-2 py-0.5 font-mono text-[11px] text-text-secondary">
-        {tool}
-      </span>
-      <span className="truncate max-w-[200px]">{displayAction || action}</span>
-    </>
-  )
-}
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, toolStatus, isStreaming, onCancel, onToggleSidebar, wsStatus } =
-    useAppLogicContext()
+  const { currentAgent, onToggleSidebar, wsStatus } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
-  const { currentSession, parentSession, canCancel } = useChatPageContext()
+  const { currentSession, parentSession } = useChatPageContext()
 
   const currentTitle = currentSession
     ? formatSessionTitle(currentSession.key, currentSession.name, currentSession.message_count)
@@ -65,31 +52,12 @@ export const ChatHeader = memo(function ChatHeader() {
             {currentAgent?.name ?? t('chat.default')}
           </p>
         </div>
-
-        <div className="flex items-center gap-3">
-          {(isStreaming || toolStatus) && (
-            <div className="flex items-center gap-1.5 text-xs text-text-tertiary">
-              {toolStatus ? (
-                <ToolStatus tool={toolStatus.tool} action={toolStatus.action} />
-              ) : (
-                <Spinner size="sm" />
-              )}
-            </div>
-          )}
-
-          {canCancel && (
-            <button
-              type="button"
-              className="rounded-md border border-border px-3 py-1 text-xs text-state-error transition-colors hover:bg-state-error-light"
-              onClick={onCancel}
-            >
-              {t('chat.cancel')}
-            </button>
-          )}
-        </div>
       </div>
 
-      <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
+      <div className="flex items-center gap-1">
+        <ContextIndicator />
+        <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
+      </div>
     </div>
   )
 })

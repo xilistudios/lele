@@ -560,6 +560,36 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 	}
 }
 
+func TestProvidersConfig_ResolveModelAlias_KeyOnlyNoModelField(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Providers.Named = map[string]NamedProviderConfig{
+		"deepseek": {
+			Type: "deepseek",
+			Models: map[string]ProviderModelConfig{
+				"deepseek-v4-flash": {ContextWindow: 1000000, MaxTokens: 32000},
+				"deepseek-v4-pro":   {ContextWindow: 1000000, MaxTokens: 32000},
+			},
+		},
+		"openrouter": {
+			Type: "openrouter",
+			Models: map[string]ProviderModelConfig{
+				"openrouter-deepseek-v4-flash": {Model: "deepseek/deepseek-v4-flash"},
+				"openrouter-deepseek-v4-pro":   {Model: "deepseek/deepseek-v4-pro"},
+			},
+		},
+	}
+
+	if got := cfg.Providers.ResolveModelAlias("deepseek/deepseek-v4-flash", "alibaba"); got != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("ResolveModelAlias(deepseek/deepseek-v4-flash, alibaba) = %q, want %q", got, "deepseek/deepseek-v4-flash")
+	}
+	if got := cfg.Providers.ResolveModelAlias("deepseek/deepseek-v4-pro", ""); got != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("ResolveModelAlias(deepseek/deepseek-v4-pro) = %q, want %q", got, "deepseek/deepseek-v4-pro")
+	}
+	if got := cfg.Providers.ResolveModelAlias("deepseek-v4-flash", "deepseek"); got != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("ResolveModelAlias(deepseek-v4-flash, deepseek) = %q, want %q", got, "deepseek/deepseek-v4-flash")
+	}
+}
+
 func TestExpandEnvVars_Basic(t *testing.T) {
 	os.Setenv("TEST_API_KEY", "my-secret-key")
 	defer os.Unsetenv("TEST_API_KEY")

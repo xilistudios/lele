@@ -21,8 +21,14 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { session } = useAuthContext()
-  const { sessions, currentSessionKey, parentSessionKey, onCreateSession, onDeleteSession } =
-    useAppLogicContext()
+  const {
+    sessions,
+    currentSessionKey,
+    parentSessionKey,
+    processingSessions,
+    onCreateSession,
+    onDeleteSession,
+  } = useAppLogicContext()
   const isMobile = useIsMobile()
 
   const deviceName = session?.device_name ?? 'lele'
@@ -113,20 +119,35 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 {sortedSessions.length === 0 ? (
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
-                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => handleSessionSelect(s.key)}
-                      className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
-                        s.key === currentSession?.key
-                          ? 'bg-surface-card text-text-primary'
-                          : 'text-text-secondary hover:bg-surface-card hover:text-text-primary'
-                      }`}
-                    >
-                      <span className="truncate">{s.name || s.key}</span>
-                    </button>
-                  ))
+                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => {
+                    const isProcessing = processingSessions.has(s.key)
+                    return (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => handleSessionSelect(s.key)}
+                        className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                          s.key === currentSession?.key
+                            ? 'bg-surface-card text-text-primary'
+                            : 'text-text-secondary hover:bg-surface-card hover:text-text-primary'
+                        }`}
+                      >
+                        {isProcessing && (
+                          <svg
+                            className="h-3 w-3 shrink-0 animate-spin text-accent"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            aria-hidden="true"
+                          >
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                        )}
+                        <span className="truncate">{s.name || s.key}</span>
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </Popover>
@@ -146,6 +167,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                       sessionName={s.name}
                       messageCount={s.message_count}
                       selected={s.key === currentSession?.key}
+                      isProcessing={processingSessions.has(s.key)}
                       onSelect={() => handleSessionSelect(s.key)}
                       onDelete={() => onDeleteSession(s.key)}
                       collapsed={false}
@@ -161,28 +183,28 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-4'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
         >
           <Popover
-              block
-              trigger={
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}
-                  style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
-                  aria-label={collapsed ? t('chat.deviceMenu') : undefined}
-                >
-                  <div className="flex flex-shrink-0 items-center justify-center rounded-md bg-surface-card text-xs font-bold text-text-primary h-7 w-7">
-                    {deviceName?.[0]?.toUpperCase() ?? 'L'}
-                  </div>
-                  {!collapsed && (
-                    <div className="min-w-0 flex-1 px-2">
-                      <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
-                    </div>
-                  )}
+            block
+            trigger={
+              <div
+                role="button"
+                tabIndex={0}
+                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}
+                style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
+                aria-label={collapsed ? t('chat.deviceMenu') : undefined}
+              >
+                <div className="flex flex-shrink-0 items-center justify-center rounded-md bg-surface-card text-xs font-bold text-text-primary h-7 w-7">
+                  {deviceName?.[0]?.toUpperCase() ?? 'L'}
                 </div>
-              }
-              popoverWidth={150}
-              popoverHeight={80}
-            >
+                {!collapsed && (
+                  <div className="min-w-0 flex-1 px-2">
+                    <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
+                  </div>
+                )}
+              </div>
+            }
+            popoverWidth={150}
+            popoverHeight={80}
+          >
             <div className="flex flex-col gap-1">
               <button
                 type="button"

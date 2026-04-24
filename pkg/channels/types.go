@@ -3,6 +3,8 @@ package channels
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type ClientInfo struct {
@@ -193,6 +195,15 @@ type SessionModelUpdateRequest struct {
 	Model string `json:"model"`
 }
 
+type SessionThinkingResponse struct {
+	SessionKey string `json:"session_key"`
+	Level      string `json:"level"`
+}
+
+type SessionThinkingUpdateRequest struct {
+	Level string `json:"level"`
+}
+
 type SessionAgentResponse struct {
 	SessionKey string `json:"session_key"`
 	AgentID    string `json:"agent_id"`
@@ -211,12 +222,22 @@ type SessionNameResponse struct {
 	Name       string `json:"name"`
 }
 
+type SessionContextResponse struct {
+	SessionKey    string `json:"session_key"`
+	InputTokens   int    `json:"input_tokens"`
+	OutputTokens  int    `json:"output_tokens"`
+	TotalTokens   int    `json:"total_tokens"`
+	ContextWindow int    `json:"context_window"`
+	UsagePercent  float64 `json:"usage_percent"`
+}
+
 type NativeAgentInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Workspace string `json:"workspace"`
-	Model     string `json:"model"`
-	Default   bool   `json:"default"`
+	ID        string                  `json:"id"`
+	Name      string                  `json:"name"`
+	Workspace string                  `json:"workspace"`
+	Model     string                  `json:"model"`
+	Default   bool                    `json:"default"`
+	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type AgentsResponse struct {
@@ -284,8 +305,9 @@ type ModelGroup struct {
 }
 
 type ModelOption struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
+	Value      string                  `json:"value"`
+	Label      string                  `json:"label"`
+	Reasoning  *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type ToolInfo struct {

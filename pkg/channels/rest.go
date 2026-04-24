@@ -366,6 +366,35 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	if action == "thinking" {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, SessionThinkingResponse{
+				SessionKey: sessionKey,
+				Level:      n.agentLoop.GetThinkLevel(sessionKey),
+			})
+			return
+		case http.MethodPatch:
+			var req SessionThinkingUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+				return
+			}
+			if !n.agentLoop.SetThinkLevel(sessionKey, req.Level) {
+				writeError(w, http.StatusBadRequest, "invalid level (valid: off, low, medium, high)", "level_invalid")
+				return
+			}
+			writeJSON(w, http.StatusOK, SessionThinkingResponse{
+				SessionKey: sessionKey,
+				Level:      n.agentLoop.GetThinkLevel(sessionKey),
+			})
+			return
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+			return
+		}
+	}
+
 	if action == "agent" {
 		switch r.Method {
 		case http.MethodGet:
@@ -400,6 +429,25 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 	if action == "compact" {
 		result := n.agentLoop.CompactSession(sessionKey)
 		writeJSON(w, http.StatusOK, map[string]string{"result": result})
+		return
+	}
+
+	if action == "context" {
+		currentTokens, contextWindow := n.agentLoop.GetCurrentContextUsage(sessionKey)
+		var usagePercent float64
+		if contextWindow > 0 {
+			usagePercent = float64(currentTokens) / float64(contextWindow) * 100.0
+			if usagePercent > 100 {
+				usagePercent = 100
+			}
+		}
+		writeJSON(w, http.StatusOK, SessionContextResponse{
+			SessionKey:    sessionKey,
+			InputTokens:   currentTokens,
+			TotalTokens:   currentTokens,
+			ContextWindow: contextWindow,
+			UsagePercent:  usagePercent,
+		})
 		return
 	}
 
@@ -459,6 +507,7 @@ func (n *NativeChannel) handleAgents(w http.ResponseWriter, r *http.Request) {
 				Workspace: info.Workspace,
 				Model:     info.Model,
 				Default:   info.ID == defaultID,
+				Reasoning: info.Reasoning,
 			})
 		}
 	}
@@ -787,14 +836,19 @@ func (n *NativeChannel) buildModelGroups(_ string, _ []string) []ModelGroup {
 			Models:   make([]ModelOption, 0, len(aliases)),
 		}
 		for _, alias := range aliases {
-			resolved := strings.TrimSpace(provider.Models[alias].Model)
+			modelCfg := provider.Models[alias]
+			resolved := strings.TrimSpace(modelCfg.Model)
 			value := alias
 			if resolved != "" {
 				value = providerName + "/" + resolved
 			} else {
 				value = providerName + "/" + alias
 			}
-			group.Models = append(group.Models, ModelOption{Value: value, Label: alias})
+			group.Models = append(group.Models, ModelOption{
+				Value:     value,
+				Label:     alias,
+				Reasoning: modelCfg.Reasoning,
+			})
 		}
 		groups = append(groups, group)
 	}

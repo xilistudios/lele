@@ -4,6 +4,7 @@ export type Agent = {
   workspace: string
   model: string
   default?: boolean
+  reasoning?: ReasoningConfig
 }
 
 export type Attachment = {
@@ -239,6 +240,7 @@ export type EditableChannelsConfig = {
 export type ReasoningConfig = {
   effort?: 'low' | 'medium' | 'high'
   summary?: 'auto' | 'detailed' | 'concise'
+  enable?: boolean
 }
 
 export type ProviderModelConfig = {
@@ -396,6 +398,7 @@ export type SessionModelResponse = {
 export type ModelOption = {
   value: string
   label: string
+  reasoning?: ReasoningConfig
 }
 
 export type ModelGroup = {
@@ -411,6 +414,20 @@ export type SessionNameResponse = {
 export type SessionAgentResponse = {
   session_key: string
   agent_id: string
+}
+
+export type SessionThinkingResponse = {
+  session_key: string
+  level: string
+}
+
+export type SessionContextResponse = {
+  session_key: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  context_window: number
+  usage_percent: number
 }
 
 export type ChannelsResponse = {

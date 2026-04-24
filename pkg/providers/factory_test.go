@@ -79,6 +79,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "anthropic oauth routes to claude auth provider",
 			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = ""
 				cfg.Agents.Defaults.Model = "claude-sonnet-4-5-20250929"
 				cfg.Providers.Anthropic.AuthMethod = "oauth"
 			},
@@ -87,6 +88,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "openai oauth routes to codex auth provider",
 			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = ""
 				cfg.Agents.Defaults.Model = "gpt-4o"
 				cfg.Providers.OpenAI.AuthMethod = "oauth"
 			},
@@ -95,6 +97,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "openai codex-cli auth routes to codex cli token provider",
 			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = ""
 				cfg.Agents.Defaults.Model = "gpt-4o"
 				cfg.Providers.OpenAI.AuthMethod = "codex-cli"
 			},
@@ -111,6 +114,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "zhipu model uses zhipu base default",
 			setup: func(cfg *config.Config) {
+				cfg.Agents.Defaults.Provider = ""
 				cfg.Agents.Defaults.Model = "glm-4.7"
 				cfg.Providers.Zhipu.APIKey = "zhipu-key"
 			},

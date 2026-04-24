@@ -67,11 +67,12 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	}
 
 	client := &WSClient{
-		ID:         clientID,
-		Conn:       conn,
-		ClientInfo: clientInfo,
-		SessionKey: sessionKey,
-		SendChan:   make(chan []byte, 256),
+		ID:            clientID,
+		Conn:          conn,
+		ClientInfo:    clientInfo,
+		SessionKey:    sessionKey,
+		Subscriptions: map[string]bool{sessionKey: true},
+		SendChan:      make(chan []byte, 256),
 	}
 
 	n.addWSClient(client)
@@ -315,12 +316,21 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 
 	oldSessionKey := client.SessionKey
 	client.SessionKey = payload.SessionKey
+
+	// Track subscription so events for this session continue flowing
+	// even when the client switches to another session
+	if client.Subscriptions == nil {
+		client.Subscriptions = make(map[string]bool)
+	}
+	client.Subscriptions[payload.SessionKey] = true
+
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
 
 	logger.InfoCF("native", "Client subscribed to session", map[string]interface{}{
 		"client_id":       client.ID,
 		"old_session_key": oldSessionKey,
 		"new_session_key": payload.SessionKey,
+		"subscriptions":   len(client.Subscriptions),
 	})
 
 	processing := false
@@ -350,6 +360,11 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 
 	oldSessionKey := client.SessionKey
 
+	// Remove from subscriptions map
+	if payload.SessionKey != "" {
+		delete(client.Subscriptions, payload.SessionKey)
+	}
+
 	// Only reset to default if unsubscribing from the current session
 	// or if no specific session_key is provided (full unsubscribe)
 	if payload.SessionKey == "" || payload.SessionKey == client.SessionKey {
@@ -361,6 +376,7 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 		"old_session_key": oldSessionKey,
 		"payload_key":     payload.SessionKey,
 		"new_session_key": client.SessionKey,
+		"subscriptions":   len(client.Subscriptions),
 	})
 
 	_ = client.Send(mustMarshal(WSMessage{
@@ -379,10 +395,12 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage) {
 	n.agentLoop.StopAgent(client.SessionKey)
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "cancel.ack",
-		Data:  mustMarshal(map[string]string{"status": "cancelled"}),
-	}))
+	// Broadcast to all subscribed sessions so the frontend
+	// can update processing status correctly
+	n.broadcastToSession(client.SessionKey, "cancel.ack", map[string]interface{}{
+		"status":      "cancelled",
+		"session_key": client.SessionKey,
+	})
 }
 
 func (n *NativeChannel) sendWelcome(client *WSClient) {

@@ -543,6 +543,7 @@ func (al *AgentLoop) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool
 		Temperature:   agent.Temperature,
 		Fallbacks:     agent.Fallbacks,
 		SkillsFilter:  agent.SkillsFilter,
+		Reasoning:     agent.Reasoning,
 	}, true
 }
 
@@ -798,11 +799,11 @@ func (al *AgentLoop) SetThinkLevel(sessionKey string, level string) bool {
 	if sessionKey == "" {
 		return false
 	}
-	validLevels := map[string]bool{"off": true, "low": true, "medium": true, "high": true}
+	validLevels := map[string]bool{"default": true, "off": true, "low": true, "medium": true, "high": true}
 	if !validLevels[level] {
 		return false
 	}
-	if level == "off" {
+	if level == "off" || level == "default" {
 		al.sessionThinking.Delete(sessionKey)
 	} else {
 		al.sessionThinking.Store(sessionKey, level)
@@ -860,6 +861,51 @@ func (al *AgentLoop) SetName(sessionKey string, name string) error {
 		return fmt.Errorf("no agent available for session")
 	}
 	return agent.Sessions.SetName(sessionKey, name)
+}
+
+// GetTokenCounts returns the input/output token counts and context window for a session (implements AgentProvidable).
+func (al *AgentLoop) GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int) {
+	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
+	agent := al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0, 0, 0
+	}
+	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(resolvedSessionKey)
+	contextWindow = agent.ContextWindow
+	return
+}
+
+// GetCurrentContextUsage returns the actual current context size (history + summary + system prompt)
+// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
+// this reflects what would actually be sent to the LLM on the next turn.
+func (al *AgentLoop) GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int) {
+	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
+	agent := al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0, 0
+	}
+
+	// Get history and estimate its token count
+	history := agent.Sessions.GetHistory(resolvedSessionKey)
+	historyTokens := al.sessionManager.EstimateTokens(history)
+
+	// Get summary and estimate its token count
+	summary := agent.Sessions.GetSummary(resolvedSessionKey)
+	summaryTokens := 0
+	if summary != "" && !hasSummaryMessage(history, summary) {
+		summaryTokens = al.sessionManager.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	}
+
+	// Build system prompt and estimate its token count
+	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+	systemTokens := al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
+
+	currentTokens = systemTokens + summaryTokens + historyTokens
+	contextWindow = agent.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = 128000
+	}
+	return
 }
 
 // ============================================================================

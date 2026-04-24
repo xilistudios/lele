@@ -220,6 +220,13 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 		if providerName == "" || providerName == defaultProvider || ref.Provider == providerName {
 			providerName = ref.Provider
 		}
+		// OpenRouter requires fully qualified model names like
+		// "deepseek/deepseek-v4-pro". ParseModelRef strips the provider
+		// prefix, so restore the original model when the provider is
+		// explicitly OpenRouter.
+		if providerName == "openrouter" && strings.Contains(rawModel, "/") {
+			model = rawModel
+		}
 	}
 	return resolveProviderSelectionByName(cfg, providerName, model)
 }
@@ -390,7 +397,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				if sel.apiBase == "" {
 					sel.apiBase = "https://api.deepseek.com/v1"
 				}
-				if model != "deepseek-chat" && model != "deepseek-reasoner" {
+				if !strings.HasPrefix(model, "deepseek-") {
 					sel.model = "deepseek-chat"
 				}
 			}

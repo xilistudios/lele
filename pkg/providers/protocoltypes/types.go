@@ -77,13 +77,13 @@ type ContentPart struct {
 
 // Message represents a message in a conversation.
 type Message struct {
-	Role             string        `json:"-"`
-	Content          string        `json:"-"`
-	ContentParts     []ContentPart `json:"-"`
-	ToolCalls        []ToolCall    `json:"-"`
-	ToolCallID       string        `json:"-"`
-	Media            []string      `json:"-"`
-	ReasoningContent string        `json:"-"`
+	Role             string        `json:"role"`
+	Content          string        `json:"content"`
+	ContentParts     []ContentPart `json:"content_parts,omitempty"`
+	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	Media            []string      `json:"media,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
 }
 
 func (m *Message) MarshalJSON() ([]byte, error) {
@@ -92,7 +92,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		Content          interface{} `json:"content"`
 		ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 		ToolCallID       string      `json:"tool_call_id,omitempty"`
-		ReasoningContent string      `json:"reasoning_content,omitempty"`
+		ReasoningContent string      `json:"reasoning_content"`
 	}
 
 	content := interface{}(m.Content)

@@ -53,13 +53,24 @@
     "toggleSidebar": "Mostrar/ocultar sidebar",
     "backTo": "Volver a {{title}}",
     "recent": "Recientes",
-    "recentChats": "Chats recientes"
+    "recentChats": "Chats recientes",
+    "thinking": "Pensamiento",
+    "thinkingDefault": "Por defecto",
+    "thinkingOff": "Apagado",
+    "thinkingLow": "Bajo",
+    "thinkingMedium": "Medio",
+    "thinkingHigh": "Alto"
   },
   "connection": {
     "connected": "Conectado",
     "connecting": "Conectando",
     "disconnected": "Desconectado",
-    "statusAria": "Estado de conexión: {{status}}. Click para detalles."
+    "statusAria": "Estado de conexión: {{status}}. Click para detalles.",
+    "context": "Contexto",
+    "currentContext": "Contexto actual",
+    "inputTokens": "Tokens de entrada",
+    "outputTokens": "Tokens de salida",
+    "contextWindow": "Ventana de contexto"
   },
   "approval": {
     "inlineTitle": "Aprobación requerida",
@@ -218,6 +229,7 @@
       "modelMaxTokens": "Máx tokens",
       "modelTemperature": "Temperatura",
       "modelVision": "Visión",
+      "modelThinking": "Pensamiento",
       "agentId": "ID del agente",
       "agentName": "Nombre",
       "agentDefault": "Predeterminado",
@@ -226,6 +238,7 @@
       "agentModelFallbacks": "Fallbacks de modelo",
       "agentSkills": "Skills",
       "agentTemperature": "Temperatura",
+      "agentThinking": "Modo pensamiento",
       "bindingAgentId": "ID del agente",
       "bindingChannel": "Canal",
       "bindingAccountId": "ID de cuenta",

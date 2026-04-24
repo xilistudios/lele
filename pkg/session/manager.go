@@ -227,6 +227,26 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
+// RemoveLastMessage removes the most recent message from the session history.
+// Returns true if a message was removed, false if the history is empty or session doesn't exist.
+func (sm *SessionManager) RemoveLastMessage(key string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return false
+	}
+
+	if len(session.Messages) == 0 {
+		return false
+	}
+
+	session.Messages = session.Messages[:len(session.Messages)-1]
+	session.Updated = time.Now()
+	return true
+}
+
 func (sm *SessionManager) ShouldStartFreshSession(key string, threshold time.Duration) (bool, time.Duration) {
 	if threshold <= 0 {
 		return false, 0

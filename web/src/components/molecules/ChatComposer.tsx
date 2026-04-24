@@ -7,7 +7,7 @@ import { SearchableSelect } from './SearchableSelect'
 
 export function ChatComposer() {
   const { t } = useTranslation()
-  const { canCancel, hasConversation, availableModels, groupedModels, selectedModel } =
+  const { canCancel, hasConversation, availableModels, groupedModels, selectedModel, thinkLevel } =
     useChatPageContext()
   const {
     currentAgent,
@@ -19,6 +19,7 @@ export function ChatComposer() {
     onAttachmentsChange,
     onSelectAgent,
     onSelectModel,
+    onSelectThinkLevel,
   } = useAppLogicContext()
 
   const [draft, setDraft] = useState('')
@@ -49,9 +50,53 @@ export function ChatComposer() {
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
   }
 
-  const agentsOptions = agents.map((agent) => ({ value: agent.id, label: agent.name }))
+  const agentsOptions = agents.map((agent) => ({
+    value: agent.id,
+    label: agent.name,
+  }))
   const selectedAgentId = currentAgent?.id ?? ''
 
+  // Check if the currently selected model has reasoning enabled
+  // Normalize model names for comparison (with/without provider prefix)
+  const normalizeModelName = (modelName: string): string => {
+    const parts = modelName.split('/')
+    return parts.length > 1 ? parts[parts.length - 1] : modelName
+  }
+  const normalizedSelectedModel = normalizeModelName(selectedModel)
+
+  const findModelReasoning = (): boolean => {
+    // First check grouped models (they have the full provider/model format)
+    for (const group of groupedModels ?? []) {
+      for (const model of group.options) {
+        const normalizedValue = normalizeModelName(model.value)
+        if (
+          (model.value === selectedModel || normalizedValue === normalizedSelectedModel) &&
+          model.reasoning?.enable
+        ) {
+          return true
+        }
+      }
+    }
+    // Then check flat available models
+    for (const model of availableModels ?? []) {
+      const normalizedValue = normalizeModelName(model.value)
+      if (
+        (model.value === selectedModel || normalizedValue === normalizedSelectedModel) &&
+        model.reasoning?.enable
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+  const thinkingEnabled = findModelReasoning()
+  const thinkOptions = [
+    { value: 'default', label: t('chat.thinkingDefault') },
+    { value: 'off', label: t('chat.thinkingOff') },
+    { value: 'low', label: t('chat.thinkingLow') },
+    { value: 'medium', label: t('chat.thinkingMedium') },
+    { value: 'high', label: t('chat.thinkingHigh') },
+  ]
   return (
     <form onSubmit={submit}>
       {pendingAttachments.length > 0 && (
@@ -93,6 +138,22 @@ export function ChatComposer() {
                 searchPlaceholder={t('chat.model')}
                 value={selectedModel}
               />
+              {thinkingEnabled && (
+                <SearchableSelect
+                  ariaLabel={t('chat.thinking')}
+                  buttonLabel={t('chat.thinking')}
+                  direction="up"
+                  emptyLabel={t('chat.thinkingOff')}
+                  onChange={onSelectThinkLevel}
+                  options={thinkOptions}
+                  placeholder={
+                    thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
+                  }
+                  searchAriaLabel={`${t('chat.thinking')} buscar`}
+                  searchPlaceholder={t('chat.thinking')}
+                  value={thinkLevel}
+                />
+              )}
               <SearchableSelect
                 ariaLabel={t('chat.agent')}
                 buttonLabel={t('chat.agent')}
@@ -117,7 +178,10 @@ export function ChatComposer() {
             onClick={canCancel ? onCancel : undefined}
             style={
               canCancel
-                ? { backgroundColor: 'rgba(255, 69, 58, 0.15)', border: '1px solid var(--border)' }
+                ? {
+                    backgroundColor: 'rgba(255, 69, 58, 0.15)',
+                    border: '1px solid var(--border)',
+                  }
                 : {}
             }
             onMouseEnter={(e) => {

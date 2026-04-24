@@ -1,6 +1,7 @@
 export { AddButton } from './AddButton'
 export { Card } from './Card'
 export { ConnectionIndicator } from './ConnectionIndicator'
+export { ContextIndicator } from './ContextIndicator'
 export { ErrorBanner } from './ErrorBanner'
 export { IconButton } from './IconButton'
 export { Logo } from './Logo'

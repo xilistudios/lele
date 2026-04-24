@@ -45,13 +45,14 @@ type NativeChannel struct {
 }
 
 type WSClient struct {
-	ID         string
-	Conn       *websocket.Conn
-	ClientInfo *ClientInfo
-	SessionKey string
-	SendChan   chan []byte
-	closed     bool
-	mu         sync.Mutex
+	ID            string
+	Conn          *websocket.Conn
+	ClientInfo    *ClientInfo
+	SessionKey    string
+	Subscriptions map[string]bool // all sessions this client is subscribed to
+	SendChan      chan []byte
+	closed        bool
+	mu            sync.Mutex
 }
 
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
@@ -190,6 +191,11 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 			})
 		}
 	}
+
+	n.pinLimiter.Stop()
+	n.pairLimiter.Stop()
+	n.apiLimiter.Stop()
+	n.wsMessageLimiter.Stop()
 
 	n.running = false
 	n.base.setRunning(false)
@@ -443,6 +449,11 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		Content:     msg.Content,
 		Attachments: attachmentsToMaps(msg.Attachments),
 	})
+
+	// Signal that session data has been persisted and is safe to refetch
+	n.sendWSEvent(sessionKey, "history.updated", map[string]interface{}{
+		"session_key": sessionKey,
+	})
 }
 
 func (n *NativeChannel) addWSClient(client *WSClient) {
@@ -474,10 +485,17 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	n.mu.RLock()
 	var targets []*WSClient
 	for _, client := range n.wsClients {
+		// Match by current session key (active subscription)
 		if client.SessionKey == sessionKey {
 			targets = append(targets, client)
 			continue
 		}
+		// Match by tracked subscriptions (sessions the client has subscribed to)
+		if client.Subscriptions != nil && client.Subscriptions[sessionKey] {
+			targets = append(targets, client)
+			continue
+		}
+		// Match by resolved session key (subagent parent sessions)
 		if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if resolved == sessionKey {

@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, cloneElement, isValidElement, useEffect, useState } from 'react'
 import { usePopoverPosition } from '../../hooks/usePopoverPosition'
 
 type Props = {
@@ -49,14 +49,20 @@ export function Popover({
   const horizontalClass = position.horizontal === 'right-align' ? 'right-0' : 'left-0'
 
   const triggerWithOnClick = isValidElement(trigger)
-    ? cloneElement(trigger as React.ReactElement<{ onClick?: () => void; onKeyDown?: (e: React.KeyboardEvent) => void }>, {
-        onClick: () => setIsOpen((prev) => !prev),
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            setIsOpen((prev) => !prev)
-          }
+    ? cloneElement(
+        trigger as React.ReactElement<{
+          onClick?: () => void
+          onKeyDown?: (e: React.KeyboardEvent) => void
+        }>,
+        {
+          onClick: () => setIsOpen((prev) => !prev),
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              setIsOpen((prev) => !prev)
+            }
+          },
         },
-      })
+      )
     : trigger
 
   return (

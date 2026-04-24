@@ -116,6 +116,8 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		}
 	}
 
+	applyThinkingMode(requestBody, options)
+
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -123,7 +125,6 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 
 	modelStr, _ := requestBody["model"].(string)
 	log.Printf("[DEBUG] OpenAICompat ChatCompletion: apiBase=%s, model=%s, apiKey=%s", p.apiBase, modelStr, maskAPIKey(p.apiKey))
-	logOutgoingRequest(p.apiBase, modelStr, false, jsonData)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
 	if err != nil {
@@ -205,6 +206,8 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		}
 	}
 
+	applyThinkingMode(requestBody, options)
+
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -242,8 +245,9 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 	var apiResponse struct {
 		Choices []struct {
 			Message struct {
-				Content   string `json:"content"`
-				ToolCalls []struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
 					Function *struct {
@@ -292,10 +296,11 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 	}
 
 	return &LLMResponse{
-		Content:      choice.Message.Content,
-		ToolCalls:    toolCalls,
-		FinishReason: choice.FinishReason,
-		Usage:        apiResponse.Usage,
+		Content:          choice.Message.Content,
+		ReasoningContent: choice.Message.ReasoningContent,
+		ToolCalls:        toolCalls,
+		FinishReason:     choice.FinishReason,
+		Usage:            apiResponse.Usage,
 	}, nil
 }
 
@@ -306,6 +311,9 @@ func normalizeModel(model, apiBase string) string {
 	}
 
 	if strings.Contains(strings.ToLower(apiBase), "openrouter.ai") {
+		if strings.HasPrefix(strings.ToLower(model), "openrouter/") {
+			return model[idx+1:]
+		}
 		return model
 	}
 	return model[idx+1:]
@@ -343,6 +351,7 @@ func asFloat(v interface{}) (float64, bool) {
 
 func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLMResponse, error) {
 	var contentBuf strings.Builder
+	var reasoningBuf strings.Builder
 	var toolCalls []protocoltypes.ToolCall
 	var finishReason string
 	var usage *protocoltypes.UsageInfo
@@ -365,8 +374,9 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLM
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string `json:"content"`
-					ToolCalls []struct {
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
+					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`
@@ -394,6 +404,10 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLM
 		if choice.Delta.Content != "" {
 			contentBuf.WriteString(choice.Delta.Content)
 			onChunk(choice.Delta.Content, false)
+		}
+
+		if choice.Delta.ReasoningContent != "" {
+			reasoningBuf.WriteString(choice.Delta.ReasoningContent)
 		}
 
 		for _, tc := range choice.Delta.ToolCalls {
@@ -448,9 +462,29 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLM
 	}
 
 	return &LLMResponse{
-		Content:      contentBuf.String(),
-		ToolCalls:    toolCalls,
-		FinishReason: finishReason,
-		Usage:        usage,
+		Content:          contentBuf.String(),
+		ReasoningContent: reasoningBuf.String(),
+		ToolCalls:        toolCalls,
+		FinishReason:     finishReason,
+		Usage:            usage,
 	}, nil
+}
+
+func applyThinkingMode(requestBody map[string]interface{}, options map[string]interface{}) {
+	thinkingEnabled, _ := options["thinking"].(bool)
+	if !thinkingEnabled {
+		return
+	}
+
+	requestBody["thinking"] = map[string]interface{}{
+		"type": "enabled",
+	}
+
+	if effort, ok := options["reasoning_effort"].(string); ok && effort != "" {
+		requestBody["reasoning_effort"] = effort
+	} else if reasoning, ok := options["reasoning"].(map[string]interface{}); ok {
+		if effort, ok := reasoning["effort"].(string); ok && effort != "" {
+			requestBody["reasoning_effort"] = effort
+		}
+	}
 }

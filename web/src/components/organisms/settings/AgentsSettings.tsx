@@ -43,6 +43,20 @@ export function AgentsSettings() {
     )
   }
 
+  const getThinkingEnabled = (agent: { reasoning?: { enable?: boolean } } | undefined): boolean => {
+    return agent?.reasoning?.enable ?? false
+  }
+
+  const toggleThinking = (index: number, agent: Record<string, unknown>, enabled: boolean) => {
+    const current = (agent as Record<string, unknown>).reasoning as
+      | Record<string, unknown>
+      | undefined
+    updateField(`agents.list.${index}.reasoning`, {
+      ...(current ?? {}),
+      enable: enabled,
+    })
+  }
+
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.agentsList')}>
@@ -121,7 +135,10 @@ export function AgentsSettings() {
                   emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
                   groups={getGroupsForAgent}
                   onChange={(v) =>
-                    updateField(`agents.list.${index}.model`, { ...agent.model, primary: v })
+                    updateField(`agents.list.${index}.model`, {
+                      ...agent.model,
+                      primary: v,
+                    })
                   }
                   options={getOptionsForAgent}
                   placeholder={getAgentModelPrimary(agent.model) || t('settings.selectModel')}
@@ -175,6 +192,21 @@ export function AgentsSettings() {
                   onChange={(v) =>
                     updateField(`agents.list.${index}.temperature`, v === 0 ? undefined : v)
                   }
+                />
+              </SettingsField>
+              <SettingsField
+                label={t('settings.fields.agentThinking')}
+                path={`agents.list.${index}.reasoning.enable`}
+                isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.reasoning.enable`)}
+              >
+                <BooleanInput
+                  id={`agents.list.${index}.reasoning.enable`}
+                  value={getThinkingEnabled(
+                    agent as Record<string, unknown> as {
+                      reasoning?: { enable?: boolean }
+                    },
+                  )}
+                  onChange={(v) => toggleThinking(index, agent as Record<string, unknown>, v)}
                 />
               </SettingsField>
             </NamedItemCard>

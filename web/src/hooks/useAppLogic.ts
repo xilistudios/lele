@@ -48,6 +48,7 @@ export function useAppLogic(
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
+  const [thinkLevel, setThinkLevel] = useState('default')
   const navigate = useNavigate()
 
   const sessionsHook = useChatSessions(api, token, clientId)
@@ -171,6 +172,13 @@ export function useAppLogic(
 
     modelLoadKeyRef.current = modelLoadKey
     loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation)
+
+    api
+      .sessionThinking(sessionsHook.currentSessionKey)
+      .then((res) => {
+        setThinkLevel(res.level)
+      })
+      .catch(() => {})
   }, [
     sessionsHook.currentSessionKey,
     currentAgentId,
@@ -237,9 +245,8 @@ export function useAppLogic(
       ) {
         return
       }
-      if (sessionsHook.currentSessionKey) {
-        wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
-      }
+      // Keep all session subscriptions active so we receive
+      // events (like message.complete) for background sessions
       subscribedSessionRef.current = null
       setParentSessionKey(options?.parentSessionKey ?? null)
       sessionsHook.selectSession(sessionKey)
@@ -260,7 +267,6 @@ export function useAppLogic(
       } catch {}
     },
     [
-      wsSend,
       sessionsHook.selectSession,
       sessionsHook.currentSessionKey,
       sessionsHook.currentSessionKeyRef,
@@ -280,9 +286,6 @@ export function useAppLogic(
       return
     }
 
-    if (sessionsHook.currentSessionKey) {
-      wsSend('unsubscribe', { session_key: sessionsHook.currentSessionKey })
-    }
     subscribedSessionRef.current = null
     setParentSessionKey(null)
     const newKey = sessionsHook.createSession()
@@ -290,7 +293,7 @@ export function useAppLogic(
       messagesHook.clearStreaming()
       navigate(`/chat/${encodeURIComponent(newKey)}`)
     }
-  }, [wsSend, sessionsHook, messagesHook.clearStreaming, navigate])
+  }, [sessionsHook, messagesHook.clearStreaming, navigate])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -323,6 +326,15 @@ export function useAppLogic(
       await selectModel(model, sessionsHook.currentSessionKey)
     },
     [sessionsHook.currentSessionKey, selectModel],
+  )
+
+  const handleSelectThinkLevel = useCallback(
+    async (level: string) => {
+      if (!sessionsHook.currentSessionKey) return
+      await api.updateSessionThinking(sessionsHook.currentSessionKey, level)
+      setThinkLevel(level)
+    },
+    [api, sessionsHook.currentSessionKey],
   )
 
   const handleUploadAttachments = useCallback(
@@ -377,6 +389,7 @@ export function useAppLogic(
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
   const isStreaming =
     messagesHook.streamingMessages.some((m) => m.streaming) || chatHistory.processing
+  const processingSessions = messagesHook.processingSessions
 
   return {
     error,
@@ -386,7 +399,9 @@ export function useAppLogic(
     diagnosticsOpen,
     sidebarOpen,
     modelState,
+    thinkLevel,
     isStreaming,
+    processingSessions,
     sessions: sessionsHook.sessions,
     currentSessionKey: sessionsHook.currentSessionKey,
     parentSessionKey,
@@ -404,6 +419,7 @@ export function useAppLogic(
     onClearSession: handleClearSession,
     onSelectAgent: handleSelectAgent,
     onSelectModel: (model: string) => void handleSelectModel(model),
+    onSelectThinkLevel: handleSelectThinkLevel,
     onUploadAttachments: handleUploadAttachments,
     onAttachmentsChange: messagesHook.setPendingAttachments,
     onLogout: handleLogout,

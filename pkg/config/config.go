@@ -352,6 +352,7 @@ type OpenAIProviderConfig struct {
 type ReasoningConfig struct {
 	Effort  *string `json:"effort,omitempty"`  // "low", "medium", "high"
 	Summary *string `json:"summary,omitempty"` // "auto", "detailed", "concise"
+	Enable  bool    `json:"enable,omitempty"`  // enables thinking/reasoning mode (e.g. DeepSeek v4)
 }
 
 // Validate checks if the reasoning config has valid values.
@@ -575,7 +576,7 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 
 	resolved := strings.TrimSpace(aliasCfg.Model)
 	if resolved == "" {
-		return "", false
+		return model, true
 	}
 	return resolved, true
 }

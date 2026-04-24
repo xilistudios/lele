@@ -12,6 +12,7 @@ type rateLimiter struct {
 	rate            int
 	window          time.Duration
 	cleanupInterval time.Duration
+	stopCh          chan struct{}
 }
 
 type rateLimitEntry struct {
@@ -25,6 +26,7 @@ func newRateLimiter(rate int, window time.Duration) *rateLimiter {
 		rate:            rate,
 		window:          window,
 		cleanupInterval: 5 * time.Minute,
+		stopCh:          make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -33,15 +35,31 @@ func newRateLimiter(rate int, window time.Duration) *rateLimiter {
 func (rl *rateLimiter) cleanup() {
 	ticker := time.NewTicker(rl.cleanupInterval)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for key, entry := range rl.entries {
-			if now.Sub(entry.windowStart) > rl.window {
-				delete(rl.entries, key)
+	for {
+		select {
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for key, entry := range rl.entries {
+				if now.Sub(entry.windowStart) > rl.window {
+					delete(rl.entries, key)
+				}
 			}
+			rl.mu.Unlock()
+		case <-rl.stopCh:
+			return
 		}
-		rl.mu.Unlock()
+	}
+}
+
+func (rl *rateLimiter) Stop() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	select {
+	case <-rl.stopCh:
+		// Already closed
+	default:
+		close(rl.stopCh)
 	}
 }
 

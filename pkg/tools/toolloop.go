@@ -95,6 +95,17 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"iteration":     iteration,
 					"content_chars": len(finalContent),
 				})
+
+			// Save assistant message with reasoning content (important for thinking models)
+			assistantMsg := providers.Message{
+				Role:             "assistant",
+				Content:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+			}
+			messages = append(messages, assistantMsg)
+			if config.SessionRecorder != nil && config.SessionKey != "" {
+				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
+			}
 			break
 		}
 
@@ -112,8 +123,9 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 		// 6. Build assistant message with tool calls
 		assistantMsg := providers.Message{
-			Role:    "assistant",
-			Content: response.Content,
+			Role:             "assistant",
+			Content:          response.Content,
+			ReasoningContent: response.ReasoningContent,
 		}
 		for _, tc := range response.ToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)
@@ -188,13 +200,15 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"iterations": iteration,
 				"max":        config.MaxIterations,
 			})
-	}
 
-	if config.SessionRecorder != nil && config.SessionKey != "" && finalContent != "" {
-		config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
-			Role:    "assistant",
-			Content: finalContent,
-		})
+		// Only save the synthetic final message when max iterations reached
+		// (normal exit with no tool calls already saves inside the loop above)
+		if config.SessionRecorder != nil && config.SessionKey != "" {
+			config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
+				Role:    "assistant",
+				Content: finalContent,
+			})
+		}
 	}
 
 	return &ToolLoopResult{
