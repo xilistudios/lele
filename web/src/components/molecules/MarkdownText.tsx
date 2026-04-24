@@ -60,7 +60,8 @@ function MarkdownTable({
           <tr>
             {headers.map((header, i) => (
               <th
-                key={`th-${i}`}
+                // biome-ignore lint/suspicious/noArrayIndexKey: table headers need stable column position, combined with content
+                key={`th-${header}-${i}`}
                 className={`border border-border bg-surface-card px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
               >
                 <InlineMarkdown text={header} />
@@ -70,10 +71,11 @@ function MarkdownTable({
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={`row-${rowIndex}`}>
+            <tr key={`row-${row.join('|')}`}>
               {row.map((cell, cellIndex) => (
                 <td
-                  key={`cell-${rowIndex}-${cellIndex}`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: table cells need stable column position, combined with content
+                  key={`cell-${cell}-${cellIndex}`}
                   className={`border border-border bg-background-primary px-3 py-2 text-sm text-text-secondary ${alignClass(alignments[cellIndex] ?? 'left')}`}
                 >
                   <InlineMarkdown text={cell} />
@@ -133,7 +135,11 @@ function InlineMarkdown({ text }: { text: string }) {
   return (
     <>
       {tokens.map((item, i) => (
-        <InlineToken key={`inline-${i}`} text={item.text} token={item.token} />
+        <InlineToken
+          key={`inline-${item.token}-${item.text.slice(0, 30)}-${i}`}
+          text={item.text}
+          token={item.token}
+        />
       ))}
     </>
   )

@@ -141,7 +141,7 @@ export function useMessages(
                   // If this is the final chunk (done=true), replace content entirely
                   // to avoid duplicating already-streamed content when the backend
                   // sends the full final content as a final chunk.
-                  content: isDone ? (chunk || m.content) : chunk ? `${m.content}${chunk}` : m.content,
+                  content: isDone ? chunk || m.content : chunk ? `${m.content}${chunk}` : m.content,
                   streaming: !isDone,
                   sessionKey,
                 }
@@ -222,7 +222,7 @@ export function useMessages(
           }
           if (welcomeData.processing && welcomeData.session_key) {
             processingSessionKeyRef.current = welcomeData.session_key
-            setProcessingSessions((prev) => new Set(prev).add(welcomeData.session_key!))
+            setProcessingSessions((prev) => new Set(prev).add(welcomeData.session_key))
             if (welcomeData.session_key === currentSessionKeyRef.current) {
               ensureAssistantPlaceholder('__processing_placeholder__', welcomeData.session_key)
             }
@@ -244,9 +244,9 @@ export function useMessages(
         case 'message.ack':
           ensureAssistantPlaceholder(data.message_id as string, (data.session_key as string) ?? '')
           break
-        case 'message.complete':
+        case 'message.complete': {
           const completedSessionKey = eventSessionKey ?? currentSessionKeyRef.current
-          
+
           // Always update processingSessions regardless of which session
           setProcessingSessions((prev) => {
             if (completedSessionKey && prev.has(completedSessionKey)) {
@@ -300,7 +300,8 @@ export function useMessages(
           processingSessionKeyRef.current = null
           // Server emits history.updated after persisting, so we refetch then
           break
-        case 'history.updated':
+        }
+        case 'history.updated': {
           const historySessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
           if (historySessionKey) {
             queryClient.invalidateQueries({
@@ -308,6 +309,7 @@ export function useMessages(
             })
           }
           break
+        }
         case 'messages.catchup': {
           const catchupData = data as {
             session_key?: string

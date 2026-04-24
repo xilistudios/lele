@@ -223,12 +223,15 @@ type SessionNameResponse struct {
 }
 
 type SessionContextResponse struct {
-	SessionKey    string `json:"session_key"`
-	InputTokens   int    `json:"input_tokens"`
-	OutputTokens  int    `json:"output_tokens"`
-	TotalTokens   int    `json:"total_tokens"`
-	ContextWindow int    `json:"context_window"`
-	UsagePercent  float64 `json:"usage_percent"`
+	SessionKey             string  `json:"session_key"`
+	InputTokens            int     `json:"input_tokens"`
+	OutputTokens           int     `json:"output_tokens"`
+	TotalTokens            int     `json:"total_tokens"`
+	CumulativeInputTokens  int     `json:"cumulative_input_tokens"`
+	CumulativeOutputTokens int     `json:"cumulative_output_tokens"`
+	CumulativeTotalTokens  int     `json:"cumulative_total_tokens"`
+	ContextWindow          int     `json:"context_window"`
+	UsagePercent           float64 `json:"usage_percent"`
 }
 
 type NativeAgentInfo struct {

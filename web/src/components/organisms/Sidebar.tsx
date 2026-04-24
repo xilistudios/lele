@@ -97,6 +97,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               block
               trigger={
                 <div
+                  // biome-ignore lint/a11y/useSemanticElements: div needed for Popover trigger compatibility
                   role="button"
                   tabIndex={0}
                   className="flex w-full items-center justify-center rounded-md px-2 text-text-secondary hover-highlight-group"
@@ -186,6 +187,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             block
             trigger={
               <div
+                // biome-ignore lint/a11y/useSemanticElements: div needed for Popover trigger compatibility
                 role="button"
                 tabIndex={0}
                 className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}

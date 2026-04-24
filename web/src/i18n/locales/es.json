@@ -70,7 +70,10 @@
     "currentContext": "Contexto actual",
     "inputTokens": "Tokens de entrada",
     "outputTokens": "Tokens de salida",
-    "contextWindow": "Ventana de contexto"
+    "contextWindow": "Ventana de contexto",
+    "cumulativeInput": "Entrada enviada",
+    "cumulativeOutput": "Salida recibida",
+    "cumulativeTotal": "Total enviado"
   },
   "approval": {
     "inlineTitle": "Aprobación requerida",

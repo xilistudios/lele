@@ -21,6 +21,7 @@ export function Modal({ isOpen, onClose, title, children }: Props) {
       />
       <div
         className="relative z-10 w-full max-w-lg rounded-lg border border-[#2e2e2e] bg-[#1a1a1a] p-6 shadow-xl"
+        // biome-ignore lint/a11y/useSemanticElements: dialog element has different default behavior, overlay pattern is intentional
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

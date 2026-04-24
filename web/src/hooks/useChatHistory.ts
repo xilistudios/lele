@@ -49,16 +49,10 @@ function mergeMessages(
     // Remove base tool messages only when there's an executing tool in streaming
     // for the same session (streaming takes precedence during execution).
     // Completed tools in streaming are fine — they'll be removed below.
-    if (
-      msg.role === 'tool' &&
-      msg.sessionKey &&
-      streamingToolSessions.has(msg.sessionKey)
-    ) {
+    if (msg.role === 'tool' && msg.sessionKey && streamingToolSessions.has(msg.sessionKey)) {
       const hasExecutingTool = streamingMessages.some(
         (sm) =>
-          sm.role === 'tool' &&
-          sm.sessionKey === msg.sessionKey &&
-          sm.toolStatus === 'executing',
+          sm.role === 'tool' && sm.sessionKey === msg.sessionKey && sm.toolStatus === 'executing',
       )
       if (hasExecutingTool) {
         continue
@@ -83,12 +77,7 @@ function mergeMessages(
     }
     // Remove completed tool messages from streaming if they now exist in history
     // This prevents duplicate tool entries after history refreshes
-    if (
-      msg.role === 'tool' &&
-      msg.toolStatus === 'completed' &&
-      msg.sessionKey &&
-      msg.toolName
-    ) {
+    if (msg.role === 'tool' && msg.toolStatus === 'completed' && msg.sessionKey && msg.toolName) {
       const isConfirmedInHistory = filteredBase.some(
         (bm) =>
           bm.role === 'tool' &&

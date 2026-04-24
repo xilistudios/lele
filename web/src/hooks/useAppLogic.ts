@@ -183,6 +183,7 @@ export function useAppLogic(
     sessionsHook.currentSessionKey,
     currentAgentId,
     token,
+    api,
     wsStatus,
     wsSend,
     loadModels,

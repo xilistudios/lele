@@ -534,16 +534,17 @@ func (al *AgentLoop) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool
 		return channels.AgentBasicInfo{}, false
 	}
 	return channels.AgentBasicInfo{
-		ID:            agent.ID,
-		Name:          agent.Name,
-		Model:         agent.Model,
-		Workspace:     agent.Workspace,
-		MaxIterations: agent.MaxIterations,
-		MaxTokens:     agent.MaxTokens,
-		Temperature:   agent.Temperature,
-		Fallbacks:     agent.Fallbacks,
-		SkillsFilter:  agent.SkillsFilter,
-		Reasoning:     agent.Reasoning,
+		ID:             agent.ID,
+		Name:           agent.Name,
+		Model:          agent.Model,
+		Workspace:      agent.Workspace,
+		MaxIterations:  agent.MaxIterations,
+		MaxTokens:      agent.MaxTokens,
+		Temperature:    agent.Temperature,
+		Fallbacks:      agent.Fallbacks,
+		SkillsFilter:   agent.SkillsFilter,
+		Reasoning:      agent.Reasoning,
+		SupportsImages: agent.SupportsImages,
 	}, true
 }
 
@@ -581,6 +582,21 @@ func (al *AgentLoop) GetSessionModel(sessionKey string) string {
 		}
 	}
 	return agent.Model
+}
+
+// GetSessionModelSupportsImages returns true if the session's current model supports vision.
+func (al *AgentLoop) GetSessionModelSupportsImages(sessionKey string) bool {
+	model := al.GetSessionModel(sessionKey)
+	if model == "" {
+		return false
+	}
+	agent := al.agentForSession(al.ResolveSessionKey(sessionKey))
+	if agent == nil {
+		return false
+	}
+	cfg := al.cfg()
+	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+	return getSupportsImages(cfg, model, providerName)
 }
 
 // SetSessionModel sets the model for a session (implements AgentProvidable).

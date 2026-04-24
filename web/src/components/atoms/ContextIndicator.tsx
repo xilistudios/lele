@@ -6,7 +6,7 @@ import { usePopoverPosition } from '../../hooks/usePopoverPosition'
 import type { SessionContextResponse } from '../../lib/types'
 
 const POPOVER_WIDTH = 220
-const POPOVER_HEIGHT = 120
+const POPOVER_HEIGHT = 180
 const CIRCLE_SIZE = 18
 const STROKE_WIDTH = 3
 const RADIUS = (CIRCLE_SIZE - STROKE_WIDTH) / 2
@@ -75,18 +75,16 @@ export function ContextIndicator() {
     fetchContext()
   }, [fetchContext])
 
-  // Poll while popover is open
+  // Poll constantly in the background to keep indicator updated
   useEffect(() => {
-    if (isOpen) {
-      intervalRef.current = setInterval(fetchContext, REFRESH_INTERVAL)
-    }
+    intervalRef.current = setInterval(fetchContext, REFRESH_INTERVAL)
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
       }
     }
-  }, [isOpen, fetchContext])
+  }, [fetchContext])
 
   useEffect(() => {
     if (!isOpen) return
@@ -192,10 +190,30 @@ export function ContextIndicator() {
                 <span>{t('connection.currentContext')}</span>
                 <span>{formatTokens(context.total_tokens)}</span>
               </div>
-              <div className="flex justify-between border-t border-border pt-1 mt-1">
+              <div className="flex justify-between">
                 <span>{t('connection.contextWindow')}</span>
                 <span>{formatTokens(context.context_window)}</span>
               </div>
+              {context.cumulative_total_tokens > 0 && (
+                <>
+                  <div className="border-t border-border pt-1.5 mt-1">
+                    <div className="flex justify-between">
+                      <span className="text-text-tertiary">{t('connection.cumulativeInput')}</span>
+                      <span>{formatTokens(context.cumulative_input_tokens)}</span>
+                    </div>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-tertiary">{t('connection.cumulativeOutput')}</span>
+                    <span>{formatTokens(context.cumulative_output_tokens)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-border pt-1 mt-1">
+                    <span className="text-text-tertiary">{t('connection.cumulativeTotal')}</span>
+                    <span className="text-text-secondary">
+                      {formatTokens(context.cumulative_total_tokens)}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}

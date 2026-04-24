@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -60,10 +61,16 @@ func (ct *CooldownTracker) MarkFailure(provider string, reason FailoverReason) {
 
 	if reason == FailoverBilling {
 		billingCount := entry.FailureCounts[FailoverBilling]
-		entry.DisabledUntil = now.Add(calculateBillingCooldown(billingCount))
+		cooldownDuration := calculateBillingCooldown(billingCount)
+		entry.DisabledUntil = now.Add(cooldownDuration)
 		entry.DisabledReason = FailoverBilling
+		log.Printf("[INFO] cooldown: applied billing cooldown for provider=%s, duration=%s (billingErrorCount=%d)",
+			provider, cooldownDuration.Round(time.Hour), billingCount)
 	} else {
-		entry.CooldownEnd = now.Add(calculateStandardCooldown(entry.ErrorCount))
+		cooldownDuration := calculateStandardCooldown(entry.ErrorCount)
+		entry.CooldownEnd = now.Add(cooldownDuration)
+		log.Printf("[INFO] cooldown: applied standard cooldown for provider=%s, duration=%s (errorCount=%d)",
+			provider, cooldownDuration.Round(time.Second), entry.ErrorCount)
 	}
 }
 
@@ -82,6 +89,8 @@ func (ct *CooldownTracker) MarkSuccess(provider string) {
 	entry.CooldownEnd = time.Time{}
 	entry.DisabledUntil = time.Time{}
 	entry.DisabledReason = ""
+
+	log.Printf("[INFO] cooldown: cleared for provider=%s (success)", provider)
 }
 
 // IsAvailable returns true if the provider is not in cooldown or disabled.

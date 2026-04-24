@@ -254,6 +254,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/status", n.handleStatus)
 	mux.HandleFunc("/api/v1/channels", n.handleChannels)
 	mux.HandleFunc("/api/v1/files/upload", n.handleFileUpload)
+	mux.HandleFunc("/api/v1/files/view", n.handleFileView)
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {

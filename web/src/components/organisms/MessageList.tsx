@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { MessageBubble } from '../MessageBubble'
 
 export function MessageList() {
   const navigate = useNavigate()
+  const { apiUrl } = useAuthContext()
   const { messages, approvalRequest, onApprove, currentSessionKey } = useAppLogicContext()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const lastMessageId = messages[messages.length - 1]?.id
@@ -45,6 +47,7 @@ export function MessageList() {
           message={message}
           isLast={index === visibleMessages.length - 1}
           onNavigateToSession={handleNavigateToSession}
+          apiUrl={apiUrl}
         />
       ))}
       {approvalRequest && (

@@ -154,20 +154,22 @@ export function ChatComposer() {
                   value={thinkLevel}
                 />
               )}
-              <SearchableSelect
-                ariaLabel={t('chat.agent')}
-                buttonLabel={t('chat.agent')}
-                disabled={hasConversation}
-                emptyLabel={t('chat.agentLocked')}
-                onChange={onSelectAgent}
-                options={agentsOptions}
-                placeholder={
-                  agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
-                }
-                searchAriaLabel={`${t('chat.agent')} buscar`}
-                searchPlaceholder={t('chat.agent')}
-                value={selectedAgentId}
-              />
+              {agentsOptions.length > 1 && (
+                <SearchableSelect
+                  ariaLabel={t('chat.agent')}
+                  buttonLabel={t('chat.agent')}
+                  disabled={hasConversation}
+                  emptyLabel={t('chat.agentLocked')}
+                  onChange={onSelectAgent}
+                  options={agentsOptions}
+                  placeholder={
+                    agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
+                  }
+                  searchAriaLabel={`${t('chat.agent')} buscar`}
+                  searchPlaceholder={t('chat.agent')}
+                  value={selectedAgentId}
+                />
+              )}
             </div>
           </div>
           <button

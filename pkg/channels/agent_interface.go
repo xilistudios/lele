@@ -25,6 +25,8 @@ type AgentProvidable interface {
 	GetSessionHistory(sessionKey string) []providers.Message
 	// GetSessionModel devuelve el modelo efectivo de una sesión
 	GetSessionModel(sessionKey string) string
+	// GetSessionModelSupportsImages returns true if the session's current model supports vision
+	GetSessionModelSupportsImages(sessionKey string) bool
 	// SetSessionModel establece el modelo de una sesión
 	SetSessionModel(sessionKey, model string) string
 	// ListAvailableModels devuelve los modelos configurados para un agente/sesión
@@ -71,14 +73,15 @@ type AgentProvidable interface {
 
 // AgentBasicInfo contiene información pública de un agente
 type AgentBasicInfo struct {
-	ID            string
-	Name          string
-	Model         string
-	Workspace     string
-	MaxIterations int
-	MaxTokens     int
-	Temperature   float64
-	Fallbacks     []string
-	SkillsFilter  []string
-	Reasoning     *config.ReasoningConfig
+	ID             string
+	Name           string
+	Model          string
+	Workspace      string
+	MaxIterations  int
+	MaxTokens      int
+	Temperature    float64
+	Fallbacks      []string
+	SkillsFilter   []string
+	Reasoning      *config.ReasoningConfig
+	SupportsImages bool
 }

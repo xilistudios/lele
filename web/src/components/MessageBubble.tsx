@@ -6,17 +6,39 @@ import {
   parseDiffStat,
   parseFileDiffRow,
 } from '../lib/markdown'
-import type { ChatMessage } from '../lib/types'
+import type { Attachment, ChatMessage } from '../lib/types'
 import { StatusBadge } from './atoms/StatusBadge'
 import { MarkdownText } from './molecules/MarkdownText'
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
+
+function isImageByExtension(name: string): boolean {
+  const ext = name.toLowerCase().split('.').pop()
+  return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
+}
+
+function isImageAttachment(attachment: Attachment): boolean {
+  // Check mime_type first (most reliable)
+  if (attachment.mime_type?.startsWith('image/')) return true
+  // Fall back to extension check on name or path
+  if (attachment.name && isImageByExtension(attachment.name)) return true
+  if (attachment.path && isImageByExtension(attachment.path)) return true
+  return false
+}
+
+function buildFileUrl(apiUrl: string, path: string): string {
+  const base = apiUrl.replace(/\/$/, '')
+  return `${base}/api/v1/files/view?path=${encodeURIComponent(path)}`
+}
 
 type Props = {
   message: ChatMessage
   isLast?: boolean
   onNavigateToSession?: (sessionKey: string) => void
+  apiUrl?: string
 }
 
-export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
+export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -130,13 +152,29 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
   }
 
   if (isUser) {
+    const imageAttachments = message.attachments?.filter(isImageAttachment) ?? []
+    const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
+
     return (
       <div className="flex justify-end py-1">
         <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
-          {message.attachments?.length ? (
+          {imageAttachments.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {message.attachments.map((attachment, index) => (
+              {imageAttachments.map((attachment, index) => (
+                <img
+                  key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
+                  src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
+                  alt={attachment.name ?? 'image'}
+                  className="max-w-full rounded-lg object-contain max-h-96"
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          ) : null}
+          {nonImageAttachments.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {nonImageAttachments.map((attachment, index) => (
                 <span
                   key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
                   className="rounded-full border border-border bg-background-secondary px-3 py-1 text-xs text-text-primary"
@@ -165,7 +203,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             if (block.type === 'tool') {
               return (
                 <div
-                  key={`toolblock-${i}`}
+                  key={`toolblock-${block.label ?? 'tool'}-${i}`}
                   className="flex items-center gap-3 text-sm text-text-secondary"
                 >
                   <span className="rounded-md bg-surface-card px-2 py-0.5 text-[11px] font-medium text-text-secondary font-mono">
@@ -179,7 +217,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             if (block.type === 'code') {
               return (
                 <div
-                  key={`codeblock-${i}`}
+                  key={`codeblock-${block.label ?? 'code'}-${i}`}
                   className="rounded-lg border border-border bg-background-primary overflow-hidden"
                 >
                   {block.label && (
@@ -198,17 +236,25 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             const hasSpecialRows = lines.some((line) => isDiffStatLine(line) || isFileDiffRow(line))
 
             if (!hasSpecialRows) {
-              return <MarkdownText key={`textblock-${i}`} content={block.content} />
+              return (
+                <MarkdownText
+                  key={`textblock-${block.content.slice(0, 50)}-${i}`}
+                  content={block.content}
+                />
+              )
             }
 
             return (
-              <div key={`specialblock-${i}`} className="space-y-2">
+              <div key={`specialblock-${block.content.slice(0, 50)}-${i}`} className="space-y-2">
                 {lines.map((line, j) => {
                   if (isDiffStatLine(line)) {
                     const parsed = parseDiffStat(line)
                     if (!parsed) return null
                     return (
-                      <div key={`diffstat-${j}`} className="text-sm text-text-secondary">
+                      <div
+                        key={`diffstat-${line.slice(0, 40)}-${j}`}
+                        className="text-sm text-text-secondary"
+                      >
                         <span>{parsed.files} Changed files </span>
                         <span className="text-diff-addition">{parsed.added}</span>
                         <span> </span>
@@ -221,7 +267,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                     if (!parsed) return null
                     return (
                       <div
-                        key={`filediff-${j}`}
+                        key={`filediff-${parsed.filename}-${j}`}
                         className="flex items-center justify-between rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs"
                       >
                         <span className="text-text-primary font-mono">{parsed.filename}</span>
@@ -244,8 +290,10 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                       </div>
                     )
                   }
-                  if (!line.trim()) return <div key={`blankline-${j}`} className="h-2" />
-                  return <MarkdownText key={`line-${j}`} content={line} />
+                  if (!line.trim())
+                    // biome-ignore lint/suspicious/noArrayIndexKey: blank lines have no content for stable keys
+                    return <div key={`blankline-${j}`} className="h-2" />
+                  return <MarkdownText key={`line-${line.slice(0, 40)}-${j}`} content={line} />
                 })}
               </div>
             )
@@ -256,22 +304,35 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
 
         {message.attachments?.length ? (
           <div className="flex flex-wrap gap-2">
-            {message.attachments.map((attachment, index) => (
-              <div
-                key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
-                className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
-              >
-                <p className="font-medium text-text-primary">
-                  {attachment.name ?? attachment.path ?? 'attachment'}
-                </p>
-                {attachment.caption ? (
-                  <p className="mt-1 text-text-secondary">{attachment.caption}</p>
-                ) : null}
-                {attachment.path ? (
-                  <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
-                ) : null}
-              </div>
-            ))}
+            {message.attachments.map((attachment, index) => {
+              if (isImageAttachment(attachment)) {
+                return (
+                  <img
+                    key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
+                    src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
+                    alt={attachment.name ?? 'image'}
+                    className="max-w-full rounded-lg object-contain max-h-96"
+                    loading="lazy"
+                  />
+                )
+              }
+              return (
+                <div
+                  key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
+                  className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
+                >
+                  <p className="font-medium text-text-primary">
+                    {attachment.name ?? attachment.path ?? 'attachment'}
+                  </p>
+                  {attachment.caption ? (
+                    <p className="mt-1 text-text-secondary">{attachment.caption}</p>
+                  ) : null}
+                  {attachment.path ? (
+                    <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         ) : null}
 

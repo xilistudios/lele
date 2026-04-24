@@ -89,6 +89,26 @@ func (m *nativeTestAgentLoop) SetSessionModel(sessionKey, model string) string {
 	return model
 }
 
+func (m *nativeTestAgentLoop) GetSessionModelSupportsImages(sessionKey string) bool {
+	model := m.GetSessionModel(sessionKey)
+	if model == "" {
+		return false
+	}
+	if m.config == nil {
+		return false
+	}
+	providerName := "openai"
+	if idx := strings.Index(model, "/"); idx > 0 {
+		providerName = strings.ToLower(model[:idx])
+	}
+	if prov, ok := m.config.Providers.GetNamed(providerName); ok {
+		if modelCfg, exists := prov.Models[model]; exists {
+			return modelCfg.Vision
+		}
+	}
+	return false
+}
+
 func (m *nativeTestAgentLoop) ListAvailableModels(agentID string) []string {
 	if agentID == "research" {
 		return []string{"gpt-4.1", "gpt-4.1-mini"}

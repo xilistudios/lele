@@ -426,6 +426,9 @@ export type SessionContextResponse = {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cumulative_input_tokens: number
+  cumulative_output_tokens: number
+  cumulative_total_tokens: number
   context_window: number
   usage_percent: number
 }

@@ -434,6 +434,7 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 
 	if action == "context" {
 		currentTokens, contextWindow := n.agentLoop.GetCurrentContextUsage(sessionKey)
+		cumInputTokens, cumOutputTokens, _ := n.agentLoop.GetTokenCounts(sessionKey)
 		var usagePercent float64
 		if contextWindow > 0 {
 			usagePercent = float64(currentTokens) / float64(contextWindow) * 100.0
@@ -442,11 +443,14 @@ func (n *NativeChannel) handleChatSession(w http.ResponseWriter, r *http.Request
 			}
 		}
 		writeJSON(w, http.StatusOK, SessionContextResponse{
-			SessionKey:    sessionKey,
-			InputTokens:   currentTokens,
-			TotalTokens:   currentTokens,
-			ContextWindow: contextWindow,
-			UsagePercent:  usagePercent,
+			SessionKey:             sessionKey,
+			InputTokens:            currentTokens,
+			TotalTokens:            currentTokens,
+			CumulativeInputTokens:  cumInputTokens,
+			CumulativeOutputTokens: cumOutputTokens,
+			CumulativeTotalTokens:  cumInputTokens + cumOutputTokens,
+			ContextWindow:          contextWindow,
+			UsagePercent:           usagePercent,
 		})
 		return
 	}
@@ -707,6 +711,13 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionKey := getQueryParam(r, "session_key")
+	if sessionKey == "" {
+		sessionKey = "native:" + getClientID(r)
+	}
+
+	supportsImages := n.agentLoop.GetSessionModelSupportsImages(sessionKey)
+
 	tools := []ToolInfo{
 		{Name: "read_file", Description: "Read file from workspace", Enabled: true},
 		{Name: "write_file", Description: "Write file to workspace", Enabled: true},
@@ -715,6 +726,10 @@ func (n *NativeChannel) handleTools(w http.ResponseWriter, r *http.Request) {
 		{Name: "web_search", Description: "Search the web", Enabled: true},
 		{Name: "web_fetch", Description: "Fetch web content", Enabled: true},
 		{Name: "spawn", Description: "Create subagent", Enabled: true},
+	}
+
+	if supportsImages {
+		tools = append(tools, ToolInfo{Name: "read_image", Description: "Read and analyze images", Enabled: true})
 	}
 
 	writeJSON(w, http.StatusOK, ToolsResponse{Tools: tools})

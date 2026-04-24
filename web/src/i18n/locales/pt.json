@@ -65,7 +65,15 @@
     "connected": "Conectado",
     "connecting": "Conectando",
     "disconnected": "Desconectado",
-    "statusAria": "Status de conexão: {{status}}. Clique para detalhes."
+    "statusAria": "Status de conexão: {{status}}. Clique para detalhes.",
+    "context": "Contexto",
+    "currentContext": "Contexto atual",
+    "inputTokens": "Tokens de entrada",
+    "outputTokens": "Tokens de saída",
+    "contextWindow": "Janela de contexto",
+    "cumulativeInput": "Entrada enviada",
+    "cumulativeOutput": "Saída recebida",
+    "cumulativeTotal": "Total enviado"
   },
   "approval": {
     "inlineTitle": "Aprovação necessária",
