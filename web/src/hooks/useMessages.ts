@@ -1,76 +1,22 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
-import type { ApprovalRequest, Attachment, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
+import {
+  buildToolCallMap,
+  createAssistantMessage,
+  createHistoryMessageId,
+  createOptimisticUserId,
+  createToolMessage,
+  createToolMessageId,
+  createUserMessage,
+  formatToolCallArgs,
+  parseAttachmentsFromContent,
+  parseSubagentSessionKey,
+} from '../lib/chatMessageBuilder'
+import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
 import { updateChatHistoryFromRaw } from './useChatHistory'
 
-const formatToolCallArgs = (toolCall: HistoryToolCall) => {
-  if (typeof toolCall.arguments === 'undefined') {
-    return toolCall.name ?? ''
-  }
-
-  return toolCall.name
-    ? `${toolCall.name} ${JSON.stringify(toolCall.arguments)}`
-    : JSON.stringify(toolCall.arguments)
-}
-
-const parseSubagentSessionKey = (value: string | undefined) => {
-  if (!value) return undefined
-
-  const trimmed = value.trim()
-  if (trimmed === '') return undefined
-
-  const directMatch = trimmed.match(/subagent:([A-Za-z0-9_-]+)/i)
-  if (directMatch) {
-    return `subagent:${directMatch[1]}`
-  }
-
-  const taskMatch = trimmed.match(/\btask(?:\s+id)?\s*:?[ \t]+([A-Za-z0-9_-]+)/i)
-  if (taskMatch) {
-    return `subagent:${taskMatch[1]}`
-  }
-
-  return undefined
-}
-
-/**
- * Parses attachment paths from a message content string that contains
- * "## Attachments\n- /path/file.png" appended by the backend.
- * Returns the cleaned content and extracted attachment info.
- */
-const ATTACHMENTS_HEADER = '## Attachments'
-const parseAttachmentsFromContent = (content: string): { content: string; attachments: Attachment[] } => {
-  if (!content.includes(ATTACHMENTS_HEADER)) {
-    return { content, attachments: [] }
-  }
-
-  const lines = content.split('\n')
-  const headerIndex = lines.findIndex((line) => line.trim() === ATTACHMENTS_HEADER)
-  if (headerIndex === -1) {
-    return { content, attachments: [] }
-  }
-
-  const cleanContent = lines.slice(0, headerIndex).join('\n').trim()
-  const attachmentLines = lines.slice(headerIndex + 1)
-  const attachments: Attachment[] = []
-
-  for (const line of attachmentLines) {
-    const trimmed = line.trim()
-    if (trimmed.startsWith('- ')) {
-      const path = trimmed.slice(2).trim()
-      if (path) {
-        attachments.push({
-          path,
-          name: path.split('/').pop() ?? path,
-          mime_type: undefined,
-          kind: 'file',
-        })
-      }
-    }
-  }
-
-  return { content: cleanContent, attachments }
-}
+export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
 export const toChatMessages = (
   history: Array<{
@@ -82,22 +28,11 @@ export const toChatMessages = (
   }>,
   sessionKey: string,
 ): ChatMessage[] => {
-  const toolCallMap = new Map<string, HistoryToolCall>()
-  for (const message of history) {
-    if (message.role === 'assistant' && message.tool_calls?.length) {
-      for (const tc of message.tool_calls) {
-        if (tc.id) {
-          toolCallMap.set(tc.id, tc)
-        }
-      }
-    }
-  }
+  const toolCallMap = buildToolCallMap(history)
 
   return history.flatMap((message, index) => {
-    // Parse attachments from user message content
-    // (backend stores them inline as "## Attachments\n- /path/file.png")
     let messageContent = message.content
-    let parsedAttachments: Attachment[] | undefined
+    let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)
@@ -107,49 +42,65 @@ export const toChatMessages = (
       }
     }
 
-    const baseMessage: ChatMessage = {
-      id: `${sessionKey}:${index}:${message.role}`,
-      role: message.role,
-      content: messageContent,
-      reasoningContent: message.reasoning_content,
-      streaming: false,
-      createdAt: new Date().toISOString(),
-      sessionKey,
-      attachments: parsedAttachments,
+    // --- User message ---
+    if (message.role === 'user') {
+      return [
+        createUserMessage({
+          id: createHistoryMessageId(sessionKey, index, message.role),
+          sessionKey,
+          content: messageContent,
+          attachments: parsedAttachments,
+        }),
+      ]
     }
 
-    if (message.role === 'assistant' && message.tool_calls?.length) {
-      if (message.content && message.content !== '') {
-        return [baseMessage]
+    // --- Assistant message ---
+    if (message.role === 'assistant') {
+      const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
+
+      // Assistant with tool_calls but no text content → skip (tool results follow)
+      if (hasToolCalls && (!message.content || message.content === '')) {
+        return []
       }
-      return []
+
+      return [
+        createAssistantMessage({
+          id: createHistoryMessageId(sessionKey, index, message.role),
+          sessionKey,
+          content: messageContent,
+          reasoningContent: message.reasoning_content,
+          streaming: false,
+          attachments: parsedAttachments,
+        }),
+      ]
     }
 
+    // --- Tool message ---
     if (message.role === 'tool') {
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
       const toolName = matchedToolCall?.name ?? message.tool_call_id ?? 'tool'
       const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
-      const isSpawn = toolName === 'spawn'
-      const inferredSubagentSessionKey = isSpawn
-        ? parseSubagentSessionKey(message.content)
-        : undefined
+      const subagentSessionKey =
+        toolName === 'spawn'
+          ? parseSubagentSessionKey(message.content)
+          : undefined
 
       return [
-        {
-          ...baseMessage,
-          role: 'tool' as const,
+        createToolMessage({
+          id: createHistoryMessageId(sessionKey, index, message.role),
+          sessionKey,
           toolName,
           toolArgs,
           toolResult: message.content,
-          toolStatus: 'completed' as const,
-          subagentSessionKey: inferredSubagentSessionKey,
-        },
+          toolStatus: 'completed',
+          subagentSessionKey,
+        }),
       ]
     }
 
-    return [baseMessage]
+    return []
   })
 }
 
@@ -193,9 +144,6 @@ export function useMessages(
             m.id === messageId
               ? {
                   ...m,
-                  // If this is the final chunk (done=true), replace content entirely
-                  // to avoid duplicating already-streamed content when the backend
-                  // sends the full final content as a final chunk.
                   content: isDone ? chunk || m.content : chunk ? `${m.content}${chunk}` : m.content,
                   streaming: !isDone,
                   sessionKey,
@@ -208,14 +156,12 @@ export function useMessages(
         )
         return [
           ...filtered,
-          {
+          createAssistantMessage({
             id: messageId,
-            role: 'assistant',
+            sessionKey,
             content: chunk,
             streaming: !isDone,
-            createdAt: new Date().toISOString(),
-            sessionKey,
-          },
+          }),
         ]
       })
     },
@@ -229,22 +175,18 @@ export function useMessages(
       const normalizedContent = content.trim()
       if (normalizedContent.length === 0) return
 
-      const tempId = `temp-user-${Date.now()}`
-      const userMessage: ChatMessage = {
-        id: tempId,
-        role: 'user',
+      const userMessage = createUserMessage({
+        id: createOptimisticUserId(),
+        sessionKey,
         content: normalizedContent,
-        streaming: false,
         optimistic: true,
         optimisticBaseCount: getHistoryUserCount(sessionKey),
-        createdAt: new Date().toISOString(),
-        sessionKey,
         attachments: attachments.map((path) => ({
           path,
           name: path.split('/').pop() ?? path,
           kind: 'file',
         })),
-      }
+      })
 
       setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
@@ -437,31 +379,24 @@ export function useMessages(
             break
           }
           setToolStatus(event.data as ToolStatus)
-          const toolId = `tool-${data.tool as string}-${Date.now()}`
-          const newTool: ChatMessage = {
-            id: toolId,
-            role: 'tool',
-            content: '',
-            streaming: false,
-            createdAt: new Date().toISOString(),
-            sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as
-              | string
-              | undefined,
+          const toolMsg = createToolMessage({
+            id: createToolMessageId(data.tool as string),
+            sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as string,
             toolName: data.tool as string,
             toolArgs: data.action as string,
             toolStatus: 'executing',
             subagentSessionKey: data.subagent_session_key as string | undefined,
-          }
+          })
           setStreamingMessages((current) => {
             const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
-            if (lastAssistantIdx < 0) return [...current, newTool]
+            if (lastAssistantIdx < 0) return [...current, toolMsg]
             const lastAssistant = current[current.length - lastAssistantIdx - 1]
             const insertBefore = lastAssistant.content === '' && lastAssistant.streaming
             const targetIndex = insertBefore
               ? current.length - lastAssistantIdx - 1
               : current.length - lastAssistantIdx
             const arr = [...current]
-            arr.splice(targetIndex, 0, newTool)
+            arr.splice(targetIndex, 0, toolMsg)
             return arr
           })
           break
