@@ -296,6 +296,10 @@
     "noBindings": "No bindings configured",
     "identityKeyPlaceholder": "pattern",
     "modelNamePlaceholder": "model-name",
+    "searchModelsPlaceholder": "Search models...",
+    "loadingModels": "Loading models...",
+    "errorLoadingModels": "Could not load models",
+    "noModelsFound": "No matching models found",
     "noModels": "No models configured",
     "noConfiguredProviders": "No providers configured. Add one to get started.",
     "addProviderModal": {

@@ -406,6 +406,18 @@ export type ModelGroup = {
   models: ModelOption[]
 }
 
+export type ProviderModelInfo = {
+  id: string
+  object: string
+  created: number
+  owned_by: string
+}
+
+export type ProviderModelsResponse = {
+  provider: string
+  models: ProviderModelInfo[]
+}
+
 export type SessionNameResponse = {
   session_key: string
   name: string

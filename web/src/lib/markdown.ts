@@ -178,7 +178,7 @@ export function isFileDiffRow(line: string): boolean {
 export function parseDiffStat(
   text: string,
 ): { files: string; added: string; removed: string } | null {
-  const match = text.match(/(\d+)\s+[Cc]hanged?\s+files?\s+(\+\d+)\s+(-\d+)/)
+  const match = text.match(/(\d+)\s+[Cc]hanged?\s+files?\s*,?\s*(\+\d+)\s+(-\d+)/)
   if (!match) return null
   return {
     files: match[1],

@@ -320,6 +320,18 @@ type ModelOption struct {
 	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
+type ProviderModelsResponse struct {
+	Provider string              `json:"provider"`
+	Models   []ProviderModelInfo `json:"models"`
+}
+
+type ProviderModelInfo struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
 type ToolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -381,4 +393,15 @@ type UploadedFile struct {
 	Name     string `json:"name"`
 	MIMEType string `json:"mime_type"`
 	Size     int64  `json:"size"`
+}
+
+// FetchModelsRequest is the request body for fetching remote model lists.
+type FetchModelsRequest struct {
+	APIBase string `json:"api_base"`
+	APIKey  string `json:"api_key,omitempty"`
+}
+
+// FetchModelsResponse returns the list of model IDs from a provider's /models endpoint.
+type FetchModelsResponse struct {
+	Models []string `json:"models"`
 }

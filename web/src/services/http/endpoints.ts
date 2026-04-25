@@ -30,6 +30,9 @@ export const endpoints = {
     status: '/api/v1/status',
     models: '/api/v1/models',
   },
+  providers: {
+    models: (name: string) => `/api/v1/providers/${encodeURIComponent(name)}/models`,
+  },
   files: {
     upload: '/api/v1/files/upload',
   },

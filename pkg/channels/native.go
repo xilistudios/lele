@@ -250,6 +250,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/config/validate", n.handleConfig)
 	mux.HandleFunc("/api/v1/tools", n.handleTools)
 	mux.HandleFunc("/api/v1/models", n.handleModels)
+	mux.HandleFunc("/api/v1/providers/", n.handleProviderModels)
 	mux.HandleFunc("/api/v1/skills", n.handleSkills)
 	mux.HandleFunc("/api/v1/status", n.handleStatus)
 	mux.HandleFunc("/api/v1/channels", n.handleChannels)
