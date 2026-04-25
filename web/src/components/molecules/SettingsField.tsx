@@ -26,17 +26,17 @@ export function SettingsField({
       <div className="flex items-center gap-2">
         <label htmlFor={path} className="text-xs font-medium text-text-secondary">
           {label}
-          {required && <span className="ml-1 text-rose-400">*</span>}
+          {required && <span className="ml-1 text-state-error">*</span>}
         </label>
         {isDirty && (
-          <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] text-blue-400">
+          <span className="rounded bg-state-info-light px-1.5 py-0.5 text-[10px] text-state-info">
             {t('settings.modified')}
           </span>
         )}
       </div>
       {description && <p className="text-[11px] text-text-tertiary">{description}</p>}
       <div className="mt-1">{children}</div>
-      {error && <p className="text-[11px] text-rose-400">{error}</p>}
+      {error && <p className="text-[11px] text-state-error">{error}</p>}
     </div>
   )
 }

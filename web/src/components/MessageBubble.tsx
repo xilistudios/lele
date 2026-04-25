@@ -64,7 +64,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
             <button
               type="button"
               aria-label="Open subagent chat"
-              className="ml-auto p-0.5 rounded-md hover:bg-surface-card transition-colors"
+              className="ml-auto p-0.5 rounded-md hover:bg-surface-hover transition-colors"
               onClick={() => onNavigateToSession(subagentSessionKey)}
             >
               <svg
@@ -127,7 +127,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
   if (isUser) {
     return (
       <div className="flex justify-end py-1">
-        <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
+        <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-muted px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {message.attachments?.length ? (
             <div className="flex flex-wrap gap-2">
@@ -163,7 +163,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession }: Props) {
                   key={`tool-${block.label}-${block.content.substring(0, 50)}`}
                   className="flex items-center gap-3 text-sm text-text-secondary"
                 >
-                  <span className="rounded-md bg-surface-card px-2 py-0.5 text-[11px] font-medium text-text-secondary font-mono">
+                  <span className="rounded-md px-2 py-1 bg-surface-hover text-xs font-medium font-mono text-text-secondary">
                     {block.label}
                   </span>
                   <span>{block.content}</span>

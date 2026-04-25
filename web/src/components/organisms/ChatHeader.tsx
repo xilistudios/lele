@@ -12,7 +12,7 @@ import { Spinner } from '../atoms/Spinner'
 function ToolStatus({ tool, action }: { tool: string; action: string }) {
   return (
     <>
-      <span className="rounded bg-surface-card px-2 py-0.5 font-mono text-[11px] text-text-secondary">
+      <span className="rounded px-2 py-1 bg-surface-hover text-xs font-medium font-mono text-text-secondary">
         {tool}
       </span>
       <span>{action}</span>
@@ -79,7 +79,7 @@ export const ChatHeader = memo(function ChatHeader() {
           {canCancel && (
             <button
               type="button"
-              className="rounded-md border border-border px-3 py-1 text-xs text-state-error transition-colors hover:bg-state-error-light"
+              className="rounded-md border border-border px-3 py-1 text-xs text-state-error transition-colors hover:bg-state-error-light hover:text-[#FF7B7B]"
               onClick={onCancel}
             >
               {t('chat.cancel')}

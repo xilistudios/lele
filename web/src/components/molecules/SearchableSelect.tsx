@@ -207,7 +207,7 @@ export function SearchableSelect({
           }`}
         >
           <div className="border-b border-border p-3">
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-input px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-border-focus">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background-tertiary px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-border-focus">
               <svg
                 aria-hidden="true"
                 className="h-4 w-4 flex-none text-text-tertiary"
@@ -249,8 +249,8 @@ export function SearchableSelect({
                             key={option.value}
                             className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-all duration-150 ${
                               active
-                                ? 'bg-surface-card text-text-primary'
-                                : 'text-text-secondary hover:bg-surface-card-hover hover:text-text-primary'
+                                ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                             }`}
                             type="button"
                             onClick={() => handleSelect(option.value)}
