@@ -39,12 +39,12 @@ export function SettingsFooter({
         {isDirty && <span className="text-xs text-state-info">{t('settings.unsavedChanges')}</span>}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <button
           onClick={onReset}
           disabled={!isDirty || saveState === 'saving'}
           type="button"
-          className="rounded border border-border bg-transparent px-4 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-hover disabled:opacity-40"
+          className="rounded-md border border-border/70 bg-transparent px-5 py-2.5 text-sm text-text-secondary transition-all hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
         >
           {t('common.reset')}
         </button>
@@ -52,7 +52,7 @@ export function SettingsFooter({
           onClick={onSave}
           disabled={!isDirty || saveState === 'saving'}
           type="button"
-          className="rounded bg-cta-primary px-4 py-2 text-xs text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40"
+          className="rounded-md bg-accent-primary px-5 py-2.5 text-sm text-text-on-accent transition-all hover:bg-accent-hover shadow-sm disabled:opacity-40"
         >
           {saveState === 'saving' ? t('common.saving') : t('common.save')}
         </button>

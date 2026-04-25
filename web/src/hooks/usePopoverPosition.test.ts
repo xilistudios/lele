@@ -1,5 +1,5 @@
-import { describe, expect, mock, test } from 'bun:test'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, expect, test } from 'bun:test'
+import { renderHook } from '@testing-library/react'
 import { usePopoverPosition } from './usePopoverPosition'
 
 describe('usePopoverPosition', () => {

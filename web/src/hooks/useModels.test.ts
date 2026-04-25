@@ -1,9 +1,9 @@
-import { act, describe, expect, mock, test } from 'bun:test'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, expect, it, mock } from 'bun:test'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useModels } from './useModels'
 
 describe('useModels', () => {
-  test('loadModels carga modelos del servidor', async () => {
+  it('loadModels carga modelos del servidor', async () => {
     const mockApi = {
       models: mock(() =>
         Promise.resolve({
@@ -66,7 +66,7 @@ describe('useModels', () => {
     expect(result.current.modelState.current).toBe('gpt-4o')
   })
 
-  test('selectModel actualiza el modelo en la sesión', async () => {
+  it('selectModel actualiza el modelo en la sesión', async () => {
     const mockApi = {
       models: mock(() => Promise.resolve({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] })),
       sessionModel: mock(() =>
@@ -101,7 +101,7 @@ describe('useModels', () => {
     expect(result.current.modelState.available).toEqual(['gpt-4o', 'gpt-4'])
   })
 
-  test('reset limpia el estado', async () => {
+  it('reset limpia el estado', async () => {
     const mockApi = {
       models: mock(() => Promise.resolve({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] })),
       sessionModel: mock(() => Promise.resolve({ session_key: 'x', model: '', models: [] })),
@@ -127,7 +127,7 @@ describe('useModels', () => {
     expect(result.current.modelState.available).toHaveLength(0)
   })
 
-  test('no carga modelos si no hay token', async () => {
+  it('no carga modelos si no hay token', async () => {
     const mockApi = {
       models: mock(() => Promise.resolve({ agent_id: 'main', model: '', models: [] })),
     }

@@ -192,7 +192,9 @@ describe('buildToolCallMap', () => {
   })
 
   test('retorna mapa vacío si no hay tool_calls', () => {
-    const map = buildToolCallMap([{ role: 'user' as const, content: 'Hola' }])
+    const map = buildToolCallMap([
+      { role: 'user', content: 'Hola' } as unknown as { tool_calls?: HistoryToolCall[] },
+    ])
     expect(map.size).toBe(0)
   })
 
@@ -202,13 +204,9 @@ describe('buildToolCallMap', () => {
   })
 
   test('ignora tool_calls sin id', () => {
-    const history = [
+    const history: Array<{ tool_calls?: HistoryToolCall[] }> = [
       {
-        role: 'assistant' as const,
-        content: '',
-        tool_calls: [
-          { name: 'read_file', arguments: { path: '/a.txt' } } as HistoryToolCall,
-        ],
+        tool_calls: [{ id: '', name: 'read_file', arguments: { path: '/a.txt' } }],
       },
     ]
 

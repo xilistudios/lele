@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { ApiError, parseApiError } from './errors'
 
 describe('ApiError', () => {
@@ -20,10 +20,10 @@ describe('ApiError', () => {
 
 describe('parseApiError', () => {
   test('parsea error con mensaje del body JSON', async () => {
-    const response = new Response(
-      JSON.stringify({ code: 'auth_error', message: 'Invalid PIN' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    )
+    const response = new Response(JSON.stringify({ code: 'auth_error', message: 'Invalid PIN' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
 
     const error = await parseApiError(response)
     expect(error.message).toBe('Invalid PIN')

@@ -1,10 +1,7 @@
-import { useState } from "react";
-import { useSettings } from "../../../contexts/SettingsContext";
-import { isDirtyPath } from "../../../hooks/useSettingsHelpers";
-import type {
-  EditableNamedProviderConfig,
-  SecretValue,
-} from "../../../lib/types";
+import { useState } from 'react'
+import { useSettings } from '../../../contexts/SettingsContext'
+import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import type { EditableNamedProviderConfig, SecretValue } from '../../../lib/types'
 import {
   BooleanInput,
   NamedItemCard,
@@ -12,75 +9,64 @@ import {
   SettingsField,
   SettingsSection,
   TextInput,
-} from "../../molecules";
-import { AddProviderModal } from "./AddProviderModal";
-import { ProviderModelsEditor } from "./ProviderModelsEditor";
+} from '../../molecules'
+import { AddProviderModal } from './AddProviderModal'
+import { ProviderModelsEditor } from './ProviderModelsEditor'
 
 function isEmptyProvider(prov: EditableNamedProviderConfig): boolean {
-  return !prov.type && prov.api_key?.mode === "empty";
+  return !prov.type && prov.api_key?.mode === 'empty'
 }
 
 export function ProvidersSettings() {
-  const { draftConfig, dirtyPaths, updateField, updateSecretField, t } =
-    useSettings();
-  const [modalOpen, setModalOpen] = useState(false);
+  const { draftConfig, dirtyPaths, updateField, updateSecretField, t } = useSettings()
+  const [modalOpen, setModalOpen] = useState(false)
 
-  if (!draftConfig) return null;
-  const providers = draftConfig.providers || {};
+  if (!draftConfig) return null
+  const providers = draftConfig.providers || {}
 
-  const configuredNames = Object.keys(providers).filter(
-    (name) => !isEmptyProvider(providers[name])
-  );
+  const configuredNames = Object.keys(providers).filter((name) => !isEmptyProvider(providers[name]))
   const removeProvider = (name: string) => {
-    const updated = { ...providers };
-    delete updated[name];
-    updateField("providers", updated);
-  };
+    const updated = { ...providers }
+    delete updated[name]
+    updateField('providers', updated)
+  }
 
   const BTN_CLS =
-    "rounded px-3 py-1.5 text-xs transition-colors bg-blue-600 text-white hover:bg-blue-500";
+    'rounded px-3 py-1.5 text-xs transition-colors bg-blue-600 text-white hover:bg-blue-500'
 
   return (
     <div className="space-y-6">
-      <SettingsSection title={t("settings.sections.namedProviders")}>
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          className={BTN_CLS}
-        >
-          {t("settings.addProvider")}
+      <SettingsSection title={t('settings.sections.namedProviders')}>
+        <button type="button" onClick={() => setModalOpen(true)} className={BTN_CLS}>
+          {t('settings.addProvider')}
         </button>
 
         {configuredNames.length === 0 && (
-          <p className="text-xs text-text-tertiary">
-            {t("settings.noProviders")}
-          </p>
+          <p className="text-xs text-text-tertiary">{t('settings.noProviders')}</p>
         )}
 
         {configuredNames.map((name) => {
-          const prov = providers[name];
+          const prov = providers[name]
           return (
             <NamedItemCard
               key={name}
               title={name}
               onRemove={() => removeProvider(name)}
-              removeLabel={t("settings.removeProvider")}
+              removeLabel={t('settings.removeProvider')}
             >
               <SettingsField
-                label={t("settings.fields.providerType")}
+                label={t('settings.fields.providerType')}
                 path={`providers.${name}.type`}
                 isDirty={isDirtyPath(dirtyPaths, `providers.${name}.type`)}
               >
                 <TextInput
                   id={`providers.${name}.type`}
-                  value={prov.type || ""}
-                  onChange={(v) =>
-                    updateField(`providers.${name}.type`, v || undefined)
-                  }
+                  value={prov.type || ''}
+                  onChange={(v) => updateField(`providers.${name}.type`, v || undefined)}
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerApiBase")}
+                label={t('settings.fields.providerApiBase')}
                 path={`providers.${name}.api_base`}
                 isDirty={isDirtyPath(dirtyPaths, `providers.${name}.api_base`)}
               >
@@ -91,7 +77,7 @@ export function ProvidersSettings() {
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerApiKey")}
+                label={t('settings.fields.providerApiKey')}
                 path={`providers.${name}.api_key`}
                 isDirty={isDirtyPath(dirtyPaths, `providers.${name}.api_key`)}
               >
@@ -99,81 +85,56 @@ export function ProvidersSettings() {
                   id={`providers.${name}.api_key`}
                   value={prov.api_key}
                   onChange={(v: SecretValue) =>
-                    updateSecretField(
-                      `providers.${name}.api_key`,
-                      v.mode,
-                      v.value,
-                      v.env_name
-                    )
+                    updateSecretField(`providers.${name}.api_key`, v.mode, v.value, v.env_name)
                   }
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerProxy")}
+                label={t('settings.fields.providerProxy')}
                 path={`providers.${name}.proxy`}
                 isDirty={isDirtyPath(dirtyPaths, `providers.${name}.proxy`)}
               >
                 <TextInput
                   id={`providers.${name}.proxy`}
-                  value={prov.proxy || ""}
-                  onChange={(v) =>
-                    updateField(`providers.${name}.proxy`, v || undefined)
-                  }
+                  value={prov.proxy || ''}
+                  onChange={(v) => updateField(`providers.${name}.proxy`, v || undefined)}
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerAuthMethod")}
+                label={t('settings.fields.providerAuthMethod')}
                 path={`providers.${name}.auth_method`}
-                isDirty={isDirtyPath(
-                  dirtyPaths,
-                  `providers.${name}.auth_method`
-                )}
+                isDirty={isDirtyPath(dirtyPaths, `providers.${name}.auth_method`)}
               >
                 <TextInput
                   id={`providers.${name}.auth_method`}
-                  value={prov.auth_method || ""}
-                  onChange={(v) =>
-                    updateField(`providers.${name}.auth_method`, v || undefined)
-                  }
+                  value={prov.auth_method || ''}
+                  onChange={(v) => updateField(`providers.${name}.auth_method`, v || undefined)}
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerConnectMode")}
+                label={t('settings.fields.providerConnectMode')}
                 path={`providers.${name}.connect_mode`}
-                isDirty={isDirtyPath(
-                  dirtyPaths,
-                  `providers.${name}.connect_mode`
-                )}
+                isDirty={isDirtyPath(dirtyPaths, `providers.${name}.connect_mode`)}
               >
                 <TextInput
                   id={`providers.${name}.connect_mode`}
-                  value={prov.connect_mode || ""}
-                  onChange={(v) =>
-                    updateField(
-                      `providers.${name}.connect_mode`,
-                      v || undefined
-                    )
-                  }
+                  value={prov.connect_mode || ''}
+                  onChange={(v) => updateField(`providers.${name}.connect_mode`, v || undefined)}
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerWebSearch")}
+                label={t('settings.fields.providerWebSearch')}
                 path={`providers.${name}.web_search`}
-                isDirty={isDirtyPath(
-                  dirtyPaths,
-                  `providers.${name}.web_search`
-                )}
+                isDirty={isDirtyPath(dirtyPaths, `providers.${name}.web_search`)}
               >
                 <BooleanInput
                   id={`providers.${name}.web_search`}
                   value={prov.web_search || false}
-                  onChange={(v) =>
-                    updateField(`providers.${name}.web_search`, v)
-                  }
+                  onChange={(v) => updateField(`providers.${name}.web_search`, v)}
                 />
               </SettingsField>
               <SettingsField
-                label={t("settings.fields.providerModels")}
+                label={t('settings.fields.providerModels')}
                 path={`providers.${name}.models`}
                 isDirty={isDirtyPath(dirtyPaths, `providers.${name}.models`)}
               >
@@ -185,14 +146,11 @@ export function ProvidersSettings() {
                 />
               </SettingsField>
             </NamedItemCard>
-          );
+          )
         })}
       </SettingsSection>
 
-      <AddProviderModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-      />
+      <AddProviderModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
-  );
+  )
 }

@@ -36,7 +36,10 @@ export function SidebarToggleIcon() {
   )
 }
 
-export function ChevronLeftIcon({ size = 14 }: { size?: number }) {
+export function ChevronLeftIcon({
+  size = 14,
+  className = '',
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -46,6 +49,7 @@ export function ChevronLeftIcon({ size = 14 }: { size?: number }) {
       stroke="currentColor"
       strokeWidth="2"
       aria-hidden="true"
+      className={className}
     >
       <path d="m15 18-6-6 6-6" />
     </svg>

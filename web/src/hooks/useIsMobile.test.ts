@@ -1,22 +1,25 @@
-import { describe, expect, it, mock, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { renderHook } from '@testing-library/react'
 import { useIsMobile } from './useIsMobile'
 
 // Mock window.matchMedia
 const originalMatchMedia = globalThis.matchMedia
+const originalInnerWidth = window.innerWidth
 
 describe('useIsMobile', () => {
   afterEach(() => {
     globalThis.matchMedia = originalMatchMedia
+    Object.defineProperty(window, 'innerWidth', { value: originalInnerWidth, configurable: true })
   })
 
-  test('detecta viewport mobile (< 768px)', () => {
+  test('detects mobile viewport (< 768px)', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 500, configurable: true })
     globalThis.matchMedia = (() => ({
       matches: true,
       media: '',
       onchange: null,
-      addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => {},
-      removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
       dispatchEvent: () => false,
     })) as unknown as typeof globalThis.matchMedia
 
@@ -24,13 +27,14 @@ describe('useIsMobile', () => {
     expect(result.current).toBe(true)
   })
 
-  test('detecta viewport desktop (> 768px)', () => {
+  test('detects desktop viewport (> 768px)', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true })
     globalThis.matchMedia = (() => ({
       matches: false,
       media: '',
       onchange: null,
-      addEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => {},
-      removeEventListener: (_type: string, cb: (e: MediaQueryListEvent) => void) => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
       dispatchEvent: () => false,
     })) as unknown as typeof globalThis.matchMedia
 
@@ -38,7 +42,8 @@ describe('useIsMobile', () => {
     expect(result.current).toBe(false)
   })
 
-  test('usa el breakpoint proporcionado', () => {
+  test('uses provided breakpoint', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 500, configurable: true })
     globalThis.matchMedia = ((query: string) => ({
       matches: query === '(max-width: 1023px)',
       media: query,

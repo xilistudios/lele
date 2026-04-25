@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { serializeCommand, parseEvent } from './events'
 import type { ClientEvent } from '../../lib/types'
+import { parseEvent, serializeCommand } from './events'
 
 describe('serializeCommand', () => {
   test('serializa comando subscribe', () => {

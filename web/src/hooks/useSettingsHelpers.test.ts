@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import {
   getAgentModelPrimary,
-  getDefaultModel,
   getDefaultImageModel,
+  getDefaultModel,
   getErrorForPath,
   isDirtyPath,
 } from './useSettingsHelpers'
@@ -23,16 +23,12 @@ describe('isDirtyPath', () => {
 
 describe('getErrorForPath', () => {
   test('encuentra error por path exacto', () => {
-    const errors = [
-      { path: 'agents.defaults.model', message: 'Model is required' },
-    ]
+    const errors = [{ path: 'agents.defaults.model', message: 'Model is required' }]
     expect(getErrorForPath(errors, 'agents.defaults.model')).toBe('Model is required')
   })
 
   test('encuentra error por path anidado', () => {
-    const errors = [
-      { path: 'agents.defaults.model', message: 'Model is required' },
-    ]
+    const errors = [{ path: 'agents.defaults.model', message: 'Model is required' }]
     expect(getErrorForPath(errors, 'agents.defaults')).toBe('Model is required')
   })
 
