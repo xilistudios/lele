@@ -467,6 +467,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant' | 'tool'
   content: string
+  reasoningContent?: string
   streaming: boolean
   createdAt: string
   optimistic?: boolean
@@ -530,6 +531,7 @@ export type HistoryResponse = {
   messages: Array<{
     role: 'user' | 'assistant' | 'tool'
     content: string
+    reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
   }>
@@ -569,6 +571,10 @@ export type ClientEvent =
   | {
       event: 'message.stream'
       data: { message_id: string; session_key?: string; chunk: string; done: boolean }
+    }
+  | {
+      event: 'message.thinking'
+      data: { message_id: string; session_key?: string; chunk: string }
     }
   | {
       event: 'message.complete'

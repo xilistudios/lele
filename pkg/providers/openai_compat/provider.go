@@ -154,7 +154,7 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 	return parseResponse(body)
 }
 
-func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}, onChunk func(chunk string, done bool)) (*LLMResponse, error) {
+func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
 	if p.apiBase == "" {
 		return nil, fmt.Errorf("API base not configured")
 	}
@@ -238,7 +238,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
 	}
 
-	return parseSSEStream(resp.Body, onChunk)
+	return parseSSEStream(resp.Body, onChunk, onReasoning)
 }
 
 func parseResponse(body []byte) (*LLMResponse, error) {
@@ -349,7 +349,7 @@ func asFloat(v interface{}) (float64, bool) {
 	}
 }
 
-func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLMResponse, error) {
+func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
 	var contentBuf strings.Builder
 	var reasoningBuf strings.Builder
 	var toolCalls []protocoltypes.ToolCall
@@ -401,13 +401,16 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool)) (*LLM
 
 		choice := chunk.Choices[0]
 
+		if choice.Delta.ReasoningContent != "" {
+			reasoningBuf.WriteString(choice.Delta.ReasoningContent)
+			if onReasoning != nil {
+				onReasoning(choice.Delta.ReasoningContent)
+			}
+		}
+
 		if choice.Delta.Content != "" {
 			contentBuf.WriteString(choice.Delta.Content)
 			onChunk(choice.Delta.Content, false)
-		}
-
-		if choice.Delta.ReasoningContent != "" {
-			reasoningBuf.WriteString(choice.Delta.ReasoningContent)
 		}
 
 		for _, tc := range choice.Delta.ToolCalls {

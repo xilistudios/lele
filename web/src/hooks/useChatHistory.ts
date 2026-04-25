@@ -9,6 +9,7 @@ const POLLING_INTERVAL = 5000
 type HistoryMessage = Array<{
   role: 'user' | 'assistant' | 'tool'
   content: string
+  reasoning_content?: string
   tool_calls?: HistoryToolCall[]
   tool_call_id?: string
 }>

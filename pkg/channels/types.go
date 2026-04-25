@@ -59,6 +59,12 @@ type WSStreamPayload struct {
 	Done       bool   `json:"done"`
 }
 
+type WSThinkingPayload struct {
+	MessageID  string `json:"message_id"`
+	SessionKey string `json:"session_key,omitempty"`
+	Chunk      string `json:"chunk"`
+}
+
 type WSMessageCompletePayload struct {
 	MessageID   string                   `json:"message_id"`
 	SessionKey  string                   `json:"session_key,omitempty"`
@@ -149,10 +155,11 @@ type ChatHistoryResponse struct {
 }
 
 type ChatHistoryMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	ToolCalls  []HistoryToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Role             string            `json:"role"`
+	Content          string            `json:"content"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
+	ToolCalls        []HistoryToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string            `json:"tool_call_id,omitempty"`
 }
 
 type HistoryToolCall struct {

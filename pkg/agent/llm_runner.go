@@ -257,6 +257,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var err error
 
 		var streamOnChunk func(chunk string, done bool)
+		var streamOnReasoning func(reasoningChunk string)
 		if opts.Channel == channels.ChannelName && opts.SendResponse {
 			messageID := opts.MessageID
 			if messageID == "" {
@@ -275,6 +276,15 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					},
 				})
 			}
+			streamOnReasoning = func(reasoningChunk string) {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:   opts.Channel,
+					ChatID:    opts.SessionKey,
+					Event:     "message.thinking",
+					MessageID: msgID,
+					Content:   reasoningChunk,
+				})
+			}
 		}
 
 		callLLM := func() (*providers.LLMResponse, error) {
@@ -288,7 +298,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				if sp, ok := agent.Provider.(providers.StreamingLLMProvider); ok {
 					if len(candidates) > 0 && lr.al.fallback != nil {
 					} else {
-						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk)
+						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk, streamOnReasoning)
 					}
 				}
 			}

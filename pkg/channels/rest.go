@@ -191,9 +191,10 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		}
 
 		historyMsg := ChatHistoryMessage{
-			Role:       msg.Role,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
+			Role:             msg.Role,
+			Content:          msg.Content,
+			ReasoningContent: msg.ReasoningContent,
+			ToolCallID:       msg.ToolCallID,
 		}
 		if len(msg.ToolCalls) > 0 {
 			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))

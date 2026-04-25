@@ -43,6 +43,16 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
   const [animate, setAnimate] = useState(false)
+  const [thinkingOpen, setThinkingOpen] = useState(
+    message.streaming && !!message.reasoningContent,
+  )
+
+  // Auto-open thinking when streaming starts
+  useEffect(() => {
+    if (message.streaming && message.reasoningContent) {
+      setThinkingOpen(true)
+    }
+  }, [message.streaming, message.reasoningContent])
 
   useEffect(() => {
     if (!isUser && !isTool && message.content) {
@@ -54,6 +64,8 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     if (isUser || isTool) return null
     return parseBlocks(message.content)
   }, [isUser, isTool, message.content])
+
+  const hasThinking = !!message.reasoningContent
 
   if (isTool) {
     const subagentSessionKey = message.subagentSessionKey
@@ -192,7 +204,41 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   return (
     <div className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
       <div className="space-y-3">
-        {message.streaming && message.content === '' ? (
+        {hasThinking ? (
+          <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-background-secondary transition-colors"
+              onClick={() => setThinkingOpen(!thinkingOpen)}
+              aria-expanded={thinkingOpen}
+            >
+              <svg
+                className={`h-3.5 w-3.5 text-text-tertiary transition-transform ${thinkingOpen ? 'rotate-90' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <span className="text-xs text-text-tertiary italic">
+                {message.streaming && message.reasoningContent ? 'Thinking…' : 'Thinking'}
+              </span>
+              {message.streaming && message.reasoningContent && (
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-tertiary animate-pulse ml-1" />
+              )}
+            </button>
+            {thinkingOpen && (
+              <div className="px-3 pb-2">
+                <p className="text-xs text-text-tertiary italic whitespace-pre-wrap">
+                  {message.reasoningContent}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : null}
+        {message.streaming && message.content === '' && !hasThinking ? (
           <div className="flex items-center gap-2 text-text-tertiary text-sm">
             <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
             <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />

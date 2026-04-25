@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
-import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
+import type { ApprovalRequest, Attachment, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
 import { updateChatHistoryFromRaw } from './useChatHistory'
 
 const formatToolCallArgs = (toolCall: HistoryToolCall) => {
@@ -33,10 +33,50 @@ const parseSubagentSessionKey = (value: string | undefined) => {
   return undefined
 }
 
+/**
+ * Parses attachment paths from a message content string that contains
+ * "## Attachments\n- /path/file.png" appended by the backend.
+ * Returns the cleaned content and extracted attachment info.
+ */
+const ATTACHMENTS_HEADER = '## Attachments'
+const parseAttachmentsFromContent = (content: string): { content: string; attachments: Attachment[] } => {
+  if (!content.includes(ATTACHMENTS_HEADER)) {
+    return { content, attachments: [] }
+  }
+
+  const lines = content.split('\n')
+  const headerIndex = lines.findIndex((line) => line.trim() === ATTACHMENTS_HEADER)
+  if (headerIndex === -1) {
+    return { content, attachments: [] }
+  }
+
+  const cleanContent = lines.slice(0, headerIndex).join('\n').trim()
+  const attachmentLines = lines.slice(headerIndex + 1)
+  const attachments: Attachment[] = []
+
+  for (const line of attachmentLines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('- ')) {
+      const path = trimmed.slice(2).trim()
+      if (path) {
+        attachments.push({
+          path,
+          name: path.split('/').pop() ?? path,
+          mime_type: undefined,
+          kind: 'file',
+        })
+      }
+    }
+  }
+
+  return { content: cleanContent, attachments }
+}
+
 export const toChatMessages = (
   history: Array<{
     role: 'user' | 'assistant' | 'tool'
     content: string
+    reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
   }>,
@@ -54,13 +94,28 @@ export const toChatMessages = (
   }
 
   return history.flatMap((message, index) => {
+    // Parse attachments from user message content
+    // (backend stores them inline as "## Attachments\n- /path/file.png")
+    let messageContent = message.content
+    let parsedAttachments: Attachment[] | undefined
+
+    if (message.role === 'user') {
+      const parsed = parseAttachmentsFromContent(messageContent)
+      messageContent = parsed.content
+      if (parsed.attachments.length > 0) {
+        parsedAttachments = parsed.attachments
+      }
+    }
+
     const baseMessage: ChatMessage = {
       id: `${sessionKey}:${index}:${message.role}`,
       role: message.role,
-      content: message.content,
+      content: messageContent,
+      reasoningContent: message.reasoning_content,
       streaming: false,
       createdAt: new Date().toISOString(),
       sessionKey,
+      attachments: parsedAttachments,
     }
 
     if (message.role === 'assistant' && message.tool_calls?.length) {
@@ -239,6 +294,22 @@ export function useMessages(
             (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string,
             (data.chunk as string) ?? '',
             (data.done as boolean) ?? false,
+          )
+          break
+        case 'message.thinking':
+          if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] Dropped message.thinking: session mismatch')
+            break
+          }
+          setStreamingMessages((current) =>
+            current.map((m) =>
+              m.id === (data.message_id as string) && m.role === 'assistant'
+                ? {
+                    ...m,
+                    reasoningContent: `${m.reasoningContent ?? ''}${(data.chunk as string) ?? ''}`,
+                  }
+                : m,
+            ),
           )
           break
         case 'message.ack':

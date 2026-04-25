@@ -328,7 +328,7 @@ func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") {
+		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/files/view") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -387,6 +387,13 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			SessionKey: sessionKey,
 			Chunk:      msg.Content,
 			Done:       done,
+		})
+		return
+	case "message.thinking":
+		n.sendWSEvent(sessionKey, "message.thinking", WSThinkingPayload{
+			MessageID:  msg.MessageID,
+			SessionKey: sessionKey,
+			Chunk:      msg.Content,
 		})
 		return
 	case "tool.executing":
