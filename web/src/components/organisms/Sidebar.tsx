@@ -120,35 +120,20 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 {sortedSessions.length === 0 ? (
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
-                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => {
-                    const isProcessing = processingSessions.has(s.key)
-                    return (
-                      <button
-                        key={s.key}
-                        type="button"
-                        onClick={() => handleSessionSelect(s.key)}
-                        className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                          s.key === currentSession?.key
-                            ? 'bg-surface-card text-text-primary'
-                            : 'text-text-secondary hover:bg-surface-card hover:text-text-primary'
-                        }`}
-                      >
-                        {isProcessing && (
-                          <svg
-                            className="h-3 w-3 shrink-0 animate-spin text-accent"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            aria-hidden="true"
-                          >
-                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                          </svg>
-                        )}
-                        <span className="truncate">{s.name || s.key}</span>
-                      </button>
-                    )
-                  })
+                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => handleSessionSelect(s.key)}
+                      className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
+                        s.key === currentSession?.key
+                          ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                      }`}
+                    >
+                      <span className="truncate">{s.name || s.key}</span>
+                    </button>
+                  ))
                 )}
               </div>
             </Popover>
@@ -181,24 +166,23 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <div
-          className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-4'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
+          className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-2'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
         >
           <Popover
             block
+            tooltip={collapsed ? deviceName : undefined}
             trigger={
               <div
-                // biome-ignore lint/a11y/useSemanticElements: div needed for Popover trigger compatibility
                 role="button"
                 tabIndex={0}
-                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full px-1 justify-center' : 'gap-2 w-full py-2 px-3'}`}
-                style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
+                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-1 w-full py-2 px-2'}`}
                 aria-label={collapsed ? t('chat.deviceMenu') : undefined}
               >
-                <div className="flex flex-shrink-0 items-center justify-center rounded-md bg-surface-card text-xs font-bold text-text-primary h-7 w-7">
+                <div className={`flex flex-shrink-0 items-center justify-center rounded ${collapsed ? 'h-6 w-6' : 'px-2 py-1'} bg-surface-hover text-xs font-medium text-text-primary`}>
                   {deviceName?.[0]?.toUpperCase() ?? 'L'}
                 </div>
                 {!collapsed && (
-                  <div className="min-w-0 flex-1 px-2">
+                  <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
                   </div>
                 )}
@@ -212,21 +196,20 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 type="button"
                 title={t('chat.settings')}
                 aria-label={t('chat.settings')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-card hover:text-text-primary"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 onClick={handleSettingsClick}
               >
                 <SettingsIcon />
                 <span>{t('chat.settings')}</span>
               </button>
               <button
-                onClick={() => navigate('/pair')}
-                title={t('chat.logout')}
                 type="button"
                 aria-label={t('chat.logout')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors cursor-not-allowed opacity-60"
+                title="Función deshabilitada"
               >
-                <LogoutIcon />
-                <span>{t('chat.logout')}</span>
+                <LogoutIcon className="opacity-50" />
+                <span>Cerrar sesión</span>
               </button>
             </div>
           </Popover>

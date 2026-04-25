@@ -32,13 +32,13 @@ export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props)
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <h1 className="text-xl font-semibold text-white">{t('chat.settings')}</h1>
+        <h1 className="text-xl font-semibold text-text-primary">{t('chat.settings')}</h1>
         {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}
       </div>
       <button
         onClick={onLogout}
         type="button"
-        className="rounded-md bg-rose-600 px-4 py-2 text-sm text-white transition-colors hover:bg-rose-500"
+        className="rounded-md bg-state-error px-4 py-2 text-sm text-text-on-accent transition-colors hover:bg-[#FF7B7B]"
       >
         {t('chat.logout')}
       </button>

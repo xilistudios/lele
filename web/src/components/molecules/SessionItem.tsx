@@ -34,8 +34,8 @@ export function SessionItem({
         title={formatSessionTitle(sessionKey, sessionName, messageCount)}
         className={`relative flex w-full items-center justify-center rounded-md p-2 transition-colors ${
           selected
-            ? 'bg-surface-card-hover text-text-primary'
-            : 'text-text-secondary hover:bg-surface-card hover:text-text-secondary'
+            ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
         }`}
       >
         <span className="text-xs">
@@ -52,10 +52,10 @@ export function SessionItem({
     <button
       onClick={onSelect}
       type="button"
-      className={`group flex w-full items-start gap-2 rounded-md px-3 py-2 text-left transition-colors ${
+      className={`group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors ${
         selected
-          ? 'bg-surface-card-hover text-text-primary'
-          : 'text-text-secondary hover:bg-surface-card hover:text-text-secondary'
+          ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
       }`}
     >
       {isProcessing && (
@@ -80,7 +80,7 @@ export function SessionItem({
         }}
         type="button"
         aria-label={t('chat.deleteSession')}
-        className="ml-auto text-text-tertiary opacity-0 transition-opacity hover:text-state-error group-hover:opacity-100"
+        className="ml-auto flex items-center justify-center rounded-md p-2 text-text-tertiary opacity-0 transition-all hover:bg-state-error-light hover:text-[#FF7B7B] group-hover:opacity-100"
       >
         <TrashIcon />
       </button>

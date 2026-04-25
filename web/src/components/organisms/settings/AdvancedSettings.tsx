@@ -158,7 +158,7 @@ export function AdvancedSettings() {
           <button
             type="button"
             onClick={() => setShowRawJson(!showRawJson)}
-            className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-card"
+            className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-hover"
           >
             {showRawJson ? t('settings.hideRawJson') : t('settings.showRawJson')}
           </button>
@@ -174,7 +174,7 @@ export function AdvancedSettings() {
                 // ignore invalid JSON while typing
               }
             }}
-            className="h-[500px] w-full rounded border border-border bg-background-primary p-3 font-mono text-xs text-text-primary focus:border-blue-500 focus:outline-none"
+            className="h-[500px] w-full rounded border border-border bg-background-primary p-3 font-mono text-xs text-text-primary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary"
             spellCheck={false}
           />
         )}

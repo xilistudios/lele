@@ -5,28 +5,102 @@
 :root {
   color-scheme: dark;
 
-  /* Colors */
-  --color-bg-primary: #1c1c1e;
-  --color-bg-secondary: #2c2c2e;
-  --color-bg-tertiary: #3a3a3c;
-  --color-bg-elevated: #48484a;
-  --color-surface-card: #2c2c2e;
-  --color-surface-card-hover: #3a3a3c;
-  --color-border-default: #3a3a3c;
-  --color-border-light: #48484a;
-  --color-border-focus: #0a84ff;
-  --color-text-primary: #f5f5f7;
-  --color-text-secondary: #98989d;
-  --color-text-tertiary: #636366;
-  --color-brand-blue: #0a84ff;
-  --color-brand-purple: #bf5af2;
-  --color-brand-pink: #ff375f;
-  --color-brand-orange: #ff9f0a;
-  --color-brand-green: #30d158;
-  --color-state-success: #30d158;
-  --color-state-warning: #ff9f0a;
-  --color-state-error: #ff453a;
-  --color-state-info: #0a84ff;
+  /* 
+   * Color System - Lele Brand Palette
+   * 
+   * Neutros (60% - Fondos):
+   * Carbón #0F1115 - Fondo principal
+   * Gris Pizarra #1E2128 - Fondo secundario
+   * Gris Medio #3A3F46 - Elevado/Hover
+   * 
+   * UI Elements (30% - Surfaces):
+   * Variaciones de grises para cards, sidebar, surfaces
+   * 
+   * Acentos (10% - CTAs & Highlights):
+   * Rosa Lele #E83E8C - Branding principal
+   * Naranja #FF6B35 - CTAs principales
+   * Turquesa #17B3B8 - Interacción
+   */
+
+  /* 60% - Neutros Oscuros (Fondos) */
+  --color-bg-primary: #0f1115;
+  --color-bg-secondary: #1e2128;
+  --color-bg-tertiary: #2a2e35;
+  --color-bg-elevated: #3a3f46;
+  --color-bg-hover: #454b53;
+
+  /* 30% - Surfaces/UI Elements */
+  --color-surface-primary: #3a3f46;
+  --color-surface-secondary: #2a2e35;
+  --color-surface-tertiary: #1e2128;
+  --color-surface-hover: #454b53;
+  --color-surface-muted: #2a2e35;
+  --color-surface-selected: rgba(232, 62, 140, 0.12);
+
+  /* 10% - Acentos Primarios */
+  --color-accent-primary: #e83e8c;
+  --color-accent-hover: #f0529a;
+  --color-accent-active: #d02a7c;
+  --color-accent-muted: rgba(232, 62, 140, 0.15);
+  --color-accent-subtle: rgba(232, 62, 140, 0.08);
+
+  /* Brand Colors */
+  --color-brand-rosa: #e83e8c;
+  --color-brand-morado: #9d4edd;
+  --color-brand-turquesa: #17b3b8;
+  --color-brand-amarillo: #ffc107;
+  --color-brand-naranja: #ff6b35;
+
+  /* Secondary Palette */
+  --color-secondary-verde: #7bc943;
+  --color-secondary-azul: #2d6cdf;
+  --color-secondary-rojo: #b71c1c;
+  --color-secondary-rosa-pastel: #ffb6d5;
+  --color-secondary-aqua: #a7e7e7;
+
+  /* CTA Colors - WCAG AA compliant (white text) */
+  --color-cta-primary: #c24a17;
+  --color-cta-hover: #d4551e;
+  --color-cta-active: #a83d14;
+  --color-cta-secondary: #ffc107;
+  --color-cta-secondary-hover: #ffd233;
+
+  /* Interaction Colors */
+  --color-interaction-primary: #17b3b8;
+  --color-interaction-hover: #1fc9ce;
+  --color-interaction-active: #139da1;
+
+  /* Borders */
+  --color-border-default: rgba(59, 65, 72, 0.25);
+  --color-border-light: rgba(59, 65, 72, 0.4);
+  --color-border-strong: rgba(59, 65, 72, 0.6);
+  --color-border-focus: #17b3b8;
+
+  /* Text Colors - WCAG AA compliant */
+  --color-text-primary: #f2f4f7;
+  --color-text-secondary: #b0b6bd;
+  --color-text-tertiary: #9ca3af;
+  --color-text-muted: #6b7280;
+  --color-text-on-surface: #f2f4f7;
+  --color-text-on-accent: #ffffff;
+
+  /* State Colors - WCAG AA compliant */
+  --color-state-success: #7bc943;
+  --color-state-success-light: rgba(123, 201, 67, 0.15);
+  --color-state-warning: #ffc107;
+  --color-state-warning-light: rgba(255, 193, 7, 0.15);
+  --color-state-error: #ef5350;
+  --color-state-error-light: rgba(239, 83, 80, 0.15);
+  --color-state-info: #4a8ae8;
+  --color-state-info-light: rgba(74, 138, 232, 0.15);
+
+  /* Overlay */
+  --color-overlay: rgba(15, 17, 21, 0.75);
+  --color-overlay-light: rgba(15, 17, 21, 0.5);
+
+  /* Glass Effect */
+  --color-glass: rgba(15, 17, 21, 0.85);
+  --color-glass-border: rgba(232, 62, 140, 0.15);
 
   /* Spacing (4pt grid) */
   --spacing-1: 4px;
@@ -100,14 +174,14 @@ pre,
 
 /* Focus states */
 :focus-visible {
-  outline: 2px solid var(--color-brand-blue);
+  outline: 2px solid var(--color-interaction-primary);
   outline-offset: 2px;
 }
 
 /* Selection */
 ::selection {
-  background: var(--color-brand-blue);
-  color: var(--color-text-primary);
+  background: var(--color-brand-rosa);
+  color: var(--color-text-on-accent);
 }
 
 /* Animations */
@@ -186,16 +260,16 @@ pre,
   }
 
   .focus-ring:focus-visible {
-    outline: 2px solid var(--color-brand-blue);
+    outline: 2px solid var(--color-interaction-primary);
     outline-offset: 2px;
     border-radius: var(--radius-md);
   }
 
   .glass-effect {
-    background: rgba(44, 44, 46, 0.72);
+    background: var(--color-glass);
     backdrop-filter: saturate(180%) blur(20px);
     -webkit-backdrop-filter: saturate(180%) blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--color-glass-border);
   }
 
   .hover-highlight {
@@ -204,7 +278,7 @@ pre,
   }
 
   .hover-highlight:hover {
-    background: var(--color-bg-tertiary);
+    background: rgba(23, 179, 184, 0.15);
     color: var(--color-text-primary);
   }
 
@@ -215,7 +289,7 @@ pre,
 
   .group:hover .hover-highlight-group,
   .hover-highlight-group:hover {
-    background: var(--color-bg-tertiary);
+    background: rgba(23, 179, 184, 0.15);
     color: var(--color-text-primary);
   }
 }
@@ -231,8 +305,8 @@ pre,
     font-size: 0.875rem;
     font-weight: 500;
     line-height: 1.25rem;
-    color: var(--color-text-primary);
-    background: var(--color-bg-tertiary);
+    color: var(--color-text-on-surface);
+    background: var(--color-surface-primary);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-lg);
     cursor: pointer;
@@ -241,8 +315,8 @@ pre,
   }
 
   .btn-base:hover {
-    background: var(--color-bg-elevated);
-    border-color: var(--color-border-light);
+    background: var(--color-surface-hover);
+    border-color: var(--color-interaction-primary);
   }
 
   .btn-base:active {
@@ -250,12 +324,12 @@ pre,
   }
 
   .btn-base:focus-visible {
-    outline: 2px solid var(--color-brand-blue);
+    outline: 2px solid var(--color-interaction-primary);
     outline-offset: 2px;
   }
 
   .btn-base:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
     pointer-events: none;
   }
@@ -267,7 +341,7 @@ pre,
     font-size: 0.875rem;
     line-height: 1.25rem;
     color: var(--color-text-primary);
-    background: var(--color-bg-secondary);
+    background: var(--color-bg-tertiary);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-lg);
     transition: all var(--transition-fast);
@@ -284,26 +358,26 @@ pre,
 
   .input-base:focus {
     outline: none;
-    border-color: var(--color-border-focus);
-    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.15);
+    border-color: var(--color-interaction-primary);
+    box-shadow: 0 0 0 3px rgba(23, 179, 184, 0.15);
   }
 
   .input-base:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
-    background: var(--color-bg-tertiary);
+    background: var(--color-bg-secondary);
   }
 
   .card-base {
     padding: var(--spacing-6);
-    background: var(--color-surface-card);
+    background: var(--color-surface-muted);
     border: 1px solid var(--color-border-default);
     border-radius: var(--radius-xl);
     transition: all var(--transition-normal);
   }
 
   .card-base:hover {
-    background: var(--color-surface-card-hover);
+    background: var(--color-surface-tertiary);
     border-color: var(--color-border-light);
   }
 }

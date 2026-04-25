@@ -176,22 +176,12 @@ export function ChatComposer() {
             type={canCancel ? 'button' : 'submit'}
             disabled={false}
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-20"
-            onClick={canCancel ? onCancel : undefined}
-            style={
+            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
               canCancel
-                ? {
-                    backgroundColor: 'rgba(255, 69, 58, 0.15)',
-                    border: '1px solid var(--border)',
-                  }
-                : {}
-            }
-            onMouseEnter={(e) => {
-              if (canCancel) e.currentTarget.style.backgroundColor = 'rgba(255, 69, 58, 0.25)'
-            }}
-            onMouseLeave={(e) => {
-              if (canCancel) e.currentTarget.style.backgroundColor = 'rgba(255, 69, 58, 0.15)'
-            }}
+                ? 'bg-state-error-light text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
+                : 'bg-cta-primary text-text-on-accent hover:bg-cta-hover'
+            }`}
+            onClick={canCancel ? onCancel : undefined}
           >
             {canCancel ? (
               <svg
@@ -199,7 +189,6 @@ export function ChatComposer() {
                 height="12"
                 viewBox="0 0 24 24"
                 fill="currentColor"
-                className="text-state-error"
                 aria-hidden="true"
               >
                 <rect x="6" y="6" width="12" height="12" rx="2" />
@@ -213,7 +202,6 @@ export function ChatComposer() {
                 stroke="currentColor"
                 strokeWidth="2.5"
                 aria-hidden="true"
-                className="text-black hover:text-black"
               >
                 <line x1="12" y1="19" x2="12" y2="5" />
                 <polyline points="5 12 12 5 19 12" />

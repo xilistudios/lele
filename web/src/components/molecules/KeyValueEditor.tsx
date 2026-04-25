@@ -52,13 +52,13 @@ export function KeyValueEditor({ id, value, onChange, disabled, keyPlaceholder }
           onKeyDown={handleKeyDown}
           disabled={disabled}
           placeholder={keyPlaceholder}
-          className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none disabled:opacity-50"
+          className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40"
         />
         <button
           type="button"
           onClick={addEntry}
           disabled={disabled || !newKey.trim()}
-          className="rounded bg-blue-600 px-3 py-2 text-xs text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+          className="rounded bg-cta-primary px-3 py-2 text-xs text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40"
         >
           {t('common.add')}
         </button>
@@ -66,14 +66,14 @@ export function KeyValueEditor({ id, value, onChange, disabled, keyPlaceholder }
       {entries.map(([key, values]) => (
         <div key={key} className="rounded border border-border bg-background-primary p-3">
           <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-xs font-medium text-white">{key}</span>
+            <span className="font-mono text-xs font-medium text-text-primary">{key}</span>
             <button
               type="button"
               onClick={() => removeEntry(key)}
               disabled={disabled}
               title={removeTitle}
               aria-label={removeTitle}
-              className="text-rose-400 transition-colors hover:text-rose-300 disabled:opacity-50"
+              className="text-state-error transition-colors hover:text-state-error/80 disabled:opacity-50"
             >
               <svg
                 width="14"

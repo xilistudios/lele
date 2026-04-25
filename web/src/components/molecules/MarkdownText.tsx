@@ -28,7 +28,7 @@ function InlineToken({ text, token }: { text: string; token?: { type: string; hr
           href={token.href ?? '#'}
           target="_blank"
           rel="noreferrer"
-          className="text-brand-teal underline decoration-border underline-offset-2 hover:text-brand-teal/80"
+          className="text-interaction-primary underline decoration-border underline-offset-2 hover:text-interaction-hover hover:decoration-interaction-hover"
         >
           {text}
         </a>
@@ -60,9 +60,8 @@ function MarkdownTable({
           <tr>
             {headers.map((header, i) => (
               <th
-                // biome-ignore lint/suspicious/noArrayIndexKey: table headers need stable column position, combined with content
-                key={`th-${header}-${i}`}
-                className={`border border-border bg-surface-card px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
+                key={`header-${header}`}
+                className={`border border-border bg-surface-muted px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
               >
                 <InlineMarkdown text={header} />
               </th>
