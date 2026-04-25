@@ -192,7 +192,7 @@ func validateProvider(providerType, apiKey, apiBase, authHeader string) bool {
 	}
 
 	if authHeader == "x-api-key" {
-		req.Header.Set("x-api-key", apiKey)
+		req.Header.Set("X-Api-Key", apiKey)
 	} else {
 		req.Header.Set("Authorization", authHeader+" "+apiKey)
 	}
