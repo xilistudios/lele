@@ -315,9 +315,9 @@ type ModelGroup struct {
 }
 
 type ModelOption struct {
-	Value      string                  `json:"value"`
-	Label      string                  `json:"label"`
-	Reasoning  *config.ReasoningConfig `json:"reasoning,omitempty"`
+	Value     string                  `json:"value"`
+	Label     string                  `json:"label"`
+	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type ToolInfo struct {
