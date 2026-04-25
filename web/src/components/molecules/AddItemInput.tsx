@@ -10,7 +10,7 @@ type Props = {
 }
 
 const INPUT_CLS =
-  'w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-blue-500 focus:outline-none disabled:opacity-50'
+  'w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40'
 
 export function AddItemInput({ value, onChange, onAdd, placeholder, disabled }: Props) {
   const { t } = useTranslation()

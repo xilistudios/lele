@@ -41,8 +41,8 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
             type="button"
             className={`w-full rounded px-3 py-2 text-left text-xs transition-colors ${
               activeTab === tab.id
-                ? 'bg-blue-600 text-white'
-                : 'text-text-secondary hover:bg-surface-card'
+                ? 'bg-cta-primary text-text-on-accent'
+                : 'text-text-secondary hover:bg-surface-hover'
             }`}
           >
             {tab.label}

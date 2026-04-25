@@ -5,7 +5,7 @@ type Props = {
 }
 
 const ADD_BTN_CLS =
-  'rounded bg-blue-600 px-3 py-2 text-xs text-white transition-colors hover:bg-blue-500 disabled:opacity-50'
+  'rounded bg-cta-primary px-3 py-2 text-xs text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40'
 
 export function AddButton({ onClick, disabled = false, children }: Props) {
   return (

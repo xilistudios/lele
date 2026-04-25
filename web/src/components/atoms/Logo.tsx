@@ -1,8 +1,8 @@
 const LOGO_CONFIG = [
-  { letter: 'L', color: 'text-pink-500' },
-  { letter: 'E', color: 'text-cyan-400' },
-  { letter: 'L', color: 'text-yellow-400' },
-  { letter: 'E', color: 'text-pink-500' },
+  { letter: 'L', color: 'text-brand-rosa' },
+  { letter: 'E', color: 'text-brand-turquesa' },
+  { letter: 'L', color: 'text-brand-amarillo' },
+  { letter: 'E', color: 'text-brand-rosa' },
 ] as const
 
 const DROP_SHADOW = 'drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]'

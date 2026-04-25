@@ -455,7 +455,9 @@ describe('App', () => {
       const sessionItems = Array.from(
         view.container.querySelectorAll('nav [role="button"]'),
       ) as HTMLElement[]
-      sessionTwoButton = sessionItems.find((button) => !button.className.includes('bg-surface-card'))
+      sessionTwoButton = sessionItems.find(
+        (button) => !button.className.includes('bg-surface-hover'),
+      )
       expect(sessionTwoButton).toBeDefined()
     })
 
@@ -688,7 +690,7 @@ describe('Routing', () => {
 
     // Look for logout button by class instead of text
     await waitFor(() => {
-      expect(view.container.querySelector('button.bg-rose-600')).not.toBeNull()
+      expect(view.container.querySelector('button.bg-state-error')).not.toBeNull()
     })
   })
 

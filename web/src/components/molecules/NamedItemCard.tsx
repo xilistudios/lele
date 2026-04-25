@@ -14,7 +14,7 @@ export function NamedItemCard({ title, onRemove, removeLabel, children }: Props)
   return (
     <div className={CARD_CLS}>
       <div className="mb-3 flex items-center justify-between">
-        <span className="font-mono text-xs font-medium text-white">{title}</span>
+        <span className="font-mono text-xs font-medium text-text-primary">{title}</span>
         <RemoveButton onClick={onRemove} ariaLabel={removeLabel} />
       </div>
       <div className="space-y-3">{children}</div>

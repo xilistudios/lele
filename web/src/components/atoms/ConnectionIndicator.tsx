@@ -12,9 +12,9 @@ const POPOVER_WIDTH = 180
 const POPOVER_HEIGHT = 80
 
 const STATUS_CONFIG = {
-  connected: { dot: 'bg-emerald-400', text: 'text-emerald-400' },
-  connecting: { dot: 'bg-yellow-400 animate-pulse-dot', text: 'text-yellow-400' },
-  disconnected: { dot: 'bg-red-400', text: 'text-gray-500' },
+  connected: { dot: 'bg-state-success', text: 'text-state-success' },
+  connecting: { dot: 'bg-state-warning animate-pulse-dot', text: 'text-state-warning' },
+  disconnected: { dot: 'bg-state-error', text: 'text-text-tertiary' },
 } as const
 
 const ORIGIN_MAP = {
@@ -56,7 +56,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1.5 text-gray-500 hover:bg-gray-700/50 hover:text-gray-400 transition-colors duration-150"
+        className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-150"
         aria-label={t('connection.statusAria', { status })}
       >
         <div className="relative">
@@ -69,7 +69,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
       </button>
 
       <span
-        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-card text-xs text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
+        className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
           isOpen ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'
         }`}
       >
@@ -77,7 +77,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
       </span>
 
       <div
-        className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-primary px-3 py-2 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-secondary px-3 py-2 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         role="menu"
@@ -86,7 +86,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
           <span className={`h-2 w-2 rounded-full ${config.dot}`} />
           <span className={`text-xs font-medium ${config.text}`}>{t(`connection.${status}`)}</span>
         </div>
-        <div className="mt-2 rounded bg-surface-card px-2 py-1.5 text-xs font-mono text-text-secondary">
+        <div className="mt-2 rounded px-2 py-1 bg-surface-hover text-xs font-medium font-mono text-text-secondary">
           {displayUrl}
         </div>
       </div>
