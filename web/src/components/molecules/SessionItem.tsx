@@ -49,10 +49,18 @@ export function SessionItem({
   }
 
   return (
-    <button
+    <div
       onClick={onSelect}
-      type="button"
-      className={`group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors ${
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      // biome-ignore lint/a11y/useSemanticElements: div needed because it contains a nested <button> (delete), which would be invalid HTML
+      role="button"
+      tabIndex={0}
+      className={`group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors cursor-pointer ${
         selected
           ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
           : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -84,6 +92,6 @@ export function SessionItem({
       >
         <TrashIcon />
       </button>
-    </button>
+    </div>
   )
 }

@@ -43,9 +43,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
   const [animate, setAnimate] = useState(false)
-  const [thinkingOpen, setThinkingOpen] = useState(
-    message.streaming && !!message.reasoningContent,
-  )
+  const [thinkingOpen, setThinkingOpen] = useState(message.streaming && !!message.reasoningContent)
 
   // Auto-open thinking when streaming starts
   useEffect(() => {

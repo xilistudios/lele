@@ -54,7 +54,7 @@ type Props = {
 }
 
 export function AddProviderModal({ isOpen, onClose }: Props) {
-  const { draftConfig, updateField, updateSecretField, t } = useSettings()
+  const { draftConfig, updateField, t } = useSettings()
   const [step, setStep] = useState(1)
   const [providerType, setProviderType] = useState('')
   const [customType, setCustomType] = useState('')

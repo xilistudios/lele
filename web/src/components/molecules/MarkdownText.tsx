@@ -69,7 +69,7 @@ function MarkdownTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
+          {rows.map((row, _rowIndex) => (
             <tr key={`row-${row.join('|')}`}>
               {row.map((cell, cellIndex) => (
                 <td

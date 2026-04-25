@@ -1,20 +1,11 @@
-import type {
-  Attachment,
-  ChatMessage,
-  HistoryToolCall,
-  ToolMessageStatus,
-} from './types'
+import type { Attachment, ChatMessage, HistoryToolCall, ToolMessageStatus } from './types'
 
 // ---------------------------------------------------------------------------
 // ID generators
 // ---------------------------------------------------------------------------
 
 /** Deterministic ID for history-sourced messages (stable across refetches). */
-export function createHistoryMessageId(
-  sessionKey: string,
-  index: number,
-  role: string,
-): string {
+export function createHistoryMessageId(sessionKey: string, index: number, role: string): string {
   return `${sessionKey}:${index}:${role}`
 }
 
@@ -48,9 +39,7 @@ export function parseAttachmentsFromContent(content: string): {
   }
 
   const lines = content.split('\n')
-  const headerIndex = lines.findIndex(
-    (line) => line.trim() === ATTACHMENTS_HEADER,
-  )
+  const headerIndex = lines.findIndex((line) => line.trim() === ATTACHMENTS_HEADER)
   if (headerIndex === -1) {
     return { content, attachments: [] }
   }
@@ -81,9 +70,7 @@ export function parseAttachmentsFromContent(content: string): {
  * Extracts a subagent session key from a spawn tool result string.
  * Handles formats like "Spawned subagent task task-1 (...)" and "task id: abc".
  */
-export function parseSubagentSessionKey(
-  value: string | undefined,
-): string | undefined {
+export function parseSubagentSessionKey(value: string | undefined): string | undefined {
   if (!value) return undefined
 
   const trimmed = value.trim()
@@ -94,9 +81,7 @@ export function parseSubagentSessionKey(
     return `subagent:${directMatch[1]}`
   }
 
-  const taskMatch = trimmed.match(
-    /\btask(?:\s+id)?\s*:?[ \t]+([A-Za-z0-9_-]+)/i,
-  )
+  const taskMatch = trimmed.match(/\btask(?:\s+id)?\s*:?[ \t]+([A-Za-z0-9_-]+)/i)
   if (taskMatch) {
     return `subagent:${taskMatch[1]}`
   }
@@ -179,9 +164,7 @@ export function createUserMessage(props: UserMessageProps): ChatMessage {
   }
 }
 
-export function createAssistantMessage(
-  props: AssistantMessageProps,
-): ChatMessage {
+export function createAssistantMessage(props: AssistantMessageProps): ChatMessage {
   return {
     id: props.id,
     role: 'assistant',

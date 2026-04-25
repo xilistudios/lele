@@ -172,13 +172,14 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             block
             tooltip={collapsed ? deviceName : undefined}
             trigger={
-              <div
-                role="button"
-                tabIndex={0}
+              <button
+                type="button"
                 className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-1 w-full py-2 px-2'}`}
                 aria-label={collapsed ? t('chat.deviceMenu') : undefined}
               >
-                <div className={`flex flex-shrink-0 items-center justify-center rounded ${collapsed ? 'h-6 w-6' : 'px-2 py-1'} bg-surface-hover text-xs font-medium text-text-primary`}>
+                <div
+                  className={`flex flex-shrink-0 items-center justify-center rounded ${collapsed ? 'h-6 w-6' : 'px-2 py-1'} bg-surface-hover text-xs font-medium text-text-primary`}
+                >
                   {deviceName?.[0]?.toUpperCase() ?? 'L'}
                 </div>
                 {!collapsed && (
@@ -186,7 +187,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
                   </div>
                 )}
-              </div>
+              </button>
             }
             popoverWidth={150}
             popoverHeight={80}
@@ -208,7 +209,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors cursor-not-allowed opacity-60"
                 title="Función deshabilitada"
               >
-                <LogoutIcon className="opacity-50" />
+                <span className="opacity-50">
+                  <LogoutIcon />
+                </span>
                 <span>Cerrar sesión</span>
               </button>
             </div>

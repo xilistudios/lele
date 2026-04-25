@@ -83,9 +83,7 @@ export const toChatMessages = (
       const toolName = matchedToolCall?.name ?? message.tool_call_id ?? 'tool'
       const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
       const subagentSessionKey =
-        toolName === 'spawn'
-          ? parseSubagentSessionKey(message.content)
-          : undefined
+        toolName === 'spawn' ? parseSubagentSessionKey(message.content) : undefined
 
       return [
         createToolMessage({
@@ -218,10 +216,11 @@ export function useMessages(
             status?: string
           }
           if (welcomeData.processing && welcomeData.session_key) {
-            processingSessionKeyRef.current = welcomeData.session_key
-            setProcessingSessions((prev) => new Set(prev).add(welcomeData.session_key))
-            if (welcomeData.session_key === currentSessionKeyRef.current) {
-              ensureAssistantPlaceholder('__processing_placeholder__', welcomeData.session_key)
+            const sessionKey = welcomeData.session_key
+            processingSessionKeyRef.current = sessionKey
+            setProcessingSessions((prev) => new Set(prev).add(sessionKey))
+            if (sessionKey === currentSessionKeyRef.current) {
+              ensureAssistantPlaceholder('__processing_placeholder__', sessionKey)
             }
           }
           break
