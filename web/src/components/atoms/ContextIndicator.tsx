@@ -42,7 +42,7 @@ function formatTokens(n: number): string {
 export function ContextIndicator() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
-  const { currentSessionKey } = useAppLogicContext()
+  const { currentSessionKey, modelState } = useAppLogicContext()
   const [isOpen, setIsOpen] = useState(false)
   const [context, setContext] = useState<SessionContextResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -68,7 +68,7 @@ export function ContextIndicator() {
     } finally {
       setLoading(false)
     }
-  }, [currentSessionKey, api])
+  }, [currentSessionKey, api, modelState.current])
 
   // Fetch on mount and when session changes
   useEffect(() => {
