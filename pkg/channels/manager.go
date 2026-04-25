@@ -62,7 +62,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["telegram"] = telegram
-			m.dispatchQueues["telegram"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["telegram"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "Telegram channel enabled successfully")
 		}
 	}
@@ -76,7 +76,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["whatsapp"] = whatsapp
-			m.dispatchQueues["whatsapp"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["whatsapp"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "WhatsApp channel enabled successfully")
 		}
 	}
@@ -90,7 +90,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["feishu"] = feishu
-			m.dispatchQueues["feishu"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["feishu"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "Feishu channel enabled successfully")
 		}
 	}
@@ -104,7 +104,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["discord"] = discord
-			m.dispatchQueues["discord"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["discord"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "Discord channel enabled successfully")
 		}
 	}
@@ -118,7 +118,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["maixcam"] = maixcam
-			m.dispatchQueues["maixcam"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["maixcam"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "MaixCam channel enabled successfully")
 		}
 	}
@@ -132,7 +132,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["qq"] = qq
-			m.dispatchQueues["qq"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["qq"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "QQ channel enabled successfully")
 		}
 	}
@@ -146,7 +146,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["dingtalk"] = dingtalk
-			m.dispatchQueues["dingtalk"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["dingtalk"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "DingTalk channel enabled successfully")
 		}
 	}
@@ -160,7 +160,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["slack"] = slackCh
-			m.dispatchQueues["slack"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["slack"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "Slack channel enabled successfully")
 		}
 	}
@@ -174,7 +174,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["line"] = line
-			m.dispatchQueues["line"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["line"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "LINE channel enabled successfully")
 		}
 	}
@@ -188,7 +188,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["onebot"] = onebot
-			m.dispatchQueues["onebot"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["onebot"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "OneBot channel enabled successfully")
 		}
 	}
@@ -202,7 +202,7 @@ func (m *Manager) initChannels() error {
 			})
 		} else {
 			m.channels["native"] = native
-			m.dispatchQueues["native"] = make(chan bus.OutboundMessage, 50)
+			m.dispatchQueues["native"] = make(chan bus.OutboundMessage, 200)
 			logger.InfoC("channels", "Native channel enabled successfully")
 		}
 	}
@@ -364,8 +364,10 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 
 			select {
 			case queue <- msg:
-			case <-ctx.Done():
-				return
+			default:
+				logger.WarnCF("channels", "Dispatch queue full for channel, dropping message", map[string]interface{}{
+					"channel": msg.Channel,
+				})
 			}
 		}
 	}

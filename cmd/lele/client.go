@@ -10,13 +10,21 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
+// parseClientSubcommand extracts the subcommand for testability.
+func parseClientSubcommand(args []string) (subcommand string) {
+	if len(args) < 1 {
+		return ""
+	}
+	return args[0]
+}
+
 func clientCmd() {
 	if len(os.Args) < 3 {
 		clientHelp()
 		return
 	}
 
-	subcommand := os.Args[2]
+	subcommand := parseClientSubcommand(os.Args[2:])
 
 	home, _ := os.UserHomeDir()
 	leleDir := filepath.Join(home, ".lele")
@@ -70,9 +78,8 @@ func clientHelp() {
 	fmt.Println("  lele client status")
 }
 
-func clientPinCmd(authMgr *channels.AuthManager) {
-	deviceName := ""
-	args := os.Args[3:]
+// parseClientPinArgs extracts the pin argument parsing logic for testability.
+func parseClientPinArgs(args []string) (deviceName string) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--device", "-d":
@@ -82,6 +89,11 @@ func clientPinCmd(authMgr *channels.AuthManager) {
 			}
 		}
 	}
+	return deviceName
+}
+
+func clientPinCmd(authMgr *channels.AuthManager) {
+	deviceName := parseClientPinArgs(os.Args[3:])
 
 	pending, err := authMgr.GeneratePIN(deviceName)
 	if err != nil {

@@ -14,7 +14,10 @@ export const endpoints = {
     history: (sessionKey: string) =>
       `/api/v1/chat/history?session_key=${encodeURIComponent(sessionKey)}`,
     sessions: '/api/v1/chat/sessions',
-    session: (sessionKey: string, action?: 'model' | 'name' | 'delete' | 'agent') => {
+    session: (
+      sessionKey: string,
+      action?: 'model' | 'name' | 'delete' | 'agent' | 'thinking' | 'context',
+    ) => {
       const suffix = action ? `?action=${action}` : ''
       return `/api/v1/chat/session/${encodeURIComponent(sessionKey)}${suffix}`
     },

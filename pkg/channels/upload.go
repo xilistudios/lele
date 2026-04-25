@@ -156,3 +156,50 @@ func detectMimeType(path string) string {
 
 	return http.DetectContentType(buffer[:n])
 }
+
+func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "missing path parameter", "path_missing")
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
+		return
+	}
+
+	// Security: only allow files inside leleDir (~/.lele)
+	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
+	if leleDirAbs == "" || !strings.HasPrefix(absPath, leleDirAbs) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "file not found", "file_not_found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "error accessing file", "file_error")
+		}
+		return
+	}
+	if info.IsDir() {
+		writeError(w, http.StatusBadRequest, "path is a directory", "not_a_file")
+		return
+	}
+
+	mimeType := detectMimeType(absPath)
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, absPath)
+}

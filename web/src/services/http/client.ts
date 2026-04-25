@@ -19,8 +19,10 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SessionAgentResponse,
+  SessionContextResponse,
   SessionModelResponse,
   SessionNameResponse,
+  SessionThinkingResponse,
   SystemStatus,
   ToolsResponse,
 } from '../../lib/types'
@@ -254,6 +256,19 @@ export const createApiClient = (baseUrl: string) => {
       request<SessionAgentResponse>(endpoints.chat.session(sessionKey, 'agent'), {
         method: 'PATCH',
         body: JSON.stringify({ agent_id: agentId }),
+      }),
+    sessionThinking: (sessionKey: string) =>
+      request<SessionThinkingResponse>(endpoints.chat.session(sessionKey, 'thinking'), {
+        method: 'GET',
+      }),
+    updateSessionThinking: (sessionKey: string, level: string) =>
+      request<SessionThinkingResponse>(endpoints.chat.session(sessionKey, 'thinking'), {
+        method: 'PATCH',
+        body: JSON.stringify({ level }),
+      }),
+    sessionContext: (sessionKey: string) =>
+      request<SessionContextResponse>(endpoints.chat.session(sessionKey, 'context'), {
+        method: 'GET',
       }),
     sendMessage: (payload: SendMessageRequest) =>
       request<SendMessageResponse>(endpoints.chat.send, {

@@ -53,13 +53,27 @@
     "toggleSidebar": "Toggle sidebar",
     "backTo": "Back to {{title}}",
     "recent": "Recent",
-    "recentChats": "Recent chats"
+    "recentChats": "Recent chats",
+    "thinking": "Thinking",
+    "thinkingDefault": "Default",
+    "thinkingOff": "Off",
+    "thinkingLow": "Low",
+    "thinkingMedium": "Medium",
+    "thinkingHigh": "High"
   },
   "connection": {
     "connected": "Connected",
     "connecting": "Connecting",
     "disconnected": "Disconnected",
-    "statusAria": "Connection status: {{status}}. Click for details."
+    "statusAria": "Connection status: {{status}}. Click for details.",
+    "context": "Context",
+    "currentContext": "Current context",
+    "inputTokens": "Input tokens",
+    "outputTokens": "Output tokens",
+    "contextWindow": "Context window",
+    "cumulativeInput": "Input sent",
+    "cumulativeOutput": "Output received",
+    "cumulativeTotal": "Total sent"
   },
   "approval": {
     "inlineTitle": "Approval required",
@@ -218,6 +232,7 @@
       "modelMaxTokens": "Max tokens",
       "modelTemperature": "Temperature",
       "modelVision": "Vision",
+      "modelThinking": "Thinking",
       "agentId": "Agent ID",
       "agentName": "Name",
       "agentDefault": "Default",
@@ -226,6 +241,7 @@
       "agentModelFallbacks": "Model fallbacks",
       "agentSkills": "Skills",
       "agentTemperature": "Temperature",
+      "agentThinking": "Thinking mode",
       "bindingAgentId": "Agent ID",
       "bindingChannel": "Channel",
       "bindingAccountId": "Account ID",
@@ -280,7 +296,21 @@
     "noBindings": "No bindings configured",
     "identityKeyPlaceholder": "pattern",
     "modelNamePlaceholder": "model-name",
-    "noModels": "No models configured"
+    "noModels": "No models configured",
+    "noConfiguredProviders": "No providers configured. Add one to get started.",
+    "addProviderModal": {
+      "title": "Add Provider",
+      "stepType": "Step 1: Select provider type",
+      "stepName": "Step 2: Enter provider name",
+      "stepConfig": "Step 3: Configure provider",
+      "selectType": "Select a provider type...",
+      "customTypePlaceholder": "custom-type",
+      "namePlaceholder": "my-provider",
+      "nameHint": "This will be the identifier used to reference this provider.",
+      "back": "Back",
+      "next": "Next",
+      "add": "Add"
+    }
   },
   "common": {
     "loading": "Loading...",

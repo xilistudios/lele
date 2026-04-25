@@ -4,6 +4,7 @@ export type Agent = {
   workspace: string
   model: string
   default?: boolean
+  reasoning?: ReasoningConfig
 }
 
 export type Attachment = {
@@ -239,6 +240,7 @@ export type EditableChannelsConfig = {
 export type ReasoningConfig = {
   effort?: 'low' | 'medium' | 'high'
   summary?: 'auto' | 'detailed' | 'concise'
+  enable?: boolean
 }
 
 export type ProviderModelConfig = {
@@ -396,6 +398,7 @@ export type SessionModelResponse = {
 export type ModelOption = {
   value: string
   label: string
+  reasoning?: ReasoningConfig
 }
 
 export type ModelGroup = {
@@ -411,6 +414,23 @@ export type SessionNameResponse = {
 export type SessionAgentResponse = {
   session_key: string
   agent_id: string
+}
+
+export type SessionThinkingResponse = {
+  session_key: string
+  level: string
+}
+
+export type SessionContextResponse = {
+  session_key: string
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cumulative_input_tokens: number
+  cumulative_output_tokens: number
+  cumulative_total_tokens: number
+  context_window: number
+  usage_percent: number
 }
 
 export type ChannelsResponse = {
@@ -447,6 +467,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant' | 'tool'
   content: string
+  reasoningContent?: string
   streaming: boolean
   createdAt: string
   optimistic?: boolean
@@ -510,6 +531,7 @@ export type HistoryResponse = {
   messages: Array<{
     role: 'user' | 'assistant' | 'tool'
     content: string
+    reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
   }>
@@ -549,6 +571,10 @@ export type ClientEvent =
   | {
       event: 'message.stream'
       data: { message_id: string; session_key?: string; chunk: string; done: boolean }
+    }
+  | {
+      event: 'message.thinking'
+      data: { message_id: string; session_key?: string; chunk: string }
     }
   | {
       event: 'message.complete'

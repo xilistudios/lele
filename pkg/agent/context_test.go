@@ -142,7 +142,6 @@ func TestGetIdentity_ContentVerification(t *testing.T) {
 	expectedSections := []string{
 		"# lele",
 		"You are lele",
-		"## Current Time",
 		"## Runtime",
 		"## Workspace",
 		"## Important Rules",
@@ -473,7 +472,7 @@ func TestBuildMessages_Basic(t *testing.T) {
 		{Role: "assistant", Content: "Previous response"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current message", nil, "", "")
+	messages := cb.BuildMessages(history, "", "Current message", nil, "", "", "")
 
 	// Should have system + history + current message
 	if len(messages) != 4 {
@@ -490,8 +489,14 @@ func TestBuildMessages_Basic(t *testing.T) {
 	if lastMsg.Role != "user" {
 		t.Errorf("Expected last message to be user, got %s", lastMsg.Role)
 	}
-	if lastMsg.Content != "Current message" {
-		t.Errorf("Expected content 'Current message', got %s", lastMsg.Content)
+	if !strings.Contains(lastMsg.Content, "Current message") {
+		t.Errorf("Expected content to contain 'Current message', got %s", lastMsg.Content)
+	}
+	if strings.Contains(lastMsg.Content, "Current Time:") {
+		t.Errorf("Expected user message to remain free of time prefix, got %s", lastMsg.Content)
+	}
+	if !strings.Contains(messages[0].Content, "Current Time:") {
+		t.Errorf("Expected system prompt to contain 'Current Time:' snapshot, got %s", messages[0].Content)
 	}
 }
 
@@ -506,15 +511,51 @@ func TestBuildMessages_WithSummary(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	summary := "This is a conversation summary"
-	messages := cb.BuildMessages([]providers.Message{}, summary, "Hello", nil, "", "")
+	messages := cb.BuildMessages([]providers.Message{}, summary, "Hello", nil, "", "", "")
 
-	// System message should contain summary
-	systemMsg := messages[0]
-	if !strings.Contains(systemMsg.Content, "Summary of Previous Conversation") {
-		t.Error("Expected system message to contain summary header")
+	if len(messages) != 3 {
+		t.Fatalf("Expected 3 messages, got %d", len(messages))
 	}
-	if !strings.Contains(systemMsg.Content, summary) {
-		t.Error("Expected system message to contain summary content")
+
+	// System message should remain static
+	systemMsg := messages[0]
+	if strings.Contains(systemMsg.Content, "Summary of Previous Conversation") {
+		t.Error("Expected system message to remain free of summary content")
+	}
+
+	summaryMsg := messages[1]
+	if summaryMsg.Role != "user" {
+		t.Fatalf("Expected summary message role user, got %s", summaryMsg.Role)
+	}
+	if !strings.Contains(summaryMsg.Content, "Summary of Previous Conversation") {
+		t.Error("Expected summary message to contain summary header")
+	}
+	if !strings.Contains(summaryMsg.Content, summary) {
+		t.Error("Expected summary message to contain summary content")
+	}
+}
+
+func TestBuildMessages_DoesNotDuplicatePersistedSummary(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	summary := "This is a conversation summary"
+	history := []providers.Message{buildSummaryMessage(summary)}
+
+	messages := cb.BuildMessages(history, summary, "Hello", nil, "", "", "")
+
+	count := 0
+	for _, msg := range messages {
+		if msg.Role == "user" && msg.Content == summaryMessageHeader+summary {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one summary message, got %d", count)
 	}
 }
 
@@ -528,9 +569,13 @@ func TestBuildMessages_WithSessionInfo(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "test-channel", "chat-123")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "test-channel", "chat-123", "")
 
-	// System message should contain session info
+	if len(messages) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(messages))
+	}
+
+	// System message should stay static
 	systemMsg := messages[0]
 	if !strings.Contains(systemMsg.Content, "## Current Session") {
 		t.Error("Expected system message to contain session header")
@@ -540,6 +585,89 @@ func TestBuildMessages_WithSessionInfo(t *testing.T) {
 	}
 	if !strings.Contains(systemMsg.Content, "Chat ID: chat-123") {
 		t.Error("Expected system message to contain chat ID info")
+	}
+
+	userMsg := messages[1]
+	if strings.Contains(userMsg.Content, "## Current Session") {
+		t.Error("Expected user message to remain free of session info")
+	}
+}
+
+func TestBuildMessages_WithNativeSessionInfoUsesStableChatID(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:1776905338147", "")
+
+	if len(messages) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(messages))
+	}
+
+	systemMsg := messages[0]
+	if !strings.Contains(systemMsg.Content, "Chat ID: native:client-123") {
+		t.Error("Expected native session prompt to use stable chat ID without timestamp suffix")
+	}
+	if strings.Contains(systemMsg.Content, "Chat ID: native:client-123:1776905338147") {
+		t.Error("Expected native session prompt to omit timestamp suffix from chat ID")
+	}
+
+	messages = cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:chat:7", "")
+	systemMsg = messages[0]
+	if !strings.Contains(systemMsg.Content, "Chat ID: native:client-123") {
+		t.Error("Expected native chat alias to collapse to stable base chat ID")
+	}
+	if strings.Contains(systemMsg.Content, "Chat ID: native:client-123:chat:7") {
+		t.Error("Expected native chat alias suffix to be omitted from chat ID")
+	}
+}
+
+func TestBuildMessages_ReusesCachedSystemPromptAcrossTurns(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	sessionKey := "native:test-client"
+
+	first := cb.BuildMessages([]providers.Message{}, "", "first message", nil, "native", "native:test-client:111", sessionKey)
+	secondHistory := []providers.Message{{Role: "user", Content: "first message"}}
+	second := cb.BuildMessages(secondHistory, "", "second message", nil, "native", "native:test-client:222", sessionKey)
+
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("expected system prompt messages to be present")
+	}
+	if first[0].Role != "system" || second[0].Role != "system" {
+		t.Fatalf("expected first messages to be system, got %q and %q", first[0].Role, second[0].Role)
+	}
+	if first[0].Content != second[0].Content {
+		t.Fatalf("expected cached system prompt to remain byte-identical across turns")
+	}
+	if strings.Contains(second[len(second)-1].Content, "Current Time:") {
+		t.Fatalf("expected user message to remain free of time snapshot, got %q", second[len(second)-1].Content)
+	}
+}
+
+func TestBuildMessages_ChangingSessionKeyRebuildsSystemPrompt(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	first := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "native", "native:test-client:111", "native:test-client:111")
+	second := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "test-channel", "chat-222", "test-channel:chat-222")
+
+	if first[0].Content == second[0].Content {
+		t.Fatalf("expected different session keys to rebuild system prompt when request context changes")
 	}
 }
 
@@ -560,7 +688,7 @@ func TestBuildMessages_WithOrphanedToolMessages(t *testing.T) {
 		{Role: "assistant", Content: "Assistant response"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
 
 	// Should have system + 2 history (orphaned tool removed) + current = 4
 	if len(messages) != 4 {
@@ -583,7 +711,7 @@ func TestBuildMessages_EmptyHistory(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "")
 
 	// Should have system + current message = 2
 	if len(messages) != 2 {
@@ -916,7 +1044,7 @@ func TestBuildMessages_MultipleOrphanedTools(t *testing.T) {
 		{Role: "user", Content: "User message"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
 
 	// Should have system + 1 history (both tools removed) + current = 3
 	if len(messages) != 3 {
@@ -946,7 +1074,7 @@ func TestBuildMessages_ToolNotAtStart(t *testing.T) {
 		{Role: "tool", Content: "Tool result", ToolCallID: "call-1"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
 
 	// Should have system + 3 history + current = 5
 	if len(messages) != 5 {
@@ -1057,7 +1185,7 @@ func TestBuildMessages_NilMedia(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	// Should not panic with nil attachments
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "")
 
 	if len(messages) != 2 {
 		t.Errorf("Expected 2 messages, got %d", len(messages))
@@ -1075,7 +1203,7 @@ func TestBuildMessages_EmptyMedia(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	// Should work with empty attachment slice
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []bus.FileAttachment{}, "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []bus.FileAttachment{}, "", "", "")
 
 	if len(messages) != 2 {
 		t.Errorf("Expected 2 messages, got %d", len(messages))

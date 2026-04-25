@@ -118,6 +118,21 @@ export function ProviderModelsEditor({ name, models, onChange }: Props) {
                   onChange={(v) => onChange({ ...models, [key]: { ...m, vision: v } })}
                 />
               </SettingsField>
+              <SettingsField
+                label={t('settings.fields.modelThinking')}
+                path={`providers.${name}.models.${key}.reasoning.enable`}
+              >
+                <BooleanInput
+                  id={`providers.${name}.models.${key}.reasoning`}
+                  value={m.reasoning?.enable || false}
+                  onChange={(v) =>
+                    onChange({
+                      ...models,
+                      [key]: { ...m, reasoning: { ...m.reasoning, enable: v } },
+                    })
+                  }
+                />
+              </SettingsField>
             </div>
           </div>
         )

@@ -70,10 +70,11 @@ function MarkdownTable({
         </thead>
         <tbody>
           {rows.map((row, _rowIndex) => (
-            <tr key={`row-${row.join('-')}`}>
+            <tr key={`row-${row.join('|')}`}>
               {row.map((cell, cellIndex) => (
                 <td
-                  key={`cell-${cell}`}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: table cells need stable column position, combined with content
+                  key={`cell-${cell}-${cellIndex}`}
                   className={`border border-border bg-background-primary px-3 py-2 text-sm text-text-secondary ${alignClass(alignments[cellIndex] ?? 'left')}`}
                 >
                   <InlineMarkdown text={cell} />
@@ -132,9 +133,9 @@ function InlineMarkdown({ text }: { text: string }) {
 
   return (
     <>
-      {tokens.map((item, _i) => (
+      {tokens.map((item, i) => (
         <InlineToken
-          key={`${item.text}-${item.token?.type || ''}`}
+          key={`inline-${item.token}-${item.text.slice(0, 30)}-${i}`}
           text={item.text}
           token={item.token}
         />

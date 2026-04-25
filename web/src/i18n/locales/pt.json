@@ -53,13 +53,27 @@
     "toggleSidebar": "Mostrar/ocultar sidebar",
     "backTo": "Voltar para {{title}}",
     "recent": "Recentes",
-    "recentChats": "Chats recentes"
+    "recentChats": "Chats recentes",
+    "thinking": "Pensamento",
+    "thinkingDefault": "Padrão",
+    "thinkingOff": "Desligado",
+    "thinkingLow": "Baixo",
+    "thinkingMedium": "Médio",
+    "thinkingHigh": "Alto"
   },
   "connection": {
     "connected": "Conectado",
     "connecting": "Conectando",
     "disconnected": "Desconectado",
-    "statusAria": "Status de conexão: {{status}}. Clique para detalhes."
+    "statusAria": "Status de conexão: {{status}}. Clique para detalhes.",
+    "context": "Contexto",
+    "currentContext": "Contexto atual",
+    "inputTokens": "Tokens de entrada",
+    "outputTokens": "Tokens de saída",
+    "contextWindow": "Janela de contexto",
+    "cumulativeInput": "Entrada enviada",
+    "cumulativeOutput": "Saída recebida",
+    "cumulativeTotal": "Total enviado"
   },
   "approval": {
     "inlineTitle": "Aprovação necessária",
@@ -218,6 +232,7 @@
       "modelMaxTokens": "Máx tokens",
       "modelTemperature": "Temperatura",
       "modelVision": "Visão",
+      "modelThinking": "Pensamento",
       "agentId": "ID do agente",
       "agentName": "Nome",
       "agentDefault": "Padrão",
@@ -226,6 +241,7 @@
       "agentModelFallbacks": "Fallbacks de modelo",
       "agentSkills": "Skills",
       "agentTemperature": "Temperatura",
+      "agentThinking": "Modo pensamento",
       "bindingAgentId": "ID do agente",
       "bindingChannel": "Canal",
       "bindingAccountId": "ID da conta",
@@ -280,7 +296,21 @@
     "noBindings": "Nenhum binding configurado",
     "identityKeyPlaceholder": "padrão",
     "modelNamePlaceholder": "nome-modelo",
-    "noModels": "Nenhum modelo configurado"
+    "noModels": "Nenhum modelo configurado",
+    "noConfiguredProviders": "Nenhum provedor configurado. Adicione um para começar.",
+    "addProviderModal": {
+      "title": "Adicionar provedor",
+      "stepType": "Passo 1: Selecionar tipo de provedor",
+      "stepName": "Passo 2: Inserir nome do provedor",
+      "stepConfig": "Passo 3: Configurar provedor",
+      "selectType": "Selecione um tipo de provedor...",
+      "customTypePlaceholder": "tipo-personalizado",
+      "namePlaceholder": "meu-provedor",
+      "nameHint": "Este será o identificador usado para referenciar este provedor.",
+      "back": "Voltar",
+      "next": "Próximo",
+      "add": "Adicionar"
+    }
   },
   "common": {
     "loading": "Carregando...",

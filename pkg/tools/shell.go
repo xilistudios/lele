@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -28,7 +29,7 @@ type ExecTool struct {
 	channel             string                                // Channel for feedback messages
 	chatID              string                                // ChatID for feedback messages
 	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
-	verbose             bool                                  // Whether verbose mode is enabled
+	verboseLevel        session.VerboseLevel                  // Verbose level for feedback messages
 }
 
 // SetContext implements ContextualTool interface
@@ -42,9 +43,9 @@ func (t *ExecTool) SetFeedbackCallback(callback func(channel, chatID, message st
 	t.feedbackCallback = callback
 }
 
-// SetVerbose enables or disables verbose mode
-func (t *ExecTool) SetVerbose(enabled bool) {
-	t.verbose = enabled
+// SetVerbose sets the verbose level for feedback messages
+func (t *ExecTool) SetVerbose(level session.VerboseLevel) {
+	t.verboseLevel = level
 }
 
 var defaultDenyPatterns = []*regexp.Regexp{
@@ -173,7 +174,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		chatID = t.chatID
 	}
 	feedbackCallback := t.feedbackCallback
-	verbose := t.verbose
+	verboseLevel := t.verboseLevel
 
 	cwd := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
@@ -262,7 +263,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			execErr = cmdCtx.Err()
 			break
 		case <-time.After(heartbeatInterval):
-			if verbose && feedbackCallback != nil && channel != "" && chatID != "" {
+			if verboseLevel == session.VerboseFull && feedbackCallback != nil && channel != "" && chatID != "" {
 				elapsedSoFar := time.Since(startTime).Round(time.Second)
 				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
 				feedbackCallback(channel, chatID, feedbackMsg)

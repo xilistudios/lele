@@ -22,7 +22,9 @@ export type AppLogicContextValue = {
   diagnosticsOpen: ReturnType<typeof useAppLogicHook>['diagnosticsOpen']
   sidebarOpen: ReturnType<typeof useAppLogicHook>['sidebarOpen']
   modelState: ReturnType<typeof useAppLogicHook>['modelState']
+  thinkLevel: ReturnType<typeof useAppLogicHook>['thinkLevel']
   isStreaming: ReturnType<typeof useAppLogicHook>['isStreaming']
+  processingSessions: ReturnType<typeof useAppLogicHook>['processingSessions']
   sessions: ReturnType<typeof useAppLogicHook>['sessions']
   currentSessionKey: ReturnType<typeof useAppLogicHook>['currentSessionKey']
   parentSessionKey: ReturnType<typeof useAppLogicHook>['parentSessionKey']
@@ -42,6 +44,7 @@ export type AppLogicContextValue = {
   onClearSession: ReturnType<typeof useAppLogicHook>['onClearSession']
   onSelectAgent: ReturnType<typeof useAppLogicHook>['onSelectAgent']
   onSelectModel: ReturnType<typeof useAppLogicHook>['onSelectModel']
+  onSelectThinkLevel: ReturnType<typeof useAppLogicHook>['onSelectThinkLevel']
   onUploadAttachments: ReturnType<typeof useAppLogicHook>['onUploadAttachments']
   onAttachmentsChange: ReturnType<typeof useAppLogicHook>['onAttachmentsChange']
   onLogout: ReturnType<typeof useAppLogicHook>['onLogout']
@@ -90,7 +93,9 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     diagnosticsOpen: app.diagnosticsOpen,
     sidebarOpen: app.sidebarOpen,
     modelState: app.modelState,
+    thinkLevel: app.thinkLevel,
     isStreaming: app.isStreaming,
+    processingSessions: app.processingSessions,
     sessions: app.sessions,
     currentSessionKey: app.currentSessionKey,
     parentSessionKey: app.parentSessionKey,
@@ -110,6 +115,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onClearSession: app.onClearSession,
     onSelectAgent: app.onSelectAgent,
     onSelectModel: app.onSelectModel,
+    onSelectThinkLevel: app.onSelectThinkLevel,
     onUploadAttachments: app.onUploadAttachments,
     onAttachmentsChange: app.onAttachmentsChange,
     onLogout: app.onLogout,

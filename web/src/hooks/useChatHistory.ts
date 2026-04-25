@@ -9,6 +9,7 @@ const POLLING_INTERVAL = 5000
 type HistoryMessage = Array<{
   role: 'user' | 'assistant' | 'tool'
   content: string
+  reasoning_content?: string
   tool_calls?: HistoryToolCall[]
   tool_call_id?: string
 }>
@@ -22,16 +23,41 @@ function mergeMessages(
   const streamingAssistantIds = new Set<string>()
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
 
+  const streamingToolSessions = new Set<string>()
+  const streamingToolIds = new Set<string>()
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
       streamingAssistantIds.add(msg.id)
     }
+    if (msg.role === 'tool') {
+      streamingToolIds.add(msg.id)
+      if (msg.sessionKey) {
+        streamingToolSessions.add(msg.sessionKey)
+      }
+    }
   }
 
+  const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
+  const baseHasCurrentTurn = baseUserCount > (optimisticUser?.optimisticBaseCount ?? 0)
+
+  // Filter base messages: keep tool messages from history unless there's
+  // an actively executing tool in streaming (which is more up-to-date).
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
     if (msg.role === 'assistant' && streamingAssistantIds.has(msg.id)) {
       continue
+    }
+    // Remove base tool messages only when there's an executing tool in streaming
+    // for the same session (streaming takes precedence during execution).
+    // Completed tools in streaming are fine — they'll be removed below.
+    if (msg.role === 'tool' && msg.sessionKey && streamingToolSessions.has(msg.sessionKey)) {
+      const hasExecutingTool = streamingMessages.some(
+        (sm) =>
+          sm.role === 'tool' && sm.sessionKey === msg.sessionKey && sm.toolStatus === 'executing',
+      )
+      if (hasExecutingTool) {
+        continue
+      }
     }
     filteredBase.push(msg)
   }
@@ -44,7 +70,31 @@ function mergeMessages(
     return baseUserCount <= (msg.optimisticBaseCount ?? 0)
   })
 
-  return [...filteredBase, ...streamingWithoutConfirmedUsers]
+  // Remove streaming messages that are now confirmed in history
+  const filteredStreaming = streamingWithoutConfirmedUsers.filter((msg) => {
+    // Remove completed non-streaming assistant messages when history has the current turn
+    if (msg.role === 'assistant' && !msg.streaming && baseHasCurrentTurn) {
+      return false
+    }
+    // Remove completed tool messages from streaming if they now exist in history
+    // This prevents duplicate tool entries after history refreshes
+    if (msg.role === 'tool' && msg.toolStatus === 'completed' && msg.sessionKey && msg.toolName) {
+      const isConfirmedInHistory = filteredBase.some(
+        (bm) =>
+          bm.role === 'tool' &&
+          bm.sessionKey === msg.sessionKey &&
+          bm.toolName === msg.toolName &&
+          bm.toolArgs === msg.toolArgs &&
+          bm.toolResult === msg.toolResult,
+      )
+      if (isConfirmedInHistory) {
+        return false
+      }
+    }
+    return true
+  })
+
+  return [...filteredBase, ...filteredStreaming]
 }
 
 export function useChatHistory(

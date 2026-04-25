@@ -119,8 +119,10 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 
 	// Delegate to llmRunner for processing
 	ephemeralNotice := mp.maybeStartEphemeralSession(agent, sessionKey)
+	messageID := ""
 	replyTo := ""
 	if msg.Metadata != nil {
+		messageID = msg.Metadata["message_id"]
 		replyTo = msg.Metadata["message_id"]
 	}
 	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
@@ -133,6 +135,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		EnableSummary:   true,
 		SendResponse:    true,
 		ReplyTo:         replyTo,
+		MessageID:       messageID,
 	})
 	if err != nil {
 		return "", err
@@ -602,7 +605,10 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	history := agent.Sessions.GetHistory(sessionKey)
 	historyTokens := mp.estimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
-	summaryTokens := mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	summaryTokens := 0
+	if summary != "" && !hasSummaryMessage(history, summary) {
+		summaryTokens = mp.estimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	}
 
 	// Build system prompt to get accurate token count
 	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()

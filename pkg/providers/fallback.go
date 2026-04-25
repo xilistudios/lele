@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -247,6 +248,9 @@ func (fc *FallbackChain) executeWithRetry(
 		if backoff > fc.maxBackoff {
 			backoff = fc.maxBackoff
 		}
+
+		log.Printf("[INFO] backoff: retry attempt for provider=%s/model=%s, attempt=%d, waiting=%s",
+			provider, model, attempt+1, backoff.Round(time.Second))
 
 		// Wait with context awareness.
 		select {

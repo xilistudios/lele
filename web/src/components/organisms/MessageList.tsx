@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
 import { MessageBubble } from '../MessageBubble'
 
 export function MessageList() {
   const navigate = useNavigate()
+  const { apiUrl } = useAuthContext()
   const { messages, approvalRequest, onApprove, currentSessionKey } = useAppLogicContext()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const lastMessageId = messages[messages.length - 1]?.id
@@ -33,14 +35,19 @@ export function MessageList() {
     )
   }
 
+  const visibleMessages = messages.filter(
+    (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
+  )
+
   return (
     <div className="mx-auto max-w-3xl space-y-1">
-      {messages.map((message, index) => (
+      {visibleMessages.map((message, index) => (
         <MessageBubble
           key={message.id}
           message={message}
-          isLast={index === messages.length - 1}
+          isLast={index === visibleMessages.length - 1}
           onNavigateToSession={handleNavigateToSession}
+          apiUrl={apiUrl}
         />
       ))}
       {approvalRequest && (

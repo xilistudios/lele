@@ -11,7 +11,6 @@ import (
 	"fmt"
 
 	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -62,9 +61,9 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 	if tool, ok := agent.Tools.Get("exec"); ok {
 		if et, ok := tool.(*tools.ExecTool); ok {
 			et.SetContext(channel, chatID)
-			// Enable verbose mode if session has verbose enabled
-			isVerbose := tc.al.verboseManager.GetLevel(sessionKey) != session.VerboseOff
-			et.SetVerbose(isVerbose)
+			// Pass the actual verbose level so exec tool can differentiate between basic and full
+			verboseLevel := tc.al.verboseManager.GetLevel(sessionKey)
+			et.SetVerbose(verboseLevel)
 			// Set feedback callback that uses the event bus
 			et.SetFeedbackCallback(func(ch, cid, msg string) {
 				tc.al.bus.PublishOutbound(bus.OutboundMessage{

@@ -1294,8 +1294,9 @@ describe('Session deletion', () => {
       expect(sessionOneDeleteButton).toBeDefined()
     })
     if (sessionOneDeleteButton) {
+      const btn = sessionOneDeleteButton
       await act(async () => {
-        fireEvent.click(sessionOneDeleteButton)
+        fireEvent.click(btn)
       })
     }
 

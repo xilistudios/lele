@@ -36,6 +36,7 @@ type sessionManager interface {
 	summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats
 	summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error)
 	AddTokenCounts(sessionKey string, inputTokens, outputTokens int)
+	EstimateTokens(messages []providers.Message) int
 }
 
 // newSessionManager creates a new session manager instance.
@@ -51,7 +52,7 @@ func newSessionManager(al *AgentLoop) *sessionManagerImpl {
 // Returns statistics about the compaction if it was triggered.
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
-	tokenEstimate := sm.estimateTokens(newHistory)
+	tokenEstimate := sm.EstimateTokens(newHistory)
 	threshold := agent.ContextWindow * 75 / 100
 
 	// Only trigger based on token estimate, not message count
@@ -88,19 +89,20 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
+	historyForSummary := stripSummaryMessages(history)
 
 	// Need at least 3 messages to summarize (keep last 2 for continuity)
-	if len(history) <= 2 {
+	if len(historyForSummary) <= 2 {
 		return nil
 	}
 
 	// Calculate before stats
 	beforeMessages := len(history)
-	beforeTokens := sm.estimateTokens(history)
+	beforeTokens := sm.EstimateTokens(history)
 
 	// Summarize everything except the last 2 messages (kept for continuity).
 	// Note: history contains only user/assistant/tool messages — no system prompt.
-	toSummarize := history[:len(history)-2]
+	toSummarize := historyForSummary[:len(historyForSummary)-2]
 
 	if len(toSummarize) == 0 {
 		return nil
@@ -155,7 +157,7 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
 	afterMessages := len(afterHistory)
-	afterTokens := sm.estimateTokens(afterHistory)
+	afterTokens := sm.EstimateTokens(afterHistory)
 
 	return &SummarizeStats{
 		BeforeMessages:  beforeMessages,
@@ -238,7 +240,7 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 // estimateTokens estimates the number of tokens in a message list.
 // Uses a safe heuristic of 2.5 characters per token to account for CJK and other
 // overheads better than the previous 3 chars/token.
-func (sm *sessionManagerImpl) estimateTokens(messages []providers.Message) int {
+func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
 		totalChars += utf8.RuneCountInString(m.Content)
@@ -304,19 +306,20 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
+	historyForSummary := stripSummaryMessages(history)
 
 	// Need at least 3 messages to summarize (keep last 2 for continuity)
-	if len(history) <= 2 {
-		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(history))
+	if len(historyForSummary) <= 2 {
+		return nil, fmt.Errorf("not enough messages to summarize (need at least 3, have %d)", len(historyForSummary))
 	}
 
 	// Calculate before stats
 	beforeMessages := len(history)
-	beforeTokens := sm.estimateTokens(history)
+	beforeTokens := sm.EstimateTokens(history)
 
 	// Summarize everything except the last 2 messages (kept for continuity).
 	// Note: history contains only user/assistant/tool messages — no system prompt.
-	toSummarize := history[:len(history)-2]
+	toSummarize := historyForSummary[:len(historyForSummary)-2]
 
 	if len(toSummarize) == 0 {
 		return nil, fmt.Errorf("no messages available to summarize")
@@ -375,7 +378,7 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
 	afterMessages := len(afterHistory)
-	afterTokens := sm.estimateTokens(afterHistory)
+	afterTokens := sm.EstimateTokens(afterHistory)
 
 	return &SummarizeStats{
 		BeforeMessages:  beforeMessages,

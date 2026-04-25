@@ -168,7 +168,7 @@ type llmRunnerMockContextBuilder struct {
 	messages []providers.Message
 }
 
-func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID string) []providers.Message {
+func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
 	if m.messages != nil {
 		return m.messages
 	}
@@ -668,13 +668,154 @@ func TestRunAgentLoop_NoHistory(t *testing.T) {
 	history := agent.Sessions.GetHistory(opts.SessionKey)
 	foundNewMessage := false
 	for _, msg := range history {
-		if msg.Content == "New message" {
+		if strings.Contains(msg.Content, "New message") {
 			foundNewMessage = true
 			break
 		}
 	}
 	if !foundNewMessage {
 		t.Error("Expected new message to be saved to session")
+	}
+}
+
+func TestRunAgentLoop_PersistsExactUserMessageSentToLLM(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	var firstSentUser string
+	callCount := 0
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			callCount++
+			if len(messages) == 0 {
+				t.Fatal("expected messages to be sent to LLM")
+			}
+
+			lastMsg := messages[len(messages)-1]
+			if lastMsg.Role != "user" {
+				t.Fatalf("expected last message to be user, got %s", lastMsg.Role)
+			}
+
+			switch callCount {
+			case 1:
+				firstSentUser = lastMsg.Content
+				if !strings.Contains(firstSentUser, "Primero") {
+					t.Fatalf("expected first LLM request to contain current user message, got %q", firstSentUser)
+				}
+			case 2:
+				found := false
+				for _, msg := range messages[:len(messages)-1] {
+					if msg.Role == "user" && msg.Content == firstSentUser {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("expected second LLM request history to contain the exact first user message sent previously: %q", firstSentUser)
+				}
+			}
+
+			return &providers.LLMResponse{Content: fmt.Sprintf("response-%d", callCount)}, nil
+		},
+	}
+
+	ctx := context.Background()
+	_, err := runner.runAgentLoop(ctx, agent, processOptions{
+		SessionKey:      "test-session",
+		Channel:         "test-channel",
+		ChatID:          "test-chat-id",
+		UserMessage:     "Primero",
+		DefaultResponse: "Default",
+		EnableSummary:   false,
+		SendResponse:    false,
+	})
+	if err != nil {
+		t.Fatalf("first runAgentLoop error: %v", err)
+	}
+
+	history := agent.Sessions.GetHistory("test-session")
+	if len(history) < 2 {
+		t.Fatalf("expected history to contain first turn, got %d messages", len(history))
+	}
+	if history[0].Role != "user" {
+		t.Fatalf("expected first history entry to be user, got %s", history[0].Role)
+	}
+	if history[0].Content != firstSentUser {
+		t.Fatalf("expected stored first user message to match sent content\nwant: %q\ngot:  %q", firstSentUser, history[0].Content)
+	}
+
+	_, err = runner.runAgentLoop(ctx, agent, processOptions{
+		SessionKey:      "test-session",
+		Channel:         "test-channel",
+		ChatID:          "test-chat-id",
+		UserMessage:     "Segundo",
+		DefaultResponse: "Default",
+		EnableSummary:   false,
+		SendResponse:    false,
+	})
+	if err != nil {
+		t.Fatalf("second runAgentLoop error: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", callCount)
+	}
+}
+
+func TestRunAgentLoop_MaterializesSummaryIntoHistoryOnce(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.Sessions.GetOrCreate("test-session")
+	agent.Sessions.SetSummary("test-session", "Persisted summary")
+
+	callCount := 0
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			callCount++
+			summaryCount := 0
+			for _, msg := range messages {
+				if msg.Role == "user" && msg.Content == summaryMessageHeader+"Persisted summary" {
+					summaryCount++
+				}
+			}
+			if summaryCount != 1 {
+				t.Fatalf("expected exactly one summary message in LLM request, got %d", summaryCount)
+			}
+			return &providers.LLMResponse{Content: fmt.Sprintf("response-%d", callCount)}, nil
+		},
+	}
+
+	ctx := context.Background()
+	for _, userMessage := range []string{"Primero", "Segundo"} {
+		_, err := runner.runAgentLoop(ctx, agent, processOptions{
+			SessionKey:      "test-session",
+			Channel:         "test-channel",
+			ChatID:          "test-chat-id",
+			UserMessage:     userMessage,
+			DefaultResponse: "Default",
+			EnableSummary:   false,
+			SendResponse:    false,
+		})
+		if err != nil {
+			t.Fatalf("runAgentLoop error: %v", err)
+		}
+	}
+
+	history := agent.Sessions.GetHistory("test-session")
+	summaryCount := 0
+	for _, msg := range history {
+		if msg.Role == "user" && msg.Content == summaryMessageHeader+"Persisted summary" {
+			summaryCount++
+		}
+	}
+	if summaryCount != 1 {
+		t.Fatalf("expected persisted history to contain exactly one summary message, got %d", summaryCount)
 	}
 }
 

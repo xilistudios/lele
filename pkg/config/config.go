@@ -316,20 +316,22 @@ type LogsConfig struct {
 }
 
 type ProvidersConfig struct {
-	Anthropic     ProviderConfig                 `json:"anthropic"`
-	OpenAI        OpenAIProviderConfig           `json:"openai"`
-	OpenRouter    ProviderConfig                 `json:"openrouter"`
-	Groq          ProviderConfig                 `json:"groq"`
-	Zhipu         ProviderConfig                 `json:"zhipu"`
-	VLLM          ProviderConfig                 `json:"vllm"`
-	Gemini        ProviderConfig                 `json:"gemini"`
-	Nvidia        ProviderConfig                 `json:"nvidia"`
-	Ollama        ProviderConfig                 `json:"ollama"`
-	Moonshot      ProviderConfig                 `json:"moonshot"`
-	ShengSuanYun  ProviderConfig                 `json:"shengsuanyun"`
-	DeepSeek      ProviderConfig                 `json:"deepseek"`
-	GitHubCopilot ProviderConfig                 `json:"github_copilot"`
-	Named         map[string]NamedProviderConfig `json:"-"`
+	Anthropic         ProviderConfig                 `json:"anthropic"`
+	OpenAI            OpenAIProviderConfig           `json:"openai"`
+	OpenRouter        ProviderConfig                 `json:"openrouter"`
+	Groq              ProviderConfig                 `json:"groq"`
+	Zhipu             ProviderConfig                 `json:"zhipu"`
+	VLLM              ProviderConfig                 `json:"vllm"`
+	Gemini            ProviderConfig                 `json:"gemini"`
+	Nvidia            ProviderConfig                 `json:"nvidia"`
+	Ollama            ProviderConfig                 `json:"ollama"`
+	Moonshot          ProviderConfig                 `json:"moonshot"`
+	ShengSuanYun      ProviderConfig                 `json:"shengsuanyun"`
+	DeepSeek          ProviderConfig                 `json:"deepseek"`
+	GitHubCopilot     ProviderConfig                 `json:"github_copilot"`
+	NanogPT           ProviderConfig                 `json:"nanogpt"`
+	AlibabaCodingPlan ProviderConfig                 `json:"alibaba_coding_plan"`
+	Named             map[string]NamedProviderConfig `json:"-"`
 }
 
 type ProviderConfig struct {
@@ -350,6 +352,7 @@ type OpenAIProviderConfig struct {
 type ReasoningConfig struct {
 	Effort  *string `json:"effort,omitempty"`  // "low", "medium", "high"
 	Summary *string `json:"summary,omitempty"` // "auto", "detailed", "concise"
+	Enable  bool    `json:"enable,omitempty"`  // enables thinking/reasoning mode (e.g. DeepSeek v4)
 }
 
 // Validate checks if the reasoning config has valid values.
@@ -478,6 +481,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	put("shengsuanyun", NamedProviderConfig{Type: "shengsuanyun", ProviderConfig: p.ShengSuanYun})
 	put("deepseek", NamedProviderConfig{Type: "deepseek", ProviderConfig: p.DeepSeek})
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
+	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
+	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
 
 	return json.Marshal(out)
 }
@@ -515,6 +520,8 @@ func (p *ProvidersConfig) ensureNamedDefaults() {
 	put("shengsuanyun", NamedProviderConfig{Type: "shengsuanyun", ProviderConfig: p.ShengSuanYun})
 	put("deepseek", NamedProviderConfig{Type: "deepseek", ProviderConfig: p.DeepSeek})
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
+	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
+	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
 }
 
 func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
@@ -569,7 +576,7 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 
 	resolved := strings.TrimSpace(aliasCfg.Model)
 	if resolved == "" {
-		return "", false
+		return model, true
 	}
 	return resolved, true
 }
@@ -814,16 +821,21 @@ func DefaultConfig() *Config {
 			},
 		},
 		Providers: ProvidersConfig{
-			Anthropic:    ProviderConfig{},
-			OpenAI:       OpenAIProviderConfig{WebSearch: true},
-			OpenRouter:   ProviderConfig{},
-			Groq:         ProviderConfig{},
-			Zhipu:        ProviderConfig{},
-			VLLM:         ProviderConfig{},
-			Gemini:       ProviderConfig{},
-			Nvidia:       ProviderConfig{},
-			Moonshot:     ProviderConfig{},
-			ShengSuanYun: ProviderConfig{},
+			Anthropic:         ProviderConfig{},
+			OpenAI:            OpenAIProviderConfig{WebSearch: true},
+			OpenRouter:        ProviderConfig{},
+			Groq:              ProviderConfig{},
+			Zhipu:             ProviderConfig{},
+			VLLM:              ProviderConfig{},
+			Gemini:            ProviderConfig{},
+			Nvidia:            ProviderConfig{},
+			Ollama:            ProviderConfig{},
+			Moonshot:          ProviderConfig{},
+			ShengSuanYun:      ProviderConfig{},
+			NanogPT:           ProviderConfig{},
+			DeepSeek:          ProviderConfig{},
+			GitHubCopilot:     ProviderConfig{},
+			AlibabaCodingPlan: ProviderConfig{APIBase: "https://coding-intl.dashscope.aliyuncs.com/v1"},
 		},
 		Gateway: GatewayConfig{
 			Host: "0.0.0.0",

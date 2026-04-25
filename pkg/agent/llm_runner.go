@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,6 +82,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		history = ensureSummaryMaterialized(agent, opts.SessionKey, history, summary)
 		// Initialize verbose mode from persistent storage
 		lr.al.verboseManager.InitializeFromSession(opts.SessionKey)
 	}
@@ -89,7 +91,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		logger.WarnCF("agent", "Failed to persist attachments to workspace", map[string]interface{}{"error": err.Error()})
 		persistedAttachments = opts.Attachments
 	}
-	renderedUserMessage := agent.ContextBuilder.RenderUserMessage(opts.UserMessage, persistedAttachments)
+	renderedUserMessage := agent.ContextBuilder.BuildCurrentUserMessage(opts.UserMessage, persistedAttachments, opts.Channel, opts.ChatID)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
 		summary,
@@ -97,6 +99,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		persistedAttachments,
 		opts.Channel,
 		opts.ChatID,
+		opts.SessionKey,
 	)
 
 	// 3. Save user message to session
@@ -120,8 +123,14 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		finalContent = opts.DefaultResponse
 	}
 
-	// 6. Save final assistant message to session
-	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
+	// 6. Save final assistant message to session (only if not already saved in the loop)
+	// The loop saves assistant messages with ReasoningContent when:
+	// - There are tool calls (line ~565)
+	// - There are no tool calls (line ~477, newly added)
+	// Only save here if we never entered the loop (iteration == 0)
+	if iteration == 0 && finalContent != "" {
+		agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
+	}
 	agent.Sessions.Save(opts.SessionKey)
 
 	// 7. Optional: summarization
@@ -248,6 +257,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var err error
 
 		var streamOnChunk func(chunk string, done bool)
+		var streamOnReasoning func(reasoningChunk string)
 		if opts.Channel == channels.ChannelName && opts.SendResponse {
 			messageID := opts.MessageID
 			if messageID == "" {
@@ -266,6 +276,15 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					},
 				})
 			}
+			streamOnReasoning = func(reasoningChunk string) {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:   opts.Channel,
+					ChatID:    opts.SessionKey,
+					Event:     "message.thinking",
+					MessageID: msgID,
+					Content:   reasoningChunk,
+				})
+			}
 		}
 
 		callLLM := func() (*providers.LLMResponse, error) {
@@ -279,7 +298,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				if sp, ok := agent.Provider.(providers.StreamingLLMProvider); ok {
 					if len(candidates) > 0 && lr.al.fallback != nil {
 					} else {
-						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk)
+						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk, streamOnReasoning)
 					}
 				}
 			}
@@ -295,7 +314,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			if sessionEffort == "off" {
 				// Explicitly disabled for this session – do not send reasoning.
 			} else if sessionEffort != "" {
-				// Per-session effort override.
 				reasoningMap := map[string]interface{}{
 					"effort": sessionEffort,
 				}
@@ -323,6 +341,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						"effort":   agent.Reasoning.Effort,
 						"summary":  agent.Reasoning.Summary,
 					})
+				}
+			}
+
+			if agent.Reasoning != nil && agent.Reasoning.Enable {
+				// Only set thinking=true for providers that support it (DeepSeek family).
+				// Covers both native DeepSeek models (deepseek-chat, deepseek-v4-flash)
+				// and OpenRouter-proxied models (deepseek/deepseek-v4-flash).
+				if isDeepSeekModel(model) {
+					llmOptions["thinking"] = true
+					logger.DebugCF("agent", "Thinking mode enabled for DeepSeek model",
+						map[string]interface{}{
+							"agent_id": agent.ID,
+							"model":    model,
+						})
 				}
 			}
 
@@ -413,9 +445,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
+				newHistory = ensureSummaryMaterialized(agent, opts.SessionKey, newHistory, newSummary)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID,
+					nil, opts.Channel, opts.ChatID, opts.SessionKey,
 				)
 				continue
 			}
@@ -466,10 +499,21 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			finalContent = response.Content
 			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
 				map[string]interface{}{
-					"agent_id":      agent.ID,
-					"iteration":     iteration,
-					"content_chars": len(finalContent),
+					"agent_id":          agent.ID,
+					"iteration":         iteration,
+					"content_chars":     len(finalContent),
+					"reasoning_present": response.ReasoningContent != "",
 				})
+
+			// Save assistant message with reasoning content (important for thinking models like DeepSeek)
+			assistantMsg := providers.Message{
+				Role:             "assistant",
+				Content:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+			}
+			messages = append(messages, assistantMsg)
+			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
+
 			// If response is empty, retry by prompting the model again
 			if len(strings.TrimSpace(finalContent)) == 0 && iteration < agent.MaxIterations-2 {
 				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
@@ -483,6 +527,35 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				})
 				continue
 			}
+
+			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
+			// instead of proper function calls. Some models (like DeepSeek) sometimes output tool call
+			// syntax as plain text, which would break the loop and send raw tool invocation text to the user.
+			if containsPlainToolCall(finalContent, agent) {
+				logger.WarnCF("agent", "LLM response contains plain-text tool calls instead of function calls, injecting guidance",
+					map[string]interface{}{
+						"agent_id":  agent.ID,
+						"iteration": iteration,
+					})
+				// Remove the assistant message we just added (replaced with guidance)
+				messages = messages[:len(messages)-1]
+				agent.Sessions.RemoveLastMessage(opts.SessionKey)
+				// Get available tool names for guidance
+				toolNames := knownToolNames(agent)
+				guidanceMsg := fmt.Sprintf(
+					"⚠️ You wrote tool invocations as plain text (e.g., `read_file{...}`) instead of using the proper function calling mechanism.\n\n"+
+						"You MUST use the native tool/function calls available to invoke tools. Do NOT write tool names with JSON arguments as plain text.\n\n"+
+						"Available tools: %s\n\n"+
+						"Please retry your response using proper function calls.",
+					strings.Join(toolNames, ", "))
+				messages = append(messages, providers.Message{
+					Role:    "user",
+					Content: guidanceMsg,
+				})
+				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg)
+				continue
+			}
+
 			break
 		}
 
@@ -537,8 +610,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
-			Role:    "assistant",
-			Content: response.Content,
+			Role:             "assistant",
+			Content:          response.Content,
+			ReasoningContent: response.ReasoningContent,
 		}
 		for _, tc := range response.ToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)
@@ -576,13 +650,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			// existing verbose text notifications.
 			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
 			if opts.Channel == channels.ChannelName {
+				actionDesc := formatBasicToolMessage(tc.Name, tc.Arguments)
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
 					ChatID:  opts.SessionKey,
 					Event:   "tool.executing",
 					Metadata: map[string]string{
 						"tool":   tc.Name,
-						"action": "Executing " + tc.Name,
+						"action": actionDesc,
 					},
 				})
 			} else if level != session.VerboseOff {
@@ -809,6 +884,19 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	return finalContent, iteration, nil
 }
 
+func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
+	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
+		return history
+	}
+
+	agent.Sessions.GetOrCreate(sessionKey)
+	updatedHistory := make([]providers.Message, 0, len(history)+1)
+	updatedHistory = append(updatedHistory, history...)
+	updatedHistory = append(updatedHistory, buildSummaryMessage(summary))
+	agent.Sessions.SetHistory(sessionKey, updatedHistory)
+	return updatedHistory
+}
+
 // updateToolContexts updates the context for tools that need channel/chatID info.
 func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
 	// Use ContextualTool interface instead of type assertions
@@ -852,4 +940,69 @@ func (lr *llmRunnerImpl) formatProviderModel(provider, model string) string {
 		return model
 	}
 	return provider + "/" + model
+}
+
+// knownToolNames returns a sorted list of registered tool names for an agent.
+func knownToolNames(agent *AgentInstance) []string {
+	names := agent.Tools.List()
+	// Sort for deterministic output
+	sort.Strings(names)
+	return names
+}
+
+// containsPlainToolCall checks if the response content contains plain-text tool
+// invocations like `read_file{"path":"..."}` or `exec{"command":"ls"}` instead of
+// proper function calling. This catches a common failure mode where the model
+// outputs tool syntax as text.
+func containsPlainToolCall(content string, agent *AgentInstance) bool {
+	if len(strings.TrimSpace(content)) == 0 {
+		return false
+	}
+
+	// Check for common patterns: toolName{...}
+	// Look for any registered tool name followed by a JSON object in braces
+	toolNames := agent.Tools.List()
+	for _, name := range toolNames {
+		// Pattern: toolName{ (e.g., read_file{, exec{, web_search{)
+		// The opening brace after the tool name is a strong indicator of a plain-text tool call
+		pattern := name + "{"
+		if strings.Contains(content, pattern) {
+			// Verify it looks like toolName{"key":value...} (has JSON inside)
+			idx := strings.Index(content, pattern)
+			if idx >= 0 {
+				remaining := content[idx+len(pattern):]
+				// Look for the closing brace and verify JSON-like content
+				endIdx := strings.Index(remaining, "}")
+				if endIdx > 0 {
+					inner := strings.TrimSpace(remaining[:endIdx])
+					// Should contain at least a quoted key
+					if strings.Contains(inner, "\"") {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// knownDeepSeekPrefixes lists model name prefixes that support DeepSeek's
+// native thinking mode. This is more specific than a generic strings.Contains
+// to avoid false matches on models from other providers that happen to
+// include "deepseek" in their name.
+var knownDeepSeekPrefixes = []string{
+	"deepseek/",
+	"deepseek-",
+	"deepseek_v",
+}
+
+func isDeepSeekModel(model string) bool {
+	lower := strings.ToLower(model)
+	for _, prefix := range knownDeepSeekPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
-import type { SecretValue } from '../../../lib/types'
+import type { EditableNamedProviderConfig, SecretValue } from '../../../lib/types'
 import {
-  AddItemInput,
   BooleanInput,
   NamedItemCard,
   SecretInput,
@@ -11,25 +10,21 @@ import {
   SettingsSection,
   TextInput,
 } from '../../molecules'
+import { AddProviderModal } from './AddProviderModal'
 import { ProviderModelsEditor } from './ProviderModelsEditor'
+
+function isEmptyProvider(prov: EditableNamedProviderConfig): boolean {
+  return !prov.type && prov.api_key?.mode === 'empty'
+}
 
 export function ProvidersSettings() {
   const { draftConfig, dirtyPaths, updateField, updateSecretField, t } = useSettings()
-  const [newProviderName, setNewProviderName] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
 
   if (!draftConfig) return null
   const providers = draftConfig.providers || {}
-  const names = Object.keys(providers)
 
-  const addProvider = () => {
-    const name = newProviderName.trim()
-    if (!name) return
-    updateField('providers', {
-      ...providers,
-      [name]: { api_key: { mode: 'empty', has_env_var: false }, api_base: '' },
-    })
-    setNewProviderName('')
-  }
+  const configuredNames = Object.keys(providers).filter((name) => !isEmptyProvider(providers[name]))
 
   const removeProvider = (name: string) => {
     const updated = { ...providers }
@@ -37,21 +32,21 @@ export function ProvidersSettings() {
     updateField('providers', updated)
   }
 
+  const BTN_CLS =
+    'rounded px-3 py-1.5 text-xs transition-colors bg-blue-600 text-white hover:bg-blue-500'
+
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.namedProviders')}>
-        <AddItemInput
-          value={newProviderName}
-          onChange={setNewProviderName}
-          onAdd={addProvider}
-          placeholder={t('settings.providerNamePlaceholder')}
-        />
+        <button type="button" onClick={() => setModalOpen(true)} className={BTN_CLS}>
+          {t('settings.addProvider')}
+        </button>
 
-        {names.length === 0 && (
+        {configuredNames.length === 0 && (
           <p className="text-xs text-text-tertiary">{t('settings.noProviders')}</p>
         )}
 
-        {names.map((name) => {
+        {configuredNames.map((name) => {
           const prov = providers[name]
           return (
             <NamedItemCard
@@ -154,6 +149,8 @@ export function ProvidersSettings() {
           )
         })}
       </SettingsSection>
+
+      <AddProviderModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   )
 }

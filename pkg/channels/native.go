@@ -45,13 +45,14 @@ type NativeChannel struct {
 }
 
 type WSClient struct {
-	ID         string
-	Conn       *websocket.Conn
-	ClientInfo *ClientInfo
-	SessionKey string
-	SendChan   chan []byte
-	closed     bool
-	mu         sync.Mutex
+	ID            string
+	Conn          *websocket.Conn
+	ClientInfo    *ClientInfo
+	SessionKey    string
+	Subscriptions map[string]bool // all sessions this client is subscribed to
+	SendChan      chan []byte
+	closed        bool
+	mu            sync.Mutex
 }
 
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
@@ -70,7 +71,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	pinLimiter := newRateLimiter(10, time.Minute)
 	pairLimiter := newRateLimiter(5, time.Minute)
 	apiLimiter := newRateLimiter(120, time.Minute)
-	wsMessageLimiter := newRateLimiter(30, time.Minute)
+	wsMessageLimiter := newRateLimiter(120, time.Minute)
 
 	return &NativeChannel{
 		base:             base,
@@ -191,6 +192,11 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 		}
 	}
 
+	n.pinLimiter.Stop()
+	n.pairLimiter.Stop()
+	n.apiLimiter.Stop()
+	n.wsMessageLimiter.Stop()
+
 	n.running = false
 	n.base.setRunning(false)
 
@@ -248,6 +254,7 @@ func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/status", n.handleStatus)
 	mux.HandleFunc("/api/v1/channels", n.handleChannels)
 	mux.HandleFunc("/api/v1/files/upload", n.handleFileUpload)
+	mux.HandleFunc("/api/v1/files/view", n.handleFileView)
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
@@ -321,7 +328,7 @@ func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") {
+		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/files/view") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -380,6 +387,13 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			SessionKey: sessionKey,
 			Chunk:      msg.Content,
 			Done:       done,
+		})
+		return
+	case "message.thinking":
+		n.sendWSEvent(sessionKey, "message.thinking", WSThinkingPayload{
+			MessageID:  msg.MessageID,
+			SessionKey: sessionKey,
+			Chunk:      msg.Content,
 		})
 		return
 	case "tool.executing":
@@ -443,6 +457,11 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		Content:     msg.Content,
 		Attachments: attachmentsToMaps(msg.Attachments),
 	})
+
+	// Signal that session data has been persisted and is safe to refetch
+	n.sendWSEvent(sessionKey, "history.updated", map[string]interface{}{
+		"session_key": sessionKey,
+	})
 }
 
 func (n *NativeChannel) addWSClient(client *WSClient) {
@@ -465,43 +484,54 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 }
 
 func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	msg := WSMessage{
 		Event: event,
 		Data:  mustMarshal(data),
 	}
+	payload := mustMarshal(msg)
 
-	found := 0
-	cleanup := make([]string, 0)
-	for id, client := range n.wsClients {
+	n.mu.RLock()
+	var targets []*WSClient
+	for _, client := range n.wsClients {
+		// Match by current session key (active subscription)
 		if client.SessionKey == sessionKey {
-			if err := client.QueueSend(mustMarshal(msg)); err != nil {
-				// Client is disconnected, mark for cleanup
-				cleanup = append(cleanup, id)
-			} else {
-				found++
-			}
-		} else if n.agentLoop != nil && client.SessionKey != "" {
+			targets = append(targets, client)
+			continue
+		}
+		// Match by tracked subscriptions (sessions the client has subscribed to)
+		if client.Subscriptions != nil && client.Subscriptions[sessionKey] {
+			targets = append(targets, client)
+			continue
+		}
+		// Match by resolved session key (subagent parent sessions)
+		if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if resolved == sessionKey {
-				if err := client.QueueSend(mustMarshal(msg)); err != nil {
-					// Client is disconnected, mark for cleanup
-					cleanup = append(cleanup, id)
-				} else {
-					found++
-				}
+				targets = append(targets, client)
 			}
 		}
 	}
+	n.mu.RUnlock()
 
-	// Clean up disconnected clients
-	for _, id := range cleanup {
-		if client, exists := n.wsClients[id]; exists {
-			client.Conn.Close()
-			delete(n.wsClients, id)
+	found := 0
+	cleanup := make([]string, 0)
+	for _, client := range targets {
+		if err := client.QueueSend(payload); err != nil {
+			cleanup = append(cleanup, client.ID)
+		} else {
+			found++
 		}
+	}
+
+	if len(cleanup) > 0 {
+		n.mu.Lock()
+		for _, id := range cleanup {
+			if client, exists := n.wsClients[id]; exists {
+				client.Conn.Close()
+				delete(n.wsClients, id)
+			}
+		}
+		n.mu.Unlock()
 	}
 
 	logger.InfoCF("native", "Broadcast to session", map[string]interface{}{
@@ -513,27 +543,35 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 }
 
 func (n *NativeChannel) broadcastAll(event string, data interface{}) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	msg := WSMessage{
 		Event: event,
 		Data:  mustMarshal(data),
 	}
+	payload := mustMarshal(msg)
+
+	n.mu.RLock()
+	targets := make([]*WSClient, 0, len(n.wsClients))
+	for _, client := range n.wsClients {
+		targets = append(targets, client)
+	}
+	n.mu.RUnlock()
 
 	cleanup := make([]string, 0)
-	for id, client := range n.wsClients {
-		if err := client.QueueSend(mustMarshal(msg)); err != nil {
-			cleanup = append(cleanup, id)
+	for _, client := range targets {
+		if err := client.QueueSend(payload); err != nil {
+			cleanup = append(cleanup, client.ID)
 		}
 	}
 
-	// Clean up disconnected clients
-	for _, id := range cleanup {
-		if client, exists := n.wsClients[id]; exists {
-			client.Conn.Close()
-			delete(n.wsClients, id)
+	if len(cleanup) > 0 {
+		n.mu.Lock()
+		for _, id := range cleanup {
+			if client, exists := n.wsClients[id]; exists {
+				client.Conn.Close()
+				delete(n.wsClients, id)
+			}
 		}
+		n.mu.Unlock()
 	}
 }
 
