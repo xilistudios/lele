@@ -79,10 +79,11 @@ type WSApprovalRequestPayload struct {
 }
 
 type WSToolExecutingPayload struct {
-	SessionKey         string `json:"session_key,omitempty"`
-	Tool               string `json:"tool"`
-	Action             string `json:"action"`
-	SubagentSessionKey string `json:"subagent_session_key,omitempty"`
+	SessionKey         string                 `json:"session_key,omitempty"`
+	Tool               string                 `json:"tool"`
+	Action             string                 `json:"action"`
+	Arguments          map[string]interface{} `json:"arguments,omitempty"`
+	SubagentSessionKey string                 `json:"subagent_session_key,omitempty"`
 }
 
 type WSToolResultPayload struct {

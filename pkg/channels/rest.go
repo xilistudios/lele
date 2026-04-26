@@ -202,11 +202,19 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		if len(msg.ToolCalls) > 0 {
 			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
+				// Use top-level Arguments; fall back to parsing Function.Arguments string
+				args := tc.Arguments
+				if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
+					var parsed map[string]interface{}
+					if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
+						args = parsed
+					}
+				}
 				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
 					ID:               tc.ID,
 					Type:             tc.Type,
 					Name:             tc.Name,
-					Arguments:        tc.Arguments,
+					Arguments:        args,
 					ThoughtSignature: tc.ThoughtSignature,
 				})
 			}

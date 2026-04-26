@@ -333,7 +333,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	mux := http.NewServeMux()
-	native.registerRoutes(mux)
+	native.RegisterRoutes(mux)
 	handler := native.corsMiddleware(native.securityHeadersMiddleware(native.authMiddleware(mux)))
 	server := httptest.NewServer(handler)
 	defer server.Close()

@@ -252,8 +252,9 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 
 	mux := http.NewServeMux()
-	channel.registerRoutes(mux)
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(channel.authMiddleware(mux))))
+	channel.RegisterRoutes(mux)
+	// Routes already have auth middleware applied via withAuth wrapper
+	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -332,8 +333,9 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	}
 
 	mux := http.NewServeMux()
-	channel.registerRoutes(mux)
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(channel.authMiddleware(mux))))
+	channel.RegisterRoutes(mux)
+	// Routes already have auth middleware applied via withAuth wrapper
+	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
 
 	t.Cleanup(func() {
 		server.Close()
