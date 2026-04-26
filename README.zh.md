@@ -108,7 +108,7 @@ Lele 现已包含本地 Web UI 和原生客户端通道。
 1. 运行 `lele onboard`
 2. 在提示时启用 Web UI
 3. 生成配对 PIN
-4. 通过 `lele gateway` 和 `lele web start` 启动服务
+4. 通过 `lele gateway` 启动服务
 5. 在浏览器中打开 Web 应用并使用 PIN 配对
 
 原生通道暴露了 REST 和 WebSocket 端点，供桌面客户端和本地集成使用。
@@ -289,8 +289,6 @@ Lele 可以将智能体的文件和命令访问限制在已配置的工作区内
 | `lele agent` | 启动交互式智能体会话 |
 | `lele agent -m "..."` | 运行一次性问答 |
 | `lele gateway` | 启动消息网关 |
-| `lele web start` | 启动内置 Web UI |
-| `lele web status` | 显示 Web UI 状态 |
 | `lele auth login` | 认证支持的提供器 |
 | `lele status` | 显示运行时状态 |
 | `lele cron list` | 列出已调度的任务 |

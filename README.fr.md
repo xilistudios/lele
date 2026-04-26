@@ -108,7 +108,7 @@ Flux typique :
 1. Exécutez `lele onboard`
 2. Activez l'interface web lorsque vous y êtes invité
 3. Générez un PIN d'appairage
-4. Démarrez les services avec `lele gateway` et `lele web start`
+4. Démarrez les services avec `lele gateway`
 5. Ouvrez l'application web dans votre navigateur et appairez avec le PIN
 
 Le canal natif expose des points d'accès REST et WebSocket pour les clients de bureau et les intégrations locales.
@@ -289,8 +289,6 @@ Consultez `docs/tools_configuration.md` et `docs/client-api.md` pour les détail
 | `lele agent` | Démarrer une session agent interactive |
 | `lele agent -m "..."` | Exécuter une invite ponctuelle |
 | `lele gateway` | Démarrer la passerelle de messagerie |
-| `lele web start` | Démarrer l'interface web intégrée |
-| `lele web status` | Afficher le statut de l'interface web |
 | `lele auth login` | Authentifier les fournisseurs pris en charge |
 | `lele status` | Afficher le statut du runtime |
 | `lele cron list` | Lister les tâches planifiées |

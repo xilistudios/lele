@@ -108,7 +108,7 @@ Fluxo típico:
 1. Execute `lele onboard`
 2. Habilite a interface web quando solicitado
 3. Gere um PIN de emparelhamento
-4. Inicie os serviços com `lele gateway` e `lele web start`
+4. Inicie os serviços com `lele gateway`
 5. Abra o app web no seu navegador e emparelhe com o PIN
 
 O canal nativo expõe endpoints REST e WebSocket para clientes desktop e integrações locais.
@@ -289,8 +289,6 @@ Consulte `docs/tools_configuration.md` e `docs/client-api.md` para detalhes oper
 | `lele agent` | Inicia sessão interativa do agente |
 | `lele agent -m "..."` | Executa um prompt único |
 | `lele gateway` | Inicia gateway de mensagens |
-| `lele web start` | Inicia a interface web embutida |
-| `lele web status` | Mostra status da interface web |
 | `lele auth login` | Autentica provedores suportados |
 | `lele status` | Mostra status do runtime |
 | `lele cron list` | Lista tarefas agendadas |
