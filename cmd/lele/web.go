@@ -7,7 +7,6 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -24,11 +23,15 @@ func parseWebServerOptions(args []string) webServerOptions {
 	opts := webServerOptions{Host: "0.0.0.0", Port: 3005}
 
 	cfg, err := loadConfig()
-	if err == nil && cfg.Channels.Web.Enabled && cfg.Channels.Web.Port != 0 {
-		if cfg.Channels.Web.Host != "" {
-			opts.Host = cfg.Channels.Web.Host
+	if err == nil {
+		// Use unified server port as default
+		effectivePort := cfg.EffectiveServerPort()
+		if effectivePort != 0 {
+			opts.Port = effectivePort
 		}
-		opts.Port = cfg.Channels.Web.Port
+		if host := cfg.EffectiveServerHost(); host != "" {
+			opts.Host = host
+		}
 	}
 
 	for i := 0; i < len(args); i++ {
@@ -51,128 +54,22 @@ func parseWebServerOptions(args []string) webServerOptions {
 }
 
 func webCmd() {
-	if len(os.Args) < 3 {
-		webHelp()
-		return
-	}
-
-	subcommand := os.Args[2]
-	switch subcommand {
-	case "start":
-		webStartCmd(parseWebServerOptions(os.Args[3:]))
-	case "stop":
-		webStopCmd()
-	case "status":
-		webStatusCmd()
-	case "serve":
-		webServeCmd(parseWebServerOptions(os.Args[3:]))
-	default:
-		fmt.Printf("Unknown web command: %s\n", subcommand)
-		webHelp()
-	}
-}
-
-func webHelp() {
-	fmt.Println("\nWeb commands:")
-	fmt.Println("  start              Start the web server in background")
-	fmt.Println("  stop               Stop the web server")
-	fmt.Println("  status             Show web server status")
+	fmt.Println("\n💡 The web UI is served by the unified gateway server.")
+	fmt.Println("   Use 'lele gateway' to start the web UI:")
 	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Println("  --host <host>     Bind host (default: 0.0.0.0)")
-	fmt.Println("  --port <port>     Bind port (default: 3005)")
+	cfg, err := loadConfig()
+	if err == nil {
+		host := cfg.EffectiveServerHost()
+		port := cfg.EffectiveServerPort()
+		if host == "0.0.0.0" {
+			host = "127.0.0.1"
+		}
+		fmt.Printf("   → lele gateway\n")
+		fmt.Printf("   → http://%s:%d\n", host, port)
+	} else {
+		fmt.Printf("   → lele gateway\n")
+	}
 	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  lele web start")
-	fmt.Println("  lele web start --host 0.0.0.0 --port 3005")
-	fmt.Println("  lele web stop")
-	fmt.Println("  lele web status")
-}
-
-func webPIDPath() string {
-	return filepath.Join(getLeleDir(), "web.pid")
-}
-
-func webLogPath() string {
-	return filepath.Join(getLeleDir(), "logs", "web.log")
-}
-
-func webStartCmd(opts webServerOptions) {
-	if running, pid := webServerRunning(); running {
-		fmt.Printf("Web server already running (pid %d)\n", pid)
-		return
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		fmt.Printf("Error resolving executable: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(webLogPath()), 0755); err != nil {
-		fmt.Printf("Error preparing log directory: %v\n", err)
-		os.Exit(1)
-	}
-
-	logFile, err := os.OpenFile(webLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Printf("Error opening web log file: %v\n", err)
-		os.Exit(1)
-	}
-	defer logFile.Close()
-
-	cmd := exec.Command(exe, "web", "serve", "--host", opts.Host, "--port", strconv.Itoa(opts.Port))
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	cmd.Stdin = nil
-
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("Error starting web server: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := os.WriteFile(webPIDPath(), []byte(strconv.Itoa(cmd.Process.Pid)), 0644); err != nil {
-		_ = cmd.Process.Kill()
-		fmt.Printf("Error writing pid file: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("✓ Web server started on http://%s:%d (pid %d)\n", opts.Host, opts.Port, cmd.Process.Pid)
-}
-
-func webStopCmd() {
-	pid, err := readWebPID()
-	if err != nil {
-		fmt.Println("Web server is not running")
-		return
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		fmt.Printf("Error finding web server process: %v\n", err)
-		_ = os.Remove(webPIDPath())
-		return
-	}
-
-	_ = proc.Kill()
-	_ = os.Remove(webPIDPath())
-	fmt.Printf("✓ Web server stopped (pid %d)\n", pid)
-}
-
-func webStatusCmd() {
-	pid, err := readWebPID()
-	if err != nil {
-		fmt.Println("Web server: stopped")
-		return
-	}
-
-	if pid > 0 {
-		fmt.Printf("Web server: running (pid %d)\n", pid)
-		return
-	}
-
-	_ = os.Remove(webPIDPath())
-	fmt.Println("Web server: stopped")
 }
 
 func webServeCmd(opts webServerOptions) {
@@ -193,9 +90,6 @@ func webServeCmd(opts webServerOptions) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	defer func() {
-		_ = os.Remove(webPIDPath())
-	}()
 
 	go func() {
 		<-ctx.Done()
@@ -238,32 +132,6 @@ func serveEmbeddedWebApp(distFS fs.FS) http.Handler {
 
 		http.NotFound(w, r)
 	})
-}
-
-func readWebPID() (int, error) {
-	data, err := os.ReadFile(webPIDPath())
-	if err != nil {
-		return 0, err
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, err
-	}
-
-	return pid, nil
-}
-
-func webServerRunning() (bool, int) {
-	pid, err := readWebPID()
-	if err != nil {
-		return false, 0
-	}
-	if pid > 0 {
-		return true, pid
-	}
-	_ = os.Remove(webPIDPath())
-	return false, 0
 }
 
 func netJoinHostPort(host string, port int) string {
