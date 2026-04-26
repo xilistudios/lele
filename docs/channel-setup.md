@@ -180,26 +180,17 @@ Fields:
 
 Notes:
 
-- the web UI is served by `lele web start`
+- the web UI is served by `lele gateway`
 - enabling Web usually implies using the native channel as the local API backend
 
 ## Which Services To Run
 
-### Messaging channels
+### Messaging channels & Web UI
 
 Run:
 
 ```bash
 lele gateway
-```
-
-### Web UI
-
-Run:
-
-```bash
-lele gateway
-lele web start
 ```
 
 ## Channel Initialization Rules
