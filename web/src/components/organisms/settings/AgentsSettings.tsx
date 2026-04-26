@@ -115,7 +115,7 @@ export function AgentsSettings() {
                 removeLabel={t('settings.removeAgent')}
               >
                 {/* Section: General */}
-                <div className="pb-4 mb-5 border-b border-border/40">
+                <div className="pb-4 mb-5 border-b border-border-light">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.general')}
                   </div>
@@ -163,7 +163,7 @@ export function AgentsSettings() {
                 </div>
 
                 {/* Section: Model */}
-                <div className="pb-4 mb-5 border-b border-border/40">
+                <div className="pb-4 mb-5 border-b border-border-light">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.model')}
                   </div>
@@ -218,7 +218,7 @@ export function AgentsSettings() {
                 </div>
 
                 {/* Section: Behavior */}
-                <div className="pb-4 mb-5 border-b border-border/40">
+                <div className="pb-4 mb-5 border-b border-border-light">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.behavior')}
                   </div>
@@ -300,7 +300,7 @@ export function AgentsSettings() {
                 </div>
 
                 {/* Section: Features */}
-                <div className="pb-4 mb-5 border-b border-border/40">
+                <div className="pb-4 mb-5 border-b border-border-light">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.features')}
                   </div>

@@ -4,8 +4,7 @@ import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '
 import type { AuthSession } from '../lib/types'
 
 export const defaultApiUrlFromWindow = () =>
-  import.meta.env.VITE_LELE_API_URL ??
-  `${window.location.protocol}//${window.location.hostname}:18793`
+  import.meta.env.VITE_LELE_API_URL ?? window.location.origin
 
 type AuthContextValue = {
   api: ReturnType<typeof createApiClient>

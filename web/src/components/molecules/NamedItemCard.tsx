@@ -13,7 +13,7 @@ type Props = {
 }
 
 const CARD_CLS =
-  'rounded-lg border border-border/60 bg-surface-secondary shadow-sm mt-4 first:mt-0 overflow-hidden'
+  'rounded-lg border border-border-strong bg-surface-secondary shadow-sm mt-4 first:mt-0 overflow-hidden'
 
 export function NamedItemCard({
   title,
@@ -27,7 +27,7 @@ export function NamedItemCard({
 
   return (
     <div className={CARD_CLS}>
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-border/40">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-border-light">
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}

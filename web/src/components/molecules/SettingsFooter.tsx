@@ -44,7 +44,7 @@ export function SettingsFooter({
           onClick={onReset}
           disabled={!isDirty || saveState === 'saving'}
           type="button"
-          className="rounded-md border border-border/70 bg-transparent px-5 py-2.5 text-sm text-text-secondary transition-all hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
+          className="rounded-md border border-border-strong bg-transparent px-5 py-2.5 text-sm text-text-secondary transition-all hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
         >
           {t('common.reset')}
         </button>
