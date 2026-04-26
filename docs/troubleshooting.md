@@ -18,10 +18,10 @@ lele onboard
 
 ## Web UI Loads But Cannot Connect
 
-Check both services:
+Check the gateway service:
 
 ```bash
-lele web status
+lele status
 lele gateway
 ```
 

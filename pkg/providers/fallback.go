@@ -12,6 +12,7 @@ import (
 const (
 	defaultMaxRetryAttempts   = 10
 	defaultMaxBackoffDuration = 60 * time.Second
+	immediateRetryAttempts    = 5
 )
 
 // FallbackChain orchestrates model fallback across multiple candidates.
@@ -210,8 +211,9 @@ func (fc *FallbackChain) Execute(
 	return nil, &FallbackExhaustedError{Attempts: result.Attempts}
 }
 
-// executeWithRetry executes the LLM call with exponential backoff retry logic.
-// Retries up to fc.maxRetries times with backoff capped at fc.maxBackoff.
+// executeWithRetry executes the LLM call with retry logic.
+// - Rate limit errors: exponential backoff retry (up to maxRetries).
+// - Other retriable errors: immediate retry (up to immediateRetryAttempts, no backoff).
 // After all retries are exhausted, returns the last error.
 func (fc *FallbackChain) executeWithRetry(
 	ctx context.Context,
@@ -222,7 +224,6 @@ func (fc *FallbackChain) executeWithRetry(
 	var lastErr error
 
 	for attempt := 0; attempt < fc.maxRetries; attempt++ {
-		// Check context before each attempt.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -234,32 +235,38 @@ func (fc *FallbackChain) executeWithRetry(
 
 		lastErr = err
 
-		// Check if error is retriable before waiting.
 		failErr := ClassifyError(err, provider, model)
 		if failErr == nil || !failErr.IsRetriable() {
-			// Non-retriable error, don't retry.
 			return nil, err
 		}
 
-		// Calculate backoff with exponential increase.
-		// Formula: min(fc.maxBackoff, 1s * 2^attempt)
-		// attempt 0: 1s, attempt 1: 2s, attempt 2: 4s, ... capped at maxBackoff
-		backoff := time.Duration(1<<uint(attempt)) * time.Second
-		if backoff > fc.maxBackoff {
-			backoff = fc.maxBackoff
-		}
+		if failErr.ShouldBackoff() {
+			backoff := time.Duration(1<<uint(attempt)) * time.Second
+			if backoff > fc.maxBackoff {
+				backoff = fc.maxBackoff
+			}
 
-		log.Printf("[INFO] backoff: retry attempt for provider=%s/model=%s, attempt=%d, waiting=%s",
-			provider, model, attempt+1, backoff.Round(time.Second))
+			log.Printf("[INFO] backoff: retry attempt for provider=%s/model=%s, attempt=%d, waiting=%s, reason=%s, error=%v",
+				provider, model, attempt+1, backoff.Round(time.Second), failErr.Reason, lastErr)
 
-		// Wait with context awareness.
-		select {
-		case <-time.After(backoff):
-			// Continue to next retry.
-		case <-ctx.Done():
-			return nil, ctx.Err()
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		} else {
+			if attempt >= immediateRetryAttempts {
+				log.Printf("[WARN] immediate retries exhausted for provider=%s/model=%s after %d attempts, reason=%s, last_error=%v",
+					provider, model, attempt+1, failErr.Reason, lastErr)
+				return nil, lastErr
+			}
+			log.Printf("[INFO] immediate retry for provider=%s/model=%s, attempt=%d, reason=%s, error=%v",
+				provider, model, attempt+1, failErr.Reason, lastErr)
 		}
 	}
+
+	log.Printf("[WARN] backoff: retries exhausted for provider=%s/model=%s after %d attempts, last_error=%v",
+		provider, model, fc.maxRetries, lastErr)
 
 	return nil, lastErr
 }

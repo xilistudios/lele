@@ -16,6 +16,7 @@ import type {
   FileUploadResponse,
   HistoryResponse,
   ModelsResponse,
+  ProviderModelsResponse,
   SendMessageRequest,
   SendMessageResponse,
   SessionAgentResponse,
@@ -297,6 +298,10 @@ export const createApiClient = (baseUrl: string) => {
     tools: () => request<ToolsResponse>(endpoints.system.tools, { method: 'GET' }),
     channels: () => request<ChannelsResponse>(endpoints.system.channels, { method: 'GET' }),
     systemStatus: () => request<SystemStatus>(endpoints.system.status, { method: 'GET' }),
+    providerModels: (providerName: string) =>
+      request<ProviderModelsResponse>(endpoints.providers.models(providerName), {
+        method: 'GET',
+      }),
     uploadFiles: async (files: File[]) => {
       const formData = new FormData()
       for (const file of files) {

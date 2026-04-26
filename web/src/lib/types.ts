@@ -406,6 +406,18 @@ export type ModelGroup = {
   models: ModelOption[]
 }
 
+export type ProviderModelInfo = {
+  id: string
+  object: string
+  created: number
+  owned_by: string
+}
+
+export type ProviderModelsResponse = {
+  provider: string
+  models: ProviderModelInfo[]
+}
+
 export type SessionNameResponse = {
   session_key: string
   name: string
@@ -485,6 +497,7 @@ export type ToolStatus = {
   session_key?: string
   tool: string
   action: string
+  arguments?: Record<string, unknown>
   subagent_session_key?: string
 }
 

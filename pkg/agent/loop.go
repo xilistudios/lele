@@ -879,6 +879,35 @@ func (al *AgentLoop) SetName(sessionKey string, name string) error {
 	return agent.Sessions.SetName(sessionKey, name)
 }
 
+// GetSessionContextWindow returns the context window for a session, dynamically resolving
+// it from the session's current model (which may have been overridden via /model).
+func (al *AgentLoop) GetSessionContextWindow(sessionKey string) int {
+	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
+	agent := al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 128000
+	}
+
+	// Check if the session has an overridden model
+	model := agent.Model
+	if m, ok := al.sessionModels.Load(resolvedSessionKey); ok {
+		if selected, ok := m.(string); ok && selected != "" {
+			model = selected
+		}
+	}
+
+	// Resolve context window from provider config, fall back to agent's value, then to default
+	cfg := al.cfg()
+	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+	if cw := getContextWindow(cfg, model, providerName); cw > 0 {
+		return cw
+	}
+	if agent.ContextWindow > 0 {
+		return agent.ContextWindow
+	}
+	return 128000
+}
+
 // GetTokenCounts returns the input/output token counts and context window for a session (implements AgentProvidable).
 func (al *AgentLoop) GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int) {
 	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
@@ -887,7 +916,7 @@ func (al *AgentLoop) GetTokenCounts(sessionKey string) (inputTokens, outputToken
 		return 0, 0, 0
 	}
 	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(resolvedSessionKey)
-	contextWindow = agent.ContextWindow
+	contextWindow = al.GetSessionContextWindow(sessionKey)
 	return
 }
 
@@ -917,10 +946,7 @@ func (al *AgentLoop) GetCurrentContextUsage(sessionKey string) (currentTokens, c
 	systemTokens := al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	currentTokens = systemTokens + summaryTokens + historyTokens
-	contextWindow = agent.ContextWindow
-	if contextWindow <= 0 {
-		contextWindow = 128000
-	}
+	contextWindow = al.GetSessionContextWindow(sessionKey)
 	return
 }
 

@@ -7,7 +7,7 @@ type Props = {
 export function StatusBadge({ status }: Props) {
   if (status === 'executing') {
     return (
-      <span className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-surface-hover text-text-secondary">
+      <span className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
         <svg
           className="h-3 w-3 animate-spin"
           viewBox="0 0 24 24"
@@ -18,41 +18,29 @@ export function StatusBadge({ status }: Props) {
         >
           <path d="M21 12a9 9 0 1 1-6.219-8.56" />
         </svg>
-        executing
+        Ejecutando
       </span>
     )
   }
   if (status === 'error') {
     return (
-      <span className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-state-error-light text-state-error">
+      <span className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
         <svg
           className="h-3 w-3"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="2"
           aria-hidden="true"
         >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
         </svg>
-        error
+        Error
       </span>
     )
   }
-  return (
-    <span className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-state-success-light text-state-success">
-      <svg
-        className="h-3 w-3"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        aria-hidden="true"
-      >
-        <polyline points="20 6 9 17 4 12" />
-      </svg>
-      completed
-    </span>
-  )
+  // Don't show badge for completed/success state - it's visual noise
+  return null
 }

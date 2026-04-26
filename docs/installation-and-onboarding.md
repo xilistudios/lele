@@ -87,14 +87,6 @@ lele agent -m "Summarize this repository"
 lele gateway
 ```
 
-### Web UI
-
-```bash
-lele web start
-lele web status
-lele web stop
-```
-
 ## Web + Native Local Flow
 
 Recommended local setup:
@@ -103,8 +95,7 @@ Recommended local setup:
 2. Enable the web UI
 3. Generate a pairing PIN
 4. Start `lele gateway`
-5. Start `lele web start`
-6. Open the local web app and pair using the PIN
+5. Open the local web app and pair using the PIN
 
 ## Useful Make Targets
 

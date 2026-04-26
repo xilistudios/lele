@@ -43,7 +43,6 @@ type replyTokenEntry struct {
 type LINEChannel struct {
 	*BaseChannel
 	config         config.LINEConfig
-	httpServer     *http.Server
 	botUserID      string   // Bot's user ID
 	botBasicID     string   // Bot's basic ID (e.g. @216ru...)
 	botDisplayName string   // Bot's display name for text-based mention detection
@@ -67,7 +66,8 @@ func NewLINEChannel(cfg config.LINEConfig, messageBus *bus.MessageBus) (*LINECha
 	}, nil
 }
 
-// Start launches the HTTP webhook server.
+// Start initializes state but doesn't listen — webhook routes are registered
+// via RegisterWebhook on the unified server.
 func (c *LINEChannel) Start(ctx context.Context) error {
 	logger.InfoC("line", "Starting LINE channel (Webhook Mode)")
 
@@ -85,31 +85,6 @@ func (c *LINEChannel) Start(ctx context.Context) error {
 			"display_name": c.botDisplayName,
 		})
 	}
-
-	mux := http.NewServeMux()
-	path := c.config.WebhookPath
-	if path == "" {
-		path = "/webhook/line"
-	}
-	mux.HandleFunc(path, c.webhookHandler)
-
-	addr := fmt.Sprintf("%s:%d", c.config.WebhookHost, c.config.WebhookPort)
-	c.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	go func() {
-		logger.InfoCF("line", "LINE webhook server listening", map[string]interface{}{
-			"addr": addr,
-			"path": path,
-		})
-		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.ErrorCF("line", "Webhook server error", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}()
 
 	c.setRunning(true)
 	logger.InfoC("line", "LINE channel started (Webhook Mode)")
@@ -150,7 +125,7 @@ func (c *LINEChannel) fetchBotInfo() error {
 	return nil
 }
 
-// Stop gracefully shuts down the HTTP server.
+// Stop gracefully shuts down the LINE channel.
 func (c *LINEChannel) Stop(ctx context.Context) error {
 	logger.InfoC("line", "Stopping LINE channel")
 
@@ -158,19 +133,18 @@ func (c *LINEChannel) Stop(ctx context.Context) error {
 		c.cancel()
 	}
 
-	if c.httpServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if err := c.httpServer.Shutdown(shutdownCtx); err != nil {
-			logger.ErrorCF("line", "Webhook server shutdown error", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}
-
 	c.setRunning(false)
 	logger.InfoC("line", "LINE channel stopped")
 	return nil
+}
+
+// RegisterWebhook registers the LINE webhook handler on the given mux.
+func (c *LINEChannel) RegisterWebhook(mux *http.ServeMux) {
+	path := c.config.WebhookPath
+	if path == "" {
+		path = "/webhook/line"
+	}
+	mux.HandleFunc(path, c.webhookHandler)
 }
 
 // webhookHandler handles incoming LINE webhook requests.

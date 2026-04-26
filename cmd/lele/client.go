@@ -178,9 +178,13 @@ func clientStatusCmd(authMgr *channels.AuthManager, cfg *config.Config) {
 
 	nativeCfg := cfg.Channels.Native
 	fmt.Printf("  Enabled:     %v\n", nativeCfg.Enabled)
+	serverPort := cfg.EffectiveServerPort()
+	serverHost := cfg.EffectiveServerHost()
+	if serverHost == "0.0.0.0" {
+		serverHost = "127.0.0.1"
+	}
 	if nativeCfg.Enabled {
-		fmt.Printf("  Host:        %s\n", nativeCfg.Host)
-		fmt.Printf("  Port:        %d\n", nativeCfg.Port)
+		fmt.Printf("  Server:      http://%s:%d\n", serverHost, serverPort)
 	}
 	fmt.Printf("  Max Clients: %d\n", nativeCfg.MaxClients)
 	fmt.Printf("  Token Expiry: %d days\n", nativeCfg.TokenExpiryDays)
@@ -200,8 +204,8 @@ func clientStatusCmd(authMgr *channels.AuthManager, cfg *config.Config) {
 
 	if nativeCfg.Enabled {
 		fmt.Println()
-		fmt.Printf("  Connect: ws://%s:%d/api/v1/ws\n", nativeCfg.Host, nativeCfg.Port)
-		fmt.Printf("  REST:    http://%s:%d/api/v1/\n", nativeCfg.Host, nativeCfg.Port)
+		fmt.Printf("  Connect: ws://%s:%d/api/v1/ws\n", serverHost, serverPort)
+		fmt.Printf("  REST:    http://%s:%d/api/v1/\n", serverHost, serverPort)
 	}
 	fmt.Println()
 }

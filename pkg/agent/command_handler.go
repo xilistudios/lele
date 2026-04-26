@@ -418,10 +418,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	// Total context = system prompt + summary (if any) + history
 	contextTokens := systemTokens + summaryTokens + historyTokens
 
-	contextWindow := agent.ContextWindow
-	if contextWindow <= 0 {
-		contextWindow = 128000
-	}
+	contextWindow := ch.al.GetSessionContextWindow(sessionKey)
 	contextPercent := contextTokens * 100 / contextWindow
 	if contextPercent > 100 {
 		contextPercent = 100

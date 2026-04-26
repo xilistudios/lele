@@ -296,6 +296,10 @@
     "noBindings": "Nenhum binding configurado",
     "identityKeyPlaceholder": "padrão",
     "modelNamePlaceholder": "nome-modelo",
+    "searchModelsPlaceholder": "Buscar modelos...",
+    "loadingModels": "Carregando modelos...",
+    "errorLoadingModels": "Não foi possível carregar os modelos",
+    "noModelsFound": "Nenhum modelo encontrado",
     "noModels": "Nenhum modelo configurado",
     "noConfiguredProviders": "Nenhum provedor configurado. Adicione um para começar.",
     "addProviderModal": {
@@ -322,5 +326,28 @@
     "enabled": "Habilitado",
     "disabled": "Desabilitado",
     "status": "Estado"
+  },
+  "toolCalls": {
+    "action": "Ação",
+    "result": "Resultado",
+    "hideDetails": "Ocultar detalhes",
+    "showDetails": "Mostrar detalhes",
+    "openSubagent": "Abrir chat do subagente",
+    "error": "Erro",
+    "readFile": "Lendo arquivo",
+    "writeFile": "Escrevendo arquivo",
+    "editFile": "Editando arquivo",
+    "applyPatch": "Aplicando alterações",
+    "replaceText": "Substituindo texto",
+    "appendFile": "Adicionando ao arquivo",
+    "listDir": "Listando diretório",
+    "execCommand": "Executando comando",
+    "webSearch": "Buscando na web",
+    "webFetch": "Carregando página",
+    "cronTask": "Agendando tarefa",
+    "spawnSubagent": "Iniciando subagente",
+    "i2c": "I2C",
+    "spi": "SPI",
+    "genericAction": "Ação"
   }
 }

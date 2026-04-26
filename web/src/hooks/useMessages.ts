@@ -378,11 +378,16 @@ export function useMessages(
             break
           }
           setToolStatus(event.data as ToolStatus)
+          // Use structured arguments when available (for path extraction in UI),
+          // fall back to action string for non-native channels
+          const toolArgsStr = data.arguments
+            ? `${data.tool as string} ${JSON.stringify(data.arguments)}`
+            : (data.action as string)
           const toolMsg = createToolMessage({
             id: createToolMessageId(data.tool as string),
             sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as string,
             toolName: data.tool as string,
-            toolArgs: data.action as string,
+            toolArgs: toolArgsStr,
             toolStatus: 'executing',
             subagentSessionKey: data.subagent_session_key as string | undefined,
           })

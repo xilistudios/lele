@@ -2,7 +2,10 @@ package channels
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -199,11 +202,19 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		if len(msg.ToolCalls) > 0 {
 			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
+				// Use top-level Arguments; fall back to parsing Function.Arguments string
+				args := tc.Arguments
+				if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
+					var parsed map[string]interface{}
+					if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
+						args = parsed
+					}
+				}
 				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
 					ID:               tc.ID,
 					Type:             tc.Type,
 					Name:             tc.Name,
-					Arguments:        tc.Arguments,
+					Arguments:        args,
 					ThoughtSignature: tc.ThoughtSignature,
 				})
 			}
@@ -922,4 +933,152 @@ func (n *NativeChannel) cfgSnapshot() *config.Config {
 		cfg.Channels.Native = *n.cfg
 	}
 	return cfg
+}
+
+func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+		return
+	}
+
+	path := r.URL.Path
+	prefix := "/api/v1/providers/"
+	if !strings.HasPrefix(path, prefix) {
+		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
+		return
+	}
+
+	remaining := strings.TrimPrefix(path, prefix)
+	parts := strings.SplitN(remaining, "/", 2)
+	if len(parts) != 2 || parts[1] != "models" {
+		writeError(w, http.StatusBadRequest, "expected /api/v1/providers/{name}/models", "path_invalid")
+		return
+	}
+	providerName, err := url.PathUnescape(parts[0])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid provider name", "name_invalid")
+		return
+	}
+	if providerName == "" {
+		writeError(w, http.StatusBadRequest, "provider name required", "name_missing")
+		return
+	}
+
+	cfg := n.cfgSnapshot()
+	named, ok := cfg.Providers.GetNamed(providerName)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("provider %q not found", providerName), "provider_not_found")
+		return
+	}
+
+	apiKey := named.APIKey
+	apiBase := strings.TrimRight(named.APIBase, "/")
+	providerType := named.Type
+	if providerType == "" {
+		providerType = providerName
+	}
+
+	if apiBase == "" {
+		apiBase = defaultAPIBaseByTypePublic(providerType)
+	}
+	if apiBase == "" {
+		writeError(w, http.StatusBadRequest, "provider has no api_base configured", "no_api_base")
+		return
+	}
+
+	if apiKey == "" {
+		writeError(w, http.StatusBadRequest, "provider has no api_key configured", "no_api_key")
+		return
+	}
+
+	modelsURL := apiBase + "/models"
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, modelsURL, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create request", "request_error")
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch models: %v", err), "upstream_error")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		writeError(w, resp.StatusCode, fmt.Sprintf("upstream returned %d: %s", resp.StatusCode, string(body)), "upstream_error")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read response", "read_error")
+		return
+	}
+
+	var modelsResp struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			Created int64  `json:"created"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse models response", "parse_error")
+		return
+	}
+
+	models := make([]ProviderModelInfo, 0, len(modelsResp.Data))
+	for _, m := range modelsResp.Data {
+		models = append(models, ProviderModelInfo{
+			ID:      m.ID,
+			Object:  m.Object,
+			Created: m.Created,
+			OwnedBy: m.OwnedBy,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, ProviderModelsResponse{
+		Provider: providerName,
+		Models:   models,
+	})
+}
+
+func defaultAPIBaseByTypePublic(providerType string) string {
+	switch providerType {
+	case "groq":
+		return "https://api.groq.com/openai/v1"
+	case "openai", "gpt":
+		return "https://api.openai.com/v1"
+	case "openrouter":
+		return "https://openrouter.ai/api/v1"
+	case "nanogpt":
+		return "https://nano-gpt.com/api/v1"
+	case "chutes":
+		return "https://llm.chutes.ai/v1"
+	case "alibaba", "alibaba_coding_plan":
+		return "https://coding-intl.dashscope.aliyuncs.com/v1"
+	case "zhipu":
+		return "https://open.bigmodel.cn/api/paas/v4"
+	case "gemini", "google":
+		return "https://generativelanguage.googleapis.com/v1beta"
+	case "shengsuanyun":
+		return "https://router.shengsuanyun.com/api/v1"
+	case "nvidia":
+		return "https://integrate.api.nvidia.com/v1"
+	case "moonshot":
+		return "https://api.moonshot.cn/v1"
+	case "ollama":
+		return "http://localhost:11434/v1"
+	case "deepseek":
+		return "https://api.deepseek.com/v1"
+	case "vllm":
+		return ""
+	default:
+		return ""
+	}
 }

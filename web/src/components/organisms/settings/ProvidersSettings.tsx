@@ -25,7 +25,6 @@ export function ProvidersSettings() {
   const providers = draftConfig.providers || {}
 
   const configuredNames = Object.keys(providers).filter((name) => !isEmptyProvider(providers[name]))
-
   const removeProvider = (name: string) => {
     const updated = { ...providers }
     delete updated[name]
@@ -143,6 +142,7 @@ export function ProvidersSettings() {
                   name={name}
                   models={prov.models || {}}
                   onChange={(v) => updateField(`providers.${name}.models`, v)}
+                  providerType={prov.type}
                 />
               </SettingsField>
             </NamedItemCard>

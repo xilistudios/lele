@@ -7,8 +7,8 @@ import {
   parseFileDiffRow,
 } from '../lib/markdown'
 import type { Attachment, ChatMessage } from '../lib/types'
-import { StatusBadge } from './atoms/StatusBadge'
 import { MarkdownText } from './molecules/MarkdownText'
+import { ToolCallDisplay } from './molecules/ToolCallDisplay'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
@@ -70,93 +70,16 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
 
     return (
       <div className="py-1.5">
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-background-secondary px-3 py-2">
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-            aria-expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            <svg
-              className="h-4 w-4 text-text-tertiary"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-            </svg>
-            <span className="text-sm font-medium text-text-secondary font-mono">
-              {message.toolName}
-            </span>
-            {message.toolArgs && (
-              <span className="min-w-0 truncate text-xs text-text-tertiary">
-                {message.toolArgs.split('\n')[0]}
-              </span>
-            )}
-            {message.toolStatus && <StatusBadge status={message.toolStatus} />}
-          </button>
-          {subagentSessionKey && message.toolStatus !== 'executing' && onNavigateToSession ? (
-            <button
-              type="button"
-              aria-label="Open subagent chat"
-              className="ml-auto p-0.5 rounded-md hover:bg-surface-hover transition-colors"
-              onClick={() => onNavigateToSession(subagentSessionKey)}
-            >
-              <svg
-                className="h-3.5 w-3.5 text-text-tertiary hover:text-text-primary"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M5 12h14" />
-                <path d="m12 5 7 7-7 7" />
-              </svg>
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="p-0.5"
-            aria-label={expanded ? 'Collapse tool details' : 'Expand tool details'}
-            onClick={() => setExpanded(!expanded)}
-          >
-            <svg
-              className={`h-3 w-3 text-text-tertiary transition-transform ${expanded ? 'rotate-180' : ''}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        </div>
-        {expanded && (
-          <div className="mt-2 space-y-2 rounded-lg border border-border bg-background-primary p-3">
-            {message.toolArgs && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
-                  Action
-                </p>
-                <p className="text-xs text-text-secondary font-mono">{message.toolArgs}</p>
-              </div>
-            )}
-            {message.toolResult && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">
-                  Result
-                </p>
-                <pre className="text-xs text-text-secondary font-mono whitespace-pre-wrap overflow-x-auto max-h-[200px]">
-                  {message.toolResult}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
+        <ToolCallDisplay
+          toolName={message.toolName}
+          toolArgs={message.toolArgs}
+          toolResult={message.toolResult}
+          toolStatus={message.toolStatus}
+          subagentSessionKey={subagentSessionKey}
+          onNavigateToSession={onNavigateToSession}
+          expanded={expanded}
+          onToggleExpand={() => setExpanded(!expanded)}
+        />
       </div>
     )
   }

@@ -63,6 +63,13 @@ func (e *FailoverError) IsRetriable() bool {
 	return e.Reason != FailoverFormat
 }
 
+// ShouldBackoff returns true if this error should trigger exponential backoff retry
+// within the same provider before falling back. Only rate limits warrant backoff;
+// other errors should fail fast and move to the next candidate.
+func (e *FailoverError) ShouldBackoff() bool {
+	return e.Reason == FailoverRateLimit
+}
+
 // ModelConfig holds primary model and fallback list.
 type ModelConfig struct {
 	Primary   string

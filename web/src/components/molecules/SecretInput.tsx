@@ -63,10 +63,10 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           type="button"
           onClick={() => handleModeChange('literal')}
           disabled={disabled}
-          className={`rounded px-2 py-1 text-[11px] ${
+          className={`rounded-md px-3 py-1.5 text-xs transition-all ${
             mode === 'literal'
-              ? 'bg-cta-primary text-text-on-accent'
-              : 'bg-surface-muted text-text-secondary hover:bg-surface-hover'
+              ? 'bg-accent-primary text-text-on-accent shadow-sm'
+              : 'bg-surface-muted text-text-secondary hover:bg-surface-hover hover:text-text-primary'
           }`}
         >
           {t('settings.literalValue')}

@@ -22,6 +22,7 @@ type SettingsContextValue = SettingsConfigState & {
   isLoadingModels: boolean
   isRestartRequired: (section: string) => boolean
   t: (key: string, options?: Record<string, unknown>) => string
+  api: ApiClient
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null)
@@ -103,6 +104,7 @@ export function SettingsProvider({ children, settingsState, api }: Props) {
     isLoadingModels,
     isRestartRequired,
     t,
+    api,
   }
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

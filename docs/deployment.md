@@ -8,7 +8,6 @@ Typical long-running setup:
 
 ```bash
 lele gateway
-lele web start
 ```
 
 ## What `gateway` Starts
@@ -21,23 +20,112 @@ The gateway runtime initializes:
 - heartbeat service
 - device service
 - config watcher
-- health server
+- unified HTTP server (API, Web UI, health endpoints)
+
+## Unified Server
+
+All HTTP services run on a single port:
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  }
+}
+```
+
+Services served:
+- `/` - Web UI
+- `/api/v1/*` - Native channel API
+- `/api/v1/ws` - WebSocket
+- `/health` - Health check
+- `/ready` - Readiness check
+- `/webhook/line` - LINE webhook (if enabled)
 
 ## Health Endpoints
 
 The gateway exposes:
 
-- `/health`
-- `/ready`
+- `/health` - Basic health status with uptime
+- `/ready` - Readiness check (checks all registered health checks)
 
-on the configured gateway host and port.
+Both endpoints are available on the unified server port.
 
-## Local Background Web Process
+## Docker Deployment
 
-`lele web start` runs the embedded web app in the background and writes:
+Example Dockerfile:
 
-- PID file: `~/.lele/web.pid`
-- log file: `~/.lele/logs/web.log`
+```dockerfile
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN make build
+
+FROM alpine:latest
+COPY --from=builder /app/lele /usr/local/bin/lele
+EXPOSE 8080
+CMD ["lele", "gateway"]
+```
+
+Example docker-compose:
+
+```yaml
+version: '3'
+services:
+  lele:
+    image: lele:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ~/.lele:/root/.lele
+    command: lele gateway
+```
+
+## Kubernetes Deployment
+
+Example deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lele
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lele
+  template:
+    metadata:
+      labels:
+        app: lele
+    spec:
+      containers:
+      - name: lele
+        image: lele:latest
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: lele-data
+          mountPath: /root/.lele
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: lele-data
+        persistentVolumeClaim:
+          claimName: lele-pvc
+```
 
 ## Configuration Reloading
 
@@ -57,6 +145,7 @@ Important paths to back up:
 - keep the workspace on reliable local storage
 - prefer explicit provider/model settings for reproducible behavior
 - review CORS and token expiry when exposing native/web access beyond localhost-style setups
+- single port simplifies firewall and reverse proxy configuration
 
 ## Related Docs
 

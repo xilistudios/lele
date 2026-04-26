@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,9 +16,9 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/devices"
-	"github.com/xilistudios/lele/pkg/health"
 	"github.com/xilistudios/lele/pkg/heartbeat"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/server"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/voice"
@@ -145,7 +146,52 @@ func gatewayCmd() {
 		fmt.Println("⚠ Warning: No channels enabled")
 	}
 
-	fmt.Printf("✓ Gateway started on %s:%d\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	// --- Unified Server Setup ---
+	serverHost := cfg.EffectiveServerHost()
+	serverPort := cfg.EffectiveServerPort()
+
+	srv := server.New(&server.Config{
+		Host: serverHost,
+		Port: serverPort,
+	})
+
+	// Register health endpoints
+	srv.RegisterHealth()
+
+	// Register web UI (SPA)
+	distFS, err := fs.Sub(embeddedFiles, "web/dist")
+	if err != nil {
+		logger.WarnC("server", "Web UI assets not available (build frontend with 'make build')")
+	} else {
+		srv.RegisterWebUI(http.FS(distFS))
+		logger.InfoC("server", "Web UI registered")
+	}
+
+	// Register native channel API routes
+	if nativeCh, ok := channelManager.GetChannel("native"); ok {
+		if nc, ok := nativeCh.(*channels.NativeChannel); ok {
+			nc.RegisterRoutes(srv.Mux())
+			logger.InfoC("server", "Native channel API routes registered")
+		}
+	}
+
+	// Register LINE webhook
+	if lineCh, ok := channelManager.GetChannel("line"); ok {
+		if lc, ok := lineCh.(*channels.LINEChannel); ok {
+			lc.RegisterWebhook(srv.Mux())
+			logger.InfoC("server", "LINE webhook registered")
+		}
+	}
+
+	fmt.Printf("✓ Unified server starting on %s:%d\n", serverHost, serverPort)
+	fmt.Println("  • Web UI:      /")
+	fmt.Println("  • API:         /api/v1/*")
+	fmt.Println("  • Health:      /health, /ready")
+	fmt.Println("  • WebSocket:   /api/v1/ws")
+	if lineCh, ok := channelManager.GetChannel("line"); ok {
+		_ = lineCh
+		fmt.Println("  • LINE webhook /webhook/line")
+	}
 	fmt.Println("Press Ctrl+C to stop")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -192,13 +238,12 @@ func gatewayCmd() {
 		}
 	}()
 
-	healthServer := health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
+	// Start unified server in goroutine
 	go func() {
-		if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
-			logger.ErrorCF("health", "Health server error", map[string]interface{}{"error": err.Error()})
+		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+			logger.ErrorCF("server", "Unified server error", map[string]interface{}{"error": err.Error()})
 		}
 	}()
-	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
 
 	go agentLoop.Run(ctx)
 
@@ -209,7 +254,7 @@ func gatewayCmd() {
 	fmt.Println("\nShutting down...")
 	cancel()
 	configWatcher.Stop()
-	healthServer.Stop(context.Background())
+	srv.Stop(context.Background())
 	deviceService.Stop()
 	heartbeatService.Stop()
 	cronService.Stop()

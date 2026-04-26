@@ -497,10 +497,11 @@ func configureWebUI(cfg *config.Config, leleDir string) {
 	fmt.Println("\n=== Web UI Configuration ===")
 
 	cfg.Channels.Web.Enabled = true
-	cfg.Channels.Web.Port = askInt("Web port", 3005)
 	cfg.Channels.Web.Host = "0.0.0.0"
+	cfg.Server.Port = askInt("Server port", 8080)
+	cfg.Server.Host = "0.0.0.0"
 
-	fmt.Println("\n\u2713 Web UI enabled on port", cfg.Channels.Web.Port)
+	fmt.Println("\n\u2713 Web UI will be served on port", cfg.Server.Port)
 
 	fmt.Println("\u2713 Native channel auto-enabled (required for Web UI)")
 	cfg.Channels.Native.Enabled = true
@@ -513,8 +514,7 @@ func configureWebUI(cfg *config.Config, leleDir string) {
 func configureNativeAdvanced(cfg *config.Config) {
 	fmt.Println("\n=== Native Channel Configuration (Advanced) ===")
 
-	cfg.Channels.Native.Host = askString("API host", "127.0.0.1")
-	cfg.Channels.Native.Port = askInt("API port", 18793)
+	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.MaxClients = askInt("Max paired clients", 5)
 	cfg.Channels.Native.TokenExpiryDays = askInt("Token expiry days", 30)
 
@@ -556,10 +556,12 @@ func maybeStartServices(cfg *config.Config) {
 		return
 	}
 
+	serverPort := cfg.EffectiveServerPort()
+
 	if !askYesNo("Start services now?", true) {
 		fmt.Println("\nTo start services manually:")
 		fmt.Println("  lele gateway")
-		fmt.Println("  lele web start")
+		fmt.Printf("Then open http://127.0.0.1:%d\n", serverPort)
 		return
 	}
 
@@ -569,15 +571,8 @@ func maybeStartServices(cfg *config.Config) {
 
 	time.Sleep(1 * time.Second)
 
-	fmt.Println("[+] Starting web server...")
-	webCmd := exec.Command("lele", "web", "start",
-		"--port", fmt.Sprintf("%d", cfg.Channels.Web.Port))
-	webCmd.Start()
-
-	time.Sleep(500 * time.Millisecond)
-
-	fmt.Println("\n\u2713 Services started")
-	fmt.Printf("\nOpen http://127.0.0.1:%d in your browser\n", cfg.Channels.Web.Port)
+	fmt.Println("\n\u2713 Gateway started")
+	fmt.Printf("\nOpen http://127.0.0.1:%d in your browser\n", serverPort)
 	fmt.Println("Enter the PIN to connect your device.")
 }
 
@@ -617,12 +612,9 @@ func printSummary(cfg *config.Config) {
 		fmt.Printf("  %s: %s, temp %g\n", agent.Name, agent.Model.Primary, *agent.Temperature)
 	}
 
-	fmt.Println("\nWeb UI:")
-	if cfg.Channels.Web.Enabled {
-		fmt.Printf("  enabled on port %d\n", cfg.Channels.Web.Port)
-	} else {
-		fmt.Println("  disabled")
-	}
+	fmt.Println("\nServer:")
+	serverPort := cfg.EffectiveServerPort()
+	fmt.Printf("  port %d (unified API + Web UI)\n", serverPort)
 }
 
 func onboard() {

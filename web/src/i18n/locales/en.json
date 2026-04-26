@@ -127,7 +127,12 @@
       "namedProviders": "Named Providers",
       "bindings": "Bindings",
       "identityLinks": "Identity Links",
-      "rawJson": "Raw JSON Config"
+      "rawJson": "Raw JSON Config",
+      "general": "General",
+      "model": "Model",
+      "behavior": "Behavior",
+      "features": "Features",
+      "skills": "Skills"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -248,7 +253,11 @@
       "bindingPeerKind": "Peer kind",
       "bindingPeerId": "Peer ID",
       "bindingGuildId": "Guild ID",
-      "bindingTeamId": "Team ID"
+      "bindingTeamId": "Team ID",
+      "agentMaxIterations": "Max Iterations",
+      "agentMaxTokens": "Max Tokens",
+      "agentContextWindow": "Context Window",
+      "agentSupportsImages": "Supports Images"
     },
     "descriptions": {
       "ephemeralThreshold": "Time in seconds before messages are removed",
@@ -259,7 +268,19 @@
       "imageModel": "Model used for image generation",
       "imageModelFallbacks": "Fallback models for image generation",
       "dmScope": "Default scope for DM conversations",
-      "identityLinks": "Map identity patterns to agent IDs"
+      "identityLinks": "Map identity patterns to agent IDs",
+      "agentName": "Display name for this agent",
+      "agentDefault": "This agent will be used by default in new chats",
+      "agentWorkspace": "Root directory where the agent can operate",
+      "agentModelPrimary": "Primary model this agent will use",
+      "agentModelFallbacks": "Alternative models if the primary is unavailable",
+      "agentTemperature": "Value between 0 (deterministic) and 2 (very creative)",
+      "agentMaxIterations": "Maximum steps the agent can execute in a task",
+      "agentMaxTokens": "Maximum token limit for generated responses",
+      "agentContextWindow": "Maximum context window size supported by the model",
+      "agentThinking": "Enables extended reasoning mode",
+      "agentSupportsImages": "This model supports image and vision inputs",
+      "agentSkills": "Active skills available for this agent"
     },
     "options": {
       "daily": "Daily",
@@ -296,8 +317,14 @@
     "noBindings": "No bindings configured",
     "identityKeyPlaceholder": "pattern",
     "modelNamePlaceholder": "model-name",
+    "searchModelsPlaceholder": "Search models...",
+    "loadingModels": "Loading models...",
+    "errorLoadingModels": "Could not load models",
+    "noModelsFound": "No matching models found",
     "noModels": "No models configured",
     "noConfiguredProviders": "No providers configured. Add one to get started.",
+    "defaultBadge": "Default",
+    "modifiedBadge": "Unsaved changes",
     "addProviderModal": {
       "title": "Add Provider",
       "stepType": "Step 1: Select provider type",
@@ -321,6 +348,31 @@
     "reset": "Reset",
     "enabled": "Enabled",
     "disabled": "Disabled",
-    "status": "Status"
+    "status": "Status",
+    "expand": "Expand",
+    "collapse": "Collapse"
+  },
+  "toolCalls": {
+    "action": "Action",
+    "result": "Result",
+    "hideDetails": "Hide details",
+    "showDetails": "Show details",
+    "openSubagent": "Open subagent chat",
+    "error": "Error",
+    "readFile": "Reading file",
+    "writeFile": "Writing file",
+    "editFile": "Editing file",
+    "applyPatch": "Applying changes",
+    "replaceText": "Replacing text",
+    "appendFile": "Appending to file",
+    "listDir": "Listing directory",
+    "execCommand": "Executing command",
+    "webSearch": "Searching web",
+    "webFetch": "Loading page",
+    "cronTask": "Scheduling task",
+    "spawnSubagent": "Starting subagent",
+    "i2c": "I2C",
+    "spi": "SPI",
+    "genericAction": "Action"
   }
 }

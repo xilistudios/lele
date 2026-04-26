@@ -623,7 +623,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					Name:      tc.Name,
 					Arguments: string(argumentsJSON),
 				},
-				Name: tc.Name,
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
 			})
 		}
 		messages = append(messages, assistantMsg)
@@ -651,13 +652,15 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
 			if opts.Channel == channels.ChannelName {
 				actionDesc := formatBasicToolMessage(tc.Name, tc.Arguments)
+				argsJSON, _ := json.Marshal(tc.Arguments)
 				lr.al.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: opts.Channel,
 					ChatID:  opts.SessionKey,
 					Event:   "tool.executing",
 					Metadata: map[string]string{
-						"tool":   tc.Name,
-						"action": actionDesc,
+						"tool":      tc.Name,
+						"action":    actionDesc,
+						"arguments": string(argsJSON),
 					},
 				})
 			} else if level != session.VerboseOff {

@@ -127,7 +127,7 @@ Typical flow:
 1. Run `lele onboard`
 2. Enable the Web UI when prompted
 3. Generate a pairing PIN
-4. Start the services with `lele gateway` and `lele web start`
+4. Start the services with `lele gateway`
 5. Open the web app in your browser and pair with the PIN
 
 The native channel exposes REST and WebSocket endpoints for desktop clients and local integrations.
@@ -308,8 +308,6 @@ See `docs/tools_configuration.md` and `docs/client-api.md` for operational detai
 | `lele agent` | Start interactive agent session |
 | `lele agent -m "..."` | Run a one-shot prompt |
 | `lele gateway` | Start messaging gateway |
-| `lele web start` | Start the built-in web UI |
-| `lele web status` | Show web UI status |
 | `lele auth login` | Authenticate supported providers |
 | `lele status` | Show runtime status |
 | `lele cron list` | List scheduled jobs |

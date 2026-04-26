@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AddButton } from '../../atoms/AddButton'
 import { RemoveButton } from '../../atoms/RemoveButton'
 import { BooleanInput, NumberInput, SettingsField } from '../../molecules'
+import { ModelSearchInput, isOpenAICompatible } from './ModelSearchInput'
 
 type ProviderModels = Record<string, import('../../../lib/types').ProviderModelConfig>
 
@@ -10,20 +10,22 @@ type Props = {
   name: string
   models: ProviderModels
   onChange: (v: ProviderModels) => void
+  providerType?: string
 }
 
-const INPUT_CLS =
-  'w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40'
-
-export function ProviderModelsEditor({ name, models, onChange }: Props) {
+export function ProviderModelsEditor({ name, models, onChange, providerType }: Props) {
   const { t } = useTranslation()
   const [newModelName, setNewModelName] = useState('')
   const modelNames = Object.keys(models)
 
-  const addModel = () => {
-    const key = newModelName.trim()
-    if (!key) return
-    onChange({ ...models, [key]: {} })
+  const addModel = (key: string) => {
+    const trimmed = key.trim()
+    if (!trimmed) return
+    onChange({ ...models, [trimmed]: {} })
+  }
+
+  const addModelFromInput = () => {
+    addModel(newModelName)
     setNewModelName('')
   }
 
@@ -33,26 +35,41 @@ export function ProviderModelsEditor({ name, models, onChange }: Props) {
     onChange(updated)
   }
 
+  const isCompat = isOpenAICompatible(providerType)
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={newModelName}
-          onChange={(e) => setNewModelName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              addModel()
-            }
-          }}
-          placeholder={t('settings.modelNamePlaceholder')}
-          className={INPUT_CLS}
+      {isCompat ? (
+        <ModelSearchInput
+          providerName={name}
+          providerType={providerType}
+          existingModels={modelNames}
+          onAddModel={addModel}
         />
-        <AddButton onClick={addModel} disabled={!newModelName.trim()}>
-          {t('common.add')}
-        </AddButton>
-      </div>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newModelName}
+            onChange={(e) => setNewModelName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addModelFromInput()
+              }
+            }}
+            placeholder={t('settings.modelNamePlaceholder')}
+            className="w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40"
+          />
+          <button
+            type="button"
+            onClick={addModelFromInput}
+            disabled={!newModelName.trim()}
+            className="rounded bg-cta-primary px-3 py-2 text-xs text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40"
+          >
+            {t('common.add')}
+          </button>
+        </div>
+      )}
 
       {modelNames.length === 0 && (
         <p className="text-xs text-text-tertiary">{t('settings.noModels')}</p>
@@ -75,7 +92,10 @@ export function ProviderModelsEditor({ name, models, onChange }: Props) {
                   id={`providers.${name}.models.${key}.context_window`}
                   value={m.context_window || 0}
                   onChange={(v) =>
-                    onChange({ ...models, [key]: { ...m, context_window: v || undefined } })
+                    onChange({
+                      ...models,
+                      [key]: { ...m, context_window: v || undefined },
+                    })
                   }
                   min={0}
                 />
@@ -88,7 +108,10 @@ export function ProviderModelsEditor({ name, models, onChange }: Props) {
                   id={`providers.${name}.models.${key}.max_tokens`}
                   value={m.max_tokens || 0}
                   onChange={(v) =>
-                    onChange({ ...models, [key]: { ...m, max_tokens: v || undefined } })
+                    onChange({
+                      ...models,
+                      [key]: { ...m, max_tokens: v || undefined },
+                    })
                   }
                   min={0}
                 />
@@ -101,7 +124,10 @@ export function ProviderModelsEditor({ name, models, onChange }: Props) {
                   id={`providers.${name}.models.${key}.temperature`}
                   value={m.temperature || 0}
                   onChange={(v) =>
-                    onChange({ ...models, [key]: { ...m, temperature: v || undefined } })
+                    onChange({
+                      ...models,
+                      [key]: { ...m, temperature: v || undefined },
+                    })
                   }
                   min={0}
                   max={2}

@@ -53,6 +53,7 @@ type Config struct {
 	Channels  ChannelsConfig  `json:"channels"`
 	Providers ProvidersConfig `json:"providers"`
 	Gateway   GatewayConfig   `json:"gateway"`
+	Server    ServerConfig    `json:"server,omitempty"`
 	Tools     ToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 	Devices   DevicesConfig   `json:"devices"`
@@ -681,6 +682,42 @@ type GatewayConfig struct {
 	Port int    `json:"port" env:"LELE_GATEWAY_PORT"`
 }
 
+// ServerConfig is the unified server configuration (single host:port for all HTTP services).
+type ServerConfig struct {
+	Host string `json:"host" env:"LELE_SERVER_HOST"`
+	Port int    `json:"port" env:"LELE_SERVER_PORT"`
+}
+
+// EffectiveServerHost returns the effective server host, falling back to
+// legacy gateway/native config if ServerConfig is not set.
+func (c *Config) EffectiveServerHost() string {
+	if c.Server.Host != "" {
+		return c.Server.Host
+	}
+	if c.Gateway.Host != "" {
+		return c.Gateway.Host
+	}
+	if c.Channels.Native.Host != "" {
+		return c.Channels.Native.Host
+	}
+	return "0.0.0.0"
+}
+
+// EffectiveServerPort returns the effective server port, falling back to
+// legacy gateway/native config if ServerConfig is not set.
+func (c *Config) EffectiveServerPort() int {
+	if c.Server.Port != 0 {
+		return c.Server.Port
+	}
+	if c.Gateway.Port != 0 {
+		return c.Gateway.Port
+	}
+	if c.Channels.Native.Port != 0 {
+		return c.Channels.Native.Port
+	}
+	return 8080
+}
+
 type BraveConfig struct {
 	Enabled    bool   `json:"enabled" env:"LELE_TOOLS_WEB_BRAVE_ENABLED"`
 	APIKey     string `json:"api_key" env:"LELE_TOOLS_WEB_BRAVE_API_KEY"`
@@ -840,6 +877,10 @@ func DefaultConfig() *Config {
 		Gateway: GatewayConfig{
 			Host: "0.0.0.0",
 			Port: 18790,
+		},
+		Server: ServerConfig{
+			Host: "",
+			Port: 0, // 0 means not set; falls back to Gateway/Native port
 		},
 		Tools: ToolsConfig{
 			Web: WebToolsConfig{

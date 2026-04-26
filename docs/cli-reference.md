@@ -65,21 +65,7 @@ lele gateway --debug
 
 ## `lele web`
 
-Subcommands:
-
-- `start`
-- `stop`
-- `status`
-- `serve`
-
-Examples:
-
-```bash
-lele web start
-lele web start --host 0.0.0.0 --port 3005
-lele web stop
-lele web status
-```
+The web UI is served by the gateway server. Use `lele gateway` to start it.
 
 ## `lele cron`
 

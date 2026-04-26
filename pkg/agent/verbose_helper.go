@@ -19,12 +19,16 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 	switch toolName {
 	case "exec":
 		return formatBasicExec(args)
-	case "read":
+	case "read", "read_file":
 		return formatBasicFileOp("read", args)
-	case "write":
+	case "write", "write_file":
 		return formatBasicFileOp("write", args)
-	case "edit", "smart_edit":
+	case "edit", "edit_file", "smart_edit":
 		return formatBasicFileOp("edit", args)
+	case "append", "append_file":
+		return formatBasicFileOp("append", args)
+	case "patch", "sequential_replace":
+		return formatBasicFileOp("patch", args)
 	case "web_search":
 		return formatBasicWebSearch(args)
 	case "web_fetch":
@@ -33,7 +37,7 @@ func formatBasicToolMessage(toolName string, args map[string]interface{}) string
 		return formatBasicSendFile(args)
 	case "spawn":
 		return formatBasicSpawn(args)
-	case "list_dir":
+	case "list", "list_dir":
 		return formatBasicListDir(args)
 	default:
 		// Para otros tools, mostrar nombre y preview de args

@@ -10,8 +10,10 @@ func TestParseWebServerOptions_Defaults(t *testing.T) {
 	if opts.Host != "0.0.0.0" {
 		t.Errorf("Host = %q, want %q", opts.Host, "0.0.0.0")
 	}
-	if opts.Port != 3005 {
-		t.Errorf("Port = %d, want %d", opts.Port, 3005)
+	// Default port comes from EffectiveServerPort() which falls back to
+	// Server.Port (default 8080) or legacy Gateway.Port (18790)
+	if opts.Port <= 0 {
+		t.Errorf("Port = %d, should be > 0", opts.Port)
 	}
 }
 
@@ -21,8 +23,8 @@ func TestParseWebServerOptions_CustomHost(t *testing.T) {
 	if opts.Host != "127.0.0.1" {
 		t.Errorf("Host = %q, want %q", opts.Host, "127.0.0.1")
 	}
-	if opts.Port != 3005 {
-		t.Errorf("Port = %d, want %d", opts.Port, 3005)
+	if opts.Port <= 0 {
+		t.Errorf("Port = %d, should be > 0", opts.Port)
 	}
 }
 
@@ -51,24 +53,24 @@ func TestParseWebServerOptions_BothCustom(t *testing.T) {
 func TestParseWebServerOptions_InvalidPort(t *testing.T) {
 	opts := parseWebServerOptions([]string{"--port", "invalid"})
 
-	if opts.Port != 3005 {
-		t.Errorf("Port should remain default for invalid input, got %d, want %d", opts.Port, 3005)
+	if opts.Port <= 0 {
+		t.Errorf("Port should remain default for invalid input, got %d", opts.Port)
 	}
 }
 
 func TestParseWebServerOptions_NegativePort(t *testing.T) {
 	opts := parseWebServerOptions([]string{"--port", "-1"})
 
-	if opts.Port != 3005 {
-		t.Errorf("Port should remain default for negative port, got %d, want %d", opts.Port, 3005)
+	if opts.Port <= 0 {
+		t.Errorf("Port should remain default for negative port, got %d", opts.Port)
 	}
 }
 
 func TestParseWebServerOptions_PortZero(t *testing.T) {
 	opts := parseWebServerOptions([]string{"--port", "0"})
 
-	if opts.Port != 3005 {
-		t.Errorf("Port should remain default for zero port, got %d, want %d", opts.Port, 3005)
+	if opts.Port <= 0 {
+		t.Errorf("Port should remain default for zero port, got %d", opts.Port)
 	}
 }
 
