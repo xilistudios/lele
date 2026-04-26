@@ -353,7 +353,7 @@ func TestFormatIntWithDefault(t *testing.T) {
 // TestPrintProviderSummary tests the provider summary output
 func TestPrintProviderSummary(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"anthropic": {
 					Type: "anthropic",

@@ -28,7 +28,7 @@ func TestTelegramSessionFlow(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},

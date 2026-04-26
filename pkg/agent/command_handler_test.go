@@ -346,7 +346,7 @@ func TestHandleModelCommand_NoArgs(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"openai": {
 					Type: "openai",
@@ -403,7 +403,7 @@ func TestHandleModelCommand_WithArgs(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"openai": {
 					Type: "openai",

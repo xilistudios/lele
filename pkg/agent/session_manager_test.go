@@ -35,7 +35,7 @@ func TestSummarizeSessionWithError_InsufficientMessages(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -126,7 +126,7 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -184,7 +184,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},

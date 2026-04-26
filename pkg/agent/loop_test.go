@@ -189,7 +189,7 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -612,7 +612,7 @@ func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -667,7 +667,7 @@ func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -764,7 +764,7 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -874,7 +874,7 @@ func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},
@@ -1133,7 +1133,7 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Anthropic: config.ProviderConfig{
 				APIKey: "test-key",
 			},

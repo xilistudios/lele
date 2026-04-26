@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { getProviderDisplayName } from '../../../lib/utils'
 import type { EditableNamedProviderConfig, SecretValue } from '../../../lib/types'
 import {
   BooleanInput,
@@ -50,7 +51,7 @@ export function ProvidersSettings() {
           return (
             <NamedItemCard
               key={name}
-              title={name}
+              title={getProviderDisplayName(name)}
               onRemove={() => removeProvider(name)}
               removeLabel={t('settings.removeProvider')}
             >
