@@ -62,13 +62,6 @@ Look at:
 - `lele auth status`
 - `lele status`
 
-### Web issues
-
-Look at:
-
-- `~/.lele/logs/web.log`
-- `lele web status`
-
 ### Channel issues
 
 Look at:

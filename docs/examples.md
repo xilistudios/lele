@@ -105,7 +105,6 @@ Run:
 
 ```bash
 lele gateway
-lele web start
 ```
 
 ## Telegram Gateway Example

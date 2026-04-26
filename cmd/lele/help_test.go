@@ -84,33 +84,6 @@ func TestMigrateHelp_ContainsExamples(t *testing.T) {
 	}
 }
 
-func TestWebHelp_ContainsCommands(t *testing.T) {
-	output := captureOutput(webHelp)
-
-	expectedCommands := []string{
-		"start",
-		"stop",
-		"status",
-	}
-
-	for _, cmd := range expectedCommands {
-		if !regexp.MustCompile(cmd).MatchString(output) {
-			t.Errorf("webHelp should contain command '%s'", cmd)
-		}
-	}
-}
-
-func TestWebHelp_ContainsOptions(t *testing.T) {
-	output := captureOutput(webHelp)
-
-	if !regexp.MustCompile(`--host`).MatchString(output) {
-		t.Error("webHelp should contain --host option")
-	}
-	if !regexp.MustCompile(`--port`).MatchString(output) {
-		t.Error("webHelp should contain --port option")
-	}
-}
-
 func TestCronHelp_ContainsCommands(t *testing.T) {
 	output := captureOutput(cronHelp)
 
