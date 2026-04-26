@@ -31,7 +31,6 @@ type NativeChannel struct {
 	bus              *bus.MessageBus
 	agentLoop        AgentProvidable
 	approvalManager  *ApprovalManager
-	server           *http.Server
 	running          bool
 	wsClients        map[string]*WSClient
 	leleDir          string
@@ -120,48 +119,13 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 		return nil
 	}
 
-	host := n.cfg.Host
-	if host == "" {
-		host = "127.0.0.1"
-	}
-
-	port := n.cfg.Port
-	if port <= 0 {
-		port = 18793
-	}
-
-	addr := fmt.Sprintf("%s:%d", host, port)
-
-	mux := http.NewServeMux()
-	n.registerRoutes(mux)
-
-	handler := n.corsMiddleware(n.securityHeadersMiddleware(n.authMiddleware(mux)))
-
-	n.server = &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-	}
-
+	n.startTime = time.Now()
 	go n.runUploadCleanup(ctx)
-
-	go func() {
-		logger.InfoCF("native", "Starting native channel server", map[string]interface{}{
-			"address": addr,
-		})
-		n.startTime = time.Now()
-		if err := n.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.ErrorCF("native", "Server error", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}()
 
 	n.running = true
 	n.base.setRunning(true)
 
-	logger.InfoC("native", "Native channel started successfully")
+	logger.InfoC("native", "Native channel started (routes registered via unified server)")
 	return nil
 }
 
@@ -180,16 +144,6 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 		close(client.SendChan)
 		client.Conn.Close()
 		delete(n.wsClients, id)
-	}
-
-	if n.server != nil {
-		shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if err := n.server.Shutdown(shutdownCtx); err != nil {
-			logger.ErrorCF("native", "Error shutting down server", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
 	}
 
 	n.pinLimiter.Stop()
@@ -228,33 +182,43 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 	return nil
 }
 
-func (n *NativeChannel) registerRoutes(mux *http.ServeMux) {
+// RegisterRoutes registers all native channel API routes on the given mux.
+// This is called by the unified server to mount the native channel endpoints.
+func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
+	// Helper: wrap handler with auth middleware (which internally skips public paths)
+	withAuth := func(h http.HandlerFunc) http.HandlerFunc {
+		return n.authMiddleware(h).ServeHTTP
+	}
+
+	// Public auth endpoints (auth middleware auto-skips /api/v1/auth/*, /api/v1/ws, /api/v1/files/view)
 	mux.HandleFunc("/api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
 	mux.HandleFunc("/api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
 	mux.HandleFunc("/api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
 	mux.HandleFunc("/api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
 	mux.HandleFunc("/api/v1/ws", n.handleWebSocket)
-	mux.HandleFunc("/api/v1/chat/send", n.handleChatSend)
-	mux.HandleFunc("/api/v1/chat/history", n.handleChatHistory)
-	mux.HandleFunc("/api/v1/chat/sessions", func(w http.ResponseWriter, r *http.Request) {
+
+	// Authenticated API endpoints
+	mux.HandleFunc("/api/v1/chat/send", withAuth(n.handleChatSend))
+	mux.HandleFunc("/api/v1/chat/history", withAuth(n.handleChatHistory))
+	mux.HandleFunc("/api/v1/chat/sessions", withAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			n.handleCreateSession(w, r)
 			return
 		}
 		n.handleChatSessions(w, r)
-	})
-	mux.HandleFunc("/api/v1/chat/session/", n.handleChatSession)
-	mux.HandleFunc("/api/v1/agents", n.handleAgents)
-	mux.HandleFunc("/api/v1/agents/", n.handleAgentInfo)
-	mux.HandleFunc("/api/v1/config", n.handleConfig)
-	mux.HandleFunc("/api/v1/config/validate", n.handleConfig)
-	mux.HandleFunc("/api/v1/tools", n.handleTools)
-	mux.HandleFunc("/api/v1/models", n.handleModels)
-	mux.HandleFunc("/api/v1/providers/", n.handleProviderModels)
-	mux.HandleFunc("/api/v1/skills", n.handleSkills)
-	mux.HandleFunc("/api/v1/status", n.handleStatus)
-	mux.HandleFunc("/api/v1/channels", n.handleChannels)
-	mux.HandleFunc("/api/v1/files/upload", n.handleFileUpload)
+	}))
+	mux.HandleFunc("/api/v1/chat/session/", withAuth(n.handleChatSession))
+	mux.HandleFunc("/api/v1/agents", withAuth(n.handleAgents))
+	mux.HandleFunc("/api/v1/agents/", withAuth(n.handleAgentInfo))
+	mux.HandleFunc("/api/v1/config", withAuth(n.handleConfig))
+	mux.HandleFunc("/api/v1/config/validate", withAuth(n.handleConfig))
+	mux.HandleFunc("/api/v1/tools", withAuth(n.handleTools))
+	mux.HandleFunc("/api/v1/models", withAuth(n.handleModels))
+	mux.HandleFunc("/api/v1/providers/", withAuth(n.handleProviderModels))
+	mux.HandleFunc("/api/v1/skills", withAuth(n.handleSkills))
+	mux.HandleFunc("/api/v1/status", withAuth(n.handleStatus))
+	mux.HandleFunc("/api/v1/channels", withAuth(n.handleChannels))
+	mux.HandleFunc("/api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("/api/v1/files/view", n.handleFileView)
 }
 
@@ -398,10 +362,15 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		})
 		return
 	case "tool.executing":
+		var toolArgs map[string]interface{}
+		if argsStr := msg.Metadata["arguments"]; argsStr != "" {
+			_ = json.Unmarshal([]byte(argsStr), &toolArgs)
+		}
 		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],
 			Action:             msg.Metadata["action"],
+			Arguments:          toolArgs,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 		})
 		return
