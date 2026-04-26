@@ -497,6 +497,7 @@ export type ToolStatus = {
   session_key?: string
   tool: string
   action: string
+  arguments?: Record<string, unknown>
   subagent_session_key?: string
 }
 

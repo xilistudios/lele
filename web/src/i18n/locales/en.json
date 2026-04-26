@@ -351,5 +351,28 @@
     "status": "Status",
     "expand": "Expand",
     "collapse": "Collapse"
+  },
+  "toolCalls": {
+    "action": "Action",
+    "result": "Result",
+    "hideDetails": "Hide details",
+    "showDetails": "Show details",
+    "openSubagent": "Open subagent chat",
+    "error": "Error",
+    "readFile": "Reading file",
+    "writeFile": "Writing file",
+    "editFile": "Editing file",
+    "applyPatch": "Applying changes",
+    "replaceText": "Replacing text",
+    "appendFile": "Appending to file",
+    "listDir": "Listing directory",
+    "execCommand": "Executing command",
+    "webSearch": "Searching web",
+    "webFetch": "Loading page",
+    "cronTask": "Scheduling task",
+    "spawnSubagent": "Starting subagent",
+    "i2c": "I2C",
+    "spi": "SPI",
+    "genericAction": "Action"
   }
 }
