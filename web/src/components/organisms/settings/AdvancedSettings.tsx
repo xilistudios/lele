@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
-import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import type { EditableConfig } from '../../../lib/types'
 import { AddButton } from '../../atoms/AddButton'
 import { RemoveButton } from '../../atoms/RemoveButton'
-import { SettingsField, SettingsSection, TextInput } from '../../molecules'
+import { NumberInput, SettingsField, SettingsSection, TextInput } from '../../molecules'
 
 const CARD_CLS = 'rounded border border-border bg-background-primary p-4'
 
 export function AdvancedSettings() {
-  const { draftConfig, dirtyPaths, updateField, replaceDraft, t } = useSettings()
+  const {
+    draftConfig,
+    dirtyPaths,
+    validationErrors,
+    updateField,
+    replaceDraft,
+    isRestartRequired,
+    t,
+  } = useSettings()
   const [showRawJson, setShowRawJson] = useState(false)
 
   if (!draftConfig) return null
@@ -28,6 +36,38 @@ export function AdvancedSettings() {
 
   return (
     <div className="space-y-6">
+      <SettingsSection
+        title={t('settings.sections.gateway')}
+        isRestartRequired={isRestartRequired('gateway')}
+      >
+        <SettingsField
+          label={t('settings.fields.gatewayHost')}
+          path="gateway.host"
+          isDirty={isDirtyPath(dirtyPaths, 'gateway.host')}
+          error={getErrorForPath(validationErrors, 'gateway.host')}
+        >
+          <TextInput
+            id="gateway.host"
+            value={draftConfig.gateway.host}
+            onChange={(v) => updateField('gateway.host', v)}
+          />
+        </SettingsField>
+        <SettingsField
+          label={t('settings.fields.gatewayPort')}
+          path="gateway.port"
+          isDirty={isDirtyPath(dirtyPaths, 'gateway.port')}
+          error={getErrorForPath(validationErrors, 'gateway.port')}
+        >
+          <NumberInput
+            id="gateway.port"
+            value={draftConfig.gateway.port}
+            onChange={(v) => updateField('gateway.port', v)}
+            min={1}
+            max={65535}
+          />
+        </SettingsField>
+      </SettingsSection>
+
       <SettingsSection title={t('settings.sections.bindings')}>
         <div className="mb-4">
           <AddButton onClick={addBinding}>{t('settings.addBinding')}</AddButton>

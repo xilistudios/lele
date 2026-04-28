@@ -19,6 +19,9 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.MaxToolIterations == 0 {
 		doc.Agents.Defaults.MaxToolIterations = defaults.Agents.Defaults.MaxToolIterations
 	}
+	if doc.Agents.Defaults.MaxReadLines == 0 {
+		doc.Agents.Defaults.MaxReadLines = defaults.Agents.Defaults.MaxReadLines
+	}
 
 	// Defaults for the native channel.
 	if doc.Channels.Native.Host == "" {
@@ -102,6 +105,7 @@ func defaultEditableDocument() *EditableDocument {
 				Model:               defaults.Agents.Defaults.Model,
 				MaxTokens:           defaults.Agents.Defaults.MaxTokens,
 				MaxToolIterations:   defaults.Agents.Defaults.MaxToolIterations,
+				MaxReadLines:        defaults.Agents.Defaults.MaxReadLines,
 			},
 			List: []EditableAgentConfig{},
 		},

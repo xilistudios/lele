@@ -78,7 +78,8 @@ const TOOL_ICONS: Record<string, IconConfig> = {
   },
 }
 
-const GENERIC_ICON = 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'
+const GENERIC_ICON =
+  'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2 2 0 0 1-2.83 0a2 2 0 0 1 0-2.83l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'
 
 function getIconConfig(toolName?: string): IconConfig {
   if (!toolName) return { icon: GENERIC_ICON, color: 'text-text-tertiary' }
@@ -123,7 +124,7 @@ function parseArgsSummary(toolName?: string, args?: string): string {
   if (!args) return ''
 
   const lines = args.split('\n')
-  let firstLine = lines[0].trim()
+  const firstLine = lines[0].trim()
 
   // Handle "toolName {...}" format: extract the JSON part
   const jsonStart = firstLine.indexOf('{')
@@ -195,7 +196,11 @@ export function ToolCallDisplay({
                 {iconConfig.icon
                   .split(' M')
                   .map((path, i) =>
-                    i === 0 ? <path key={i} d={path} /> : <path key={i} d={`M${path}`} />,
+                    i === 0 ? (
+                      <path key={path} d={path} />
+                    ) : (
+                      <path key={`M${path}`} d={`M${path}`} />
+                    ),
                   )}
               </svg>
             </div>
@@ -252,7 +257,7 @@ export function ToolCallDisplay({
               {iconConfig.icon
                 .split(' M')
                 .map((path, i) =>
-                  i === 0 ? <path key={i} d={path} /> : <path key={i} d={`M${path}`} />,
+                  i === 0 ? <path key={path} d={path} /> : <path key={`M${path}`} d={`M${path}`} />,
                 )}
             </svg>
           </div>
@@ -262,7 +267,9 @@ export function ToolCallDisplay({
 
           {/* Summary: command for exec, path for files, etc. */}
           {argsSummary && (
-            <span className="min-w-0 truncate text-xs text-text-tertiary font-mono">{argsSummary}</span>
+            <span className="min-w-0 truncate text-xs text-text-tertiary font-mono">
+              {argsSummary}
+            </span>
           )}
 
           {/* Error badge only */}
@@ -299,7 +306,9 @@ export function ToolCallDisplay({
 
           {/* Chevron */}
           <svg
-            className={`h-3 w-3 text-text-tertiary transition-transform ml-auto ${expanded ? 'rotate-90' : ''}`}
+            className={`h-3 w-3 text-text-tertiary transition-transform ml-auto ${
+              expanded ? 'rotate-90' : ''
+            }`}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

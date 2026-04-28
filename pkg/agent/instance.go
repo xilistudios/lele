@@ -155,8 +155,12 @@ func NewAgentInstance(
 	}
 
 	restrict := defaults.RestrictToWorkspace
+	maxReadLines := defaults.MaxReadLines
+	if maxReadLines <= 0 {
+		maxReadLines = 500
+	}
 	toolsRegistry := tools.NewToolRegistry()
-	toolsRegistry.Register(tools.NewReadFileTool(workspace, restrict))
+	toolsRegistry.Register(tools.NewReadFileTool(workspace, restrict, maxReadLines))
 	toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewListDirTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewExecToolWithConfig(workspace, restrict, cfg))

@@ -79,12 +79,13 @@ func isWithinWorkspace(candidate, workspace string) bool {
 }
 
 type ReadFileTool struct {
-	workspace string
-	restrict  bool
+	workspace    string
+	restrict     bool
+	maxReadLines int
 }
 
-func NewReadFileTool(workspace string, restrict bool) *ReadFileTool {
-	return &ReadFileTool{workspace: workspace, restrict: restrict}
+func NewReadFileTool(workspace string, restrict bool, maxReadLines int) *ReadFileTool {
+	return &ReadFileTool{workspace: workspace, restrict: restrict, maxReadLines: maxReadLines}
 }
 
 func (t *ReadFileTool) Name() string {
@@ -92,7 +93,7 @@ func (t *ReadFileTool) Name() string {
 }
 
 func (t *ReadFileTool) Description() string {
-	return "Read the contents of a file. For large files (>500 lines), only the first 100 lines are shown automatically. Use from/to parameters to read specific line ranges."
+	return fmt.Sprintf("Read the contents of a file. For large files (>500 lines), only the first %d lines are shown automatically. Use from/to parameters to read specific line ranges.", t.maxReadLines)
 }
 
 func (t *ReadFileTool) Parameters() map[string]interface{} {
@@ -115,13 +116,6 @@ func (t *ReadFileTool) Parameters() map[string]interface{} {
 		"required": []string{"path"},
 	}
 }
-
-const (
-	// maxLinesAuto is the threshold for auto-limiting large files
-	maxLinesAuto = 1000
-	// chunkSize is the number of lines to show when auto-limiting
-	chunkSize = 500
-)
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	path, ok := args["path"].(string)
@@ -153,9 +147,9 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]interface{})
 	autoLimited := false
 	if fromLine == 0 && toLine == 0 {
 		lineCount := estimateLineCount(resolvedPath, fileInfo.Size())
-		if lineCount > maxLinesAuto {
+		if lineCount > t.maxReadLines {
 			fromLine = 1
-			toLine = chunkSize
+			toLine = t.maxReadLines
 			autoLimited = true
 		}
 	}
