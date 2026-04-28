@@ -47,17 +47,17 @@ func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	Agents    AgentsConfig    `json:"agents"`
-	Bindings  []AgentBinding  `json:"bindings,omitempty"`
-	Session   SessionConfig   `json:"session,omitempty"`
-	Channels  ChannelsConfig  `json:"channels"`
+	Agents    AgentsConfig     `json:"agents"`
+	Bindings  []AgentBinding   `json:"bindings,omitempty"`
+	Session   SessionConfig    `json:"session,omitempty"`
+	Channels  ChannelsConfig   `json:"channels"`
 	Providers *ProvidersConfig `json:"providers,omitempty"`
-	Gateway   GatewayConfig   `json:"gateway"`
-	Server    ServerConfig    `json:"server,omitempty"`
-	Tools     ToolsConfig     `json:"tools"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"`
-	Devices   DevicesConfig   `json:"devices"`
-	Logs      LogsConfig      `json:"logs"`
+	Gateway   GatewayConfig    `json:"gateway"`
+	Server    ServerConfig     `json:"server,omitempty"`
+	Tools     ToolsConfig      `json:"tools"`
+	Heartbeat HeartbeatConfig  `json:"heartbeat"`
+	Devices   DevicesConfig    `json:"devices"`
+	Logs      LogsConfig       `json:"logs"`
 	mu        sync.RWMutex
 }
 
