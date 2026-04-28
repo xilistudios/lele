@@ -318,24 +318,24 @@ type LogsConfig struct {
 }
 
 type ProvidersConfig struct {
-	Anthropic         ProviderConfig                 `json:"anthropic"`
-	OpenAI            OpenAIProviderConfig           `json:"openai"`
-	OpenRouter        ProviderConfig                 `json:"openrouter"`
-	Groq              ProviderConfig                 `json:"groq"`
-	Zhipu             ProviderConfig                 `json:"zhipu"`
-	VLLM              ProviderConfig                 `json:"vllm"`
-	Gemini            ProviderConfig                 `json:"gemini"`
-	Nvidia            ProviderConfig                 `json:"nvidia"`
-	Ollama            ProviderConfig                 `json:"ollama"`
-	Moonshot          ProviderConfig                 `json:"moonshot"`
-	ShengSuanYun      ProviderConfig                 `json:"shengsuanyun"`
-	DeepSeek          ProviderConfig                 `json:"deepseek"`
-	GitHubCopilot     ProviderConfig                 `json:"github_copilot"`
-	NanogPT           ProviderConfig                 `json:"nanogpt"`
-	AlibabaCodingPlan ProviderConfig                 `json:"alibaba_coding_plan"`
-	ZAICodingPlan     ProviderConfig                 `json:"zai_coding_plan"`
+	Anthropic          ProviderConfig                 `json:"anthropic"`
+	OpenAI             OpenAIProviderConfig           `json:"openai"`
+	OpenRouter         ProviderConfig                 `json:"openrouter"`
+	Groq               ProviderConfig                 `json:"groq"`
+	Zhipu              ProviderConfig                 `json:"zhipu"`
+	VLLM               ProviderConfig                 `json:"vllm"`
+	Gemini             ProviderConfig                 `json:"gemini"`
+	Nvidia             ProviderConfig                 `json:"nvidia"`
+	Ollama             ProviderConfig                 `json:"ollama"`
+	Moonshot           ProviderConfig                 `json:"moonshot"`
+	ShengSuanYun       ProviderConfig                 `json:"shengsuanyun"`
+	DeepSeek           ProviderConfig                 `json:"deepseek"`
+	GitHubCopilot      ProviderConfig                 `json:"github_copilot"`
+	NanogPT            ProviderConfig                 `json:"nanogpt"`
+	AlibabaCodingPlan  ProviderConfig                 `json:"alibaba_coding_plan"`
+	ZAICodingPlan      ProviderConfig                 `json:"zai_coding_plan"`
 	ModelArkCodingPlan ProviderConfig                 `json:"modelark_coding_plan"`
-	Named             map[string]NamedProviderConfig `json:"-"`
+	Named              map[string]NamedProviderConfig `json:"-"`
 }
 
 type ProviderConfig struct {
