@@ -29,7 +29,7 @@ func testCfg(agents []config.AgentConfig) *config.Config {
 			},
 			List: agents,
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"testprovider": {
 					Type: "openai",

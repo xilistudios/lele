@@ -51,7 +51,7 @@ type Config struct {
 	Bindings  []AgentBinding  `json:"bindings,omitempty"`
 	Session   SessionConfig   `json:"session,omitempty"`
 	Channels  ChannelsConfig  `json:"channels"`
-	Providers ProvidersConfig `json:"providers"`
+	Providers *ProvidersConfig `json:"providers,omitempty"`
 	Gateway   GatewayConfig   `json:"gateway"`
 	Server    ServerConfig    `json:"server,omitempty"`
 	Tools     ToolsConfig     `json:"tools"`
@@ -408,6 +408,9 @@ type NamedProviderConfig struct {
 }
 
 func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
+	if p == nil {
+		return nil
+	}
 	type alias ProvidersConfig
 	aux := (*alias)(p)
 	if err := json.Unmarshal(data, aux); err != nil {
@@ -445,7 +448,11 @@ func (p *ProvidersConfig) UnmarshalJSON(data []byte) error {
 }
 
 func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
+	if p == nil {
+		return []byte("null"), nil
+	}
 	out := map[string]NamedProviderConfig{}
+	hasData := false
 	for k, v := range p.Named {
 		key := strings.ToLower(strings.TrimSpace(k))
 		if key == "" {
@@ -454,7 +461,11 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if v.Type == "" {
 			v.Type = key
 		}
-		out[key] = v
+		// Only include if has APIKey or models
+		if v.APIKey != "" || len(v.Models) > 0 {
+			out[key] = v
+			hasData = true
+		}
 	}
 
 	put := func(name string, cfg NamedProviderConfig) {
@@ -462,10 +473,15 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 		if _, exists := out[key]; exists {
 			return
 		}
+		// Only include if has APIKey or models
+		if cfg.APIKey == "" && len(cfg.Models) == 0 {
+			return
+		}
 		if cfg.Type == "" {
 			cfg.Type = key
 		}
 		out[key] = cfg
+		hasData = true
 	}
 
 	ws := p.OpenAI.WebSearch
@@ -485,10 +501,18 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
 	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
 
+	// If no providers have any data, return null so the parent omitempty works
+	if !hasData {
+		return []byte("null"), nil
+	}
+
 	return json.Marshal(out)
 }
 
 func (p *ProvidersConfig) ensureNamedDefaults() {
+	if p == nil {
+		return
+	}
 	if p.Named == nil {
 		p.Named = map[string]NamedProviderConfig{}
 	}
@@ -526,12 +550,18 @@ func (p *ProvidersConfig) ensureNamedDefaults() {
 }
 
 func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {
+	if p == nil {
+		return NamedProviderConfig{}, false
+	}
 	p.ensureNamedDefaults()
 	cfg, ok := p.Named[strings.ToLower(strings.TrimSpace(name))]
 	return cfg, ok
 }
 
 func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
+	if p == nil {
+		return make(map[string]NamedProviderConfig)
+	}
 	p.ensureNamedDefaults()
 	result := make(map[string]NamedProviderConfig, len(p.Named))
 	for name, cfg := range p.Named {
@@ -541,6 +571,9 @@ func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
 }
 
 func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, preferExact bool) (string, bool) {
+	if p == nil {
+		return "", false
+	}
 	if provider == "" {
 		return "", false
 	}
@@ -583,6 +616,9 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 }
 
 func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) string {
+	if p == nil {
+		return rawModel
+	}
 	rawModel = strings.TrimSpace(rawModel)
 	if rawModel == "" {
 		return rawModel
@@ -857,7 +893,7 @@ func DefaultConfig() *Config {
 				Port:    3005,
 			},
 		},
-		Providers: ProvidersConfig{
+		Providers: &ProvidersConfig{
 			Anthropic:         ProviderConfig{},
 			OpenAI:            OpenAIProviderConfig{WebSearch: true},
 			OpenRouter:        ProviderConfig{},
@@ -961,6 +997,7 @@ func LoadConfig(path string) (*Config, error) {
 	data = expandEnvVars(data)
 
 	sessionEphemeralConfigured := false
+	providersConfigured := false
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err == nil {
 		if sessionRaw, ok := raw["session"]; ok {
@@ -968,6 +1005,10 @@ func LoadConfig(path string) (*Config, error) {
 			if err := json.Unmarshal(sessionRaw, &rawSession); err == nil {
 				_, sessionEphemeralConfigured = rawSession["ephemeral"]
 			}
+		}
+		// Check if providers key exists and has actual data
+		if providersRaw, ok := raw["providers"]; ok && len(providersRaw) > 2 { // > 2 to ignore "{}"
+			providersConfigured = true
 		}
 	}
 
@@ -979,6 +1020,11 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Session.EphemeralThreshold <= 0 {
 		cfg.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
+	}
+
+	// If providers were not in the JSON, set to nil so it gets omitted on save
+	if !providersConfigured {
+		cfg.Providers = nil
 	}
 
 	if err := env.Parse(cfg); err != nil {

@@ -17,7 +17,7 @@ func createTestConfig(tmpDir string) *config.Config {
 				MaxToolIterations: 5,
 			},
 		},
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"testprovider": {
 					Type: "openai",

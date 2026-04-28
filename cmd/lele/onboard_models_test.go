@@ -12,7 +12,7 @@ import (
 // TestGetConfiguredModels_Empty tests with no named providers
 func TestGetConfiguredModels_Empty(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{},
+		Providers: &config.ProvidersConfig{},
 	}
 
 	models := getConfiguredModels(cfg)
@@ -24,7 +24,7 @@ func TestGetConfiguredModels_Empty(t *testing.T) {
 // TestGetConfiguredModels_WithModels tests with providers that have model aliases
 func TestGetConfiguredModels_WithModels(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"anthropic": {
 					Type: "anthropic",
@@ -60,7 +60,7 @@ func TestGetConfiguredModels_WithModels(t *testing.T) {
 // TestGetConfiguredModels_NoModels tests with providers that have no model aliases
 func TestGetConfiguredModels_NoModels(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"anthropic": {
 					Type: "anthropic",
@@ -91,7 +91,7 @@ func TestGetConfiguredModels_NoModels(t *testing.T) {
 // TestGetConfiguredModels_NoAPIKey tests providers without API keys are skipped
 func TestGetConfiguredModels_NoAPIKey(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"anthropic": {
 					Type:           "anthropic",
@@ -123,7 +123,7 @@ func TestGetConfiguredModels_NoAPIKey(t *testing.T) {
 // TestGetConfiguredModels_NoNamed tests with no named providers
 func TestGetConfiguredModels_NoNamed(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{},
+		Providers: &config.ProvidersConfig{},
 	}
 
 	models := getConfiguredModels(cfg)
@@ -135,7 +135,7 @@ func TestGetConfiguredModels_NoNamed(t *testing.T) {
 // TestGetConfiguredModels_OnlyDefault tests with only default models
 func TestGetConfiguredModels_OnlyDefault(t *testing.T) {
 	cfg := &config.Config{
-		Providers: config.ProvidersConfig{
+		Providers: &config.ProvidersConfig{
 			Named: map[string]config.NamedProviderConfig{
 				"anthropic": {
 					Type:           "anthropic",

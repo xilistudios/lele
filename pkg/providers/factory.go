@@ -208,6 +208,11 @@ func createCodexAuthProvider(enableWebSearch bool) (LLMProvider, error) {
 }
 
 func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
+	// Handle nil Providers
+	if cfg.Providers == nil {
+		cfg.Providers = &config.ProvidersConfig{}
+	}
+	
 	rawModel := strings.TrimSpace(cfg.Agents.Defaults.Model)
 	providerName := NormalizeProvider(cfg.Agents.Defaults.Provider)
 	model := rawModel
@@ -237,6 +242,11 @@ func resolveProviderSelectionForProvider(cfg *config.Config, providerName string
 }
 
 func resolveProviderSelectionByName(cfg *config.Config, providerName string, model string) (providerSelection, error) {
+	// Handle nil Providers
+	if cfg.Providers == nil {
+		cfg.Providers = &config.ProvidersConfig{}
+	}
+	
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{

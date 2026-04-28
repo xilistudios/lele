@@ -560,6 +560,10 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc.Providers = EditableProvidersConfig{}
 	for name, provider := range cfg.Providers.ListNamed() {
+		// Only include providers that have actual data
+		if provider.APIKey == "" && len(provider.Models) == 0 {
+			continue
+		}
 		doc.Providers[name] = EditableNamedProviderConfig{
 			Type:        provider.Type,
 			APIKey:      literalOrEmptySecret(provider.APIKey),
