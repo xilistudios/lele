@@ -209,7 +209,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("/api/v1/chat/session/", withAuth(n.handleChatSession))
 	mux.HandleFunc("/api/v1/agents", withAuth(n.handleAgents))
-	mux.HandleFunc("/api/v1/agents/", withAuth(n.handleAgentInfo))
+	mux.HandleFunc("/api/v1/agents/", withAuth(n.handleAgentDispatcher))
 	mux.HandleFunc("/api/v1/config", withAuth(n.handleConfig))
 	mux.HandleFunc("/api/v1/config/validate", withAuth(n.handleConfig))
 	mux.HandleFunc("/api/v1/tools", withAuth(n.handleTools))

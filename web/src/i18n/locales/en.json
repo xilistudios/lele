@@ -59,7 +59,9 @@
     "thinkingOff": "Off",
     "thinkingLow": "Low",
     "thinkingMedium": "Medium",
-    "thinkingHigh": "High"
+    "thinkingHigh": "High",
+    "previous": "Previous",
+    "next": "Next"
   },
   "connection": {
     "connected": "Connected",
@@ -105,6 +107,7 @@
     "sections": {
       "gateway": "Gateway",
       "agentsDefaults": "Agent Defaults",
+      "display": "Display",
       "agentsList": "Agent List",
       "session": "Session",
       "heartbeat": "Heartbeat",
@@ -139,6 +142,7 @@
       "gatewayPort": "Port",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restrict to workspace",
+      "language": "Language",
       "provider": "Default provider",
       "model": "Default model",
       "modelFallbacks": "Model fallbacks",
@@ -282,7 +286,8 @@
       "agentContextWindow": "Maximum context window size supported by the model",
       "agentThinking": "Enables extended reasoning mode",
       "agentSupportsImages": "This model supports image and vision inputs",
-      "agentSkills": "Active skills available for this agent"
+      "agentSkills": "Active skills available for this agent",
+      "agentsList": "Create and manage AI agents with custom configurations"
     },
     "options": {
       "daily": "Daily",
@@ -339,6 +344,62 @@
       "back": "Back",
       "next": "Next",
       "add": "Add"
+    },
+    "addAgentModal": {
+      "title": "Create New Agent",
+      "addButton": "Add Agent",
+      "openWizard": "Wizard",
+      "stepBasicInfoTitle": "Create Your Agent",
+      "stepBasicInfoDesc": "Give your agent a unique identity",
+      "stepModelTitle": "Choose a Model",
+      "stepModelDesc": "Select the AI that powers your agent",
+      "stepBehaviorTitle": "Behavior Settings",
+      "stepBehaviorDesc": "Fine-tune how your agent responds",
+      "stepSkillsTitle": "Add Skills",
+      "stepSkillsDesc": "Give your agent superpowers",
+      "back": "Back",
+      "next": "Next",
+      "add": "Create Agent",
+      "preview": "Preview",
+      "previewEmpty": "Your agent preview will appear here",
+      "previewEmptyDesc": "Start filling the form to see it come to life",
+      "tips": "Tips",
+      "tipIdentity": "The ID is permanent and used in commands. Choose something memorable.",
+      "tipModel": "Only select a primary model. Fallbacks are optional backups.",
+      "tipBehavior": "Lower temperature = more focused responses. Higher = more creative.",
+      "tipSkills": "Skills extend your agent's capabilities. Add only what you need.",
+      "modelPrimaryLabel": "Primary Model",
+      "modelFallbacksLabel": "Fallback Models",
+      "modelConfigured": "Model configured",
+      "modelPrimaryDesc": "The main model used for all requests",
+      "modelFallbacksDesc": "Backup models if primary fails",
+      "tempPrecise": "Precise",
+      "tempPreciseDesc": "Focused and deterministic",
+      "tempBalanced": "Balanced",
+      "tempBalancedDesc": "Good mix of creativity and accuracy",
+      "tempCreative": "Creative",
+      "tempCreativeDesc": "More varied and imaginative",
+      "tempVeryCreative": "Very Creative",
+      "tempVeryCreativeDesc": "Highly random and experimental",
+      "maxIterationsDesc": "Max tool calls",
+      "maxTokensDesc": "Response length",
+      "contextWindowDesc": "Maximum context size in tokens",
+      "featuresLabel": "Features",
+      "popularSkills": "Popular Skills",
+      "skillsSelected": "skill selected",
+      "skillsSelectedPlural": "skills selected",
+      "skillGithub": "GitHub",
+      "skillGithubDesc": "Repository management",
+      "skillWeather": "Weather",
+      "skillWeatherDesc": "Forecast data",
+      "skillSummarize": "Summarize",
+      "skillSummarizeDesc": "Content summarization",
+      "skillWebSearch": "Web Search",
+      "skillWebSearchDesc": "Search the web",
+      "skillFileManager": "Files",
+      "skillFileManagerDesc": "File operations",
+      "agentIdHint": "Only letters, numbers, hyphens and underscores. Will be used in commands.",
+      "creating": "Creating..."
     }
   },
   "common": {
@@ -375,6 +436,7 @@
     "spawnSubagent": "Starting subagent",
     "i2c": "I2C",
     "spi": "SPI",
+    "readImage": "Reading image",
     "genericAction": "Action"
   }
 }

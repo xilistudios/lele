@@ -1,8 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { getAgentModelPrimary, isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import {
-  AddItemInput,
   BooleanInput,
   NamedItemCard,
   NumberInput,
@@ -12,6 +12,7 @@ import {
   StringListEditor,
   TextInput,
 } from '../../molecules'
+import { AddAgentModal } from './AddAgentWizard'
 
 export function AgentsSettings() {
   const {
@@ -24,17 +25,11 @@ export function AgentsSettings() {
     isLoadingModels,
   } = useSettings()
 
-  const [newAgentId, setNewAgentId] = useState('')
+  const navigate = useNavigate()
+  const [showWizard, setShowWizard] = useState(false)
 
   if (!draftConfig) return null
   const list = draftConfig.agents.list || []
-
-  const addAgent = () => {
-    const id = newAgentId.trim()
-    if (!id) return
-    updateField('agents.list', [...list, { id, default: false, skills: [] }])
-    setNewAgentId('')
-  }
 
   const removeAgent = (index: number) => {
     updateField(
@@ -60,17 +55,74 @@ export function AgentsSettings() {
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.agentsList')}>
-        <AddItemInput
-          value={newAgentId}
-          onChange={setNewAgentId}
-          onAdd={addAgent}
-          placeholder={t('settings.agentIdPlaceholder')}
-        />
+        {/* Header with Add button */}
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm text-text-secondary">
+            {t('settings.descriptions.agentsList') ||
+              'Create and manage AI agents with custom configurations'}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            {t('settings.addAgentModal.addButton')}
+          </button>
+        </div>
 
+        {/* Empty state */}
         {list.length === 0 && (
-          <p className="text-xs text-text-tertiary">{t('settings.noAgents')}</p>
+          <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-background-secondary/20">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mb-4">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="text-blue-400"
+              >
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+            <p className="text-sm text-text-secondary mb-2">
+              {t('settings.noAgents')}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowWizard(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {t('settings.addAgentModal.addButton')}
+            </button>
+          </div>
         )}
 
+        {/* Agent cards */}
         {list.map(
           (
             agent: {
@@ -98,7 +150,14 @@ export function AgentsSettings() {
                 key={agent.id}
                 title={
                   <div className="flex items-center gap-3">
-                    <span>{agent.id}</span>
+                    {/* Agent avatar */}
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs text-white font-medium flex-shrink-0">
+                      {agent.name ? agent.name.charAt(0).toUpperCase() : agent.id.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="font-medium">{agent.id}</span>
+                    {agent.name && (
+                      <span className="text-text-tertiary text-sm">— {agent.name}</span>
+                    )}
                     {agent.default && (
                       <span className="rounded-full bg-accent-subtle text-accent-primary px-2 py-0.5 text-xs font-medium">
                         {t('settings.defaultBadge')}
@@ -109,6 +168,30 @@ export function AgentsSettings() {
                         {t('settings.modifiedBadge')}
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
+                      }}
+                      className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5"
+                      title="Edit context files"
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                      Files
+                    </button>
                   </div>
                 }
                 onRemove={() => removeAgent(index)}
@@ -365,6 +448,8 @@ export function AgentsSettings() {
           },
         )}
       </SettingsSection>
+
+      <AddAgentModal isOpen={showWizard} onClose={() => setShowWizard(false)} />
     </div>
   )
 }

@@ -8,6 +8,10 @@ export const endpoints = {
     list: '/api/v1/agents',
     info: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}`,
     status: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}?action=status`,
+    files: (agentId: string, fileName?: string) => {
+      const base = `/api/v1/agents/${encodeURIComponent(agentId)}/files`
+      return fileName ? `${base}?file=${encodeURIComponent(fileName)}` : base
+    },
   },
   chat: {
     send: '/api/v1/chat/send',
