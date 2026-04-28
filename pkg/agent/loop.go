@@ -64,10 +64,13 @@ func (al *AgentLoop) cfg() *config.Config {
 	return config.DefaultConfig()
 }
 
-func (al *AgentLoop) UpdateConfig(cfg *config.Config) {
-	if cfg == nil {
+// ReloadRegistry updates the agent registry with new agent configurations.
+// This should be called when the configuration changes (agents.list, defaults, etc.).
+func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
+	if cfg == nil || al.registry == nil {
 		return
 	}
+	al.registry.ReloadAgents(cfg)
 	al.cfgPtr.Store(cfg)
 }
 

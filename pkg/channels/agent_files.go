@@ -28,6 +28,7 @@ type AgentFileInfo struct {
 }
 
 // Context files that exist in every agent workspace.
+// Keep in sync with agent.ContextFiles in pkg/agent/workspace_init.go.
 var agentContextFiles = []string{
 	"AGENT.md",
 	"SOUL.md",
@@ -38,7 +39,7 @@ var agentContextFiles = []string{
 }
 
 func (n *NativeChannel) handleAgentDispatcher(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := normalizePath(r.URL.Path)
 	// Check if path ends with /files by parsing the route properly
 	prefix := "/api/v1/agents/"
 	if strings.HasPrefix(path, prefix) {
@@ -53,7 +54,7 @@ func (n *NativeChannel) handleAgentDispatcher(w http.ResponseWriter, r *http.Req
 }
 
 func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
+	path := normalizePath(r.URL.Path)
 	prefix := "/api/v1/agents/"
 	if !strings.HasPrefix(path, prefix) {
 		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
@@ -231,6 +232,14 @@ func (n *NativeChannel) handleAgentFileWrite(w http.ResponseWriter, r *http.Requ
 
 // isAllowedWorkspacePath returns true if the absolute workspace path is within
 // an allowed directory tree (user home, /tmp, or /var/folders for macOS).
+// normalizePath removes a trailing slash from a URL path (except for root "/").
+func normalizePath(path string) string {
+	if len(path) > 1 && strings.HasSuffix(path, "/") {
+		return strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
 func isAllowedWorkspacePath(absPath string) bool {
 	home, err := os.UserHomeDir()
 	if err == nil && strings.HasPrefix(absPath, home+string(filepath.Separator)) {

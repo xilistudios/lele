@@ -226,7 +226,8 @@ func gatewayCmd() {
 	configWatcher := config.NewConfigWatcher(getConfigPath())
 	go func() {
 		if err := configWatcher.Start(ctx, func(updated *config.Config) error {
-			agentLoop.UpdateConfig(updated)
+			// Reload registry first to pick up new agents
+			agentLoop.ReloadRegistry(updated)
 			if err := channelManager.ReloadConfig(updated); err != nil {
 				return err
 			}

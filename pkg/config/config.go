@@ -333,6 +333,8 @@ type ProvidersConfig struct {
 	GitHubCopilot     ProviderConfig                 `json:"github_copilot"`
 	NanogPT           ProviderConfig                 `json:"nanogpt"`
 	AlibabaCodingPlan ProviderConfig                 `json:"alibaba_coding_plan"`
+	ZAICodingPlan     ProviderConfig                 `json:"zai_coding_plan"`
+	ModelArkCodingPlan ProviderConfig                 `json:"modelark_coding_plan"`
 	Named             map[string]NamedProviderConfig `json:"-"`
 }
 
@@ -501,6 +503,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
 	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
 	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
+	put("zai_coding_plan", NamedProviderConfig{Type: "zai_coding_plan", ProviderConfig: p.ZAICodingPlan})
+	put("modelark_coding_plan", NamedProviderConfig{Type: "modelark_coding_plan", ProviderConfig: p.ModelArkCodingPlan})
 
 	// If no providers have any data, return null so the parent omitempty works
 	if !hasData {
@@ -548,6 +552,8 @@ func (p *ProvidersConfig) ensureNamedDefaults() {
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
 	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
 	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
+	put("zai_coding_plan", NamedProviderConfig{Type: "zai_coding_plan", ProviderConfig: p.ZAICodingPlan})
+	put("modelark_coding_plan", NamedProviderConfig{Type: "modelark_coding_plan", ProviderConfig: p.ModelArkCodingPlan})
 }
 
 func (p *ProvidersConfig) GetNamed(name string) (NamedProviderConfig, bool) {

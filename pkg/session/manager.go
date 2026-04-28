@@ -556,3 +556,17 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	cleanup = false
 	return nil
 }
+
+// ActiveCount returns the number of sessions that have at least one message.
+// This is useful for detecting agents with active conversations.
+func (sm *SessionManager) ActiveCount() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	count := 0
+	for _, s := range sm.sessions {
+		if len(s.Messages) > 0 {
+			count++
+		}
+	}
+	return count
+}

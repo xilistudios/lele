@@ -208,3 +208,89 @@ func TestAgentInstance_FallbackExplicitEmpty(t *testing.T) {
 		t.Errorf("expected 0 fallbacks (explicit empty), got %d: %v", len(agent.Fallbacks), agent.Fallbacks)
 	}
 }
+
+func TestAgentRegistry_ReloadAgents_AddNewAgent(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+
+	if len(registry.ListAgentIDs()) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(registry.ListAgentIDs()))
+	}
+
+	// Add a new agent via reload
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+		{ID: "beta"},
+	})
+	registry.ReloadAgents(newCfg)
+
+	ids := registry.ListAgentIDs()
+	if len(ids) != 2 {
+		t.Errorf("expected 2 agents after reload, got %d: %v", len(ids), ids)
+	}
+	if _, ok := registry.GetAgent("beta"); !ok {
+		t.Error("expected 'beta' agent after reload")
+	}
+}
+
+func TestAgentRegistry_ReloadAgents_RemoveAgent(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+		{ID: "beta"},
+	})
+	registry := NewAgentRegistry(cfg)
+
+	// Remove beta via reload
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry.ReloadAgents(newCfg)
+
+	ids := registry.ListAgentIDs()
+	if len(ids) != 1 || ids[0] != "alpha" {
+		t.Errorf("expected only 'alpha' after reload, got %v", ids)
+	}
+}
+
+func TestAgentRegistry_ReloadAgents_PreserveUnchanged(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+
+	original, _ := registry.GetAgent("alpha")
+	originalPtr := original // Save pointer to compare
+
+	// Reload with same config — agent should be preserved
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded != originalPtr {
+		t.Error("expected same agent instance when config unchanged, got new instance")
+	}
+}
+
+func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+
+	original, _ := registry.GetAgent("alpha")
+
+	// Change model
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
+	})
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Error("expected new agent instance when model changed, got same instance")
+	}
+}

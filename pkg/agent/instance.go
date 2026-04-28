@@ -133,7 +133,11 @@ func NewAgentInstance(
 	cfg *config.Config,
 ) *AgentInstance {
 	workspace := resolveAgentWorkspace(agentCfg, defaults)
-	os.MkdirAll(workspace, 0755)
+	// Initialize workspace with template context files
+	// This creates the directory and copies AGENT.md, SOUL.md, etc.
+	if err := InitializeWorkspace(workspace); err != nil {
+		log.Printf("[ERROR] Failed to initialize workspace %q: %v", workspace, err)
+	}
 
 	model := resolveAgentModel(agentCfg, defaults, cfg)
 	fallbacks := resolveAgentFallbacks(agentCfg, defaults, cfg)
