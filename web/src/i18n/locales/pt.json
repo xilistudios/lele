@@ -142,6 +142,7 @@
       "maxTokens": "Máx tokens",
       "temperature": "Temperatura",
       "maxToolIterations": "Máx iterações",
+      "maxReadLines": "Máx linhas de leitura",
       "ephemeral": "Modo efêmero",
       "ephemeralThreshold": "Limite efêmero (segundos)",
       "dmScope": "Escopo DM",
@@ -259,7 +260,8 @@
       "imageModel": "Modelo usado para geração de imagens",
       "imageModelFallbacks": "Modelos fallback para geração de imagens",
       "dmScope": "Escopo padrão para conversas DM",
-      "identityLinks": "Mapear padrões de identidade para IDs de agente"
+      "identityLinks": "Mapear padrões de identidade para IDs de agente",
+      "maxReadLines": "Número máximo de linhas exibidas por padrão ao ler arquivos grandes"
     },
     "options": {
       "daily": "Diário",

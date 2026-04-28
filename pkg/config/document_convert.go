@@ -23,6 +23,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		MaxTokens:           doc.Agents.Defaults.MaxTokens,
 		Temperature:         doc.Agents.Defaults.Temperature,
 		MaxToolIterations:   doc.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:        doc.Agents.Defaults.MaxReadLines,
 	}
 
 	for _, agent := range doc.Agents.List {
@@ -529,6 +530,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		MaxTokens:           cfg.Agents.Defaults.MaxTokens,
 		Temperature:         cfg.Agents.Defaults.Temperature,
 		MaxToolIterations:   cfg.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:        cfg.Agents.Defaults.MaxReadLines,
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {

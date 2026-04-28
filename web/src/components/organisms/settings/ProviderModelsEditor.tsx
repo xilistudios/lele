@@ -21,7 +21,14 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
   const addModel = (key: string) => {
     const trimmed = key.trim()
     if (!trimmed) return
-    onChange({ ...models, [trimmed]: {} })
+    onChange({
+      ...models,
+      [trimmed]: {
+        context_window: 120000,
+        max_tokens: 10000,
+        temperature: 0.6,
+      },
+    })
   }
 
   const addModelFromInput = () => {

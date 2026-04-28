@@ -212,7 +212,7 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 	if cfg.Providers == nil {
 		cfg.Providers = &config.ProvidersConfig{}
 	}
-	
+
 	rawModel := strings.TrimSpace(cfg.Agents.Defaults.Model)
 	providerName := NormalizeProvider(cfg.Agents.Defaults.Provider)
 	model := rawModel
@@ -246,7 +246,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 	if cfg.Providers == nil {
 		cfg.Providers = &config.ProvidersConfig{}
 	}
-	
+
 	lowerModel := strings.ToLower(model)
 
 	sel := providerSelection{

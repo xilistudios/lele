@@ -14,7 +14,10 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 
 const ORIGIN_MAP = {
   below: { 'right-align': 'origin-top-right', 'left-align': 'origin-top-left' },
-  above: { 'right-align': 'origin-bottom-right', 'left-align': 'origin-bottom-left' },
+  above: {
+    'right-align': 'origin-bottom-right',
+    'left-align': 'origin-bottom-left',
+  },
 } as const
 
 const REFRESH_INTERVAL = 30_000 // 30 seconds
@@ -42,7 +45,7 @@ function formatTokens(n: number): string {
 export function ContextIndicator() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
-  const { currentSessionKey, modelState } = useAppLogicContext()
+  const { currentSessionKey } = useAppLogicContext()
   const [isOpen, setIsOpen] = useState(false)
   const [context, setContext] = useState<SessionContextResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -68,7 +71,7 @@ export function ContextIndicator() {
     } finally {
       setLoading(false)
     }
-  }, [currentSessionKey, api, modelState.current])
+  }, [currentSessionKey, api])
 
   // Fetch on mount and when session changes
   useEffect(() => {
@@ -180,7 +183,10 @@ export function ContextIndicator() {
             {/* Progress bar */}
             <div className="h-1.5 w-full rounded-full bg-surface-card mb-2 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${ringColorClass.replace('stroke-', 'bg-')}`}
+                className={`h-full rounded-full transition-all duration-300 ${ringColorClass.replace(
+                  'stroke-',
+                  'bg-',
+                )}`}
                 style={{ width: `${Math.min(percent, 100)}%` }}
               />
             </div>

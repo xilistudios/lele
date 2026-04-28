@@ -1,5 +1,6 @@
 import { useSettings } from '../../../contexts/SettingsContext'
-import { getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
 import {
   BooleanInput,
   NumberInput,
@@ -16,7 +17,6 @@ export function GeneralSettings() {
     dirtyPaths,
     validationErrors,
     updateField,
-    isRestartRequired,
     t,
     getOptionsForAgent,
     getGroupsForAgent,
@@ -38,38 +38,6 @@ export function GeneralSettings() {
 
   return (
     <div className="space-y-6">
-      <SettingsSection
-        title={t('settings.sections.gateway')}
-        isRestartRequired={isRestartRequired('gateway')}
-      >
-        <SettingsField
-          label={t('settings.fields.gatewayHost')}
-          path="gateway.host"
-          isDirty={isDirtyPath(dirtyPaths, 'gateway.host')}
-          error={getErrorForPath(validationErrors, 'gateway.host')}
-        >
-          <TextInput
-            id="gateway.host"
-            value={config.gateway.host}
-            onChange={(v) => updateField('gateway.host', v)}
-          />
-        </SettingsField>
-        <SettingsField
-          label={t('settings.fields.gatewayPort')}
-          path="gateway.port"
-          isDirty={isDirtyPath(dirtyPaths, 'gateway.port')}
-          error={getErrorForPath(validationErrors, 'gateway.port')}
-        >
-          <NumberInput
-            id="gateway.port"
-            value={config.gateway.port}
-            onChange={(v) => updateField('gateway.port', v)}
-            min={1}
-            max={65535}
-          />
-        </SettingsField>
-      </SettingsSection>
-
       <SettingsSection title={t('settings.sections.agentsDefaults')}>
         <SettingsField
           label={t('settings.fields.workspace')}
@@ -220,6 +188,20 @@ export function GeneralSettings() {
             onChange={(v) => updateField('agents.defaults.max_tool_iterations', v)}
             min={1}
             max={100}
+          />
+        </SettingsField>
+        <SettingsField
+          label={t('settings.fields.maxReadLines')}
+          path="agents.defaults.max_read_lines"
+          isDirty={isDirtyPath(dirtyPaths, 'agents.defaults.max_read_lines')}
+          description={t('settings.descriptions.maxReadLines')}
+        >
+          <NumberInput
+            id="agents.defaults.max_read_lines"
+            value={config.agents.defaults.max_read_lines}
+            onChange={(v) => updateField('agents.defaults.max_read_lines', v)}
+            min={1}
+            max={5000}
           />
         </SettingsField>
       </SettingsSection>

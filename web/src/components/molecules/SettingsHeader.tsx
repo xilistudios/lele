@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { SidebarToggleIcon } from '../atoms/Icons'
 
 type Props = {
   onToggleSidebar: () => void
@@ -18,19 +19,7 @@ export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props)
           className="text-text-secondary transition-colors hover:text-text-primary"
           aria-label="Toggle sidebar"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
+          <SidebarToggleIcon />
         </button>
         <h1 className="text-xl font-semibold text-text-primary">{t('chat.settings')}</h1>
         {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}

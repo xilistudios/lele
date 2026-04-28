@@ -81,6 +81,7 @@ export type EditableAgentDefaults = {
   max_tokens: number
   temperature?: number
   max_tool_iterations: number
+  max_read_lines: number
 }
 
 export type AgentModelConfig = {

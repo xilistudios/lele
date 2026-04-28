@@ -510,6 +510,12 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		"clients":     len(n.wsClients),
 		"matched":     found,
 	})
+
+	// Fallback: if no clients matched and this is an approval request,
+	// broadcast to all connected clients so the approval UI can receive it.
+	if found == 0 && event == "approval.request" {
+		n.broadcastAll(event, data)
+	}
 }
 
 func (n *NativeChannel) broadcastAll(event string, data interface{}) {

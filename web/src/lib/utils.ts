@@ -9,7 +9,6 @@ export const formatSessionTitle = (
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
 
-
 // Maps internal provider names to user-friendly display names
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   alibaba_coding_plan: 'Alibaba Coding Plan',
@@ -32,8 +31,11 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 
 // Converts a provider name to a user-friendly display name
 export function getProviderDisplayName(name: string): string {
-  return PROVIDER_DISPLAY_NAMES[name] || name
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
+  return (
+    PROVIDER_DISPLAY_NAMES[name] ||
+    name
+      .split('_')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+  )
 }

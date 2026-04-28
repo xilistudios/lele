@@ -47,17 +47,17 @@ func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	Agents    AgentsConfig    `json:"agents"`
-	Bindings  []AgentBinding  `json:"bindings,omitempty"`
-	Session   SessionConfig   `json:"session,omitempty"`
-	Channels  ChannelsConfig  `json:"channels"`
+	Agents    AgentsConfig     `json:"agents"`
+	Bindings  []AgentBinding   `json:"bindings,omitempty"`
+	Session   SessionConfig    `json:"session,omitempty"`
+	Channels  ChannelsConfig   `json:"channels"`
 	Providers *ProvidersConfig `json:"providers,omitempty"`
-	Gateway   GatewayConfig   `json:"gateway"`
-	Server    ServerConfig    `json:"server,omitempty"`
-	Tools     ToolsConfig     `json:"tools"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"`
-	Devices   DevicesConfig   `json:"devices"`
-	Logs      LogsConfig      `json:"logs"`
+	Gateway   GatewayConfig    `json:"gateway"`
+	Server    ServerConfig     `json:"server,omitempty"`
+	Tools     ToolsConfig      `json:"tools"`
+	Heartbeat HeartbeatConfig  `json:"heartbeat"`
+	Devices   DevicesConfig    `json:"devices"`
+	Logs      LogsConfig       `json:"logs"`
 	mu        sync.RWMutex
 }
 
@@ -173,6 +173,7 @@ type AgentDefaults struct {
 	MaxTokens           int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
 	Temperature         *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
 	MaxToolIterations   int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines        int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
 }
 
 type ChannelsConfig struct {
@@ -802,6 +803,7 @@ func DefaultConfig() *Config {
 				Model:               "nanogpt/qwen3-5-397b-a17b-thinking",
 				MaxTokens:           8192,
 				MaxToolIterations:   20,
+				MaxReadLines:        500,
 			},
 		},
 		Session: SessionConfig{
