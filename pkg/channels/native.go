@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -41,6 +42,9 @@ type NativeChannel struct {
 	pairLimiter      *rateLimiter
 	apiLimiter       *rateLimiter
 	wsMessageLimiter *rateLimiter
+	skillsLoader     *skills.SkillsLoader
+	skillInstaller   *skills.SkillInstaller
+	workspacePath    string
 }
 
 type WSClient struct {
@@ -72,6 +76,13 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	apiLimiter := newRateLimiter(120, time.Minute)
 	wsMessageLimiter := newRateLimiter(120, time.Minute)
 
+	workspacePath := cfg.WorkspacePath()
+	globalSkillsDir := filepath.Join(leleDir, "skills")
+	builtinSkillsDir := filepath.Join(leleDir, "lele", "skills")
+
+	skillsLoader := skills.NewSkillsLoader(workspacePath, globalSkillsDir, builtinSkillsDir)
+	skillInstaller := skills.NewSkillInstaller(workspacePath)
+
 	return &NativeChannel{
 		base:             base,
 		cfg:              &nativeCfg,
@@ -85,6 +96,9 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		pairLimiter:      pairLimiter,
 		apiLimiter:       apiLimiter,
 		wsMessageLimiter: wsMessageLimiter,
+		skillsLoader:     skillsLoader,
+		skillInstaller:   skillInstaller,
+		workspacePath:    workspacePath,
 	}, nil
 }
 
@@ -216,6 +230,8 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/models", withAuth(n.handleModels))
 	mux.HandleFunc("/api/v1/providers/", withAuth(n.handleProviderModels))
 	mux.HandleFunc("/api/v1/skills", withAuth(n.handleSkills))
+	mux.HandleFunc("/api/v1/skills/available", withAuth(n.handleSkillsAvailable))
+	mux.HandleFunc("/api/v1/skills/", withAuth(n.handleSkillDispatcher))
 	mux.HandleFunc("/api/v1/status", withAuth(n.handleStatus))
 	mux.HandleFunc("/api/v1/channels", withAuth(n.handleChannels))
 	mux.HandleFunc("/api/v1/files/upload", withAuth(n.handleFileUpload))
@@ -618,7 +634,10 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		if n.agentLoop == nil {
 			return false
 		}
-		resolvedParent := n.agentLoop.ResolveSessionKey(sessionKey)
+		resolvedParent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
+		if resolvedParent == "" {
+			return false
+		}
 		for _, sk := range client.SessionKeys {
 			if sk == resolvedParent {
 				return true

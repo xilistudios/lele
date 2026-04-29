@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/xilistudios/lele/pkg/contextfiles"
 )
 
 // AgentFilesRequest is the request body for saving an agent context file.
@@ -25,17 +27,6 @@ type AgentFileInfo struct {
 	Name     string `json:"name"`
 	Size     int64  `json:"size"`
 	Editable bool   `json:"editable"`
-}
-
-// Context files that exist in every agent workspace.
-// Keep in sync with agent.ContextFiles in pkg/agent/workspace_init.go.
-var agentContextFiles = []string{
-	"AGENT.md",
-	"SOUL.md",
-	"USER.md",
-	"IDENTITY.md",
-	"MEMORY.md",
-	"HEARTBEAT.md",
 }
 
 func (n *NativeChannel) handleAgentDispatcher(w http.ResponseWriter, r *http.Request) {
@@ -100,11 +91,11 @@ func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Bootstrap workspace: create directory and seed context files if missing.
+	// Initialize workspace: create directory and seed context files if missing.
 	// This handles the case where an agent was just created via the UI but its
 	// workspace directory hasn't been initialized yet.
-	if err := bootstrapWorkspace(absWorkspace); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to bootstrap workspace: "+err.Error(), "workspace_create_failed")
+	if err := contextfiles.InitializeWorkspace(absWorkspace); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to initialize workspace: "+err.Error(), "workspace_create_failed")
 		return
 	}
 
@@ -134,9 +125,9 @@ func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request)
 }
 
 func (n *NativeChannel) handleAgentFileList(w http.ResponseWriter, _ *http.Request, workspace string) {
-	files := make([]AgentFileInfo, 0, len(agentContextFiles))
+	files := make([]AgentFileInfo, 0, len(contextfiles.ContextFiles))
 
-	for _, name := range agentContextFiles {
+	for _, name := range contextfiles.ContextFiles {
 		filePath := filepath.Join(workspace, name)
 		info, err := os.Stat(filePath)
 		if err != nil {
@@ -160,7 +151,7 @@ func (n *NativeChannel) handleAgentFileList(w http.ResponseWriter, _ *http.Reque
 
 func (n *NativeChannel) handleAgentFileRead(w http.ResponseWriter, _ *http.Request, workspace, fileName string) {
 	// Security: only allow known context files
-	if !isAgentContextFile(fileName) {
+	if !contextfiles.IsContextFile(fileName) {
 		writeError(w, http.StatusForbidden, "file not allowed", "file_not_allowed")
 		return
 	}
@@ -196,7 +187,7 @@ func (n *NativeChannel) handleAgentFileRead(w http.ResponseWriter, _ *http.Reque
 
 func (n *NativeChannel) handleAgentFileWrite(w http.ResponseWriter, r *http.Request, workspace, fileName string) {
 	// Security: only allow known context files
-	if !isAgentContextFile(fileName) {
+	if !contextfiles.IsContextFile(fileName) {
 		writeError(w, http.StatusForbidden, "file not allowed", "file_not_allowed")
 		return
 	}
@@ -262,15 +253,6 @@ func isAllowedWorkspacePath(absPath string) bool {
 	return false
 }
 
-func isAgentContextFile(name string) bool {
-	for _, f := range agentContextFiles {
-		if f == name {
-			return true
-		}
-	}
-	return false
-}
-
 func expandHomePath(path string) string {
 	if path == "" {
 		return path
@@ -286,31 +268,4 @@ func expandHomePath(path string) string {
 		return home
 	}
 	return path
-}
-
-// bootstrapWorkspace creates the workspace directory and seeds empty context files
-// if the workspace doesn't exist yet. Idempotent — safe to call on every request.
-func bootstrapWorkspace(workspace string) error {
-	// Create workspace directory if needed
-	if err := os.MkdirAll(workspace, 0755); err != nil {
-		return err
-	}
-
-	// Seed any missing context files as empty
-	for _, name := range agentContextFiles {
-		filePath := filepath.Join(workspace, name)
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			if err := os.WriteFile(filePath, []byte{}, 0644); err != nil {
-				return err
-			}
-		}
-	}
-
-	// Also ensure memory/ subdirectory exists (used by NewMemoryStore)
-	memoryDir := filepath.Join(workspace, "memory")
-	if err := os.MkdirAll(memoryDir, 0755); err != nil {
-		return err
-	}
-
-	return nil
 }

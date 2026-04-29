@@ -1,11 +1,13 @@
 package channels
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -774,14 +776,115 @@ func (n *NativeChannel) handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (n *NativeChannel) handleSkills(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		skills := n.skillsLoader.ListSkills()
+
+		skillInfos := make([]SkillInfo, 0, len(skills))
+		for _, s := range skills {
+			skillInfos = append(skillInfos, SkillInfo{
+				ID:          s.Name,
+				Name:        s.Name,
+				Description: s.Description,
+				Installed:   true,
+				Source:      s.Source,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, SkillsResponse{Skills: skillInfos})
+
+	case http.MethodPost:
+		var req SkillInstallRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
+			return
+		}
+
+		if req.URL == "" {
+			writeError(w, http.StatusBadRequest, "url is required", "missing_url")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+
+		if err := n.skillInstaller.InstallFromGitHub(ctx, req.URL); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skill: %v", err), "install_failed")
+			return
+		}
+
+		skillName := filepath.Base(req.URL)
+		writeJSON(w, http.StatusOK, SkillInstallResponse{
+			SkillID: skillName,
+			Message: fmt.Sprintf("Skill '%s' installed successfully", skillName),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+	}
+}
+
+func (n *NativeChannel) handleSkillsAvailable(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
 		return
 	}
 
-	skills := []SkillInfo{}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
 
-	writeJSON(w, http.StatusOK, SkillsResponse{Skills: skills})
+	available, err := n.skillInstaller.ListAvailableSkills(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to fetch available skills: %v", err), "fetch_failed")
+		return
+	}
+
+	type AvailableSkillInfo struct {
+		Name        string   `json:"name"`
+		Repository  string   `json:"repository"`
+		Description string   `json:"description"`
+		Author      string   `json:"author"`
+		Tags        []string `json:"tags"`
+	}
+
+	result := make([]AvailableSkillInfo, 0, len(available))
+	for _, s := range available {
+		result = append(result, AvailableSkillInfo{
+			Name:        s.Name,
+			Repository:  s.Repository,
+			Description: s.Description,
+			Author:      s.Author,
+			Tags:        s.Tags,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"skills": result,
+	})
+}
+
+func (n *NativeChannel) handleSkillDispatcher(w http.ResponseWriter, r *http.Request) {
+	// Extract skill name from path: /api/v1/skills/{name}
+	skillName := strings.TrimPrefix(r.URL.Path, "/api/v1/skills/")
+	if skillName == "" {
+		writeError(w, http.StatusBadRequest, "skill name is required", "missing_name")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		if err := n.skillInstaller.Uninstall(skillName); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to remove skill: %v", err), "remove_failed")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message": fmt.Sprintf("Skill '%s' removed successfully", skillName),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
+	}
 }
 
 func (n *NativeChannel) handleStatus(w http.ResponseWriter, r *http.Request) {

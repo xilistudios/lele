@@ -348,6 +348,7 @@ type SkillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Installed   bool   `json:"installed"`
+	Source      string `json:"source,omitempty"`
 }
 
 type SkillInstallRequest struct {
