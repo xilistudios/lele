@@ -177,3 +177,63 @@ export function DatabaseIcon({ size = 16 }: { size?: number }) {
     </svg>
   )
 }
+
+export function AgentsIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="8" r="4" />
+      <path d="M20 21a8 8 0 0 0-16 0" />
+      <circle cx="17" cy="5" r="2" />
+      <path d="M21 9a3 3 0 0 0-6 0" />
+    </svg>
+  )
+}
+
+export function ProvidersIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 4h16v4H4z" />
+      <path d="M4 10h16v4H4z" />
+      <path d="M4 16h16v4H4z" />
+    </svg>
+  )
+}
+
+export function SkillsIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
+      <path d="M17 5v.01" />
+    </svg>
+  )
+}

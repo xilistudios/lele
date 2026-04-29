@@ -187,6 +187,10 @@ func (m *nativeTestAgentLoop) ResolveSessionKey(sessionKey string) string {
 	return sessionKey
 }
 
+func (m *nativeTestAgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
+	return ""
+}
+
 func (m *nativeTestAgentLoop) IsSessionProcessing(sessionKey string) bool {
 	return false
 }

@@ -3,11 +3,11 @@ import { SidebarToggleIcon } from '../atoms/Icons'
 
 type Props = {
   onToggleSidebar: () => void
-  onLogout: () => void
   configPath?: string
+  title?: string
 }
 
-export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props) {
+export function SettingsHeader({ onToggleSidebar, configPath, title }: Props) {
   const { t } = useTranslation()
 
   return (
@@ -21,16 +21,13 @@ export function SettingsHeader({ onToggleSidebar, onLogout, configPath }: Props)
         >
           <SidebarToggleIcon />
         </button>
-        <h1 className="text-xl font-semibold text-text-primary">{t('chat.settings')}</h1>
-        {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}
+        <h1 className="text-xl font-semibold text-text-primary">
+          {title ?? t('chat.settings')}
+        </h1>
+        {configPath && (
+          <span className="text-xs text-text-tertiary">{configPath}</span>
+        )}
       </div>
-      <button
-        onClick={onLogout}
-        type="button"
-        className="rounded-md bg-state-error px-4 py-2 text-sm text-text-on-accent transition-colors hover:bg-[#FF7B7B]"
-      >
-        {t('chat.logout')}
-      </button>
     </div>
   )
 }

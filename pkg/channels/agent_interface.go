@@ -61,6 +61,8 @@ type AgentProvidable interface {
 	SetName(sessionKey string, name string) error
 	// ResolveSessionKey resuelve el alias de session_key si existe
 	ResolveSessionKey(sessionKey string) string
+	// GetSubagentParentSessionKey devuelve la sesión padre de un subagente
+	GetSubagentParentSessionKey(sessionKey string) string
 	// IsSessionProcessing devuelve true si hay un procesamiento LLM activo para la sesión
 	IsSessionProcessing(sessionKey string) bool
 	// GetTokenCounts returns the cumulative input/output token counts and context window for a session

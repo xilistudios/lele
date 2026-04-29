@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
@@ -136,7 +136,11 @@ func NewAgentInstance(
 	// Initialize workspace with template context files
 	// This creates the directory and copies AGENT.md, SOUL.md, etc.
 	if err := InitializeWorkspace(workspace); err != nil {
-		log.Printf("[ERROR] Failed to initialize workspace %q: %v", workspace, err)
+		logger.ErrorCF("agent", "Failed to initialize workspace",
+			map[string]interface{}{
+				"workspace": workspace,
+				"error":     err.Error(),
+			})
 	}
 
 	model := resolveAgentModel(agentCfg, defaults, cfg)
@@ -149,11 +153,18 @@ func NewAgentInstance(
 	// Create a provider specifically for this agent
 	provider, err := providers.CreateProviderForCandidate(cfg, providerName)
 	if err != nil {
-		log.Printf("[WARN] Failed to create provider '%s' for agent, falling back to default: %v", providerName, err)
+		logger.WarnCF("agent", "Failed to create provider for agent, falling back to default",
+			map[string]interface{}{
+				"provider": providerName,
+				"error":    err.Error(),
+			})
 		// Fallback: try to create default provider
 		provider, err = providers.CreateProvider(cfg)
 		if err != nil {
-			log.Printf("[ERROR] Failed to create any provider: %v", err)
+			logger.ErrorCF("agent", "Failed to create any provider",
+				map[string]interface{}{
+					"error": err.Error(),
+				})
 			provider = nil
 		}
 	}
@@ -261,14 +272,24 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 
 // resolveAgentModel resolves the primary model for an agent.
 func resolveAgentModel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults, cfg *config.Config) string {
-	log.Printf("[DEBUG] resolveAgentModel: defaults.Model=%s, defaults.Provider=%s", defaults.Model, defaults.Provider)
+	logger.DebugCF("agent", "Resolving agent model",
+		map[string]interface{}{
+			"defaults_model":    defaults.Model,
+			"defaults_provider": defaults.Provider,
+		})
 	if agentCfg != nil && agentCfg.Model != nil && strings.TrimSpace(agentCfg.Model.Primary) != "" {
 		resolved := cfg.Providers.ResolveModelAlias(strings.TrimSpace(agentCfg.Model.Primary), defaults.Provider)
-		log.Printf("[DEBUG] resolveAgentModel: resolved=%s", resolved)
+		logger.DebugCF("agent", "Agent model resolved",
+			map[string]interface{}{
+				"resolved": resolved,
+			})
 		return resolved
 	}
 	resolved := cfg.Providers.ResolveModelAlias(defaults.Model, defaults.Provider)
-	log.Printf("[DEBUG] resolveAgentModel: resolved=%s", resolved)
+	logger.DebugCF("agent", "Agent model resolved (defaults)",
+		map[string]interface{}{
+			"resolved": resolved,
+		})
 	return resolved
 }
 

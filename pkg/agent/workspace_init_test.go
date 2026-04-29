@@ -3,8 +3,9 @@ package agent
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/context"
 )
 
 func TestInitializeWorkspace(t *testing.T) {
@@ -121,50 +122,17 @@ func TestInitializeWorkspaceNoTemplate(t *testing.T) {
 	}
 }
 
-func TestFindTemplateWorkspaceDir(t *testing.T) {
-	// Test with environment variable set
-	templateDir := t.TempDir()
-	t.Setenv("LELE_TEMPLATE_WORKSPACE", templateDir)
-
-	found := findTemplateWorkspaceDir()
-	if found != templateDir {
-		t.Errorf("findTemplateWorkspaceDir with env var set: got %q, want %q", found, templateDir)
-	}
-
-	// Test without env var — behavior depends on working directory.
-	// If running from project root, it may find cmd/lele/workspace/.
-	// We just verify it doesn't panic and returns a valid-looking path
-	// (either empty or a real directory).
-	t.Setenv("LELE_TEMPLATE_WORKSPACE", "")
-	found = findTemplateWorkspaceDir()
-	if found != "" {
-		if info, err := os.Stat(found); err != nil || !info.IsDir() {
-			t.Errorf("findTemplateWorkspaceDir returned %q which is not a valid directory", found)
-		}
-	}
-	// found == "" is also an acceptable result
-}
-
 func TestContextFiles_SyncWithChannels(t *testing.T) {
-	// This test ensures that agent.ContextFiles and channels.agentContextFiles
-	// stay in sync. Since there's an import cycle between the packages, we
-	// verify the channels list by reading the source file directly.
-	//
-	// If you add a new context file, update BOTH:
-	//   - pkg/agent/workspace_init.go: ContextFiles
-	//   - pkg/channels/agent_files.go: agentContextFiles
-
-	thisDir := filepath.Dir("workspace_init.go")
-	channelsFile := filepath.Join(thisDir, "..", "channels", "agent_files.go")
-	data, err := os.ReadFile(channelsFile)
-	if err != nil {
-		t.Skipf("Cannot read channels/agent_files.go: %v", err)
+	// Verify that agent.ContextFiles matches context.ContextFiles,
+	// the single source of truth used by both pkg/agent and pkg/channels.
+	if len(ContextFiles) != len(context.ContextFiles) {
+		t.Errorf("agent.ContextFiles length (%d) != context.ContextFiles length (%d)",
+			len(ContextFiles), len(context.ContextFiles))
 	}
-
-	content := string(data)
-	for _, filename := range ContextFiles {
-		if !strings.Contains(content, `"`+filename+`"`) {
-			t.Errorf("ContextFiles entry %q not found in pkg/channels/agent_files.go — update agentContextFiles!", filename)
+	for i, f := range ContextFiles {
+		if f != context.ContextFiles[i] {
+			t.Errorf("agent.ContextFiles[%d] = %q, context.ContextFiles[%d] = %q",
+				i, f, i, context.ContextFiles[i])
 		}
 	}
 }

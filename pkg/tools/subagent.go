@@ -356,6 +356,11 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 	taskID := fmt.Sprintf("subagent-%d", sm.nextID)
 	sm.nextID++
 
+	originSessionKey := originChannel + ":" + originChatID
+	if strings.HasPrefix(originChatID, originChannel+":") {
+		originSessionKey = originChatID
+	}
+
 	subagentTask := &SubagentTask{
 		ID:               taskID,
 		Task:             task,
@@ -363,7 +368,7 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 		AgentID:          agentID,
 		OriginChannel:    originChannel,
 		OriginChatID:     originChatID,
-		OriginSessionKey: originChatID,
+		OriginSessionKey: originSessionKey,
 		Status:           SubagentStatusRunning,
 		Created:          time.Now().UnixMilli(),
 		Updated:          time.Now().UnixMilli(),
@@ -435,11 +440,12 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
+		// Always use the agent's model and provider from its config, even if context is empty.
+		agentModel = ctxInfo.Model
+		agentProvider = ctxInfo.Provider
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
-			agentModel = ctxInfo.Model
-			agentProvider = ctxInfo.Provider
 			if agentName == "" {
 				agentName = agentID
 			}
@@ -746,7 +752,24 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	temperature := sm.temperature
 	hasMaxTokens := sm.hasMaxTokens
 	hasTemperature := sm.hasTemperature
+	getContextInfo := sm.getAgentContext
 	sm.mu.RUnlock()
+
+	// Resolve provider and model from the agent's config via callback.
+	// This ensures the subagent uses the same model/provider as the parent agent,
+	// not the manager's defaults.
+	agentProvider := sm.provider
+	agentModel := sm.defaultModel
+	if getContextInfo != nil {
+		// Pass empty agentID to use the parent agent's config (fallback behavior)
+		ctxInfo := getContextInfo("")
+		if ctxInfo.Model != "" {
+			agentModel = ctxInfo.Model
+		}
+		if ctxInfo.Provider != nil {
+			agentProvider = ctxInfo.Provider
+		}
+	}
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -767,8 +790,8 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
-		Model:         sm.defaultModel,
+		Provider:      agentProvider,
+		Model:         agentModel,
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,

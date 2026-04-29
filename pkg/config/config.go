@@ -596,6 +596,7 @@ func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, pr
 		if resolved != "" {
 			return resolved, true
 		}
+		return model, true
 	}
 
 	normalizedModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))

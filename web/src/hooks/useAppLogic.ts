@@ -157,9 +157,10 @@ export function useAppLogic(
 
     const alreadySubscribed = subscribedSessionRef.current === sessionsHook.currentSessionKey
     if (!alreadySubscribed) {
-      if (subscribedSessionRef.current) {
-        wsSend('unsubscribe', { session_key: subscribedSessionRef.current })
-      }
+      // Don't unsubscribe from previous sessions — the backend manages stale
+      // subscriptions via TTL, so we avoid unnecessary unsub/resub chatter and
+      // keep receiving background events (e.g., message.complete) for sessions
+      // that are still processing.
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
       subscribedSessionRef.current = sessionsHook.currentSessionKey
     }

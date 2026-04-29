@@ -7,6 +7,7 @@ import type {
   AuthRefreshResponse,
   AuthSession,
   AuthStatusResponse,
+  AvailableSkillsResponse,
   ChannelsResponse,
   ChatSessionsResponse,
   ConfigResponse,
@@ -25,6 +26,9 @@ import type {
   SessionModelResponse,
   SessionNameResponse,
   SessionThinkingResponse,
+  SkillInstallResponse,
+  SkillRemoveResponse,
+  SkillsResponse,
   SystemStatus,
   ToolsResponse,
 } from '../../lib/types'
@@ -308,6 +312,16 @@ export const createApiClient = (baseUrl: string) => {
     tools: () => request<ToolsResponse>(endpoints.system.tools, { method: 'GET' }),
     channels: () => request<ChannelsResponse>(endpoints.system.channels, { method: 'GET' }),
     systemStatus: () => request<SystemStatus>(endpoints.system.status, { method: 'GET' }),
+    skills: () => request<SkillsResponse>(endpoints.skills.list, { method: 'GET' }),
+    availableSkills: () =>
+      request<AvailableSkillsResponse>(endpoints.skills.available, { method: 'GET' }),
+    installSkill: (url: string) =>
+      request<SkillInstallResponse>(endpoints.skills.install, {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    removeSkill: (name: string) =>
+      request<SkillRemoveResponse>(endpoints.skills.remove(name), { method: 'DELETE' }),
     providerModels: (providerName: string) =>
       request<ProviderModelsResponse>(endpoints.providers.models(providerName), {
         method: 'GET',

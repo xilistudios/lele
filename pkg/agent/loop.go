@@ -649,7 +649,14 @@ func (al *AgentLoop) ListAvailableAgentIDs() []string {
 
 // SetSessionAgent sets the active agent for a specific session (implements AgentProvidable).
 func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
-	al.sessionAgents.Store(al.ResolveSessionKey(sessionKey), agentID)
+	resolvedKey := al.ResolveSessionKey(sessionKey)
+	currentAgentID := al.GetSessionAgent(sessionKey)
+	if currentAgentID == agentID {
+		return
+	}
+	al.sessionAgents.Store(resolvedKey, agentID)
+	// Clear the session model override so the new agent's default model is used
+	al.sessionModels.Delete(resolvedKey)
 }
 
 // GetSessionAgent gets the active agent for a session (implements AgentProvidable).

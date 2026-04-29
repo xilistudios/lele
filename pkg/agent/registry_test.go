@@ -294,3 +294,108 @@ func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
 		t.Error("expected new agent instance when model changed, got same instance")
 	}
 }
+
+func TestAgentConfigChanged_Temperature(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+
+	// Change temperature via agent config
+	temp := 0.3
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true, Temperature: &temp},
+	})
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Error("expected new agent instance when temperature changed, got same instance")
+	}
+	if reloaded.Temperature != 0.3 {
+		t.Errorf("expected temperature 0.3, got %v", reloaded.Temperature)
+	}
+}
+
+func TestAgentConfigChanged_Fallbacks(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+
+	// Change fallbacks via agent model config
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{
+			Primary:   "testprovider/test-model",
+			Fallbacks: []string{"testprovider/fallback-model"},
+		}},
+	})
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Error("expected new agent instance when fallbacks changed, got same instance")
+	}
+	if len(reloaded.Fallbacks) != 1 || reloaded.Fallbacks[0] != "testprovider/fallback-model" {
+		t.Errorf("expected fallbacks [testprovider/fallback-model], got %v", reloaded.Fallbacks)
+	}
+}
+
+func TestAgentConfigChanged_ContextWindow(t *testing.T) {
+	cfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	// Add a model config with a specific context window
+	cfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "test-key",
+			APIBase: "https://test.example.com/v1",
+		},
+		Models: map[string]config.ProviderModelConfig{
+			"test-model": {
+				ContextWindow: 64000,
+			},
+			"different-model": {
+				ContextWindow: 256000,
+			},
+		},
+	}
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+
+	if original.ContextWindow != 64000 {
+		t.Fatalf("expected initial context window 64000, got %d", original.ContextWindow)
+	}
+
+	// Change model to one with a different context window
+	newCfg := testCfg([]config.AgentConfig{
+		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
+	})
+	newCfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
+		Type: "openai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey:  "test-key",
+			APIBase: "https://test.example.com/v1",
+		},
+		Models: map[string]config.ProviderModelConfig{
+			"test-model": {
+				ContextWindow: 64000,
+			},
+			"different-model": {
+				ContextWindow: 256000,
+			},
+		},
+	}
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Error("expected new agent instance when context window changed, got same instance")
+	}
+	if reloaded.ContextWindow != 256000 {
+		t.Errorf("expected context window 256000, got %d", reloaded.ContextWindow)
+	}
+}

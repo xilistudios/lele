@@ -425,5 +425,36 @@
     "spi": "SPI",
     "readImage": "Leyendo imagen",
     "genericAction": "Acción"
+  },
+  "sidebar": {
+    "agents": "Agentes",
+    "providers": "Proveedores",
+    "skills": "Habilidades",
+    "navigation": "Navegación"
+  },
+  "skills": {
+    "title": "Habilidades",
+    "installed": "instaladas",
+    "noSkills": "No hay habilidades instaladas",
+    "noSkillsDesc": "Instala habilidades para extender las capacidades de tu agente",
+    "installSkill": "Instalar habilidad",
+    "removeSkill": "Eliminar",
+    "removeConfirmYes": "Sí, eliminar",
+    "removeConfirmNo": "No",
+    "browse": "Explorar",
+    "availableSkills": "Habilidades disponibles",
+    "noAvailableSkills": "No se encontraron habilidades disponibles",
+    "noSearchResults": "Ninguna habilidad coincide con tu búsqueda",
+    "searchSkills": "Buscar habilidades...",
+    "installFromUrl": "Instalar desde URL",
+    "githubRepo": "Repositorio de GitHub",
+    "githubRepoHint": "ej. sipeed/lele-skills/weather",
+    "install": "Instalar",
+    "installing": "Instalando...",
+    "source": {
+      "workspace": "Workspace",
+      "global": "Global",
+      "builtin": "Integrado"
+    }
   }
 }

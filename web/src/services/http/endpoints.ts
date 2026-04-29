@@ -40,4 +40,10 @@ export const endpoints = {
   files: {
     upload: '/api/v1/files/upload',
   },
+  skills: {
+    list: '/api/v1/skills',
+    available: '/api/v1/skills/available',
+    install: '/api/v1/skills',
+    remove: (name: string) => `/api/v1/skills/${encodeURIComponent(name)}`,
+  },
 } as const
