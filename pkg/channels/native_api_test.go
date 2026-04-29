@@ -203,6 +203,18 @@ func (m *nativeTestAgentLoop) GetCurrentContextUsage(sessionKey string) (int, in
 	return 0, 128000
 }
 
+func (m *nativeTestAgentLoop) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
+	return "", nil
+}
+
+func (m *nativeTestAgentLoop) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
+	return "", nil
+}
+
+func (m *nativeTestAgentLoop) ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error) {
+	return "HEARTBEAT_OK", nil
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop

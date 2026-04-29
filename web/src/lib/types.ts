@@ -623,8 +623,6 @@ export type FileUploadResponse = {
   files: UploadedFile[]
 }
 
-
-
 export type ClientEvent =
   | {
       event: 'welcome'

@@ -1,22 +1,22 @@
-import { useState } from "react";
-import { useSettings } from "../../../../contexts/SettingsContext";
-import type { EditableAgentConfig } from "../../../../lib/types";
-import { Modal } from "../../../atoms";
-import { BasicInfoStep } from "./BasicInfoStep";
-import { BehaviorStep } from "./BehaviorStep";
-import { ModelStep } from "./ModelStep";
-import { SkillsStep } from "./SkillsStep";
-import { StepIndicator } from "./StepIndicator";
+import { useState } from 'react'
+import { useSettings } from '../../../../contexts/SettingsContext'
+import type { EditableAgentConfig } from '../../../../lib/types'
+import { Modal } from '../../../atoms'
+import { BasicInfoStep } from './BasicInfoStep'
+import { BehaviorStep } from './BehaviorStep'
+import { ModelStep } from './ModelStep'
+import { SkillsStep } from './SkillsStep'
+import { StepIndicator } from './StepIndicator'
 
 type Props = {
-  isOpen: boolean;
-  onClose: () => void;
-};
+  isOpen: boolean
+  onClose: () => void
+}
 
 const STEPS = [
   {
     id: 1,
-    title: "settings.addAgentModal.stepBasicInfoTitle",
+    title: 'settings.addAgentModal.stepBasicInfoTitle',
     icon: (
       <svg
         width="18"
@@ -33,7 +33,7 @@ const STEPS = [
   },
   {
     id: 2,
-    title: "settings.addAgentModal.stepModelTitle",
+    title: 'settings.addAgentModal.stepModelTitle',
     icon: (
       <svg
         width="18"
@@ -51,7 +51,7 @@ const STEPS = [
   },
   {
     id: 3,
-    title: "settings.addAgentModal.stepBehaviorTitle",
+    title: 'settings.addAgentModal.stepBehaviorTitle',
     icon: (
       <svg
         width="18"
@@ -68,7 +68,7 @@ const STEPS = [
   },
   {
     id: 4,
-    title: "settings.addAgentModal.stepSkillsTitle",
+    title: 'settings.addAgentModal.stepSkillsTitle',
     icon: (
       <svg
         width="18"
@@ -82,56 +82,56 @@ const STEPS = [
       </svg>
     ),
   },
-];
+]
 
 export function AddAgentModal({ isOpen, onClose }: Props) {
-  const { draftConfig, updateField, t } = useSettings();
+  const { draftConfig, updateField, t } = useSettings()
 
-  const [step, setStep] = useState(1);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [step, setStep] = useState(1)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Form state
-  const [agentId, setAgentId] = useState("");
-  const [agentName, setAgentName] = useState("");
-  const [isDefault, setIsDefault] = useState(false);
-  const [primaryModel, setPrimaryModel] = useState("");
-  const [fallbacks, setFallbacks] = useState<string[]>([]);
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxIterations, setMaxIterations] = useState(10);
-  const [maxTokens, setMaxTokens] = useState(4096);
-  const [contextWindow, setContextWindow] = useState(128000);
-  const [enableThinking, setEnableThinking] = useState(false);
-  const [supportsImages, setSupportsImages] = useState(false);
-  const [skills, setSkills] = useState<string[]>([]);
+  const [agentId, setAgentId] = useState('')
+  const [agentName, setAgentName] = useState('')
+  const [isDefault, setIsDefault] = useState(false)
+  const [primaryModel, setPrimaryModel] = useState('')
+  const [fallbacks, setFallbacks] = useState<string[]>([])
+  const [temperature, setTemperature] = useState(0.7)
+  const [maxIterations, setMaxIterations] = useState(10)
+  const [maxTokens, setMaxTokens] = useState(4096)
+  const [contextWindow, setContextWindow] = useState(128000)
+  const [enableThinking, setEnableThinking] = useState(false)
+  const [supportsImages, setSupportsImages] = useState(false)
+  const [skills, setSkills] = useState<string[]>([])
 
   const resetForm = () => {
-    setStep(1);
-    setIsSubmitting(false);
-    setAgentId("");
-    setAgentName("");
-    setIsDefault(false);
-    setPrimaryModel("");
-    setFallbacks([]);
-    setTemperature(0.7);
-    setMaxIterations(10);
-    setMaxTokens(4096);
-    setContextWindow(128000);
-    setEnableThinking(false);
-    setSupportsImages(false);
-    setSkills([]);
-  };
+    setStep(1)
+    setIsSubmitting(false)
+    setAgentId('')
+    setAgentName('')
+    setIsDefault(false)
+    setPrimaryModel('')
+    setFallbacks([])
+    setTemperature(0.7)
+    setMaxIterations(10)
+    setMaxTokens(4096)
+    setContextWindow(128000)
+    setEnableThinking(false)
+    setSupportsImages(false)
+    setSkills([])
+  }
 
   const handleClose = () => {
-    resetForm();
-    onClose();
-  };
+    resetForm()
+    onClose()
+  }
 
   const handleAdd = async () => {
-    if (!draftConfig || !agentId.trim() || isDuplicate) return;
+    if (!draftConfig || !agentId.trim() || isDuplicate) return
 
-    setIsSubmitting(true);
+    setIsSubmitting(true)
 
-    const list = draftConfig.agents.list || [];
+    const list = draftConfig.agents.list || []
 
     const newAgent: EditableAgentConfig = {
       id: agentId.trim(),
@@ -144,8 +144,8 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
             fallbacks: fallbacks.length > 0 ? fallbacks : undefined,
           }
         : fallbacks.length > 0
-        ? { fallbacks }
-        : undefined,
+          ? { fallbacks }
+          : undefined,
       temperature: temperature !== 0.7 ? temperature : undefined,
       skills: skills.length > 0 ? skills : undefined,
       reasoning: enableThinking ? { enable: true } : undefined,
@@ -153,53 +153,51 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
       max_tokens: maxTokens !== 4096 ? maxTokens : undefined,
       context_window: contextWindow !== 128000 ? contextWindow : undefined,
       supports_images: supportsImages || undefined,
-    };
+    }
 
-    updateField("agents.list", [...list, newAgent]);
+    updateField('agents.list', [...list, newAgent])
 
     // Small delay for visual feedback
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 300))
 
-    handleClose();
-  };
+    handleClose()
+  }
 
-  const canProceedStep1 = agentId.trim() !== "";
-  const isDuplicate = (draftConfig?.agents.list || []).some(
-    (a) => a.id === agentId.trim()
-  );
-  const canAdd = canProceedStep1 && !isDuplicate;
+  const canProceedStep1 = agentId.trim() !== ''
+  const isDuplicate = (draftConfig?.agents.list || []).some((a) => a.id === agentId.trim())
+  const canAdd = canProceedStep1 && !isDuplicate
 
   const handleStepClick = (targetStep: number) => {
     // Only allow going back or to next available step
     if (targetStep <= step || (targetStep === step + 1 && canProceedStep1)) {
-      setStep(targetStep);
+      setStep(targetStep)
     }
-  };
+  }
 
   const handleNext = () => {
     if (step < STEPS.length) {
-      setStep(step + 1);
+      setStep(step + 1)
     }
-  };
+  }
 
   const handleBack = () => {
     if (step > 1) {
-      setStep(step - 1);
+      setStep(step - 1)
     }
-  };
+  }
 
   const tipKey = [
-    "settings.addAgentModal.tipIdentity",
-    "settings.addAgentModal.tipModel",
-    "settings.addAgentModal.tipBehavior",
-    "settings.addAgentModal.tipSkills",
-  ][step - 1];
+    'settings.addAgentModal.tipIdentity',
+    'settings.addAgentModal.tipModel',
+    'settings.addAgentModal.tipBehavior',
+    'settings.addAgentModal.tipSkills',
+  ][step - 1]
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={t("settings.addAgentModal.title")}
+      title={t('settings.addAgentModal.title')}
       size="md"
     >
       <div className="flex gap-6 p-6">
@@ -253,9 +251,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                   setSupportsImages={setSupportsImages}
                 />
               )}
-              {step === 4 && (
-                <SkillsStep skills={skills} setSkills={setSkills} />
-              )}
+              {step === 4 && <SkillsStep skills={skills} setSkills={setSkills} />}
             </div>
           </div>
 
@@ -279,7 +275,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
               >
                 <polyline points="15 18 9 12 15 6" />
               </svg>
-              {t("settings.addAgentModal.back")}
+              {t('settings.addAgentModal.back')}
             </button>
 
             {step < STEPS.length ? (
@@ -291,7 +287,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                   bg-blue-600 text-white hover:bg-blue-500
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {t("settings.addAgentModal.next")}
+                {t('settings.addAgentModal.next')}
                 <svg
                   width="16"
                   height="16"
@@ -321,15 +317,9 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                       stroke="currentColor"
                       strokeWidth="2"
                     >
-                      <circle
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        strokeDasharray="60"
-                        strokeDashoffset="10"
-                      />
+                      <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="10" />
                     </svg>
-                    {t("settings.addAgentModal.creating")}
+                    {t('settings.addAgentModal.creating')}
                   </>
                 ) : (
                   <>
@@ -343,7 +333,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                     >
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
-                    {t("settings.addAgentModal.add")}
+                    {t('settings.addAgentModal.add')}
                   </>
                 )}
               </button>
@@ -352,5 +342,5 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
         </div>
       </div>
     </Modal>
-  );
+  )
 }

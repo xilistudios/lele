@@ -61,9 +61,11 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
             <path d="M17 5v.01" />
           </svg>
         </div>
-        <h3 className="text-sm font-medium text-text-primary">{t('skills.noSkills', 'No skills installed')}</h3>
+        <h3 className="text-sm font-medium text-text-primary">
+          {t('skills.noSkills', 'No skills installed')}
+        </h3>
         <p className="mt-1 text-xs text-text-secondary max-w-sm">
-          {t('skills.noSkillsDesc', 'Install skills to extend your agent\'s capabilities')}
+          {t('skills.noSkillsDesc', "Install skills to extend your agent's capabilities")}
         </p>
       </div>
     )
@@ -159,7 +161,9 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
               </span>
             )}
             <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
-              <span className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-emerald-400' : 'bg-slate-400'}`}
+              />
               {skill.installed ? t('common.enabled') : t('common.disabled')}
             </span>
           </div>

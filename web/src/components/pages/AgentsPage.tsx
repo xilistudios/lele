@@ -1,5 +1,5 @@
-import { AgentsSettings } from '../organisms/settings'
 import { EntitySettingsPage } from '../molecules/EntitySettingsPage'
+import { AgentsSettings } from '../organisms/settings'
 
 export function AgentsPage() {
   return (

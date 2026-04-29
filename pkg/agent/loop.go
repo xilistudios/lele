@@ -10,11 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
@@ -40,11 +38,8 @@ type AgentLoop struct {
 	sessionThinking   sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
 	fallback          *providers.FallbackChain
 	channelManager    *channels.Manager
-	subagents         map[string]*tools.SubagentManager
 	verboseManager    *session.VerboseManager
-	sessionCancels    sync.Map // sessionKey -> context.CancelFunc
 	sessionKeySeq     atomic.Uint64
-	sessionCancelSeq  atomic.Uint64
 	approvalManager   *channels.ApprovalManager // Manager for command approvals
 	sessionProcessing sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
 	wg                sync.WaitGroup            // tracks in-flight message goroutines
@@ -55,6 +50,7 @@ type AgentLoop struct {
 	commandHandler   commandHandler
 	sessionManager   sessionManager
 	toolCoordinator  toolCoordinator
+	providable       *agentProvidableImpl // AgentProvidable interface implementation
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -74,9 +70,27 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	al.cfgPtr.Store(cfg)
 }
 
+// ResolveSessionKey resolves the session key alias if one exists.
+// For Native channel sessions with timestamp (native:clientId:number), skip alias
+// resolution since the frontend manages these directly and they shouldn't have aliases.
 func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	if sessionKey == "" {
 		return ""
+	}
+	if strings.HasPrefix(sessionKey, "native:") {
+		parts := strings.Split(sessionKey[7:], ":")
+		if len(parts) == 2 && parts[1] != "" {
+			allDigits := true
+			for _, c := range parts[1] {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				return sessionKey
+			}
+		}
 	}
 	if active, ok := al.sessionAliases.Load(sessionKey); ok {
 		if resolved, ok := active.(string); ok && resolved != "" {
@@ -86,19 +100,36 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	return sessionKey
 }
 
+// GetSubagentParentSessionKey returns the parent session key for a subagent session.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	if !strings.HasPrefix(sessionKey, "subagent:") {
 		return ""
 	}
 	taskID := strings.TrimPrefix(sessionKey, "subagent:")
 	if al.toolCoordinator == nil {
+		logger.WarnCF("agent", "GetSubagentParentSessionKey: toolCoordinator is nil", map[string]interface{}{
+			"session_key": sessionKey,
+		})
 		return ""
 	}
 	task, ok := al.toolCoordinator.getSubagentTask(taskID)
 	if !ok || task == nil {
+		logger.WarnCF("agent", "GetSubagentParentSessionKey: task not found", map[string]interface{}{
+			"session_key": sessionKey,
+			"task_id":     taskID,
+		})
 		return ""
 	}
-	return al.ResolveSessionKey(task.OriginSessionKey)
+	resolved := al.ResolveSessionKey(task.OriginSessionKey)
+	logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved", map[string]interface{}{
+		"session_key":        sessionKey,
+		"task_id":            taskID,
+		"origin_session_key": task.OriginSessionKey,
+		"origin_channel":     task.OriginChannel,
+		"origin_chat_id":     task.OriginChatID,
+		"resolved_parent":    resolved,
+	})
+	return resolved
 }
 
 func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
@@ -114,6 +145,45 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		return ""
 	}
 
+	var sessionAgent *AgentInstance
+	if agentID != "" {
+		if a, ok := al.registry.GetAgent(agentID); ok {
+			sessionAgent = a
+		}
+	}
+	if sessionAgent == nil {
+		sessionAgent = al.registry.GetDefaultAgent()
+	}
+
+	if strings.HasPrefix(baseSessionKey, "native:") {
+		parts := strings.Split(baseSessionKey[7:], ":")
+		if len(parts) == 2 && parts[1] != "" {
+			allDigits := true
+			for _, c := range parts[1] {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				if sessionAgent != nil {
+					sessionAgent.Sessions.GetOrCreate(baseSessionKey)
+					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
+					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
+					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
+				}
+				if agentID != "" {
+					al.sessionAgents.Store(baseSessionKey, agentID)
+				}
+				if model != "" {
+					al.sessionModels.Store(baseSessionKey, model)
+				}
+				al.sessionThinking.Delete(baseSessionKey)
+				return baseSessionKey
+			}
+		}
+	}
+
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
 	al.sessionAliases.Store(baseSessionKey, newSessionKey)
 
@@ -125,24 +195,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	}
 	al.sessionThinking.Delete(newSessionKey)
 
-	// Reset token counts for the new session to ensure clean state.
-	// Get the agent for this session to access its session manager.
-	var sessionAgent *AgentInstance
-	if agentID != "" {
-		if a, ok := al.registry.GetAgent(agentID); ok {
-			sessionAgent = a
-		}
-	}
-	if sessionAgent == nil {
-		sessionAgent = al.registry.GetDefaultAgent()
-	}
 	if sessionAgent != nil {
-		// GetOrCreate ensures the session exists before resetting tokens.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
-		// Clear any existing history to ensure a truly fresh conversation.
 		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
-		// Also clear any summary from previous sessions.
 		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
@@ -165,48 +221,6 @@ type processOptions struct {
 	SkipUserMessage bool
 }
 
-type sessionCancelGroup struct {
-	mu      sync.Mutex
-	cancels map[uint64]context.CancelFunc
-}
-
-func newSessionCancelGroup() *sessionCancelGroup {
-	return &sessionCancelGroup{
-		cancels: make(map[uint64]context.CancelFunc),
-	}
-}
-
-func (scg *sessionCancelGroup) add(id uint64, cancel context.CancelFunc) {
-	scg.mu.Lock()
-	defer scg.mu.Unlock()
-	scg.cancels[id] = cancel
-}
-
-func (scg *sessionCancelGroup) remove(id uint64) bool {
-	scg.mu.Lock()
-	defer scg.mu.Unlock()
-	delete(scg.cancels, id)
-	return len(scg.cancels) == 0
-}
-
-func (scg *sessionCancelGroup) cancelAll() int {
-	scg.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(scg.cancels))
-	for id, cancel := range scg.cancels {
-		delete(scg.cancels, id)
-		if cancel != nil {
-			cancels = append(cancels, cancel)
-		}
-	}
-	scg.mu.Unlock()
-
-	for _, cancel := range cancels {
-		cancel()
-	}
-
-	return len(cancels)
-}
-
 // SummarizeStats contains statistics about a summarization operation.
 type SummarizeStats struct {
 	BeforeMessages  int
@@ -223,9 +237,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	// Create approval manager early so it can be passed to tools during registration
 	approvalManager := channels.NewApprovalManager()
-
-	// Register shared tools to all agents (each agent uses its own provider)
-	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
 
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
@@ -268,7 +279,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		state:           stateManager,
 		summarizing:     sync.Map{},
 		fallback:        fallbackChain,
-		subagents:       subagents,
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
 	}
@@ -279,150 +289,29 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	loop.llmRunner = newLLMRunner(loop)
 	loop.commandHandler = newCommandHandler(loop)
 	loop.sessionManager = newSessionManager(loop)
-	loop.toolCoordinator = newToolCoordinator(loop)
+
+	// Register shared tools and create tool coordinator with subagents
+	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
+	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents)
+	loop.providable = newAgentProvidable(loop)
 
 	return loop
 }
 
+// GetProvidable returns the AgentProvidable interface implementation.
+// This is used by channel managers to access agent capabilities.
+func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
+	return al.providable
+}
+
+// registerSessionCancel delegates to sessionManager.
 func (al *AgentLoop) registerSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
-	if sessionKey == "" || cancel == nil {
-		return func() {}
-	}
-
-	id := al.sessionCancelSeq.Add(1)
-	rawGroup, _ := al.sessionCancels.LoadOrStore(sessionKey, newSessionCancelGroup())
-	group, ok := rawGroup.(*sessionCancelGroup)
-	if !ok || group == nil {
-		group = newSessionCancelGroup()
-		al.sessionCancels.Store(sessionKey, group)
-	}
-	group.add(id, cancel)
-
-	return func() {
-		cancel()
-		if !group.remove(id) {
-			return
-		}
-		if current, ok := al.sessionCancels.Load(sessionKey); ok && current == group {
-			al.sessionCancels.Delete(sessionKey)
-		}
-	}
+	return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
 }
 
+// cancelSession delegates to sessionManager.
 func (al *AgentLoop) cancelSession(sessionKey string) int {
-	if sessionKey == "" {
-		return 0
-	}
-
-	rawGroup, ok := al.sessionCancels.Load(sessionKey)
-	if !ok {
-		return 0
-	}
-
-	switch entry := rawGroup.(type) {
-	case *sessionCancelGroup:
-		stopped := entry.cancelAll()
-		al.sessionCancels.Delete(sessionKey)
-		return stopped
-	case context.CancelFunc:
-		if entry != nil {
-			entry()
-		}
-		al.sessionCancels.Delete(sessionKey)
-		return 1
-	default:
-		al.sessionCancels.Delete(sessionKey)
-		return 0
-	}
-}
-
-// registerSharedTools registers tools that are shared across all agents (web, message, spawn).
-// Each agent uses its own provider for subagent spawning.
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
-	subagents := make(map[string]*tools.SubagentManager)
-	for _, agentID := range registry.ListAgentIDs() {
-		agent, ok := registry.GetAgent(agentID)
-		if !ok {
-			continue
-		}
-
-		// Web tools
-		if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
-			BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
-			BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
-			BraveEnabled:         cfg.Tools.Web.Brave.Enabled,
-			DuckDuckGoMaxResults: cfg.Tools.Web.DuckDuckGo.MaxResults,
-			DuckDuckGoEnabled:    cfg.Tools.Web.DuckDuckGo.Enabled,
-			PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
-			PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
-			PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
-		}); searchTool != nil {
-			agent.Tools.Register(searchTool)
-		}
-		agent.Tools.Register(tools.NewWebFetchTool(50000))
-
-		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
-		agent.Tools.Register(tools.NewI2CTool())
-		agent.Tools.Register(tools.NewSPITool())
-
-		// File tool
-		sendFileTool := tools.NewSendFileTool()
-		sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
-			msgBus.PublishOutbound(bus.OutboundMessage{
-				Channel:     channel,
-				ChatID:      chatID,
-				Content:     payload.Content,
-				Attachments: payload.Attachments,
-			})
-			return nil
-		})
-		agent.Tools.Register(sendFileTool)
-
-		// Shell/Exec tool with approval support
-		execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
-		if approvalManager != nil {
-			execTool.SetApprovalMode(true)
-		}
-		agent.Tools.Register(execTool)
-
-		// Spawn tool with allowlist checker - use agent's own provider
-		subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
-		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-		subagentManager.SetMaxIterations(agent.MaxIterations)
-		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
-		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
-			if targetAgent, ok := registry.GetAgent(agentID); ok {
-				return tools.AgentContextInfo{
-					Context:   targetAgent.ContextBuilder.GetInitialContext(),
-					Workspace: targetAgent.Workspace,
-					Name:      targetAgent.Name,
-					Model:     targetAgent.Model,
-					Provider:  targetAgent.Provider,
-				}
-			}
-			// Fallback: use parent agent's context if agent not found
-			return tools.AgentContextInfo{
-				Context:   agent.ContextBuilder.GetInitialContext(),
-				Workspace: agent.Workspace,
-				Name:      agent.Name,
-				Model:     agent.Model,
-				Provider:  agent.Provider,
-			}
-		})
-		spawnTool := tools.NewSpawnTool(subagentManager)
-		subagents[agentID] = subagentManager
-		currentAgentID := agentID
-		spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
-			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
-		})
-		agent.Tools.Register(spawnTool)
-		subagentManager.SetTools(agent.Tools.CloneWithout("send_file"))
-		subagentManager.SetSessionRecorder(agent.Sessions)
-
-		// Update context builder with the complete tools registry
-		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
-	}
-	return subagents
+	return al.sessionManager.CancelSession(sessionKey)
 }
 
 // Run starts the main agent loop.
@@ -492,13 +381,6 @@ func (al *AgentLoop) SetApprovalManager(am *channels.ApprovalManager) {
 	al.approvalManager = am
 }
 
-// IsSessionProcessing returns true if there is an active LLM processing loop for the given session.
-func (al *AgentLoop) IsSessionProcessing(sessionKey string) bool {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	_, ok := al.sessionCancels.Load(sessionKey)
-	return ok
-}
-
 // RecordLastChannel records the last active channel for this workspace.
 // This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChannel(channel string) error {
@@ -517,381 +399,42 @@ func (al *AgentLoop) RecordLastChatID(chatID string) error {
 	return al.state.SetLastChatID(chatID)
 }
 
-// RegisterTool registers a tool to all agents.
-func (al *AgentLoop) RegisterTool(tool tools.Tool) {
-	for _, agentID := range al.registry.ListAgentIDs() {
-		if agent, ok := al.registry.GetAgent(agentID); ok {
-			agent.Tools.Register(tool)
-		}
-	}
-}
-
 // ============================================================================
-// AgentProvidable Interface Implementation
+// Internal Methods (for use by components within this package)
 // ============================================================================
 
-// GetAgentInfo returns basic agent info for the UI (implements AgentProvidable).
-func (al *AgentLoop) GetAgentInfo(agentID string) (channels.AgentBasicInfo, bool) {
-	agent, ok := al.registry.GetAgent(agentID)
-	if !ok {
-		return channels.AgentBasicInfo{}, false
-	}
-	return channels.AgentBasicInfo{
-		ID:             agent.ID,
-		Name:           agent.Name,
-		Model:          agent.Model,
-		Workspace:      agent.Workspace,
-		MaxIterations:  agent.MaxIterations,
-		MaxTokens:      agent.MaxTokens,
-		Temperature:    agent.Temperature,
-		Fallbacks:      agent.Fallbacks,
-		SkillsFilter:   agent.SkillsFilter,
-		Reasoning:      agent.Reasoning,
-		SupportsImages: agent.SupportsImages,
-	}, true
-}
-
-func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	agent := al.registry.GetDefaultAgent()
-	if selectedAgentID := al.GetSessionAgent(resolvedSessionKey); selectedAgentID != "" {
-		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
-			agent = selectedAgent
-		}
-	}
-	return agent
-}
-
-// GetSessionHistory returns the persisted history for a session (implements AgentProvidable).
-func (al *AgentLoop) GetSessionHistory(sessionKey string) []providers.Message {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(resolvedSessionKey)
-	if agent == nil {
-		return nil
-	}
-	return agent.Sessions.GetHistory(resolvedSessionKey)
-}
-
-// GetSessionModel returns the effective model for a session (implements AgentProvidable).
-func (al *AgentLoop) GetSessionModel(sessionKey string) string {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(resolvedSessionKey)
-	if agent == nil {
-		return ""
-	}
-	if model, ok := al.sessionModels.Load(resolvedSessionKey); ok {
-		if selected, ok := model.(string); ok && selected != "" {
-			return selected
-		}
-	}
-	return agent.Model
-}
-
-// GetSessionModelSupportsImages returns true if the session's current model supports vision.
-func (al *AgentLoop) GetSessionModelSupportsImages(sessionKey string) bool {
-	model := al.GetSessionModel(sessionKey)
-	if model == "" {
-		return false
-	}
-	agent := al.agentForSession(al.ResolveSessionKey(sessionKey))
-	if agent == nil {
-		return false
-	}
-	cfg := al.cfg()
-	providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
-	return getSupportsImages(cfg, model, providerName)
-}
-
-// SetSessionModel sets the model for a session (implements AgentProvidable).
-func (al *AgentLoop) SetSessionModel(sessionKey, model string) string {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	if resolvedSessionKey == "" {
-		return ""
-	}
-	next := al.cfg().Providers.ResolveModelAlias(model, al.cfg().Agents.Defaults.Provider)
-	al.sessionModels.Store(resolvedSessionKey, next)
-	return next
-}
-
-// ListAvailableModels returns configured model aliases for the provider backing an agent (implements AgentProvidable).
-func (al *AgentLoop) ListAvailableModels(agentID string) []string {
-	providerName := al.cfg().Agents.Defaults.Provider
-	if agentID != "" {
-		if agent, ok := al.registry.GetAgent(agentID); ok && agent != nil {
-			if ref := providers.ParseModelRef(agent.Model, al.cfg().Agents.Defaults.Provider); ref != nil {
-				providerName = ref.Provider
-			}
-		}
-	}
-
-	provider, ok := al.cfg().Providers.GetNamed(providerName)
-	if !ok || len(provider.Models) == 0 {
-		return nil
-	}
-
-	models := make([]string, 0, len(provider.Models))
-	for alias := range provider.Models {
-		models = append(models, alias)
-	}
-	sort.Strings(models)
-	return models
-}
-
-// GetConfigSnapshot returns the current configuration snapshot (implements AgentProvidable).
-func (al *AgentLoop) GetConfigSnapshot() *config.Config {
-	return al.cfg()
-}
-
-// ListAvailableAgentIDs returns the list of available agent IDs (implements AgentProvidable).
-func (al *AgentLoop) ListAvailableAgentIDs() []string {
-	return al.registry.ListAgentIDs()
-}
-
-// SetSessionAgent sets the active agent for a specific session (implements AgentProvidable).
-func (al *AgentLoop) SetSessionAgent(sessionKey, agentID string) {
-	resolvedKey := al.ResolveSessionKey(sessionKey)
-	currentAgentID := al.GetSessionAgent(sessionKey)
-	if currentAgentID == agentID {
-		return
-	}
-	al.sessionAgents.Store(resolvedKey, agentID)
-	// Clear the session model override so the new agent's default model is used
-	al.sessionModels.Delete(resolvedKey)
-}
-
-// GetSessionAgent gets the active agent for a session (implements AgentProvidable).
-func (al *AgentLoop) GetSessionAgent(sessionKey string) string {
+// getSessionAgent returns the agent ID for a session (internal use).
+func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 	sessionKey = al.ResolveSessionKey(sessionKey)
 	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
-		return agentID.(string)
-	}
-	// Return default agent
-	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
-		return defaultAgent.ID
-	}
-	return "main"
-}
-
-// GetDefaultAgentID returns the default agent ID (implements AgentProvidable).
-func (al *AgentLoop) GetDefaultAgentID() string {
-	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
-		return defaultAgent.ID
-	}
-	return "main"
-}
-
-// GetStatus returns the current status for a session (implements AgentProvidable).
-func (al *AgentLoop) GetStatus(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return "No default agent configured."
-	}
-	// Delegate to message processor for formatting
-	if mp, ok := al.messageProcessor.(*messageProcessorImpl); ok {
-		return mp.formatStatusResponse(agent, sessionKey, "telegram")
-	}
-	return "No default agent configured."
-}
-
-// StopAgent stops the agent processing for a session (implements AgentProvidable).
-func (al *AgentLoop) StopAgent(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	subagentCount := 0
-	if al.toolCoordinator != nil {
-		subagentCount = al.toolCoordinator.stopAllSubagents()
-	}
-	al.cancelSession(sessionKey)
-	if subagentCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
-	}
-	return "⏹️ Agente detenido."
-}
-
-// CompactSession compacts the session history (implements AgentProvidable).
-func (al *AgentLoop) CompactSession(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return "No default agent configured."
-	}
-
-	history := agent.Sessions.GetHistory(sessionKey)
-	if len(history) <= 4 {
-		return "📭 Not enough messages to compact (need 5+)."
-	}
-
-	stats := al.sessionManager.summarizeSession(agent, sessionKey)
-	if stats == nil {
-		return "❌ Compaction failed or nothing to compact."
-	}
-
-	return fmt.Sprintf("✅ Compacted session: %d messages → %d messages (%d tokens saved)",
-		stats.BeforeMessages, stats.AfterMessages, stats.SavedTokens)
-}
-
-func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) error {
-	previousHistory := agent.Sessions.GetHistory(sessionKey)
-	previousSummary := agent.Sessions.GetSummary(sessionKey)
-	agent.Sessions.TruncateHistory(sessionKey, 0)
-	agent.Sessions.SetSummary(sessionKey, "")
-	agent.Sessions.ResetTokenCounts(sessionKey)
-	agent.ContextBuilder.ResetSystemPromptCache(sessionKey)
-	// Clear any session-specific model and thinking overrides
-	al.sessionModels.Delete(sessionKey)
-	al.sessionThinking.Delete(sessionKey)
-	if err := agent.Sessions.Save(sessionKey); err != nil {
-		agent.Sessions.SetHistory(sessionKey, previousHistory)
-		agent.Sessions.SetSummary(sessionKey, previousSummary)
-		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
+		result := agentID.(string)
+		logger.DebugCF("agent", "getSessionAgent found in sessionAgents", map[string]interface{}{
 			"session_key": sessionKey,
-			"error":       err.Error(),
+			"agent_id":    result,
 		})
-		return err
+		return result
 	}
-	return nil
+	defaultID := "main"
+	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
+		defaultID = defaultAgent.ID
+	}
+	logger.DebugCF("agent", "getSessionAgent using default", map[string]interface{}{
+		"session_key":  sessionKey,
+		"default_id":   defaultID,
+	})
+	return defaultID
 }
 
-func (al *AgentLoop) ToggleEphemeral() string {
-	current := al.cfg().SessionEphemeralEnabled()
-	next := !current
-	if err := al.cfg().PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
-		return fmt.Sprintf("Failed to update ephemeral mode in config.json: %v", err)
+// getDefaultAgentID returns the default agent ID (internal use).
+func (al *AgentLoop) getDefaultAgentID() string {
+	if defaultAgent := al.registry.GetDefaultAgent(); defaultAgent != nil {
+		return defaultAgent.ID
 	}
-	threshold := al.cfg().SessionEphemeralThresholdSeconds()
-	if next {
-		return fmt.Sprintf("🫧 Ephemeral mode enabled. Chats idle for more than %d seconds will start a fresh session on the next message.", threshold)
-	}
-	return "🧱 Ephemeral mode disabled. Chat history will persist across inactivity again."
+	return "main"
 }
 
-// ToggleVerbose toggles verbose mode for a session (implements AgentProvidable).
-func (al *AgentLoop) ToggleVerbose(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	if sessionKey == "" {
-		return "Verbose mode requires a session context. Please start a conversation first."
-	}
-	newLevel := al.verboseManager.CycleLevel(sessionKey)
-	switch newLevel {
-	case session.VerboseOff:
-		return "🔇 Verbose mode **OFF**\nTool execution notifications are hidden."
-	case session.VerboseBasic:
-		return "🛠️ Verbose mode **BASIC**\nYou will see simplified tool execution notifications."
-	case session.VerboseFull:
-		return "📋 Verbose mode **FULL**\nYou will see detailed tool execution and results."
-	}
-	return "Unknown verbose level"
-}
-
-// GetVerboseLevel returns the current verbose level for a session (implements AgentProvidable).
-func (al *AgentLoop) GetVerboseLevel(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	if sessionKey == "" {
-		return "off"
-	}
-	return string(al.verboseManager.GetLevel(sessionKey))
-}
-
-// SetVerboseLevel sets the verbose level for a session (implements AgentProvidable).
-func (al *AgentLoop) SetVerboseLevel(sessionKey string, level string) bool {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	if sessionKey == "" {
-		return false
-	}
-	if !session.IsValidVerboseLevel(level) {
-		return false
-	}
-	al.verboseManager.SetLevel(sessionKey, session.VerboseLevel(level))
-	return true
-}
-
-// GetThinkLevel returns the current reasoning effort level for a session (implements AgentProvidable).
-func (al *AgentLoop) GetThinkLevel(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	if sessionKey == "" {
-		return "default"
-	}
-	if v, ok := al.sessionThinking.Load(sessionKey); ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s
-		}
-	}
-	return "default"
-}
-
-// SetThinkLevel sets the reasoning effort level for a session (implements AgentProvidable).
-func (al *AgentLoop) SetThinkLevel(sessionKey string, level string) bool {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	if sessionKey == "" {
-		return false
-	}
-	validLevels := map[string]bool{"default": true, "off": true, "low": true, "medium": true, "high": true}
-	if !validLevels[level] {
-		return false
-	}
-	if level == "off" || level == "default" {
-		al.sessionThinking.Delete(sessionKey)
-	} else {
-		al.sessionThinking.Store(sessionKey, level)
-	}
-	return true
-}
-
-// GetSubagents lists running subagents (implements AgentProvidable).
-func (al *AgentLoop) GetSubagents() string {
-	return formatSubagentTaskList(al.toolCoordinator.listRunningSubagentTasks())
-}
-
-// ClearSession starts a fresh conversation for the current chat (implements AgentProvidable).
-// It preserves the selected agent while switching the chat to a new empty session.
-func (al *AgentLoop) ClearSession(sessionKey string) string {
-	baseSessionKey := strings.TrimSpace(sessionKey)
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return "No default agent configured"
-	}
-	agentModel := agent.Model
-	if agentModel == "" {
-		agentModel = al.cfg().Agents.Defaults.Model
-	}
-	if baseSessionKey == "" {
-		baseSessionKey = sessionKey
-	}
-	al.startFreshConversation(baseSessionKey, agent.ID, agentModel)
-	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
-}
-
-func (al *AgentLoop) GetName(sessionKey string) string {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return ""
-	}
-	return agent.Sessions.GetName(sessionKey)
-}
-
-func (al *AgentLoop) GetUpdated(sessionKey string) time.Time {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return time.Time{}
-	}
-	return agent.Sessions.GetUpdated(sessionKey)
-}
-
-func (al *AgentLoop) SetName(sessionKey string, name string) error {
-	sessionKey = al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(sessionKey)
-	if agent == nil {
-		return fmt.Errorf("no agent available for session")
-	}
-	return agent.Sessions.SetName(sessionKey, name)
-}
-
-// GetSessionContextWindow returns the context window for a session, dynamically resolving
-// it from the session's current model (which may have been overridden via /model).
-func (al *AgentLoop) GetSessionContextWindow(sessionKey string) int {
+// getSessionContextWindow returns the context window for a session (internal use).
+func (al *AgentLoop) getSessionContextWindow(sessionKey string) int {
 	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
 	agent := al.agentForSession(resolvedSessionKey)
 	if agent == nil {
@@ -918,78 +461,77 @@ func (al *AgentLoop) GetSessionContextWindow(sessionKey string) int {
 	return 128000
 }
 
-// GetTokenCounts returns the input/output token counts and context window for a session (implements AgentProvidable).
-func (al *AgentLoop) GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int) {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(resolvedSessionKey)
-	if agent == nil {
-		return 0, 0, 0
-	}
-	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(resolvedSessionKey)
-	contextWindow = al.GetSessionContextWindow(sessionKey)
-	return
+// RegisterTool registers a tool to all agents.
+func (al *AgentLoop) RegisterTool(tool tools.Tool) {
+	al.toolCoordinator.RegisterTool(tool)
 }
 
-// GetCurrentContextUsage returns the actual current context size (history + summary + system prompt)
-// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
-// this reflects what would actually be sent to the LLM on the next turn.
-func (al *AgentLoop) GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int) {
-	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
-	agent := al.agentForSession(resolvedSessionKey)
-	if agent == nil {
-		return 0, 0
-	}
-
-	// Get history and estimate its token count
-	history := agent.Sessions.GetHistory(resolvedSessionKey)
-	historyTokens := al.sessionManager.EstimateTokens(history)
-
-	// Get summary and estimate its token count
-	summary := agent.Sessions.GetSummary(resolvedSessionKey)
-	summaryTokens := 0
-	if summary != "" && !hasSummaryMessage(history, summary) {
-		summaryTokens = al.sessionManager.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
-	}
-
-	// Build system prompt and estimate its token count
-	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
-	systemTokens := al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
-
-	currentTokens = systemTokens + summaryTokens + historyTokens
-	contextWindow = al.GetSessionContextWindow(sessionKey)
-	return
+// GetSubagents returns the subagent managers (for tests).
+func (al *AgentLoop) GetSubagents() map[string]*tools.SubagentManager {
+	return al.toolCoordinator.GetSubagents()
 }
-
-// ============================================================================
-// Public Methods for External Access (delegated to internal components)
-// ============================================================================
 
 // GetStartupInfo returns information about loaded tools and skills for logging.
 func (al *AgentLoop) GetStartupInfo() map[string]interface{} {
 	return al.toolCoordinator.GetStartupInfo()
 }
 
-// ProcessDirect processes a message directly without going through the message bus.
-func (al *AgentLoop) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
-	if mp, ok := al.messageProcessor.(*messageProcessorImpl); ok {
-		return mp.ProcessDirect(ctx, content, sessionKey)
+// agentForSession returns the agent instance for a session.
+func (al *AgentLoop) agentForSession(sessionKey string) *AgentInstance {
+	resolvedSessionKey := al.ResolveSessionKey(sessionKey)
+	agent := al.registry.GetDefaultAgent()
+	selectedAgentID := al.getSessionAgent(resolvedSessionKey)
+	defaultAgentID := ""
+	if agent != nil {
+		defaultAgentID = agent.ID
 	}
-	return "", fmt.Errorf("message processor not available")
+	logger.DebugCF("agent", "agentForSession debug", map[string]interface{}{
+		"session_key":          sessionKey,
+		"resolved_session_key": resolvedSessionKey,
+		"selected_agent_id":    selectedAgentID,
+		"default_agent_id":     defaultAgentID,
+	})
+	if selectedAgentID != "" {
+		if selectedAgent, ok := al.registry.GetAgent(selectedAgentID); ok {
+			agent = selectedAgent
+		}
+	}
+	return agent
 }
 
-// ProcessDirectWithChannel processes a message directly with channel information.
-func (al *AgentLoop) ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error) {
-	if mp, ok := al.messageProcessor.(*messageProcessorImpl); ok {
-		return mp.ProcessDirectWithChannel(ctx, content, sessionKey, channel, chatID)
+// resetAgentSession clears the session history and state for an agent.
+func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) error {
+	previousHistory := agent.Sessions.GetHistory(sessionKey)
+	previousSummary := agent.Sessions.GetSummary(sessionKey)
+	agent.Sessions.TruncateHistory(sessionKey, 0)
+	agent.Sessions.SetSummary(sessionKey, "")
+	agent.Sessions.ResetTokenCounts(sessionKey)
+	agent.ContextBuilder.ResetSystemPromptCache(sessionKey)
+	// Clear any session-specific model and thinking overrides
+	al.sessionModels.Delete(sessionKey)
+	al.sessionThinking.Delete(sessionKey)
+	if err := agent.Sessions.Save(sessionKey); err != nil {
+		agent.Sessions.SetHistory(sessionKey, previousHistory)
+		agent.Sessions.SetSummary(sessionKey, previousSummary)
+		logger.WarnCF("agent", "Failed to save cleared session", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		return err
 	}
-	return "", fmt.Errorf("message processor not available")
+	return nil
 }
 
-// ProcessHeartbeat processes a heartbeat request without session history.
-// Each heartbeat is independent and doesn't accumulate context.
-func (al *AgentLoop) ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error) {
-	if mp, ok := al.messageProcessor.(*messageProcessorImpl); ok {
-		return mp.ProcessHeartbeat(ctx, content, channel, chatID)
+// ToggleEphemeral toggles the ephemeral session mode.
+func (al *AgentLoop) ToggleEphemeral() string {
+	current := al.cfg().SessionEphemeralEnabled()
+	next := !current
+	if err := al.cfg().PersistSessionEphemeral(config.DefaultConfigPath(), next); err != nil {
+		return fmt.Sprintf("Failed to update ephemeral mode in config.json: %v", err)
 	}
-	return "", fmt.Errorf("message processor not available")
+	threshold := al.cfg().SessionEphemeralThresholdSeconds()
+	if next {
+		return fmt.Sprintf("🫧 Ephemeral mode enabled. Chats idle for more than %d seconds will start a fresh session on the next message.", threshold)
+	}
+	return "🧱 Ephemeral mode disabled. Chat history will persist across inactivity again."
 }

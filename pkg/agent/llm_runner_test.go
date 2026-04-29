@@ -1375,7 +1375,6 @@ func TestUpdateToolContexts(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	// Create mock contextual tools
@@ -1387,8 +1386,8 @@ func TestUpdateToolContexts(t *testing.T) {
 	agent.Tools.Register(spawnTool)
 	agent.Tools.Register(subagentTool)
 
-	// Call updateToolContexts
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
+	// Call updateToolContexts via toolCoordinator
+	al.toolCoordinator.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 
 	// Verify all tools received context
 	if !messageTool.setContextCalled {
@@ -1413,12 +1412,11 @@ func TestUpdateToolContexts_MissingTools(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	// Don't register any contextual tools
 	// Should not panic
-	runner.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
+	al.toolCoordinator.updateToolContexts(agent, "test-channel", "test-chat-id", "test-session")
 }
 
 // ============================================================================
@@ -1433,11 +1431,12 @@ func TestModelForSession_DefaultModel(t *testing.T) {
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
-	model := runner.modelForSession(agent, "test-session")
+	model := al.sessionManager.ModelForSession(agent, "test-session")
 
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model', got: %s", model)
 	}
+	_ = runner
 }
 
 func TestModelForSession_SessionOverride(t *testing.T) {
@@ -1451,11 +1450,12 @@ func TestModelForSession_SessionOverride(t *testing.T) {
 	// Set session-specific model
 	al.sessionModels.Store("test-session", "session-specific-model")
 
-	model := runner.modelForSession(agent, "test-session")
+	model := al.sessionManager.ModelForSession(agent, "test-session")
 
 	if model != "session-specific-model" {
 		t.Errorf("Expected 'session-specific-model', got: %s", model)
 	}
+	_ = runner
 }
 
 func TestModelForSession_EmptySessionKey(t *testing.T) {
@@ -1467,11 +1467,12 @@ func TestModelForSession_EmptySessionKey(t *testing.T) {
 	agent.Model = "default-model"
 
 	// Should return default model for empty session key
-	model := runner.modelForSession(agent, "")
+	model := al.sessionManager.ModelForSession(agent, "")
 
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for empty session, got: %s", model)
 	}
+	_ = runner
 }
 
 func TestModelForSession_InvalidStoredValue(t *testing.T) {
@@ -1485,16 +1486,17 @@ func TestModelForSession_InvalidStoredValue(t *testing.T) {
 	// Store non-string value
 	al.sessionModels.Store("test-session", 12345)
 
-	model := runner.modelForSession(agent, "test-session")
+	model := al.sessionManager.ModelForSession(agent, "test-session")
 
 	// Should fall back to default model
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for invalid stored value, got: %s", model)
 	}
+	_ = runner
 }
 
 // ============================================================================
-// Tests for formatProviderModel (llmRunnerImpl method)
+// Tests for FormatProviderModel (standalone function in helpers.go)
 // ============================================================================
 
 func TestLLMRunnerFormatProviderModel(t *testing.T) {
@@ -1538,14 +1540,10 @@ func TestLLMRunnerFormatProviderModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			al, tmpDir := createLLMRunnerTestAgentLoop(t)
-			defer os.RemoveAll(tmpDir)
-
-			runner := newLLMRunner(al)
-			got := runner.formatProviderModel(tt.provider, tt.model)
+			got := FormatProviderModel(tt.provider, tt.model)
 
 			if got != tt.want {
-				t.Errorf("formatProviderModel(%q, %q) = %q, want %q", tt.provider, tt.model, got, tt.want)
+				t.Errorf("FormatProviderModel(%q, %q) = %q, want %q", tt.provider, tt.model, got, tt.want)
 			}
 		})
 	}
@@ -2180,11 +2178,11 @@ func TestRunAgentLoop_StopAgentCancelsSessionAndCleansUp(t *testing.T) {
 		t.Fatal("provider was not called")
 	}
 
-	if _, ok := al.sessionCancels.Load(opts.SessionKey); !ok {
+	if !al.providable.IsSessionProcessing(opts.SessionKey) {
 		t.Fatal("expected session cancel to be registered")
 	}
 
-	response := al.StopAgent(opts.SessionKey)
+	response := al.providable.StopAgent(opts.SessionKey)
 	if !strings.Contains(response, "Agente detenido") {
 		t.Fatalf("unexpected stop response: %s", response)
 	}
@@ -2198,7 +2196,7 @@ func TestRunAgentLoop_StopAgentCancelsSessionAndCleansUp(t *testing.T) {
 		t.Fatal("runAgentLoop did not stop after cancellation")
 	}
 
-	if _, ok := al.sessionCancels.Load(opts.SessionKey); ok {
+	if al.providable.IsSessionProcessing(opts.SessionKey) {
 		t.Fatal("expected session cancel registry to be cleaned up")
 	}
 }
@@ -2207,7 +2205,7 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
-	runner := newLLMRunner(al)
+	_ = newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.Model = "default-model"
 
@@ -2215,13 +2213,13 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 	al.sessionModels.Store("user-session-1", "custom-model-v1")
 
 	// Verify the session model is used
-	model := runner.modelForSession(agent, "user-session-1")
+	model := al.sessionManager.ModelForSession(agent, "user-session-1")
 	if model != "custom-model-v1" {
 		t.Errorf("Expected 'custom-model-v1', got: %s", model)
 	}
 
 	// Verify default model is used for different session
-	model = runner.modelForSession(agent, "user-session-2")
+	model = al.sessionManager.ModelForSession(agent, "user-session-2")
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for different session, got: %s", model)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +189,17 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	logger.InfoCF("native", "handleChatHistory request", map[string]interface{}{
+		"session_key": sessionKey,
+		"client_id":   clientID,
+	})
+
 	history := n.agentLoop.GetSessionHistory(sessionKey)
+	logger.InfoCF("native", "handleChatHistory got history", map[string]interface{}{
+		"session_key":    sessionKey,
+		"history_count":  len(history),
+	})
+
 	messages := make([]ChatHistoryMessage, 0, len(history))
 	for _, msg := range history {
 		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
@@ -204,7 +215,6 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		if len(msg.ToolCalls) > 0 {
 			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
-				// Use top-level Arguments; fall back to parsing Function.Arguments string
 				args := tc.Arguments
 				if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
 					var parsed map[string]interface{}
@@ -228,6 +238,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	if n.agentLoop != nil {
 		processing = n.agentLoop.IsSessionProcessing(sessionKey)
 	}
+
+	logger.InfoCF("native", "handleChatHistory response", map[string]interface{}{
+		"session_key":    sessionKey,
+		"messages_count": len(messages),
+		"processing":     processing,
+	})
 
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
 		SessionKey: sessionKey,

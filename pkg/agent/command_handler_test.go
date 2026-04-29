@@ -833,7 +833,7 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	if !strings.Contains(result, "support") {
 		t.Fatalf("Expected response to mention support agent, got: %s", result)
 	}
-	if got := al.GetSessionAgent(sessionKey); got != "support" {
+	if got := al.providable.GetSessionAgent(sessionKey); got != "support" {
 		t.Fatalf("Expected session agent support, got %s", got)
 	}
 	activeSessionKey := al.ResolveSessionKey(sessionKey)
@@ -845,7 +845,7 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 		t.Fatalf("Expected original session tokens to remain (321, 123), got (%d, %d)", inputTokens, outputTokens)
 	}
 
-	switchedAgent, ok := al.registry.GetAgent(al.GetSessionAgent(sessionKey))
+	switchedAgent, ok := al.registry.GetAgent(al.providable.GetSessionAgent(sessionKey))
 	if !ok {
 		t.Fatal("Expected switched agent to exist in registry")
 	}
@@ -923,7 +923,7 @@ func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 	if secondActiveSessionKey == firstActiveSessionKey {
 		t.Fatal("Expected /new to create a different active session key")
 	}
-	if got := al.GetSessionAgent(sessionKey); got != "support" {
+	if got := al.providable.GetSessionAgent(sessionKey); got != "support" {
 		t.Fatalf("Expected selected agent to remain support after /new, got %s", got)
 	}
 }
@@ -1083,6 +1083,12 @@ func (m *commandHandlerSubagentCoordinatorStub) continueSubagentTask(ctx context
 
 func (m *commandHandlerSubagentCoordinatorStub) GetStartupInfo() map[string]interface{} {
 	return map[string]interface{}{}
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) RegisterTool(tool tools.Tool) {}
+
+func (m *commandHandlerSubagentCoordinatorStub) GetSubagents() map[string]*tools.SubagentManager {
+	return nil
 }
 
 func TestHandleSubagentsCommand_Continue(t *testing.T) {
