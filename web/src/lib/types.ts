@@ -586,9 +586,44 @@ export type UploadedFile = {
   size: number
 }
 
+export type SkillInfo = {
+  id: string
+  name: string
+  description: string
+  installed: boolean
+  source?: 'workspace' | 'global' | 'builtin'
+}
+
+export type AvailableSkill = {
+  name: string
+  repository: string
+  description: string
+  author: string
+  tags: string[]
+}
+
+export type SkillsResponse = {
+  skills: SkillInfo[]
+}
+
+export type AvailableSkillsResponse = {
+  skills: AvailableSkill[]
+}
+
+export type SkillInstallResponse = {
+  skill_id: string
+  message: string
+}
+
+export type SkillRemoveResponse = {
+  message: string
+}
+
 export type FileUploadResponse = {
   files: UploadedFile[]
 }
+
+
 
 export type ClientEvent =
   | {

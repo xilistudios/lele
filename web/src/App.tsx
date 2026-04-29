@@ -13,6 +13,9 @@ import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
+import { AgentsPage } from './components/pages/AgentsPage'
+import { ProvidersPage } from './components/pages/ProvidersPage'
+import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
 
@@ -201,7 +204,7 @@ function SettingsRoute() {
     navigate('/pair', { replace: true })
   }, [onLogout, navigate])
 
-  return <SettingsPage onLogout={handleLogout} />
+  return <SettingsPage />
 }
 
 function AppContent() {
@@ -226,8 +229,13 @@ function AppContent() {
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
+        <Route path="agents" element={<AgentsPage />} />
+        <Route path="providers" element={<ProvidersPage />} />
+        <Route path="skills" element={<SkillsPage />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
         <Route path="settings/agent/:agentId" element={<AgentFilesPage />} />
+        <Route path="settings/agents" element={<Navigate to="/agents" replace />} />
+        <Route path="settings/providers" element={<Navigate to="/providers" replace />} />
       </Route>
 
       {/* Fallback */}
