@@ -3,6 +3,7 @@ import type { AuthSession } from './types'
 const KEY = 'lele.session'
 const API_URL_KEY = 'lele.apiUrl'
 const SESSION_KEY = 'lele.currentSessionKey'
+const SIDEBAR_KEY = 'lele.sidebarOpen'
 
 const isSubagentSessionKey = (sessionKey: string) => sessionKey.startsWith('subagent:')
 
@@ -61,4 +62,17 @@ export const saveCurrentSessionKey = (sessionKey: string) => {
 
 export const clearCurrentSessionKey = () => {
   localStorage.removeItem(SESSION_KEY)
+}
+
+export const loadSidebarOpen = (): boolean => {
+  if (typeof localStorage === 'undefined') {
+    return true
+  }
+
+  const stored = localStorage.getItem(SIDEBAR_KEY)
+  return stored === null ? true : stored === 'true'
+}
+
+export const saveSidebarOpen = (isOpen: boolean) => {
+  localStorage.setItem(SIDEBAR_KEY, String(isOpen))
 }

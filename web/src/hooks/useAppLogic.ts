@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ApiClient } from '../lib/api'
-import { clearCurrentSessionKey } from '../lib/storage'
+import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
 import type {
   Agent,
   AgentDetails,
@@ -46,7 +46,7 @@ export function useAppLogic(
     agentInfo: null,
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => loadSidebarOpen())
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
   const navigate = useNavigate()
@@ -358,7 +358,11 @@ export function useAppLogic(
   }, [])
 
   const handleToggleSidebar = useCallback(() => {
-    setSidebarOpen((current) => !current)
+    setSidebarOpen((current) => {
+      const newValue = !current
+      saveSidebarOpen(newValue)
+      return newValue
+    })
   }, [])
 
   const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
