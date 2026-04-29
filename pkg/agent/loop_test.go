@@ -1738,3 +1738,76 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 	// Nota: No podemos verificar directamente los valores internos sin exponerlos,
 	// pero el hecho de que no haya errores indica que la configuración se aplicó
 }
+// TestSetSessionAgent_PreservesModelWhenAgentUnchanged verifies that SetSessionAgent
+// does not clear the session model when the agent ID is the same as the current agent.
+// This fixes a bug where sending a message would reset the model to the agent's default
+// because the frontend always sends agent_id with each message.
+func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "default-model",
+				Provider:          "test",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "agent1", Model: &config.AgentModelConfig{Primary: "agent1-model"}},
+				{ID: "agent2", Model: &config.AgentModelConfig{Primary: "agent2-model"}},
+			},
+		},
+		Providers: &config.ProvidersConfig{
+			Named: map[string]config.NamedProviderConfig{
+				"test": {
+					ProviderConfig: config.ProviderConfig{APIKey: "test-key"},
+					Models: map[string]config.ProviderModelConfig{
+						"default-model": {Model: "default-model"},
+						"agent1-model":  {Model: "agent1-model"},
+						"agent2-model":  {Model: "agent2-model"},
+						"custom-model":  {Model: "custom-model"},
+					},
+				},
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+	sessionKey := "test-session:model-preserve"
+
+	// Set initial agent
+	al.SetSessionAgent(sessionKey, "agent1")
+
+	// Set custom model (different from agent's default)
+	al.SetSessionModel(sessionKey, "custom-model")
+
+	// Verify model is set (resolved with provider prefix)
+	model := al.GetSessionModel(sessionKey)
+	if model != "test/custom-model" {
+		t.Fatalf("Expected model 'test/custom-model', got '%s'", model)
+	}
+
+	// Call SetSessionAgent with the SAME agent ID (simulates frontend sending agent_id with message)
+	al.SetSessionAgent(sessionKey, "agent1")
+
+	// Verify model is STILL preserved (not reset to agent1-model)
+	modelAfter := al.GetSessionModel(sessionKey)
+	if modelAfter != "test/custom-model" {
+		t.Fatalf("Expected model to remain 'test/custom-model', got '%s' - SetSessionAgent incorrectly cleared model", modelAfter)
+	}
+
+	// Now change to a different agent
+	al.SetSessionAgent(sessionKey, "agent2")
+
+	// Verify model IS cleared when agent actually changes
+	modelAfterChange := al.GetSessionModel(sessionKey)
+	if modelAfterChange != "test/agent2-model" {
+		t.Fatalf("Expected model 'test/agent2-model' after agent change, got '%s'", modelAfterChange)
+	}
+}

@@ -102,11 +102,12 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 
 	// Keep session model in sync with the active/session-selected agent unless user
 	// explicitly changed model with /model.
-	if _, hasSessionModel := mp.al.sessionModels.Load(sessionKey); !hasSessionModel && agent != nil {
+	resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
+	if _, hasSessionModel := mp.al.sessionModels.Load(resolvedSessionKey); !hasSessionModel && agent != nil {
 		if agent.Model != "" {
-			mp.al.sessionModels.Store(sessionKey, agent.Model)
+			mp.al.sessionModels.Store(resolvedSessionKey, agent.Model)
 		} else {
-			mp.al.sessionModels.Store(sessionKey, mp.al.cfg().Agents.Defaults.Model)
+			mp.al.sessionModels.Store(resolvedSessionKey, mp.al.cfg().Agents.Defaults.Model)
 		}
 	}
 
@@ -779,7 +780,8 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 // modelForSession returns the model to use for a session.
 func (mp *messageProcessorImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
 	if sessionKey != "" {
-		if model, ok := mp.al.sessionModels.Load(sessionKey); ok {
+		resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
+		if model, ok := mp.al.sessionModels.Load(resolvedSessionKey); ok {
 			if selected, ok := model.(string); ok && selected != "" {
 				return selected
 			}

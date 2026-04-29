@@ -923,7 +923,8 @@ func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatI
 // modelForSession gets the model for a session (user-selected or agent default)
 func (lr *llmRunnerImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
 	if sessionKey != "" {
-		if model, ok := lr.al.sessionModels.Load(sessionKey); ok {
+		resolvedSessionKey := lr.al.ResolveSessionKey(sessionKey)
+		if model, ok := lr.al.sessionModels.Load(resolvedSessionKey); ok {
 			if selected, ok := model.(string); ok && selected != "" {
 				return selected
 			}

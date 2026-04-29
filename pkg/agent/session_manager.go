@@ -252,7 +252,8 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 // modelForSession returns the model to use for a session.
 func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
 	if sessionKey != "" {
-		if model, ok := sm.al.sessionModels.Load(sessionKey); ok {
+		resolvedSessionKey := sm.al.ResolveSessionKey(sessionKey)
+		if model, ok := sm.al.sessionModels.Load(resolvedSessionKey); ok {
 			if selected, ok := model.(string); ok && selected != "" {
 				return selected
 			}
