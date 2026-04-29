@@ -438,5 +438,36 @@
     "spi": "SPI",
     "readImage": "Reading image",
     "genericAction": "Action"
+  },
+  "sidebar": {
+    "agents": "Agents",
+    "providers": "Providers",
+    "skills": "Skills",
+    "navigation": "Navigation"
+  },
+  "skills": {
+    "title": "Skills",
+    "installed": "installed",
+    "noSkills": "No skills installed",
+    "noSkillsDesc": "Install skills to extend your agent's capabilities",
+    "installSkill": "Install Skill",
+    "removeSkill": "Remove",
+    "removeConfirmYes": "Yes, remove",
+    "removeConfirmNo": "No",
+    "browse": "Browse",
+    "availableSkills": "Available Skills",
+    "noAvailableSkills": "No available skills found",
+    "noSearchResults": "No skills match your search",
+    "searchSkills": "Search skills...",
+    "installFromUrl": "Install from URL",
+    "githubRepo": "GitHub repository",
+    "githubRepoHint": "e.g. sipeed/lele-skills/weather",
+    "install": "Install",
+    "installing": "Installing...",
+    "source": {
+      "workspace": "Workspace",
+      "global": "Global",
+      "builtin": "Built-in"
+    }
   }
 }
