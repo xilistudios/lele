@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -21,7 +21,9 @@ export function AgentFilesPage() {
   const [content, setContent] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [saving, setSaving] = useState(false)
-  const [dirtyFiles, setDirtyFiles] = useState<DirtyMap>({})
+  // useRef for dirty content cache — avoids fragile dependency on React batching semantics.
+  // Refs are always up-to-date, so effects and callbacks always see the latest cache.
+  const dirtyFilesRef = useRef<DirtyMap>({})
 
   // Load file list on mount
   useEffect(() => {
@@ -42,22 +44,23 @@ export function AgentFilesPage() {
         setLoading(false)
       }
     })()
-  }, [agentId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentId])
 
   // Load file content when active file changes
   useEffect(() => {
     if (!agentId || !activeFile) return
 
     // Check if we have dirty content cached from a previous edit
-    if (dirtyFiles[activeFile] !== undefined && dirtyFiles[activeFile] !== null) {
+    const cached = dirtyFilesRef.current[activeFile]
+    if (cached !== undefined && cached !== null) {
       // Need to also fetch original content for comparison
       ;(async () => {
         try {
           setError(null)
           const res = await api.agentFile(agentId, activeFile)
           setOriginalContent(res.content || '')
-          // Restore dirty content
-          setContent(dirtyFiles[activeFile]!)
+          // Restore dirty content from cache
+          setContent(cached)
         } catch (e) {
           setError((e as Error).message || 'Failed to load file')
         }
@@ -76,22 +79,18 @@ export function AgentFilesPage() {
         setError((e as Error).message || 'Failed to load file')
       }
     })()
-    // dirtyFiles is intentionally NOT in deps: it's only used as a cache
-    // when restoring dirty content on tab switch. handleFileSelect updates
-    // dirtyFiles synchronously before setActiveFile, and React 18+ batching
-    // ensures the effect sees the fresh dirtyFiles value when activeFile changes.
-  }, [agentId, activeFile]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentId, activeFile])
 
   const isDirty = content !== originalContent
 
   const handleFileSelect = useCallback(
     (fileName: string) => {
       if (isDirty) {
-        // Store current dirty content before switching
-        setDirtyFiles((prev) => ({
-          ...prev,
+        // Store current dirty content in ref before switching tabs
+        dirtyFilesRef.current = {
+          ...dirtyFilesRef.current,
           [activeFile!]: content !== originalContent ? content : null,
-        }))
+        }
       }
       setActiveFile(fileName)
     },
@@ -105,7 +104,7 @@ export function AgentFilesPage() {
       setError(null)
       await api.agentFileSave(agentId, activeFile, content)
       setOriginalContent(content)
-      setDirtyFiles((prev) => ({ ...prev, [activeFile]: null }))
+      dirtyFilesRef.current = { ...dirtyFilesRef.current, [activeFile]: null }
     } catch (e) {
       setError((e as Error).message || 'Failed to save')
     } finally {
@@ -115,11 +114,11 @@ export function AgentFilesPage() {
 
   const handleDiscard = () => {
     setContent(originalContent)
-    setDirtyFiles((prev) => ({ ...prev, [activeFile!]: null }))
+    dirtyFilesRef.current = { ...dirtyFilesRef.current, [activeFile!]: null }
   }
 
   const hasAnyDirty =
-    isDirty || Object.values(dirtyFiles).some((v) => v !== null && v !== undefined)
+    isDirty || Object.values(dirtyFilesRef.current).some((v) => v !== null && v !== undefined)
 
   const btnCls =
     'rounded px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
@@ -173,10 +172,11 @@ export function AgentFilesPage() {
                 </p>
               </div>
               {files.map((f) => {
+                const cached = dirtyFilesRef.current[f.name]
                 const fileDirty =
                   activeFile === f.name
                     ? isDirty
-                    : dirtyFiles[f.name] !== null && dirtyFiles[f.name] !== undefined
+                    : cached !== null && cached !== undefined
                 return (
                   <button
                     key={f.name}

@@ -10,24 +10,16 @@ import { DiagnosticsPanel } from '../organisms/DiagnosticsPanel'
 import { Sidebar } from '../organisms/Sidebar'
 import {
   AdvancedSettings,
-  AgentsSettings,
   ChannelSettings,
   GeneralSettings,
-  ProvidersSettings,
   SessionSettings,
   SystemSettings,
   ToolsSettings,
 } from '../organisms/settings'
 
-type Props = {
-  onLogout: () => void
-}
-
 type SettingsTab =
   | 'general'
-  | 'agents'
   | 'session'
-  | 'providers'
   | 'channels'
   | 'tools'
   | 'system'
@@ -36,9 +28,7 @@ type SettingsTab =
 
 const VALID_TABS: SettingsTab[] = [
   'general',
-  'agents',
   'session',
-  'providers',
   'channels',
   'tools',
   'system',
@@ -46,7 +36,7 @@ const VALID_TABS: SettingsTab[] = [
   'diagnostics',
 ]
 
-export function SettingsPage({ onLogout }: Props) {
+export function SettingsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
   const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
@@ -91,12 +81,8 @@ export function SettingsPage({ onLogout }: Props) {
     switch (activeTab) {
       case 'general':
         return <GeneralSettings />
-      case 'agents':
-        return <AgentsSettings />
       case 'session':
         return <SessionSettings />
-      case 'providers':
-        return <ProvidersSettings />
       case 'channels':
         return <ChannelSettings />
       case 'tools':
@@ -123,7 +109,6 @@ export function SettingsPage({ onLogout }: Props) {
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
             onToggleSidebar={onToggleSidebar}
-            onLogout={onLogout}
             configPath={settingsState.metadata?.config_path}
           />
 

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useSettings } from "../../../../contexts/SettingsContext";
 import type { EditableAgentConfig } from "../../../../lib/types";
 import { Modal } from "../../../atoms";
-import { AgentPreview } from "./AgentPreview";
 import { BasicInfoStep } from "./BasicInfoStep";
 import { BehaviorStep } from "./BehaviorStep";
 import { ModelStep } from "./ModelStep";
@@ -166,7 +165,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
 
   const canProceedStep1 = agentId.trim() !== "";
   const isDuplicate = (draftConfig?.agents.list || []).some(
-    (a) => a.id === agentId.trim(),
+    (a) => a.id === agentId.trim()
   );
   const canAdd = canProceedStep1 && !isDuplicate;
 
@@ -349,36 +348,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 )}
               </button>
             )}
-          </div>
-        </div>
-
-        {/* Right side: Live preview */}
-        <div className="w-56 shrink-0 border-l border-border pl-6 hidden lg:block">
-          <div className="sticky top-0">
-            <p className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
-              {t("settings.addAgentModal.preview")}
-            </p>
-            <AgentPreview
-              agentId={agentId}
-              agentName={agentName}
-              isDefault={isDefault}
-              primaryModel={primaryModel}
-              fallbacks={fallbacks}
-              temperature={temperature}
-              skills={skills}
-              enableThinking={enableThinking}
-              supportsImages={supportsImages}
-            />
-
-            {/* Quick tips */}
-            <div className="mt-6 space-y-3">
-              <p className="text-xs font-medium text-text-tertiary uppercase tracking-wider">
-                {t("settings.addAgentModal.tips")}
-              </p>
-              <p className="text-xs text-text-tertiary leading-relaxed">
-                {t(tipKey)}
-              </p>
-            </div>
           </div>
         </div>
       </div>

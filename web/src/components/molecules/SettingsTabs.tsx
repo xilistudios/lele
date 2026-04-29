@@ -2,9 +2,7 @@ import { useTranslation } from 'react-i18next'
 
 type SettingsTab =
   | 'general'
-  | 'agents'
   | 'session'
-  | 'providers'
   | 'channels'
   | 'tools'
   | 'system'
@@ -21,9 +19,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
-    { id: 'agents', label: t('settings.tabs.agents') },
     { id: 'session', label: t('settings.tabs.session') },
-    { id: 'providers', label: t('settings.tabs.providers') },
     { id: 'channels', label: t('settings.tabs.channels') },
     { id: 'tools', label: t('settings.tabs.tools') },
     { id: 'system', label: t('settings.tabs.system') },

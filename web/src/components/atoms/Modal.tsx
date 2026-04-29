@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 
 type Size = 'sm' | 'md' | 'lg' | 'xl' | 'full'
 
@@ -27,18 +27,23 @@ export function Modal({
   size = 'md',
   showCloseButton = true,
 }: Props) {
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
+
   if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity border-0 cursor-pointer"
         onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose()
-        }}
-        role="button"
-        tabIndex={0}
         aria-label="Close modal"
       />
       <div

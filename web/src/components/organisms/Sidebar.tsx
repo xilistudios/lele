@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { ChatBubbleIcon, EditIcon, LogoutIcon, SettingsIcon } from '../atoms/Icons'
+import {
+  AgentsIcon,
+  ChatBubbleIcon,
+  EditIcon,
+  LogoutIcon,
+  ProvidersIcon,
+  SettingsIcon,
+  SkillsIcon,
+} from '../atoms/Icons'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
@@ -20,6 +28,7 @@ type SidebarProps = {
 export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const { session } = useAuthContext()
   const {
     sessions,
@@ -40,9 +49,16 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     )
   }, [sessions])
 
+  // Only show current session on chat pages
+  const isOnChatPage = ['/', '/chat/'].some(prefix => {
+    if (prefix === '/') return location.pathname === '/'
+    return location.pathname.startsWith(prefix)
+  })
+
   const selectedKey = parentSessionKey ?? currentSessionKey
-  const currentSession =
-    sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null
+  const currentSession = isOnChatPage
+    ? (sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null)
+    : null
 
   // Expanded state - shows all sessions when true
   const [expanded, setExpanded] = useState(false)
@@ -67,10 +83,25 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     if (isMobile) onClose()
   }
 
-  const handleSettingsClick = () => {
-    navigate('/settings/general')
-    if (isMobile) onClose()
-  }
+  const isActiveRoute = (path: string) => location.pathname === path
+
+  const navItems = [
+    {
+      path: '/agents',
+      label: t('sidebar.agents'),
+      icon: AgentsIcon,
+    },
+    {
+      path: '/providers',
+      label: t('sidebar.providers'),
+      icon: ProvidersIcon,
+    },
+    {
+      path: '/skills',
+      label: t('sidebar.skills'),
+      icon: SkillsIcon,
+    },
+  ]
 
   return (
     <>
@@ -217,8 +248,56 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           )}
         </div>
 
+        {/* Agents & Providers navigation */}
+        <nav
+          className={`border-t border-border px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}
+        >
+          {collapsed ? (
+            <>
+              {navItems.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => {
+                    navigate(item.path)
+                    if (isMobile) onClose()
+                  }}
+                  className={`flex w-full items-center justify-center rounded-md py-2 transition-colors ${
+                    isActiveRoute(item.path)
+                      ? 'text-brand-rosa bg-surface-selected'
+                      : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                  }`}
+                  title={item.label}
+                  aria-label={item.label}
+                >
+                  <item.icon size={16} />
+                </button>
+              ))}
+            </>
+          ) : (
+            navItems.map((item) => (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => {
+                  navigate(item.path)
+                  if (isMobile) onClose()
+                }}
+                className={`flex items-center gap-2 w-full rounded-md px-2 py-2 text-sm transition-colors ${
+                  isActiveRoute(item.path)
+                    ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                }`}
+              >
+                <item.icon size={16} />
+                <span>{item.label}</span>
+              </button>
+            ))
+          )}
+        </nav>
+
         <div
-          className={`mt-auto border-t border-border ${collapsed ? 'px-2' : 'px-2'} py-3 ${collapsed ? 'flex justify-center' : ''}`}
+          className={`mt-auto border-t border-border px-2 py-3 ${collapsed ? 'flex justify-center' : ''}`}
         >
           <Popover
             block
@@ -250,7 +329,10 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 title={t('chat.settings')}
                 aria-label={t('chat.settings')}
                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                onClick={handleSettingsClick}
+                onClick={() => {
+                  navigate('/settings/general')
+                  if (isMobile) onClose()
+                }}
               >
                 <SettingsIcon />
                 <span>{t('chat.settings')}</span>
