@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,6 +28,7 @@ type nativeTestAgentLoop struct {
 	sessionModels    map[string]string
 	sessionAliases   map[string]string // base -> resolved
 	sessionAliasesMu sync.RWMutex
+	workspace        string // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -62,10 +64,14 @@ func (m *nativeTestAgentLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool
 	if agentID != "main" {
 		return AgentBasicInfo{}, false
 	}
+	workspace := m.workspace
+	if workspace == "" {
+		workspace = "/tmp/workspace"
+	}
 	return AgentBasicInfo{
 		ID:        "main",
 		Name:      "Main Agent",
-		Workspace: "/tmp/workspace",
+		Workspace: workspace,
 		Model:     "gpt-4",
 	}, true
 }
@@ -1379,4 +1385,145 @@ func TestHandleConfig_Put_WithEnvProviders(t *testing.T) {
 	if !bytes.Contains(data, []byte("{{ENV_MY_API_KEY}}")) {
 		t.Error("expected ENV placeholder to be preserved in saved config")
 	}
+}
+func TestNativeChannelAgentFiles_ListFiles(t *testing.T) {
+	workspace := t.TempDir()
+	ts := newNativeTestServer(t)
+	ts.loop.workspace = workspace
+
+	// Create test workspace with context files
+	for _, name := range []string{"AGENT.md", "SOUL.md", "MEMORY.md"} {
+		os.WriteFile(filepath.Join(workspace, name), []byte("test content"), 0644)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, readBody(resp))
+	}
+
+	var payload AgentFilesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if len(payload.Files) == 0 {
+		t.Fatal("expected at least one file in response")
+	}
+
+	// Check that AGENT.md is listed
+	found := false
+	for _, f := range payload.Files {
+		if f.Name == "AGENT.md" {
+			found = true
+			if f.Size != 12 { // "test content" length
+				t.Errorf("AGENT.md size = %d, want 12", f.Size)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected AGENT.md to be listed")
+	}
+}
+
+func TestNativeChannelAgentFiles_ReadFile(t *testing.T) {
+	workspace := t.TempDir()
+	ts := newNativeTestServer(t)
+	ts.loop.workspace = workspace
+
+	testContent := "# Agent Context\n\nThis is the agent context file."
+	os.WriteFile(filepath.Join(workspace, "AGENT.md"), []byte(testContent), 0644)
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files?file=AGENT.md", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, readBody(resp))
+	}
+
+	var payload AgentFilesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if payload.Content != testContent {
+		t.Errorf("content = %q, want %q", payload.Content, testContent)
+	}
+}
+
+func TestNativeChannelAgentFiles_AgentNotFound(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/nonexistent/files", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestNativeChannelAgentFiles_TrailingSlash(t *testing.T) {
+	workspace := t.TempDir()
+	ts := newNativeTestServer(t)
+	ts.loop.workspace = workspace
+
+	// Test with trailing slash
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files/", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, readBody(resp))
+	}
+
+	var payload AgentFilesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if len(payload.Files) == 0 {
+		t.Fatal("expected at least one file in response")
+	}
+}
+
+func readBody(resp *http.Response) string {
+	data, _ := io.ReadAll(resp.Body)
+	return string(data)
 }

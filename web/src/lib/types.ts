@@ -60,6 +60,18 @@ export type AgentDetails = Agent & {
   active_sessions?: number
 }
 
+// AgentFiles represents the context files for an agent's workspace.
+export type AgentFileInfo = {
+  name: string
+  size: number
+  editable: boolean
+}
+
+export type AgentFilesResponse = {
+  files: AgentFileInfo[]
+  content?: string
+}
+
 export type SecretMode = 'literal' | 'env' | 'empty'
 
 export type SecretValue = {
@@ -103,6 +115,11 @@ export type EditableAgentConfig = {
   skills?: string[]
   subagents?: SubagentsConfig
   temperature?: number
+  reasoning?: ReasoningConfig
+  max_iterations?: number
+  max_tokens?: number
+  context_window?: number
+  supports_images?: boolean
 }
 
 export type EditableAgentsConfig = {
@@ -326,6 +343,10 @@ export type EditableLogsConfig = {
   rotation?: 'daily' | 'weekly'
 }
 
+export type DisplayConfig = {
+  language?: string
+}
+
 export type EditableConfig = {
   agents: EditableAgentsConfig
   session?: EditableSessionConfig
@@ -337,6 +358,7 @@ export type EditableConfig = {
   heartbeat: HeartbeatConfig
   devices: DevicesConfig
   logs: EditableLogsConfig
+  display?: DisplayConfig
 }
 
 export type ConfigMetadata = {

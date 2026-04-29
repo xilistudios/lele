@@ -194,14 +194,14 @@ export function useAppLogic(
     subscribedSessionRef.current = null
     modelLoadKeyRef.current = null
     wsClose()
-    messagesHook.clearStreaming()
+    messagesHook.clearAll()
     persistSession(null)
     clearCurrentSessionKey()
     setAgents([])
     setCurrentAgentId(null)
     setDiagnostics({ status: null, channels: [], tools: [], config: null, agentInfo: null })
     setError(null)
-  }, [wsClose, messagesHook.clearStreaming, persistSession])
+  }, [wsClose, messagesHook.clearAll, persistSession])
 
   const handleSend = useCallback(
     async (content: string, attachments: string[]) => {

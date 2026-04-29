@@ -196,6 +196,10 @@ export function useMessages(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
 
+      // Mark session as processing only after API confirms the send
+      setProcessingSessions((prev) => new Set(prev).add(sessionKey))
+      processingSessionKeyRef.current = sessionKey
+
       ensureAssistantPlaceholder(response.message_id, response.session_key)
       console.log('[WS] Message sent, messageId:', response.message_id)
       return response
@@ -253,9 +257,15 @@ export function useMessages(
             ),
           )
           break
-        case 'message.ack':
-          ensureAssistantPlaceholder(data.message_id as string, (data.session_key as string) ?? '')
+        case 'message.ack': {
+          const ackSessionKey = (data.session_key as string) ?? ''
+          if (ackSessionKey) {
+            setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
+            processingSessionKeyRef.current = ackSessionKey
+          }
+          ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
           break
+        }
         case 'message.complete': {
           const completedSessionKey = eventSessionKey ?? currentSessionKeyRef.current
 
@@ -315,7 +325,16 @@ export function useMessages(
         }
         case 'history.updated': {
           const historySessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
+          // Fallback: remove from processingSessions if message.complete wasn't received
           if (historySessionKey) {
+            setProcessingSessions((prev) => {
+              if (prev.has(historySessionKey)) {
+                const next = new Set(prev)
+                next.delete(historySessionKey)
+                return next
+              }
+              return prev
+            })
             queryClient.invalidateQueries({
               queryKey: ['chatHistory', historySessionKey],
             })
@@ -520,6 +539,16 @@ export function useMessages(
     setToolStatus(null)
     setApprovalRequest(null)
     setPendingAttachments([])
+    // Don't clear processingSessions - this tracks ALL sessions processing,
+    // not just the current one. It's updated by WebSocket events.
+    processingSessionKeyRef.current = null
+  }, [])
+
+  const clearAll = useCallback(() => {
+    setStreamingMessages([])
+    setToolStatus(null)
+    setApprovalRequest(null)
+    setPendingAttachments([])
     setProcessingSessions(new Set())
     processingSessionKeyRef.current = null
   }, [])
@@ -538,5 +567,6 @@ export function useMessages(
     approveRequest,
     setPendingAttachments,
     clearStreaming,
+    clearAll,
   }
 }

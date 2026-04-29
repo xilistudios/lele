@@ -75,6 +75,10 @@ func defaultAPIBaseByType(providerType string) string {
 		return "https://api.deepseek.com/v1"
 	case "github_copilot":
 		return "localhost:4321"
+	case "zai_coding_plan", "zai":
+		return "https://api.z.ai/api/paas/v4"
+	case "modelark_coding_plan", "modelark":
+		return "https://ark.ap-southeast.bytepluses.com/api/coding/v3"
 	default:
 		return ""
 	}
@@ -420,6 +424,24 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 			}
 			sel.connectMode = cfg.Providers.GitHubCopilot.ConnectMode
 			return sel, nil
+		case "zai_coding_plan", "zai":
+			if cfg.Providers.ZAICodingPlan.APIKey != "" {
+				sel.apiKey = cfg.Providers.ZAICodingPlan.APIKey
+				sel.apiBase = cfg.Providers.ZAICodingPlan.APIBase
+				sel.proxy = cfg.Providers.ZAICodingPlan.Proxy
+				if sel.apiBase == "" {
+					sel.apiBase = "https://api.z.ai/api/paas/v4"
+				}
+			}
+		case "modelark_coding_plan", "modelark":
+			if cfg.Providers.ModelArkCodingPlan.APIKey != "" {
+				sel.apiKey = cfg.Providers.ModelArkCodingPlan.APIKey
+				sel.apiBase = cfg.Providers.ModelArkCodingPlan.APIBase
+				sel.proxy = cfg.Providers.ModelArkCodingPlan.Proxy
+				if sel.apiBase == "" {
+					sel.apiBase = "https://ark.ap-southeast.bytepluses.com/api/coding/v3"
+				}
+			}
 		}
 	}
 

@@ -18,6 +18,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   gemini: 'Google Gemini',
   github_copilot: 'GitHub Copilot',
   groq: 'Groq',
+  modelark_coding_plan: 'ModelArk Coding Plan',
   moonshot: 'Moonshot',
   nanogpt: 'NanoGPT',
   nvidia: 'NVIDIA',
@@ -26,6 +27,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   openrouter: 'OpenRouter',
   shengsuanyun: 'ShengSuan Yun',
   vllm: 'vLLM',
+  zai_coding_plan: 'zAI Coding Plan',
   zhipu: 'Zhipu',
 }
 

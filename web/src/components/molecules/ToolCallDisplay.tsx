@@ -76,6 +76,10 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M8 12h8',
     color: 'text-fuchsia-400',
   },
+  read_image: {
+    icon: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+    color: 'text-violet-400',
+  },
 }
 
 const GENERIC_ICON =
@@ -114,13 +118,14 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     spawn: t('toolCalls.spawnSubagent'),
     i2c: t('toolCalls.i2c'),
     spi: t('toolCalls.spi'),
+    read_image: t('toolCalls.readImage'),
   }
 
   const key = toolName.toLowerCase()
   return labels[key] || t('toolCalls.genericAction')
 }
 
-function parseArgsSummary(toolName?: string, args?: string): string {
+function parseArgsSummary(_toolName?: string, args?: string): string {
   if (!args) return ''
 
   const lines = args.split('\n')

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -43,6 +43,24 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const selectedKey = parentSessionKey ?? currentSessionKey
   const currentSession =
     sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null
+
+  // Expanded state - shows all sessions when true
+  const [expanded, setExpanded] = useState(false)
+
+  const prevCountRef = useRef(sessions.length)
+
+  // Only reset expanded when sessions are removed (user deleted one),
+  // not when a new session arrives while the user is browsing the expanded list.
+  useEffect(() => {
+    if (sessions.length < prevCountRef.current) {
+      setExpanded(false)
+    }
+    prevCountRef.current = sessions.length
+  }, [sessions.length])
+
+  const visibleSessions = expanded
+    ? sortedSessions
+    : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
 
   const handleSessionSelect = (key: string) => {
     navigate(`/chat/${encodeURIComponent(key)}`)
@@ -120,20 +138,31 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 {sortedSessions.length === 0 ? (
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
-                  sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => handleSessionSelect(s.key)}
-                      className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
-                        s.key === currentSession?.key
-                          ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
-                          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                      }`}
-                    >
-                      <span className="truncate">{s.name || s.key}</span>
-                    </button>
-                  ))
+                  <>
+                    {visibleSessions.map((s) => (
+                      <button
+                        key={s.key}
+                        type="button"
+                        onClick={() => handleSessionSelect(s.key)}
+                        className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
+                          s.key === currentSession?.key
+                            ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                        }`}
+                      >
+                        <span className="truncate">{s.name || s.key}</span>
+                      </button>
+                    ))}
+                    {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded((v) => !v)}
+                        className="text-xs text-brand-rosa hover:text-brand-rosa/80 px-3 py-1 mt-1 border-t border-border pt-2"
+                      >
+                        {expanded ? t('chat.showLess') : t('chat.showMore')} ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </Popover>
@@ -145,21 +174,44 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 </p>
               </div>
               {sortedSessions.length > 0 && (
-                <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
-                  {sortedSessions.slice(0, MAX_VISIBLE_SESSIONS).map((s) => (
-                    <SessionItem
-                      key={s.key}
-                      sessionKey={s.key}
-                      sessionName={s.name}
-                      messageCount={s.message_count}
-                      selected={s.key === currentSession?.key}
-                      isProcessing={processingSessions.has(s.key)}
-                      onSelect={() => handleSessionSelect(s.key)}
-                      onDelete={() => onDeleteSession(s.key)}
-                      collapsed={false}
-                    />
-                  ))}
-                </nav>
+                <>
+                  <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
+                    {visibleSessions.map((s) => (
+                      <SessionItem
+                        key={s.key}
+                        sessionKey={s.key}
+                        sessionName={s.name}
+                        messageCount={s.message_count}
+                        selected={s.key === currentSession?.key}
+                        isProcessing={processingSessions.has(s.key)}
+                        onSelect={() => handleSessionSelect(s.key)}
+                        onDelete={() => onDeleteSession(s.key)}
+                        collapsed={false}
+                      />
+                    ))}
+                  </nav>
+                  {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
+                    <button
+                      type="button"
+                      onClick={() => setExpanded((v) => !v)}
+                      className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                    >
+                      <svg
+                        className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                      <span>{expanded ? t('chat.showLess') : t('chat.showMore')}</span>
+                      {!expanded && (
+                        <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
+                      )}
+                    </button>
+                  )}
+                </>
               )}
             </>
           )}

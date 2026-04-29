@@ -1,3 +1,4 @@
+export { AddAgentModal } from './AddAgentWizard'
 export { AdvancedSettings } from './AdvancedSettings'
 export { AgentsSettings } from './AgentsSettings'
 export { ChannelSettings } from './ChannelSettings'

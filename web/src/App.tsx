@@ -12,6 +12,7 @@ import {
 import { AuthPage } from './components/pages/AuthPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { SettingsPage } from './components/pages/SettingsPage'
+import { AgentFilesPage } from './components/pages/AgentFilesPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
 
@@ -226,6 +227,7 @@ function AppContent() {
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
+        <Route path="settings/agent/:agentId" element={<AgentFilesPage />} />
       </Route>
 
       {/* Fallback */}

@@ -1,10 +1,12 @@
 import { useSettings } from '../../../contexts/SettingsContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
+import i18n from '../../../i18n'
 import {
   BooleanInput,
   NumberInput,
   SearchableSelect,
+  SelectInput,
   SettingsField,
   SettingsSection,
   StringListEditor,
@@ -202,6 +204,28 @@ export function GeneralSettings() {
             onChange={(v) => updateField('agents.defaults.max_read_lines', v)}
             min={1}
             max={5000}
+          />
+        </SettingsField>
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.sections.display')}>
+        <SettingsField
+          label={t('settings.fields.language')}
+          path="display.language"
+          isDirty={isDirtyPath(dirtyPaths, 'display.language')}
+        >
+          <SelectInput
+            id="display.language"
+            value={draftConfig.display?.language || i18n.language || 'es'}
+            onChange={(lang) => {
+              i18n.changeLanguage(lang)
+              updateField('display.language', lang)
+            }}
+            options={[
+              { value: 'es', label: 'Español' },
+              { value: 'en', label: 'English' },
+              { value: 'pt', label: 'Português' },
+            ]}
           />
         </SettingsField>
       </SettingsSection>

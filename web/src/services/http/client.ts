@@ -1,5 +1,6 @@
 import type {
   AgentDetails,
+  AgentFilesResponse,
   AgentStatusResponse,
   AgentsResponse,
   AuthPairResponse,
@@ -218,6 +219,15 @@ export const createApiClient = (baseUrl: string) => {
         active_sessions: status.active_sessions,
       }
     },
+    agentFiles: (agentId: string) =>
+      request<AgentFilesResponse>(endpoints.agents.files(agentId), { method: 'GET' }),
+    agentFile: (agentId: string, fileName: string) =>
+      request<AgentFilesResponse>(endpoints.agents.files(agentId, fileName), { method: 'GET' }),
+    agentFileSave: (agentId: string, fileName: string, content: string) =>
+      request<AgentFilesResponse>(endpoints.agents.files(agentId, fileName), {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      }),
     history: (sessionKey: string) =>
       request<HistoryResponse>(endpoints.chat.history(sessionKey), { method: 'GET' }),
     sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),

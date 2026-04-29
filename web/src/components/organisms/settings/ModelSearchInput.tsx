@@ -19,6 +19,10 @@ const OPENAI_COMPATIBLE_TYPES = new Set([
   'alibaba',
   'alibaba_coding_plan',
   'shengsuanyun',
+  'zai_coding_plan',
+  'zai',
+  'modelark_coding_plan',
+  'modelark',
   'custom',
 ])
 
