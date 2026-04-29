@@ -1,9 +1,9 @@
-// Package contextfiles provides the canonical list of agent context files
+// Package context provides the canonical list of agent context files
 // and workspace initialization logic shared across the agent and channels packages.
 //
 // This package is intentionally minimal — it only depends on stdlib + pkg/logger
 // to avoid import cycles between pkg/agent and pkg/channels.
-package contextfiles
+package context
 
 import (
 	"io"

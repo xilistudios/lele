@@ -1738,6 +1738,7 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 	// Nota: No podemos verificar directamente los valores internos sin exponerlos,
 	// pero el hecho de que no haya errores indica que la configuración se aplicó
 }
+
 // TestSetSessionAgent_PreservesModelWhenAgentUnchanged verifies that SetSessionAgent
 // does not clear the session model when the agent ID is the same as the current agent.
 // This fixes a bug where sending a message would reset the model to the agent's default

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/xilistudios/lele/pkg/contextfiles"
+	"github.com/xilistudios/lele/pkg/context"
 )
 
 // AgentFilesRequest is the request body for saving an agent context file.
@@ -94,7 +94,7 @@ func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request)
 	// Initialize workspace: create directory and seed context files if missing.
 	// This handles the case where an agent was just created via the UI but its
 	// workspace directory hasn't been initialized yet.
-	if err := contextfiles.InitializeWorkspace(absWorkspace); err != nil {
+	if err := context.InitializeWorkspace(absWorkspace); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to initialize workspace: "+err.Error(), "workspace_create_failed")
 		return
 	}
@@ -125,9 +125,9 @@ func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request)
 }
 
 func (n *NativeChannel) handleAgentFileList(w http.ResponseWriter, _ *http.Request, workspace string) {
-	files := make([]AgentFileInfo, 0, len(contextfiles.ContextFiles))
+	files := make([]AgentFileInfo, 0, len(context.ContextFiles))
 
-	for _, name := range contextfiles.ContextFiles {
+	for _, name := range context.ContextFiles {
 		filePath := filepath.Join(workspace, name)
 		info, err := os.Stat(filePath)
 		if err != nil {
@@ -151,7 +151,7 @@ func (n *NativeChannel) handleAgentFileList(w http.ResponseWriter, _ *http.Reque
 
 func (n *NativeChannel) handleAgentFileRead(w http.ResponseWriter, _ *http.Request, workspace, fileName string) {
 	// Security: only allow known context files
-	if !contextfiles.IsContextFile(fileName) {
+	if !context.IsContextFile(fileName) {
 		writeError(w, http.StatusForbidden, "file not allowed", "file_not_allowed")
 		return
 	}
@@ -187,7 +187,7 @@ func (n *NativeChannel) handleAgentFileRead(w http.ResponseWriter, _ *http.Reque
 
 func (n *NativeChannel) handleAgentFileWrite(w http.ResponseWriter, r *http.Request, workspace, fileName string) {
 	// Security: only allow known context files
-	if !contextfiles.IsContextFile(fileName) {
+	if !context.IsContextFile(fileName) {
 		writeError(w, http.StatusForbidden, "file not allowed", "file_not_allowed")
 		return
 	}

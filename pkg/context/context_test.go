@@ -1,4 +1,4 @@
-package contextfiles
+package context
 
 import (
 	"os"

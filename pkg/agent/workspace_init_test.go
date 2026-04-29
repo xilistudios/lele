@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/xilistudios/lele/pkg/contextfiles"
+	"github.com/xilistudios/lele/pkg/context"
 )
 
 func TestInitializeWorkspace(t *testing.T) {
@@ -123,16 +123,16 @@ func TestInitializeWorkspaceNoTemplate(t *testing.T) {
 }
 
 func TestContextFiles_SyncWithChannels(t *testing.T) {
-	// Verify that agent.ContextFiles matches contextfiles.ContextFiles,
+	// Verify that agent.ContextFiles matches context.ContextFiles,
 	// the single source of truth used by both pkg/agent and pkg/channels.
-	if len(ContextFiles) != len(contextfiles.ContextFiles) {
-		t.Errorf("agent.ContextFiles length (%d) != contextfiles.ContextFiles length (%d)",
-			len(ContextFiles), len(contextfiles.ContextFiles))
+	if len(ContextFiles) != len(context.ContextFiles) {
+		t.Errorf("agent.ContextFiles length (%d) != context.ContextFiles length (%d)",
+			len(ContextFiles), len(context.ContextFiles))
 	}
 	for i, f := range ContextFiles {
-		if f != contextfiles.ContextFiles[i] {
-			t.Errorf("agent.ContextFiles[%d] = %q, contextfiles.ContextFiles[%d] = %q",
-				i, f, i, contextfiles.ContextFiles[i])
+		if f != context.ContextFiles[i] {
+			t.Errorf("agent.ContextFiles[%d] = %q, context.ContextFiles[%d] = %q",
+				i, f, i, context.ContextFiles[i])
 		}
 	}
 }
