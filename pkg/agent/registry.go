@@ -244,8 +244,84 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if len(existing.SkillsFilter) != len(ac.Skills) {
 		return true
 	}
+	// Check temperature — same resolution logic as NewAgentInstance:
+	// agent config overrides defaults, default is 0.7
+	newTemperature := 0.7
+	if defaults.Temperature != nil {
+		newTemperature = *defaults.Temperature
+	}
+	if ac != nil && ac.Temperature != nil {
+		newTemperature = *ac.Temperature
+	}
+	if existing.Temperature != newTemperature {
+		return true
+	}
+	// Check fallbacks — compare resolved fallback lists
+	newFallbacks := resolveAgentFallbacks(ac, defaults, cfg)
+	if !stringSlicesEqual(existing.Fallbacks, newFallbacks) {
+		return true
+	}
+	// Check context window — computed from provider model config
+	newCtxWindow := getContextWindow(cfg, newModel, newProvider)
+	if existing.ContextWindow != newCtxWindow {
+		return true
+	}
+	// Check supports images — computed from provider model config
+	newSupportsImages := getSupportsImages(cfg, newModel, newProvider)
+	if existing.SupportsImages != newSupportsImages {
+		return true
+	}
+	// Check reasoning config — computed from provider model config
+	newReasoning := getReasoningConfig(cfg, newModel, newProvider)
+	if !reasoningConfigsEqual(existing.Reasoning, newReasoning) {
+		return true
+	}
 
 	return false
+}
+
+// stringSlicesEqual returns true if both slices have the same length and elements.
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// reasoningConfigsEqual compares two ReasoningConfig values for equality.
+func reasoningConfigsEqual(a, b *config.ReasoningConfig) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Enable != b.Enable {
+		return false
+	}
+	if !ptrStringsEqual(a.Effort, b.Effort) {
+		return false
+	}
+	if !ptrStringsEqual(a.Summary, b.Summary) {
+		return false
+	}
+	return true
+}
+
+// ptrStringsEqual compares two *string values for equality.
+func ptrStringsEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 // resolveAgentModelForReload resolves the model for an agent during registry reload.
