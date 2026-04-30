@@ -419,8 +419,8 @@ func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 		defaultID = defaultAgent.ID
 	}
 	logger.DebugCF("agent", "getSessionAgent using default", map[string]interface{}{
-		"session_key":  sessionKey,
-		"default_id":   defaultID,
+		"session_key": sessionKey,
+		"default_id":  defaultID,
 	})
 	return defaultID
 }

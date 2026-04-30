@@ -196,8 +196,8 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 	logger.InfoCF("native", "handleChatHistory got history", map[string]interface{}{
-		"session_key":    sessionKey,
-		"history_count":  len(history),
+		"session_key":   sessionKey,
+		"history_count": len(history),
 	})
 
 	messages := make([]ChatHistoryMessage, 0, len(history))

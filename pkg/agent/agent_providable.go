@@ -74,11 +74,11 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 					newAgent.Sessions.SetVerboseLevel(resolvedKey, verboseLevel)
 				}
 				logger.InfoCF("agent", "Migrated session history to new agent", map[string]interface{}{
-					"session_key":     resolvedKey,
-					"old_agent_id":    currentAgentID,
-					"new_agent_id":    agentID,
-					"history_count":   len(history),
-					"has_summary":     summary != "",
+					"session_key":   resolvedKey,
+					"old_agent_id":  currentAgentID,
+					"new_agent_id":  agentID,
+					"history_count": len(history),
+					"has_summary":   summary != "",
 				})
 			}
 		}

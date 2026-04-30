@@ -148,7 +148,7 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	history := make([]providers.Message, len(session.Messages))
 	copy(history, session.Messages)
 	logger.DebugCF("session", "GetHistory: returning history", map[string]interface{}{
-		"session_key":  key,
+		"session_key":    key,
 		"messages_count": len(history),
 	})
 	return history
