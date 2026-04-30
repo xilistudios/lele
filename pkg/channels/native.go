@@ -632,17 +632,37 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 	}
 	if strings.HasPrefix(sessionKey, "subagent:") {
 		if n.agentLoop == nil {
+			logger.WarnCF("native", "validateSessionOwnership: agentLoop is nil for subagent", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+			})
 			return false
 		}
 		resolvedParent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
 		if resolvedParent == "" {
+			logger.WarnCF("native", "validateSessionOwnership: resolved parent is empty", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+			})
 			return false
 		}
+		logger.InfoCF("native", "validateSessionOwnership: checking subagent parent", map[string]interface{}{
+			"session_key":     sessionKey,
+			"client_id":       clientID,
+			"resolved_parent": resolvedParent,
+			"client_keys":     client.SessionKeys,
+		})
 		for _, sk := range client.SessionKeys {
 			if sk == resolvedParent {
 				return true
 			}
 		}
+		logger.WarnCF("native", "validateSessionOwnership: no matching session key for subagent", map[string]interface{}{
+			"session_key":     sessionKey,
+			"client_id":       clientID,
+			"resolved_parent": resolvedParent,
+			"client_keys":     client.SessionKeys,
+		})
 		return false
 	}
 	// Extract base session key (without timestamp suffix)

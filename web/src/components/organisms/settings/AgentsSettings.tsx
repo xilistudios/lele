@@ -98,9 +98,7 @@ export function AgentsSettings() {
                 <circle cx="12" cy="7" r="4" />
               </svg>
             </div>
-            <p className="text-sm text-text-secondary mb-2">
-              {t('settings.noAgents')}
-            </p>
+            <p className="text-sm text-text-secondary mb-2">{t('settings.noAgents')}</p>
             <button
               type="button"
               onClick={() => setShowWizard(true)}
@@ -152,7 +150,9 @@ export function AgentsSettings() {
                   <div className="flex items-center gap-3">
                     {/* Agent avatar */}
                     <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs text-white font-medium flex-shrink-0">
-                      {agent.name ? agent.name.charAt(0).toUpperCase() : agent.id.charAt(0).toUpperCase()}
+                      {agent.name
+                        ? agent.name.charAt(0).toUpperCase()
+                        : agent.id.charAt(0).toUpperCase()}
                     </div>
                     <span className="font-medium">{agent.id}</span>
                     {agent.name && (

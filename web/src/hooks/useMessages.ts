@@ -560,6 +560,7 @@ export function useMessages(
     approvalRequest,
     pendingAttachments,
     processingSessions,
+    setProcessingSessions,
     processingSessionKeyRef,
     ensureAssistantPlaceholder,
     sendMessage,

@@ -83,9 +83,7 @@ export function SkillsStep({ skills, setSkills }: Props) {
                       </svg>
                     )}
                   </div>
-                  <p className="text-xs text-text-tertiary truncate">
-                    {t(descKey)}
-                  </p>
+                  <p className="text-xs text-text-tertiary truncate">{t(descKey)}</p>
                 </div>
               </button>
             )
@@ -120,7 +118,10 @@ export function SkillsStep({ skills, setSkills }: Props) {
             <polyline points="22 4 12 14.01 9 11.01" />
           </svg>
           <span>
-            {skills.length} {skills.length === 1 ? t('settings.addAgentModal.skillsSelected') : t('settings.addAgentModal.skillsSelectedPlural')}
+            {skills.length}{' '}
+            {skills.length === 1
+              ? t('settings.addAgentModal.skillsSelected')
+              : t('settings.addAgentModal.skillsSelectedPlural')}
           </span>
         </div>
       )}

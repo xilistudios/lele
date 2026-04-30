@@ -26,6 +26,11 @@ import (
 type messageProcessor interface {
 	processMessage(ctx context.Context, msg bus.InboundMessage) (string, error)
 	processSystemMessage(ctx context.Context, msg bus.InboundMessage) (string, error)
+	// Public methods for direct processing (eliminates type assertions)
+	ProcessDirect(ctx context.Context, content, sessionKey string) (string, error)
+	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
+	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
+	formatStatusResponse(agent *AgentInstance, sessionKey, originChannel string) string
 }
 
 // messageProcessorImpl implements the messageProcessor interface for handling
@@ -94,7 +99,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Check if a session-specific agent is set (e.g., via /agent command)
-	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+	if sessionAgentID := mp.al.getSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
@@ -203,7 +208,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
 	// Honor session-selected agent for command/system handling as well.
-	if sessionAgentID := mp.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+	if sessionAgentID := mp.al.getSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
@@ -460,15 +465,16 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 	spawnConfig := mp.parseSystemSpawnMessage(content)
 
 	// Get the agent for this session to access its subagent manager
-	agentID := mp.al.GetSessionAgent(sessionKey)
+	agentID := mp.al.getSessionAgent(sessionKey)
 	if agentID == "" {
-		agentID = mp.al.GetDefaultAgentID()
+		agentID = mp.al.getDefaultAgentID()
 	}
 
-	subagentManager, ok := mp.al.subagents[agentID]
+	subagents := mp.al.toolCoordinator.GetSubagents()
+	subagentManager, ok := subagents[agentID]
 	if !ok || subagentManager == nil {
 		// Try default agent's subagent manager
-		subagentManager = mp.al.subagents[mp.al.GetDefaultAgentID()]
+		subagentManager = subagents[mp.al.getDefaultAgentID()]
 	}
 
 	if subagentManager == nil {
@@ -585,7 +591,7 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	if agent == nil {
 		return "No default agent configured"
 	}
-	currentModel := mp.modelForSession(agent, sessionKey)
+	currentModel := mp.al.sessionManager.ModelForSession(agent, sessionKey)
 	providerName := mp.al.cfg().Agents.Defaults.Provider
 	if idx := strings.Index(currentModel, "/"); idx > 0 {
 		providerName = currentModel[:idx]
@@ -692,7 +698,7 @@ func (mp *messageProcessorImpl) handleModelCommand(agent *AgentInstance, session
 	if agent == nil {
 		return "No default agent configured"
 	}
-	currentModel := mp.modelForSession(agent, sessionKey)
+	currentModel := mp.al.sessionManager.ModelForSession(agent, sessionKey)
 	if len(args) == 0 {
 		return fmt.Sprintf("Current model: %s\n\nUse /model <name> to change.\nUse /models to see available options.", currentModel)
 	}
@@ -776,19 +782,6 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 // ============================================================================
 // Session utilities
 // ============================================================================
-
-// modelForSession returns the model to use for a session.
-func (mp *messageProcessorImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
-	if sessionKey != "" {
-		resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
-		if model, ok := mp.al.sessionModels.Load(resolvedSessionKey); ok {
-			if selected, ok := model.(string); ok && selected != "" {
-				return selected
-			}
-		}
-	}
-	return agent.Model
-}
 
 // estimateTokens estimates the number of tokens in a message list.
 func (mp *messageProcessorImpl) estimateTokens(messages []providers.Message) int {

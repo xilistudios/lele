@@ -383,6 +383,16 @@ export function useAppLogic(
 
     if (!chatHistory.processing && prevProcessingRef.current) {
       clearStreamingRef.current()
+      // Sync processingSessions with HTTP polling state
+      // This ensures the sidebar updates even when WebSocket events are missed
+      messagesHook.setProcessingSessions((prev: Set<string>) => {
+        if (prev.has(sessionKey)) {
+          const next = new Set(prev)
+          next.delete(sessionKey)
+          return next
+        }
+        return prev
+      })
     }
 
     prevProcessingRef.current = chatHistory.processing
@@ -411,6 +421,7 @@ export function useAppLogic(
     approvalRequest: messagesHook.approvalRequest,
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,
+    setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
     onSend: handleSend,
     onApprove: handleApprove,

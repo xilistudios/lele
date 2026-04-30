@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -21,22 +22,70 @@ import (
 	"github.com/xilistudios/lele/pkg/routing"
 )
 
+// sessionCancelGroup manages multiple cancel functions for a single session.
+type sessionCancelGroup struct {
+	mu      sync.Mutex
+	cancels map[uint64]context.CancelFunc
+}
+
+func newSessionCancelGroup() *sessionCancelGroup {
+	return &sessionCancelGroup{
+		cancels: make(map[uint64]context.CancelFunc),
+	}
+}
+
+func (scg *sessionCancelGroup) add(id uint64, cancel context.CancelFunc) {
+	scg.mu.Lock()
+	defer scg.mu.Unlock()
+	scg.cancels[id] = cancel
+}
+
+func (scg *sessionCancelGroup) remove(id uint64) bool {
+	scg.mu.Lock()
+	defer scg.mu.Unlock()
+	delete(scg.cancels, id)
+	return len(scg.cancels) == 0
+}
+
+func (scg *sessionCancelGroup) cancelAll() int {
+	scg.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(scg.cancels))
+	for id, cancel := range scg.cancels {
+		delete(scg.cancels, id)
+		if cancel != nil {
+			cancels = append(cancels, cancel)
+		}
+	}
+	scg.mu.Unlock()
+
+	for _, cancel := range cancels {
+		cancel()
+	}
+
+	return len(cancels)
+}
+
 // sessionManagerImpl implements the sessionManager interface for managing
-// session summarization, compression, and token estimation.
+// session summarization, compression, token estimation, and cancellation.
 type sessionManagerImpl struct {
-	al          *AgentLoop
-	bus         *bus.MessageBus
-	summarizing *sync.Map
+	al             *AgentLoop
+	bus            *bus.MessageBus
+	summarizing    *sync.Map
+	sessionCancels sync.Map // sessionKey -> context.CancelFunc
+	cancelSeq      atomic.Uint64
 }
 
 // sessionManager is the internal interface for session management operations.
-// SummarizeStats is defined in loop.go
 type sessionManager interface {
 	maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats
 	summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats
 	summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error)
 	AddTokenCounts(sessionKey string, inputTokens, outputTokens int)
 	EstimateTokens(messages []providers.Message) int
+	RegisterSessionCancel(sessionKey string, cancel context.CancelFunc) func()
+	CancelSession(sessionKey string) int
+	IsSessionProcessing(sessionKey string) bool
+	ModelForSession(agent *AgentInstance, sessionKey string) string
 }
 
 // newSessionManager creates a new session manager instance.
@@ -48,15 +97,100 @@ func newSessionManager(al *AgentLoop) *sessionManagerImpl {
 	}
 }
 
+// RegisterSessionCancel registers a cancel function for a session and returns a cleanup function.
+func (sm *sessionManagerImpl) RegisterSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
+	if sessionKey == "" || cancel == nil {
+		return func() {}
+	}
+
+	id := sm.cancelSeq.Add(1)
+	rawGroup, _ := sm.sessionCancels.LoadOrStore(sessionKey, newSessionCancelGroup())
+	group, ok := rawGroup.(*sessionCancelGroup)
+	if !ok || group == nil {
+		group = newSessionCancelGroup()
+		sm.sessionCancels.Store(sessionKey, group)
+	}
+	group.add(id, cancel)
+
+	return func() {
+		cancel()
+		if !group.remove(id) {
+			return
+		}
+		if current, ok := sm.sessionCancels.Load(sessionKey); ok && current == group {
+			sm.sessionCancels.Delete(sessionKey)
+		}
+	}
+}
+
+// CancelSession cancels all active processing for a session and returns the count of stopped operations.
+func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
+	if sessionKey == "" {
+		return 0
+	}
+
+	rawGroup, ok := sm.sessionCancels.Load(sessionKey)
+	if !ok {
+		return 0
+	}
+
+	switch entry := rawGroup.(type) {
+	case *sessionCancelGroup:
+		stopped := entry.cancelAll()
+		sm.sessionCancels.Delete(sessionKey)
+		return stopped
+	case context.CancelFunc:
+		if entry != nil {
+			entry()
+		}
+		sm.sessionCancels.Delete(sessionKey)
+		return 1
+	default:
+		sm.sessionCancels.Delete(sessionKey)
+		return 0
+	}
+}
+
+// IsSessionProcessing returns true if there is an active LLM processing loop for the session.
+func (sm *sessionManagerImpl) IsSessionProcessing(sessionKey string) bool {
+	_, ok := sm.sessionCancels.Load(sessionKey)
+	return ok
+}
+
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
 // Returns statistics about the compaction if it was triggered.
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
 	tokenEstimate := sm.EstimateTokens(newHistory)
+
+	if agent.ContextWindow <= 0 {
+		logger.DebugCF("agent", "maybeSummarize skipped: no context window configured", map[string]interface{}{
+			"session_key":    sessionKey,
+			"agent_id":       agent.ID,
+			"context_window": agent.ContextWindow,
+		})
+		return nil
+	}
+
 	threshold := agent.ContextWindow * 75 / 100
 
-	// Only trigger based on token estimate, not message count
+	logger.DebugCF("agent", "maybeSummarize check", map[string]interface{}{
+		"session_key":    sessionKey,
+		"agent_id":       agent.ID,
+		"context_window": agent.ContextWindow,
+		"threshold":      threshold,
+		"token_estimate": tokenEstimate,
+		"history_count":  len(newHistory),
+	})
+
 	if tokenEstimate > threshold {
+		logger.InfoCF("agent", "Summarization triggered", map[string]interface{}{
+			"session_key":    sessionKey,
+			"agent_id":       agent.ID,
+			"token_estimate": tokenEstimate,
+			"threshold":      threshold,
+			"context_window": agent.ContextWindow,
+		})
 		summarizeKey := agent.ID + ":" + sessionKey
 		if _, loading := sm.summarizing.LoadOrStore(summarizeKey, true); !loading {
 			stats := sm.summarizeSession(agent, sessionKey)
@@ -208,15 +342,6 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	// Helper to find the mid-point of the conversation
 	mid := len(conversation) / 2
 
-	// New history structure:
-	// 1. System Prompt
-	// 2. [Summary of dropped part] - synthesized
-	// 3. Second half of conversation
-	// 4. Last message
-
-	// Simplified approach for emergency: Drop first half of conversation
-	// and rely on existing summary if present, or create a placeholder.
-
 	droppedCount := mid
 	keptConversation := conversation[mid:]
 
@@ -237,7 +362,7 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	})
 }
 
-// estimateTokens estimates the number of tokens in a message list.
+// EstimateTokens estimates the number of tokens in a message list.
 // Uses a safe heuristic of 2.5 characters per token to account for CJK and other
 // overheads better than the previous 3 chars/token.
 func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
@@ -249,13 +374,21 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	return totalChars * 2 / 5
 }
 
-// modelForSession returns the model to use for a session.
-func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
+// ModelForSession returns the model to use for a session.
+func (sm *sessionManagerImpl) ModelForSession(agent *AgentInstance, sessionKey string) string {
 	if sessionKey != "" {
 		resolvedSessionKey := sm.al.ResolveSessionKey(sessionKey)
+		// First check in-memory override (fast path)
 		if model, ok := sm.al.sessionModels.Load(resolvedSessionKey); ok {
 			if selected, ok := model.(string); ok && selected != "" {
 				return selected
+			}
+		}
+		// Then check persisted session model (survives restarts)
+		if agent.Sessions != nil {
+			persistedModel := agent.Sessions.GetModel(resolvedSessionKey)
+			if persistedModel != "" {
+				return persistedModel
 			}
 		}
 	}
@@ -267,7 +400,7 @@ func (sm *sessionManagerImpl) modelForSession(agent *AgentInstance, sessionKey s
 func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, outputTokens int) {
 	// Check for session-level agent override first (set via /agent command)
 	var agent *AgentInstance
-	if overrideID := sm.al.GetSessionAgent(sessionKey); overrideID != "" {
+	if overrideID := sm.al.getSessionAgent(sessionKey); overrideID != "" {
 		if a, ok := sm.al.registry.GetAgent(overrideID); ok {
 			agent = a
 		}

@@ -21,12 +21,8 @@ export function SettingsHeader({ onToggleSidebar, configPath, title }: Props) {
         >
           <SidebarToggleIcon />
         </button>
-        <h1 className="text-xl font-semibold text-text-primary">
-          {title ?? t('chat.settings')}
-        </h1>
-        {configPath && (
-          <span className="text-xs text-text-tertiary">{configPath}</span>
-        )}
+        <h1 className="text-xl font-semibold text-text-primary">{title ?? t('chat.settings')}</h1>
+        {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}
       </div>
     </div>
   )

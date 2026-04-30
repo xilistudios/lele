@@ -130,9 +130,7 @@ export function BehaviorStep({
             step={256}
             onChange={setMaxTokens}
           />
-          <p className="text-xs text-text-tertiary">
-            {t('settings.addAgentModal.maxTokensDesc')}
-          </p>
+          <p className="text-xs text-text-tertiary">{t('settings.addAgentModal.maxTokensDesc')}</p>
         </div>
       </div>
 

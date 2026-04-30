@@ -325,6 +325,21 @@ func stripSummaryMessages(history []providers.Message) []providers.Message {
 	return filtered
 }
 
+// ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
+// Returns the updated history (may be the same slice if no changes needed).
+func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
+	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
+		return history
+	}
+
+	agent.Sessions.GetOrCreate(sessionKey)
+	updatedHistory := make([]providers.Message, 0, len(history)+1)
+	updatedHistory = append(updatedHistory, history...)
+	updatedHistory = append(updatedHistory, buildSummaryMessage(summary))
+	agent.Sessions.SetHistory(sessionKey, updatedHistory)
+	return updatedHistory
+}
+
 func (cb *ContextBuilder) BuildCurrentUserMessage(currentMessage string, attachments []bus.FileAttachment, channel, chatID string) string {
 	return cb.RenderUserMessage(currentMessage, attachments)
 }

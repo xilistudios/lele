@@ -9,12 +9,12 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom'
-import { AuthPage } from './components/pages/AuthPage'
-import { ChatPage } from './components/pages/ChatPage'
-import { SettingsPage } from './components/pages/SettingsPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
 import { AgentsPage } from './components/pages/AgentsPage'
+import { AuthPage } from './components/pages/AuthPage'
+import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
+import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'

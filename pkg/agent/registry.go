@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sort"
 	"strings"
 	"sync"
 
@@ -106,8 +107,16 @@ func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	if agent, ok := r.agents["main"]; ok {
 		return agent
 	}
-	for _, agent := range r.agents {
+	if agent, ok := r.agents["coder"]; ok {
 		return agent
+	}
+	ids := make([]string, 0, len(r.agents))
+	for id := range r.agents {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) > 0 {
+		return r.agents[ids[0]]
 	}
 	return nil
 }

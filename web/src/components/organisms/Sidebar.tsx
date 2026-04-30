@@ -50,7 +50,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   }, [sessions])
 
   // Only show current session on chat pages
-  const isOnChatPage = ['/', '/chat/'].some(prefix => {
+  const isOnChatPage = ['/', '/chat/'].some((prefix) => {
     if (prefix === '/') return location.pathname === '/'
     return location.pathname.startsWith(prefix)
   })
@@ -74,9 +74,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     prevCountRef.current = sessions.length
   }, [sessions.length])
 
-  const visibleSessions = expanded
-    ? sortedSessions
-    : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
+  const visibleSessions = expanded ? sortedSessions : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
 
   const handleSessionSelect = (key: string) => {
     navigate(`/chat/${encodeURIComponent(key)}`)
@@ -190,7 +188,8 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         onClick={() => setExpanded((v) => !v)}
                         className="text-xs text-brand-rosa hover:text-brand-rosa/80 px-3 py-1 mt-1 border-t border-border pt-2"
                       >
-                        {expanded ? t('chat.showLess') : t('chat.showMore')} ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                        {expanded ? t('chat.showLess') : t('chat.showMore')} (
+                        {sortedSessions.length - MAX_VISIBLE_SESSIONS})
                       </button>
                     )}
                   </>
@@ -238,7 +237,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                       </svg>
                       <span>{expanded ? t('chat.showLess') : t('chat.showMore')}</span>
                       {!expanded && (
-                        <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
+                        <span className="text-text-tertiary">
+                          ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                        </span>
                       )}
                     </button>
                   )}
