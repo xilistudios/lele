@@ -565,12 +565,14 @@ export type HistoryResponse = {
   session_key: string
   processing: boolean
   messages: Array<{
+    id: string
     role: 'user' | 'assistant' | 'tool'
     content: string
     reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
   }>
+  has_more: boolean
 }
 
 export type ApiErrorResponse = {

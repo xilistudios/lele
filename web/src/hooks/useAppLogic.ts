@@ -433,5 +433,8 @@ export function useAppLogic(
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
     onToggleSidebar: handleToggleSidebar,
+    loadMore: chatHistory.loadMore,
+    hasMore: chatHistory.hasMore,
+    isLoadingMore: chatHistory.isLoadingMore,
   }
 }

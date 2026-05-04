@@ -52,6 +52,11 @@ export type AppLogicContextValue = {
   onToggleDiagnostics: ReturnType<typeof useAppLogicHook>['onToggleDiagnostics']
   onToggleSidebar: ReturnType<typeof useAppLogicHook>['onToggleSidebar']
 
+  // Pagination
+  loadMore: ReturnType<typeof useAppLogicHook>['loadMore']
+  hasMore: ReturnType<typeof useAppLogicHook>['hasMore']
+  isLoadingMore: ReturnType<typeof useAppLogicHook>['isLoadingMore']
+
   // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
 }
@@ -123,6 +128,11 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onLogout: app.onLogout,
     onToggleDiagnostics: app.onToggleDiagnostics,
     onToggleSidebar: app.onToggleSidebar,
+
+    // Pagination
+    loadMore: app.loadMore,
+    hasMore: app.hasMore,
+    isLoadingMore: app.isLoadingMore,
 
     // Ref for internal wiring
     eventHandlerRef,

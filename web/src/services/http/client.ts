@@ -232,10 +232,16 @@ export const createApiClient = (baseUrl: string) => {
         method: 'PUT',
         body: JSON.stringify({ content }),
       }),
-    history: (sessionKey: string, parentSessionKey?: string) =>
-      request<HistoryResponse>(endpoints.chat.history(sessionKey, parentSessionKey), {
+    history: (sessionKey: string, parentSessionKey?: string, beforeId?: string, limit?: number) => {
+      const params = new URLSearchParams()
+      if (beforeId !== undefined && beforeId !== null) params.set('before_id', beforeId)
+      if (limit !== undefined) params.set('limit', String(limit))
+      const query = params.toString()
+      const baseEndpoint = endpoints.chat.history(sessionKey, parentSessionKey)
+      return request<HistoryResponse>(query ? `${baseEndpoint}?${query}` : baseEndpoint, {
         method: 'GET',
-      }),
+      })
+    },
     sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),
     createSession: (sessionKey: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {

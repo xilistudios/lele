@@ -4,17 +4,31 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { MessageBubble } from '../MessageBubble'
 
+const SCROLL_THRESHOLD = 100
+const DEBOUNCE_MS = 150
+
 export function MessageList() {
   const navigate = useNavigate()
   const { apiUrl } = useAuthContext()
-  const { messages, approvalRequest, onApprove, currentSessionKey } = useAppLogicContext()
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const lastMessageId = messages[messages.length - 1]?.id
+  const {
+    messages,
+    approvalRequest,
+    onApprove,
+    currentSessionKey,
+    loadMore,
+    hasMore,
+    isLoadingMore,
+  } = useAppLogicContext()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const scrollHeightBeforeLoadRef = useRef<number>(0)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isLoadingMoreRef = useRef(false)
+  const lastMessageCountRef = useRef(0)
+  const shouldScrollToBottomRef = useRef(false)
 
   const handleNavigateToSession = useCallback(
     (sessionKey: string) => {
       if (!currentSessionKey) return
-
       navigate(
         `/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`,
       )
@@ -22,10 +36,84 @@ export function MessageList() {
     [currentSessionKey, navigate],
   )
 
+  // Handle scroll to load more messages
+  const handleScroll = useCallback(() => {
+    const container = containerRef.current
+    if (!container || !hasMore || isLoadingMoreRef.current) return
+
+    // Check if user scrolled near the top
+    if (container.scrollTop < SCROLL_THRESHOLD) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+
+      debounceTimerRef.current = setTimeout(() => {
+        // Save scroll position before loading
+        scrollHeightBeforeLoadRef.current = container.scrollHeight
+        isLoadingMoreRef.current = true
+        shouldScrollToBottomRef.current = false
+        loadMore()
+      }, DEBOUNCE_MS)
+    }
+  }, [hasMore, loadMore])
+
+  // Restore scroll position after loading older messages
   useEffect(() => {
-    if (!lastMessageId && messages.length === 0) return
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lastMessageId, messages.length])
+    if (!isLoadingMore && isLoadingMoreRef.current) {
+      isLoadingMoreRef.current = false
+      const container = containerRef.current
+      if (container && scrollHeightBeforeLoadRef.current > 0) {
+        const newScrollHeight = container.scrollHeight
+        const heightDifference = newScrollHeight - scrollHeightBeforeLoadRef.current
+        container.scrollTop = heightDifference
+        scrollHeightBeforeLoadRef.current = 0
+      }
+    }
+  }, [isLoadingMore, messages.length])
+
+  // Track new messages and decide if we should scroll to bottom
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    // Check if new messages were added (not from loading more)
+    if (messages.length > lastMessageCountRef.current && !isLoadingMoreRef.current) {
+      const lastMessage = messages[messages.length - 1]
+      // Only scroll to bottom if it's a new user message or streaming message
+      if (lastMessage && (lastMessage.role === 'user' || lastMessage.streaming)) {
+        shouldScrollToBottomRef.current = true
+      }
+    }
+    lastMessageCountRef.current = messages.length
+  }, [messages.length, isLoadingMore])
+
+  // Scroll to bottom when needed
+  useEffect(() => {
+    if (shouldScrollToBottomRef.current) {
+      const container = containerRef.current
+      if (container) {
+        container.scrollTop = container.scrollHeight
+      }
+      shouldScrollToBottomRef.current = false
+    }
+  })
+
+  // Cleanup debounce timer
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Reset refs when session changes
+  useEffect(() => {
+    isLoadingMoreRef.current = false
+    scrollHeightBeforeLoadRef.current = 0
+    lastMessageCountRef.current = 0
+    shouldScrollToBottomRef.current = false
+  }, [currentSessionKey])
 
   if (messages.length === 0) {
     return (
@@ -40,7 +128,19 @@ export function MessageList() {
   )
 
   return (
-    <div className="mx-auto max-w-3xl space-y-1">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="mx-auto max-w-3xl space-y-1 overflow-y-auto h-full"
+    >
+      {isLoadingMore && (
+        <div className="flex justify-center py-2">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      )}
+      {!isLoadingMore && hasMore && (
+        <p className="text-center py-2 text-xs text-text-tertiary">Scroll up for more</p>
+      )}
       {visibleMessages.map((message, index) => (
         <MessageBubble
           key={message.id}
@@ -76,7 +176,6 @@ export function MessageList() {
           </div>
         </div>
       )}
-      <div ref={messagesEndRef} />
     </div>
   )
 }

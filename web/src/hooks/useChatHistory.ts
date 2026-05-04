@@ -1,12 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
 import { toChatMessages } from './useMessages'
 
 const POLLING_INTERVAL = 5000
+const DEFAULT_LIMIT = 50
 
 type HistoryMessage = Array<{
+  id: string
   role: 'user' | 'assistant' | 'tool'
   content: string
   reasoning_content?: string
@@ -105,27 +107,40 @@ export function useChatHistory(
   parentSessionKey?: string,
 ) {
   const queryClient = useQueryClient()
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const hasMoreRef = useRef(true)
+  const isLoadingMoreRef = useRef(false)
 
+  // Query for fetching recent messages (polling and initial load)
   const query = useQuery({
-    queryKey: [...chatHistoryQueryKey(sessionKey ?? ''), parentSessionKey],
+    queryKey: parentSessionKey
+      ? [...chatHistoryQueryKey(sessionKey ?? ''), parentSessionKey]
+      : chatHistoryQueryKey(sessionKey ?? ''),
     queryFn: async () => {
       if (!sessionKey || !token) return null
-      console.log('[RQ] Fetching history for session', sessionKey)
-      const history = await api.history(sessionKey, parentSessionKey)
-      if (!history) {
+      console.log('[RQ] Fetching recent history for session', sessionKey)
+      const history = await api.history(sessionKey, parentSessionKey, undefined, DEFAULT_LIMIT)
+      if (!history || !history.messages) {
         console.log('[RQ] History fetched, empty response')
+        hasMoreRef.current = false
         return {
           sessionKey,
           messages: [],
           rawMessages: [],
+          hasMore: false,
         }
       }
-      console.log('[RQ] History fetched, messages:', history.messages.length)
+      console.log('[RQ] History fetched, messages:', history.messages.length, 'has_more:', history.has_more)
+      hasMoreRef.current = history.has_more
+
+      // Convert to ChatMessage array
+      const messages = toChatMessages(history.messages, history.session_key)
+
       return {
         sessionKey: history.session_key,
-        messages: toChatMessages(history.messages, history.session_key),
+        messages,
         rawMessages: history.messages,
-        processing: history.processing,
+        hasMore: history.has_more,
       }
     },
     enabled:
@@ -139,26 +154,83 @@ export function useChatHistory(
     retry: false,
   })
 
+  // Function to load older messages (called when scrolling up)
+  const loadMore = useCallback(async () => {
+    if (!sessionKey || !token || isLoadingMoreRef.current) return
+    const currentData = query.data
+    if (!currentData || !currentData.messages.length || !hasMoreRef.current) return
+
+    // Get the ID of the oldest message to use as cursor
+    const oldestMessage = currentData.messages[0]
+    if (!oldestMessage) return
+
+    console.log('[RQ] Loading older history before message:', oldestMessage.id)
+    isLoadingMoreRef.current = true
+    setIsLoadingMore(true)
+
+    try {
+      const history = await api.history(sessionKey, parentSessionKey, oldestMessage.id, DEFAULT_LIMIT)
+      if (!history || !history.messages || history.messages.length === 0) {
+        hasMoreRef.current = false
+        return
+      }
+
+      hasMoreRef.current = history.has_more
+
+      const olderMessages = toChatMessages(history.messages, history.session_key)
+
+      // Remove duplicates by checking IDs
+      const existingIds = new Set(currentData.messages.map((m) => m.id))
+      const uniqueOlderMessages = olderMessages.filter((m) => !existingIds.has(m.id))
+
+      if (uniqueOlderMessages.length === 0) {
+        console.log('[RQ] No new older messages to add')
+        return
+      }
+
+      console.log('[RQ] Adding', uniqueOlderMessages.length, 'older messages')
+
+      // Prepend older messages to the beginning
+      queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+        sessionKey: currentData.sessionKey,
+        messages: [...uniqueOlderMessages, ...currentData.messages],
+        rawMessages: [...history.messages, ...(currentData.rawMessages || [])],
+        hasMore: history.has_more,
+      })
+    } catch (error) {
+      console.error('[RQ] Error loading more history:', error)
+    } finally {
+      isLoadingMoreRef.current = false
+      setIsLoadingMore(false)
+    }
+  }, [api, sessionKey, token, parentSessionKey, queryClient, query.data])
+
+  const hasMore = hasMoreRef.current
+
   const baseMessages = query.data?.messages ?? []
   const messages = useMemo(
     () => mergeMessages(baseMessages, streamingMessages),
     [baseMessages, streamingMessages],
   )
 
-  const invalidateHistory = () => {
+  const invalidateHistory = useCallback(() => {
     if (!sessionKey) return
+    hasMoreRef.current = true
     queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
-  }
+  }, [sessionKey, queryClient])
 
   return {
     messages,
     rawMessages: query.data?.rawMessages ?? [],
-    processing: query.data?.processing ?? false,
+    processing: false, // This would need to be updated if processing status is needed
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,
     invalidateHistory,
     refetch: query.refetch,
+    loadMore,
+    hasMore,
+    isLoadingMore,
   }
 }
 

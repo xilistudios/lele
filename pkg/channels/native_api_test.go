@@ -517,6 +517,9 @@ func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	if payload.Messages[2].ToolCallID != "call-1" {
 		t.Fatalf("tool_call_id = %#v, want call-1", payload.Messages[2].ToolCallID)
 	}
+	if payload.HasMore != false {
+		t.Fatalf("has_more = %v, want false", payload.HasMore)
+	}
 }
 
 func TestNativeChannelSubagentHistoryReturnsMessages(t *testing.T) {
@@ -571,6 +574,9 @@ func TestNativeChannelSubagentHistoryReturnsMessages(t *testing.T) {
 	}
 	if payload.Messages[1].Role != "assistant" || payload.Messages[1].Content != "Subagent result" {
 		t.Fatalf("second message = %#v, want assistant Subagent result", payload.Messages[1])
+	}
+	if payload.HasMore != false {
+		t.Fatalf("has_more = %v, want false", payload.HasMore)
 	}
 }
 

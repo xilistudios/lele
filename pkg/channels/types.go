@@ -155,9 +155,11 @@ type ChatHistoryResponse struct {
 	SessionKey string               `json:"session_key"`
 	Messages   []ChatHistoryMessage `json:"messages"`
 	Processing bool                 `json:"processing"`
+	HasMore    bool                 `json:"has_more"`
 }
 
 type ChatHistoryMessage struct {
+	ID               string            `json:"id"`
 	Role             string            `json:"role"`
 	Content          string            `json:"content"`
 	ReasoningContent string            `json:"reasoning_content,omitempty"`

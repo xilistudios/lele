@@ -20,6 +20,7 @@ export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
 export const toChatMessages = (
   history: Array<{
+    id: string
     role: 'user' | 'assistant' | 'tool'
     content: string
     reasoning_content?: string
@@ -30,7 +31,7 @@ export const toChatMessages = (
 ): ChatMessage[] => {
   const toolCallMap = buildToolCallMap(history)
 
-  return history.flatMap((message, index) => {
+  return history.flatMap((message) => {
     let messageContent = message.content
     let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
 
@@ -46,7 +47,7 @@ export const toChatMessages = (
     if (message.role === 'user') {
       return [
         createUserMessage({
-          id: createHistoryMessageId(sessionKey, index, message.role),
+          id: message.id,
           sessionKey,
           content: messageContent,
           attachments: parsedAttachments,
@@ -65,7 +66,7 @@ export const toChatMessages = (
 
       return [
         createAssistantMessage({
-          id: createHistoryMessageId(sessionKey, index, message.role),
+          id: message.id,
           sessionKey,
           content: messageContent,
           reasoningContent: message.reasoning_content,
@@ -87,7 +88,7 @@ export const toChatMessages = (
 
       return [
         createToolMessage({
-          id: createHistoryMessageId(sessionKey, index, message.role),
+          id: message.id,
           sessionKey,
           toolName,
           toolArgs,
@@ -121,10 +122,9 @@ export function useMessages(
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
-      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>([
-        'chatHistory',
-        sessionKey,
-      ])
+      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
+        chatHistoryQueryKey(sessionKey),
+      )
       return history?.messages?.filter((message) => message.role === 'user').length ?? 0
     },
     [queryClient],
@@ -356,7 +356,7 @@ export function useMessages(
               return prev
             })
             queryClient.invalidateQueries({
-              queryKey: ['chatHistory', historySessionKey],
+              queryKey: chatHistoryQueryKey(historySessionKey),
             })
             // Refresh sessions list to get updated name from backend
             onSessionUpdated?.()

@@ -18,6 +18,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	lelectx "github.com/xilistudios/lele/pkg/context"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -165,62 +166,88 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	offset, limit := parsePagination(r)
+	// Parse pagination params: before_id for cursor-based pagination
+	beforeID := getQueryParam(r, "before_id")
+	limitStr := getQueryParam(r, "limit")
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 
-	var messages []ChatHistoryMessage
-	total := 0
-	for _, msg := range history {
+	// Build a list of valid messages (user, assistant, tool) with their IDs
+	type indexedMessage struct {
+		index int
+		id    string
+		msg   providers.Message
+	}
+	validMessages := make([]indexedMessage, 0, len(history))
+	for i, msg := range history {
 		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
 			continue
 		}
-		total++
-	}
-	start := offset
-	if start > total {
-		start = total
-	}
-	end := offset + limit
-	if end > total {
-		end = total
+		// Generate a stable ID for the message based on index and session
+		msgID := fmt.Sprintf("%s:%d", sessionKey, i)
+		validMessages = append(validMessages, indexedMessage{index: i, id: msgID, msg: msg})
 	}
 
-	sliceIdx := 0
-	for _, msg := range history {
-		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
-			continue
-		}
-		if sliceIdx >= start && sliceIdx < end {
-			historyMsg := ChatHistoryMessage{
-				Role:             msg.Role,
-				Content:          msg.Content,
-				ReasoningContent: msg.ReasoningContent,
-				ToolCallID:       msg.ToolCallID,
+	// Find the starting point based on before_id cursor
+	startIdx := len(validMessages)
+	if beforeID != "" {
+		for i, vm := range validMessages {
+			if vm.id == beforeID {
+				startIdx = i
+				break
 			}
-			if len(msg.ToolCalls) > 0 {
-				historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
-				for _, tc := range msg.ToolCalls {
-					args := tc.Arguments
-					if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
-						var parsed map[string]interface{}
-						if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
-							args = parsed
-						}
-					}
-					historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
-						ID:               tc.ID,
-						Type:             tc.Type,
-						Name:             tc.Name,
-						Arguments:        args,
-						ThoughtSignature: tc.ThoughtSignature,
-					})
-				}
-			}
-			messages = append(messages, historyMsg)
 		}
-		sliceIdx++
 	}
+
+	// Calculate the range to return (messages before the cursor)
+	endIdx := startIdx
+	if endIdx > len(validMessages) {
+		endIdx = len(validMessages)
+	}
+	resultStartIdx := endIdx - limit
+	if resultStartIdx < 0 {
+		resultStartIdx = 0
+	}
+
+	// Build response messages
+	messages := make([]ChatHistoryMessage, 0)
+	for i := resultStartIdx; i < endIdx; i++ {
+		vm := validMessages[i]
+		historyMsg := ChatHistoryMessage{
+			ID:               vm.id,
+			Role:             vm.msg.Role,
+			Content:          vm.msg.Content,
+			ReasoningContent: vm.msg.ReasoningContent,
+			ToolCallID:       vm.msg.ToolCallID,
+		}
+		if len(vm.msg.ToolCalls) > 0 {
+			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(vm.msg.ToolCalls))
+			for _, tc := range vm.msg.ToolCalls {
+				args := tc.Arguments
+				if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
+					var parsed map[string]interface{}
+					if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
+						args = parsed
+					}
+				}
+				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
+					ID:               tc.ID,
+					Type:             tc.Type,
+					Name:             tc.Name,
+					Arguments:        args,
+					ThoughtSignature: tc.ThoughtSignature,
+				})
+			}
+		}
+		messages = append(messages, historyMsg)
+	}
+
+	// Check if there are more messages available
+	hasMore := resultStartIdx > 0
 
 	processing := false
 	if n.agentLoop != nil {
@@ -231,6 +258,7 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		SessionKey: sessionKey,
 		Messages:   messages,
 		Processing: processing,
+		HasMore:    hasMore,
 	})
 }
 
@@ -1237,7 +1265,7 @@ func parsePagination(r *http.Request) (offset, limit int) {
 	}
 
 	limit, _ = strconv.Atoi(limitStr)
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 
