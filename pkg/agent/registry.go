@@ -116,12 +116,20 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// First check for agent "main" (backward compatibility)
 	if agent, ok := r.agents["main"]; ok {
 		return agent
 	}
-	if agent, ok := r.agents["coder"]; ok {
-		return agent
+
+	// Then iterate through all agents and return the one with IsDefault=true
+	for _, agent := range r.agents {
+		if agent.IsDefault {
+			return agent
+		}
 	}
+
+	// If no default found, fall back to the first alphabetically sorted agent
 	ids := make([]string, 0, len(r.agents))
 	for id := range r.agents {
 		ids = append(ids, id)
