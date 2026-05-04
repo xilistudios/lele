@@ -4,14 +4,22 @@ export type ClientCommand =
   | { event: 'subscribe'; data: { session_key: string; agent_id?: string } }
   | { event: 'unsubscribe'; data: { session_key?: string } }
   | { event: 'approve'; data: { request_id: string; approved: boolean } }
+  | { event: 'message'; data: { content: string; session_key?: string; agent_id?: string; attachments?: string[] } }
   | { event: 'cancel'; data: Record<string, never> }
   | { event: 'ping'; data: Record<string, never> }
   | { event: 'typing'; data: Record<string, never> }
 
 export type { ClientEvent }
 
+let commandIdCounter = 0
+
 export function serializeCommand(command: ClientCommand): string {
-  return JSON.stringify(command)
+  return JSON.stringify({
+    v: 1,
+    id: `cmd-${++commandIdCounter}-${Date.now()}`,
+    event: command.event,
+    data: command.data,
+  })
 }
 
 export function parseEvent(raw: string): ClientEvent {

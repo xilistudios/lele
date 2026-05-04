@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -298,7 +299,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 20, // Default, will be overridden by SetMaxIterations
+		maxIterations: 100, // Default, will be overridden by SetMaxIterations
 		nextID:        1,
 	}
 }
@@ -493,7 +494,9 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	recorder := sm.sessionRecorder
 	sm.mu.RUnlock()
 
-	sessionKey := "subagent:" + task.ID
+	// Build subagent session key: {origin_session_key}:{task_id}
+	// This ensures subagent history is saved alongside the parent session
+	sessionKey := task.OriginSessionKey + ":" + task.ID
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -515,6 +518,17 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		SessionRecorder: recorder,
 		SessionKey:      sessionKey,
 	}, messages, task.OriginChannel, task.OriginChatID)
+
+	// Save subagent history to disk if recorder is available
+	if recorder != nil && sessionKey != "" {
+		if err := recorder.Save(sessionKey); err != nil {
+			logger.ErrorCF("subagent", "Failed to save subagent history", map[string]interface{}{
+				"session_key": sessionKey,
+				"task_id":     task.ID,
+				"error":       err.Error(),
+			})
+		}
+	}
 
 	sm.mu.Lock()
 	var result *ToolResult

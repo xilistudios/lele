@@ -88,13 +88,10 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		agent = mp.al.registry.GetDefaultAgent()
 	}
 
-	// Use routed session key, but honor pre-set agent-scoped keys (for ProcessDirect/cron)
-	// Also honor channel-specific session keys (e.g., telegram:<chat_id>)
+	// Use routed session key, but honor message's session key when explicitly set
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") || strings.HasPrefix(msg.SessionKey, "native:") {
-			sessionKey = msg.SessionKey
-		}
+		sessionKey = msg.SessionKey
 	}
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 

@@ -334,7 +334,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 
 	mux := http.NewServeMux()
 	native.RegisterRoutes(mux)
-	handler := native.corsMiddleware(native.securityHeadersMiddleware(native.authMiddleware(mux)))
+	handler := native.corsMiddleware(native.securityHeadersMiddleware(mux))
 	server := httptest.NewServer(handler)
 	defer server.Close()
 

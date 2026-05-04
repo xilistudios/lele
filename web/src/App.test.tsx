@@ -287,12 +287,12 @@ describe('App', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
         return new Promise<Response>((resolve) => {
           historyAResolver.current = resolve
         })
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A2')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -305,7 +305,7 @@ describe('App', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/session/')) {
+      if (url.includes('/api/v1/chat/sessions/')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -424,7 +424,7 @@ describe('App', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?')) {
+      if (url.includes('/api/v1/chat/')) {
         const sessionKey = url.includes('native%3Aclient-1%3A2')
           ? 'native:client-1:2'
           : 'native:client-1:1'
@@ -435,7 +435,7 @@ describe('App', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/session/')) {
+      if (url.includes('/api/v1/chat/sessions/')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -457,15 +457,18 @@ describe('App', () => {
     })
 
     let sessionTwoButton: HTMLElement | undefined
-    await waitFor(() => {
-      const sessionItems = Array.from(
-        view.container.querySelectorAll('nav [role="button"]'),
-      ) as HTMLElement[]
-      sessionTwoButton = sessionItems.find(
-        (button) => !button.className.includes('bg-surface-hover'),
-      )
-      expect(sessionTwoButton).toBeDefined()
-    }, { timeout: 2000 })
+    await waitFor(
+      () => {
+        const sessionItems = Array.from(
+          view.container.querySelectorAll('nav [role="button"]'),
+        ) as HTMLElement[]
+        sessionTwoButton = sessionItems.find(
+          (button) => !button.className.includes('bg-surface-hover'),
+        )
+        expect(sessionTwoButton).toBeDefined()
+      },
+      { timeout: 2000 },
+    )
 
     if (!sessionTwoButton) {
       throw new Error('Session 2 button not found')
@@ -487,7 +490,7 @@ describe('App', () => {
         event: 'tool.executing',
         data: { session_key: 'native:client-1:2', tool: 'exec', action: 'Running active session' },
       })
-    })    // Wait longer for the UI to update
+    }) // Wait longer for the UI to update
     await waitFor(() => expect(view.getByText('Running active session')).not.toBeNull(), {
       timeout: 3000,
     })
@@ -495,11 +498,11 @@ describe('App', () => {
 
     await act(async () => {
       socket.emitJSON({
-         event: 'tool.result',
-         data: { session_key: 'native:client-1:2', tool: 'exec', result: 'ok' },
-       })
+        event: 'tool.result',
+        data: { session_key: 'native:client-1:2', tool: 'exec', result: 'ok' },
+      })
     })
- 
+
     // Wait for tool result to clear the executing state
     await waitFor(() => expect(view.queryByText('Running active session')).toBeNull(), {
       timeout: 3000,
@@ -597,7 +600,7 @@ describe('Routing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -605,7 +608,7 @@ describe('Routing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A2')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -613,7 +616,7 @@ describe('Routing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=subagent%3Atask-1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history/task-1')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'subagent:task-1',
@@ -629,8 +632,12 @@ describe('Routing', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/session/')) {
-        if (url.includes('subagent%3Atask-1') || url.includes('subagent:task-1')) {
+      if (url.includes('/api/v1/chat/sessions/')) {
+        if (
+          url.includes('subagent%3Atask-1') ||
+          url.includes('subagent:task-1') ||
+          url.includes('task-1')
+        ) {
           return Promise.resolve(
             jsonResponse({
               session_key: 'subagent:task-1',
@@ -699,11 +706,17 @@ describe('Routing', () => {
     const view = renderWithProviders(<App />)
 
     // Wait for settings page to load by looking for settings-specific elements
-    await waitFor(() => {
-      // Look for settings tabs or navigation elements
-      const settingsElements = view.container.querySelectorAll('[data-testid], [role="tab"]')
-      expect(settingsElements.length > 0 || view.container.querySelector('button.bg-state-error') !== null).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        // Look for settings tabs or navigation elements
+        const settingsElements = view.container.querySelectorAll('[data-testid], [role="tab"]')
+        expect(
+          settingsElements.length > 0 ||
+            view.container.querySelector('button.bg-state-error') !== null,
+        ).toBe(true)
+      },
+      { timeout: 3000 },
+    )
   })
 
   test('loads specific chat via deep link /chat/:chat_id', async () => {
@@ -722,10 +735,13 @@ describe('Routing', () => {
     const view = renderWithProviders(<App />)
 
     // Wait for subagent chat to load
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('Subagent result') || content?.includes('Verifying')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('Subagent result') || content?.includes('Verifying')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
     expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
     expect(view.queryByText('subagent:task-1')).toBeNull()
     expect(view.queryByText('mensaje A')).toBeNull()
@@ -773,10 +789,13 @@ describe('Routing', () => {
     const view = renderWithProviders(<App />)
 
     // Wait for initial session to load
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('mensaje A')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('mensaje A')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
 
     const ws = MockWebSocket.instances[0]
 
@@ -819,10 +838,13 @@ describe('Routing', () => {
     })
 
     // Wait for the parent response message
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('Parent response')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('Parent response')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
 
     fireEvent.click(view.getByRole('button', { name: 'Open subagent chat' }))
 
@@ -849,7 +871,7 @@ describe('Routing', () => {
     const historyFetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
 
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -872,28 +894,43 @@ describe('Routing', () => {
     const view = renderWithProviders(<App />)
 
     // Wait for parent chat with subagent link to load
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('Parent response after reload')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('Parent response after reload')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
 
-    await waitFor(() => {
-      const buttons = view.container.querySelectorAll('button')
-      const hasSubagentButton = Array.from(buttons).some(btn => btn.getAttribute('aria-label')?.includes('subagent') || btn.textContent?.includes('subagent'))
-      expect(hasSubagentButton).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const buttons = view.container.querySelectorAll('button')
+        const hasSubagentButton = Array.from(buttons).some(
+          (btn) =>
+            btn.getAttribute('aria-label')?.includes('subagent') ||
+            btn.textContent?.includes('subagent'),
+        )
+        expect(hasSubagentButton).toBe(true)
+      },
+      { timeout: 3000 },
+    )
 
-    const subagentButton = view.container.querySelector('button[aria-label*="subagent"]') ||
-                          Array.from(view.container.querySelectorAll('button')).find(btn => 
-                            btn.textContent?.toLowerCase().includes('subagent'))
+    const subagentButton =
+      view.container.querySelector('button[aria-label*="subagent"]') ||
+      Array.from(view.container.querySelectorAll('button')).find((btn) =>
+        btn.textContent?.toLowerCase().includes('subagent'),
+      )
     if (subagentButton) {
       fireEvent.click(subagentButton)
     }
 
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('Subagent result') || content?.includes('Verifying')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('Subagent result') || content?.includes('Verifying')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
     expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
   })
 
@@ -905,10 +942,13 @@ describe('Routing', () => {
     const view = renderWithProviders(<App />)
 
     // Wait for initial session
-    await waitFor(() => {
-      const content = view.container.textContent
-      expect(content?.includes('mensaje A')).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const content = view.container.textContent
+        expect(content?.includes('mensaje A')).toBe(true)
+      },
+      { timeout: 3000 },
+    )
 
     const ws = MockWebSocket.instances[0]
 
@@ -933,14 +973,18 @@ describe('Routing', () => {
     })
 
     // Wait for subagent button to appear
-    await waitFor(() => {
-      const buttons = view.container.querySelectorAll('button')
-      const hasSubagentButton = Array.from(buttons).some(btn => 
-        btn.getAttribute('aria-label')?.toLowerCase().includes('subagent') || 
-        btn.textContent?.toLowerCase().includes('subagent')
-      )
-      expect(hasSubagentButton).toBe(true)
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        const buttons = view.container.querySelectorAll('button')
+        const hasSubagentButton = Array.from(buttons).some(
+          (btn) =>
+            btn.getAttribute('aria-label')?.toLowerCase().includes('subagent') ||
+            btn.textContent?.toLowerCase().includes('subagent'),
+        )
+        expect(hasSubagentButton).toBe(true)
+      },
+      { timeout: 3000 },
+    )
   })
 })
 
@@ -1046,7 +1090,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-2%3A1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-2%3A1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-2:1',
@@ -1054,7 +1098,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-2%3A2')) {
+      if (url.includes('/api/v1/chat/native%3Aclient-2%3A2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-2:2',
@@ -1062,7 +1106,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?')) {
+      if (url.includes('/api/v1/chat/')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -1075,7 +1119,7 @@ describe('Auto-pairing', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/session/')) {
+      if (url.includes('/api/v1/chat/sessions/')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-2:2',
@@ -1095,11 +1139,15 @@ describe('Auto-pairing', () => {
     await waitFor(() => expect(pairCalled).toBe(true), { timeout: 5000 })
 
     // Wait for the app to complete loading
-    await waitFor(() => {
-      const hasLoading = view.container.textContent?.includes('Connecting') ||
-                         view.container.querySelector('.animate-spin') !== null
-      expect(hasLoading || view.container.querySelector('textarea') !== null).toBe(true)
-    }, { timeout: 5000 })
+    await waitFor(
+      () => {
+        const hasLoading =
+          view.container.textContent?.includes('Connecting') ||
+          view.container.querySelector('.animate-spin') !== null
+        expect(hasLoading || view.container.querySelector('textarea') !== null).toBe(true)
+      },
+      { timeout: 5000 },
+    )
   })
 
   test('shows error when auto-pairing fails', async () => {
@@ -1145,7 +1193,7 @@ describe('Auto-pairing', () => {
       if (url.endsWith('/api/v1/chat/sessions')) {
         return Promise.resolve(jsonResponse({ sessions: [] }))
       }
-      if (url.includes('/api/v1/chat/history?')) {
+      if (url.includes('/api/v1/chat/')) {
         return Promise.resolve(jsonResponse({ session_key: 'native:client-1:1', messages: [] }))
       }
       if (url.includes('/api/v1/models?')) {
@@ -1153,7 +1201,7 @@ describe('Auto-pairing', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/session/')) {
+      if (url.includes('/api/v1/chat/sessions/')) {
         return Promise.resolve(
           jsonResponse({ session_key: 'native:client-1:1', model: 'gpt-4', models: ['gpt-4'] }),
         )
@@ -1183,9 +1231,12 @@ describe('Auto-pairing', () => {
     }
 
     // Error should be visible
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('Invalid PIN')
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        expect(view.container.textContent).toContain('Invalid PIN')
+      },
+      { timeout: 3000 },
+    )
   })
 
   test('pre-fills PIN from URL code parameter', async () => {
@@ -1300,13 +1351,13 @@ describe('Session deletion', () => {
         )
       }
       if (
-        url.endsWith('/api/v1/chat/session/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native%3Aclient-1%3A1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native:client-1:1')
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         return Promise.resolve(jsonResponse({}))
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A1')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -1314,7 +1365,7 @@ describe('Session deletion', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/history?session_key=native%3Aclient-1%3A2')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -1337,9 +1388,9 @@ describe('Session deletion', () => {
     const fetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
       if (
-        url.endsWith('/api/v1/chat/session/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native%3Aclient-1%3A1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native:client-1:1')
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         deleteCalled = true
         return Promise.resolve(jsonResponse({}))
@@ -1442,13 +1493,13 @@ describe('Session deletion', () => {
         )
       }
       if (
-        url.endsWith('/api/v1/chat/session/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native%3Aclient-1%3A1?action=delete') ||
-        url.endsWith('/api/v1/chat/session/native:client-1:1')
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         return Promise.resolve(jsonResponse({}))
       }
-      if (url.includes('/api/v1/chat/history')) {
+      if (url.includes('/api/v1/chat/')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',

@@ -682,6 +682,7 @@ export type ClientEvent =
   | { event: 'pong'; data: { time: string } }
   | { event: 'attachments'; data: Attachment[] }
   | { event: 'error'; data: { code: string; message: string } }
+  | { event: 'history.updated'; data: { session_key: string; name?: string } }
 
 export type ApprovalDecision = {
   request_id: string

@@ -107,6 +107,7 @@ export function useMessages(
   token: string | null,
   _currentSessionKey: string | null,
   currentSessionKeyRef: React.MutableRefObject<string | null>,
+  onSessionUpdated?: () => void,
 ) {
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
@@ -338,6 +339,8 @@ export function useMessages(
             queryClient.invalidateQueries({
               queryKey: ['chatHistory', historySessionKey],
             })
+            // Refresh sessions list to get updated name from backend
+            onSessionUpdated?.()
           }
           break
         }

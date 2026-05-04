@@ -66,7 +66,6 @@ export function AgentFilesPage() {
       })()
       return
     }
-
     ;(async () => {
       try {
         setContent('')

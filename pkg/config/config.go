@@ -1076,8 +1076,7 @@ func (c *Config) Snapshot() *Config {
 }
 
 func DefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".lele", "config.json")
+	return filepath.Join(GetLeleDir(), "config.json")
 }
 
 func SaveConfig(path string, cfg *Config) error {
@@ -1159,7 +1158,7 @@ func (c *Config) LogsPath() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.Logs.Path == "" {
-		return expandHome("~/.lele/logs")
+		return filepath.Join(GetLeleDir(), "logs")
 	}
 	return expandHome(c.Logs.Path)
 }
@@ -1250,6 +1249,13 @@ func expandHome(path string) string {
 		return home
 	}
 	return path
+}
+
+func GetLeleDir() string {
+	if envDir := os.Getenv("LELE_CONFIG_DIR"); envDir != "" {
+		return expandHome(envDir)
+	}
+	return getDefaultLeleDir()
 }
 
 func getDefaultLeleDir() string {

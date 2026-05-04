@@ -11,6 +11,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -35,11 +36,7 @@ type ContextBuilder struct {
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
 
 func getGlobalConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".lele")
+	return config.GetLeleDir()
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
@@ -385,18 +382,7 @@ func normalizeNativeChatID(chatID string) string {
 		return chatID
 	}
 
-	last := parts[len(parts)-1]
-	allDigits := last != ""
-	for _, ch := range last {
-		if ch < '0' || ch > '9' {
-			allDigits = false
-			break
-		}
-	}
-	if allDigits {
-		return strings.Join(parts[:len(parts)-1], ":")
-	}
-
+	// Strip :chat: alias if present
 	if len(parts) >= 4 && parts[len(parts)-2] == "chat" {
 		return strings.Join(parts[:len(parts)-2], ":")
 	}

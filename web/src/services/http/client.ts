@@ -232,8 +232,10 @@ export const createApiClient = (baseUrl: string) => {
         method: 'PUT',
         body: JSON.stringify({ content }),
       }),
-    history: (sessionKey: string) =>
-      request<HistoryResponse>(endpoints.chat.history(sessionKey), { method: 'GET' }),
+    history: (sessionKey: string, parentSessionKey?: string) =>
+      request<HistoryResponse>(endpoints.chat.history(sessionKey, parentSessionKey), {
+        method: 'GET',
+      }),
     sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),
     createSession: (sessionKey: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {
@@ -288,15 +290,16 @@ export const createApiClient = (baseUrl: string) => {
     sendMessage: (payload: SendMessageRequest) =>
       request<SendMessageResponse>(endpoints.chat.send, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          session_key: payload.session_key || undefined,
+        }),
       }),
     clearSession: async (sessionKey: string) => {
-      await request<unknown>(endpoints.chat.session(sessionKey), { method: 'DELETE' })
+      await request<unknown>(endpoints.chat.clear(sessionKey), { method: 'POST' })
     },
     deleteSession: async (sessionKey: string) => {
-      await request<unknown>(endpoints.chat.session(sessionKey, 'delete'), {
-        method: 'DELETE',
-      })
+      await request<unknown>(endpoints.chat.session(sessionKey), { method: 'DELETE' })
     },
     config: () => request<ConfigResponse>(endpoints.system.config, { method: 'GET' }),
     saveConfig: (config: EditableConfig) =>

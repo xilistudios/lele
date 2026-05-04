@@ -32,8 +32,10 @@ type ClientStore struct {
 }
 
 type WSMessage struct {
-	Event string          `json:"event"`
-	Data  json.RawMessage `json:"data"`
+	Version int             `json:"v,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Event   string          `json:"event"`
+	Data    json.RawMessage `json:"data"`
 }
 
 type WSMessagePayload struct {
@@ -378,12 +380,26 @@ type ChannelInfo struct {
 	Running bool   `json:"running"`
 }
 
-type ErrorResponse struct {
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
-	Code    string `json:"code,omitempty"`
-	Details string `json:"details,omitempty"`
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
 }
+
+type PaginationParams struct {
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
+}
+
+type PaginatedResponse struct {
+	Items   any   `json:"items"`
+	Total   int   `json:"total"`
+	Offset  int   `json:"offset"`
+	Limit   int   `json:"limit"`
+	HasMore bool  `json:"has_more"`
+}
+
+const WSProtocolVersion = 1
 
 type FileUploadResponse struct {
 	Files []UploadedFile `json:"files"`

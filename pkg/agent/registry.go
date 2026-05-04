@@ -85,18 +85,30 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 	if !ok {
 		return false
 	}
-	if parent.Subagents == nil || parent.Subagents.AllowAgents == nil {
+
+	// If parent has explicit allowlist, use it
+	if parent.Subagents != nil && parent.Subagents.AllowAgents != nil {
+		targetNorm := routing.NormalizeAgentID(targetAgentID)
+		for _, allowed := range parent.Subagents.AllowAgents {
+			if allowed == "*" {
+				return true
+			}
+			if routing.NormalizeAgentID(allowed) == targetNorm {
+				return true
+			}
+		}
 		return false
 	}
-	targetNorm := routing.NormalizeAgentID(targetAgentID)
-	for _, allowed := range parent.Subagents.AllowAgents {
-		if allowed == "*" {
-			return true
-		}
-		if routing.NormalizeAgentID(allowed) == targetNorm {
-			return true
-		}
+
+	// No explicit allowlist - check if parent is default agent
+	// Default agent can spawn any existing agent
+	if parent.ID == "main" || parent.ID == routing.DefaultAgentID {
+		// Check if target agent exists in registry
+		_, exists := r.GetAgent(targetAgentID)
+		return exists
 	}
+
+	// Non-default agents without allowlist cannot spawn
 	return false
 }
 

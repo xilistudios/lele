@@ -54,7 +54,7 @@ func maskAPIKey(key string) string {
 
 func printHelp() {
 	fmt.Printf("%s lele - Personal AI Assistant v%s\n\n", logo, version)
-	fmt.Println("Usage: lele <command>")
+	fmt.Println("Usage: lele [-c|--config-dir <path>] <command>")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  onboard     Initialize lele configuration and workspace")
@@ -635,8 +635,7 @@ func onboard() {
 
 	cfg := config.DefaultConfig()
 
-	home, _ := os.UserHomeDir()
-	leleDir := filepath.Join(home, ".lele")
+	leleDir := config.GetLeleDir()
 
 	configureProviders(cfg)
 

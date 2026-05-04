@@ -265,9 +265,8 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 	if agentCfg == nil || agentCfg.Default || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == "main" {
 		return expandHome(defaults.Workspace)
 	}
-	home, _ := os.UserHomeDir()
 	id := routing.NormalizeAgentID(agentCfg.ID)
-	return filepath.Join(home, ".lele", "workspace-"+id)
+	return filepath.Join(config.GetLeleDir(), "workspace-"+id)
 }
 
 // resolveAgentModel resolves the primary model for an agent.

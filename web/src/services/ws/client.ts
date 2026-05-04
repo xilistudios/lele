@@ -17,7 +17,6 @@ type SocketEventKey = keyof SocketEventMap
 
 export type LeleSocketOptions = {
   reconnectStrategy?: Partial<ReconnectStrategy>
-  pingIntervalMs?: number
 }
 
 export class LeleSocket {
@@ -27,12 +26,10 @@ export class LeleSocket {
   private reconnectStrategy: ReconnectStrategy
   private readonly openQueue: ClientCommand[] = []
   private reconnectAttempts = 0
-  private pingIntervalId: number | null = null
   private pendingSessionKey: string | null = null
   private confirmedSessionKey: string | null = null
   private _state: ConnectionState = 'disconnected'
   private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
-  private readonly pingIntervalMs: number
 
   constructor(
     private readonly baseUrl: string,
@@ -41,7 +38,6 @@ export class LeleSocket {
   ) {
     this.reconnectStrategy = defaultReconnectStrategy(opts.reconnectStrategy)
     this.reconnectDelay = this.reconnectStrategy.initialDelay
-    this.pingIntervalMs = opts.pingIntervalMs ?? 25000
   }
 
   get state(): ConnectionState {
@@ -90,10 +86,6 @@ export class LeleSocket {
 
   close() {
     this.shouldReconnect = false
-    if (this.pingIntervalId !== null) {
-      window.clearInterval(this.pingIntervalId)
-      this.pingIntervalId = null
-    }
     this.socket?.close()
     this.socket = null
     this.pendingSessionKey = null
@@ -200,23 +192,7 @@ export class LeleSocket {
       this.emit('error', event)
     })
 
-    socket.addEventListener('open', () => {
-      if (this.pingIntervalId !== null) {
-        window.clearInterval(this.pingIntervalId)
-      }
-
-      this.pingIntervalId = window.setInterval(() => {
-        if (this.socket?.readyState === WebSocket.OPEN) {
-          this.send('ping', {})
-        }
-      }, this.pingIntervalMs)
-    })
-
     socket.addEventListener('close', () => {
-      if (this.pingIntervalId !== null) {
-        window.clearInterval(this.pingIntervalId)
-        this.pingIntervalId = null
-      }
       this.emit('close')
       if (!this.shouldReconnect) {
         this.setState('disconnected')

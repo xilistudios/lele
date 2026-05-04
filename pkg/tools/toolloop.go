@@ -21,6 +21,7 @@ type VerboseCallback func(iteration int, toolName string, args map[string]interf
 
 type SessionRecorder interface {
 	AddFullMessage(sessionKey string, msg providers.Message)
+	Save(sessionKey string) error
 }
 
 // ToolLoopConfig configures the tool execution loop.

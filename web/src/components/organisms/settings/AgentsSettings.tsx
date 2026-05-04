@@ -130,6 +130,7 @@ export function AgentsSettings() {
               workspace?: string
               model?: { primary?: string; fallbacks?: string[] }
               skills?: string[]
+              subagents?: { allow_agents?: string[] }
               temperature?: number
               max_iterations?: number
               max_tokens?: number
@@ -442,6 +443,73 @@ export function AgentsSettings() {
                       onChange={(v) => updateField(`agents.list.${index}.skills`, v)}
                     />
                   </SettingsField>
+                </div>
+
+                {/* Section: Subagents */}
+                <div>
+                  <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
+                    {t('settings.sections.subagents')}
+                  </div>
+
+                  <SettingsField
+                    label={t('settings.fields.agentSubagentsEnabled')}
+                    description={t('settings.descriptions.agentSubagentsEnabled')}
+                    path={`agents.list.${index}.subagents`}
+                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.subagents`)}
+                  >
+                    <BooleanInput
+                      id={`agents.list.${index}.subagents.enabled`}
+                      value={
+                        agent.subagents?.allow_agents !== undefined &&
+                        agent.subagents?.allow_agents !== null
+                      }
+                      onChange={(v) => {
+                        if (v) {
+                          // Enable subagents - create empty config with all other agents as options
+                          const otherAgents = list
+                            .filter((a: { id: string }) => a.id !== agent.id)
+                            .map((a: { id: string }) => a.id)
+                          updateField(`agents.list.${index}.subagents`, {
+                            allow_agents: otherAgents.length > 0 ? otherAgents : [],
+                          })
+                        } else {
+                          // Disable subagents - remove the config
+                          updateField(`agents.list.${index}.subagents`, undefined)
+                        }
+                      }}
+                    />
+                  </SettingsField>
+
+                  {agent.subagents?.allow_agents !== undefined && (
+                    <SettingsField
+                      label={t('settings.fields.agentSubagentsAllowed')}
+                      description={t('settings.descriptions.agentSubagentsAllowed')}
+                      path={`agents.list.${index}.subagents.allow_agents`}
+                      isDirty={isDirtyPath(
+                        dirtyPaths,
+                        `agents.list.${index}.subagents.allow_agents`,
+                      )}
+                    >
+                      <StringListEditor
+                        id={`agents.list.${index}.subagents.allow_agents`}
+                        value={agent.subagents?.allow_agents || []}
+                        onChange={(v) =>
+                          updateField(`agents.list.${index}.subagents`, {
+                            ...agent.subagents,
+                            allow_agents: v,
+                          })
+                        }
+                        options={list
+                          .filter((a: { id: string }) => a.id !== agent.id)
+                          .map((a: { id: string; name?: string }) => ({
+                            value: a.id,
+                            label: a.name ? `${a.id} (${a.name})` : a.id,
+                          }))}
+                        placeholder={t('settings.selectAgent')}
+                        emptyLabel={t('settings.noOtherAgents')}
+                      />
+                    </SettingsField>
+                  )}
                 </div>
               </NamedItemCard>
             )

@@ -40,6 +40,7 @@ export type AppLogicContextValue = {
   onCancel: ReturnType<typeof useAppLogicHook>['onCancel']
   onSelectSession: ReturnType<typeof useAppLogicHook>['onSelectSession']
   onCreateSession: ReturnType<typeof useAppLogicHook>['onCreateSession']
+  createSession: ReturnType<typeof useAppLogicHook>['createSession']
   onDeleteSession: ReturnType<typeof useAppLogicHook>['onDeleteSession']
   onClearSession: ReturnType<typeof useAppLogicHook>['onClearSession']
   onSelectAgent: ReturnType<typeof useAppLogicHook>['onSelectAgent']
@@ -111,6 +112,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onCancel: app.onCancel,
     onSelectSession: app.onSelectSession,
     onCreateSession: app.onCreateSession,
+    createSession: app.createSession,
     onDeleteSession: app.onDeleteSession,
     onClearSession: app.onClearSession,
     onSelectAgent: app.onSelectAgent,

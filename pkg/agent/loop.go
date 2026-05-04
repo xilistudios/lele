@@ -68,29 +68,19 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	}
 	al.registry.ReloadAgents(cfg)
 	al.cfgPtr.Store(cfg)
+
+	// Re-register shared tools for new/recreated agents
+	existingSubagents := al.toolCoordinator.GetSubagents()
+	updatedSubagents := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents)
+
+	// Update tool coordinator with new subagents
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents)
 }
 
 // ResolveSessionKey resolves the session key alias if one exists.
-// For Native channel sessions with timestamp (native:clientId:number), skip alias
-// resolution since the frontend manages these directly and they shouldn't have aliases.
 func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	if sessionKey == "" {
 		return ""
-	}
-	if strings.HasPrefix(sessionKey, "native:") {
-		parts := strings.Split(sessionKey[7:], ":")
-		if len(parts) == 2 && parts[1] != "" {
-			allDigits := true
-			for _, c := range parts[1] {
-				if c < '0' || c > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				return sessionKey
-			}
-		}
 	}
 	if active, ok := al.sessionAliases.Load(sessionKey); ok {
 		if resolved, ok := active.(string); ok && resolved != "" {
@@ -102,10 +92,19 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 
 // GetSubagentParentSessionKey returns the parent session key for a subagent session.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
-	if !strings.HasPrefix(sessionKey, "subagent:") {
+	var taskID string
+	if strings.HasPrefix(sessionKey, "subagent:") {
+		// Old format: subagent:{taskID}
+		taskID = strings.TrimPrefix(sessionKey, "subagent:")
+	} else if strings.HasPrefix(sessionKey, "native:") {
+		// New format: native:{parent}:subagent-{n} - extract the task ID
+		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
+			taskID = sessionKey[idx+1:] // e.g., "subagent-1"
+		}
+	}
+	if taskID == "" {
 		return ""
 	}
-	taskID := strings.TrimPrefix(sessionKey, "subagent:")
 	if al.toolCoordinator == nil {
 		logger.WarnCF("agent", "GetSubagentParentSessionKey: toolCoordinator is nil", map[string]interface{}{
 			"session_key": sessionKey,
@@ -153,35 +152,6 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	}
 	if sessionAgent == nil {
 		sessionAgent = al.registry.GetDefaultAgent()
-	}
-
-	if strings.HasPrefix(baseSessionKey, "native:") {
-		parts := strings.Split(baseSessionKey[7:], ":")
-		if len(parts) == 2 && parts[1] != "" {
-			allDigits := true
-			for _, c := range parts[1] {
-				if c < '0' || c > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				if sessionAgent != nil {
-					sessionAgent.Sessions.GetOrCreate(baseSessionKey)
-					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
-					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
-					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
-				}
-				if agentID != "" {
-					al.sessionAgents.Store(baseSessionKey, agentID)
-				}
-				if model != "" {
-					al.sessionModels.Store(baseSessionKey, model)
-				}
-				al.sessionThinking.Delete(baseSessionKey)
-				return baseSessionKey
-			}
-		}
 	}
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)

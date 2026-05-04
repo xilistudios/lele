@@ -102,15 +102,16 @@ export function useChatHistory(
   sessionKey: string | null,
   token: string | null,
   streamingMessages: ChatMessage[],
+  parentSessionKey?: string,
 ) {
   const queryClient = useQueryClient()
 
   const query = useQuery({
-    queryKey: chatHistoryQueryKey(sessionKey ?? ''),
+    queryKey: [...chatHistoryQueryKey(sessionKey ?? ''), parentSessionKey],
     queryFn: async () => {
       if (!sessionKey || !token) return null
       console.log('[RQ] Fetching history for session', sessionKey)
-      const history = await api.history(sessionKey)
+      const history = await api.history(sessionKey, parentSessionKey)
       if (!history) {
         console.log('[RQ] History fetched, empty response')
         return {
@@ -127,7 +128,10 @@ export function useChatHistory(
         processing: history.processing,
       }
     },
-    enabled: sessionKey !== null && token !== null,
+    enabled:
+      sessionKey !== null &&
+      token !== null &&
+      !(sessionKey.startsWith('subagent:') && !parentSessionKey),
     staleTime: 5_000,
     refetchInterval: POLLING_INTERVAL,
     refetchOnWindowFocus: false,

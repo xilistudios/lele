@@ -1739,6 +1739,63 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 	// pero el hecho de que no haya errores indica que la configuración se aplicó
 }
 
+// TestAgentLoop_ReloadRegistry_PreservesSpawnTool verifies that spawn tool is registered
+// after agent reload. This is the key fix for the issue where ReloadRegistry only calls
+// registry.ReloadAgents(cfg) without re-registering shared tools.
+func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "reload-spawn-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
+
+	// Verify spawn is registered initially
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	if _, hasSpawn := defaultAgent.Tools.Get("spawn"); !hasSpawn {
+		t.Fatal("Spawn tool should be registered initially")
+	}
+
+	// Reload with changed config (different model)
+	newCfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "different-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	al.ReloadRegistry(newCfg)
+
+	// Verify spawn is still registered after reload
+	reloadedAgent := al.registry.GetDefaultAgent()
+	if reloadedAgent == nil {
+		t.Fatal("Default agent should exist after reload")
+	}
+	if _, hasSpawn := reloadedAgent.Tools.Get("spawn"); !hasSpawn {
+		t.Error("Spawn tool should be registered after reload")
+	}
+}
+
 // TestSetSessionAgent_PreservesModelWhenAgentUnchanged verifies that SetSessionAgent
 // does not clear the session model when the agent ID is the same as the current agent.
 // This fixes a bug where sending a message would reset the model to the agent's default
@@ -1749,6 +1806,7 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

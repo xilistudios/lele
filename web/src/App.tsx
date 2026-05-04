@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Navigate,
   Outlet,
@@ -114,12 +114,27 @@ function ChatRoute() {
   }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { sessions, currentSessionKey, parentSessionKey, onSelectSession } = useAppLogicContext()
+  const { sessions, currentSessionKey, parentSessionKey, onSelectSession, createSession } =
+    useAppLogicContext()
   const targetSessionKey = child_chat_id ?? chat_id
   const derivedParentSessionKey = child_chat_id ? (parent_chat_id ?? null) : null
   const availableKeys = useMemo(() => new Set(sessions.map((s) => s.key)), [sessions])
+  const creatingRef = useRef(false)
 
   useEffect(() => {
+    if (chat_id === 'new') {
+      if (creatingRef.current) return
+      creatingRef.current = true
+      const sessionKey = createSession()
+      if (sessionKey) {
+        navigate(`/chat/${sessionKey}`, { replace: true })
+        return
+      }
+      navigate('/', { replace: true })
+      return
+    }
+    creatingRef.current = false
+
     if (!targetSessionKey) return
 
     if (currentSessionKey === targetSessionKey && parentSessionKey === derivedParentSessionKey) {
@@ -141,6 +156,7 @@ function ChatRoute() {
     }
   }, [
     targetSessionKey,
+    chat_id,
     child_chat_id,
     derivedParentSessionKey,
     sessions,
@@ -149,9 +165,13 @@ function ChatRoute() {
     parentSessionKey,
     onSelectSession,
     navigate,
+    createSession,
   ])
 
   useEffect(() => {
+    // Skip when creating new session — first useEffect handles this
+    if (chat_id === 'new') return
+
     if (!currentSessionKey) return
 
     if (targetSessionKey && currentSessionKey !== targetSessionKey) {
@@ -163,8 +183,8 @@ function ChatRoute() {
     }
 
     const newPath = parentSessionKey
-      ? `/chat/${encodeURIComponent(parentSessionKey)}/subagent/${encodeURIComponent(currentSessionKey)}`
-      : `/chat/${encodeURIComponent(currentSessionKey)}`
+      ? `/chat/${parentSessionKey}/subagent/${currentSessionKey}`
+      : `/chat/${currentSessionKey}`
 
     if (location.pathname !== newPath) {
       navigate(newPath, { replace: true })
@@ -176,6 +196,7 @@ function ChatRoute() {
     derivedParentSessionKey,
     location.pathname,
     navigate,
+    chat_id,
   ])
 
   // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled

@@ -103,7 +103,7 @@ func (am *AuthManager) loadStore() error {
 	am.store = &store
 	for clientID, client := range am.store.Clients {
 		if len(client.SessionKeys) == 0 {
-			client.SessionKeys = []string{"native:" + clientID}
+			client.SessionKeys = []string{clientID}
 		}
 	}
 	am.cleanupExpired()
@@ -252,7 +252,7 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 		Created:     time.Now(),
 		Expires:     time.Now().AddDate(0, 0, expiryDays),
 		LastSeen:    time.Now(),
-		SessionKeys: []string{"native:" + clientID},
+		SessionKeys: []string{clientID},
 	}
 
 	am.store.Clients[clientID] = client

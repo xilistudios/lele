@@ -58,12 +58,14 @@ export function useAppLogic(
     token,
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
+    sessionsHook.refreshSessions,
   )
   const chatHistory = useChatHistory(
     api,
     sessionsHook.currentSessionKey,
     token,
     messagesHook.streamingMessages,
+    parentSessionKey ?? undefined,
   )
 
   const wsStatusRef = useRef(wsStatus)
@@ -274,28 +276,19 @@ export function useAppLogic(
       sessionsHook.currentSessionKeyRef,
       messagesHook.clearStreaming,
       api,
-      parentSessionKey,
+      parentSessionKey ?? undefined,
     ],
   )
 
   const handleCreateSession = useCallback(() => {
-    const currentSession = sessionsHook.sessions.find(
-      (s) => s.key === sessionsHook.currentSessionKey,
-    )
-
-    if (currentSession && currentSession.message_count === 0 && sessionsHook.currentSessionKey) {
-      navigate(`/chat/${encodeURIComponent(sessionsHook.currentSessionKey)}`)
-      return
-    }
-
     subscribedSessionRef.current = null
     setParentSessionKey(null)
-    const newKey = sessionsHook.createSession()
-    if (newKey) {
-      messagesHook.clearStreaming()
-      navigate(`/chat/${encodeURIComponent(newKey)}`)
+    messagesHook.clearStreaming()
+    const sessionKey = sessionsHook.createSession()
+    if (sessionKey) {
+      navigate(`/chat/${sessionKey}`, { replace: true })
     }
-  }, [sessionsHook, messagesHook.clearStreaming, navigate])
+  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -428,6 +421,7 @@ export function useAppLogic(
     onCancel: handleCancel,
     onSelectSession: handleSelectSession,
     onCreateSession: handleCreateSession,
+    createSession: sessionsHook.createSession,
     onDeleteSession: handleDeleteSession,
     onClearSession: handleClearSession,
     onSelectAgent: handleSelectAgent,
