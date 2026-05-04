@@ -175,9 +175,7 @@ func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message,
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 	}
-	for _, h := range history {
-		messages = append(messages, h)
-	}
+	messages = append(messages, history...)
 	if userMessage != "" {
 		messages = append(messages, providers.Message{Role: "user", Content: userMessage})
 	}

@@ -103,7 +103,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				Content:          response.Content,
 				ReasoningContent: response.ReasoningContent,
 			}
-			messages = append(messages, assistantMsg)
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
 			}

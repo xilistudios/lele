@@ -155,7 +155,7 @@ describe('toChatMessages', () => {
     expect(result[0].toolResult).toBe('Resultado huérfano')
   })
 
-  test('genera tool message con status executing para tool_calls sin resultado', () => {
+  test('no genera tool messages sintéticos para tool_calls sin resultado (vienen por WS)', () => {
     const history = [
       { id: '0', role: 'user' as const, content: 'Ejecuta algo' },
       {
@@ -166,19 +166,13 @@ describe('toChatMessages', () => {
           { id: 'call-1', name: 'exec', arguments: { command: 'ls' } },
         ] as HistoryToolCall[],
       },
-      // Sin tool result - el tool_call está pendiendo/ejecutando
     ]
 
     const result = toChatMessages(history, sessionKey)
 
-    // 3 mensajes: user + assistant + tool message sintetico (sin resultado)
-    expect(result.length).toBe(3)
+    expect(result.length).toBe(2)
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('assistant')
-    expect(result[2].role).toBe('tool')
-    expect(result[2].toolName).toBe('exec')
-    expect(result[2].toolArgs).toBe('exec {"command":"ls"}')
-    expect(result[2].toolResult).toBeUndefined()
-    expect(result[2].toolStatus).toBe('executing')
+    expect(result[1].content).toBe('Voy a ejecutar')
   })
 })

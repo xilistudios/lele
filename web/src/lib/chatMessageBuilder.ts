@@ -19,6 +19,10 @@ export function createToolMessageId(toolName: string, suffix?: string): string {
   return `tool-${toolName}-${suffix ?? Date.now()}`
 }
 
+export function createDeterministicToolMessageId(messageId: string, toolCallId: string): string {
+  return `tool:${messageId}:${toolCallId}`
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -147,6 +151,7 @@ interface ToolMessageProps extends BaseMessageProps {
   toolArgs?: string
   toolResult?: string
   toolStatus: ToolMessageStatus
+  toolCallId?: string
   subagentSessionKey?: string
 }
 
@@ -181,7 +186,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
   return {
     id: props.id,
     role: 'tool',
-    content: '', // tool messages use toolResult, not content
+    content: '',
     streaming: false,
     createdAt: props.createdAt ?? new Date().toISOString(),
     sessionKey: props.sessionKey,
@@ -189,6 +194,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
     toolArgs: props.toolArgs,
     toolResult: props.toolResult,
     toolStatus: props.toolStatus,
+    toolCallId: props.toolCallId,
     subagentSessionKey: props.subagentSessionKey,
   }
 }

@@ -4,7 +4,7 @@ import type { ApiClient } from '../lib/api'
 import {
   buildToolCallMap,
   createAssistantMessage,
-  
+  createDeterministicToolMessageId,
   createOptimisticUserId,
   createToolMessage,
   createToolMessageId,
@@ -14,7 +14,7 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
-import { chatHistoryQueryKey, updateChatHistoryFromRaw } from './useChatHistory'
+import { chatHistoryQueryKey, type HistoryMessage, updateChatHistoryFromRaw } from './useChatHistory'
 
 export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
@@ -32,15 +32,6 @@ export const toChatMessages = (
 ): ChatMessage[] => {
   const toolCallMap = buildToolCallMap(history)
 
-  // Build a set of tool_call_ids that have results in the history
-  // to avoid generating duplicate tool messages
-  const toolCallIdsWithResults = new Set<string>()
-  for (const message of history) {
-    if (message.role === 'tool' && message.tool_call_id) {
-      toolCallIdsWithResults.add(message.tool_call_id)
-    }
-  }
-
   return history.flatMap((message) => {
     let messageContent = message.content
     let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
@@ -53,7 +44,6 @@ export const toChatMessages = (
       }
     }
 
-    // --- User message ---
     if (message.role === 'user') {
       return [
         createUserMessage({
@@ -65,20 +55,11 @@ export const toChatMessages = (
       ]
     }
 
-    // --- Assistant message ---
     if (message.role === 'assistant') {
       const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
-
-      // Build result array
-      const result: ChatMessage[] = []
-
-      // Add assistant message if:
-      // - It has content, OR
-      // - It doesn't have tool_calls (even if empty, to maintain backward compatibility)
-      // We skip empty assistant messages with tool_calls since tool messages will be shown instead
       const shouldAddAssistant = (message.content && message.content !== '') || !hasToolCalls
       if (shouldAddAssistant) {
-        result.push(
+        return [
           createAssistantMessage({
             id: message.id,
             sessionKey,
@@ -87,42 +68,15 @@ export const toChatMessages = (
             streaming: false,
             attachments: parsedAttachments,
           }),
-        )
+        ]
       }
-
-      // Generate tool messages for each tool_call that doesn't have a result yet
-      // (tool results are handled separately by the tool messages in history)
-      if (hasToolCalls && message.tool_calls) {
-        for (const tc of message.tool_calls) {
-          // Skip if this tool_call already has a result in history
-          if (toolCallIdsWithResults.has(tc.id)) {
-            continue
-          }
-
-          const toolArgsStr = tc.arguments ? `${tc.name} ${JSON.stringify(tc.arguments)}` : tc.name
-
-          result.push(
-            createToolMessage({
-              id: `${message.id}:tool:${tc.id}`,
-              sessionKey,
-              toolName: tc.name ?? 'tool',
-              toolArgs: toolArgsStr,
-              toolStatus: 'executing',
-              subagentSessionKey: undefined, // Will be set from tool result if spawn
-            }),
-          )
-        }
-      }
-
-      return result
+      return []
     }
 
-    // --- Tool message ---
     if (message.role === 'tool') {
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
-      // Priority: 1) matched tool call name, 2) tool_name from API (backend-computed), 3) tool_call_id, 4) 'tool'
       const toolName = matchedToolCall?.name ?? message.tool_name ?? message.tool_call_id ?? 'tool'
       const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
       const subagentSessionKey =
@@ -136,6 +90,7 @@ export const toChatMessages = (
           toolArgs,
           toolResult: message.content,
           toolStatus: 'completed',
+          toolCallId: message.tool_call_id,
           subagentSessionKey,
         }),
       ]
@@ -351,16 +306,13 @@ export function useMessages(
           setStreamingMessages((current) => {
             const targetSessionKey = eventSessionKey ?? currentSessionKeyRef.current
             return current.flatMap((m) => {
-              // Remove processing placeholder
               if (m.id === '__processing_placeholder__' && m.sessionKey === targetSessionKey) {
                 return []
               }
-              // Mark the assistant message as done streaming
               if (m.role === 'assistant' && m.id === (data.message_id as string)) {
                 const content = (data.content as string) || m.content
                 return [{ ...m, content, streaming: false }]
               }
-              // Remove empty user messages (leftover from cancelled sends)
               if (
                 m.role === 'user' &&
                 m.sessionKey === targetSessionKey &&
@@ -368,13 +320,8 @@ export function useMessages(
               ) {
                 return []
               }
-              // KEEP tool messages in streaming state — they are transient UI state
-              // that represents tool executions. We don't remove them here because:
-              // 1. Removing them creates a visual gap (~500ms) until history refetches
-              // 2. History will correctly merge/override these when it arrives
-              // 3. The merge logic in useChatHistory handles deduplication
               if (m.role === 'tool' && m.sessionKey === targetSessionKey) {
-                return [m]
+                return [{ ...m, streaming: false }]
               }
               return [m]
             })
@@ -382,12 +329,10 @@ export function useMessages(
           setToolStatus(null)
           setPendingAttachments([])
           processingSessionKeyRef.current = null
-          // Server emits history.updated after persisting, so we refetch then
           break
         }
         case 'history.updated': {
           const historySessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
-          // Fallback: remove from processingSessions if message.complete wasn't received
           if (historySessionKey) {
             setProcessingSessions((prev) => {
               if (prev.has(historySessionKey)) {
@@ -400,8 +345,20 @@ export function useMessages(
             queryClient.invalidateQueries({
               queryKey: chatHistoryQueryKey(historySessionKey),
             })
-            // Refresh sessions list to get updated name from backend
             onSessionUpdated?.()
+            // Clean up streaming messages for this session now that history is confirmed
+            if (historySessionKey === currentSessionKeyRef.current) {
+              setStreamingMessages((current) =>
+                current.filter((m) => {
+                  if (m.sessionKey !== historySessionKey) return true
+                  if (m.role === 'tool') return false
+                  if (m.role === 'assistant' && !m.streaming) return false
+                  if (m.id === '__processing_placeholder__') return false
+                  if (m.role === 'user' && m.optimistic) return false
+                  return true
+                }),
+              )
+            }
           }
           break
         }
@@ -410,6 +367,7 @@ export function useMessages(
             session_key?: string
             is_initial: boolean
             messages: Array<{
+              id?: string
               role: 'user' | 'assistant' | 'tool'
               content: string
               tool_call_id?: string
@@ -418,20 +376,19 @@ export function useMessages(
           }
           const targetSessionKey = catchupData.session_key || currentSessionKeyRef.current || ''
           if (catchupData.is_initial && targetSessionKey === currentSessionKeyRef.current) {
-            updateChatHistoryFromRaw(queryClient, targetSessionKey, catchupData.messages)
+            const rawMessages = catchupData.messages.map((m, i) => ({
+              ...m,
+              id: m.id ?? `catchup-${i}`,
+            })) as unknown as HistoryMessage
+            updateChatHistoryFromRaw(queryClient, targetSessionKey, rawMessages)
             setStreamingMessages((current) =>
               current.filter((message) => {
                 if (message.sessionKey !== targetSessionKey) {
                   return true
                 }
-                // Keep assistant messages that are still streaming or have content
-                // Only remove if it's a placeholder or the catchup has this message persisted
                 if (message.role === 'assistant') {
-                  // Keep if still streaming (in progress)
                   if (message.streaming) return true
-                  // Keep if has meaningful content (don't remove just because streaming finished)
                   if (message.content && message.content.length > 0) return true
-                  // Remove only placeholders or empty messages
                   return message.id === '__processing_placeholder__'
                 }
                 if (message.role === 'tool') {
@@ -461,20 +418,32 @@ export function useMessages(
             break
           }
           setToolStatus(event.data as ToolStatus)
-          // Use structured arguments when available (for path extraction in UI),
-          // fall back to action string for non-native channels
+          const toolCallId = data.tool_call_id as string | undefined
           const toolArgsStr = data.arguments
             ? `${data.tool as string} ${JSON.stringify(data.arguments)}`
             : (data.action as string)
           const toolMsg = createToolMessage({
-            id: createToolMessageId(data.tool as string),
+            id: toolCallId
+              ? createDeterministicToolMessageId('ws', toolCallId)
+              : createToolMessageId(data.tool as string),
             sessionKey: (eventSessionKey ?? currentSessionKeyRef.current ?? undefined) as string,
             toolName: data.tool as string,
             toolArgs: toolArgsStr,
             toolStatus: 'executing',
+            toolCallId,
             subagentSessionKey: data.subagent_session_key as string | undefined,
           })
           setStreamingMessages((current) => {
+            if (toolCallId) {
+              const existingIdx = current.findIndex(
+                (m) => m.role === 'tool' && m.toolCallId === toolCallId,
+              )
+              if (existingIdx >= 0) {
+                return current.map((m, i) =>
+                  i === existingIdx ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const } : m,
+                )
+              }
+            }
             const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
             if (lastAssistantIdx < 0) return [...current, toolMsg]
             const lastAssistant = current[current.length - lastAssistantIdx - 1]
@@ -495,16 +464,25 @@ export function useMessages(
           }
           setToolStatus(null)
           setStreamingMessages((current) => {
-            const lastToolIdx = [...current]
-              .reverse()
-              .findIndex(
-                (m) =>
-                  m.role === 'tool' &&
-                  m.toolStatus === 'executing' &&
-                  m.toolName === (data.tool as string),
+            const toolCallId = data.tool_call_id as string | undefined
+            let targetIndex = -1
+            if (toolCallId) {
+              targetIndex = current.findIndex(
+                (m) => m.role === 'tool' && m.toolCallId === toolCallId,
               )
-            if (lastToolIdx < 0) return current
-            const targetIndex = current.length - lastToolIdx - 1
+            }
+            if (targetIndex < 0) {
+              const lastToolIdx = [...current]
+                .reverse()
+                .findIndex(
+                  (m) =>
+                    m.role === 'tool' &&
+                    m.toolStatus === 'executing' &&
+                    m.toolName === (data.tool as string),
+                )
+              if (lastToolIdx < 0) return current
+              targetIndex = current.length - lastToolIdx - 1
+            }
             const isError =
               data.result &&
               typeof data.result === 'string' &&
@@ -516,6 +494,7 @@ export function useMessages(
                     ...m,
                     toolResult: data.result as string,
                     toolStatus: isError ? 'error' : 'completed',
+                    toolCallId: toolCallId ?? m.toolCallId,
                     subagentSessionKey:
                       (data.subagent_session_key as string) ||
                       m.subagentSessionKey ||
@@ -533,11 +512,20 @@ export function useMessages(
             break
           }
           setStreamingMessages((current) => {
-            const lastSpawnIdx = [...current]
-              .reverse()
-              .findIndex((m) => m.role === 'tool' && m.toolName === 'spawn')
-            if (lastSpawnIdx < 0) return current
-            const targetIndex = current.length - lastSpawnIdx - 1
+            const toolCallId = data.tool_call_id as string | undefined
+            let targetIndex = -1
+            if (toolCallId) {
+              targetIndex = current.findIndex(
+                (m) => m.role === 'tool' && m.toolCallId === toolCallId,
+              )
+            }
+            if (targetIndex < 0) {
+              const lastSpawnIdx = [...current]
+                .reverse()
+                .findIndex((m) => m.role === 'tool' && m.toolName === 'spawn')
+              if (lastSpawnIdx < 0) return current
+              targetIndex = current.length - lastSpawnIdx - 1
+            }
             return current.map((m, i) =>
               i === targetIndex
                 ? {

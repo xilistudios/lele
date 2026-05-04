@@ -195,9 +195,10 @@ func (te *toolExecutor) publishExecuting(opts toolExecOptions) {
 			ChatID:  opts.sessionKey,
 			Event:   "tool.executing",
 			Metadata: map[string]string{
-				"tool":      opts.tc.Name,
-				"action":    actionDesc,
-				"arguments": string(argsJSON),
+				"tool":         opts.tc.Name,
+				"action":       actionDesc,
+				"arguments":    string(argsJSON),
+				"tool_call_id": opts.tc.ID,
 			},
 		})
 	} else if level != session.VerboseOff {
@@ -228,8 +229,9 @@ func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.To
 		}
 		resultPreview = utils.Truncate(resultPreview, 300)
 		metadata := map[string]string{
-			"tool":   opts.tc.Name,
-			"result": resultPreview,
+			"tool":         opts.tc.Name,
+			"result":       resultPreview,
+			"tool_call_id": opts.tc.ID,
 		}
 		if opts.tc.Name == "spawn" && toolResult.Metadata != nil {
 			if subagentSessionKey := toolResult.Metadata["subagent_session_key"]; subagentSessionKey != "" {

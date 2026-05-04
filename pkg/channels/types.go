@@ -86,6 +86,7 @@ type WSToolExecutingPayload struct {
 	Action             string                 `json:"action"`
 	Arguments          map[string]interface{} `json:"arguments,omitempty"`
 	SubagentSessionKey string                 `json:"subagent_session_key,omitempty"`
+	ToolCallID         string                 `json:"tool_call_id,omitempty"`
 }
 
 type WSToolResultPayload struct {
@@ -93,6 +94,7 @@ type WSToolResultPayload struct {
 	Tool               string `json:"tool"`
 	Result             string `json:"result"`
 	SubagentSessionKey string `json:"subagent_session_key,omitempty"`
+	ToolCallID         string `json:"tool_call_id,omitempty"`
 }
 
 type WSErrorPayload struct {

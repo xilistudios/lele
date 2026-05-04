@@ -287,9 +287,7 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	// Mark old messages as excluded from context instead of deleting them,
 	// preserving the full history for the web UI.
 	keepCount := 2
-	if len(historyForSummary) > 2 {
-		keepCount = 2
-	} else {
+	if len(historyForSummary) <= 2 {
 		keepCount = 0
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
@@ -511,9 +509,7 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 	agent.Sessions.SetSummary(sessionKey, finalSummary)
 	// Mark old messages as excluded from context instead of deleting them.
 	keepCount := 2
-	if len(historyForSummary) > 2 {
-		keepCount = 2
-	} else {
+	if len(historyForSummary) <= 2 {
 		keepCount = 0
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)

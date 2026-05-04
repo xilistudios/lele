@@ -455,9 +455,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	if systemPrompt == "" {
-		systemPrompt = buildSubagentSystemPrompt("", agentID, agentName, agentWorkspace)
-		agentWorkspace = "unknown"
-		agentName = agentID
+		systemPrompt = buildSubagentSystemPrompt("", agentID, agentID, "")
 	}
 
 	// Use the agent's model and provider if available, otherwise fall back to manager's defaults

@@ -116,11 +116,17 @@ func LoginBrowser(cfg OAuthProviderConfig) (*AuthCredential, error) {
 	}
 
 	server := &http.Server{Handler: mux}
-	go server.Serve(listener)
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("OAuth callback server error: %v\n", err)
+		}
+	}()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		server.Shutdown(ctx)
+		if err := server.Shutdown(ctx); err != nil {
+			fmt.Printf("OAuth callback server shutdown error: %v\n", err)
+		}
 	}()
 
 	fmt.Printf("Open this URL to authenticate:\n\n%s\n\n", authURL)

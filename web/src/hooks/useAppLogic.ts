@@ -66,6 +66,7 @@ export function useAppLogic(
     token,
     messagesHook.streamingMessages,
     parentSessionKey ?? undefined,
+    messagesHook.streamingMessages.some((m) => m.streaming),
   )
 
   const wsStatusRef = useRef(wsStatus)

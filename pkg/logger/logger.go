@@ -195,7 +195,9 @@ func checkDateRotation() {
 	// Open new files with current date
 	if logger.basePath != "" {
 		// Ensure directory exists
-		os.MkdirAll(logger.basePath, 0755)
+		if err := os.MkdirAll(logger.basePath, 0755); err != nil {
+			log.Printf("Error: could not create logs directory: %v\n", err)
+		}
 
 		infoPath := filepath.Join(logger.basePath, fmt.Sprintf("info-%s.log", currentDate))
 		if infoFile, err := os.OpenFile(infoPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -214,19 +216,27 @@ func writeToFile(level LogLevel, entry LogEntry, jsonData []byte) {
 	mu.RLock()
 	defer mu.RUnlock()
 
+	data := string(jsonData) + "\n"
+
 	// Only write to file for INFO and above (DEBUG only goes to console)
 	switch level {
 	case INFO:
 		if logger.infoFile != nil {
-			logger.infoFile.WriteString(string(jsonData) + "\n")
+			if _, err := logger.infoFile.WriteString(data); err != nil {
+				log.Printf("Error: failed to write to info log file: %v\n", err)
+			}
 		}
 	case WARN, ERROR, FATAL:
 		// Write to both files for errors (errors are important)
 		if logger.errorFile != nil {
-			logger.errorFile.WriteString(string(jsonData) + "\n")
+			if _, err := logger.errorFile.WriteString(data); err != nil {
+				log.Printf("Error: failed to write to error log file: %v\n", err)
+			}
 		}
 		if logger.infoFile != nil {
-			logger.infoFile.WriteString(string(jsonData) + "\n")
+			if _, err := logger.infoFile.WriteString(data); err != nil {
+				log.Printf("Error: failed to write to info log file: %v\n", err)
+			}
 		}
 	}
 }

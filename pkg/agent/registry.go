@@ -294,11 +294,7 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	}
 	// Check reasoning config — computed from provider model config
 	newReasoning := getReasoningConfig(cfg, newModel, newProvider)
-	if !reasoningConfigsEqual(existing.Reasoning, newReasoning) {
-		return true
-	}
-
-	return false
+	return !reasoningConfigsEqual(existing.Reasoning, newReasoning)
 }
 
 // stringSlicesEqual returns true if both slices have the same length and elements.

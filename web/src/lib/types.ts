@@ -513,6 +513,7 @@ export type ChatMessage = {
   toolArgs?: string
   toolResult?: string
   toolStatus?: ToolMessageStatus
+  toolCallId?: string
   subagentSessionKey?: string
 }
 
@@ -664,6 +665,7 @@ export type ClientEvent =
         catchup_count: number
         is_initial: boolean
         messages: Array<{
+          id?: string
           role: 'user' | 'assistant' | 'tool'
           content: string
           tool_call_id?: string
@@ -671,10 +673,10 @@ export type ClientEvent =
         }>
       }
     }
-  | { event: 'tool.executing'; data: ToolStatus }
+  | { event: 'tool.executing'; data: ToolStatus & { tool_call_id?: string } }
   | {
       event: 'tool.result' | 'subagent.result'
-      data: { session_key?: string; tool: string; result: string; subagent_session_key?: string }
+      data: { session_key?: string; tool: string; result: string; subagent_session_key?: string; tool_call_id?: string }
     }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }

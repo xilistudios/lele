@@ -261,7 +261,13 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		if agent != nil {
 			agent.Sessions.TruncateHistory(sessionKey, 0)
 			agent.Sessions.SetSummary(sessionKey, "")
-			agent.Sessions.Save(sessionKey)
+			if err := agent.Sessions.Save(sessionKey); err != nil {
+				logger.WarnCF("agent", "Failed to save session after clear",
+					map[string]interface{}{
+						"session_key": sessionKey,
+						"error":       err.Error(),
+					})
+			}
 		}
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,

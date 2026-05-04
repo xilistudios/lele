@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // MaxBasicMessageSize is the maximum character limit for verbose basic mode messages
@@ -14,7 +17,7 @@ const MaxBasicMessageSize = 80
 // Ejemplo: "🛠️ Exec: push git changes (in ~/.openclaw/workspace/lele)"
 func formatBasicToolMessage(toolName string, args map[string]interface{}) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("🛠️ %s", strings.Title(toolName)))
+	builder.WriteString(fmt.Sprintf("🛠️ %s", cases.Title(language.English).String(toolName)))
 
 	switch toolName {
 	case "exec":
@@ -99,7 +102,7 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 		}
 
 		var builder strings.Builder
-		builder.WriteString(fmt.Sprintf("🛠️ %s: %s (in %s)", strings.Title(action), baseName, dir))
+		builder.WriteString(fmt.Sprintf("🛠️ %s: %s (in %s)", cases.Title(language.English).String(action), baseName, dir))
 
 		// Para write/edit, mostrar preview del contenido si existe
 		if action == "write" || action == "edit" {
@@ -122,7 +125,7 @@ func formatBasicFileOp(action string, args map[string]interface{}) string {
 		}
 		return result
 	}
-	return fmt.Sprintf("🛠️ %s: [no path]", strings.Title(action))
+	return fmt.Sprintf("🛠️ %s: [no path]", cases.Title(language.English).String(action))
 }
 
 func formatBasicWebSearch(args map[string]interface{}) string {

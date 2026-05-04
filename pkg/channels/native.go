@@ -213,7 +213,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	}
 
 	applyBodyLimit := func(h http.HandlerFunc) http.HandlerFunc {
-		return withBodyLimit(http.HandlerFunc(h)).ServeHTTP
+		return withBodyLimit(h).ServeHTTP
 	}
 
 	// Public auth endpoints
@@ -418,6 +418,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Action:             msg.Metadata["action"],
 			Arguments:          toolArgs,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "tool.result":
@@ -430,6 +431,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Tool:               msg.Metadata["tool"],
 			Result:             result,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "subagent.result":
@@ -438,6 +440,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Tool:               msg.Metadata["tool"],
 			Result:             msg.Metadata["result"],
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "approval.request":

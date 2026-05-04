@@ -352,9 +352,7 @@ func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Reque
 
 	n.auth.TrackSessionKey(clientID, req.SessionKey)
 
-	writeJSON(w, http.StatusCreated, CreateSessionResponse{
-		SessionKey: req.SessionKey,
-	})
+	writeJSON(w, http.StatusCreated, CreateSessionResponse(req))
 }
 
 func (n *NativeChannel) handleChatSessionGet(w http.ResponseWriter, r *http.Request) {
@@ -1330,7 +1328,7 @@ func (n *NativeChannel) buildModelGroups(_ string, _ []string) []ModelGroup {
 		for _, alias := range aliases {
 			modelCfg := provider.Models[alias]
 			resolved := strings.TrimSpace(modelCfg.Model)
-			value := alias
+			var value string
 			if resolved != "" {
 				value = providerName + "/" + resolved
 			} else {

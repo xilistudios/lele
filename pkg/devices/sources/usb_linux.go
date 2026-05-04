@@ -117,7 +117,9 @@ func (m *USBMonitor) Start(ctx context.Context) (<-chan *events.DeviceEvent, err
 		if err := scanner.Err(); err != nil {
 			logger.ErrorCF("devices", "udevadm scan error", map[string]interface{}{"error": err.Error()})
 		}
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			logger.ErrorCF("devices", "udevadm process wait error", map[string]interface{}{"error": err.Error()})
+		}
 	}()
 
 	return eventCh, nil
@@ -127,7 +129,8 @@ func (m *USBMonitor) Stop() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cmd != nil && m.cmd.Process != nil {
-		m.cmd.Process.Kill()
+		// Ignore error - process may have already exited
+		_ = m.cmd.Process.Kill()
 		m.cmd = nil
 	}
 	return nil
