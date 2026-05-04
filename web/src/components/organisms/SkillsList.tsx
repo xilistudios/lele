@@ -57,6 +57,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
             strokeWidth="1.5"
             className="text-text-tertiary"
           >
+            <title>Code icon</title>
             <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
             <path d="M17 5v.01" />
           </svg>
@@ -92,6 +93,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                   strokeLinejoin="round"
                   className="text-brand-rosa"
                 >
+                  <title>Skill icon</title>
                   <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
                   <path d="M17 5v.01" />
                 </svg>
@@ -139,6 +141,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       stroke="currentColor"
                       strokeWidth="2"
                     >
+                      <title>Delete</title>
                       <path d="M3 6h18" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>

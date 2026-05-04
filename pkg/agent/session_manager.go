@@ -284,19 +284,26 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 	}
 
 	agent.Sessions.SetSummary(sessionKey, finalSummary)
-	// Keep only the last 2 messages (the ones not summarized above)
-	agent.Sessions.TruncateHistory(sessionKey, 2)
+	// Mark old messages as excluded from context instead of deleting them,
+	// preserving the full history for the web UI.
+	keepCount := 2
+	if len(historyForSummary) > 2 {
+		keepCount = 2
+	} else {
+		keepCount = 0
+	}
+	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
 	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	afterMessages := len(afterHistory)
+	contextAfter := countContextMessages(afterHistory)
 	afterTokens := sm.EstimateTokens(afterHistory)
 
 	return &SummarizeStats{
 		BeforeMessages:  beforeMessages,
-		AfterMessages:   afterMessages,
-		DroppedMessages: beforeMessages - afterMessages,
+		AfterMessages:   contextAfter,
+		DroppedMessages: beforeMessages - contextAfter,
 		BeforeTokens:    beforeTokens,
 		AfterTokens:     afterTokens,
 		SavedTokens:     beforeTokens - afterTokens,
@@ -324,8 +331,8 @@ func (sm *sessionManagerImpl) summarizeBatch(ctx context.Context, agent *AgentIn
 	return response.Content, nil
 }
 
-// forceCompression aggressively reduces context when the limit is hit.
-// It drops the oldest 50% of messages (keeping the last user message).
+// forceCompression marks old messages as excluded from context when the limit is hit.
+// It marks the oldest 50% of messages (keeping the last user message included).
 func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) <= 4 {
@@ -333,41 +340,38 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	}
 
 	// history contains only user/assistant/tool messages — no system prompt.
-	// Drop the oldest half of the conversation, preserving the last message.
+	// Mark the oldest half of the conversation as excluded, preserving the last message.
 	conversation := history[:len(history)-1]
 	if len(conversation) == 0 {
 		return
 	}
 
-	// Helper to find the mid-point of the conversation
 	mid := len(conversation) / 2
 
 	droppedCount := mid
-	keptConversation := conversation[mid:]
 
-	// The summary is stored separately in session.Summary, so it persists.
-	// We only modify the messages list here.
-	newHistory := make([]providers.Message, 0, len(keptConversation)+1)
-	newHistory = append(newHistory, keptConversation...)
-	newHistory = append(newHistory, history[len(history)-1]) // Last message
-
-	// Update session
-	agent.Sessions.SetHistory(sessionKey, newHistory)
+	// Mark the oldest 'mid' messages as excluded from context
+	// (they remain in storage for the web UI)
+	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
 	agent.Sessions.Save(sessionKey)
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]interface{}{
 		"session_key":  sessionKey,
 		"dropped_msgs": droppedCount,
-		"new_count":    len(newHistory),
+		"total_msgs":   len(history),
 	})
 }
 
 // EstimateTokens estimates the number of tokens in a message list.
 // Uses a safe heuristic of 2.5 characters per token to account for CJK and other
 // overheads better than the previous 3 chars/token.
+// Messages marked with ExcludeFromContext are skipped.
 func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
+		if m.ExcludeFromContext {
+			continue
+		}
 		totalChars += utf8.RuneCountInString(m.Content)
 	}
 	// 2.5 chars per token = totalChars * 2 / 5
@@ -505,21 +509,37 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 	}
 
 	agent.Sessions.SetSummary(sessionKey, finalSummary)
-	// Keep only the last 2 messages (the ones not summarized above)
-	agent.Sessions.TruncateHistory(sessionKey, 2)
+	// Mark old messages as excluded from context instead of deleting them.
+	keepCount := 2
+	if len(historyForSummary) > 2 {
+		keepCount = 2
+	} else {
+		keepCount = 0
+	}
+	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
 	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	afterMessages := len(afterHistory)
+	contextAfter := countContextMessages(afterHistory)
 	afterTokens := sm.EstimateTokens(afterHistory)
 
 	return &SummarizeStats{
 		BeforeMessages:  beforeMessages,
-		AfterMessages:   afterMessages,
-		DroppedMessages: beforeMessages - afterMessages,
+		AfterMessages:   contextAfter,
+		DroppedMessages: beforeMessages - contextAfter,
 		BeforeTokens:    beforeTokens,
 		AfterTokens:     afterTokens,
 		SavedTokens:     beforeTokens - afterTokens,
 	}, nil
+}
+
+func countContextMessages(history []providers.Message) int {
+	count := 0
+	for _, msg := range history {
+		if !msg.ExcludeFromContext {
+			count++
+		}
+	}
+	return count
 }

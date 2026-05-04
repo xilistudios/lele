@@ -244,10 +244,28 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected summary to contain 'Summary', got: %s", summary)
 	}
 
-	// Verify history was truncated (should keep last 2 messages)
+	// Verify messages are preserved (not deleted) — old messages are excluded from context
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	if len(afterHistory) != 2 {
-		t.Errorf("Expected 2 messages after compaction, got %d", len(afterHistory))
+	if len(afterHistory) != beforeCount {
+		t.Errorf("Expected all %d messages preserved after compaction, got %d", beforeCount, len(afterHistory))
+	}
+
+	contextCount := 0
+	for _, m := range afterHistory {
+		if !m.ExcludeFromContext {
+			contextCount++
+		}
+	}
+	if contextCount != 2 {
+		t.Errorf("Expected 2 context-included messages after compaction, got %d", contextCount)
+	}
+	for i, m := range afterHistory {
+		if i < beforeCount-2 && !m.ExcludeFromContext {
+			t.Errorf("Expected message %d to be excluded from context", i)
+		}
+		if i >= beforeCount-2 && m.ExcludeFromContext {
+			t.Errorf("Expected message %d to be included in context", i)
+		}
 	}
 }
 

@@ -74,7 +74,7 @@ export function BehaviorStep({
       {/* Temperature with visual indicator */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <label className="text-sm font-medium text-text-primary">
+          <label htmlFor="wizard-temperature" className="text-sm font-medium text-text-primary">
             {t('settings.fields.agentTemperature')}
           </label>
           <span className={`text-xs font-medium ${tempInfo.color}`}>{tempInfo.label}</span>

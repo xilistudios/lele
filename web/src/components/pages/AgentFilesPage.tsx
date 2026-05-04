@@ -26,6 +26,7 @@ export function AgentFilesPage() {
   const dirtyFilesRef = useRef<DirtyMap>({})
 
   // Load file list on mount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeFile is intentionally excluded to avoid re-triggering on mount
   useEffect(() => {
     if (!agentId) return
     ;(async () => {
@@ -46,6 +47,7 @@ export function AgentFilesPage() {
   }, [agentId])
 
   // Load file content when active file changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: api is stable, dirtyFilesRef is intentionally excluded
   useEffect(() => {
     if (!agentId || !activeFile) return
 
@@ -87,7 +89,7 @@ export function AgentFilesPage() {
         // Store current dirty content in ref before switching tabs
         dirtyFilesRef.current = {
           ...dirtyFilesRef.current,
-          [activeFile!]: content !== originalContent ? content : null,
+          ...(activeFile && { [activeFile]: content !== originalContent ? content : null }),
         }
       }
       setActiveFile(fileName)
@@ -112,7 +114,7 @@ export function AgentFilesPage() {
 
   const handleDiscard = () => {
     setContent(originalContent)
-    dirtyFilesRef.current = { ...dirtyFilesRef.current, [activeFile!]: null }
+    dirtyFilesRef.current = { ...dirtyFilesRef.current, ...(activeFile && { [activeFile]: null }) }
   }
 
   const hasAnyDirty =

@@ -37,7 +37,10 @@ export function BasicInfoStep({
 
       {/* Agent ID */}
       <div className="space-y-2">
-        <label className="flex items-center gap-1 text-sm font-medium text-text-primary">
+        <label
+          htmlFor="wizard-agent-id"
+          className="flex items-center gap-1 text-sm font-medium text-text-primary"
+        >
           {t('settings.fields.agentId')}
           <span className="text-red-400">*</span>
         </label>
@@ -47,6 +50,7 @@ export function BasicInfoStep({
           </span>
           <input
             type="text"
+            id="wizard-agent-id"
             value={agentId}
             onChange={(e) =>
               setAgentId(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase())
@@ -76,6 +80,7 @@ export function BasicInfoStep({
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Valid</title>
               <polyline points="20 6 9 17 4 12" />
             </svg>
           )}
@@ -89,6 +94,7 @@ export function BasicInfoStep({
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Error</title>
               <circle cx="12" cy="12" r="10" />
               <line x1="15" y1="9" x2="9" y2="15" />
               <line x1="9" y1="9" x2="15" y2="15" />
@@ -105,11 +111,12 @@ export function BasicInfoStep({
 
       {/* Agent Name */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-text-primary">
+        <label htmlFor="wizard-agent-name" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentName')}
         </label>
         <input
           type="text"
+          id="wizard-agent-name"
           value={agentName}
           onChange={(e) => setAgentName(e.target.value)}
           placeholder="My Awesome Agent"

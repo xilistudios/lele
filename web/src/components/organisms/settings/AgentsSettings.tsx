@@ -74,6 +74,7 @@ export function AgentsSettings() {
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Add agent</title>
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -85,6 +86,7 @@ export function AgentsSettings() {
         {list.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-background-secondary/20">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mb-4">
+              {' '}
               <svg
                 width="32"
                 height="32"
@@ -94,6 +96,7 @@ export function AgentsSettings() {
                 strokeWidth="1.5"
                 className="text-blue-400"
               >
+                <title>Agent icon</title>
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
@@ -104,6 +107,7 @@ export function AgentsSettings() {
               onClick={() => setShowWizard(true)}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200"
             >
+              {' '}
               <svg
                 width="16"
                 height="16"
@@ -112,6 +116,7 @@ export function AgentsSettings() {
                 stroke="currentColor"
                 strokeWidth="2"
               >
+                <title>Add agent</title>
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
@@ -178,6 +183,7 @@ export function AgentsSettings() {
                       className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5"
                       title="Edit context files"
                     >
+                      {' '}
                       <svg
                         width="14"
                         height="14"
@@ -186,6 +192,7 @@ export function AgentsSettings() {
                         stroke="currentColor"
                         strokeWidth="2"
                       >
+                        <title>Edit files</title>
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                         <line x1="16" y1="13" x2="8" y2="13" />

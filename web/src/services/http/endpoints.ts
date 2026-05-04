@@ -17,7 +17,7 @@ export const endpoints = {
     send: '/api/v1/chat/send',
     history: (sessionKey: string, parentSessionKey?: string) => {
       if (parentSessionKey) {
-        if (sessionKey.startsWith(parentSessionKey + ':')) {
+        if (sessionKey.startsWith(`${parentSessionKey}:`)) {
           const subagentId = sessionKey.slice(parentSessionKey.length + 1)
           return `/api/v1/chat/sessions/${parentSessionKey}/history/${subagentId}`
         }
@@ -37,7 +37,8 @@ export const endpoints = {
       return subresource ? `${base}/${subresource}` : base
     },
     clear: (sessionKey: string) => `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/clear`,
-    compact: (sessionKey: string) => `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
+    compact: (sessionKey: string) =>
+      `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
   },
   system: {
     config: '/api/v1/config',

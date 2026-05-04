@@ -1226,7 +1226,7 @@ describe('Auto-pairing', () => {
 
     // PIN should be pre-filled - look for numeric input
     const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement
-    if (pinInput && pinInput.value) {
+    if (pinInput?.value) {
       expect(pinInput.value).toBe('999999')
     }
 

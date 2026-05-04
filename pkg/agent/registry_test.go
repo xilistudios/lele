@@ -170,7 +170,7 @@ func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
 
 func TestAgentRegistry_CanSpawnSubagent_DefaultAgentNoConfig(t *testing.T) {
 	cfg := testCfg(t, []config.AgentConfig{
-		{ID: "main", Default: true},  // No subagents config
+		{ID: "main", Default: true}, // No subagents config
 		{ID: "coder"},
 		{ID: "reviewer"},
 	})

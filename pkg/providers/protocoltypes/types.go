@@ -77,22 +77,24 @@ type ContentPart struct {
 
 // Message represents a message in a conversation.
 type Message struct {
-	Role             string        `json:"role"`
-	Content          string        `json:"content"`
-	ContentParts     []ContentPart `json:"content_parts,omitempty"`
-	ToolCalls        []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID       string        `json:"tool_call_id,omitempty"`
-	Media            []string      `json:"media,omitempty"`
-	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	Role               string        `json:"role"`
+	Content            string        `json:"content"`
+	ContentParts       []ContentPart `json:"content_parts,omitempty"`
+	ToolCalls          []ToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID         string        `json:"tool_call_id,omitempty"`
+	Media              []string      `json:"media,omitempty"`
+	ReasoningContent   string        `json:"reasoning_content,omitempty"`
+	ExcludeFromContext bool          `json:"exclude_from_context,omitempty"`
 }
 
 func (m *Message) MarshalJSON() ([]byte, error) {
 	type rawMessage struct {
-		Role             string      `json:"role"`
-		Content          interface{} `json:"content"`
-		ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-		ToolCallID       string      `json:"tool_call_id,omitempty"`
-		ReasoningContent string      `json:"reasoning_content"`
+		Role               string      `json:"role"`
+		Content            interface{} `json:"content"`
+		ToolCalls          []ToolCall  `json:"tool_calls,omitempty"`
+		ToolCallID         string      `json:"tool_call_id,omitempty"`
+		ReasoningContent   string      `json:"reasoning_content"`
+		ExcludeFromContext bool        `json:"exclude_from_context,omitempty"`
 	}
 
 	content := interface{}(m.Content)
@@ -101,21 +103,23 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(rawMessage{
-		Role:             m.Role,
-		Content:          content,
-		ToolCalls:        m.ToolCalls,
-		ToolCallID:       m.ToolCallID,
-		ReasoningContent: m.ReasoningContent,
+		Role:               m.Role,
+		Content:            content,
+		ToolCalls:          m.ToolCalls,
+		ToolCallID:         m.ToolCallID,
+		ReasoningContent:   m.ReasoningContent,
+		ExcludeFromContext: m.ExcludeFromContext,
 	})
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
 	type rawMessage struct {
-		Role             string          `json:"role"`
-		Content          json.RawMessage `json:"content"`
-		ToolCalls        []ToolCall      `json:"tool_calls,omitempty"`
-		ToolCallID       string          `json:"tool_call_id,omitempty"`
-		ReasoningContent string          `json:"reasoning_content,omitempty"`
+		Role               string          `json:"role"`
+		Content            json.RawMessage `json:"content"`
+		ToolCalls          []ToolCall      `json:"tool_calls,omitempty"`
+		ToolCallID         string          `json:"tool_call_id,omitempty"`
+		ReasoningContent   string          `json:"reasoning_content,omitempty"`
+		ExcludeFromContext bool            `json:"exclude_from_context,omitempty"`
 	}
 
 	var raw rawMessage
@@ -127,6 +131,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ToolCalls = raw.ToolCalls
 	m.ToolCallID = raw.ToolCallID
 	m.ReasoningContent = raw.ReasoningContent
+	m.ExcludeFromContext = raw.ExcludeFromContext
 	m.Content = ""
 	m.ContentParts = nil
 

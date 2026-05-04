@@ -276,7 +276,7 @@ export function useAppLogic(
       sessionsHook.currentSessionKeyRef,
       messagesHook.clearStreaming,
       api,
-      parentSessionKey ?? undefined,
+      parentSessionKey,
     ],
   )
 
@@ -362,6 +362,7 @@ export function useAppLogic(
   streamingMessagesRef.current = messagesHook.streamingMessages
 
   const prevProcessingRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally excluded, they hold stable values
   useEffect(() => {
     const sessionKey = sessionsHook.currentSessionKey
     if (!sessionKey) return

@@ -262,7 +262,8 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		history = history[1:]
 	}
 
-	messages = append(messages, history...)
+	contextMessages := filterContextMessages(history)
+	messages = append(messages, contextMessages...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
 		messages = append(messages, buildSummaryMessage(summary))
@@ -315,6 +316,17 @@ func stripSummaryMessages(history []providers.Message) []providers.Message {
 	filtered := make([]providers.Message, 0, len(history))
 	for _, msg := range history {
 		if isSummaryMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
+func filterContextMessages(history []providers.Message) []providers.Message {
+	filtered := make([]providers.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.ExcludeFromContext {
 			continue
 		}
 		filtered = append(filtered, msg)

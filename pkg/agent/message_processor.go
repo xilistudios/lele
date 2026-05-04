@@ -784,8 +784,10 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 func (mp *messageProcessorImpl) estimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
+		if m.ExcludeFromContext {
+			continue
+		}
 		totalChars += len(m.Content)
 	}
-	// 2.5 chars per token = totalChars * 2 / 5
 	return totalChars * 2 / 5
 }

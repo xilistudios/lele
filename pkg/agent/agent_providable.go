@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
 )
 
@@ -130,6 +131,31 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 // GetSessionHistory returns the persisted history for a session.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			history := agent.Sessions.GetHistory(resolvedSessionKey)
+			if len(history) > 0 {
+				logger.InfoCF("agent", "GetSessionHistory result", map[string]interface{}{
+					"session_key":          sessionKey,
+					"resolved_session_key": resolvedSessionKey,
+					"agent_id":             agent.ID,
+					"history_count":        len(history),
+				})
+				return history
+			}
+		}
+		logger.InfoCF("agent", "GetSessionHistory: subagent history not found in any agent", map[string]interface{}{
+			"session_key":          sessionKey,
+			"resolved_session_key": resolvedSessionKey,
+		})
+		return []providers.Message{}
+	}
+
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent == nil {
 		logger.InfoCF("agent", "GetSessionHistory: agent is nil", map[string]interface{}{

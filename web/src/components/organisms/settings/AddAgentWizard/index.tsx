@@ -26,6 +26,7 @@ const STEPS = [
         stroke="currentColor"
         strokeWidth="2"
       >
+        <title>Agent icon</title>
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
         <circle cx="12" cy="7" r="4" />
       </svg>
@@ -43,6 +44,7 @@ const STEPS = [
         stroke="currentColor"
         strokeWidth="2"
       >
+        <title>Model icon</title>
         <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
         <line x1="8" y1="21" x2="16" y2="21" />
         <line x1="12" y1="17" x2="12" y2="21" />
@@ -61,6 +63,7 @@ const STEPS = [
         stroke="currentColor"
         strokeWidth="2"
       >
+        <title>Behavior icon</title>
         <circle cx="12" cy="12" r="3" />
         <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
       </svg>
@@ -78,6 +81,7 @@ const STEPS = [
         stroke="currentColor"
         strokeWidth="2"
       >
+        <title>Skills icon</title>
         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
       </svg>
     ),
@@ -265,6 +269,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 bg-background-secondary text-text-secondary hover:bg-background-tertiary hover:text-text-primary
                 disabled:opacity-40 disabled:cursor-not-allowed"
             >
+              {' '}
               <svg
                 width="16"
                 height="16"
@@ -273,6 +278,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 stroke="currentColor"
                 strokeWidth="2"
               >
+                <title>Back</title>
                 <polyline points="15 18 9 12 15 6" />
               </svg>
               {t('settings.addAgentModal.back')}
@@ -287,7 +293,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                   bg-blue-600 text-white hover:bg-blue-500
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {t('settings.addAgentModal.next')}
+                {t('settings.addAgentModal.next')}{' '}
                 <svg
                   width="16"
                   height="16"
@@ -296,6 +302,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                   stroke="currentColor"
                   strokeWidth="2"
                 >
+                  <title>Next</title>
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
               </button>
@@ -317,12 +324,14 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                       stroke="currentColor"
                       strokeWidth="2"
                     >
+                      <title>Loading</title>
                       <circle cx="12" cy="12" r="10" strokeDasharray="60" strokeDashoffset="10" />
                     </svg>
                     {t('settings.addAgentModal.creating')}
                   </>
                 ) : (
                   <>
+                    {' '}
                     <svg
                       width="16"
                       height="16"
@@ -331,6 +340,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                       stroke="currentColor"
                       strokeWidth="2"
                     >
+                      <title>Add</title>
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                     {t('settings.addAgentModal.add')}

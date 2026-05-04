@@ -94,41 +94,46 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	var taskID string
 	if strings.HasPrefix(sessionKey, "subagent:") {
-		// Old format: subagent:{taskID}
 		taskID = strings.TrimPrefix(sessionKey, "subagent:")
-	} else if strings.HasPrefix(sessionKey, "native:") {
-		// New format: native:{parent}:subagent-{n} - extract the task ID
-		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
-			taskID = sessionKey[idx+1:] // e.g., "subagent-1"
-		}
+	} else if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
+		taskID = sessionKey[idx+1:]
 	}
 	if taskID == "" {
 		return ""
 	}
-	if al.toolCoordinator == nil {
-		logger.WarnCF("agent", "GetSubagentParentSessionKey: toolCoordinator is nil", map[string]interface{}{
-			"session_key": sessionKey,
-		})
-		return ""
+
+	if al.toolCoordinator != nil {
+		task, ok := al.toolCoordinator.getSubagentTask(taskID)
+		if ok && task != nil {
+			resolved := al.ResolveSessionKey(task.OriginSessionKey)
+			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from task", map[string]interface{}{
+				"session_key":        sessionKey,
+				"task_id":            taskID,
+				"origin_session_key": task.OriginSessionKey,
+				"origin_channel":     task.OriginChannel,
+				"origin_chat_id":     task.OriginChatID,
+				"resolved_parent":    resolved,
+			})
+			return resolved
+		}
 	}
-	task, ok := al.toolCoordinator.getSubagentTask(taskID)
-	if !ok || task == nil {
-		logger.WarnCF("agent", "GetSubagentParentSessionKey: task not found", map[string]interface{}{
+
+	// Fallback: parse parent from session key structure {parent}:{taskID}
+	if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
+		parent := sessionKey[:idx]
+		logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
 			"session_key": sessionKey,
 			"task_id":     taskID,
+			"parent_key":  parent,
 		})
-		return ""
+		return parent
 	}
-	resolved := al.ResolveSessionKey(task.OriginSessionKey)
-	logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved", map[string]interface{}{
-		"session_key":        sessionKey,
-		"task_id":            taskID,
-		"origin_session_key": task.OriginSessionKey,
-		"origin_channel":     task.OriginChannel,
-		"origin_chat_id":     task.OriginChatID,
-		"resolved_parent":    resolved,
+
+	logger.WarnCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
+		"session_key": sessionKey,
+		"task_id":     taskID,
 	})
-	return resolved
+	return ""
 }
 
 func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {

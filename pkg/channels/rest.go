@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	lelectx "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	lelectx "github.com/xilistudios/lele/pkg/context"
 )
 
 func (n *NativeChannel) handleGetPIN(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +153,9 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	subagentID := r.PathValue("subagentId")
 
 	if subagentID != "" {
+		if !strings.HasPrefix(sessionKey, "native:") {
+			sessionKey = "native:" + sessionKey
+		}
 		sessionKey = sessionKey + ":" + subagentID
 	}
 
@@ -314,11 +317,11 @@ func (n *NativeChannel) handleChatSessionGet(w http.ResponseWriter, r *http.Requ
 	thinkLevel := n.agentLoop.GetThinkLevel(sessionKey)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"session_key":   sessionKey,
-		"agent_id":      agentID,
-		"model":         model,
-		"name":          name,
-		"think_level":   thinkLevel,
+		"session_key": sessionKey,
+		"agent_id":    agentID,
+		"model":       model,
+		"name":        name,
+		"think_level": thinkLevel,
 	})
 }
 
@@ -652,7 +655,7 @@ func (n *NativeChannel) handleAgentFiles(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-		if err := lelectx.InitializeWorkspace(absWorkspace); err != nil {
+	if err := lelectx.InitializeWorkspace(absWorkspace); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to initialize workspace: "+err.Error(), "workspace_create_failed")
 		return
 	}

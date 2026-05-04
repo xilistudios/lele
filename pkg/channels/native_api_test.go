@@ -29,15 +29,15 @@ type nativeTestAgentLoop struct {
 	sessionAliases   map[string]string // base -> resolved
 	sessionAliasesMu sync.RWMutex
 	subagentParents  map[string]string // subagent_key -> parent_key
-	workspace        string // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	workspace        string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
-		config:         cfg,
-		histories:      make(map[string][]providers.Message),
-		sessionAgents:  make(map[string]string),
-		sessionModels:  make(map[string]string),
+		config:          cfg,
+		histories:       make(map[string][]providers.Message),
+		sessionAgents:   make(map[string]string),
+		sessionModels:   make(map[string]string),
 		sessionAliases:  make(map[string]string),
 		subagentParents: make(map[string]string),
 	}
@@ -1552,7 +1552,6 @@ func TestNativeChannelAgentFiles_AgentNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
 	}
 }
-
 
 func readBody(resp *http.Response) string {
 	data, _ := io.ReadAll(resp.Body)

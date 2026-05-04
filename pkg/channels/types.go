@@ -392,11 +392,11 @@ type PaginationParams struct {
 }
 
 type PaginatedResponse struct {
-	Items   any   `json:"items"`
-	Total   int   `json:"total"`
-	Offset  int   `json:"offset"`
-	Limit   int   `json:"limit"`
-	HasMore bool  `json:"has_more"`
+	Items   any  `json:"items"`
+	Total   int  `json:"total"`
+	Offset  int  `json:"offset"`
+	Limit   int  `json:"limit"`
+	HasMore bool `json:"has_more"`
 }
 
 const WSProtocolVersion = 1

@@ -14,7 +14,7 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
-import { updateChatHistoryFromRaw } from './useChatHistory'
+import { chatHistoryQueryKey, updateChatHistoryFromRaw } from './useChatHistory'
 
 export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
@@ -190,6 +190,24 @@ export function useMessages(
       setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
 
+      const cacheData = queryClient.getQueryData<{
+        messages?: ChatMessage[]
+      }>(chatHistoryQueryKey(sessionKey))
+
+      if (cacheData) {
+        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+          ...cacheData,
+          messages: [...(cacheData.messages ?? []), userMessage],
+        })
+      } else {
+        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+          sessionKey,
+          messages: [userMessage],
+          rawMessages: [],
+          processing: false,
+        })
+      }
+
       const response = await api.sendMessage({
         content: normalizedContent,
         session_key: sessionKey,
@@ -208,6 +226,7 @@ export function useMessages(
     [api, token, ensureAssistantPlaceholder, getHistoryUserCount],
   )
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable, refs are intentionally excluded
   const handleEvent = useCallback(
     (event: { event: string; data: unknown }) => {
       const data = event.data as Record<string, unknown>

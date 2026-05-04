@@ -692,37 +692,38 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 			})
 			return false
 		}
+		resolvedParent = strings.TrimPrefix(resolvedParent, "native:")
+
+		if resolvedParent == clientID {
+			return true
+		}
+
 		logger.InfoCF("native", "validateSessionOwnership: checking subagent parent", map[string]interface{}{
 			"session_key":     sessionKey,
 			"client_id":       clientID,
 			"resolved_parent": resolvedParent,
 			"client_keys":     client.SessionKeys,
 		})
-		// Extract base session key from resolved parent (chat alias only)
 		resolvedParentBase := resolvedParent
 		if strings.Contains(resolvedParent, ":chat:") {
-			// For chat alias (e.g., :chat:1), strip from the :chat: part
 			chatIdx := strings.LastIndex(resolvedParent, ":chat:")
 			if chatIdx >= 0 {
 				resolvedParentBase = resolvedParent[:chatIdx]
 			}
 		}
 		for _, sk := range client.SessionKeys {
-			// Exact match with resolved parent
-			if sk == resolvedParent {
+			skNorm := strings.TrimPrefix(sk, "native:")
+			if skNorm == resolvedParent {
 				return true
 			}
-			// Base match: client key matches resolved parent base
-			if sk == resolvedParentBase {
+			if skNorm == resolvedParentBase {
 				return true
 			}
-			// Reverse base match: client key base matches resolved parent
-			skBase := sk
-			if strings.Contains(sk, ":chat:") {
-				// For chat alias (e.g., :chat:1), strip from the :chat: part
-				chatIdx := strings.LastIndex(sk, ":chat:")
+			skBase := skNorm
+			if strings.Contains(skNorm, ":chat:") {
+				chatIdx := strings.LastIndex(skNorm, ":chat:")
 				if chatIdx >= 0 {
-					skBase = sk[:chatIdx]
+					skBase = skNorm[:chatIdx]
 				}
 			}
 			if skBase == resolvedParent || skBase == resolvedParentBase {
@@ -730,11 +731,11 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 			}
 		}
 		logger.WarnCF("native", "validateSessionOwnership: no matching session key for subagent", map[string]interface{}{
-			"session_key":       sessionKey,
-			"client_id":         clientID,
-			"resolved_parent":   resolvedParent,
+			"session_key":          sessionKey,
+			"client_id":            clientID,
+			"resolved_parent":      resolvedParent,
 			"resolved_parent_base": resolvedParentBase,
-			"client_keys":       client.SessionKeys,
+			"client_keys":          client.SessionKeys,
 		})
 		return false
 	}
