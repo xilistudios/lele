@@ -176,6 +176,26 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 
+	// Build a map of tool_call_id -> tool name from assistant messages
+	// This is used to populate ToolName for tool result messages
+	toolCallIDToName := make(map[string]string)
+	for _, msg := range history {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					// Use tc.Name if available, otherwise try tc.Function.Name
+					toolName := tc.Name
+					if toolName == "" && tc.Function != nil {
+						toolName = tc.Function.Name
+					}
+					if toolName != "" {
+						toolCallIDToName[tc.ID] = toolName
+					}
+				}
+			}
+		}
+	}
+
 	// Build a list of valid messages (user, assistant, tool) with their IDs
 	type indexedMessage struct {
 		index int
@@ -223,6 +243,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 			Content:          vm.msg.Content,
 			ReasoningContent: vm.msg.ReasoningContent,
 			ToolCallID:       vm.msg.ToolCallID,
+		}
+		// For tool messages, look up the tool name from the assistant message that initiated the call
+		if vm.msg.Role == "tool" && vm.msg.ToolCallID != "" {
+			if toolName, ok := toolCallIDToName[vm.msg.ToolCallID]; ok {
+				historyMsg.ToolName = toolName
+			}
 		}
 		if len(vm.msg.ToolCalls) > 0 {
 			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(vm.msg.ToolCalls))

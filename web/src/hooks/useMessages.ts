@@ -4,7 +4,7 @@ import type { ApiClient } from '../lib/api'
 import {
   buildToolCallMap,
   createAssistantMessage,
-  createHistoryMessageId,
+  
   createOptimisticUserId,
   createToolMessage,
   createToolMessageId,
@@ -26,10 +26,20 @@ export const toChatMessages = (
     reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
+    tool_name?: string
   }>,
   sessionKey: string,
 ): ChatMessage[] => {
   const toolCallMap = buildToolCallMap(history)
+
+  // Build a set of tool_call_ids that have results in the history
+  // to avoid generating duplicate tool messages
+  const toolCallIdsWithResults = new Set<string>()
+  for (const message of history) {
+    if (message.role === 'tool' && message.tool_call_id) {
+      toolCallIdsWithResults.add(message.tool_call_id)
+    }
+  }
 
   return history.flatMap((message) => {
     let messageContent = message.content
@@ -59,21 +69,52 @@ export const toChatMessages = (
     if (message.role === 'assistant') {
       const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
 
-      // Assistant with tool_calls but no text content → skip (tool results follow)
-      if (hasToolCalls && (!message.content || message.content === '')) {
-        return []
+      // Build result array
+      const result: ChatMessage[] = []
+
+      // Add assistant message if:
+      // - It has content, OR
+      // - It doesn't have tool_calls (even if empty, to maintain backward compatibility)
+      // We skip empty assistant messages with tool_calls since tool messages will be shown instead
+      const shouldAddAssistant = (message.content && message.content !== '') || !hasToolCalls
+      if (shouldAddAssistant) {
+        result.push(
+          createAssistantMessage({
+            id: message.id,
+            sessionKey,
+            content: messageContent,
+            reasoningContent: message.reasoning_content,
+            streaming: false,
+            attachments: parsedAttachments,
+          }),
+        )
       }
 
-      return [
-        createAssistantMessage({
-          id: message.id,
-          sessionKey,
-          content: messageContent,
-          reasoningContent: message.reasoning_content,
-          streaming: false,
-          attachments: parsedAttachments,
-        }),
-      ]
+      // Generate tool messages for each tool_call that doesn't have a result yet
+      // (tool results are handled separately by the tool messages in history)
+      if (hasToolCalls && message.tool_calls) {
+        for (const tc of message.tool_calls) {
+          // Skip if this tool_call already has a result in history
+          if (toolCallIdsWithResults.has(tc.id)) {
+            continue
+          }
+
+          const toolArgsStr = tc.arguments ? `${tc.name} ${JSON.stringify(tc.arguments)}` : tc.name
+
+          result.push(
+            createToolMessage({
+              id: `${message.id}:tool:${tc.id}`,
+              sessionKey,
+              toolName: tc.name ?? 'tool',
+              toolArgs: toolArgsStr,
+              toolStatus: 'executing',
+              subagentSessionKey: undefined, // Will be set from tool result if spawn
+            }),
+          )
+        }
+      }
+
+      return result
     }
 
     // --- Tool message ---
@@ -81,7 +122,8 @@ export const toChatMessages = (
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
-      const toolName = matchedToolCall?.name ?? message.tool_call_id ?? 'tool'
+      // Priority: 1) matched tool call name, 2) tool_name from API (backend-computed), 3) tool_call_id, 4) 'tool'
+      const toolName = matchedToolCall?.name ?? message.tool_name ?? message.tool_call_id ?? 'tool'
       const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
       const subagentSessionKey =
         toolName === 'spawn' ? parseSubagentSessionKey(message.content) : undefined
@@ -223,7 +265,7 @@ export function useMessages(
       console.log('[WS] Message sent, messageId:', response.message_id)
       return response
     },
-    [api, token, ensureAssistantPlaceholder, getHistoryUserCount],
+    [api, token, ensureAssistantPlaceholder, getHistoryUserCount, queryClient],
   )
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable, refs are intentionally excluded

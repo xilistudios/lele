@@ -165,6 +165,7 @@ type ChatHistoryMessage struct {
 	ReasoningContent string            `json:"reasoning_content,omitempty"`
 	ToolCalls        []HistoryToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string            `json:"tool_call_id,omitempty"`
+	ToolName         string            `json:"tool_name,omitempty"`
 }
 
 type HistoryToolCall struct {

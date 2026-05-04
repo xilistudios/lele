@@ -72,6 +72,23 @@ function mergeMessages(
     return baseUserCount <= (msg.optimisticBaseCount ?? 0)
   })
 
+  // Helper to normalize tool args for comparison.
+  // Handles JSON key ordering differences by parsing and re-serializing with sorted keys.
+  const normalizeToolArgs = (args: string | undefined): string => {
+    if (!args) return ''
+    // Try to extract JSON from the tool args string (format: "toolName {...}")
+    const jsonMatch = args.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return args // Not JSON, return as-is
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      // Re-serialize with sorted keys for consistent comparison
+      return JSON.stringify(parsed, Object.keys(parsed).sort())
+    } catch {
+      return args // Parse failed, return original
+    }
+  }
+
   // Remove streaming messages that are now confirmed in history
   const filteredStreaming = streamingWithoutConfirmedUsers.filter((msg) => {
     // Remove completed non-streaming assistant messages when history has the current turn
@@ -86,7 +103,7 @@ function mergeMessages(
           bm.role === 'tool' &&
           bm.sessionKey === msg.sessionKey &&
           bm.toolName === msg.toolName &&
-          bm.toolArgs === msg.toolArgs &&
+          normalizeToolArgs(bm.toolArgs) === normalizeToolArgs(msg.toolArgs) &&
           bm.toolResult === msg.toolResult,
       )
       if (isConfirmedInHistory) {
@@ -108,7 +125,7 @@ export function useChatHistory(
 ) {
   const queryClient = useQueryClient()
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const hasMoreRef = useRef(true)
+  const [hasMore, setHasMore] = useState(true)
   const isLoadingMoreRef = useRef(false)
 
   // Query for fetching recent messages (polling and initial load)
@@ -122,7 +139,7 @@ export function useChatHistory(
       const history = await api.history(sessionKey, parentSessionKey, undefined, DEFAULT_LIMIT)
       if (!history || !history.messages) {
         console.log('[RQ] History fetched, empty response')
-        hasMoreRef.current = false
+        setHasMore(false)
         return {
           sessionKey,
           messages: [],
@@ -130,8 +147,13 @@ export function useChatHistory(
           hasMore: false,
         }
       }
-      console.log('[RQ] History fetched, messages:', history.messages.length, 'has_more:', history.has_more)
-      hasMoreRef.current = history.has_more
+      console.log(
+        '[RQ] History fetched, messages:',
+        history.messages.length,
+        'has_more:',
+        history.has_more,
+      )
+      setHasMore(history.has_more)
 
       // Convert to ChatMessage array
       const messages = toChatMessages(history.messages, history.session_key)
@@ -158,7 +180,7 @@ export function useChatHistory(
   const loadMore = useCallback(async () => {
     if (!sessionKey || !token || isLoadingMoreRef.current) return
     const currentData = query.data
-    if (!currentData || !currentData.messages.length || !hasMoreRef.current) return
+    if (!currentData || !currentData.messages.length || !hasMore) return
 
     // Get the ID of the oldest message to use as cursor
     const oldestMessage = currentData.messages[0]
@@ -169,13 +191,18 @@ export function useChatHistory(
     setIsLoadingMore(true)
 
     try {
-      const history = await api.history(sessionKey, parentSessionKey, oldestMessage.id, DEFAULT_LIMIT)
+      const history = await api.history(
+        sessionKey,
+        parentSessionKey,
+        oldestMessage.id,
+        DEFAULT_LIMIT,
+      )
       if (!history || !history.messages || history.messages.length === 0) {
-        hasMoreRef.current = false
+        setHasMore(false)
         return
       }
 
-      hasMoreRef.current = history.has_more
+      setHasMore(history.has_more)
 
       const olderMessages = toChatMessages(history.messages, history.session_key)
 
@@ -203,9 +230,7 @@ export function useChatHistory(
       isLoadingMoreRef.current = false
       setIsLoadingMore(false)
     }
-  }, [api, sessionKey, token, parentSessionKey, queryClient, query.data])
-
-  const hasMore = hasMoreRef.current
+  }, [api, sessionKey, token, parentSessionKey, queryClient, query.data, hasMore])
 
   const baseMessages = query.data?.messages ?? []
   const messages = useMemo(
@@ -215,7 +240,7 @@ export function useChatHistory(
 
   const invalidateHistory = useCallback(() => {
     if (!sessionKey) return
-    hasMoreRef.current = true
+    setHasMore(true)
     queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
   }, [sessionKey, queryClient])
 

@@ -85,7 +85,7 @@ export function MessageList() {
       }
     }
     lastMessageCountRef.current = messages.length
-  }, [messages.length, isLoadingMore])
+  }, [messages])
 
   // Scroll to bottom when needed
   useEffect(() => {
@@ -96,7 +96,7 @@ export function MessageList() {
       }
       shouldScrollToBottomRef.current = false
     }
-  })
+  }, [messages])
 
   // Cleanup debounce timer
   useEffect(() => {
@@ -108,6 +108,7 @@ export function MessageList() {
   }, [])
 
   // Reset refs when session changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally used for mutation
   useEffect(() => {
     isLoadingMoreRef.current = false
     scrollHeightBeforeLoadRef.current = 0

@@ -334,7 +334,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 
 	mux := http.NewServeMux()
 	native.RegisterRoutes(mux)
-	handler := native.corsMiddleware(native.securityHeadersMiddleware(mux))
+	handler := native.corsMiddleware(native.securityHeadersMiddleware(native.authMiddleware(mux)))
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
@@ -348,8 +348,10 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 		t.Fatalf("failed to pair: %v", err)
 	}
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws?token=" + token
-	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
+		"Authorization": []string{"Bearer " + token},
+	})
 	if err != nil {
 		t.Fatalf("failed to connect websocket: %v", err)
 	}
