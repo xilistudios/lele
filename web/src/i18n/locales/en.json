@@ -337,6 +337,8 @@
     "noConfiguredProviders": "No providers configured. Add one to get started.",
     "defaultBadge": "Default",
     "modifiedBadge": "Unsaved changes",
+    "agentFilesButton": "Files",
+    "agentFilesTooltip": "Edit context files",
     "selectAgent": "Select agent",
     "noOtherAgents": "No other agents available",
     "addProviderModal": {

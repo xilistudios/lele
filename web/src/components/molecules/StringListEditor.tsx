@@ -111,19 +111,25 @@ export function StringListEditor({
         )}
       </div>
       {items.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {items.map((item, index) => (
             <div
               key={item}
-              className="flex items-center justify-between rounded bg-surface-muted px-3 py-2"
+              className="group flex items-center justify-between rounded-lg border border-border-light bg-background-secondary/30 px-3 py-2.5 hover:border-interaction-primary hover:bg-background-secondary transition-all duration-200"
             >
-              <span className="text-xs text-text-secondary">{item}</span>
+              <div className="flex items-center gap-2.5">
+                {/* Agent icon */}
+                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] text-white font-medium flex-shrink-0">
+                  {item.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs text-text-primary font-medium">{item}</span>
+              </div>
               <button
                 type="button"
                 onClick={() => removeItem(index)}
                 disabled={disabled}
                 title={removeTitle}
-                className="text-state-error transition-colors hover:text-state-error/80 disabled:opacity-50"
+                className="text-state-error/40 transition-all duration-200 hover:text-state-error hover:bg-state-error/10 rounded p-1.5"
               >
                 <svg
                   width="14"

@@ -326,6 +326,8 @@
     "noConfiguredProviders": "No hay proveedores configurados. Agrega uno para comenzar.",
     "defaultBadge": "Default",
     "modifiedBadge": "Modificado",
+    "agentFilesButton": "Archivos",
+    "agentFilesTooltip": "Editar archivos de contexto",
     "selectAgent": "Seleccionar agente",
     "noOtherAgents": "No hay otros agentes disponibles",
     "addProviderModal": {

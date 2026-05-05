@@ -58,8 +58,7 @@ export function AgentsSettings() {
         {/* Header with Add button */}
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm text-text-secondary">
-            {t('settings.descriptions.agentsList') ||
-              'Create and manage AI agents with custom configurations'}
+            {t('settings.descriptions.agentsList')}
           </p>
           <button
             type="button"
@@ -181,7 +180,7 @@ export function AgentsSettings() {
                         navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
                       }}
                       className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5"
-                      title="Edit context files"
+                      title={t('settings.agentFilesTooltip')}
                     >
                       {' '}
                       <svg
@@ -198,7 +197,7 @@ export function AgentsSettings() {
                         <line x1="16" y1="13" x2="8" y2="13" />
                         <line x1="16" y1="17" x2="8" y2="17" />
                       </svg>
-                      Files
+                      {t('settings.agentFilesButton')}
                     </button>
                   </div>
                 }
@@ -331,107 +330,7 @@ export function AgentsSettings() {
                       }
                     />
                   </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentMaxIterations')}
-                    description={t('settings.descriptions.agentMaxIterations')}
-                    path={`agents.list.${index}.max_iterations`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.max_iterations`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.max_iterations`}
-                      value={agent.max_iterations ?? 10}
-                      min={1}
-                      max={100}
-                      step={1}
-                      onChange={(v) =>
-                        updateField(`agents.list.${index}.max_iterations`, v === 10 ? undefined : v)
-                      }
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentMaxTokens')}
-                    description={t('settings.descriptions.agentMaxTokens')}
-                    path={`agents.list.${index}.max_tokens`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.max_tokens`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.max_tokens`}
-                      value={agent.max_tokens ?? 4096}
-                      min={256}
-                      max={128000}
-                      step={256}
-                      onChange={(v) =>
-                        updateField(`agents.list.${index}.max_tokens`, v === 4096 ? undefined : v)
-                      }
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentContextWindow')}
-                    description={t('settings.descriptions.agentContextWindow')}
-                    path={`agents.list.${index}.context_window`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.context_window`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.context_window`}
-                      value={agent.context_window ?? 128000}
-                      min={4096}
-                      max={2097152}
-                      step={4096}
-                      onChange={(v) =>
-                        updateField(
-                          `agents.list.${index}.context_window`,
-                          v === 128000 ? undefined : v,
-                        )
-                      }
-                    />
-                  </SettingsField>
                 </div>
-
-                {/* Section: Features */}
-                <div className="pb-4 mb-5 border-b border-border-light">
-                  <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
-                    {t('settings.sections.features')}
-                  </div>
-
-                  <SettingsField
-                    label={t('settings.fields.agentThinking')}
-                    description={t('settings.descriptions.agentThinking')}
-                    path={`agents.list.${index}.reasoning.enable`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.reasoning.enable`)}
-                  >
-                    <BooleanInput
-                      id={`agents.list.${index}.reasoning.enable`}
-                      value={getThinkingEnabled(
-                        agent as Record<string, unknown> as {
-                          reasoning?: { enable?: boolean }
-                        },
-                      )}
-                      onChange={(v) => toggleThinking(index, agent as Record<string, unknown>, v)}
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentSupportsImages')}
-                    description={t('settings.descriptions.agentSupportsImages')}
-                    path={`agents.list.${index}.supports_images`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.supports_images`)}
-                  >
-                    <BooleanInput
-                      id={`agents.list.${index}.supports_images`}
-                      value={agent.supports_images ?? false}
-                      onChange={(v) =>
-                        updateField(
-                          `agents.list.${index}.supports_images`,
-                          v === false ? undefined : v,
-                        )
-                      }
-                    />
-                  </SettingsField>
-                </div>
-
                 {/* Section: Skills */}
                 <div>
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">

@@ -47,6 +47,7 @@ export function Modal({
         aria-label="Close modal"
       />
       <dialog
+        open
         className={`relative z-10 w-full ${SIZE_CLASSES[size]} rounded-xl border border-border bg-background-primary shadow-2xl max-h-[90vh] overflow-hidden`}
         aria-modal="true"
         aria-labelledby="modal-title"
