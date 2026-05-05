@@ -199,7 +199,12 @@ func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
 		n.handleWSCancel(client, msg.Data, eventID)
 
 	case "ping":
-		_ = client.Send(mustMarshal(WSMessage{Version: WSProtocolVersion, Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})}))
+		if err := client.Send(mustMarshal(WSMessage{Version: WSProtocolVersion, Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})})); err != nil {
+			logger.WarnCF("native", "Failed to send pong", map[string]interface{}{
+				"client_id": client.ID,
+				"error":     err.Error(),
+			})
+		}
 
 	default:
 		n.sendError(client, "unknown_event", "unknown event type: "+msg.Event)
@@ -259,7 +264,12 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 
 	ackData := map[string]string{"message_id": messageID, "session_key": sessionKey}
 	ack := marshalWithID("message.ack", ackData, eventID)
-	_ = client.Send(ack)
+	if err := client.Send(ack); err != nil {
+		logger.WarnCF("native", "Failed to send message.ack", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, eventID string) {
@@ -282,7 +292,13 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 	}
 
 	ackData := map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}
-	_ = client.Send(marshalWithID("approve.ack", ackData, eventID))
+	if err := client.Send(marshalWithID("approve.ack", ackData, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send approve.ack", map[string]interface{}{
+			"client_id":  client.ID,
+			"request_id": payload.RequestID,
+			"error":      err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage, eventID string) {
@@ -341,7 +357,13 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		"session_key": sessionKey,
 		"processing":  processing,
 	}
-	_ = client.Send(marshalWithID("subscribe.ack", ackData, eventID))
+	if err := client.Send(marshalWithID("subscribe.ack", ackData, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send subscribe.ack", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessage, eventID string) {
@@ -373,7 +395,13 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 		"subscriptions":   len(client.Subscriptions),
 	})
 
-	_ = client.Send(marshalWithID("unsubscribe.ack", map[string]string{"session_key": payload.SessionKey}, eventID))
+	if err := client.Send(marshalWithID("unsubscribe.ack", map[string]string{"session_key": payload.SessionKey}, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send unsubscribe.ack", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": payload.SessionKey,
+			"error":       err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
@@ -414,7 +442,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 		processing = n.agentLoop.IsSessionProcessing(client.SessionKey)
 	}
 
-	_ = client.Send(mustMarshal(WSMessage{
+	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "welcome",
 		Data: mustMarshal(map[string]interface{}{
@@ -426,15 +454,26 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"server_time": time.Now().Format(time.RFC3339),
 			"processing":  processing,
 		}),
-	}))
+	})); err != nil {
+		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) sendError(client *WSClient, code, message string) {
-	_ = client.Send(mustMarshal(WSMessage{
+	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "error",
 		Data:    mustMarshal(WSErrorPayload{Code: code, Message: message}),
-	}))
+	})); err != nil {
+		logger.WarnCF("native", "Failed to send error to client", map[string]interface{}{
+			"client_id": client.ID,
+			"code":      code,
+			"error":     err.Error(),
+		})
+	}
 }
 
 func marshalWithID(event string, data interface{}, id string) json.RawMessage {
@@ -485,13 +524,30 @@ func boolToString(b bool) string {
 }
 
 // isValidSessionKeyFormat validates that a session key follows the expected format:
-// - Any non-empty string (plain client IDs, custom keys)
+// - Non-empty, max 256 chars, printable ASCII only
+// - No path traversal sequences (.., /, \)
 // - native:{client_id} or native:{client_id}:{suffix} (deprecated, kept for backward compatibility)
 // - subagent:{task_id} (deprecated, kept for backward compatibility)
+// - Plain client IDs and custom session keys
 // Returns true if the format is valid, false otherwise.
 func isValidSessionKeyFormat(sessionKey string) bool {
 	if strings.TrimSpace(sessionKey) == "" {
 		return false
+	}
+	if len(sessionKey) > 256 {
+		return false
+	}
+	// Reject path traversal and control characters
+	if strings.Contains(sessionKey, "..") {
+		return false
+	}
+	if strings.Contains(sessionKey, "/") || strings.Contains(sessionKey, "\\") {
+		return false
+	}
+	for _, r := range sessionKey {
+		if r < 32 || r > 126 {
+			return false
+		}
 	}
 	// Subagent keys have strict format requirements
 	if strings.HasPrefix(sessionKey, "subagent:") {
@@ -520,29 +576,18 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 		}
 		return true
 	}
-	// Accept any non-empty string that doesn't start with subagent:
-	// This allows plain client IDs and custom session keys
+	// Accept any valid string for plain session keys
 	return true
 }
 
 // sessionKeyMatches checks if two session keys match, handling backward compatibility
-// for the deprecated native: prefix. It compares:
-// - {key1} vs {key2} (exact match)
-// - native:{key1} vs {key2} (strip prefix)
-// - {key1} vs native:{key2} (strip prefix)
-func sessionKeyMatches(key1, key2 string) bool {
-	if key1 == key2 {
+// for the deprecated native: prefix.
+func sessionKeyMatches(a, b string) bool {
+	if a == b {
 		return true
 	}
-	// Handle deprecated native: prefix
-	key1Stripped := strings.TrimPrefix(key1, "native:")
-	key2Stripped := strings.TrimPrefix(key2, "native:")
-	if key1Stripped == key2Stripped && key1Stripped != key1 && key2Stripped != key2 {
-		return true
-	}
-	// One has prefix, one doesn't
-	if key1Stripped == key2 || key2Stripped == key1 {
-		return true
-	}
-	return false
+	// Strip native: prefix for comparison (backward compat)
+	aNorm := strings.TrimPrefix(a, "native:")
+	bNorm := strings.TrimPrefix(b, "native:")
+	return aNorm == bNorm
 }

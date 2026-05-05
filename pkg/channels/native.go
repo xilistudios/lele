@@ -772,17 +772,21 @@ func (c *WSClient) QueueSend(data []byte) error {
 		return fmt.Errorf("client is closed")
 	}
 	c.mu.Unlock()
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
 	select {
 	case c.SendChan <- data:
 		return nil
-	default:
+	case <-timer.C:
 		c.mu.Lock()
 		if !c.closed {
 			c.closed = true
 			c.Conn.Close()
 		}
 		c.mu.Unlock()
-		return fmt.Errorf("send channel full, client disconnected")
+		return fmt.Errorf("send timeout, client disconnected")
 	}
 }
 
@@ -815,6 +819,7 @@ func writeError(w http.ResponseWriter, status int, message string, code string) 
 	writeJSON(w, status, APIError{
 		Code:    code,
 		Message: message,
+		Error:   message,
 	})
 }
 

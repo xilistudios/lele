@@ -414,12 +414,12 @@ Messages follow a versioned envelope:
 }
 ```
 
-- `v` (number) — protocol version (currently 1). Required for new clients.
-- `id` (string, optional) — correlation ID. Server includes this in ack responses.
+- `v` (number, optional) — protocol version (currently `1`, defined as `WSProtocolVersion` in the server). New clients should send `v: 1`. The field is optional for backward compatibility — if omitted, the server treats the message as v0.
+- `id` (string, optional) — correlation ID for request-response pairing. When a client includes an `id` on an outbound event, the server echoes the same `id` in the corresponding ack response (`*.ack` events), enabling the client to correlate responses to requests.
 - `event` (string) — event type.
 - `data` (object) — event payload.
 
-The server sends `v: 1` on all outbound events. Clients should send `v: 1` on outbound events.
+The server sends `v: 1` on all outbound events (`welcome`, `ack`s, `error`, streaming events, etc.). Clients should send `v: 1` on outbound events for forward compatibility. Clients that omit `v` will have their messages processed with v0 semantics (backward compatible fallback).
 
 ### Client Events
 
@@ -489,11 +489,24 @@ The server sends `v: 1` on all outbound events. Clients should send `v: 1` on ou
 }
 ```
 
+#### `typing`
+
+Indicates the user is typing in a session. Currently a no-op on the server side (reserved for future use).
+
+```json
+{
+  "event": "typing",
+  "data": {
+    "session_key": "native:client-id:1712339123"
+  }
+}
+```
+
 ### Server Events
 
 #### `welcome`
 
-Sent immediately after connect.
+Sent immediately after connect. The envelope `v` field is set to `1` (the current `WSProtocolVersion`).
 
 Includes:
 
@@ -522,37 +535,129 @@ Streaming chunk payload:
 }
 ```
 
+#### `message.thinking`
+
+Emitted for streaming thinking/chain-of-thought content (when the model supports reasoning). Same shape as `message.stream` but conveys internal reasoning rather than the final response.
+
+```json
+{
+  "message_id": "uuid",
+  "session_key": "native:client-id",
+  "chunk": "internal reasoning step..."
+}
+```
+
 #### `message.complete`
 
-Final assembled message payload, including attachments when present.
+Final assembled message payload (always emitted after streaming completes), including attachments when present.
+
+```json
+{
+  "message_id": "uuid",
+  "session_key": "native:client-id",
+  "content": "Complete response text",
+  "attachments": [
+    {
+      "name": "file.pdf",
+      "mime_type": "application/pdf",
+      "size": 1024,
+      "path": "/home/user/.lele/tmp/uploads/uuid_file.pdf"
+    }
+  ]
+}
+```
 
 #### `tool.executing`
 
-Emitted when a tool starts.
+Emitted when a tool starts. Includes tool name, action, arguments, and optional `subagent_session_key` / `tool_call_id`.
 
-Includes optional `subagent_session_key`.
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "web_search",
+  "action": "Searching the web for...",
+  "arguments": {
+    "query": "latest news"
+  },
+  "tool_call_id": "call_abc123",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
 
 #### `tool.result`
 
 Emitted when a tool returns.
 
-Includes optional `subagent_session_key`.
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "web_search",
+  "result": "Search results...",
+  "tool_call_id": "call_abc123",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
 
 #### `subagent.result`
 
 Emitted for async subagent outcomes when surfaced through the native channel.
 
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "subagent",
+  "result": "...",
+  "tool_call_id": "...",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
+
 #### `approval.request`
 
 Sent when user approval is required for a guarded action.
+
+```json
+{
+  "id": "approval-uuid",
+  "command": "rm -rf /tmp/test",
+  "reason": "This action requires your approval"
+}
+```
 
 #### `attachments`
 
 Sent when attachment metadata is delivered separately from text.
 
+#### `history.updated`
+
+Emitted after a message is fully processed and persisted to storage. Signals that the client can safely refetch session history.
+
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "name": "Session Name"
+}
+```
+
 #### `subscribe.ack`, `unsubscribe.ack`, `approve.ack`, `cancel.ack`, `pong`
 
 Acknowledgement and control events for client-side state handling.
+
+Each ack event echoes the `id` field from the client's original request for correlation.
+
+Example response to a `subscribe` event with `id: "sub-1-1712339123000"`:
+
+```json
+{
+  "v": 1,
+  "id": "sub-1-1712339123000",
+  "event": "subscribe.ack",
+  "data": {
+    "session_key": "native:client-id:timestamp",
+    "processing": false
+  }
+}
+```
 
 #### `error`
 

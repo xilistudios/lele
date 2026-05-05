@@ -119,17 +119,57 @@ export function useChatHistory(
           messages: [],
           rawMessages: [],
           hasMore: false,
+          processing: false,
         }
       }
       setHasMore(history.has_more)
 
-      const messages = toChatMessages(history.messages, history.session_key)
+      const newMessages = toChatMessages(history.messages, history.session_key)
+
+      // Merge with previously loaded older messages (from loadMore) so polling
+      // doesn't wipe out paginated history. Without this, a polling refetch
+      // replaces the entire cache with only the latest DEFAULT_LIMIT messages,
+      // discarding any older messages the user loaded by scrolling up.
+      const queryKey = parentSessionKey
+        ? [...chatHistoryQueryKey(sessionKey), parentSessionKey]
+        : chatHistoryQueryKey(sessionKey)
+      const cachedData = queryClient.getQueryData<{
+        sessionKey: string
+        messages: ChatMessage[]
+        rawMessages: HistoryMessage
+        hasMore: boolean
+        processing?: boolean
+      }>(queryKey)
+
+      if (cachedData && cachedData.messages.length > DEFAULT_LIMIT) {
+        const newMessageIds = new Set(newMessages.map((m) => m.id))
+        // Keep cached messages that are older than the oldest new message
+        // (i.e., messages not present in the latest batch)
+        const olderCachedMessages = cachedData.messages.filter(
+          (m) => !newMessageIds.has(m.id),
+        )
+
+        // Also merge rawMessages preserving order
+        const newRawIds = new Set(history.messages.map((m: { id: string }) => m.id))
+        const olderRawMessages = (cachedData.rawMessages || []).filter(
+          (m: { id: string }) => !newRawIds.has(m.id),
+        )
+
+        return {
+          sessionKey: history.session_key,
+          messages: [...olderCachedMessages, ...newMessages],
+          rawMessages: [...olderRawMessages, ...history.messages],
+          hasMore: olderCachedMessages.length > 0 || history.has_more,
+          processing: history.processing,
+        }
+      }
 
       return {
         sessionKey: history.session_key,
-        messages,
+        messages: newMessages,
         rawMessages: history.messages,
         hasMore: history.has_more,
+        processing: history.processing,
       }
     },
     enabled:
@@ -182,6 +222,7 @@ export function useChatHistory(
         messages: [...uniqueOlderMessages, ...currentData.messages],
         rawMessages: [...history.messages, ...(currentData.rawMessages || [])],
         hasMore: history.has_more,
+        processing: history.processing,
       })
     } catch (error) {
       console.error('[RQ] Error loading more history:', error)
@@ -206,7 +247,7 @@ export function useChatHistory(
   return {
     messages,
     rawMessages: query.data?.rawMessages ?? [],
-    processing: false,
+    processing: query.data?.processing ?? false,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,
@@ -222,10 +263,12 @@ export function updateChatHistoryFromRaw(
   queryClient: ReturnType<typeof useQueryClient>,
   sessionKey: string,
   rawMessages: HistoryMessage,
+  processing?: boolean,
 ) {
   queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
     sessionKey,
     messages: toChatMessages(rawMessages, sessionKey),
     rawMessages,
+    processing,
   })
 }

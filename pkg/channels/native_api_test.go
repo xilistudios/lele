@@ -208,6 +208,10 @@ func (m *nativeTestAgentLoop) GetCurrentContextUsage(sessionKey string) (int, in
 	return 0, 128000
 }
 
+func (m *nativeTestAgentLoop) GetSessionSummary(sessionKey string) string {
+	return ""
+}
+
 func (m *nativeTestAgentLoop) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
 	return "", nil
 }

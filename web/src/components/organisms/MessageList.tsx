@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
@@ -20,7 +20,8 @@ export function MessageList() {
     isLoadingMore,
   } = useAppLogicContext()
   const containerRef = useRef<HTMLDivElement>(null)
-  const scrollHeightBeforeLoadRef = useRef<number>(0)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const [showSentinel, setShowSentinel] = useState(false)
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLoadingMoreRef = useRef(false)
   const lastMessageCountRef = useRef(0)
@@ -48,8 +49,8 @@ export function MessageList() {
       }
 
       debounceTimerRef.current = setTimeout(() => {
-        // Save scroll position before loading
-        scrollHeightBeforeLoadRef.current = container.scrollHeight
+        // Insert sentinel at current scroll position before loading
+        setShowSentinel(true)
         isLoadingMoreRef.current = true
         shouldScrollToBottomRef.current = false
         loadMore()
@@ -57,16 +58,14 @@ export function MessageList() {
     }
   }, [hasMore, loadMore])
 
-  // Restore scroll position after loading older messages
+  // Restore scroll position after loading older messages using sentinel
   useEffect(() => {
     if (!isLoadingMore && isLoadingMoreRef.current) {
       isLoadingMoreRef.current = false
-      const container = containerRef.current
-      if (container && scrollHeightBeforeLoadRef.current > 0) {
-        const newScrollHeight = container.scrollHeight
-        const heightDifference = newScrollHeight - scrollHeightBeforeLoadRef.current
-        container.scrollTop = heightDifference
-        scrollHeightBeforeLoadRef.current = 0
+      // Restore scroll using sentinel
+      if (sentinelRef.current) {
+        sentinelRef.current.scrollIntoView()
+        setShowSentinel(false)
       }
     }
   }, [isLoadingMore, messages.length])
@@ -111,9 +110,9 @@ export function MessageList() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally used for mutation
   useEffect(() => {
     isLoadingMoreRef.current = false
-    scrollHeightBeforeLoadRef.current = 0
     lastMessageCountRef.current = 0
     shouldScrollToBottomRef.current = false
+    setShowSentinel(false)
   }, [currentSessionKey])
 
   if (messages.length === 0) {
@@ -134,6 +133,7 @@ export function MessageList() {
       onScroll={handleScroll}
       className="mx-auto max-w-3xl space-y-1 overflow-y-auto h-full"
     >
+      {showSentinel && <div ref={sentinelRef} />}
       {isLoadingMore && (
         <div className="flex justify-center py-2">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />

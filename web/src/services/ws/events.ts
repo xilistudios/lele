@@ -14,12 +14,10 @@ export type ClientCommand =
 
 export type { ClientEvent }
 
-let commandIdCounter = 0
-
 export function serializeCommand(command: ClientCommand): string {
   return JSON.stringify({
     v: 1,
-    id: `cmd-${++commandIdCounter}-${Date.now()}`,
+    id: crypto.randomUUID(),
     event: command.event,
     data: command.data,
   })

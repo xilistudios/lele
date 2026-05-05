@@ -187,9 +187,12 @@ export function useMessages(
       setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
 
-      const cacheData = queryClient.getQueryData<{
+      // Save previous cache for rollback on error
+      const previousCache = queryClient.getQueryData<{
         messages?: ChatMessage[]
       }>(chatHistoryQueryKey(sessionKey))
+
+      const cacheData = previousCache
 
       if (cacheData) {
         queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
@@ -205,20 +208,34 @@ export function useMessages(
         })
       }
 
-      const response = await api.sendMessage({
-        content: normalizedContent,
-        session_key: sessionKey,
-        agent_id: agentId ?? undefined,
-        attachments: attachments.length > 0 ? attachments : undefined,
-      })
+      try {
+        const response = await api.sendMessage({
+          content: normalizedContent,
+          session_key: sessionKey,
+          agent_id: agentId ?? undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        })
 
-      // Mark session as processing only after API confirms the send
-      setProcessingSessions((prev) => new Set(prev).add(sessionKey))
-      processingSessionKeyRef.current = sessionKey
+        // Mark session as processing only after API confirms the send
+        setProcessingSessions((prev) => new Set(prev).add(sessionKey))
+        processingSessionKeyRef.current = sessionKey
 
-      ensureAssistantPlaceholder(response.message_id, response.session_key)
-      console.log('[WS] Message sent, messageId:', response.message_id)
-      return response
+        ensureAssistantPlaceholder(response.message_id, response.session_key)
+        console.log('[WS] Message sent, messageId:', response.message_id)
+        return response
+      } catch (error) {
+        // Rollback cache on failure
+        if (previousCache) {
+          queryClient.setQueryData(chatHistoryQueryKey(sessionKey), previousCache)
+        } else {
+          queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
+        }
+        // Remove optimistic user message from streamingMessages
+        setStreamingMessages((current) =>
+          current.filter((m) => !(m.role === 'user' && m.optimistic)),
+        )
+        throw error
+      }
     },
     [api, token, ensureAssistantPlaceholder, getHistoryUserCount, queryClient],
   )

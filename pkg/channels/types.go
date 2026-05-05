@@ -188,6 +188,8 @@ type ChatSession struct {
 
 type ChatSessionsResponse struct {
 	Sessions []ChatSession `json:"sessions"`
+	Total    int           `json:"total"`
+	HasMore  bool          `json:"has_more"`
 }
 
 type CreateSessionRequest struct {
@@ -235,6 +237,11 @@ type SessionNameUpdateRequest struct {
 type SessionNameResponse struct {
 	SessionKey string `json:"session_key"`
 	Name       string `json:"name"`
+}
+
+type SessionSummaryResponse struct {
+	SessionKey string `json:"session_key"`
+	Summary    string `json:"summary"`
 }
 
 type SessionContextResponse struct {
@@ -388,6 +395,7 @@ type ChannelInfo struct {
 type APIError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Error   string `json:"error"`
 	Details any    `json:"details,omitempty"`
 }
 

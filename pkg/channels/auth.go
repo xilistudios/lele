@@ -362,6 +362,23 @@ func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
 	}
 }
 
+func (am *AuthManager) IsSessionKeyAvailable(sessionKey string, exceptClientID string) bool {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	for cid, client := range am.store.Clients {
+		if cid == exceptClientID {
+			continue
+		}
+		for _, sk := range client.SessionKeys {
+			if sk == sessionKey {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (am *AuthManager) GetClient(clientID string) (*ClientInfo, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()

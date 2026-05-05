@@ -103,6 +103,14 @@ func parseConfigDirFlag(args []string) (configDir string, remaining []string) {
 		if args[i] == "--config-dir" || args[i] == "-c" {
 			if i+1 < len(args) {
 				configDir = args[i+1]
+				// Validate the path
+				if info, err := os.Stat(configDir); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: config directory does not exist: %s\n", configDir)
+					os.Exit(1)
+				} else if !info.IsDir() {
+					fmt.Fprintf(os.Stderr, "Error: config path is not a directory: %s\n", configDir)
+					os.Exit(1)
+				}
 				remaining = append(remaining, args[:i]...)
 				remaining = append(remaining, args[i+2:]...)
 				return

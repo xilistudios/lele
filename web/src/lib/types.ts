@@ -474,6 +474,8 @@ export type ChannelsResponse = {
 
 export type ChatSessionsResponse = {
   sessions: ChatSession[]
+  total: number
+  has_more: boolean
 }
 
 export type CreateSessionResponse = {
@@ -577,6 +579,7 @@ export type HistoryResponse = {
 }
 
 export type ApiErrorResponse = {
+  error?: string
   code?: string
   message?: string
 }

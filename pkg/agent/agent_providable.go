@@ -133,6 +133,23 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
 	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		// Fast path: O(1) lookup in the subagent-to-agent mapping
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				history := agent.Sessions.GetHistory(resolvedSessionKey)
+				if len(history) > 0 {
+					logger.InfoCF("agent", "GetSessionHistory result (fast path)", map[string]interface{}{
+						"session_key":          sessionKey,
+						"resolved_session_key": resolvedSessionKey,
+						"agent_id":             agent.ID,
+						"history_count":        len(history),
+					})
+					return history
+				}
+			}
+		}
+
+		// Fallback: O(N) scan over all agents (self-healing — caches first hit)
 		for _, agentID := range ap.al.registry.ListAgentIDs() {
 			agent, ok := ap.al.registry.GetAgent(agentID)
 			if !ok {
@@ -140,7 +157,9 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 			}
 			history := agent.Sessions.GetHistory(resolvedSessionKey)
 			if len(history) > 0 {
-				logger.InfoCF("agent", "GetSessionHistory result", map[string]interface{}{
+				// Cache this mapping for future O(1) lookups
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				logger.InfoCF("agent", "GetSessionHistory result (cached)", map[string]interface{}{
 					"session_key":          sessionKey,
 					"resolved_session_key": resolvedSessionKey,
 					"agent_id":             agent.ID,
@@ -459,6 +478,16 @@ func (ap *agentProvidableImpl) SetName(sessionKey string, name string) error {
 		return fmt.Errorf("no agent available for session")
 	}
 	return agent.Sessions.SetName(sessionKey, name)
+}
+
+// GetSessionSummary returns the summary of a session.
+func (ap *agentProvidableImpl) GetSessionSummary(sessionKey string) string {
+	sessionKey = ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(sessionKey)
+	if agent == nil {
+		return ""
+	}
+	return agent.Sessions.GetSummary(sessionKey)
 }
 
 // ============================================================================

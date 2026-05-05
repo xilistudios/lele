@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,23 +27,24 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus               *bus.MessageBus
-	cfgPtr            atomic.Pointer[config.Config]
-	registry          *AgentRegistry
-	state             *state.Manager
-	running           atomic.Bool
-	summarizing       sync.Map
-	sessionAliases    sync.Map // base session key -> active session key
-	sessionModels     sync.Map
-	sessionAgents     sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking   sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback          *providers.FallbackChain
-	channelManager    *channels.Manager
-	verboseManager    *session.VerboseManager
-	sessionKeySeq     atomic.Uint64
-	approvalManager   *channels.ApprovalManager // Manager for command approvals
-	sessionProcessing sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
-	wg                sync.WaitGroup            // tracks in-flight message goroutines
+	bus                  *bus.MessageBus
+	cfgPtr               atomic.Pointer[config.Config]
+	registry             *AgentRegistry
+	state                *state.Manager
+	running              atomic.Bool
+	summarizing          sync.Map
+	sessionAliases       sync.Map // base session key -> active session key
+	sessionModels        sync.Map
+	sessionAgents        sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking      sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
+	fallback             *providers.FallbackChain
+	channelManager       *channels.Manager
+	verboseManager       *session.VerboseManager
+	sessionKeySeq        atomic.Uint64
+	approvalManager      *channels.ApprovalManager // Manager for command approvals
+	sessionProcessing    sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
+	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
+	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
 	// Internal components (delegated operations)
 	messageProcessor messageProcessor
@@ -66,6 +68,13 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	if cfg == nil || al.registry == nil {
 		return
 	}
+
+	// Cancel all running subagents before reloading the tool coordinator.
+	// This prevents goroutine leaks from the old coordinator's subagent managers.
+	if al.toolCoordinator != nil {
+		al.toolCoordinator.cancelAll()
+	}
+
 	al.registry.ReloadAgents(cfg)
 	al.cfgPtr.Store(cfg)
 
@@ -119,14 +128,17 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	}
 
 	// Fallback: parse parent from session key structure {parent}:{taskID}
-	if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
-		parent := sessionKey[:idx]
-		logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
-			"session_key": sessionKey,
-			"task_id":     taskID,
-			"parent_key":  parent,
-		})
-		return parent
+	// Only use this fallback if taskID matches the expected subagent format
+	if matched, _ := regexp.MatchString(`^subagent-\d+$`, taskID); matched {
+		if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
+			parent := sessionKey[:idx]
+			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
+				"session_key": sessionKey,
+				"task_id":     taskID,
+				"parent_key":  parent,
+			})
+			return parent
+		}
 	}
 
 	logger.WarnCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
@@ -147,6 +159,51 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	baseSessionKey = strings.TrimSpace(baseSessionKey)
 	if baseSessionKey == "" {
 		return ""
+	}
+
+	// Backward compatibility: handle old native:<uuid>:<digits> format
+	// Old sessions on disk with this format should still be cleaned up correctly.
+	if strings.HasPrefix(baseSessionKey, "native:") {
+		parts := strings.Split(baseSessionKey[7:], ":")
+		if len(parts) == 2 && parts[1] != "" {
+			allDigits := true
+			for _, c := range parts[1] {
+				if c < '0' || c > '9' {
+					allDigits = false
+					break
+				}
+			}
+			if allDigits {
+				// Old format - reset the session in-place, no new key generation
+				var sessionAgent *AgentInstance
+				if agentID != "" {
+					if a, ok := al.registry.GetAgent(agentID); ok {
+						sessionAgent = a
+					}
+				}
+				if sessionAgent == nil {
+					sessionAgent = al.registry.GetDefaultAgent()
+				}
+
+				// Reset session state on the existing key
+				if sessionAgent != nil {
+					sessionAgent.Sessions.GetOrCreate(baseSessionKey)
+					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
+					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
+					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
+				}
+
+				if agentID != "" {
+					al.sessionAgents.Store(baseSessionKey, agentID)
+				}
+				if model != "" {
+					al.sessionModels.Store(baseSessionKey, model)
+				}
+				al.sessionThinking.Delete(baseSessionKey)
+
+				return baseSessionKey
+			}
+		}
 	}
 
 	var sessionAgent *AgentInstance
@@ -267,6 +324,16 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	// Register shared tools and create tool coordinator with subagents
 	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
+
+	// Wire up session key callbacks so the agent layer can build an O(1)
+	// subagent session-to-agent mapping for GetSessionHistory.
+	for agentID, sm := range subagents {
+		id := agentID // capture loop variable
+		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
+			loop.subagentSessionAgent.Store(sessionKey, id)
+		})
+	}
+
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents)
 	loop.providable = newAgentProvidable(loop)
 

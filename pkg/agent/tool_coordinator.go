@@ -20,6 +20,7 @@ import (
 type toolCoordinator interface {
 	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
+	cancelAll() int
 	cancelSession(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
@@ -102,6 +103,15 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 		}
 	}
 	return totalStopped
+}
+
+// cancelAll cancels all running subagent tasks and clears the subagent map.
+// Returns the count of cancelled tasks. Unlike stopAllSubagents, this also
+// removes all subagent references so the map can be safely replaced.
+func (tc *toolCoordinatorImpl) cancelAll() int {
+	count := tc.stopAllSubagents()
+	tc.subagents = make(map[string]*tools.SubagentManager)
+	return count
 }
 
 // cancelSession cancels any active processing for a specific session
