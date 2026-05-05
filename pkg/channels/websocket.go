@@ -322,6 +322,8 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
+
 	if !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
 		logger.WarnCF("native", "Subscribe ownership validation failed", map[string]interface{}{

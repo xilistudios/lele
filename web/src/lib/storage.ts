@@ -62,3 +62,20 @@ export const saveCurrentSessionKey = (sessionKey: string) => {
 export const clearCurrentSessionKey = () => {
   localStorage.removeItem(SESSION_KEY)
 }
+
+const SIDEBAR_OPEN_KEY = 'lele.sidebarOpen'
+
+export const loadSidebarOpen = (): boolean => {
+  if (typeof localStorage === 'undefined') {
+    return true
+  }
+  const raw = localStorage.getItem(SIDEBAR_OPEN_KEY)
+  if (raw === null) {
+    return true // default: open
+  }
+  return raw === 'true'
+}
+
+export const saveSidebarOpen = (open: boolean) => {
+  localStorage.setItem(SIDEBAR_OPEN_KEY, String(open))
+}

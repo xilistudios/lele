@@ -102,7 +102,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     [persistCurrentSessionKey],
   )
 
-  const createSession = useCallback(() => {
+  const createSession = useCallback(async (): Promise<string | null> => {
     if (!clientId) return null
 
     const sessionKey = crypto.randomUUID()
@@ -120,7 +120,11 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     )
     persistCurrentSessionKey(sessionKey)
 
-    api.createSession(sessionKey).catch(() => {})
+    // Await the API call to ensure backend confirms session creation before navigation
+    await api.createSession(sessionKey).catch((err) => {
+      console.error('[useChatSessions] Failed to create session on backend:', err)
+      return null
+    })
 
     return sessionKey
   }, [clientId, persistCurrentSessionKey, api])
