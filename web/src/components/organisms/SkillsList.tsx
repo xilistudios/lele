@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SkillInfo } from '../../lib/types'
+import { Badge } from '../atoms/Badge'
+import { IconButton } from '../atoms/IconButton'
 
 type Props = {
   skills: SkillInfo[]
@@ -9,10 +11,10 @@ type Props = {
   onRemove: (name: string) => void
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-  workspace: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  global: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  builtin: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+const SOURCE_VARIANTS: Record<string, 'primary' | 'success' | 'default'> = {
+  workspace: 'primary',
+  global: 'success',
+  builtin: 'default',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -122,11 +124,10 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => handleRemoveClick(skill.name, skill.source)}
                     disabled={isRemoving === skill.name}
-                    className="rounded-lg p-1.5 text-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    variant="danger"
                     title={t('skills.removeSkill', 'Remove')}
                   >
                     <svg
@@ -140,7 +141,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       <path d="M3 6h18" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                  </button>
+                  </IconButton>
                 )}
               </div>
             )}
@@ -152,16 +153,14 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
 
           <div className="mt-auto pt-3 flex items-center gap-2">
             {skill.source && (
-              <span
-                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border ${SOURCE_COLORS[skill.source] || SOURCE_COLORS.builtin}`}
-              >
+              <Badge variant={SOURCE_VARIANTS[skill.source] || 'default'} bordered>
                 {SOURCE_LABELS[skill.source] || skill.source}
-              </span>
+              </Badge>
             )}
-            <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
+            <Badge variant={skill.installed ? 'success' : 'default'}>
               <span className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-emerald-400' : 'bg-slate-400'}`} />
               {skill.installed ? t('common.enabled') : t('common.disabled')}
-            </span>
+            </Badge>
           </div>
         </div>
       ))}

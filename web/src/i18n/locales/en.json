@@ -443,7 +443,9 @@
     "agents": "Agents",
     "providers": "Providers",
     "skills": "Skills",
-    "navigation": "Navigation"
+    "navigation": "Navigation",
+    "collapse": "Close sidebar",
+    "expand": "Open sidebar"
   },
   "skills": {
     "title": "Skills",

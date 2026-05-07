@@ -430,7 +430,9 @@
     "agents": "Agentes",
     "providers": "Proveedores",
     "skills": "Habilidades",
-    "navigation": "Navegación"
+    "navigation": "Navegación",
+    "collapse": "Cerrar barra lateral",
+    "expand": "Abrir barra lateral"
   },
   "skills": {
     "title": "Habilidades",

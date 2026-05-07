@@ -1,4 +1,5 @@
 import { useSettings } from '../../../../contexts/SettingsContext'
+import { Badge } from '../../../atoms/Badge'
 
 const DEFAULT_AVATARS = ['🤖', '🔧', '💻', '🎨', '⚡', '🔍', '📊', '⚙️']
 
@@ -57,9 +58,9 @@ export function AgentPreview({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-text-secondary font-mono">@{agentId || '...'}</span>
               {isDefault && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-medium">
+                <Badge variant="primary" size="sm">
                   {t('settings.defaultBadge').toUpperCase()}
-                </span>
+                </Badge>
               )}
             </div>
           </div>
@@ -113,22 +114,19 @@ export function AgentPreview({
         {/* Features badges */}
         <div className="flex flex-wrap gap-1.5 pt-1">
           {enableThinking && (
-            <span className="text-[10px] px-2 py-1 rounded-full bg-purple-500/20 text-purple-400">
+            <Badge variant="default" size="sm" className="bg-purple-500/20 text-purple-400">
               🧠 {t('settings.fields.agentThinking')}
-            </span>
+            </Badge>
           )}
           {supportsImages && (
-            <span className="text-[10px] px-2 py-1 rounded-full bg-green-500/20 text-green-400">
+            <Badge variant="success" size="sm">
               📷 {t('settings.fields.agentSupportsImages')}
-            </span>
+            </Badge>
           )}
           {skills.map((skill) => (
-            <span
-              key={skill}
-              className="text-[10px] px-2 py-1 rounded-full bg-surface-muted text-text-secondary"
-            >
+            <Badge key={skill} variant="default" size="sm">
               {skill}
-            </span>
+            </Badge>
           ))}
         </div>
       </div>

@@ -4,6 +4,7 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { usePopoverPosition } from '../../hooks/usePopoverPosition'
 import type { SessionContextResponse } from '../../lib/types'
+import { IconButton } from './IconButton'
 
 const POPOVER_WIDTH = 220
 const POPOVER_HEIGHT = 180
@@ -116,11 +117,9 @@ export function ContextIndicator() {
 
   return (
     <div ref={ref} className={`relative ${!isOpen ? 'group' : ''}`}>
-      <button
-        type="button"
+      <IconButton
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1.5 text-gray-500 hover:bg-gray-700/50 hover:text-gray-400 transition-colors duration-150"
-        aria-label={t('connection.context')}
+        ariaLabel={t('connection.context')}
       >
         {/* Circular progress ring — always visible */}
         <svg width={CIRCLE_SIZE} height={CIRCLE_SIZE} className="-rotate-90" aria-hidden="true">
@@ -147,12 +146,12 @@ export function ContextIndicator() {
             className={`transition-all duration-500 ease-out ${ringColorClass}`}
           />
         </svg>
-      </button>
+      </IconButton>
 
       {/* Tooltip on hover */}
       {hasData && (
         <span
-          className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-card text-xs transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
+          className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${
             isOpen ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'
           }`}
         >

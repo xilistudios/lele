@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { ToolMessageStatus } from '../../lib/types'
+import { Badge } from '../atoms/Badge'
 
 type IconConfig = { icon: string; color: string }
 
@@ -222,9 +223,9 @@ export function ToolCallDisplay({
 
             {/* Error badge */}
             {toolStatus === 'error' && (
-              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20 ml-auto">
+              <Badge variant="error" className="ml-auto">
                 {t('toolCalls.error')}
-              </span>
+              </Badge>
             )}
           </div>
         </div>
@@ -278,11 +279,7 @@ export function ToolCallDisplay({
           )}
 
           {/* Error badge only */}
-          {toolStatus === 'error' && (
-            <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
-              {t('toolCalls.error')}
-            </span>
-          )}
+          {toolStatus === 'error' && <Badge variant="error">{t('toolCalls.error')}</Badge>}
 
           {/* Subagent nav */}
           {subagentSessionKey && toolStatus !== 'executing' && onNavigateToSession && (

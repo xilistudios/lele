@@ -37,7 +37,6 @@ export function EntitySettingsPage({ titleKey, children }: Props) {
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
             title={t(titleKey)}
-            onToggleSidebar={onToggleSidebar}
             configPath={settingsState.metadata?.config_path}
           />
 

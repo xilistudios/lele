@@ -7,12 +7,14 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   AgentsIcon,
   ChatBubbleIcon,
-  EditIcon,
   LogoutIcon,
+  PlusCircleIcon,
   ProvidersIcon,
   SettingsIcon,
+  SidebarToggleIcon,
   SkillsIcon,
 } from '../atoms/Icons'
+import { IconButton } from '../atoms/IconButton'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
@@ -37,6 +39,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     processingSessions,
     onCreateSession,
     onDeleteSession,
+    onToggleSidebar,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
 
@@ -122,25 +125,64 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
-          className={`flex items-center border-b border-border px-4 py-3 ${collapsed ? 'justify-center' : ''}`}
+          className={`flex items-center px-4 py-3 ${collapsed ? 'justify-center' : 'justify-between'}`}
         >
-          <Logo collapsed={collapsed} />
+          {!collapsed && <Logo collapsed={collapsed} />}
+          {collapsed && (
+            <div className="hidden md:flex group relative">
+              <IconButton
+                onClick={onToggleSidebar}
+                ariaLabel={t('sidebar.expand')}
+              >
+                <SidebarToggleIcon />
+              </IconButton>
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                {t('sidebar.expand')}
+              </span>
+            </div>
+          )}
+          {!collapsed && (
+            <div className="hidden md:flex group relative">
+              <IconButton
+                onClick={onToggleSidebar}
+                ariaLabel={t('sidebar.collapse')}
+              >
+                <SidebarToggleIcon />
+              </IconButton>
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                {t('sidebar.collapse')}
+              </span>
+            </div>
+          )}
         </div>
 
-        <div className="border-b border-border px-2 py-3">
-          <button
-            onClick={onCreateSession}
-            type="button"
-            className={`flex w-full items-center gap-2 rounded-md text-xs text-text-secondary hover-highlight ${collapsed ? 'px-2 justify-center' : 'px-3 py-2'}`}
-            style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
-            title={collapsed ? t('chat.newChat') : undefined}
-          >
-            <EditIcon />
-            {!collapsed && <span>{t('chat.newChat')}</span>}
-          </button>
+        <div className={`px-2 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
+          {collapsed ? (
+            <div className="group relative py-3">
+              <IconButton
+                onClick={onCreateSession}
+                ariaLabel={t('chat.newChat')}
+                variant="nav"
+              >
+                <PlusCircleIcon size={32} />
+              </IconButton>
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                {t('chat.newChat')}
+              </span>
+            </div>
+          ) : (
+            <IconButton
+              onClick={onCreateSession}
+              ariaLabel={t('chat.newChat')}
+              variant="nav-full"
+            >
+              <PlusCircleIcon size={28} />
+              <span>{t('chat.newChat')}</span>
+            </IconButton>
+          )}
         </div>
 
-        <div className={`border-b border-border ${collapsed ? 'px-2' : 'px-3'} py-3`}>
+        <div className={`${collapsed ? 'px-2' : 'px-3'} py-3`}>
           {collapsed ? (
             <Popover
               block
@@ -160,7 +202,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               popoverWidth={200}
               popoverHeight={250}
             >
-              <div className="border-b border-border pb-2 mb-2">
+              <div className="pb-2 mb-2">
                 <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
                   {t('chat.recentChats')}
                 </p>
@@ -250,48 +292,50 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
         {/* Agents & Providers navigation */}
         <nav
-          className={`border-t border-border px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}
+          className={`px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}
         >
           {collapsed ? (
             <>
               {navItems.map((item) => (
-                <button
+                <IconButton
                   key={item.path}
-                  type="button"
                   onClick={() => {
                     navigate(item.path)
                     if (isMobile) onClose()
                   }}
-                  className={`flex w-full items-center justify-center rounded-md py-2 transition-colors ${
+                  title={item.label}
+                  ariaLabel={item.label}
+                  variant="nav"
+                  className={`justify-center py-2 ${
                     isActiveRoute(item.path)
                       ? 'text-brand-rosa bg-surface-selected'
-                      : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                      : ''
                   }`}
-                  title={item.label}
-                  aria-label={item.label}
                 >
                   <item.icon size={16} />
-                </button>
+                </IconButton>
               ))}
             </>
           ) : (
             navItems.map((item) => (
-              <button
+              <IconButton
                 key={item.path}
-                type="button"
                 onClick={() => {
                   navigate(item.path)
                   if (isMobile) onClose()
                 }}
-                className={`flex items-center gap-2 w-full rounded-md px-2 py-2 text-sm transition-colors ${
+                title={item.label}
+                ariaLabel={item.label}
+                variant="nav-full"
+                className={
                   isActiveRoute(item.path)
                     ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
+                    : ''
+                }
               >
                 <item.icon size={16} />
                 <span>{item.label}</span>
-              </button>
+              </IconButton>
             ))
           )}
         </nav>
@@ -324,11 +368,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             popoverHeight={80}
           >
             <div className="flex flex-col gap-1">
-              <button
-                type="button"
+              <IconButton
                 title={t('chat.settings')}
-                aria-label={t('chat.settings')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                ariaLabel={t('chat.settings')}
+                variant="nav-full"
+                className="px-3 py-2"
                 onClick={() => {
                   navigate('/settings/general')
                   if (isMobile) onClose()
@@ -336,7 +380,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               >
                 <SettingsIcon />
                 <span>{t('chat.settings')}</span>
-              </button>
+              </IconButton>
               <button
                 type="button"
                 aria-label={t('chat.logout')}

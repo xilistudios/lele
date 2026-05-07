@@ -136,10 +136,7 @@ export function AgentFilesPage() {
         onClose={() => onToggleSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        <SettingsHeader
-          onToggleSidebar={onToggleSidebar}
-          configPath={`Agent: ${agentId}`}
-        />
+        <SettingsHeader configPath={`Agent: ${agentId}`} />
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
