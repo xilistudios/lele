@@ -7,12 +7,16 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   AgentsIcon,
   ChatBubbleIcon,
+  FilterIcon,
   LogoutIcon,
+  MoreIcon,
   PlusCircleIcon,
   ProvidersIcon,
+  SearchIcon,
   SettingsIcon,
   SidebarToggleIcon,
   SkillsIcon,
+  TrashIcon,
 } from '../atoms/Icons'
 import { IconButton } from '../atoms/IconButton'
 import { Logo } from '../atoms/Logo'
@@ -156,29 +160,53 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        <div className={`px-2 py-3 ${collapsed ? 'flex justify-center' : ''}`}>
+        <div className={`px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-3' : 'flex flex-col gap-2'}`}>
           {collapsed ? (
-            <div className="group relative py-3">
+            <>
+              <div className="group relative">
+                <IconButton
+                  onClick={onCreateSession}
+                  ariaLabel={t('chat.newChat')}
+                  variant="nav"
+                >
+                  <PlusCircleIcon size={32} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('chat.newChat')}
+                </span>
+              </div>
+              <div className="group relative">
+                <IconButton
+                  onClick={() => {}}
+                  ariaLabel={t('chat.search')}
+                  variant="nav"
+                >
+                  <SearchIcon size={20} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('chat.search')}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
               <IconButton
                 onClick={onCreateSession}
                 ariaLabel={t('chat.newChat')}
-                variant="nav"
+                variant="nav-full"
               >
-                <PlusCircleIcon size={32} />
+                <PlusCircleIcon size={28} />
+                <span>{t('chat.newChat')}</span>
               </IconButton>
-              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
-                {t('chat.newChat')}
-              </span>
-            </div>
-          ) : (
-            <IconButton
-              onClick={onCreateSession}
-              ariaLabel={t('chat.newChat')}
-              variant="nav-full"
-            >
-              <PlusCircleIcon size={28} />
-              <span>{t('chat.newChat')}</span>
-            </IconButton>
+              <IconButton
+                onClick={() => {}}
+                ariaLabel={t('chat.search')}
+                variant="nav-full"
+              >
+                <SearchIcon size={20} />
+                <span>{t('chat.search')}</span>
+              </IconButton>
+            </>
           )}
         </div>
 
@@ -241,10 +269,35 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             </Popover>
           ) : (
             <>
-              <div className="overflow-hidden max-h-8 opacity-100">
-                <p className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary">
+              <div className="flex items-center justify-between px-1 py-1">
+                <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
+                <Popover
+                  tooltip={t('chat.more')}
+                  trigger={
+                    <button
+                      type="button"
+                      className="flex items-center justify-center rounded p-0.5 text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+                      aria-label={t('chat.more')}
+                    >
+                      <MoreIcon size={12} />
+                    </button>
+                  }
+                  popoverWidth={200}
+                  popoverHeight={110}
+                >
+                  <div className="flex flex-col gap-1">
+                    <button type="button" className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors">
+                      <FilterIcon size={14} />
+                      <span>{t('chat.filterChats')}</span>
+                    </button>
+                    <button type="button" className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors">
+                      <TrashIcon size={14} />
+                      <span>{t('chat.deleteAllChats')}</span>
+                    </button>
+                  </div>
+                </Popover>
               </div>
               {sortedSessions.length > 0 && (
                 <>

@@ -61,7 +61,12 @@
     "thinkingMedium": "Medium",
     "thinkingHigh": "High",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "more": "More",
+    "organizeChats": "Organize chats",
+    "filterChats": "Filter chats",
+    "deleteAllChats": "Delete all chats",
+    "search": "Search"
   },
   "connection": {
     "connected": "Connected",
