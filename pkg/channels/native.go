@@ -512,8 +512,8 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	payload := mustMarshal(msg)
 
 	logger.DebugCF("native", "Broadcast to session - starting", map[string]interface{}{
-		"session_key": sessionKey,
-		"event":       event,
+		"session_key":   sessionKey,
+		"event":         event,
 		"total_clients": len(n.wsClients),
 	})
 
@@ -536,9 +536,9 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 			for subKey := range client.Subscriptions {
 				if sessionKeyMatches(subKey, sessionKey) {
 					logger.DebugCF("native", "Client matched by Subscriptions", map[string]interface{}{
-						"client_id":           clientID,
+						"client_id":            clientID,
 						"matched_subscription": subKey,
-						"target_session_key":  sessionKey,
+						"target_session_key":   sessionKey,
 					})
 					targets = append(targets, client)
 					goto nextClient
@@ -550,10 +550,10 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if sessionKeyMatches(resolved, sessionKey) {
 				logger.DebugCF("native", "Client matched by resolved SessionKey", map[string]interface{}{
-					"client_id":           clientID,
-					"client_session_key":  client.SessionKey,
+					"client_id":            clientID,
+					"client_session_key":   client.SessionKey,
 					"resolved_session_key": resolved,
-					"target_session_key":  sessionKey,
+					"target_session_key":   sessionKey,
 				})
 				targets = append(targets, client)
 			}
@@ -707,9 +707,9 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 	}
 
 	logger.DebugCF("native", "validateSessionOwnership: checking", map[string]interface{}{
-		"client_id":     clientID,
-		"session_key":   sessionKey,
-		"client_keys":   client.SessionKeys,
+		"client_id":      clientID,
+		"session_key":    sessionKey,
+		"client_keys":    client.SessionKeys,
 		"num_ws_clients": len(n.wsClients),
 	})
 
@@ -765,17 +765,17 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 			skNorm := strings.TrimPrefix(sk, "native:")
 			if skNorm == resolvedParent {
 				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParent", map[string]interface{}{
-					"session_key":     sessionKey,
-					"sk":              sk,
-					"client_id":       clientID,
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
 				})
 				return true
 			}
 			if skNorm == resolvedParentBase {
 				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParentBase", map[string]interface{}{
-					"session_key":     sessionKey,
-					"sk":              sk,
-					"client_id":       clientID,
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
 				})
 				return true
 			}
@@ -788,9 +788,9 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 			}
 			if skBase == resolvedParent || skBase == resolvedParentBase {
 				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skBase", map[string]interface{}{
-					"session_key":     sessionKey,
-					"sk":              sk,
-					"client_id":       clientID,
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
 				})
 				return true
 			}
@@ -836,9 +836,9 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 	}
 
 	logger.WarnCF("native", "validateSessionOwnership: no matching key found", map[string]interface{}{
-		"client_id":     clientID,
-		"session_key":   sessionKey,
-		"client_keys":   client.SessionKeys,
+		"client_id":       clientID,
+		"session_key":     sessionKey,
+		"client_keys":     client.SessionKeys,
 		"ws_client_count": len(n.wsClients),
 	})
 	return false
