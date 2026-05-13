@@ -18,7 +18,9 @@ func (m *mockRegistryProvider) GetDefaultModel() string {
 	return "mock-model"
 }
 
-func testCfg(agents []config.AgentConfig) *config.Config {
+func testCfg(t *testing.T, agents []config.AgentConfig) *config.Config {
+	t.Helper()
+	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	return &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -44,7 +46,7 @@ func testCfg(agents []config.AgentConfig) *config.Config {
 }
 
 func TestNewAgentRegistry_ImplicitMain(t *testing.T) {
-	cfg := testCfg(nil)
+	cfg := testCfg(t, nil)
 	registry := NewAgentRegistry(cfg)
 
 	ids := registry.ListAgentIDs()
@@ -62,7 +64,7 @@ func TestNewAgentRegistry_ImplicitMain(t *testing.T) {
 }
 
 func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "sales", Default: true, Name: "Sales Bot"},
 		{ID: "support", Name: "Support Bot"},
 	})
@@ -88,7 +90,7 @@ func TestNewAgentRegistry_ExplicitAgents(t *testing.T) {
 }
 
 func TestAgentRegistry_GetAgent_Normalize(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "my-agent", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -103,7 +105,7 @@ func TestAgentRegistry_GetAgent_Normalize(t *testing.T) {
 }
 
 func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha"},
 		{ID: "beta", Default: true},
 	})
@@ -117,7 +119,7 @@ func TestAgentRegistry_GetDefaultAgent(t *testing.T) {
 }
 
 func TestAgentRegistry_CanSpawnSubagent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{
 			ID:      "parent",
 			Default: true,
@@ -146,7 +148,7 @@ func TestAgentRegistry_CanSpawnSubagent(t *testing.T) {
 }
 
 func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{
 			ID:      "admin",
 			Default: true,
@@ -166,9 +168,36 @@ func TestAgentRegistry_CanSpawnSubagent_Wildcard(t *testing.T) {
 	}
 }
 
+func TestAgentRegistry_CanSpawnSubagent_DefaultAgentNoConfig(t *testing.T) {
+	cfg := testCfg(t, []config.AgentConfig{
+		{ID: "main", Default: true}, // No subagents config
+		{ID: "coder"},
+		{ID: "reviewer"},
+	})
+	registry := NewAgentRegistry(cfg)
+
+	// Main agent without config should be able to spawn existing agents
+	if !registry.CanSpawnSubagent("main", "coder") {
+		t.Error("expected main to be allowed to spawn coder (no config, but coder exists)")
+	}
+	if !registry.CanSpawnSubagent("main", "reviewer") {
+		t.Error("expected main to be allowed to spawn reviewer")
+	}
+
+	// Main should NOT be able to spawn nonexistent agent
+	if registry.CanSpawnSubagent("main", "nonexistent") {
+		t.Error("expected main to NOT be allowed to spawn nonexistent agent")
+	}
+
+	// Non-default agent without config cannot spawn
+	if registry.CanSpawnSubagent("coder", "reviewer") {
+		t.Error("expected coder (non-default, no config) to NOT be allowed to spawn")
+	}
+}
+
 func TestAgentInstance_Model(t *testing.T) {
 	model := &config.AgentModelConfig{Primary: "claude-opus"}
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "custom", Default: true, Model: model},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -180,7 +209,7 @@ func TestAgentInstance_Model(t *testing.T) {
 }
 
 func TestAgentInstance_FallbackInheritance(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "inherit", Default: true},
 	})
 	cfg.Agents.Defaults.ModelFallbacks = []string{"openai/gpt-4o-mini", "anthropic/haiku"}
@@ -197,7 +226,7 @@ func TestAgentInstance_FallbackExplicitEmpty(t *testing.T) {
 		Primary:   "gpt-4",
 		Fallbacks: []string{}, // explicitly empty = disable
 	}
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "no-fallback", Default: true, Model: model},
 	})
 	cfg.Agents.Defaults.ModelFallbacks = []string{"should-not-inherit"}
@@ -210,7 +239,7 @@ func TestAgentInstance_FallbackExplicitEmpty(t *testing.T) {
 }
 
 func TestAgentRegistry_ReloadAgents_AddNewAgent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -220,7 +249,7 @@ func TestAgentRegistry_ReloadAgents_AddNewAgent(t *testing.T) {
 	}
 
 	// Add a new agent via reload
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 		{ID: "beta"},
 	})
@@ -236,14 +265,14 @@ func TestAgentRegistry_ReloadAgents_AddNewAgent(t *testing.T) {
 }
 
 func TestAgentRegistry_ReloadAgents_RemoveAgent(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 		{ID: "beta"},
 	})
 	registry := NewAgentRegistry(cfg)
 
 	// Remove beta via reload
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry.ReloadAgents(newCfg)
@@ -255,7 +284,7 @@ func TestAgentRegistry_ReloadAgents_RemoveAgent(t *testing.T) {
 }
 
 func TestAgentRegistry_ReloadAgents_PreserveUnchanged(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -264,7 +293,7 @@ func TestAgentRegistry_ReloadAgents_PreserveUnchanged(t *testing.T) {
 	originalPtr := original // Save pointer to compare
 
 	// Reload with same config — agent should be preserved
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry.ReloadAgents(newCfg)
@@ -276,7 +305,7 @@ func TestAgentRegistry_ReloadAgents_PreserveUnchanged(t *testing.T) {
 }
 
 func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -284,7 +313,7 @@ func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
 	original, _ := registry.GetAgent("alpha")
 
 	// Change model
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
 	})
 	registry.ReloadAgents(newCfg)
@@ -296,7 +325,7 @@ func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
 }
 
 func TestAgentConfigChanged_Temperature(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
@@ -304,7 +333,7 @@ func TestAgentConfigChanged_Temperature(t *testing.T) {
 
 	// Change temperature via agent config
 	temp := 0.3
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Temperature: &temp},
 	})
 	registry.ReloadAgents(newCfg)
@@ -319,14 +348,14 @@ func TestAgentConfigChanged_Temperature(t *testing.T) {
 }
 
 func TestAgentConfigChanged_Fallbacks(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	registry := NewAgentRegistry(cfg)
 	original, _ := registry.GetAgent("alpha")
 
 	// Change fallbacks via agent model config
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{
 			Primary:   "testprovider/test-model",
 			Fallbacks: []string{"testprovider/fallback-model"},
@@ -344,7 +373,7 @@ func TestAgentConfigChanged_Fallbacks(t *testing.T) {
 }
 
 func TestAgentConfigChanged_ContextWindow(t *testing.T) {
-	cfg := testCfg([]config.AgentConfig{
+	cfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true},
 	})
 	// Add a model config with a specific context window
@@ -371,7 +400,7 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 	}
 
 	// Change model to one with a different context window
-	newCfg := testCfg([]config.AgentConfig{
+	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
 	})
 	newCfg.Providers.Named["testprovider"] = config.NamedProviderConfig{

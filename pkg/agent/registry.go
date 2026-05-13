@@ -85,18 +85,30 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 	if !ok {
 		return false
 	}
-	if parent.Subagents == nil || parent.Subagents.AllowAgents == nil {
+
+	// If parent has explicit allowlist, use it
+	if parent.Subagents != nil && parent.Subagents.AllowAgents != nil {
+		targetNorm := routing.NormalizeAgentID(targetAgentID)
+		for _, allowed := range parent.Subagents.AllowAgents {
+			if allowed == "*" {
+				return true
+			}
+			if routing.NormalizeAgentID(allowed) == targetNorm {
+				return true
+			}
+		}
 		return false
 	}
-	targetNorm := routing.NormalizeAgentID(targetAgentID)
-	for _, allowed := range parent.Subagents.AllowAgents {
-		if allowed == "*" {
-			return true
-		}
-		if routing.NormalizeAgentID(allowed) == targetNorm {
-			return true
-		}
+
+	// No explicit allowlist - check if parent is default agent
+	// Default agent can spawn any existing agent
+	if parent.ID == "main" || parent.ID == routing.DefaultAgentID {
+		// Check if target agent exists in registry
+		_, exists := r.GetAgent(targetAgentID)
+		return exists
 	}
+
+	// Non-default agents without allowlist cannot spawn
 	return false
 }
 
@@ -104,12 +116,20 @@ func (r *AgentRegistry) CanSpawnSubagent(parentAgentID, targetAgentID string) bo
 func (r *AgentRegistry) GetDefaultAgent() *AgentInstance {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	// First check for agent "main" (backward compatibility)
 	if agent, ok := r.agents["main"]; ok {
 		return agent
 	}
-	if agent, ok := r.agents["coder"]; ok {
-		return agent
+
+	// Then iterate through all agents and return the one with IsDefault=true
+	for _, agent := range r.agents {
+		if agent.IsDefault {
+			return agent
+		}
 	}
+
+	// If no default found, fall back to the first alphabetically sorted agent
 	ids := make([]string, 0, len(r.agents))
 	for id := range r.agents {
 		ids = append(ids, id)
@@ -282,11 +302,7 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	}
 	// Check reasoning config — computed from provider model config
 	newReasoning := getReasoningConfig(cfg, newModel, newProvider)
-	if !reasoningConfigsEqual(existing.Reasoning, newReasoning) {
-		return true
-	}
-
-	return false
+	return !reasoningConfigsEqual(existing.Reasoning, newReasoning)
 }
 
 // stringSlicesEqual returns true if both slices have the same length and elements.

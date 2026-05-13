@@ -24,7 +24,10 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
 
       {/* Primary Model */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-text-primary">
+        <label
+          htmlFor="wizard-agent-primary-model"
+          className="text-sm font-medium text-text-primary"
+        >
           {t('settings.fields.agentModelPrimary')}
         </label>
         <SearchableSelect
@@ -50,6 +53,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Configured</title>
               <polyline points="20 6 9 17 4 12" />
             </svg>
             {t('settings.addAgentModal.modelConfigured')}
@@ -59,7 +63,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
 
       {/* Fallback Models */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-text-primary">
+        <label htmlFor="wizard-agent-fallbacks" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentModelFallbacks')}
         </label>
         <div className="rounded-lg border border-border bg-background-secondary/30 p-4">
@@ -91,6 +95,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
               strokeWidth="2"
               className="text-blue-400"
             >
+              <title>Primary model</title>
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="16" x2="12" y2="12" />
               <line x1="12" y1="8" x2="12.01" y2="8" />
@@ -114,6 +119,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
               strokeWidth="2"
               className="text-purple-400"
             >
+              <title>Fallback models</title>
               <path d="M12 2L2 7l10 5 10-5-10-5z" />
               <path d="M2 17l10 5 10-5" />
               <path d="M2 12l10 5 10-5" />

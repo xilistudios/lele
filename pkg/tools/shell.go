@@ -100,10 +100,9 @@ func NewExecTool(workingDir string, restrict bool) *ExecTool {
 func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Config) *ExecTool {
 	denyPatterns := make([]*regexp.Regexp, 0)
 
-	enableDenyPatterns := true
+	enableDenyPatterns := config != nil && config.Tools.Exec.EnableDenyPatterns
 	if config != nil {
 		execConfig := config.Tools.Exec
-		enableDenyPatterns = execConfig.EnableDenyPatterns
 		if enableDenyPatterns {
 			if len(execConfig.CustomDenyPatterns) > 0 {
 				fmt.Printf("Using custom deny patterns: %v\n", execConfig.CustomDenyPatterns)

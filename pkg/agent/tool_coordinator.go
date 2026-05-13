@@ -20,6 +20,7 @@ import (
 type toolCoordinator interface {
 	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
+	cancelAll() int
 	cancelSession(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
@@ -102,6 +103,15 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 		}
 	}
 	return totalStopped
+}
+
+// cancelAll cancels all running subagent tasks and clears the subagent map.
+// Returns the count of cancelled tasks. Unlike stopAllSubagents, this also
+// removes all subagent references so the map can be safely replaced.
+func (tc *toolCoordinatorImpl) cancelAll() int {
+	count := tc.stopAllSubagents()
+	tc.subagents = make(map[string]*tools.SubagentManager)
+	return count
 }
 
 // cancelSession cancels any active processing for a specific session
@@ -202,6 +212,85 @@ func (tc *toolCoordinatorImpl) GetSubagents() map[string]*tools.SubagentManager 
 	return tc.subagents
 }
 
+// registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn)
+// for a single agent. Returns the created SubagentManager.
+func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager) *tools.SubagentManager {
+	// Web tools
+	if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
+		BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
+		BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
+		BraveEnabled:         cfg.Tools.Web.Brave.Enabled,
+		DuckDuckGoMaxResults: cfg.Tools.Web.DuckDuckGo.MaxResults,
+		DuckDuckGoEnabled:    cfg.Tools.Web.DuckDuckGo.Enabled,
+		PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
+		PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
+		PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
+	}); searchTool != nil {
+		agent.Tools.Register(searchTool)
+	}
+	agent.Tools.Register(tools.NewWebFetchTool(50000))
+
+	// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
+	agent.Tools.Register(tools.NewI2CTool())
+	agent.Tools.Register(tools.NewSPITool())
+
+	// File tool
+	sendFileTool := tools.NewSendFileTool()
+	sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
+		msgBus.PublishOutbound(bus.OutboundMessage{
+			Channel:     channel,
+			ChatID:      chatID,
+			Content:     payload.Content,
+			Attachments: payload.Attachments,
+		})
+		return nil
+	})
+	agent.Tools.Register(sendFileTool)
+
+	// Shell/Exec tool with approval support
+	execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
+	if approvalManager != nil {
+		execTool.SetApprovalMode(true)
+	}
+	agent.Tools.Register(execTool)
+
+	// Spawn tool with allowlist checker - use agent's own provider
+	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
+	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+	subagentManager.SetMaxIterations(agent.MaxIterations)
+	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
+		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
+			return tools.AgentContextInfo{
+				Context:   targetAgent.ContextBuilder.GetInitialContext(),
+				Workspace: targetAgent.Workspace,
+				Name:      targetAgent.Name,
+				Model:     targetAgent.Model,
+				Provider:  targetAgent.Provider,
+			}
+		}
+		return tools.AgentContextInfo{
+			Context:   agent.ContextBuilder.GetInitialContext(),
+			Workspace: agent.Workspace,
+			Name:      agent.Name,
+			Model:     agent.Model,
+			Provider:  agent.Provider,
+		}
+	})
+	spawnTool := tools.NewSpawnTool(subagentManager)
+	subagents[agentID] = subagentManager
+	currentAgentID := agentID
+	spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
+		return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
+	})
+	agent.Tools.Register(spawnTool)
+	subagentManager.SetTools(agent.Tools.CloneWithout("send_file"))
+	subagentManager.SetSessionRecorder(agent.Sessions)
+
+	agent.ContextBuilder.SetToolsRegistry(agent.Tools)
+
+	return subagentManager
+}
+
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
 // Each agent uses its own provider for subagent spawning.
 func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
@@ -211,82 +300,49 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		if !ok {
 			continue
 		}
-
-		// Web tools
-		if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
-			BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
-			BraveMaxResults:      cfg.Tools.Web.Brave.MaxResults,
-			BraveEnabled:         cfg.Tools.Web.Brave.Enabled,
-			DuckDuckGoMaxResults: cfg.Tools.Web.DuckDuckGo.MaxResults,
-			DuckDuckGoEnabled:    cfg.Tools.Web.DuckDuckGo.Enabled,
-			PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
-			PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
-			PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
-		}); searchTool != nil {
-			agent.Tools.Register(searchTool)
-		}
-		agent.Tools.Register(tools.NewWebFetchTool(50000))
-
-		// Hardware tools (I2C, SPI) - Linux only, returns error on other platforms
-		agent.Tools.Register(tools.NewI2CTool())
-		agent.Tools.Register(tools.NewSPITool())
-
-		// File tool
-		sendFileTool := tools.NewSendFileTool()
-		sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
-			msgBus.PublishOutbound(bus.OutboundMessage{
-				Channel:     channel,
-				ChatID:      chatID,
-				Content:     payload.Content,
-				Attachments: payload.Attachments,
-			})
-			return nil
-		})
-		agent.Tools.Register(sendFileTool)
-
-		// Shell/Exec tool with approval support
-		execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
-		if approvalManager != nil {
-			execTool.SetApprovalMode(true)
-		}
-		agent.Tools.Register(execTool)
-
-		// Spawn tool with allowlist checker - use agent's own provider
-		subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
-		subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-		subagentManager.SetMaxIterations(agent.MaxIterations)
-		// Set callback to get context for specific agent types (each agent loads its own AGENT.md, SOUL.md, etc.)
-		subagentManager.SetAgentContextCallback(func(agentID string) tools.AgentContextInfo {
-			if targetAgent, ok := registry.GetAgent(agentID); ok {
-				return tools.AgentContextInfo{
-					Context:   targetAgent.ContextBuilder.GetInitialContext(),
-					Workspace: targetAgent.Workspace,
-					Name:      targetAgent.Name,
-					Model:     targetAgent.Model,
-					Provider:  targetAgent.Provider,
-				}
-			}
-			// Fallback: use parent agent's context if agent not found
-			return tools.AgentContextInfo{
-				Context:   agent.ContextBuilder.GetInitialContext(),
-				Workspace: agent.Workspace,
-				Name:      agent.Name,
-				Model:     agent.Model,
-				Provider:  agent.Provider,
-			}
-		})
-		spawnTool := tools.NewSpawnTool(subagentManager)
-		subagents[agentID] = subagentManager
-		currentAgentID := agentID
-		spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
-			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
-		})
-		agent.Tools.Register(spawnTool)
-		subagentManager.SetTools(agent.Tools.CloneWithout("send_file"))
-		subagentManager.SetSessionRecorder(agent.Sessions)
-
-		// Update context builder with the complete tools registry
-		agent.ContextBuilder.SetToolsRegistry(agent.Tools)
+		registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, subagents)
 	}
 	return subagents
+}
+
+// updateSharedToolsForAgent registers shared tools for a specific agent.
+// It returns the SubagentManager for that agent.
+// This is used during reload to update tools for new or recreated agents.
+func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager) *tools.SubagentManager {
+	agent, ok := registry.GetAgent(agentID)
+	if !ok {
+		return nil
+	}
+
+	// Check if spawn is already registered
+	if _, hasSpawn := agent.Tools.Get("spawn"); hasSpawn {
+		// Already has shared tools, return existing subagent manager if present
+		if existingSm, ok := existingSubagents[agentID]; ok {
+			return existingSm
+		}
+		return nil
+	}
+
+	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents)
+}
+
+// updateSharedTools updates shared tools for all agents after a reload.
+// It preserves existing subagent managers and only updates recreated agents.
+func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager) map[string]*tools.SubagentManager {
+	updated := make(map[string]*tools.SubagentManager)
+
+	// Preserve existing subagent managers
+	for id, sm := range existingSubagents {
+		updated[id] = sm
+	}
+
+	// Update each agent
+	for _, agentID := range registry.ListAgentIDs() {
+		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents)
+		if sm != nil {
+			updated[agentID] = sm
+		}
+	}
+
+	return updated
 }

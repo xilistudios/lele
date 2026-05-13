@@ -130,7 +130,8 @@
       "namedProviders": "Provedores nomeados",
       "bindings": "Bindings",
       "identityLinks": "Links de identidade",
-      "rawJson": "Configuração JSON raw"
+      "rawJson": "Configuração JSON raw",
+      "subagents": "Subagentes"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -278,7 +279,9 @@
       "agentThinking": "Habilita modo de raciocínio estendido",
       "agentSupportsImages": "Este modelo suporta imagens e visão",
       "agentSkills": "Skills ativos disponíveis para este agente",
-      "agentsList": "Crie e gerencie agentes IA com configurações personalizadas"
+      "agentsList": "Crie e gerencie agentes IA com configurações personalizadas",
+      "agentSubagentsEnabled": "Permitir que este agente crie subagentes para tarefas delegadas",
+      "agentSubagentsAllowed": "Agentes que este agente pode criar. Use '*' para permitir todos."
     },
     "options": {
       "daily": "Diário",
@@ -321,6 +324,12 @@
     "noModelsFound": "Nenhum modelo encontrado",
     "noModels": "Nenhum modelo configurado",
     "noConfiguredProviders": "Nenhum provedor configurado. Adicione um para começar.",
+    "defaultBadge": "Default",
+    "modifiedBadge": "Modificado",
+    "agentFilesButton": "Arquivos",
+    "agentFilesTooltip": "Editar arquivos de contexto",
+    "selectAgent": "Selecionar agente",
+    "noOtherAgents": "Nenhum outro agente disponível",
     "addProviderModal": {
       "title": "Adicionar provedor",
       "stepType": "Passo 1: Selecionar tipo de provedor",

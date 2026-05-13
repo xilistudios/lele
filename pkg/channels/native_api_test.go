@@ -28,16 +28,18 @@ type nativeTestAgentLoop struct {
 	sessionModels    map[string]string
 	sessionAliases   map[string]string // base -> resolved
 	sessionAliasesMu sync.RWMutex
-	workspace        string // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	subagentParents  map[string]string // subagent_key -> parent_key
+	workspace        string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
-		config:         cfg,
-		histories:      make(map[string][]providers.Message),
-		sessionAgents:  make(map[string]string),
-		sessionModels:  make(map[string]string),
-		sessionAliases: make(map[string]string),
+		config:          cfg,
+		histories:       make(map[string][]providers.Message),
+		sessionAgents:   make(map[string]string),
+		sessionModels:   make(map[string]string),
+		sessionAliases:  make(map[string]string),
+		subagentParents: make(map[string]string),
 	}
 }
 
@@ -188,6 +190,9 @@ func (m *nativeTestAgentLoop) ResolveSessionKey(sessionKey string) string {
 }
 
 func (m *nativeTestAgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
+	if parent, ok := m.subagentParents[sessionKey]; ok {
+		return parent
+	}
 	return ""
 }
 
@@ -201,6 +206,10 @@ func (m *nativeTestAgentLoop) GetTokenCounts(sessionKey string) (int, int, int) 
 
 func (m *nativeTestAgentLoop) GetCurrentContextUsage(sessionKey string) (int, int) {
 	return 0, 128000
+}
+
+func (m *nativeTestAgentLoop) GetSessionSummary(sessionKey string) string {
+	return ""
 }
 
 func (m *nativeTestAgentLoop) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
@@ -467,7 +476,7 @@ func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 		{Role: "tool", Content: "result", ToolCallID: "call-1"},
 	}
 
-	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/history?session_key="+url.QueryEscape(sessionKey), nil)
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
@@ -511,6 +520,67 @@ func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	}
 	if payload.Messages[2].ToolCallID != "call-1" {
 		t.Fatalf("tool_call_id = %#v, want call-1", payload.Messages[2].ToolCallID)
+	}
+	if payload.HasMore != false {
+		t.Fatalf("has_more = %v, want false", payload.HasMore)
+	}
+}
+
+func TestNativeChannelSubagentHistoryReturnsMessages(t *testing.T) {
+	ts := newNativeTestServer(t)
+	sessionKey := "native:" + ts.clientID + ":uuid-test-session"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
+	ts.loop.histories[sessionKey] = []providers.Message{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi there!"},
+	}
+
+	// Register subagent history - new format: native:{parent_uuid}:{task_id}
+	subagentSessionKey := sessionKey + ":subagent-1"
+	ts.loop.histories[subagentSessionKey] = []providers.Message{
+		{Role: "user", Content: "Subagent task"},
+		{Role: "assistant", Content: "Subagent result"},
+	}
+
+	// Registrar relación parent-subagent (using new format without subagent: prefix)
+	ts.loop.subagentParents[sessionKey+":subagent-1"] = sessionKey
+
+	// Test subagent history endpoint
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history/subagent-1", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if payload.SessionKey != subagentSessionKey {
+		t.Fatalf("session_key = %q, want %q", payload.SessionKey, subagentSessionKey)
+	}
+	if len(payload.Messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(payload.Messages))
+	}
+	if payload.Messages[0].Role != "user" || payload.Messages[0].Content != "Subagent task" {
+		t.Fatalf("first message = %#v, want user Subagent task", payload.Messages[0])
+	}
+	if payload.Messages[1].Role != "assistant" || payload.Messages[1].Content != "Subagent result" {
+		t.Fatalf("second message = %#v, want assistant Subagent result", payload.Messages[1])
+	}
+	if payload.HasMore != false {
+		t.Fatalf("has_more = %v, want false", payload.HasMore)
 	}
 }
 
@@ -565,7 +635,7 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 
 func TestNativeChannelCreateSession(t *testing.T) {
 	ts := newNativeTestServer(t)
-	sessionKey := "native:" + ts.clientID + ":" + "1234567890"
+	sessionKey := "native:" + ts.clientID + ":" + "uuid-test-session"
 
 	body, _ := json.Marshal(CreateSessionRequest{SessionKey: sessionKey})
 	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/sessions", bytes.NewReader(body))
@@ -581,8 +651,8 @@ func TestNativeChannelCreateSession(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
 
 	var payload CreateSessionResponse
@@ -611,7 +681,7 @@ func TestNativeChannelCreateSession(t *testing.T) {
 	}
 }
 
-func TestNativeChannelCreateSessionRejectsForeignSession(t *testing.T) {
+func TestNativeChannelCreateSessionAllowsAnyValidKey(t *testing.T) {
 	ts := newNativeTestServer(t)
 
 	body, _ := json.Marshal(CreateSessionRequest{SessionKey: "native:otherclient:123"})
@@ -628,8 +698,25 @@ func TestNativeChannelCreateSessionRejectsForeignSession(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	// Session creation accepts any valid key; ownership is validated on access
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	client, ok := ts.channel.auth.GetClient(ts.clientID)
+	if !ok {
+		t.Fatal("client not found")
+	}
+
+	var found bool
+	for _, sk := range client.SessionKeys {
+		if sk == "native:otherclient:123" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("session key not tracked for client")
 	}
 }
 
@@ -637,7 +724,7 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 	ts := newNativeTestServer(t)
 	sessionKey := "native:" + ts.clientID
 
-	getReq, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/session/"+url.PathEscape(sessionKey)+"?action=model", nil)
+	getReq, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/model", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
@@ -674,7 +761,7 @@ func TestNativeChannelSessionModelEndpoints(t *testing.T) {
 	}
 
 	body := strings.NewReader(`{"model":"gpt-4o-mini"}`)
-	patchReq, err := http.NewRequest(http.MethodPatch, ts.server.URL+"/api/v1/chat/session/"+url.PathEscape(sessionKey)+"?action=model", body)
+	patchReq, err := http.NewRequest(http.MethodPatch, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/model", body)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
@@ -778,7 +865,7 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 
 func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.T) {
 	ts := newNativeTestServer(t)
-	sessionKey := "native:" + ts.clientID
+	sessionKey := ts.clientID
 
 	wsURL := "ws" + strings.TrimPrefix(ts.server.URL, "http") + "/api/v1/ws?token=" + url.QueryEscape(ts.token)
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -1049,7 +1136,7 @@ func TestHandleConfig_Get(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handleGetConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
@@ -1116,7 +1203,7 @@ func TestHandleConfig_GetWithEnvPlaceholder(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handleGetConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
@@ -1166,7 +1253,7 @@ func TestHandleConfig_Put(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handlePutConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
@@ -1179,7 +1266,7 @@ func TestHandleConfig_Put(t *testing.T) {
 	}
 
 	if len(response.Errors) > 0 {
-		t.Errorf("expected no errors, got %v", response.Errors)
+		t.Errorf("unexpected validation errors: %v", response.Errors)
 	}
 
 	configPath := filepath.Join(leleDir, "config.json")
@@ -1216,19 +1303,19 @@ func TestHandleConfig_Put_InvalidConfig(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handlePutConfig(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", w.Code)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected status 422, got %d", w.Code)
 		return
 	}
 
-	var response ConfigUpdateResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+	var respConfigUpdate ConfigUpdateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &respConfigUpdate); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if len(response.Errors) == 0 {
+	if len(respConfigUpdate.Errors) == 0 {
 		t.Error("expected validation errors")
 	}
 }
@@ -1258,7 +1345,7 @@ func TestHandleConfig_Post_Validate(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handleValidateConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
@@ -1300,7 +1387,7 @@ func TestHandleConfig_Post_Validate_Invalid(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handleValidateConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", w.Code)
@@ -1316,37 +1403,6 @@ func TestHandleConfig_Post_Validate_Invalid(t *testing.T) {
 	}
 	if len(response.Errors) == 0 {
 		t.Error("expected validation errors")
-	}
-}
-
-func TestHandleConfig_Post_InvalidPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
-
-	nc := &NativeChannel{}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/config", nil)
-	w := httptest.NewRecorder()
-
-	nc.handleConfig(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", w.Code)
-	}
-}
-
-func TestHandleConfig_MethodNotAllowed(t *testing.T) {
-	nc := &NativeChannel{}
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/config", nil)
-	w := httptest.NewRecorder()
-
-	nc.handleConfig(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status 405, got %d", w.Code)
 	}
 }
 
@@ -1385,7 +1441,7 @@ func TestHandleConfig_Put_WithEnvProviders(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	nc.handleConfig(w, req)
+	nc.handlePutConfig(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d: %s", w.Code, w.Body.String())
@@ -1461,7 +1517,7 @@ func TestNativeChannelAgentFiles_ReadFile(t *testing.T) {
 	testContent := "# Agent Context\n\nThis is the agent context file."
 	os.WriteFile(filepath.Join(workspace, "AGENT.md"), []byte(testContent), 0644)
 
-	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files?file=AGENT.md", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files/AGENT.md", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
@@ -1504,38 +1560,6 @@ func TestNativeChannelAgentFiles_AgentNotFound(t *testing.T) {
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
-	}
-}
-
-func TestNativeChannelAgentFiles_TrailingSlash(t *testing.T) {
-	workspace := t.TempDir()
-	ts := newNativeTestServer(t)
-	ts.loop.workspace = workspace
-
-	// Test with trailing slash
-	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/agents/main/files/", nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+ts.token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, readBody(resp))
-	}
-
-	var payload AgentFilesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-
-	if len(payload.Files) == 0 {
-		t.Fatal("expected at least one file in response")
 	}
 }
 

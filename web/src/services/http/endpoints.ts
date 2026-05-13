@@ -7,24 +7,38 @@ export const endpoints = {
   agents: {
     list: '/api/v1/agents',
     info: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}`,
-    status: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}?action=status`,
+    status: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/status`,
     files: (agentId: string, fileName?: string) => {
       const base = `/api/v1/agents/${encodeURIComponent(agentId)}/files`
-      return fileName ? `${base}?file=${encodeURIComponent(fileName)}` : base
+      return fileName ? `${base}/${encodeURIComponent(fileName)}` : base
     },
   },
   chat: {
     send: '/api/v1/chat/send',
-    history: (sessionKey: string) =>
-      `/api/v1/chat/history?session_key=${encodeURIComponent(sessionKey)}`,
+    history: (sessionKey: string, parentSessionKey?: string) => {
+      if (parentSessionKey) {
+        if (sessionKey.startsWith(`${parentSessionKey}:`)) {
+          const subagentId = sessionKey.slice(parentSessionKey.length + 1)
+          return `/api/v1/chat/sessions/${parentSessionKey}/history/${subagentId}`
+        }
+        if (sessionKey.startsWith('subagent:')) {
+          const subagentId = sessionKey.slice(9)
+          return `/api/v1/chat/sessions/${parentSessionKey}/history/${subagentId}`
+        }
+      }
+      return `/api/v1/chat/sessions/${sessionKey}/history`
+    },
     sessions: '/api/v1/chat/sessions',
     session: (
       sessionKey: string,
-      action?: 'model' | 'name' | 'delete' | 'agent' | 'thinking' | 'context',
+      subresource?: 'model' | 'name' | 'agent' | 'thinking' | 'context' | 'summary',
     ) => {
-      const suffix = action ? `?action=${action}` : ''
-      return `/api/v1/chat/session/${encodeURIComponent(sessionKey)}${suffix}`
+      const base = `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}`
+      return subresource ? `${base}/${subresource}` : base
     },
+    clear: (sessionKey: string) => `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/clear`,
+    compact: (sessionKey: string) =>
+      `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
   },
   system: {
     config: '/api/v1/config',

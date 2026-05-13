@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,23 +27,24 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus               *bus.MessageBus
-	cfgPtr            atomic.Pointer[config.Config]
-	registry          *AgentRegistry
-	state             *state.Manager
-	running           atomic.Bool
-	summarizing       sync.Map
-	sessionAliases    sync.Map // base session key -> active session key
-	sessionModels     sync.Map
-	sessionAgents     sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking   sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback          *providers.FallbackChain
-	channelManager    *channels.Manager
-	verboseManager    *session.VerboseManager
-	sessionKeySeq     atomic.Uint64
-	approvalManager   *channels.ApprovalManager // Manager for command approvals
-	sessionProcessing sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
-	wg                sync.WaitGroup            // tracks in-flight message goroutines
+	bus                  *bus.MessageBus
+	cfgPtr               atomic.Pointer[config.Config]
+	registry             *AgentRegistry
+	state                *state.Manager
+	running              atomic.Bool
+	summarizing          sync.Map
+	sessionAliases       sync.Map // base session key -> active session key
+	sessionModels        sync.Map
+	sessionAgents        sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking      sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
+	fallback             *providers.FallbackChain
+	channelManager       *channels.Manager
+	verboseManager       *session.VerboseManager
+	sessionKeySeq        atomic.Uint64
+	approvalManager      *channels.ApprovalManager // Manager for command approvals
+	sessionProcessing    sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
+	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
+	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
 	// Internal components (delegated operations)
 	messageProcessor messageProcessor
@@ -66,31 +68,28 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	if cfg == nil || al.registry == nil {
 		return
 	}
+
+	// Cancel all running subagents before reloading the tool coordinator.
+	// This prevents goroutine leaks from the old coordinator's subagent managers.
+	if al.toolCoordinator != nil {
+		al.toolCoordinator.cancelAll()
+	}
+
 	al.registry.ReloadAgents(cfg)
 	al.cfgPtr.Store(cfg)
+
+	// Re-register shared tools for new/recreated agents
+	existingSubagents := al.toolCoordinator.GetSubagents()
+	updatedSubagents := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents)
+
+	// Update tool coordinator with new subagents
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents)
 }
 
 // ResolveSessionKey resolves the session key alias if one exists.
-// For Native channel sessions with timestamp (native:clientId:number), skip alias
-// resolution since the frontend manages these directly and they shouldn't have aliases.
 func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	if sessionKey == "" {
 		return ""
-	}
-	if strings.HasPrefix(sessionKey, "native:") {
-		parts := strings.Split(sessionKey[7:], ":")
-		if len(parts) == 2 && parts[1] != "" {
-			allDigits := true
-			for _, c := range parts[1] {
-				if c < '0' || c > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				return sessionKey
-			}
-		}
 	}
 	if active, ok := al.sessionAliases.Load(sessionKey); ok {
 		if resolved, ok := active.(string); ok && resolved != "" {
@@ -102,34 +101,51 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 
 // GetSubagentParentSessionKey returns the parent session key for a subagent session.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
-	if !strings.HasPrefix(sessionKey, "subagent:") {
+	var taskID string
+	if strings.HasPrefix(sessionKey, "subagent:") {
+		taskID = strings.TrimPrefix(sessionKey, "subagent:")
+	} else if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
+		taskID = sessionKey[idx+1:]
+	}
+	if taskID == "" {
 		return ""
 	}
-	taskID := strings.TrimPrefix(sessionKey, "subagent:")
-	if al.toolCoordinator == nil {
-		logger.WarnCF("agent", "GetSubagentParentSessionKey: toolCoordinator is nil", map[string]interface{}{
-			"session_key": sessionKey,
-		})
-		return ""
+
+	if al.toolCoordinator != nil {
+		task, ok := al.toolCoordinator.getSubagentTask(taskID)
+		if ok && task != nil {
+			resolved := al.ResolveSessionKey(task.OriginSessionKey)
+			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from task", map[string]interface{}{
+				"session_key":        sessionKey,
+				"task_id":            taskID,
+				"origin_session_key": task.OriginSessionKey,
+				"origin_channel":     task.OriginChannel,
+				"origin_chat_id":     task.OriginChatID,
+				"resolved_parent":    resolved,
+			})
+			return resolved
+		}
 	}
-	task, ok := al.toolCoordinator.getSubagentTask(taskID)
-	if !ok || task == nil {
-		logger.WarnCF("agent", "GetSubagentParentSessionKey: task not found", map[string]interface{}{
-			"session_key": sessionKey,
-			"task_id":     taskID,
-		})
-		return ""
+
+	// Fallback: parse parent from session key structure {parent}:{taskID}
+	// Only use this fallback if taskID matches the expected subagent format
+	if matched, _ := regexp.MatchString(`^subagent-\d+$`, taskID); matched {
+		if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
+			parent := sessionKey[:idx]
+			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{
+				"session_key": sessionKey,
+				"task_id":     taskID,
+				"parent_key":  parent,
+			})
+			return parent
+		}
 	}
-	resolved := al.ResolveSessionKey(task.OriginSessionKey)
-	logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved", map[string]interface{}{
-		"session_key":        sessionKey,
-		"task_id":            taskID,
-		"origin_session_key": task.OriginSessionKey,
-		"origin_channel":     task.OriginChannel,
-		"origin_chat_id":     task.OriginChatID,
-		"resolved_parent":    resolved,
+
+	logger.WarnCF("agent", "GetSubagentParentSessionKey: unable to resolve parent", map[string]interface{}{
+		"session_key": sessionKey,
+		"task_id":     taskID,
 	})
-	return resolved
+	return ""
 }
 
 func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
@@ -145,16 +161,8 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		return ""
 	}
 
-	var sessionAgent *AgentInstance
-	if agentID != "" {
-		if a, ok := al.registry.GetAgent(agentID); ok {
-			sessionAgent = a
-		}
-	}
-	if sessionAgent == nil {
-		sessionAgent = al.registry.GetDefaultAgent()
-	}
-
+	// Backward compatibility: handle old native:<uuid>:<digits> format
+	// Old sessions on disk with this format should still be cleaned up correctly.
 	if strings.HasPrefix(baseSessionKey, "native:") {
 		parts := strings.Split(baseSessionKey[7:], ":")
 		if len(parts) == 2 && parts[1] != "" {
@@ -166,12 +174,25 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 				}
 			}
 			if allDigits {
+				// Old format - reset the session in-place, no new key generation
+				var sessionAgent *AgentInstance
+				if agentID != "" {
+					if a, ok := al.registry.GetAgent(agentID); ok {
+						sessionAgent = a
+					}
+				}
+				if sessionAgent == nil {
+					sessionAgent = al.registry.GetDefaultAgent()
+				}
+
+				// Reset session state on the existing key
 				if sessionAgent != nil {
 					sessionAgent.Sessions.GetOrCreate(baseSessionKey)
+					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
 					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
 					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
-					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
 				}
+
 				if agentID != "" {
 					al.sessionAgents.Store(baseSessionKey, agentID)
 				}
@@ -179,9 +200,20 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 					al.sessionModels.Store(baseSessionKey, model)
 				}
 				al.sessionThinking.Delete(baseSessionKey)
+
 				return baseSessionKey
 			}
 		}
+	}
+
+	var sessionAgent *AgentInstance
+	if agentID != "" {
+		if a, ok := al.registry.GetAgent(agentID); ok {
+			sessionAgent = a
+		}
+	}
+	if sessionAgent == nil {
+		sessionAgent = al.registry.GetDefaultAgent()
 	}
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
@@ -292,6 +324,16 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	// Register shared tools and create tool coordinator with subagents
 	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
+
+	// Wire up session key callbacks so the agent layer can build an O(1)
+	// subagent session-to-agent mapping for GetSessionHistory.
+	for agentID, sm := range subagents {
+		id := agentID // capture loop variable
+		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
+			loop.subagentSessionAgent.Store(sessionKey, id)
+		})
+	}
+
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents)
 	loop.providable = newAgentProvidable(loop)
 

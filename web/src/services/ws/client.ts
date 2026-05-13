@@ -1,3 +1,4 @@
+import { wsDebug } from '../../lib/debug'
 import type { ClientEvent } from './events'
 import { type ClientCommand, parseEvent, serializeCommand } from './events'
 import { type ReconnectStrategy, defaultReconnectStrategy } from './reconnect'
@@ -17,7 +18,6 @@ type SocketEventKey = keyof SocketEventMap
 
 export type LeleSocketOptions = {
   reconnectStrategy?: Partial<ReconnectStrategy>
-  pingIntervalMs?: number
 }
 
 export class LeleSocket {
@@ -27,12 +27,10 @@ export class LeleSocket {
   private reconnectStrategy: ReconnectStrategy
   private readonly openQueue: ClientCommand[] = []
   private reconnectAttempts = 0
-  private pingIntervalId: number | null = null
   private pendingSessionKey: string | null = null
   private confirmedSessionKey: string | null = null
   private _state: ConnectionState = 'disconnected'
   private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
-  private readonly pingIntervalMs: number
 
   constructor(
     private readonly baseUrl: string,
@@ -41,7 +39,6 @@ export class LeleSocket {
   ) {
     this.reconnectStrategy = defaultReconnectStrategy(opts.reconnectStrategy)
     this.reconnectDelay = this.reconnectStrategy.initialDelay
-    this.pingIntervalMs = opts.pingIntervalMs ?? 25000
   }
 
   get state(): ConnectionState {
@@ -90,10 +87,6 @@ export class LeleSocket {
 
   close() {
     this.shouldReconnect = false
-    if (this.pingIntervalId !== null) {
-      window.clearInterval(this.pingIntervalId)
-      this.pingIntervalId = null
-    }
     this.socket?.close()
     this.socket = null
     this.pendingSessionKey = null
@@ -113,6 +106,10 @@ export class LeleSocket {
     if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
       const sessionKey = (data as { session_key?: unknown }).session_key
       this.pendingSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
+      wsDebug('[WS] Sending subscribe', {
+        sessionKey: this.pendingSessionKey,
+        data,
+      })
     }
     if (event === 'unsubscribe') {
       const sessionKey = (data as { session_key?: unknown })?.session_key
@@ -151,6 +148,12 @@ export class LeleSocket {
   handleEvent(event: ClientEvent) {
     if (event.event === 'subscribe.ack') {
       const data = event.data as { session_key?: string; processing?: boolean }
+      wsDebug('[WS] subscribe.ack received', {
+        sessionKey: data.session_key,
+        processing: data.processing,
+        pendingSessionKey: this.pendingSessionKey,
+        confirmedSessionKey: this.confirmedSessionKey,
+      })
       if (data.session_key && data.session_key === this.pendingSessionKey) {
         this.confirmedSessionKey = this.pendingSessionKey
       }
@@ -200,23 +203,7 @@ export class LeleSocket {
       this.emit('error', event)
     })
 
-    socket.addEventListener('open', () => {
-      if (this.pingIntervalId !== null) {
-        window.clearInterval(this.pingIntervalId)
-      }
-
-      this.pingIntervalId = window.setInterval(() => {
-        if (this.socket?.readyState === WebSocket.OPEN) {
-          this.send('ping', {})
-        }
-      }, this.pingIntervalMs)
-    })
-
     socket.addEventListener('close', () => {
-      if (this.pingIntervalId !== null) {
-        window.clearInterval(this.pingIntervalId)
-        this.pingIntervalId = null
-      }
       this.emit('close')
       if (!this.shouldReconnect) {
         this.setState('disconnected')

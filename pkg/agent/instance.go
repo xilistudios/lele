@@ -45,6 +45,7 @@ type AgentInstance struct {
 	Subagents      *config.SubagentsConfig
 	SkillsFilter   []string
 	Candidates     []providers.FallbackCandidate
+	IsDefault      bool
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -202,12 +203,14 @@ func NewAgentInstance(
 	agentName := ""
 	var subagents *config.SubagentsConfig
 	var skillsFilter []string
+	isDefault := false
 
 	if agentCfg != nil {
 		agentID = routing.NormalizeAgentID(agentCfg.ID)
 		agentName = agentCfg.Name
 		subagents = agentCfg.Subagents
 		skillsFilter = agentCfg.Skills
+		isDefault = agentCfg.Default
 	}
 
 	maxIter := defaults.MaxToolIterations
@@ -254,6 +257,7 @@ func NewAgentInstance(
 		Subagents:      subagents,
 		SkillsFilter:   skillsFilter,
 		Candidates:     candidates,
+		IsDefault:      isDefault,
 	}
 }
 
@@ -265,9 +269,8 @@ func resolveAgentWorkspace(agentCfg *config.AgentConfig, defaults *config.AgentD
 	if agentCfg == nil || agentCfg.Default || agentCfg.ID == "" || routing.NormalizeAgentID(agentCfg.ID) == "main" {
 		return expandHome(defaults.Workspace)
 	}
-	home, _ := os.UserHomeDir()
 	id := routing.NormalizeAgentID(agentCfg.ID)
-	return filepath.Join(home, ".lele", "workspace-"+id)
+	return filepath.Join(config.GetLeleDir(), "workspace-"+id)
 }
 
 // resolveAgentModel resolves the primary model for an agent.

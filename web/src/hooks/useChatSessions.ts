@@ -7,7 +7,7 @@ import {
 } from '../lib/storage'
 import type { ChatSession } from '../lib/types'
 
-const buildDefaultSessionKey = (clientId: string) => `native:${clientId}`
+const buildDefaultSessionKey = (clientId: string) => clientId
 const isSubagentSessionKey = (sessionKey: string | null | undefined) =>
   Boolean(sessionKey?.startsWith('subagent:'))
 
@@ -54,9 +54,25 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
             },
           ]
 
-    const nextSessions = fallbackSessions.sort(
+    let nextSessions = fallbackSessions.sort(
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
     )
+
+    // Keep locally-created session in the list even if not yet on the backend
+    if (
+      currentSessionKeyRef.current &&
+      !nextSessions.some((s) => s.key === currentSessionKeyRef.current)
+    ) {
+      nextSessions = [
+        {
+          key: currentSessionKeyRef.current,
+          created: new Date().toISOString(),
+          updated: new Date().toISOString(),
+          message_count: 0,
+        },
+        ...nextSessions,
+      ]
+    }
 
     setSessions(nextSessions)
 
@@ -71,7 +87,9 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
         ? storedSessionKey
         : currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
           ? currentSessionKeyRef.current
-          : fallbackKey
+          : currentSessionKeyRef.current
+            ? currentSessionKeyRef.current
+            : fallbackKey
 
     persistCurrentSessionKey(nextSessionKey)
     return nextSessionKey
@@ -84,10 +102,10 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     [persistCurrentSessionKey],
   )
 
-  const createSession = useCallback(() => {
+  const createSession = useCallback(async (): Promise<string | null> => {
     if (!clientId) return null
 
-    const sessionKey = `${buildDefaultSessionKey(clientId)}:${Date.now()}`
+    const sessionKey = crypto.randomUUID()
     const newSession: ChatSession = {
       key: sessionKey,
       created: new Date().toISOString(),
@@ -102,7 +120,11 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     )
     persistCurrentSessionKey(sessionKey)
 
-    api.createSession(sessionKey).catch(() => {})
+    // Await the API call to ensure backend confirms session creation before navigation
+    await api.createSession(sessionKey).catch((err) => {
+      console.error('[useChatSessions] Failed to create session on backend:', err)
+      return null
+    })
 
     return sessionKey
   }, [clientId, persistCurrentSessionKey, api])

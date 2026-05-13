@@ -1,12 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
 import { toChatMessages } from './useMessages'
 
 const POLLING_INTERVAL = 5000
+const DEFAULT_LIMIT = 50
 
-type HistoryMessage = Array<{
+export type HistoryMessage = Array<{
+  id: string
   role: 'user' | 'assistant' | 'tool'
   content: string
   reasoning_content?: string
@@ -23,14 +25,16 @@ function mergeMessages(
   const streamingAssistantIds = new Set<string>()
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
 
+  const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
-  const streamingToolIds = new Set<string>()
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
       streamingAssistantIds.add(msg.id)
     }
     if (msg.role === 'tool') {
-      streamingToolIds.add(msg.id)
+      if (msg.toolCallId) {
+        streamingToolCallIds.add(msg.toolCallId)
+      }
       if (msg.sessionKey) {
         streamingToolSessions.add(msg.sessionKey)
       }
@@ -40,22 +44,20 @@ function mergeMessages(
   const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
   const baseHasCurrentTurn = baseUserCount > (optimisticUser?.optimisticBaseCount ?? 0)
 
-  // Filter base messages: keep tool messages from history unless there's
-  // an actively executing tool in streaming (which is more up-to-date).
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
     if (msg.role === 'assistant' && streamingAssistantIds.has(msg.id)) {
       continue
     }
-    // Remove base tool messages only when there's an executing tool in streaming
-    // for the same session (streaming takes precedence during execution).
-    // Completed tools in streaming are fine — they'll be removed below.
-    if (msg.role === 'tool' && msg.sessionKey && streamingToolSessions.has(msg.sessionKey)) {
-      const hasExecutingTool = streamingMessages.some(
+    if (msg.role === 'tool' && msg.toolCallId && streamingToolCallIds.has(msg.toolCallId)) {
+      continue
+    }
+    if (msg.role === 'tool' && !msg.toolCallId && msg.sessionKey && streamingToolSessions.has(msg.sessionKey)) {
+      const hasStreamingTool = streamingMessages.some(
         (sm) =>
-          sm.role === 'tool' && sm.sessionKey === msg.sessionKey && sm.toolStatus === 'executing',
+          sm.role === 'tool' && sm.sessionKey === msg.sessionKey,
       )
-      if (hasExecutingTool) {
+      if (hasStreamingTool) {
         continue
       }
     }
@@ -70,22 +72,13 @@ function mergeMessages(
     return baseUserCount <= (msg.optimisticBaseCount ?? 0)
   })
 
-  // Remove streaming messages that are now confirmed in history
   const filteredStreaming = streamingWithoutConfirmedUsers.filter((msg) => {
-    // Remove completed non-streaming assistant messages when history has the current turn
     if (msg.role === 'assistant' && !msg.streaming && baseHasCurrentTurn) {
       return false
     }
-    // Remove completed tool messages from streaming if they now exist in history
-    // This prevents duplicate tool entries after history refreshes
-    if (msg.role === 'tool' && msg.toolStatus === 'completed' && msg.sessionKey && msg.toolName) {
+    if (msg.role === 'tool' && msg.toolCallId) {
       const isConfirmedInHistory = filteredBase.some(
-        (bm) =>
-          bm.role === 'tool' &&
-          bm.sessionKey === msg.sessionKey &&
-          bm.toolName === msg.toolName &&
-          bm.toolArgs === msg.toolArgs &&
-          bm.toolResult === msg.toolResult,
+        (bm) => bm.role === 'tool' && bm.toolCallId === msg.toolCallId,
       )
       if (isConfirmedInHistory) {
         return false
@@ -102,38 +95,142 @@ export function useChatHistory(
   sessionKey: string | null,
   token: string | null,
   streamingMessages: ChatMessage[],
+  parentSessionKey?: string,
+  isStreaming?: boolean,
 ) {
   const queryClient = useQueryClient()
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const isLoadingMoreRef = useRef(false)
+
+  const shouldPausePolling = isStreaming ?? false
 
   const query = useQuery({
-    queryKey: chatHistoryQueryKey(sessionKey ?? ''),
+    queryKey: parentSessionKey
+      ? [...chatHistoryQueryKey(sessionKey ?? ''), parentSessionKey]
+      : chatHistoryQueryKey(sessionKey ?? ''),
     queryFn: async () => {
       if (!sessionKey || !token) return null
-      console.log('[RQ] Fetching history for session', sessionKey)
-      const history = await api.history(sessionKey)
-      if (!history) {
-        console.log('[RQ] History fetched, empty response')
+      const history = await api.history(sessionKey, parentSessionKey, undefined, DEFAULT_LIMIT)
+      if (!history || !history.messages) {
+        setHasMore(false)
         return {
           sessionKey,
           messages: [],
           rawMessages: [],
+          hasMore: false,
+          processing: false,
         }
       }
-      console.log('[RQ] History fetched, messages:', history.messages.length)
+      setHasMore(history.has_more)
+
+      const newMessages = toChatMessages(history.messages, history.session_key)
+
+      // Merge with previously loaded older messages (from loadMore) so polling
+      // doesn't wipe out paginated history. Without this, a polling refetch
+      // replaces the entire cache with only the latest DEFAULT_LIMIT messages,
+      // discarding any older messages the user loaded by scrolling up.
+      const queryKey = parentSessionKey
+        ? [...chatHistoryQueryKey(sessionKey), parentSessionKey]
+        : chatHistoryQueryKey(sessionKey)
+      const cachedData = queryClient.getQueryData<{
+        sessionKey: string
+        messages: ChatMessage[]
+        rawMessages: HistoryMessage
+        hasMore: boolean
+        processing?: boolean
+      }>(queryKey)
+
+      if (cachedData && cachedData.messages.length > DEFAULT_LIMIT) {
+        const newMessageIds = new Set(newMessages.map((m) => m.id))
+        // Keep cached messages that are older than the oldest new message
+        // (i.e., messages not present in the latest batch)
+        const olderCachedMessages = cachedData.messages.filter(
+          (m) => !newMessageIds.has(m.id),
+        )
+
+        // Also merge rawMessages preserving order
+        const newRawIds = new Set(history.messages.map((m: { id: string }) => m.id))
+        const olderRawMessages = (cachedData.rawMessages || []).filter(
+          (m: { id: string }) => !newRawIds.has(m.id),
+        )
+
+        return {
+          sessionKey: history.session_key,
+          messages: [...olderCachedMessages, ...newMessages],
+          rawMessages: [...olderRawMessages, ...history.messages],
+          hasMore: olderCachedMessages.length > 0 || history.has_more,
+          processing: history.processing,
+        }
+      }
+
       return {
         sessionKey: history.session_key,
-        messages: toChatMessages(history.messages, history.session_key),
+        messages: newMessages,
         rawMessages: history.messages,
+        hasMore: history.has_more,
         processing: history.processing,
       }
     },
-    enabled: sessionKey !== null && token !== null,
+    enabled:
+      sessionKey !== null &&
+      token !== null &&
+      !(sessionKey.startsWith('subagent:') && !parentSessionKey),
     staleTime: 5_000,
-    refetchInterval: POLLING_INTERVAL,
+    refetchInterval: shouldPausePolling ? false : POLLING_INTERVAL,
     refetchOnWindowFocus: false,
     refetchIntervalInBackground: true,
     retry: false,
   })
+
+  const loadMore = useCallback(async () => {
+    if (!sessionKey || !token || isLoadingMoreRef.current) return
+    const currentData = query.data
+    if (!currentData || !currentData.messages.length || !hasMore) return
+
+    const oldestMessage = currentData.messages[0]
+    if (!oldestMessage) return
+
+    isLoadingMoreRef.current = true
+    setIsLoadingMore(true)
+
+    try {
+      const history = await api.history(
+        sessionKey,
+        parentSessionKey,
+        oldestMessage.id,
+        DEFAULT_LIMIT,
+      )
+      if (!history || !history.messages || history.messages.length === 0) {
+        setHasMore(false)
+        return
+      }
+
+      setHasMore(history.has_more)
+
+      const olderMessages = toChatMessages(history.messages, history.session_key)
+
+      const existingIds = new Set(currentData.messages.map((m) => m.id))
+      const uniqueOlderMessages = olderMessages.filter((m) => !existingIds.has(m.id))
+
+      if (uniqueOlderMessages.length === 0) {
+        return
+      }
+
+      queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+        sessionKey: currentData.sessionKey,
+        messages: [...uniqueOlderMessages, ...currentData.messages],
+        rawMessages: [...history.messages, ...(currentData.rawMessages || [])],
+        hasMore: history.has_more,
+        processing: history.processing,
+      })
+    } catch (error) {
+      console.error('[RQ] Error loading more history:', error)
+    } finally {
+      isLoadingMoreRef.current = false
+      setIsLoadingMore(false)
+    }
+  }, [api, sessionKey, token, parentSessionKey, queryClient, query.data, hasMore])
 
   const baseMessages = query.data?.messages ?? []
   const messages = useMemo(
@@ -141,10 +238,11 @@ export function useChatHistory(
     [baseMessages, streamingMessages],
   )
 
-  const invalidateHistory = () => {
+  const invalidateHistory = useCallback(() => {
     if (!sessionKey) return
+    setHasMore(true)
     queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
-  }
+  }, [sessionKey, queryClient])
 
   return {
     messages,
@@ -155,6 +253,9 @@ export function useChatHistory(
     error: query.error,
     invalidateHistory,
     refetch: query.refetch,
+    loadMore,
+    hasMore,
+    isLoadingMore,
   }
 }
 
@@ -162,10 +263,12 @@ export function updateChatHistoryFromRaw(
   queryClient: ReturnType<typeof useQueryClient>,
   sessionKey: string,
   rawMessages: HistoryMessage,
+  processing?: boolean,
 ) {
   queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
     sessionKey,
     messages: toChatMessages(rawMessages, sessionKey),
     rawMessages,
+    processing,
   })
 }

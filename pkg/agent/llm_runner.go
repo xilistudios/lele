@@ -94,16 +94,28 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		opts.SessionKey,
 	)
 
-	// 3. Save user message to session
+	// 3. Save user message to session and persist immediately
 	if !opts.SkipUserMessage {
 		agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
 	} else if opts.Channel == "system" {
 		agent.Sessions.AddMessage(opts.SessionKey, "system", renderedUserMessage)
 	}
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save user message to disk", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
 	if err != nil {
+		if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+			logger.WarnCF("agent", "Failed to save session after LLM error", map[string]interface{}{
+				"session_key": opts.SessionKey,
+				"error":       saveErr.Error(),
+			})
+		}
 		return "", err
 	}
 
@@ -123,7 +135,12 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if iteration == 0 && finalContent != "" {
 		agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	}
-	agent.Sessions.Save(opts.SessionKey)
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save session to disk", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 
 	// 7. Optional: summarization
 	if opts.EnableSummary {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Navigate,
   Outlet,
@@ -16,6 +16,7 @@ import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
+import { wsDebug } from './lib/debug'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
 
@@ -114,12 +115,30 @@ function ChatRoute() {
   }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { sessions, currentSessionKey, parentSessionKey, onSelectSession } = useAppLogicContext()
+  const { sessions, currentSessionKey, parentSessionKey, onSelectSession, createSession } =
+    useAppLogicContext()
   const targetSessionKey = child_chat_id ?? chat_id
   const derivedParentSessionKey = child_chat_id ? (parent_chat_id ?? null) : null
   const availableKeys = useMemo(() => new Set(sessions.map((s) => s.key)), [sessions])
+  const creatingRef = useRef(false)
 
   useEffect(() => {
+    if (chat_id === 'new') {
+      if (creatingRef.current) return
+      creatingRef.current = true
+      wsDebug('[ChatRoute] Creating new session...')
+      const sessionKey = createSession()
+      wsDebug('[ChatRoute] createSession returned:', sessionKey)
+      if (sessionKey) {
+        wsDebug('[ChatRoute] Navigating to /chat/' + sessionKey)
+        navigate(`/chat/${sessionKey}`, { replace: true })
+        return
+      }
+      navigate('/', { replace: true })
+      return
+    }
+    creatingRef.current = false
+
     if (!targetSessionKey) return
 
     if (currentSessionKey === targetSessionKey && parentSessionKey === derivedParentSessionKey) {
@@ -141,6 +160,7 @@ function ChatRoute() {
     }
   }, [
     targetSessionKey,
+    chat_id,
     child_chat_id,
     derivedParentSessionKey,
     sessions,
@@ -149,9 +169,13 @@ function ChatRoute() {
     parentSessionKey,
     onSelectSession,
     navigate,
+    createSession,
   ])
 
   useEffect(() => {
+    // Skip when creating new session — first useEffect handles this
+    if (chat_id === 'new') return
+
     if (!currentSessionKey) return
 
     if (targetSessionKey && currentSessionKey !== targetSessionKey) {
@@ -163,8 +187,8 @@ function ChatRoute() {
     }
 
     const newPath = parentSessionKey
-      ? `/chat/${encodeURIComponent(parentSessionKey)}/subagent/${encodeURIComponent(currentSessionKey)}`
-      : `/chat/${encodeURIComponent(currentSessionKey)}`
+      ? `/chat/${parentSessionKey}/subagent/${currentSessionKey}`
+      : `/chat/${currentSessionKey}`
 
     if (location.pathname !== newPath) {
       navigate(newPath, { replace: true })
@@ -176,6 +200,7 @@ function ChatRoute() {
     derivedParentSessionKey,
     location.pathname,
     navigate,
+    chat_id,
   ])
 
   // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
@@ -196,14 +221,6 @@ function ProtectedLayout() {
 
 // Settings route component (layout wrapper with shared state)
 function SettingsRoute() {
-  const navigate = useNavigate()
-  const { onLogout } = useAppLogicContext()
-
-  const handleLogout = useCallback(() => {
-    onLogout()
-    navigate('/pair', { replace: true })
-  }, [onLogout, navigate])
-
   return <SettingsPage />
 }
 

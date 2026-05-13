@@ -17,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
 )
 
@@ -130,6 +131,50 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 // GetSessionHistory returns the persisted history for a session.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		// Fast path: O(1) lookup in the subagent-to-agent mapping
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				history := agent.Sessions.GetHistory(resolvedSessionKey)
+				if len(history) > 0 {
+					logger.InfoCF("agent", "GetSessionHistory result (fast path)", map[string]interface{}{
+						"session_key":          sessionKey,
+						"resolved_session_key": resolvedSessionKey,
+						"agent_id":             agent.ID,
+						"history_count":        len(history),
+					})
+					return history
+				}
+			}
+		}
+
+		// Fallback: O(N) scan over all agents (self-healing — caches first hit)
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			history := agent.Sessions.GetHistory(resolvedSessionKey)
+			if len(history) > 0 {
+				// Cache this mapping for future O(1) lookups
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				logger.InfoCF("agent", "GetSessionHistory result (cached)", map[string]interface{}{
+					"session_key":          sessionKey,
+					"resolved_session_key": resolvedSessionKey,
+					"agent_id":             agent.ID,
+					"history_count":        len(history),
+				})
+				return history
+			}
+		}
+		logger.InfoCF("agent", "GetSessionHistory: subagent history not found in any agent", map[string]interface{}{
+			"session_key":          sessionKey,
+			"resolved_session_key": resolvedSessionKey,
+		})
+		return []providers.Message{}
+	}
+
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent == nil {
 		logger.InfoCF("agent", "GetSessionHistory: agent is nil", map[string]interface{}{
@@ -433,6 +478,16 @@ func (ap *agentProvidableImpl) SetName(sessionKey string, name string) error {
 		return fmt.Errorf("no agent available for session")
 	}
 	return agent.Sessions.SetName(sessionKey, name)
+}
+
+// GetSessionSummary returns the summary of a session.
+func (ap *agentProvidableImpl) GetSessionSummary(sessionKey string) string {
+	sessionKey = ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(sessionKey)
+	if agent == nil {
+		return ""
+	}
+	return agent.Sessions.GetSummary(sessionKey)
 }
 
 // ============================================================================

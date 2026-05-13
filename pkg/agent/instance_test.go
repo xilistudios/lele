@@ -94,6 +94,7 @@ func TestNewAgentInstance_AgentTemperatureOverridesDefaults(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := createTestConfig(tmpDir)
 	defaultTemp := 0.5

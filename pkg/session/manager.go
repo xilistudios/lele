@@ -12,6 +12,10 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
+// maxStoredMessages is the maximum number of messages kept in a session file.
+// When exceeded, the oldest excluded messages are pruned on save.
+const maxStoredMessages = 10000
+
 type Session struct {
 	Key          string              `json:"key"`
 	Name         string              `json:"name,omitempty"`
@@ -241,8 +245,28 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
-// RemoveLastMessage removes the most recent message from the session history.
-// Returns true if a message was removed, false if the history is empty or session doesn't exist.
+// ExcludeOldMessagesFromContext marks the first len(messages)-keepCount messages
+// as excluded from the LLM context, preserving them in storage for the web UI.
+// If keepCount <= 0, all messages are excluded.
+func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return
+	}
+
+	if len(session.Messages) <= keepCount {
+		return
+	}
+
+	excludeUpTo := len(session.Messages) - keepCount
+	for i := 0; i < excludeUpTo; i++ {
+		session.Messages[i].ExcludeFromContext = true
+	}
+	session.Updated = time.Now()
+}
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -545,6 +569,21 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	stored, ok := sm.sessions[key]
 	if !ok {
 		return nil
+	}
+
+	// Prune old excluded messages when over the storage limit
+	if len(stored.Messages) > maxStoredMessages {
+		toRemove := len(stored.Messages) - maxStoredMessages
+		kept := make([]providers.Message, 0, maxStoredMessages)
+		removed := 0
+		for _, msg := range stored.Messages {
+			if removed < toRemove && msg.ExcludeFromContext {
+				removed++
+				continue
+			}
+			kept = append(kept, msg)
+		}
+		stored.Messages = kept
 	}
 
 	snapshot := Session{

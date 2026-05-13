@@ -38,7 +38,10 @@ func NewManager(workspace string) *Manager {
 	oldStateFile := filepath.Join(workspace, "state.json")
 
 	// Create state directory if it doesn't exist
-	os.MkdirAll(stateDir, 0755)
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		log.Printf("[ERROR] state: failed to create state directory: %v", err)
+		return nil // Return manager with empty state
+	}
 
 	sm := &Manager{
 		workspace: workspace,
@@ -52,13 +55,18 @@ func NewManager(workspace string) *Manager {
 		if data, err := os.ReadFile(oldStateFile); err == nil {
 			if err := json.Unmarshal(data, sm.state); err == nil {
 				// Migrate to new location
-				sm.saveAtomic()
-				log.Printf("[INFO] state: migrated state from %s to %s", oldStateFile, stateFile)
+				if err := sm.saveAtomic(); err != nil {
+					log.Printf("[ERROR] state: failed to save migrated state: %v", err)
+				} else {
+					log.Printf("[INFO] state: migrated state from %s to %s", oldStateFile, stateFile)
+				}
 			}
 		}
 	} else {
 		// Load from new location
-		sm.load()
+		if err := sm.load(); err != nil {
+			log.Printf("[ERROR] state: failed to load state: %v", err)
+		}
 	}
 
 	return sm

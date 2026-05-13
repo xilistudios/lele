@@ -11,6 +11,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -35,11 +36,7 @@ type ContextBuilder struct {
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
 
 func getGlobalConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".lele")
+	return config.GetLeleDir()
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
@@ -265,7 +262,8 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		history = history[1:]
 	}
 
-	messages = append(messages, history...)
+	contextMessages := filterContextMessages(history)
+	messages = append(messages, contextMessages...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
 		messages = append(messages, buildSummaryMessage(summary))
@@ -318,6 +316,17 @@ func stripSummaryMessages(history []providers.Message) []providers.Message {
 	filtered := make([]providers.Message, 0, len(history))
 	for _, msg := range history {
 		if isSummaryMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
+func filterContextMessages(history []providers.Message) []providers.Message {
+	filtered := make([]providers.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.ExcludeFromContext {
 			continue
 		}
 		filtered = append(filtered, msg)
@@ -385,18 +394,7 @@ func normalizeNativeChatID(chatID string) string {
 		return chatID
 	}
 
-	last := parts[len(parts)-1]
-	allDigits := last != ""
-	for _, ch := range last {
-		if ch < '0' || ch > '9' {
-			allDigits = false
-			break
-		}
-	}
-	if allDigits {
-		return strings.Join(parts[:len(parts)-1], ":")
-	}
-
+	// Strip :chat: alias if present
 	if len(parts) >= 4 && parts[len(parts)-2] == "chat" {
 		return strings.Join(parts[:len(parts)-2], ":")
 	}

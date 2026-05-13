@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -271,22 +272,23 @@ func (task *SubagentTask) statusMessage() string {
 }
 
 type SubagentManager struct {
-	tasks           map[string]*SubagentTask
-	cancels         map[string]context.CancelFunc
-	mu              sync.RWMutex
-	provider        providers.LLMProvider
-	defaultModel    string
-	bus             *bus.MessageBus
-	workspace       string
-	tools           *ToolRegistry
-	getAgentContext func(agentID string) AgentContextInfo
-	maxIterations   int
-	maxTokens       int
-	temperature     float64
-	hasMaxTokens    bool
-	hasTemperature  bool
-	nextID          int
-	sessionRecorder SessionRecorder
+	tasks              map[string]*SubagentTask
+	cancels            map[string]context.CancelFunc
+	mu                 sync.RWMutex
+	provider           providers.LLMProvider
+	defaultModel       string
+	bus                *bus.MessageBus
+	workspace          string
+	tools              *ToolRegistry
+	getAgentContext    func(agentID string) AgentContextInfo
+	maxIterations      int
+	maxTokens          int
+	temperature        float64
+	hasMaxTokens       bool
+	hasTemperature     bool
+	nextID             int
+	sessionRecorder    SessionRecorder
+	sessionKeyCallback func(sessionKey, agentID string) // called when subagent session key is created
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus) *SubagentManager {
@@ -298,7 +300,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 20, // Default, will be overridden by SetMaxIterations
+		maxIterations: 100, // Default, will be overridden by SetMaxIterations
 		nextID:        1,
 	}
 }
@@ -340,6 +342,16 @@ func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionRecorder = rec
+}
+
+// SetSessionKeyCallback sets a callback function that is called whenever a
+// subagent session key is created. The callback receives the session key and
+// the agent ID of the agent whose session storage holds the history.
+// This enables the owner to build a lookup map for O(1) session history retrieval.
+func (sm *SubagentManager) SetSessionKeyCallback(callback func(sessionKey, agentID string)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionKeyCallback = callback
 }
 
 // RegisterTool registers a tool for subagent execution.
@@ -454,9 +466,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}
 
 	if systemPrompt == "" {
-		systemPrompt = buildSubagentSystemPrompt("", agentID, agentName, agentWorkspace)
-		agentWorkspace = "unknown"
-		agentName = agentID
+		systemPrompt = buildSubagentSystemPrompt("", agentID, agentID, "")
 	}
 
 	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
@@ -493,7 +503,17 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	recorder := sm.sessionRecorder
 	sm.mu.RUnlock()
 
-	sessionKey := "subagent:" + task.ID
+	// Build subagent session key: {origin_session_key}:{task_id}
+	// This ensures subagent history is saved alongside the parent session
+	sessionKey := task.OriginSessionKey + ":" + task.ID
+
+	// Notify the session key callback so the owner can build an O(1) lookup map
+	sm.mu.RLock()
+	cb := sm.sessionKeyCallback
+	sm.mu.RUnlock()
+	if cb != nil {
+		cb(sessionKey, agentID)
+	}
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -515,6 +535,17 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		SessionRecorder: recorder,
 		SessionKey:      sessionKey,
 	}, messages, task.OriginChannel, task.OriginChatID)
+
+	// Save subagent history to disk if recorder is available
+	if recorder != nil && sessionKey != "" {
+		if err := recorder.Save(sessionKey); err != nil {
+			logger.ErrorCF("subagent", "Failed to save subagent history", map[string]interface{}{
+				"session_key": sessionKey,
+				"task_id":     task.ID,
+				"error":       err.Error(),
+			})
+		}
+	}
 
 	sm.mu.Lock()
 	var result *ToolResult

@@ -88,13 +88,10 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		agent = mp.al.registry.GetDefaultAgent()
 	}
 
-	// Use routed session key, but honor pre-set agent-scoped keys (for ProcessDirect/cron)
-	// Also honor channel-specific session keys (e.g., telegram:<chat_id>)
+	// Use routed session key, but honor message's session key when explicitly set
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") || strings.HasPrefix(msg.SessionKey, "native:") {
-			sessionKey = msg.SessionKey
-		}
+		sessionKey = msg.SessionKey
 	}
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
@@ -264,7 +261,13 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		if agent != nil {
 			agent.Sessions.TruncateHistory(sessionKey, 0)
 			agent.Sessions.SetSummary(sessionKey, "")
-			agent.Sessions.Save(sessionKey)
+			if err := agent.Sessions.Save(sessionKey); err != nil {
+				logger.WarnCF("agent", "Failed to save session after clear",
+					map[string]interface{}{
+						"session_key": sessionKey,
+						"error":       err.Error(),
+					})
+			}
 		}
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
@@ -787,8 +790,10 @@ func (mp *messageProcessorImpl) handleAgentCommand(sessionKey string, args []str
 func (mp *messageProcessorImpl) estimateTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
+		if m.ExcludeFromContext {
+			continue
+		}
 		totalChars += len(m.Content)
 	}
-	// 2.5 chars per token = totalChars * 2 / 5
 	return totalChars * 2 / 5
 }

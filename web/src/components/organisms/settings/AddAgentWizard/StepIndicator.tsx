@@ -58,6 +58,7 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
                     stroke="currentColor"
                     strokeWidth="2.5"
                   >
+                    <title>Completed</title>
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 ) : (

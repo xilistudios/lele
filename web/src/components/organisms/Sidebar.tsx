@@ -233,6 +233,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         stroke="currentColor"
                         strokeWidth={2}
                       >
+                        <title>{expanded ? 'Show less' : 'Show more'}</title>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                       </svg>
                       <span>{expanded ? t('chat.showLess') : t('chat.showMore')}</span>

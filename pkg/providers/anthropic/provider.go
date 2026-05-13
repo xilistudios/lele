@@ -296,9 +296,7 @@ func normalizeBaseURL(apiBase string) string {
 	}
 
 	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/v1") {
-		base = strings.TrimSuffix(base, "/v1")
-	}
+	base = strings.TrimSuffix(base, "/v1")
 	if base == "" {
 		return defaultBaseURL
 	}

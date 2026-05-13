@@ -56,6 +56,8 @@ type AgentProvidable interface {
 	ClearSession(sessionKey string) string
 	// GetName devuelve el nombre de una sesión
 	GetName(sessionKey string) string
+	// GetSessionSummary devuelve el resumen de una sesión
+	GetSessionSummary(sessionKey string) string
 	// GetUpdated devuelve el timestamp de última actualización de una sesión
 	GetUpdated(sessionKey string) time.Time
 	// SetName establece el nombre de una sesión

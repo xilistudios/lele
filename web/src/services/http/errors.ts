@@ -20,5 +20,5 @@ export const parseApiError = async (response: Response): Promise<ApiError> => {
     payload = null
   }
 
-  return new ApiError(payload?.message ?? response.statusText, response.status, payload?.code)
+  return new ApiError(payload?.message ?? payload?.error ?? response.statusText, response.status, payload?.code)
 }

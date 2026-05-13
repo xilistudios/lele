@@ -175,9 +175,7 @@ func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message,
 	messages := []providers.Message{
 		{Role: "system", Content: "System prompt"},
 	}
-	for _, h := range history {
-		messages = append(messages, h)
-	}
+	messages = append(messages, history...)
 	if userMessage != "" {
 		messages = append(messages, providers.Message{Role: "user", Content: userMessage})
 	}
@@ -302,6 +300,8 @@ func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, 
 }
 
 func (m *llmRunnerMockToolCoordinator) stopAllSubagents() int { return 0 }
+
+func (m *llmRunnerMockToolCoordinator) cancelAll() int { return 0 }
 
 func (m *llmRunnerMockToolCoordinator) cancelSession(sessionKey string) {}
 

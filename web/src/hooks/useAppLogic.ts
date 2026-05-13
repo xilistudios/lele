@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { wsDebug } from '../lib/debug'
 import type { ApiClient } from '../lib/api'
-import { clearCurrentSessionKey } from '../lib/storage'
+import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
 import type {
   Agent,
   AgentDetails,
@@ -46,7 +47,7 @@ export function useAppLogic(
     agentInfo: null,
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => loadSidebarOpen())
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
   const navigate = useNavigate()
@@ -58,12 +59,15 @@ export function useAppLogic(
     token,
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
+    sessionsHook.refreshSessions,
   )
   const chatHistory = useChatHistory(
     api,
     sessionsHook.currentSessionKey,
     token,
     messagesHook.streamingMessages,
+    parentSessionKey ?? undefined,
+    messagesHook.streamingMessages.some((m) => m.streaming),
   )
 
   const wsStatusRef = useRef(wsStatus)
@@ -161,6 +165,11 @@ export function useAppLogic(
       // subscriptions via TTL, so we avoid unnecessary unsub/resub chatter and
       // keep receiving background events (e.g., message.complete) for sessions
       // that are still processing.
+      wsDebug('[AppLogic] Subscribing to session', {
+        sessionKey: sessionsHook.currentSessionKey,
+        agentId: currentAgentId,
+        wsStatus,
+      })
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
       subscribedSessionRef.current = sessionsHook.currentSessionKey
     }
@@ -278,24 +287,17 @@ export function useAppLogic(
     ],
   )
 
-  const handleCreateSession = useCallback(() => {
-    const currentSession = sessionsHook.sessions.find(
-      (s) => s.key === sessionsHook.currentSessionKey,
-    )
-
-    if (currentSession && currentSession.message_count === 0 && sessionsHook.currentSessionKey) {
-      navigate(`/chat/${encodeURIComponent(sessionsHook.currentSessionKey)}`)
-      return
-    }
-
+  const handleCreateSession = useCallback(async () => {
     subscribedSessionRef.current = null
     setParentSessionKey(null)
-    const newKey = sessionsHook.createSession()
-    if (newKey) {
-      messagesHook.clearStreaming()
-      navigate(`/chat/${encodeURIComponent(newKey)}`)
+    messagesHook.clearStreaming()
+    // Await backend session registration before navigating, so the subsequent
+    // WebSocket subscribe passes ownership validation on the first attempt.
+    const sessionKey = await sessionsHook.createSession()
+    if (sessionKey) {
+      navigate(`/chat/${sessionKey}`, { replace: true })
     }
-  }, [sessionsHook, messagesHook.clearStreaming, navigate])
+  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -361,6 +363,10 @@ export function useAppLogic(
     setSidebarOpen((current) => !current)
   }, [])
 
+  useEffect(() => {
+    saveSidebarOpen(sidebarOpen)
+  }, [sidebarOpen])
+
   const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
   ensurePlaceholderRef.current = messagesHook.ensureAssistantPlaceholder
   const clearStreamingRef = useRef(messagesHook.clearStreaming)
@@ -369,6 +375,7 @@ export function useAppLogic(
   streamingMessagesRef.current = messagesHook.streamingMessages
 
   const prevProcessingRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally excluded, they hold stable values
   useEffect(() => {
     const sessionKey = sessionsHook.currentSessionKey
     if (!sessionKey) return
@@ -428,6 +435,7 @@ export function useAppLogic(
     onCancel: handleCancel,
     onSelectSession: handleSelectSession,
     onCreateSession: handleCreateSession,
+    createSession: sessionsHook.createSession,
     onDeleteSession: handleDeleteSession,
     onClearSession: handleClearSession,
     onSelectAgent: handleSelectAgent,
@@ -438,5 +446,8 @@ export function useAppLogic(
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
     onToggleSidebar: handleToggleSidebar,
+    loadMore: chatHistory.loadMore,
+    hasMore: chatHistory.hasMore,
+    isLoadingMore: chatHistory.isLoadingMore,
   }
 }
