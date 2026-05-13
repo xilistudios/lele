@@ -176,13 +176,6 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
     }
   };
 
-  const tipKey = [
-    "settings.addAgentModal.tipIdentity",
-    "settings.addAgentModal.tipModel",
-    "settings.addAgentModal.tipBehavior",
-    "settings.addAgentModal.tipSkills",
-  ][step - 1];
-
   return (
     <Modal
       isOpen={isOpen}

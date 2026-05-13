@@ -1,3 +1,4 @@
+import { wsDebug } from '../../lib/debug'
 import type { ClientEvent } from './events'
 import { type ClientCommand, parseEvent, serializeCommand } from './events'
 import { type ReconnectStrategy, defaultReconnectStrategy } from './reconnect'
@@ -105,6 +106,10 @@ export class LeleSocket {
     if (event === 'subscribe' && data && typeof data === 'object' && 'session_key' in data) {
       const sessionKey = (data as { session_key?: unknown }).session_key
       this.pendingSessionKey = typeof sessionKey === 'string' && sessionKey ? sessionKey : null
+      wsDebug('[WS] Sending subscribe', {
+        sessionKey: this.pendingSessionKey,
+        data,
+      })
     }
     if (event === 'unsubscribe') {
       const sessionKey = (data as { session_key?: unknown })?.session_key
@@ -143,6 +148,12 @@ export class LeleSocket {
   handleEvent(event: ClientEvent) {
     if (event.event === 'subscribe.ack') {
       const data = event.data as { session_key?: string; processing?: boolean }
+      wsDebug('[WS] subscribe.ack received', {
+        sessionKey: data.session_key,
+        processing: data.processing,
+        pendingSessionKey: this.pendingSessionKey,
+        confirmedSessionKey: this.confirmedSessionKey,
+      })
       if (data.session_key && data.session_key === this.pendingSessionKey) {
         this.confirmedSessionKey = this.pendingSessionKey
       }

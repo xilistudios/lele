@@ -31,7 +31,6 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
           {t('settings.fields.agentModelPrimary')}
         </label>
         <SearchableSelect
-          id="wizard-agent-primary-model"
           ariaLabel={t('settings.fields.agentModelPrimary')}
           buttonLabel={t('settings.fields.agentModelPrimary')}
           direction="down"

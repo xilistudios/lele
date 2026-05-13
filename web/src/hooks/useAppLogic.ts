@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { wsDebug } from '../lib/debug'
 import type { ApiClient } from '../lib/api'
 import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
 import type {
@@ -164,6 +165,11 @@ export function useAppLogic(
       // subscriptions via TTL, so we avoid unnecessary unsub/resub chatter and
       // keep receiving background events (e.g., message.complete) for sessions
       // that are still processing.
+      wsDebug('[AppLogic] Subscribing to session', {
+        sessionKey: sessionsHook.currentSessionKey,
+        agentId: currentAgentId,
+        wsStatus,
+      })
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
       subscribedSessionRef.current = sessionsHook.currentSessionKey
     }

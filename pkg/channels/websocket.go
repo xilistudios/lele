@@ -345,6 +345,7 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 
 	logger.InfoCF("native", "Client subscribed to session", map[string]interface{}{
 		"client_id":       client.ID,
+		"client_info_id":  client.ClientInfo.ClientID,
 		"old_session_key": oldSessionKey,
 		"new_session_key": sessionKey,
 		"subscriptions":   len(client.Subscriptions),

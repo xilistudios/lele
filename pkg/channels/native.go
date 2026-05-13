@@ -511,11 +511,23 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	}
 	payload := mustMarshal(msg)
 
+	logger.DebugCF("native", "Broadcast to session - starting", map[string]interface{}{
+		"session_key": sessionKey,
+		"event":       event,
+		"total_clients": len(n.wsClients),
+	})
+
 	n.mu.RLock()
 	var targets []*WSClient
-	for _, client := range n.wsClients {
+	for clientID, client := range n.wsClients {
+
 		// Match by current session key (active subscription)
 		if sessionKeyMatches(client.SessionKey, sessionKey) {
+			logger.DebugCF("native", "Client matched by SessionKey", map[string]interface{}{
+				"client_id":          clientID,
+				"client_session_key": client.SessionKey,
+				"target_session_key": sessionKey,
+			})
 			targets = append(targets, client)
 			continue
 		}
@@ -523,6 +535,11 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		if client.Subscriptions != nil {
 			for subKey := range client.Subscriptions {
 				if sessionKeyMatches(subKey, sessionKey) {
+					logger.DebugCF("native", "Client matched by Subscriptions", map[string]interface{}{
+						"client_id":           clientID,
+						"matched_subscription": subKey,
+						"target_session_key":  sessionKey,
+					})
 					targets = append(targets, client)
 					goto nextClient
 				}
@@ -532,6 +549,12 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if sessionKeyMatches(resolved, sessionKey) {
+				logger.DebugCF("native", "Client matched by resolved SessionKey", map[string]interface{}{
+					"client_id":           clientID,
+					"client_session_key":  client.SessionKey,
+					"resolved_session_key": resolved,
+					"target_session_key":  sessionKey,
+				})
 				targets = append(targets, client)
 			}
 		}
@@ -567,9 +590,16 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		"matched":     found,
 	})
 
-	// Fallback: if no clients matched and this is an approval request,
-	// broadcast to all connected clients so the approval UI can receive it.
+	// Fallback: if no clients matched, broadcast to all connected clients.
+	// This is a workaround for session key mismatches - every client receives the event
+	// and the frontend filters by session_key in handleEvent.
+	// TODO: Fix the root cause of why clients don't match
 	if found == 0 && event == "approval.request" {
+		logger.WarnCF("native", "No clients matched for approval broadcast, falling back to all clients", map[string]interface{}{
+			"session_key": sessionKey,
+			"event":       event,
+			"clients":     len(n.wsClients),
+		})
 		n.broadcastAll(event, data)
 	}
 }
@@ -669,8 +699,20 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
 	client, ok := n.auth.GetClient(clientID)
 	if !ok {
+		logger.DebugCF("native", "validateSessionOwnership: client not found", map[string]interface{}{
+			"client_id":   clientID,
+			"session_key": sessionKey,
+		})
 		return false
 	}
+
+	logger.DebugCF("native", "validateSessionOwnership: checking", map[string]interface{}{
+		"client_id":     clientID,
+		"session_key":   sessionKey,
+		"client_keys":   client.SessionKeys,
+		"num_ws_clients": len(n.wsClients),
+	})
+
 	// Check for subagent session key (old format: subagent:{id} or new format: {parent}:subagent-{n})
 	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
 	if !isSubagent {
@@ -698,6 +740,11 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		resolvedParent = strings.TrimPrefix(resolvedParent, "native:")
 
 		if resolvedParent == clientID {
+			logger.DebugCF("native", "validateSessionOwnership: subagent parent matches clientID", map[string]interface{}{
+				"session_key":     sessionKey,
+				"client_id":       clientID,
+				"resolved_parent": resolvedParent,
+			})
 			return true
 		}
 
@@ -717,9 +764,19 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		for _, sk := range client.SessionKeys {
 			skNorm := strings.TrimPrefix(sk, "native:")
 			if skNorm == resolvedParent {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParent", map[string]interface{}{
+					"session_key":     sessionKey,
+					"sk":              sk,
+					"client_id":       clientID,
+				})
 				return true
 			}
 			if skNorm == resolvedParentBase {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParentBase", map[string]interface{}{
+					"session_key":     sessionKey,
+					"sk":              sk,
+					"client_id":       clientID,
+				})
 				return true
 			}
 			skBase := skNorm
@@ -730,6 +787,11 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 				}
 			}
 			if skBase == resolvedParent || skBase == resolvedParentBase {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skBase", map[string]interface{}{
+					"session_key":     sessionKey,
+					"sk":              sk,
+					"client_id":       clientID,
+				})
 				return true
 			}
 		}
@@ -746,18 +808,39 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 	// WebSocket connections before any sessions have been created.
 	// Also handles deprecated native: prefix for backward compatibility.
 	if sessionKey == clientID || strings.TrimPrefix(sessionKey, "native:") == clientID {
+		logger.DebugCF("native", "validateSessionOwnership: default/clientID match", map[string]interface{}{
+			"session_key": sessionKey,
+			"client_id":   clientID,
+		})
 		return true
 	}
 	for _, sk := range client.SessionKeys {
 		// Exact match
 		if sk == sessionKey {
+			logger.DebugCF("native", "validateSessionOwnership: exact match", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+				"matched_key": sk,
+			})
 			return true
 		}
 		// Backward compatibility: match with/without native: prefix
 		if sessionKeyMatches(sk, sessionKey) {
+			logger.DebugCF("native", "validateSessionOwnership: prefix-insensitive match", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+				"matched_key": sk,
+			})
 			return true
 		}
 	}
+
+	logger.WarnCF("native", "validateSessionOwnership: no matching key found", map[string]interface{}{
+		"client_id":     clientID,
+		"session_key":   sessionKey,
+		"client_keys":   client.SessionKeys,
+		"ws_client_count": len(n.wsClients),
+	})
 	return false
 }
 

@@ -1,5 +1,5 @@
 import { useSettings } from '../../../../contexts/SettingsContext'
-import { BooleanInput, NumberInput } from '../../../molecules'
+import { NumberInput } from '../../../molecules'
 
 type Props = {
   temperature: number

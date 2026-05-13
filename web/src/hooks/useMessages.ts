@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { wsDebug } from '../lib/debug'
 import type { ApiClient } from '../lib/api'
 import {
   buildToolCallMap,
@@ -265,9 +266,19 @@ export function useMessages(
         }
         case 'message.stream':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
-            console.warn('[WS] Dropped message.stream: session mismatch')
+            console.warn('[WS] Dropped message.stream: session mismatch', {
+              eventSessionKey,
+              currentSessionKey: currentSessionKeyRef.current,
+            })
             break
           }
+          wsDebug('[WS] message.stream received', {
+            messageId: data.message_id,
+            eventSessionKey,
+            currentSessionKey: currentSessionKeyRef.current,
+            chunkLength: (data.chunk as string)?.length ?? 0,
+            done: data.done,
+          })
           ensureAssistantPlaceholder(
             data.message_id as string,
             (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string,
@@ -302,6 +313,12 @@ export function useMessages(
         }
         case 'message.complete': {
           const completedSessionKey = eventSessionKey ?? currentSessionKeyRef.current
+          wsDebug('[WS] message.complete received', {
+            messageId: data.message_id,
+            eventSessionKey,
+            currentSessionKey: currentSessionKeyRef.current,
+            completedSessionKey,
+          })
 
           // Always update processingSessions regardless of which session
           setProcessingSessions((prev) => {
@@ -315,6 +332,7 @@ export function useMessages(
 
           // Only update streaming messages if this is the current session
           if (completedSessionKey && completedSessionKey !== currentSessionKeyRef.current) {
+            console.warn('[WS] message.complete for different session, skipping streaming update')
             setPendingAttachments([])
             processingSessionKeyRef.current = null
             break

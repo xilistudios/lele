@@ -38,20 +38,6 @@ export function AgentsSettings() {
     )
   }
 
-  const getThinkingEnabled = (agent: { reasoning?: { enable?: boolean } } | undefined): boolean => {
-    return agent?.reasoning?.enable ?? false
-  }
-
-  const toggleThinking = (index: number, agent: Record<string, unknown>, enabled: boolean) => {
-    const current = (agent as Record<string, unknown>).reasoning as
-      | Record<string, unknown>
-      | undefined
-    updateField(`agents.list.${index}.reasoning`, {
-      ...(current ?? {}),
-      enable: enabled,
-    })
-  }
-
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.agentsList')}>

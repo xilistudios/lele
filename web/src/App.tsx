@@ -16,6 +16,7 @@ import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
+import { wsDebug } from './lib/debug'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
 
@@ -125,8 +126,11 @@ function ChatRoute() {
     if (chat_id === 'new') {
       if (creatingRef.current) return
       creatingRef.current = true
+      wsDebug('[ChatRoute] Creating new session...')
       const sessionKey = createSession()
+      wsDebug('[ChatRoute] createSession returned:', sessionKey)
       if (sessionKey) {
+        wsDebug('[ChatRoute] Navigating to /chat/' + sessionKey)
         navigate(`/chat/${sessionKey}`, { replace: true })
         return
       }
@@ -217,14 +221,6 @@ function ProtectedLayout() {
 
 // Settings route component (layout wrapper with shared state)
 function SettingsRoute() {
-  const navigate = useNavigate()
-  const { onLogout } = useAppLogicContext()
-
-  const handleLogout = useCallback(() => {
-    onLogout()
-    navigate('/pair', { replace: true })
-  }, [onLogout, navigate])
-
   return <SettingsPage />
 }
 
