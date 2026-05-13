@@ -449,8 +449,8 @@
     "providers": "Providers",
     "skills": "Skills",
     "navigation": "Navigation",
-    "collapse": "Close sidebar",
-    "expand": "Open sidebar"
+    "collapse": "Minimize",
+    "expand": "Expand"
   },
   "skills": {
     "title": "Skills",

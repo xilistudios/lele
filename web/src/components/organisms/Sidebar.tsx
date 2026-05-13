@@ -17,6 +17,7 @@ import {
   SidebarToggleIcon,
   SkillsIcon,
   TrashIcon,
+  UserIcon,
 } from '../atoms/Icons'
 import { IconButton } from '../atoms/IconButton'
 import { Logo } from '../atoms/Logo'
@@ -133,12 +134,13 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         >
           {!collapsed && <Logo collapsed={collapsed} />}
           {collapsed && (
-            <div className="hidden md:flex group relative">
+            <div className="hidden md:flex group relative items-center justify-center">
               <IconButton
                 onClick={onToggleSidebar}
                 ariaLabel={t('sidebar.expand')}
+                className="flex items-center justify-center h-8 w-8"
               >
-                <SidebarToggleIcon />
+                <SidebarToggleIcon size={16} />
               </IconButton>
               <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                 {t('sidebar.expand')}
@@ -146,12 +148,13 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             </div>
           )}
           {!collapsed && (
-            <div className="hidden md:flex group relative">
+            <div className="hidden md:flex group relative items-center justify-center">
               <IconButton
                 onClick={onToggleSidebar}
                 ariaLabel={t('sidebar.collapse')}
+                className="flex items-center justify-center h-8 w-8"
               >
-                <SidebarToggleIcon />
+                <SidebarToggleIcon size={16} />
               </IconButton>
               <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                 {t('sidebar.collapse')}
@@ -160,28 +163,30 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        <div className={`px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-3' : 'flex flex-col gap-2'}`}>
+        <div className={`px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex flex-col gap-1'}`}>
           {collapsed ? (
             <>
-              <div className="group relative">
+              <div className="group relative flex items-center justify-center">
                 <IconButton
                   onClick={onCreateSession}
                   ariaLabel={t('chat.newChat')}
                   variant="nav"
+                  className="flex items-center justify-center h-8 w-8"
                 >
-                  <PlusCircleIcon size={32} />
+                  <PlusCircleIcon size={24} />
                 </IconButton>
                 <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                   {t('chat.newChat')}
                 </span>
               </div>
-              <div className="group relative">
+              <div className="group relative flex items-center justify-center">
                 <IconButton
                   onClick={() => {}}
                   ariaLabel={t('chat.search')}
                   variant="nav"
+                  className="flex items-center justify-center h-8 w-8"
                 >
-                  <SearchIcon size={20} />
+                  <SearchIcon size={16} />
                 </IconButton>
                 <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                   {t('chat.search')}
@@ -190,41 +195,48 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             </>
           ) : (
             <>
-              <IconButton
+              <button
+                type="button"
                 onClick={onCreateSession}
-                ariaLabel={t('chat.newChat')}
-                variant="nav-full"
+                aria-label={t('chat.newChat')}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
-                <PlusCircleIcon size={28} />
-                <span>{t('chat.newChat')}</span>
-              </IconButton>
-              <IconButton
+                <div className="h-8 w-8 flex items-center justify-center">
+                  <PlusCircleIcon size={24} />
+                </div>
+                <span className="leading-none">{t('chat.newChat')}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => {}}
-                ariaLabel={t('chat.search')}
-                variant="nav-full"
+                aria-label={t('chat.search')}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
-                <SearchIcon size={20} />
+                <div className="h-8 w-8 flex items-center justify-center">
+                  <SearchIcon size={16} />
+                </div>
                 <span>{t('chat.search')}</span>
-              </IconButton>
+              </button>
             </>
           )}
         </div>
 
-        <div className={`${collapsed ? 'px-2' : 'px-3'} py-3`}>
+        <div className={`${collapsed ? 'px-2' : 'px-3 py-3'}`}>
           {collapsed ? (
             <Popover
               block
               trigger={
-                <div
-                  // biome-ignore lint/a11y/useSemanticElements: div needed for Popover trigger compatibility
-                  role="button"
-                  tabIndex={0}
-                  className="flex w-full items-center justify-center rounded-md px-2 text-text-secondary hover-highlight-group"
-                  style={{ paddingTop: '12px', paddingBottom: '12px' }}
-                  title={t('chat.recent')}
-                  aria-label={t('chat.recent')}
-                >
-                  <ChatBubbleIcon />
+                <div className="group relative flex items-center justify-center">
+                  <IconButton
+                    ariaLabel={t('chat.recent')}
+                    variant="nav"
+                    className="flex items-center justify-center h-8 w-8"
+                  >
+                    <ChatBubbleIcon size={16} />
+                  </IconButton>
+                  <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                    {t('chat.recent')}
+                  </span>
                 </div>
               }
               popoverWidth={200}
@@ -344,52 +356,57 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Agents & Providers navigation */}
-        <nav
-          className={`px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}
-        >
+        <nav className="px-2 flex flex-col gap-1">
           {collapsed ? (
             <>
               {navItems.map((item) => (
-                <IconButton
+                <div key={item.path} className="group relative flex items-center justify-center">
+                  <IconButton
+                    onClick={() => {
+                      navigate(item.path)
+                      if (isMobile) onClose()
+                    }}
+                    title={item.label}
+                    ariaLabel={item.label}
+                    variant="nav"
+                    className={`flex items-center justify-center h-8 w-8 ${
+                      isActiveRoute(item.path)
+                        ? 'text-brand-rosa bg-surface-selected'
+                        : ''
+                    }`}
+                  >
+                    <item.icon size={16} />
+                  </IconButton>
+                  <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                    {item.label}
+                  </span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              {navItems.map((item) => (
+                <button
                   key={item.path}
+                  type="button"
                   onClick={() => {
                     navigate(item.path)
                     if (isMobile) onClose()
                   }}
-                  title={item.label}
-                  ariaLabel={item.label}
-                  variant="nav"
-                  className={`justify-center py-2 ${
+                  aria-label={item.label}
+                  className={`flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover ${
                     isActiveRoute(item.path)
-                      ? 'text-brand-rosa bg-surface-selected'
-                      : ''
+                      ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                      : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  <item.icon size={16} />
-                </IconButton>
+                  <div className="h-8 w-8 flex items-center justify-center">
+                    <item.icon size={16} />
+                  </div>
+                  <span>{item.label}</span>
+                </button>
               ))}
             </>
-          ) : (
-            navItems.map((item) => (
-              <IconButton
-                key={item.path}
-                onClick={() => {
-                  navigate(item.path)
-                  if (isMobile) onClose()
-                }}
-                title={item.label}
-                ariaLabel={item.label}
-                variant="nav-full"
-                className={
-                  isActiveRoute(item.path)
-                    ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
-                    : ''
-                }
-              >
-                <item.icon size={16} />
-                <span>{item.label}</span>
-              </IconButton>
-            ))
           )}
         </nav>
 
@@ -402,16 +419,19 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             trigger={
               <button
                 type="button"
-                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-1 w-full py-2 px-2'}`}
+                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-2 w-full py-2 px-2'}`}
                 aria-label={collapsed ? t('chat.deviceMenu') : undefined}
               >
                 <div
-                  className={`flex flex-shrink-0 items-center justify-center rounded ${collapsed ? 'h-6 w-6' : 'px-2 py-1'} bg-surface-hover text-xs font-medium text-text-primary`}
+                  className="flex flex-shrink-0 items-center justify-center bg-surface-hover text-text-primary h-7 w-7 rounded"
+                  style={{ transform: 'rotate(45deg)' }}
                 >
-                  {deviceName?.[0]?.toUpperCase() ?? 'L'}
+                  <div style={{ transform: 'rotate(-45deg)' }}>
+                    <UserIcon size={12} />
+                  </div>
                 </div>
                 {!collapsed && (
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 text-left">
                     <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
                   </div>
                 )}

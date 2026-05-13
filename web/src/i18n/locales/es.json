@@ -436,8 +436,8 @@
     "providers": "Proveedores",
     "skills": "Habilidades",
     "navigation": "Navegación",
-    "collapse": "Cerrar barra lateral",
-    "expand": "Abrir barra lateral"
+    "collapse": "Minimizar",
+    "expand": "Expandir"
   },
   "skills": {
     "title": "Habilidades",
