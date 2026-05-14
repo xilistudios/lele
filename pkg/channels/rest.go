@@ -259,6 +259,11 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
+		// Skip empty sessions that were never actually used
+		if messageCount == 0 {
+			continue
+		}
+
 		sessions = append(sessions, ChatSession{
 			Key:          sk,
 			Name:         n.agentLoop.GetName(sk),
