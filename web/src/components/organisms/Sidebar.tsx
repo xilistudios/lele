@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -7,7 +7,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   AgentsIcon,
   ChatBubbleIcon,
-  FilterIcon,
+  HistoryIcon,
   LogoutIcon,
   MoreIcon,
   PlusCircleIcon,
@@ -23,6 +23,7 @@ import { IconButton } from '../atoms/IconButton'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
+import { QuickChatPanel } from './QuickChatPanel'
 
 const MAX_VISIBLE_SESSIONS = 5
 
@@ -51,7 +52,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const deviceName = session?.device_name ?? 'lele'
 
   const sortedSessions = useMemo(() => {
-    const visible = sessions.filter((s) => !s.key.startsWith('subagent:'))
+    const visible = sessions.filter(
+      (s) => !s.key.startsWith('subagent:') && s.message_count > 0,
+    )
     return [...visible].sort(
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
     )
@@ -68,21 +71,16 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     ? (sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null)
     : null
 
-  // Expanded state - shows all sessions when true
-  const [expanded, setExpanded] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelFocusSearch, setPanelFocusSearch] = useState(false)
+  const [recentExpanded, setRecentExpanded] = useState(false)
 
-  const prevCountRef = useRef(sessions.length)
+  const openPanel = (focusSearch = false) => {
+    setPanelFocusSearch(focusSearch)
+    setPanelOpen(true)
+  }
 
-  // Only reset expanded when sessions are removed (user deleted one),
-  // not when a new session arrives while the user is browsing the expanded list.
-  useEffect(() => {
-    if (sessions.length < prevCountRef.current) {
-      setExpanded(false)
-    }
-    prevCountRef.current = sessions.length
-  }, [sessions.length])
-
-  const visibleSessions = expanded
+  const recentSessions = recentExpanded
     ? sortedSessions
     : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
 
@@ -94,6 +92,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const isActiveRoute = (path: string) => location.pathname === path
 
   const navItems = [
+    {
+      path: '/chats',
+      label: t('sidebar.chats'),
+      icon: ChatBubbleIcon,
+    },
     {
       path: '/agents',
       label: t('sidebar.agents'),
@@ -181,7 +184,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               </div>
               <div className="group relative flex items-center justify-center">
                 <IconButton
-                  onClick={() => {}}
+                  onClick={() => openPanel(true)}
                   ariaLabel={t('chat.search')}
                   variant="nav"
                   className="flex items-center justify-center h-8 w-8"
@@ -208,7 +211,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {}}
+                onClick={() => openPanel(true)}
                 aria-label={t('chat.search')}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
@@ -225,6 +228,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           {collapsed ? (
             <Popover
               block
+              tooltip={t('chat.recent')}
               trigger={
                 <div className="group relative flex items-center justify-center">
                   <IconButton
@@ -232,17 +236,17 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     variant="nav"
                     className="flex items-center justify-center h-8 w-8"
                   >
-                    <ChatBubbleIcon size={16} />
+                    <HistoryIcon size={16} />
                   </IconButton>
                   <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
                     {t('chat.recent')}
                   </span>
                 </div>
               }
-              popoverWidth={200}
-              popoverHeight={250}
+              popoverWidth={220}
+              popoverHeight={280}
             >
-              <div className="pb-2 mb-2">
+              <div className="pb-2 mb-2 border-b border-border">
                 <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
                   {t('chat.recentChats')}
                 </p>
@@ -252,7 +256,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
                   <>
-                    {visibleSessions.map((s) => (
+                    {recentSessions.map((s) => (
                       <button
                         key={s.key}
                         type="button"
@@ -266,18 +270,21 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         <span className="truncate">{s.name || s.key}</span>
                       </button>
                     ))}
-                    {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
-                      <button
-                        type="button"
-                        onClick={() => setExpanded((v) => !v)}
-                        className="text-xs text-brand-rosa hover:text-brand-rosa/80 px-3 py-1 mt-1 border-t border-border pt-2"
-                      >
-                        {expanded ? t('chat.showLess') : t('chat.showMore')} ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
-                      </button>
-                    )}
                   </>
                 )}
               </div>
+              {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
+                <button
+                  type="button"
+                  onClick={() => setRecentExpanded((v) => !v)}
+                  className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                >
+                  <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
+                  {!recentExpanded && (
+                    <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
+                  )}
+                </button>
+              )}
             </Popover>
           ) : (
             <>
@@ -297,13 +304,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     </button>
                   }
                   popoverWidth={200}
-                  popoverHeight={110}
+                  popoverHeight={60}
                 >
                   <div className="flex flex-col gap-1">
-                    <button type="button" className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors">
-                      <FilterIcon size={14} />
-                      <span>{t('chat.filterChats')}</span>
-                    </button>
                     <button type="button" className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors">
                       <TrashIcon size={14} />
                       <span>{t('chat.deleteAllChats')}</span>
@@ -314,7 +317,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               {sortedSessions.length > 0 && (
                 <>
                   <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
-                    {visibleSessions.map((s) => (
+                    {recentSessions.map((s) => (
                       <SessionItem
                         key={s.key}
                         sessionKey={s.key}
@@ -331,20 +334,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
                     <button
                       type="button"
-                      onClick={() => setExpanded((v) => !v)}
+                      onClick={() => setRecentExpanded((v) => !v)}
                       className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
                     >
-                      <svg
-                        className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                      <span>{expanded ? t('chat.showLess') : t('chat.showMore')}</span>
-                      {!expanded && (
+                      <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
+                      {!recentExpanded && (
                         <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
                       )}
                     </button>
@@ -469,6 +463,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           </Popover>
         </div>
       </aside>
+
+      <QuickChatPanel
+        isOpen={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        initialFocusSearch={panelFocusSearch}
+      />
     </>
   )
 }

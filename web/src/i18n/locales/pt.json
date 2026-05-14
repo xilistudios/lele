@@ -66,7 +66,25 @@
     "organizeChats": "Organizar chats",
     "filterChats": "Filtrar chats",
     "deleteAllChats": "Excluir todos os chats",
-    "search": "Pesquisar"
+    "search": "Pesquisar",
+    "allChats": "Todos os chats",
+    "searchChats": "Buscar chats...",
+    "sortBy": "Ordenar por",
+    "sortRecent": "Recentes",
+    "sortName": "Nome",
+    "sortDate": "Data",
+    "today": "Hoje",
+    "yesterday": "Ontem",
+    "thisWeek": "Esta semana",
+    "thisMonth": "Este mês",
+    "justNow": "Agora mesmo",
+    "minutesAgo": "Há {{count}} min",
+    "hoursAgo": "Há {{count}} h",
+    "unnamedSession": "Chat sem nome ({{key}})",
+    "rename": "Renomear",
+    "closePanel": "Fechar painel",
+    "manageChats": "Gerenciar chats",
+    "totalChats": "{{count}} chats no total"
   },
   "connection": {
     "connected": "Conectado",
@@ -432,6 +450,7 @@
     "genericAction": "Ação"
   },
   "sidebar": {
+    "chats": "Chats",
     "agents": "Agentes",
     "providers": "Provedores",
     "skills": "Habilidades",

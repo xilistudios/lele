@@ -66,7 +66,25 @@
     "organizeChats": "Organize chats",
     "filterChats": "Filter chats",
     "deleteAllChats": "Delete all chats",
-    "search": "Search"
+    "search": "Search",
+    "allChats": "All chats",
+    "searchChats": "Search chats...",
+    "sortBy": "Sort by",
+    "sortRecent": "Recents",
+    "sortName": "Name",
+    "sortDate": "Date",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "thisWeek": "This week",
+    "thisMonth": "This month",
+    "justNow": "Just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "unnamedSession": "Unnamed chat ({{key}})",
+    "rename": "Rename",
+    "closePanel": "Close panel",
+    "manageChats": "Manage chats",
+    "totalChats": "{{count}} chats total"
   },
   "connection": {
     "connected": "Connected",
@@ -445,6 +463,7 @@
     "genericAction": "Action"
   },
   "sidebar": {
+    "chats": "Chats",
     "agents": "Agents",
     "providers": "Providers",
     "skills": "Skills",
