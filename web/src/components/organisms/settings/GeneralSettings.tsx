@@ -1,3 +1,4 @@
+import { useTheme } from '../../../contexts/ThemeContext'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
@@ -14,6 +15,7 @@ import {
 } from '../../molecules'
 
 export function GeneralSettings() {
+  const { theme, setTheme } = useTheme()
   const {
     draftConfig,
     dirtyPaths,
@@ -209,6 +211,20 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.display')}>
+        <SettingsField
+          label={t('settings.fields.theme')}
+          path="display.theme"
+        >
+          <SelectInput
+            id="display.theme"
+            value={theme}
+            onChange={(v) => setTheme(v as 'dark' | 'light')}
+            options={[
+              { value: 'dark', label: t('settings.theme.dark') },
+              { value: 'light', label: t('settings.theme.light') },
+            ]}
+          />
+        </SettingsField>
         <SettingsField
           label={t('settings.fields.language')}
           path="display.language"

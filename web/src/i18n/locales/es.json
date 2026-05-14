@@ -138,6 +138,7 @@
       "gatewayPort": "Puerto",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restringir al workspace",
+      "theme": "Tema",
       "language": "Idioma",
       "provider": "Proveedor por defecto",
       "model": "Modelo por defecto",
@@ -282,6 +283,10 @@
       "agentsList": "Crea y gestiona agentes IA con configuraciones personalizadas",
       "agentSubagentsEnabled": "Permitir que este agente cree subagentes para tareas delegadas",
       "agentSubagentsAllowed": "Agentes que este agente puede crear. Use '*' para permitir todos."
+    },
+    "theme": {
+      "dark": "Oscuro",
+      "light": "Claro"
     },
     "options": {
       "daily": "Diario",

@@ -143,6 +143,7 @@
       "gatewayPort": "Port",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restrict to workspace",
+      "theme": "Theme",
       "language": "Language",
       "provider": "Default provider",
       "model": "Default model",
@@ -293,6 +294,10 @@
       "agentsList": "Create and manage AI agents with custom configurations",
       "agentSubagentsEnabled": "Allow this agent to spawn subagents for delegated tasks",
       "agentSubagentsAllowed": "Agents that this agent can spawn. Use '*' to allow all."
+    },
+    "theme": {
+      "dark": "Dark",
+      "light": "Light"
     },
     "options": {
       "daily": "Daily",

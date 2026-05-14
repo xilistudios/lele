@@ -71,7 +71,7 @@ func NewHTTPClient(proxy string) *http.Client {
 // internal field that would be unknown to third-party endpoints.
 type openaiMessage struct {
 	Role             string     `json:"role"`
-	Content          string     `json:"content"`
+	Content          any        `json:"content"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
@@ -79,12 +79,18 @@ type openaiMessage struct {
 
 // SerializeMessages converts internal Message structs to the OpenAI wire format.
 //   - Strips SystemParts (unknown to third-party endpoints)
+//   - Converts messages with ContentParts to multipart content (text + image_url)
 //   - Converts messages with Media to multipart content format (text + image_url parts)
+//   - If both ContentParts and Media are present, merges them (ContentParts first)
 //   - Preserves ToolCallID, ToolCalls, and ReasoningContent for all messages
 func SerializeMessages(messages []Message) []any {
 	out := make([]any, 0, len(messages))
 	for _, m := range messages {
-		if len(m.Media) == 0 {
+		// Determine if we need multipart content
+		hasContentParts := len(m.ContentParts) > 0
+		hasMedia := len(m.Media) > 0
+
+		if !hasContentParts && !hasMedia {
 			out = append(out, openaiMessage{
 				Role:             m.Role,
 				Content:          m.Content,
@@ -95,14 +101,45 @@ func SerializeMessages(messages []Message) []any {
 			continue
 		}
 
-		// Multipart content format for messages with media
-		parts := make([]map[string]any, 0, 1+len(m.Media))
+		// Multipart content format for messages with images/media
+		parts := make([]map[string]any, 0, 1+len(m.ContentParts)+len(m.Media))
+
+		// First, add ContentParts if present (from read_image tool etc.)
+		for _, part := range m.ContentParts {
+			switch part.Type {
+			case "text":
+				if strings.TrimSpace(part.Text) != "" {
+					parts = append(parts, map[string]any{
+						"type": "text",
+						"text": part.Text,
+					})
+				}
+			case "image_url":
+				if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+					continue
+				}
+				imageURL := map[string]any{"url": part.ImageURL.URL}
+				if part.ImageURL.Detail != "" {
+					imageURL["detail"] = part.ImageURL.Detail
+				}
+				parts = append(parts, map[string]any{
+					"type":     "image_url",
+					"image_url": imageURL,
+				})
+			case "input_audio":
+				// Input audio is only available via Media path
+			}
+		}
+
+		// Then, add text content if present (and not already added via ContentParts)
 		if m.Content != "" {
 			parts = append(parts, map[string]any{
 				"type": "text",
 				"text": m.Content,
 			})
 		}
+
+		// Then, add Media if present (from channel attachments)
 		for _, mediaURL := range m.Media {
 			if strings.HasPrefix(mediaURL, "data:image/") {
 				parts = append(parts, map[string]any{
@@ -135,7 +172,10 @@ func SerializeMessages(messages []Message) []any {
 		if len(m.ToolCalls) > 0 {
 			msg["tool_calls"] = m.ToolCalls
 		}
-		if m.ReasoningContent != "" {
+		if m.Role == "assistant" {
+			// Always include reasoning_content for assistant messages.
+			// Some providers (e.g. Moonshot AI) require it when reasoning/thinking is
+			// enabled, even if the content is empty. Missing the field causes 400 errors.
 			msg["reasoning_content"] = m.ReasoningContent
 		}
 		out = append(out, msg)
