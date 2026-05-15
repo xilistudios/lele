@@ -416,6 +416,19 @@
     "disabled": "Deshabilitado",
     "status": "Estado"
   },
+  "canvas": {
+    "code": "Código",
+    "preview": "Preview",
+    "viewCode": "Ver código",
+    "viewPreview": "Ver preview",
+    "copy": "Copiar",
+    "copyCode": "Copiar código",
+    "copied": "Copiado",
+    "loadingPreview": "Cargando preview…",
+    "renderError": "Error al renderizar preview",
+    "noContent": "Sin contenido para previsualizar",
+    "previewTitle": "Vista previa HTML"
+  },
   "toolCalls": {
     "action": "Acción",
     "result": "Resultado",

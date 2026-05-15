@@ -429,6 +429,19 @@
     "expand": "Expand",
     "collapse": "Collapse"
   },
+  "canvas": {
+    "code": "Code",
+    "preview": "Preview",
+    "viewCode": "View code",
+    "viewPreview": "View preview",
+    "copy": "Copy",
+    "copyCode": "Copy code",
+    "copied": "Copied",
+    "loadingPreview": "Loading preview…",
+    "renderError": "Failed to render preview",
+    "noContent": "No content to preview",
+    "previewTitle": "HTML preview"
+  },
   "toolCalls": {
     "action": "Action",
     "result": "Result",

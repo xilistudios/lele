@@ -1,5 +1,5 @@
-import { useTheme } from '../../../contexts/ThemeContext'
 import { useSettings } from '../../../contexts/SettingsContext'
+import { useTheme } from '../../../contexts/ThemeContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
 import i18n from '../../../i18n'
@@ -211,10 +211,7 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.display')}>
-        <SettingsField
-          label={t('settings.fields.theme')}
-          path="display.theme"
-        >
+        <SettingsField label={t('settings.fields.theme')} path="display.theme">
           <SelectInput
             id="display.theme"
             value={theme}

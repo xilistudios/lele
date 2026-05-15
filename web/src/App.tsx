@@ -16,9 +16,9 @@ import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
-import { wsDebug } from './lib/debug'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
+import { wsDebug } from './lib/debug'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
@@ -130,7 +130,7 @@ function ChatRoute() {
       const sessionKey = createSession()
       wsDebug('[ChatRoute] createSession returned:', sessionKey)
       if (sessionKey) {
-        wsDebug('[ChatRoute] Navigating to /chat/' + sessionKey)
+        wsDebug(`[ChatRoute] Navigating to /chat/${sessionKey}`)
         navigate(`/chat/${sessionKey}`, { replace: true })
         return
       }

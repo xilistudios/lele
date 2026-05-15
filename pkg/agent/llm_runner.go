@@ -405,9 +405,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Phase 1: Execute all tools and collect results
 		type toolExecResult struct {
-			tc   providers.ToolCall
-			res  *tools.ToolResult
-			err  error
+			tc  providers.ToolCall
+			res *tools.ToolResult
+			err error
 		}
 		var execResults []toolExecResult
 		for _, tc := range response.ToolCalls {

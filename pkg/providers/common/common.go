@@ -123,7 +123,7 @@ func SerializeMessages(messages []Message) []any {
 					imageURL["detail"] = part.ImageURL.Detail
 				}
 				parts = append(parts, map[string]any{
-					"type":     "image_url",
+					"type":      "image_url",
 					"image_url": imageURL,
 				})
 			case "input_audio":

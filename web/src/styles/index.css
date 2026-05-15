@@ -127,7 +127,7 @@
 }
 
 /* Light mode */
-[data-theme='light'] {
+[data-theme="light"] {
   color-scheme: light;
 
   /* 60% - Fondos claros */

@@ -286,21 +286,13 @@ export function ToolCallDisplay({
 
           {/* Subagent nav */}
           {subagentSessionKey && toolStatus !== 'executing' && onNavigateToSession && (
-            <span
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               aria-label={t('toolCalls.openSubagent')}
               className="ml-auto p-0.5 rounded-md hover:bg-background-secondary transition-colors cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation()
                 onNavigateToSession(subagentSessionKey)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  onNavigateToSession(subagentSessionKey)
-                }
               }}
             >
               <svg
@@ -314,7 +306,7 @@ export function ToolCallDisplay({
                 <path d="M5 12h14" />
                 <path d="m12 5 7 7-7 7" />
               </svg>
-            </span>
+            </button>
           )}
 
           {/* Chevron */}

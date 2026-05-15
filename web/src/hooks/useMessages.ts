@@ -1,6 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { wsDebug } from '../lib/debug'
 import type { ApiClient } from '../lib/api'
 import {
   buildToolCallMap,
@@ -14,8 +13,13 @@ import {
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
+import { wsDebug } from '../lib/debug'
 import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
-import { chatHistoryQueryKey, type HistoryMessage, updateChatHistoryFromRaw } from './useChatHistory'
+import {
+  type HistoryMessage,
+  chatHistoryQueryKey,
+  updateChatHistoryFromRaw,
+} from './useChatHistory'
 
 export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
@@ -475,7 +479,9 @@ export function useMessages(
               )
               if (existingIdx >= 0) {
                 return current.map((m, i) =>
-                  i === existingIdx ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const } : m,
+                  i === existingIdx
+                    ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const }
+                    : m,
                 )
               }
             }

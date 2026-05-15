@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { wsDebug } from '../lib/debug'
 import type { ApiClient } from '../lib/api'
+import { wsDebug } from '../lib/debug'
 import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
 import type {
   Agent,
@@ -67,7 +67,6 @@ export function useAppLogic(
     token,
     messagesHook.streamingMessages,
     parentSessionKey ?? undefined,
-    messagesHook.streamingMessages.some((m) => m.streaming),
   )
 
   const wsStatusRef = useRef(wsStatus)
