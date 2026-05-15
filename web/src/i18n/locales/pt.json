@@ -138,6 +138,7 @@
       "gatewayPort": "Porta",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restringir ao workspace",
+      "theme": "Tema",
       "language": "Idioma",
       "provider": "Provedor padrão",
       "model": "Modelo padrão",
@@ -283,6 +284,10 @@
       "agentSubagentsEnabled": "Permitir que este agente crie subagentes para tarefas delegadas",
       "agentSubagentsAllowed": "Agentes que este agente pode criar. Use '*' para permitir todos."
     },
+    "theme": {
+      "dark": "Escuro",
+      "light": "Claro"
+    },
     "options": {
       "daily": "Diário",
       "weekly": "Semanal",
@@ -410,6 +415,19 @@
     "enabled": "Habilitado",
     "disabled": "Desabilitado",
     "status": "Estado"
+  },
+  "canvas": {
+    "code": "Código",
+    "preview": "Pré-visualização",
+    "viewCode": "Ver código",
+    "viewPreview": "Ver pré-visualização",
+    "copy": "Copiar",
+    "copyCode": "Copiar código",
+    "copied": "Copiado",
+    "loadingPreview": "Carregando pré-visualização…",
+    "renderError": "Erro ao renderizar pré-visualização",
+    "noContent": "Sem conteúdo para pré-visualizar",
+    "previewTitle": "Pré-visualização HTML"
   },
   "toolCalls": {
     "action": "Ação",

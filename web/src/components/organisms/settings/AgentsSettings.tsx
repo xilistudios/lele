@@ -43,9 +43,7 @@ export function AgentsSettings() {
       <SettingsSection title={t('settings.sections.agentsList')}>
         {/* Header with Add button */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-text-secondary">
-            {t('settings.descriptions.agentsList')}
-          </p>
+          <p className="text-sm text-text-secondary">{t('settings.descriptions.agentsList')}</p>
           <button
             type="button"
             onClick={() => setShowWizard(true)}

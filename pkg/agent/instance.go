@@ -189,9 +189,9 @@ func NewAgentInstance(
 	// toolsRegistry.Register(tools.NewApplyTool(workspace, restrict))        // DEPRECATED
 	toolsRegistry.Register(tools.NewPatchTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewSequentialReplaceTool(workspace, restrict))
-	if getSupportsImages(cfg, model, providerName) {
-		toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
-	}
+	// Always register read_image tool so it's available when the user switches to a vision model.
+	// It will be filtered out from tool definitions if the current session model doesn't support vision.
+	toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
 
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)

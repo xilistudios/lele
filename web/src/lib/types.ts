@@ -679,7 +679,13 @@ export type ClientEvent =
   | { event: 'tool.executing'; data: ToolStatus & { tool_call_id?: string } }
   | {
       event: 'tool.result' | 'subagent.result'
-      data: { session_key?: string; tool: string; result: string; subagent_session_key?: string; tool_call_id?: string }
+      data: {
+        session_key?: string
+        tool: string
+        result: string
+        subagent_session_key?: string
+        tool_call_id?: string
+      }
     }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }

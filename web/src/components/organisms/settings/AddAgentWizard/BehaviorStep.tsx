@@ -6,10 +6,7 @@ type Props = {
   setTemperature: (value: number) => void
 }
 
-export function BehaviorStep({
-  temperature,
-  setTemperature,
-}: Props) {
+export function BehaviorStep({ temperature, setTemperature }: Props) {
   const { t } = useSettings()
 
   const getTemperatureInfo = (temp: number) => {
@@ -81,7 +78,6 @@ export function BehaviorStep({
       </div>
 
       {/* Other numeric settings in a grid */}
-
     </div>
   )
 }

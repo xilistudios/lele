@@ -1,5 +1,6 @@
 export { AddItemInput } from './AddItemInput'
 export { BooleanInput } from './BooleanInput'
+export { CanvasBlock } from './CanvasBlock'
 export { KeyValueEditor } from './KeyValueEditor'
 export { NamedItemCard } from './NamedItemCard'
 export { NumberInput } from './NumberInput'

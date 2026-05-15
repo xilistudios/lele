@@ -104,11 +104,11 @@ export function SearchableSelect({
         const windowHeight = window.innerHeight
         const spaceBelow = windowHeight - rect.bottom
         const popupHeight = 256 // max-h-64
-        
+
         // If not enough space below, open upwards
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
-      
+
       setIsOpen(true)
       window.requestAnimationFrame(() => searchRef.current?.focus())
     })
@@ -166,14 +166,14 @@ export function SearchableSelect({
   // Recalculate direction on window resize
   useEffect(() => {
     if (!isMounted) return
-    
+
     const handleResize = () => {
       if (rootRef.current) {
         const rect = rootRef.current.getBoundingClientRect()
         const windowHeight = window.innerHeight
         const spaceBelow = windowHeight - rect.bottom
         const popupHeight = 256
-        
+
         setIsOpenUp(spaceBelow < popupHeight + 20)
       }
     }
@@ -282,7 +282,9 @@ export function SearchableSelect({
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
-                            <span className="truncate text-[11px] leading-relaxed">{option.label}</span>
+                            <span className="truncate text-[11px] leading-relaxed">
+                              {option.label}
+                            </span>
                             {active ? (
                               <span className="ml-3 text-xs text-state-success">●</span>
                             ) : null}

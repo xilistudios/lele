@@ -112,7 +112,9 @@ Your workspace is at: %s
 
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
-3. **Memory** - When remembering something, write to %s/MEMORY.md`,
+3. **Memory** - When remembering something, write to %s/MEMORY.md
+
+4. **HTML/SVG output** - When generating HTML or SVG content for the user to view, always wrap it in a markdown code block with the appropriate language tag (e.g. html or svg).`,
 		rt, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 

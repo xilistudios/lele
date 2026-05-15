@@ -143,6 +143,7 @@
       "gatewayPort": "Port",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restrict to workspace",
+      "theme": "Theme",
       "language": "Language",
       "provider": "Default provider",
       "model": "Default model",
@@ -294,6 +295,10 @@
       "agentSubagentsEnabled": "Allow this agent to spawn subagents for delegated tasks",
       "agentSubagentsAllowed": "Agents that this agent can spawn. Use '*' to allow all."
     },
+    "theme": {
+      "dark": "Dark",
+      "light": "Light"
+    },
     "options": {
       "daily": "Daily",
       "weekly": "Weekly",
@@ -423,6 +428,19 @@
     "status": "Status",
     "expand": "Expand",
     "collapse": "Collapse"
+  },
+  "canvas": {
+    "code": "Code",
+    "preview": "Preview",
+    "viewCode": "View code",
+    "viewPreview": "View preview",
+    "copy": "Copy",
+    "copyCode": "Copy code",
+    "copied": "Copied",
+    "loadingPreview": "Loading preview…",
+    "renderError": "Failed to render preview",
+    "noContent": "No content to preview",
+    "previewTitle": "HTML preview"
   },
   "toolCalls": {
     "action": "Action",

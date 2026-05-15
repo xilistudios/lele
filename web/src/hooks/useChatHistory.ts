@@ -52,10 +52,14 @@ function mergeMessages(
     if (msg.role === 'tool' && msg.toolCallId && streamingToolCallIds.has(msg.toolCallId)) {
       continue
     }
-    if (msg.role === 'tool' && !msg.toolCallId && msg.sessionKey && streamingToolSessions.has(msg.sessionKey)) {
+    if (
+      msg.role === 'tool' &&
+      !msg.toolCallId &&
+      msg.sessionKey &&
+      streamingToolSessions.has(msg.sessionKey)
+    ) {
       const hasStreamingTool = streamingMessages.some(
-        (sm) =>
-          sm.role === 'tool' && sm.sessionKey === msg.sessionKey,
+        (sm) => sm.role === 'tool' && sm.sessionKey === msg.sessionKey,
       )
       if (hasStreamingTool) {
         continue
@@ -96,14 +100,11 @@ export function useChatHistory(
   token: string | null,
   streamingMessages: ChatMessage[],
   parentSessionKey?: string,
-  isStreaming?: boolean,
 ) {
   const queryClient = useQueryClient()
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const isLoadingMoreRef = useRef(false)
-
-  const shouldPausePolling = isStreaming ?? false
 
   const query = useQuery({
     queryKey: parentSessionKey
@@ -145,9 +146,7 @@ export function useChatHistory(
         const newMessageIds = new Set(newMessages.map((m) => m.id))
         // Keep cached messages that are older than the oldest new message
         // (i.e., messages not present in the latest batch)
-        const olderCachedMessages = cachedData.messages.filter(
-          (m) => !newMessageIds.has(m.id),
-        )
+        const olderCachedMessages = cachedData.messages.filter((m) => !newMessageIds.has(m.id))
 
         // Also merge rawMessages preserving order
         const newRawIds = new Set(history.messages.map((m: { id: string }) => m.id))
@@ -177,7 +176,7 @@ export function useChatHistory(
       token !== null &&
       !(sessionKey.startsWith('subagent:') && !parentSessionKey),
     staleTime: 5_000,
-    refetchInterval: shouldPausePolling ? false : POLLING_INTERVAL,
+    refetchInterval: POLLING_INTERVAL,
     refetchOnWindowFocus: false,
     refetchIntervalInBackground: true,
     retry: false,

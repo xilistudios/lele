@@ -315,6 +315,33 @@ func convertMessages(messages []Message) ([]types.Message, []types.SystemContent
 func buildUserContent(msg Message) []types.ContentBlock {
 	var content []types.ContentBlock
 
+	// If the message has ContentParts (from read_image tool), use those first
+	if len(msg.ContentParts) > 0 {
+		for _, part := range msg.ContentParts {
+			switch part.Type {
+			case "text":
+				if strings.TrimSpace(part.Text) != "" {
+					content = append(content, &types.ContentBlockMemberText{
+						Value: part.Text,
+					})
+				}
+			case "image_url":
+				if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+					continue
+				}
+				blocks := dataURLToBedrockImages(part.ImageURL.URL)
+				content = append(content, blocks...)
+			}
+		}
+
+		// Bedrock requires at least one content block
+		if len(content) == 0 {
+			content = append(content, &types.ContentBlockMemberText{Value: ""})
+		}
+		return content
+	}
+
+	// Fallback to legacy text + Media field (from channel attachments)
 	// Add text content
 	if msg.Content != "" {
 		content = append(content, &types.ContentBlockMemberText{
@@ -325,67 +352,8 @@ func buildUserContent(msg Message) []types.ContentBlock {
 	// Add images from Media field
 	for _, mediaURL := range msg.Media {
 		if strings.HasPrefix(mediaURL, "data:image/") {
-			// Parse data URL: data:image/jpeg;base64,<data>
-			parts := strings.SplitN(mediaURL, ",", 2)
-			if len(parts) != 2 {
-				continue
-			}
-
-			// Extract media type from "data:image/jpeg;base64"
-			mediaType := ""
-			header := parts[0]
-			if idx := strings.Index(header, "/"); idx != -1 {
-				end := strings.Index(header[idx:], ";")
-				if end == -1 {
-					end = len(header) - idx
-				}
-				mediaType = header[idx+1 : idx+end]
-			}
-
-			// Verify this is base64 encoded
-			if !strings.Contains(header, ";base64") {
-				continue // Skip non-base64 encoded data
-			}
-
-			// Map media type to Bedrock format
-			var format types.ImageFormat
-			switch mediaType {
-			case "jpeg", "jpg":
-				format = types.ImageFormatJpeg
-			case "png":
-				format = types.ImageFormatPng
-			case "gif":
-				format = types.ImageFormatGif
-			case "webp":
-				format = types.ImageFormatWebp
-			default:
-				continue // Skip unsupported formats
-			}
-
-			// Check size before decoding to prevent excessive memory allocation
-			// Bedrock has a ~20MB request limit; cap decoded images at 10MB
-			const maxImageSize = 10 * 1024 * 1024
-			decodedLen := base64.StdEncoding.DecodedLen(len(parts[1]))
-			if decodedLen > maxImageSize {
-				log.Printf("bedrock: skipping image exceeding size limit (%d bytes > %d)", decodedLen, maxImageSize)
-				continue
-			}
-
-			// Decode base64 data
-			imageData, err := base64.StdEncoding.DecodeString(parts[1])
-			if err != nil {
-				log.Printf("bedrock: failed to decode base64 image data: %v", err)
-				continue
-			}
-
-			content = append(content, &types.ContentBlockMemberImage{
-				Value: types.ImageBlock{
-					Format: format,
-					Source: &types.ImageSourceMemberBytes{
-						Value: imageData,
-					},
-				},
-			})
+			blocks := dataURLToBedrockImages(mediaURL)
+			content = append(content, blocks...)
 		}
 	}
 
@@ -395,6 +363,72 @@ func buildUserContent(msg Message) []types.ContentBlock {
 	}
 
 	return content
+}
+
+// dataURLToBedrockImages parses a data:image/... URL and returns Bedrock image content blocks.
+func dataURLToBedrockImages(dataURL string) []types.ContentBlock {
+	parts := strings.SplitN(dataURL, ",", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+
+	// Extract media type from "data:image/jpeg;base64"
+	mediaType := ""
+	header := parts[0]
+	if idx := strings.Index(header, "/"); idx != -1 {
+		end := strings.Index(header[idx:], ";")
+		if end == -1 {
+			end = len(header) - idx
+		}
+		mediaType = header[idx+1 : idx+end]
+	}
+
+	// Verify this is base64 encoded
+	if !strings.Contains(header, ";base64") {
+		return nil // Skip non-base64 encoded data
+	}
+
+	// Map media type to Bedrock format
+	var format types.ImageFormat
+	switch mediaType {
+	case "jpeg", "jpg":
+		format = types.ImageFormatJpeg
+	case "png":
+		format = types.ImageFormatPng
+	case "gif":
+		format = types.ImageFormatGif
+	case "webp":
+		format = types.ImageFormatWebp
+	default:
+		return nil // Skip unsupported formats
+	}
+
+	// Check size before decoding to prevent excessive memory allocation
+	// Bedrock has a ~20MB request limit; cap decoded images at 10MB
+	const maxImageSize = 10 * 1024 * 1024
+	decodedLen := base64.StdEncoding.DecodedLen(len(parts[1]))
+	if decodedLen > maxImageSize {
+		log.Printf("bedrock: skipping image exceeding size limit (%d bytes > %d)", decodedLen, maxImageSize)
+		return nil
+	}
+
+	// Decode base64 data
+	imageData, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		log.Printf("bedrock: failed to decode base64 image data: %v", err)
+		return nil
+	}
+
+	return []types.ContentBlock{
+		&types.ContentBlockMemberImage{
+			Value: types.ImageBlock{
+				Format: format,
+				Source: &types.ImageSourceMemberBytes{
+					Value: imageData,
+				},
+			},
+		},
+	}
 }
 
 // buildAssistantContent builds Bedrock content blocks for an assistant message.

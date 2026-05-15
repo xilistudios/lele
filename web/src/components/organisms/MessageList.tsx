@@ -59,6 +59,7 @@ export function MessageList() {
   }, [hasMore, loadMore])
 
   // Restore scroll position after loading older messages using sentinel
+  // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length change triggers scroll restore
   useEffect(() => {
     if (!isLoadingMore && isLoadingMoreRef.current) {
       isLoadingMoreRef.current = false
@@ -95,7 +96,7 @@ export function MessageList() {
       }
       shouldScrollToBottomRef.current = false
     }
-  }, [messages])
+  }, [])
 
   // Cleanup debounce timer
   useEffect(() => {

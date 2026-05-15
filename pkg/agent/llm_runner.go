@@ -16,6 +16,7 @@ import (
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -216,6 +217,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
+		// Filter out read_image tool if the current model doesn't support vision
+		modelHasVision := getSupportsImages(lr.al.cfg(), model, extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider))
+		if !modelHasVision {
+			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
+			for _, def := range providerToolDefs {
+				if def.Function.Name != "read_image" {
+					filtered = append(filtered, def)
+				}
+			}
+			providerToolDefs = filtered
+		}
+
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
@@ -389,6 +402,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Execute tool calls
 		executor := newToolExecutor(lr.al)
+
+		// Phase 1: Execute all tools and collect results
+		type toolExecResult struct {
+			tc  providers.ToolCall
+			res *tools.ToolResult
+			err error
+		}
+		var execResults []toolExecResult
 		for _, tc := range response.ToolCalls {
 			toolResult, execErr := executor.Execute(toolExecOptions{
 				ctx:          ctx,
@@ -405,23 +426,33 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				return "", iteration, execErr
 			}
 
-			// Build and save tool result message
-			contentForLLM := buildToolResultContent(toolResult)
+			execResults = append(execResults, toolExecResult{tc: tc, res: toolResult})
+		}
+
+		// Phase 2: Append all tool result messages (role: "tool") in order
+		var allContextMsgs []providers.Message
+		for _, er := range execResults {
+			contentForLLM := buildToolResultContent(er.res)
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,
-				ToolCallID: tc.ID,
+				ToolCallID: er.tc.ID,
 			}
 			messages = append(messages, toolResultMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 
-			// Add context messages if present
-			if len(toolResult.ContextMessages) > 0 {
-				messages = append(messages, toolResult.ContextMessages...)
-				for _, contextMsg := range toolResult.ContextMessages {
-					agent.Sessions.AddFullMessage(opts.SessionKey, contextMsg)
-				}
+			// Collect context messages for phase 3
+			if len(er.res.ContextMessages) > 0 {
+				allContextMsgs = append(allContextMsgs, er.res.ContextMessages...)
 			}
+		}
+
+		// Phase 3: Append all context messages (role: "user") after all tool messages
+		// This ensures tool messages are contiguous, satisfying the API requirement
+		// that all tool responses follow immediately after the assistant's tool_calls.
+		for _, ctxMsg := range allContextMsgs {
+			messages = append(messages, ctxMsg)
+			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
 		}
 	}
 
