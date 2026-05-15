@@ -3,13 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
+    <meta name="theme-color" id="theme-color-meta" content="#0f1115" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Lele Client</title>
+    <script>
+      // Apply stored theme before first paint to prevent flash
+      (function() {
+        try {
+          var theme = localStorage.getItem('lele-theme');
+          if (theme === 'dark' || theme === 'light') {
+            document.documentElement.setAttribute('data-theme', theme);
+            return;
+          }
+        } catch(e) {}
+        // Fall back to system preference
+        var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+        document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
+      })();
+    </script>
   </head>
-  <body class="bg-slate-950 text-slate-100">
+  <body class="bg-background-primary text-text-primary">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

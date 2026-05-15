@@ -121,9 +121,9 @@ export function AgentFilesPage() {
     isDirty || Object.values(dirtyFilesRef.current).some((v) => v !== null && v !== undefined)
 
   const btnCls = 'rounded px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
-  const btnPrimary = `${btnCls} bg-blue-600 text-white hover:bg-blue-500`
-  const btnSecondary = `${btnCls} bg-[#2a2a2a] text-[#888] hover:bg-[#333]`
-  const btnDanger = `${btnCls} bg-red-800/30 text-red-400 hover:bg-red-800/50`
+  const btnPrimary = `${btnCls} bg-cta-primary text-text-on-accent hover:bg-cta-hover`
+  const btnSecondary = `${btnCls} bg-surface-secondary text-text-secondary hover:bg-surface-hover`
+  const btnDanger = `${btnCls} bg-state-error-light text-state-error hover:bg-state-error/20`
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
@@ -141,7 +141,7 @@ export function AgentFilesPage() {
           </div>
         ) : error ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6">
-            <p className="text-sm text-red-400">{error}</p>
+            <p className="text-sm text-state-error">{error}</p>
             <button
               type="button"
               onClick={() => navigate('/settings/agents')}
@@ -153,12 +153,12 @@ export function AgentFilesPage() {
         ) : (
           <div className="flex flex-1 overflow-hidden">
             {/* File Tabs Sidebar */}
-            <div className="w-48 flex-shrink-0 border-r border-border-light bg-[#111] overflow-y-auto">
+            <div className="w-48 flex-shrink-0 border-r border-border-light bg-background-tertiary overflow-y-auto">
               <div className="p-3">
                 <button
                   type="button"
                   onClick={() => navigate('/settings/agents')}
-                  className="mb-3 text-xs text-[#666] hover:text-[#aaa] transition-colors flex items-center gap-1"
+                  className="mb-3 text-xs text-text-tertiary hover:text-text-primary transition-colors flex items-center gap-1"
                 >
                   <svg
                     width="12"
@@ -173,7 +173,7 @@ export function AgentFilesPage() {
                   </svg>
                   Agents
                 </button>
-                <p className="text-xs font-medium text-[#666] uppercase tracking-wider mb-2">
+                <p className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">
                   Context Files
                 </p>
               </div>
@@ -188,14 +188,14 @@ export function AgentFilesPage() {
                     onClick={() => handleFileSelect(f.name)}
                     className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                       activeFile === f.name
-                        ? 'bg-blue-600/20 text-blue-400 border-l-2 border-blue-500'
-                        : 'text-[#aaa] hover:bg-[#1a1a1a] border-l-2 border-transparent'
+                        ? 'bg-accent-subtle text-accent-primary border-l-2 border-accent-primary'
+                        : 'text-text-secondary hover:bg-surface-hover border-l-2 border-transparent'
                     }`}
                   >
                     <span className="truncate">{f.name}</span>
                     {fileDirty && (
                       <span
-                        className="ml-1 w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"
+                        className="ml-1 w-2 h-2 rounded-full bg-state-warning flex-shrink-0"
                         title="Modified"
                       />
                     )}
@@ -207,10 +207,10 @@ export function AgentFilesPage() {
             {/* Editor Area */}
             <div className="flex flex-1 flex-col overflow-hidden">
               {/* Toolbar */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border-light bg-[#0d0d0d]">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border-light bg-background-secondary">
                 <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-[#e0e0e0]">{activeFile}</span>
-                  {isDirty && <span className="text-xs text-amber-400">Modified</span>}
+                  <span className="text-sm font-medium text-text-primary">{activeFile}</span>
+                  {isDirty && <span className="text-xs text-state-warning">Modified</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   {isDirty && (
@@ -234,14 +234,14 @@ export function AgentFilesPage() {
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full h-full resize-none bg-[#0a0a0a] text-[#e0e0e0] font-mono text-sm p-4 leading-relaxed outline-none border-0 focus:ring-0 placeholder-[#333]"
+                  className="w-full h-full resize-none bg-background-primary text-text-primary font-mono text-sm p-4 leading-relaxed outline-none border-0 focus:ring-0 placeholder-text-tertiary"
                   placeholder="File content..."
                   spellCheck={false}
                 />
               </div>
 
               {/* Status Bar */}
-              <div className="flex items-center justify-between px-4 py-1.5 border-t border-border-light bg-[#0d0d0d] text-xs text-[#555]">
+              <div className="flex items-center justify-between px-4 py-1.5 border-t border-border-light bg-background-secondary text-xs text-text-tertiary">
                 <span>{content.length.toLocaleString()} chars</span>
                 <span>
                   {content.length === 0 ? 0 : content.split(/\n/).length.toLocaleString()} lines
@@ -253,8 +253,8 @@ export function AgentFilesPage() {
 
         {/* Global save bar if any file is dirty */}
         {hasAnyDirty && !loading && (
-          <div className="flex items-center justify-between px-4 py-2 border-t border-amber-800/30 bg-amber-900/10">
-            <span className="text-xs text-amber-400">You have unsaved changes</span>
+          <div className="flex items-center justify-between px-4 py-2 border-t border-state-warning/30 bg-state-warning-light">
+            <span className="text-xs text-state-warning">You have unsaved changes</span>
             <button
               type="button"
               onClick={handleSave}

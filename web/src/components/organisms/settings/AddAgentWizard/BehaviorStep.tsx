@@ -13,24 +13,24 @@ export function BehaviorStep({ temperature, setTemperature }: Props) {
     if (temp <= 0.3)
       return {
         label: t('settings.addAgentModal.tempPrecise'),
-        color: 'text-blue-400',
+        color: 'text-state-info',
         desc: t('settings.addAgentModal.tempPreciseDesc'),
       }
     if (temp <= 0.7)
       return {
         label: t('settings.addAgentModal.tempBalanced'),
-        color: 'text-green-400',
+        color: 'text-state-success',
         desc: t('settings.addAgentModal.tempBalancedDesc'),
       }
     if (temp <= 1.0)
       return {
         label: t('settings.addAgentModal.tempCreative'),
-        color: 'text-yellow-400',
+        color: 'text-state-warning',
         desc: t('settings.addAgentModal.tempCreativeDesc'),
       }
     return {
       label: t('settings.addAgentModal.tempVeryCreative'),
-      color: 'text-purple-400',
+      color: 'text-brand-morado',
       desc: t('settings.addAgentModal.tempVeryCreativeDesc'),
     }
   }
@@ -59,7 +59,7 @@ export function BehaviorStep({ temperature, setTemperature }: Props) {
 
         {/* Temperature gradient bar */}
         <div className="relative">
-          <div className="h-2 rounded-full bg-gradient-to-r from-blue-500 via-green-500 via-yellow-500 to-purple-500" />
+          <div className="h-2 rounded-full bg-gradient-to-r from-state-info via-state-success via-state-warning to-brand-morado" />
           <div
             className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-lg border-2 border-border transition-all duration-200 pointer-events-none"
             style={{ left: `${(temperature / 2) * 100}%`, transform: 'translate(-50%, -50%)' }}

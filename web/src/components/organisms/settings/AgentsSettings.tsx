@@ -47,7 +47,7 @@ export function AgentsSettings() {
           <button
             type="button"
             onClick={() => setShowWizard(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
+            className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200 shadow-sm hover:shadow-md"
           >
             <svg
               width="16"
@@ -68,7 +68,7 @@ export function AgentsSettings() {
         {/* Empty state */}
         {list.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-background-secondary/20">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-interaction-primary/20 to-brand-morado/20 flex items-center justify-center mb-4">
               {' '}
               <svg
                 width="32"
@@ -77,7 +77,7 @@ export function AgentsSettings() {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
-                className="text-blue-400"
+                className="text-interaction-primary"
               >
                 <title>Agent icon</title>
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -88,7 +88,7 @@ export function AgentsSettings() {
             <button
               type="button"
               onClick={() => setShowWizard(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200"
+              className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200"
             >
               {' '}
               <svg
@@ -138,7 +138,7 @@ export function AgentsSettings() {
                 title={
                   <div className="flex items-center gap-3">
                     {/* Agent avatar */}
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs text-white font-medium flex-shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
                       {agent.name
                         ? agent.name.charAt(0).toUpperCase()
                         : agent.id.charAt(0).toUpperCase()}

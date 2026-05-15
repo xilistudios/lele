@@ -130,12 +130,12 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const canAdd = canProceedStep1 && canProceedStep2
 
   const SELECT_CLS =
-    'w-full rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] focus:border-blue-500 focus:outline-none'
+    'w-full rounded border border-border bg-background-tertiary px-3 py-2 text-xs text-text-primary focus:border-interaction-primary focus:outline-none'
   const INPUT_CLS =
-    'w-full rounded border border-[#3a3a3a] bg-[#1a1a1a] px-3 py-2 text-xs text-[#e0e0e0] placeholder-[#555] focus:border-blue-500 focus:outline-none'
+    'w-full rounded border border-border bg-background-tertiary px-3 py-2 text-xs text-text-primary placeholder-text-tertiary focus:border-interaction-primary focus:outline-none'
   const BTN_CLS = 'rounded px-3 py-1.5 text-xs transition-colors'
-  const BTN_PRIMARY = `${BTN_CLS} bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50`
-  const BTN_SECONDARY = `${BTN_CLS} bg-[#2a2a2a] text-[#888] hover:bg-[#333]`
+  const BTN_PRIMARY = `${BTN_CLS} bg-interaction-primary text-text-on-accent hover:bg-interaction-hover disabled:opacity-50`
+  const BTN_SECONDARY = `${BTN_CLS} bg-surface-secondary text-text-secondary hover:bg-surface-hover`
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={t('settings.addProviderModal.title')}>
@@ -143,14 +143,14 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
         {[1, 2, 3].map((s) => (
           <div
             key={s}
-            className={`flex-1 h-1 rounded ${step >= s ? 'bg-blue-600' : 'bg-[#333]'}`}
+            className={`flex-1 h-1 rounded ${step >= s ? 'bg-interaction-primary' : 'bg-surface-tertiary'}`}
           />
         ))}
       </div>
 
       {step === 1 && (
         <div className="space-y-4">
-          <p className="text-xs text-[#888]">{t('settings.addProviderModal.stepType')}</p>
+          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepType')}</p>
           <select
             value={providerType}
             onChange={(e) => handleTypeChange(e.target.value)}
@@ -179,7 +179,7 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
 
       {step === 2 && (
         <div className="space-y-4">
-          <p className="text-xs text-[#888]">{t('settings.addProviderModal.stepName')}</p>
+          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepName')}</p>
           <input
             type="text"
             value={providerName}
@@ -187,16 +187,19 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
             placeholder={t('settings.addProviderModal.namePlaceholder')}
             className={INPUT_CLS}
           />
-          <p className="text-xs text-[#555]">{t('settings.addProviderModal.nameHint')}</p>
+          <p className="text-xs text-text-tertiary">{t('settings.addProviderModal.nameHint')}</p>
         </div>
       )}
 
       {step === 3 && (
         <div className="space-y-4">
-          <p className="text-xs text-[#888]">{t('settings.addProviderModal.stepConfig')}</p>
+          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepConfig')}</p>
           <div className="space-y-3">
             <div>
-              <label htmlFor="new-provider-api-key" className="mb-1 block text-xs text-[#888]">
+              <label
+                htmlFor="new-provider-api-key"
+                className="mb-1 block text-xs text-text-secondary"
+              >
                 {t('settings.fields.providerApiKey')}
               </label>
               <SecretInput
@@ -215,19 +218,28 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
               />
             </div>
             <div>
-              <label htmlFor="new-provider-api-base" className="mb-1 block text-xs text-[#888]">
+              <label
+                htmlFor="new-provider-api-base"
+                className="mb-1 block text-xs text-text-secondary"
+              >
                 {t('settings.fields.providerApiBase')}
               </label>
               <TextInput id="new-provider-api-base" value={apiBase} onChange={setApiBase} />
             </div>
             <div>
-              <label htmlFor="new-provider-proxy" className="mb-1 block text-xs text-[#888]">
+              <label
+                htmlFor="new-provider-proxy"
+                className="mb-1 block text-xs text-text-secondary"
+              >
                 {t('settings.fields.providerProxy')}
               </label>
               <TextInput id="new-provider-proxy" value={proxy} onChange={setProxy} />
             </div>
             <div>
-              <label htmlFor="new-provider-web-search" className="mb-1 block text-xs text-[#888]">
+              <label
+                htmlFor="new-provider-web-search"
+                className="mb-1 block text-xs text-text-secondary"
+              >
                 {t('settings.fields.providerWebSearch')}
               </label>
               <BooleanInput

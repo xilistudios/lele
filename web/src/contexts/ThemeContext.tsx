@@ -28,8 +28,18 @@ export function getStoredTheme(): Theme {
   return 'dark'
 }
 
+const THEME_META_COLORS: Record<Theme, string> = {
+  dark: '#0f1115',
+  light: '#f5f6f8',
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme)
+  // Update theme-color meta for browser chrome
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) {
+    meta.setAttribute('content', THEME_META_COLORS[theme])
+  }
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme)
   } catch {

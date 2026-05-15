@@ -33,7 +33,7 @@ export function ProvidersSettings() {
   }
 
   const BTN_CLS =
-    'rounded px-3 py-1.5 text-xs transition-colors bg-blue-600 text-white hover:bg-blue-500'
+    'rounded px-3 py-1.5 text-xs transition-colors bg-cta-primary text-text-on-accent hover:bg-cta-hover'
 
   return (
     <div className="space-y-6">
