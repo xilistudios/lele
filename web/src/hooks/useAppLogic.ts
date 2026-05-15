@@ -235,12 +235,26 @@ export function useAppLogic(
   )
 
   const handleApprove = useCallback(
-    (approved: boolean) => {
+    async (approved: boolean) => {
       if (!messagesHook.approvalRequest) return
-      const result = messagesHook.approveRequest(approved, messagesHook.approvalRequest.id)
-      wsSend('approve', result)
+      const { id: requestId, command } = messagesHook.approvalRequest
+      const sessionKey = sessionsHook.currentSessionKey
+
+      // Optimistic UI update: show feedback immediately
+      messagesHook.approveRequest(approved, requestId, command)
+
+      // Send via HTTP as primary method (persists in history)
+      if (sessionKey) {
+        api.approve(sessionKey, requestId, approved).catch((err) => {
+          console.warn('[Approve] HTTP failed, falling back to WS:', err)
+          wsSend('approve', { request_id: requestId, approved })
+        })
+      }
+
+      // Also send via WebSocket for redundancy and real-time notification
+      wsSend('approve', { request_id: requestId, approved })
     },
-    [messagesHook.approvalRequest, messagesHook.approveRequest, wsSend],
+    [messagesHook.approvalRequest, messagesHook.approveRequest, sessionsHook.currentSessionKey, api, wsSend],
   )
 
   const handleCancel = useCallback(() => {
@@ -425,6 +439,7 @@ export function useAppLogic(
     parentSessionKey,
     messages: chatHistory.messages,
     approvalRequest: messagesHook.approvalRequest,
+    approvalResult: messagesHook.approvalResult,
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,
     setProcessingSessions: messagesHook.setProcessingSessions,

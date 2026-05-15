@@ -85,6 +85,11 @@ func (m *nativeTestAgentLoop) GetSessionHistory(sessionKey string) []providers.M
 	return result
 }
 
+func (m *nativeTestAgentLoop) AddSessionMessage(sessionKey string, msg providers.Message) error {
+	m.histories[sessionKey] = append(m.histories[sessionKey], msg)
+	return nil
+}
+
 func (m *nativeTestAgentLoop) GetSessionModel(sessionKey string) string {
 	if model, ok := m.sessionModels[sessionKey]; ok {
 		return model

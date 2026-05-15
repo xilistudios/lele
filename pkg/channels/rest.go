@@ -442,6 +442,90 @@ func (n *NativeChannel) handleChatClear(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
+func (n *NativeChannel) handleChatApprove(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	clientID := getClientID(r)
+
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
+	var req ApproveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "body_invalid")
+		return
+	}
+
+	if req.RequestID == "" {
+		writeError(w, http.StatusBadRequest, "request_id is required", "request_id_missing")
+		return
+	}
+
+	if n.approvalManager == nil {
+		writeError(w, http.StatusInternalServerError, "approval manager not available", "approval_unavailable")
+		return
+	}
+
+	// Get approval info before handling (to know the command)
+	approval := n.approvalManager.GetApproval(req.RequestID)
+	command := ""
+	reason := ""
+	if approval != nil {
+		command = approval.Command
+		reason = approval.Reason
+	}
+
+	handledApproval, err := n.approvalManager.HandleApproval(req.RequestID, req.Approved)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "approval_not_found")
+		return
+	}
+
+	if handledApproval != nil {
+		command = handledApproval.Command
+		reason = handledApproval.Reason
+	}
+
+	// Persist the approval decision in session history
+	approvalContent := "✅ Command approved"
+	if !req.Approved {
+		approvalContent = "❌ Command rejected"
+	}
+	n.persistApprovalMessage(sessionKey, req.RequestID, req.Approved, command, reason)
+
+	// Broadcast approval result via WebSocket for real-time UI update
+	n.broadcastToSession(sessionKey, "approve.result", map[string]interface{}{
+		"request_id": req.RequestID,
+		"approved":   req.Approved,
+		"command":    command,
+	})
+
+	writeJSON(w, http.StatusOK, ApproveResponse{
+		RequestID: req.RequestID,
+		Approved:  req.Approved,
+		Message:   approvalContent,
+	})
+}
+
+// persistApprovalMessage stores the approval/rejection decision as a tool message in session history.
+func (n *NativeChannel) persistApprovalMessage(sessionKey, requestID string, approved bool, command, reason string) {
+	content := "✅ Command approved"
+	if !approved {
+		content = "❌ Command rejected"
+	}
+	if command != "" {
+		content += ": `" + command + "`"
+	}
+
+	n.agentLoop.AddSessionMessage(sessionKey, providers.Message{
+		Role:               "tool",
+		Content:            content,
+		ToolCallID:         "approval:" + requestID,
+		ExcludeFromContext: true,
+	})
+}
+
 func (n *NativeChannel) handleSessionModel(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	clientID := getClientID(r)

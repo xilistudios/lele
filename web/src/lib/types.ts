@@ -533,6 +533,12 @@ export type ApprovalRequest = {
   reason: string
 }
 
+export type ApprovalResult = {
+  requestId: string
+  approved: boolean
+  command: string
+}
+
 export type AuthPairResponse = AuthSession
 
 export type AuthRefreshResponse = {
@@ -689,6 +695,7 @@ export type ClientEvent =
     }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
+  | { event: 'approve.result'; data: { request_id: string; approved: boolean; command: string } }
   | { event: 'subscribe.ack'; data: { session_key: string; processing?: boolean } }
   | { event: 'unsubscribe.ack'; data: { session_key: string } }
   | { event: 'cancel.ack'; data: { status: string } }
@@ -700,4 +707,10 @@ export type ClientEvent =
 export type ApprovalDecision = {
   request_id: string
   approved: boolean
+}
+
+export type ApproveResponse = {
+  request_id: string
+  approved: boolean
+  message?: string
 }

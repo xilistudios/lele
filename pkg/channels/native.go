@@ -232,6 +232,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionGet))
 	mux.HandleFunc("DELETE /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionDelete))
 	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/clear", withAuth(n.handleChatClear))
+	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/approve", withAuth(applyBodyLimit(n.handleChatApprove)))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/history", withAuth(n.handleChatHistory))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/history/{subagentId}", withAuth(n.handleChatHistory))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/model", withAuth(n.handleSessionModel))

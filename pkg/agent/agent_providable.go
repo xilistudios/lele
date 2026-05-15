@@ -128,6 +128,19 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 // AgentProvidable Interface - Session History
 // ============================================================================
 
+// AddSessionMessage adds a message to the persisted session history.
+func (ap *agentProvidableImpl) AddSessionMessage(sessionKey string, msg providers.Message) error {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return fmt.Errorf("no agent found for session: %s", resolvedSessionKey)
+	}
+
+	agent.Sessions.AddFullMessage(resolvedSessionKey, msg)
+	return nil
+}
+
 // GetSessionHistory returns the persisted history for a session.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
