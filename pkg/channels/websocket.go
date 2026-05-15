@@ -281,11 +281,7 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 
 	command := ""
 	if n.approvalManager != nil {
-		approval := n.approvalManager.GetApproval(payload.RequestID)
-		if approval != nil {
-			command = approval.Command
-		}
-
+		// HandleApproval atomically finds, removes and returns the approval
 		handledApproval, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
 		if err != nil {
 			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
@@ -295,9 +291,7 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 			n.sendError(client, "approval_error", "approval request expired or not found")
 			return
 		}
-		if handledApproval != nil {
-			command = handledApproval.Command
-		}
+		command = handledApproval.Command
 
 		// Persist the approval decision in session history
 		n.persistApprovalMessage(client.SessionKey, payload.RequestID, payload.Approved, command, "")

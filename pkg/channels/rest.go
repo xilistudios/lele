@@ -467,32 +467,24 @@ func (n *NativeChannel) handleChatApprove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get approval info before handling (to know the command)
-	approval := n.approvalManager.GetApproval(req.RequestID)
-	command := ""
-	reason := ""
-	if approval != nil {
-		command = approval.Command
-		reason = approval.Reason
-	}
-
+	// HandleApproval atomically finds, removes and returns the approval
 	handledApproval, err := n.approvalManager.HandleApproval(req.RequestID, req.Approved)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error(), "approval_not_found")
 		return
 	}
 
-	if handledApproval != nil {
-		command = handledApproval.Command
-		reason = handledApproval.Reason
-	}
+	command := handledApproval.Command
+	reason := handledApproval.Reason
 
 	// Persist the approval decision in session history
+	n.persistApprovalMessage(sessionKey, req.RequestID, req.Approved, command, reason)
+
+	// Build the user-facing message
 	approvalContent := "✅ Command approved"
 	if !req.Approved {
 		approvalContent = "❌ Command rejected"
 	}
-	n.persistApprovalMessage(sessionKey, req.RequestID, req.Approved, command, reason)
 
 	// Broadcast approval result via WebSocket for real-time UI update
 	n.broadcastToSession(sessionKey, "approve.result", map[string]interface{}{

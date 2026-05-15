@@ -243,16 +243,17 @@ export function useAppLogic(
       // Optimistic UI update: show feedback immediately
       messagesHook.approveRequest(approved, requestId, command)
 
-      // Send via HTTP as primary method (persists in history)
+      // Send via HTTP as primary method (persists in history).
+      // If HTTP fails, fall back to WebSocket (which also persists on the backend).
       if (sessionKey) {
         api.approve(sessionKey, requestId, approved).catch((err) => {
           console.warn('[Approve] HTTP failed, falling back to WS:', err)
           wsSend('approve', { request_id: requestId, approved })
         })
+      } else {
+        // No session key available, use WebSocket directly
+        wsSend('approve', { request_id: requestId, approved })
       }
-
-      // Also send via WebSocket for redundancy and real-time notification
-      wsSend('approve', { request_id: requestId, approved })
     },
     [messagesHook.approvalRequest, messagesHook.approveRequest, sessionsHook.currentSessionKey, api, wsSend],
   )

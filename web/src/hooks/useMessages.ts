@@ -79,6 +79,20 @@ export const toChatMessages = (
     }
 
     if (message.role === 'tool') {
+      // Approval messages should render as simple text, not tool cards
+      if (message.tool_call_id && message.tool_call_id.startsWith('approval:')) {
+        return [
+          {
+            id: message.id,
+            role: 'assistant' as const,
+            content: message.content,
+            streaming: false,
+            createdAt: new Date().toISOString(),
+            sessionKey,
+          },
+        ]
+      }
+
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
@@ -116,6 +130,7 @@ export function useMessages(
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
   const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null)
+  const approvalTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
   const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set())
   const streamingRef = useRef(streamingMessages)
@@ -591,12 +606,13 @@ export function useMessages(
               approved: boolean
               command: string
             }
+            if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
             setApprovalResult({
               requestId: resultData.request_id,
               approved: resultData.approved,
               command: resultData.command,
             })
-            setTimeout(() => setApprovalResult(null), 5000)
+            approvalTimerRef.current = setTimeout(() => setApprovalResult(null), 5000)
           }
           break
         case 'cancel.ack':
@@ -641,14 +657,16 @@ export function useMessages(
 
   const approveRequest = useCallback((approved: boolean, requestId: string, command: string) => {
     setApprovalRequest(null)
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
     setApprovalResult({ requestId, approved, command })
-    setTimeout(() => setApprovalResult(null), 5000)
+    approvalTimerRef.current = setTimeout(() => setApprovalResult(null), 5000)
   }, [])
 
   const clearStreaming = useCallback(() => {
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
     setApprovalResult(null)
     setPendingAttachments([])
     // Don't clear processingSessions - this tracks ALL sessions processing,
@@ -660,6 +678,7 @@ export function useMessages(
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
     setApprovalResult(null)
     setPendingAttachments([])
     setProcessingSessions(new Set())
