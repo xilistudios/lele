@@ -149,7 +149,7 @@ export function CanvasBlock({ content, language }: Props) {
             </div>
           )}
           {loadState === 'error' && (
-            <div className="flex items-center justify-center px-4 py-8 text-xs text-red-500">
+            <div className="flex items-center justify-center px-4 py-8 text-xs text-state-error">
               {t('canvas.renderError')}
             </div>
           )}

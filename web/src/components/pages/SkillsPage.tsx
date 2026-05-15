@@ -101,7 +101,7 @@ export function SkillsPage() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {error && (
-            <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <div className="mb-4 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-3 text-sm text-state-error">
               {error}
             </div>
           )}

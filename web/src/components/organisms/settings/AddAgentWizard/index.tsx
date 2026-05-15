@@ -254,7 +254,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 onClick={handleNext}
                 disabled={step === 1 && !canProceedStep1}
                 className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200
-                  bg-blue-600 text-white hover:bg-blue-500
+                  bg-cta-primary text-text-on-accent hover:bg-cta-hover
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t('settings.addAgentModal.next')}{' '}
@@ -276,7 +276,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 onClick={handleAdd}
                 disabled={!canAdd || isSubmitting}
                 className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200
-                  bg-blue-600 text-white hover:bg-blue-500
+                  bg-cta-primary text-text-on-accent hover:bg-cta-hover
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (

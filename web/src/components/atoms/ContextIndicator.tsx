@@ -23,17 +23,17 @@ const ORIGIN_MAP = {
 const REFRESH_INTERVAL = 30_000 // 30 seconds
 
 function getRingColor(percent: number): string {
-  if (percent >= 90) return 'stroke-red-400'
-  if (percent >= 70) return 'stroke-yellow-400'
-  if (percent >= 50) return 'stroke-blue-400'
-  return 'stroke-emerald-400'
+  if (percent >= 90) return 'stroke-state-error'
+  if (percent >= 70) return 'stroke-state-warning'
+  if (percent >= 50) return 'stroke-state-info'
+  return 'stroke-state-success'
 }
 
 function getTextColor(percent: number): string {
-  if (percent >= 90) return 'text-red-400'
-  if (percent >= 70) return 'text-yellow-400'
-  if (percent >= 50) return 'text-blue-400'
-  return 'text-emerald-400'
+  if (percent >= 90) return 'text-state-error'
+  if (percent >= 70) return 'text-state-warning'
+  if (percent >= 50) return 'text-state-info'
+  return 'text-state-success'
 }
 
 function formatTokens(n: number): string {
@@ -104,7 +104,7 @@ export function ContextIndicator() {
 
   const percent = context ? Math.round(context.usage_percent * 10) / 10 : 0
   const ringColorClass = context ? getRingColor(context.usage_percent) : 'stroke-gray-500'
-  const textColorClass = context ? getTextColor(context.usage_percent) : 'text-gray-500'
+  const textColorClass = context ? getTextColor(context.usage_percent) : 'text-text-tertiary'
   const hasData = context && context.context_window > 0
 
   // Calculate the dash offset for the SVG ring
@@ -119,7 +119,7 @@ export function ContextIndicator() {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1.5 text-gray-500 hover:bg-gray-700/50 hover:text-gray-400 transition-colors duration-150"
+        className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-150"
         aria-label={t('connection.context')}
       >
         {/* Circular progress ring — always visible */}
@@ -132,7 +132,7 @@ export function ContextIndicator() {
             fill="none"
             stroke="currentColor"
             strokeWidth={STROKE_WIDTH}
-            className="text-gray-600"
+            className="text-text-tertiary"
           />
           {/* Progress circle (used context) */}
           <circle

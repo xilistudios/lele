@@ -10,9 +10,9 @@ type Props = {
 }
 
 const SOURCE_COLORS: Record<string, string> = {
-  workspace: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  global: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  builtin: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+  workspace: 'bg-state-info-light text-state-info border-state-info/30',
+  global: 'bg-state-success-light text-state-success border-state-success/30',
+  builtin: 'bg-surface-muted text-text-tertiary border-border/50',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -112,7 +112,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
                     >
                       {isRemoving === skill.name ? (
-                        <div className="h-3 w-3 animate-spin rounded-full border border-red-400 border-t-transparent" />
+                        <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
                       ) : (
                         t('skills.removeConfirmYes', 'Yes, remove')
                       )}
@@ -165,7 +165,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
             )}
             <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
               <span
-                className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-emerald-400' : 'bg-slate-400'}`}
+                className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-state-success' : 'bg-text-tertiary'}`}
               />
               {skill.installed ? t('common.enabled') : t('common.disabled')}
             </span>

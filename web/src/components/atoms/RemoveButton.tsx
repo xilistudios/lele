@@ -3,7 +3,8 @@ type Props = {
   ariaLabel: string
 }
 
-const REMOVE_BTN_CLS = 'text-state-error transition-colors hover:text-[#FF7B7B] disabled:opacity-40'
+const REMOVE_BTN_CLS =
+  'text-state-error transition-colors hover:text-state-error/70 disabled:opacity-40'
 
 export function RemoveButton({ onClick, ariaLabel }: Props) {
   return (
