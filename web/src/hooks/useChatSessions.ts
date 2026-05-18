@@ -37,6 +37,16 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     clearCurrentSessionKey()
   }, [])
 
+  const touchSession = useCallback((sessionKey: string) => {
+    setSessions((current) =>
+      current.map((s) =>
+        s.key === sessionKey
+          ? { ...s, updated: new Date().toISOString(), message_count: s.message_count + 1 }
+          : s,
+      ),
+    )
+  }, [])
+
   const refreshSessions = useCallback(async () => {
     if (!token || !clientId) return null
 
@@ -169,6 +179,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     sessionsRef,
     persistCurrentSessionKey,
     refreshSessions,
+    touchSession,
     selectSession,
     createSession,
     deleteSession,

@@ -53,6 +53,7 @@ export function useAppLogic(
   const navigate = useNavigate()
 
   const sessionsHook = useChatSessions(api, token, clientId)
+  const { touchSession } = sessionsHook
   const { modelState, loadModels, selectModel } = useModels(api, token)
   const messagesHook = useMessages(
     api,
@@ -223,7 +224,9 @@ export function useAppLogic(
         currentAgentId,
       )
       messagesHook.setPendingAttachments([])
-      sessionsHook.refreshSessions()
+      // Optimistic update: bump message_count immediately so sidebar
+      // shows the session activity instead of "New Chat"
+      touchSession(sessionsHook.currentSessionKey)
     },
     [
       sessionsHook.currentSessionKey,
