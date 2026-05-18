@@ -327,6 +327,8 @@ export function useMessages(
           if (ackSessionKey) {
             setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
             processingSessionKeyRef.current = ackSessionKey
+            // Trigger session refresh so backend data replaces optimistic state
+            onSessionUpdated?.()
           }
           ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
           break
@@ -384,6 +386,8 @@ export function useMessages(
           setToolStatus(null)
           setPendingAttachments([])
           processingSessionKeyRef.current = null
+          // Refresh sessions so sidebar shows updated message count
+          onSessionUpdated?.()
           break
         }
         case 'history.updated': {
