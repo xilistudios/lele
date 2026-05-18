@@ -14,7 +14,13 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import { wsDebug } from '../lib/debug'
-import type { ApprovalRequest, ApprovalResult, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
+import type {
+  ApprovalRequest,
+  ApprovalResult,
+  ChatMessage,
+  HistoryToolCall,
+  ToolStatus,
+} from '../lib/types'
 import {
   type HistoryMessage,
   chatHistoryQueryKey,
@@ -80,7 +86,7 @@ export const toChatMessages = (
 
     if (message.role === 'tool') {
       // Approval messages should render as simple text, not tool cards
-      if (message.tool_call_id && message.tool_call_id.startsWith('approval:')) {
+      if (message.tool_call_id?.startsWith('approval:')) {
         return [
           {
             id: message.id,

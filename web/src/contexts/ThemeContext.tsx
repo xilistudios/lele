@@ -62,9 +62,7 @@ function persistThemeSetting(setting: ThemeSetting) {
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() =>
-    getStoredThemeSetting(),
-  )
+  const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() => getStoredThemeSetting())
   const [theme, setThemeState] = useState<Theme>(() => resolveTheme(getStoredThemeSetting()))
 
   // Track the media query listener ref so we can clean up

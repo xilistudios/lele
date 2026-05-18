@@ -226,14 +226,20 @@ export function useAppLogic(
       messagesHook.setPendingAttachments([])
       // Optimistic update: bump message_count immediately so sidebar
       // shows the session activity instead of "New Chat"
-      touchSession(sessionsHook.currentSessionKey)
+      // Also generate a title from the first message so we don't show a UUID
+      const title = content
+        .replace(/[\n\r\t]+/g, ' ')
+        .replace(/[.,!?;:'"`]+/g, '')
+        .trim()
+        .slice(0, 50)
+      touchSession(sessionsHook.currentSessionKey, title || undefined)
     },
     [
       sessionsHook.currentSessionKey,
       currentAgentId,
       messagesHook.sendMessage,
       messagesHook.setPendingAttachments,
-      sessionsHook.refreshSessions,
+      touchSession,
     ],
   )
 
@@ -258,7 +264,13 @@ export function useAppLogic(
         wsSend('approve', { request_id: requestId, approved })
       }
     },
-    [messagesHook.approvalRequest, messagesHook.approveRequest, sessionsHook.currentSessionKey, api, wsSend],
+    [
+      messagesHook.approvalRequest,
+      messagesHook.approveRequest,
+      sessionsHook.currentSessionKey,
+      api,
+      wsSend,
+    ],
   )
 
   const handleCancel = useCallback(() => {
@@ -409,10 +421,16 @@ export function useAppLogic(
       ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
     }
 
-    if (!chatHistory.processing && prevProcessingRef.current) {
-      clearStreamingRef.current()
-      // Sync processingSessions with HTTP polling state
-      // This ensures the sidebar updates even when WebSocket events are missed
+    if (!chatHistory.processing) {
+      // Only clear streaming on actual processing→done transition
+      if (prevProcessingRef.current) {
+        clearStreamingRef.current()
+      }
+      // Always sync processingSessions regardless of prev state.
+      // This catches race conditions where:
+      // - sendMessage() added the session to processingSessions
+      // - Agent finished before the first polling cycle saw processing=true
+      // - Without this, the session stays in processingSessions forever
       messagesHook.setProcessingSessions((prev: Set<string>) => {
         if (prev.has(sessionKey)) {
           const next = new Set(prev)

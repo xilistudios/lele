@@ -593,6 +593,11 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 	ts := newNativeTestServer(t)
 	trackedSession := "native:" + ts.clientID + ":secondary"
 	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
+
+	// Both sessions need history so neither is skipped as empty
+	ts.loop.histories[ts.clientID] = []providers.Message{
+		{Role: "user", Content: "First message"},
+	}
 	ts.loop.histories[trackedSession] = []providers.Message{
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi"},

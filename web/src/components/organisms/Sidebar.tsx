@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { IconButton } from '../atoms/IconButton'
 import {
   AgentsIcon,
   ChatBubbleIcon,
@@ -19,7 +20,6 @@ import {
   TrashIcon,
   UserIcon,
 } from '../atoms/Icons'
-import { IconButton } from '../atoms/IconButton'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
@@ -51,22 +51,23 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const deviceName = session?.device_name ?? 'lele'
 
-  const sortedSessions = useMemo(() => {
-    const visible = sessions.filter(
-      (s) => !s.key.startsWith('subagent:') && s.message_count > 0,
-    )
-    return [...visible].sort(
-      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
-    )
-  }, [sessions])
-
-  // Only show current session on chat pages
   const isOnChatPage = ['/', '/chat/'].some((prefix) => {
     if (prefix === '/') return location.pathname === '/'
     return location.pathname.startsWith(prefix)
   })
 
   const selectedKey = parentSessionKey ?? currentSessionKey
+
+  const sortedSessions = useMemo(() => {
+    const visible = sessions.filter(
+      (s) => !s.key.startsWith('subagent:') && (s.message_count > 0 || s.key === selectedKey),
+    )
+    return [...visible].sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
+  }, [sessions, selectedKey])
+
+  // Only show current session on chat pages
   const currentSession = isOnChatPage
     ? (sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null)
     : null
@@ -166,7 +167,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           )}
         </div>
 
-        <div className={`px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex flex-col gap-1'}`}>
+        <div
+          className={`px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex flex-col gap-1'}`}
+        >
           {collapsed ? (
             <>
               <div className="group relative flex items-center justify-center">
@@ -281,7 +284,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 >
                   <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
                   {!recentExpanded && (
-                    <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
+                    <span className="text-text-tertiary">
+                      ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                    </span>
                   )}
                 </button>
               )}
@@ -307,7 +312,10 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   popoverHeight={60}
                 >
                   <div className="flex flex-col gap-1">
-                    <button type="button" className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors"
+                    >
                       <TrashIcon size={14} />
                       <span>{t('chat.deleteAllChats')}</span>
                     </button>
@@ -339,7 +347,9 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     >
                       <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
                       {!recentExpanded && (
-                        <span className="text-text-tertiary">({sortedSessions.length - MAX_VISIBLE_SESSIONS})</span>
+                        <span className="text-text-tertiary">
+                          ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                        </span>
                       )}
                     </button>
                   )}
@@ -364,9 +374,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     ariaLabel={item.label}
                     variant="nav"
                     className={`flex items-center justify-center h-8 w-8 ${
-                      isActiveRoute(item.path)
-                        ? 'text-brand-rosa bg-surface-selected'
-                        : ''
+                      isActiveRoute(item.path) ? 'text-brand-rosa bg-surface-selected' : ''
                     }`}
                   >
                     <item.icon size={16} />

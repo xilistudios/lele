@@ -4,8 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatFilters } from '../../hooks/useChatFilters'
-import { ChatListView } from '../organisms/ChatListView'
 import { ChatSearchBar } from '../molecules/ChatSearchBar'
+import { ChatListView } from '../organisms/ChatListView'
 import { Sidebar } from '../organisms/Sidebar'
 
 export function ChatHistoryPage() {
@@ -22,24 +22,34 @@ export function ChatHistoryPage() {
     onDeleteSession,
   } = useAppLogicContext()
 
-  const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } = useChatFilters(sessions)
+  const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } =
+    useChatFilters(sessions)
 
-  const handleSelect = useCallback((key: string) => {
-    onSelectSession(key)
-    navigate(`/chat/${encodeURIComponent(key)}`)
-  }, [onSelectSession, navigate])
+  const handleSelect = useCallback(
+    (key: string) => {
+      onSelectSession(key)
+      navigate(`/chat/${encodeURIComponent(key)}`)
+    },
+    [onSelectSession, navigate],
+  )
 
-  const handleDelete = useCallback(async (key: string) => {
-    await onDeleteSession(key)
-  }, [onDeleteSession])
+  const handleDelete = useCallback(
+    async (key: string) => {
+      await onDeleteSession(key)
+    },
+    [onDeleteSession],
+  )
 
-  const handleClear = useCallback(async (key: string) => {
-    try {
-      await api.clearSession(key)
-    } catch {
-      // Silently ignore; session may already be gone
-    }
-  }, [api])
+  const handleClear = useCallback(
+    async (key: string) => {
+      try {
+        await api.clearSession(key)
+      } catch {
+        // Silently ignore; session may already be gone
+      }
+    },
+    [api],
+  )
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">

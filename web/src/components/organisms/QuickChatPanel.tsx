@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useChatFilters } from '../../hooks/useChatFilters'
-import { ChatListView } from './ChatListView'
 import { ChatSearchBar } from '../molecules/ChatSearchBar'
+import { ChatListView } from './ChatListView'
 
 interface QuickChatPanelProps {
   isOpen: boolean
@@ -12,10 +12,15 @@ interface QuickChatPanelProps {
   initialFocusSearch?: boolean
 }
 
-export function QuickChatPanel({ isOpen, onClose, initialFocusSearch = false }: QuickChatPanelProps) {
+export function QuickChatPanel({
+  isOpen,
+  onClose,
+  initialFocusSearch = false,
+}: QuickChatPanelProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { sessions, currentSessionKey, processingSessions, onSelectSession, onDeleteSession } = useAppLogicContext()
+  const { sessions, currentSessionKey, processingSessions, onSelectSession, onDeleteSession } =
+    useAppLogicContext()
   const { query, setQuery, sortMode, setSortMode, grouped } = useChatFilters(sessions)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -34,14 +39,20 @@ export function QuickChatPanel({ isOpen, onClose, initialFocusSearch = false }: 
     return () => document.removeEventListener('keydown', handleKey)
   }, [isOpen, onClose])
 
-  const handleSelect = useCallback((key: string) => {
-    onSelectSession(key)
-    onClose()
-  }, [onSelectSession, onClose])
+  const handleSelect = useCallback(
+    (key: string) => {
+      onSelectSession(key)
+      onClose()
+    },
+    [onSelectSession, onClose],
+  )
 
-  const handleDelete = useCallback(async (key: string) => {
-    await onDeleteSession(key)
-  }, [onDeleteSession])
+  const handleDelete = useCallback(
+    async (key: string) => {
+      await onDeleteSession(key)
+    },
+    [onDeleteSession],
+  )
 
   const goToAdmin = useCallback(() => {
     onClose()
@@ -81,7 +92,15 @@ export function QuickChatPanel({ isOpen, onClose, initialFocusSearch = false }: 
             className="rounded-md p-1.5 text-text-tertiary hover:bg-background-secondary"
             aria-label={t('chat.closePanel')}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>

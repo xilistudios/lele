@@ -36,26 +36,20 @@ export function useChatFilters(allSessions: ChatSession[]) {
     if (query.trim()) {
       const q = query.toLowerCase()
       list = list.filter(
-        (s) =>
-          (s.name ?? '').toLowerCase().includes(q) ||
-          s.key.toLowerCase().includes(q),
+        (s) => (s.name ?? '').toLowerCase().includes(q) || s.key.toLowerCase().includes(q),
       )
     }
 
     switch (sortMode) {
       case 'name':
-        list.sort((a, b) =>
-          (a.name ?? a.key).localeCompare(b.name ?? b.key),
-        )
+        list.sort((a, b) => (a.name ?? a.key).localeCompare(b.name ?? b.key))
         break
       case 'messages':
         list.sort((a, b) => b.message_count - a.message_count)
         break
       default:
         list.sort(
-          (a, b) =>
-            (safeDate(b.updated)?.getTime() ?? 0) -
-            (safeDate(a.updated)?.getTime() ?? 0),
+          (a, b) => (safeDate(b.updated)?.getTime() ?? 0) - (safeDate(a.updated)?.getTime() ?? 0),
         )
         break
     }

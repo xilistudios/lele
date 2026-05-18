@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ChatSession } from '../../lib/types'
 import type { TimeGroup } from '../../hooks/useChatFilters'
 import { useClickOutside } from '../../hooks/useClickOutside'
+import type { ChatSession } from '../../lib/types'
 
 interface ChatListViewProps {
   groups: TimeGroup[]
@@ -14,7 +14,10 @@ interface ChatListViewProps {
   onRename?: (sessionKey: string, name: string) => void
 }
 
-function formatDateRelative(dateStr: string, t: (s: string, o?: Record<string, unknown>) => string): string {
+function formatDateRelative(
+  dateStr: string,
+  t: (s: string, o?: Record<string, unknown>) => string,
+): string {
   const d = new Date(dateStr)
   if (Number.isNaN(d.getTime())) return ''
 
@@ -130,18 +133,18 @@ const ChatListItem = memo(function ChatListItem({
         }
       `}
     >
-      <button
-        type="button"
-        className="min-w-0 flex-1 text-left"
-        onClick={handleSelectClick}
-      >
+      <button type="button" className="min-w-0 flex-1 text-left" onClick={handleSelectClick}>
         {renaming ? (
           <div
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
             role="presentation"
           >
-            <RenameForm value={renameValue} onChange={setRenameValue} onSubmit={handleRenameSubmit} />
+            <RenameForm
+              value={renameValue}
+              onChange={setRenameValue}
+              onSubmit={handleRenameSubmit}
+            />
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2">
@@ -154,7 +157,7 @@ const ChatListItem = memo(function ChatListItem({
                 {session.name || t('chat.unnamedSession', { key: session.key.slice(-8) })}
               </p>
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                <span>{t('messageCount', { count: session.message_count })}</span>
+                <span>{t('chat.messageCount', { count: session.message_count })}</span>
                 <span className="h-1 w-1 rounded-full bg-text-tertiary/40" />
                 <span>{formatDateRelative(session.updated, t)}</span>
                 {isProcessing && (
@@ -167,7 +170,10 @@ const ChatListItem = memo(function ChatListItem({
       </button>
 
       {(onDelete || onClear || onRename) && (
-        <div ref={menuRef} className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <div
+          ref={menuRef}
+          className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity"
+        >
           <button
             type="button"
             onClick={toggleMenu}
@@ -176,8 +182,18 @@ const ChatListItem = memo(function ChatListItem({
             }}
             className="rounded-md p-1.5 hover:bg-background-secondary text-text-tertiary"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="5" r="1" />
+              <circle cx="12" cy="12" r="1" />
+              <circle cx="12" cy="19" r="1" />
             </svg>
           </button>
           {menuOpen && (

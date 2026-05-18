@@ -1,6 +1,9 @@
 const DEFAULT_ICON_SIZE = 20
 
-export function ServerIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function ServerIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -22,7 +25,10 @@ export function ServerIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: num
   )
 }
 
-export function SidebarToggleIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function SidebarToggleIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -42,7 +48,10 @@ export function SidebarToggleIcon({ size = DEFAULT_ICON_SIZE, className }: { siz
   )
 }
 
-export function ChevronLeftIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function ChevronLeftIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -61,7 +70,10 @@ export function ChevronLeftIcon({ size = DEFAULT_ICON_SIZE, className }: { size?
   )
 }
 
-export function PlusIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function PlusIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -81,7 +93,10 @@ export function PlusIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: numbe
   )
 }
 
-export function SettingsIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function SettingsIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -101,7 +116,10 @@ export function SettingsIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: n
   )
 }
 
-export function LogoutIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function LogoutIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -122,7 +140,10 @@ export function LogoutIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: num
   )
 }
 
-export function EditIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function EditIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -142,7 +163,10 @@ export function EditIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: numbe
   )
 }
 
-export function ChatBubbleIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function ChatBubbleIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -161,7 +185,10 @@ export function ChatBubbleIcon({ size = DEFAULT_ICON_SIZE, className }: { size?:
   )
 }
 
-export function TrashIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function TrashIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -181,7 +208,10 @@ export function TrashIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: numb
   )
 }
 
-export function DatabaseIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function DatabaseIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -202,7 +232,10 @@ export function DatabaseIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: n
   )
 }
 
-export function AgentsIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function AgentsIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -224,7 +257,10 @@ export function AgentsIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: num
   )
 }
 
-export function ProvidersIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function ProvidersIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -245,7 +281,10 @@ export function ProvidersIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: 
   )
 }
 
-export function SkillsIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function SkillsIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -290,7 +329,10 @@ export function PlusCircleIcon({
   )
 }
 
-export function MoreIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function MoreIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -311,7 +353,10 @@ export function MoreIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: numbe
   )
 }
 
-export function HistoryIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function HistoryIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -332,7 +377,10 @@ export function HistoryIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: nu
   )
 }
 
-export function FilterIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function FilterIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -351,7 +399,10 @@ export function FilterIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: num
   )
 }
 
-export function SearchIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function SearchIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
@@ -371,7 +422,10 @@ export function SearchIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: num
   )
 }
 
-export function UserIcon({ size = DEFAULT_ICON_SIZE, className }: { size?: number; className?: string }) {
+export function UserIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
   return (
     <svg
       width={size}

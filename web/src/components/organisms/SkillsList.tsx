@@ -157,7 +157,9 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
 
           <div className="mt-auto pt-3 flex items-center gap-2">
             {skill.source && (
-              <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${SOURCE_COLORS[skill.source] || 'bg-surface-muted text-text-tertiary border-border/50'}`}>
+              <span
+                className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${SOURCE_COLORS[skill.source] || 'bg-surface-muted text-text-tertiary border-border/50'}`}
+              >
                 {SOURCE_LABELS[skill.source] || skill.source}
               </span>
             )}

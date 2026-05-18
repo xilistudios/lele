@@ -37,11 +37,16 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     clearCurrentSessionKey()
   }, [])
 
-  const touchSession = useCallback((sessionKey: string) => {
+  const touchSession = useCallback((sessionKey: string, name?: string) => {
     setSessions((current) =>
       current.map((s) =>
         s.key === sessionKey
-          ? { ...s, updated: new Date().toISOString(), message_count: s.message_count + 1 }
+          ? {
+              ...s,
+              updated: new Date().toISOString(),
+              message_count: s.message_count + 1,
+              ...(name ? { name } : {}),
+            }
           : s,
       ),
     )

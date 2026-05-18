@@ -9,7 +9,8 @@ export const BUTTON_SIZES = {
 
 export const BUTTON_VARIANTS = {
   primary: 'bg-cta-primary text-text-on-accent hover:bg-cta-hover',
-  secondary: 'border border-border bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+  secondary:
+    'border border-border bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
   danger: 'bg-red-600 text-white hover:bg-red-500',
   dangerText: 'text-state-error hover:bg-red-500/10 hover:text-red-400',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
@@ -21,7 +22,8 @@ export const BUTTON_VARIANTS = {
 
 export const BUTTON_DISABLED = 'disabled:opacity-40 disabled:cursor-not-allowed'
 
-export const BUTTON_FOCUS = 'focus:outline-none focus:ring-2 focus:ring-cta-primary/50 focus:ring-offset-2 focus:ring-offset-background-primary'
+export const BUTTON_FOCUS =
+  'focus:outline-none focus:ring-2 focus:ring-cta-primary/50 focus:ring-offset-2 focus:ring-offset-background-primary'
 
 export function getButtonClasses({
   variant = 'primary',
@@ -34,11 +36,7 @@ export function getButtonClasses({
   disabled?: boolean
   className?: string
 } = {}): string {
-  const parts = [
-    BUTTON_BASE,
-    BUTTON_SIZES[size],
-    BUTTON_VARIANTS[variant],
-  ]
+  const parts = [BUTTON_BASE, BUTTON_SIZES[size], BUTTON_VARIANTS[variant]]
 
   if (disabled) {
     parts.push(BUTTON_DISABLED)

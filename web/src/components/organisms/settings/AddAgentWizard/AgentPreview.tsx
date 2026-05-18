@@ -123,7 +123,10 @@ export function AgentPreview({
             </span>
           )}
           {skills.map((skill) => (
-            <span key={skill} className="text-[10px] px-2 py-1 rounded-full bg-surface-muted text-text-tertiary border border-border/50">
+            <span
+              key={skill}
+              className="text-[10px] px-2 py-1 rounded-full bg-surface-muted text-text-tertiary border border-border/50"
+            >
               {skill}
             </span>
           ))}

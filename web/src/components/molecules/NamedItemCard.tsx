@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronLeftIcon } from '../atoms/Icons'
 import { IconButton } from '../atoms/IconButton'
+import { ChevronLeftIcon } from '../atoms/Icons'
 
 type Props = {
   title: ReactNode
