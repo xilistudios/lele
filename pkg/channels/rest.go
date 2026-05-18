@@ -492,11 +492,11 @@ func (n *NativeChannel) handleChatApprove(w http.ResponseWriter, r *http.Request
 	}
 
 	// Broadcast approval result via WebSocket for real-time UI update
-	n.broadcastToSession(sessionKey, "approve.result", map[string]interface{}{
+	n.emitNativeEvent(sessionKey, "approve.result", map[string]interface{}{
 		"request_id": req.RequestID,
 		"approved":   req.Approved,
 		"command":    command,
-	})
+	}, "")
 
 	writeJSON(w, http.StatusOK, ApproveResponse{
 		RequestID: req.RequestID,

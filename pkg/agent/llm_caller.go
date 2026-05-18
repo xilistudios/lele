@@ -40,6 +40,31 @@ type llmCallOptions struct {
 	streamOnReason func(reasoningChunk string)
 }
 
+type streamingState struct {
+	chunked bool
+}
+
+func (s *streamingState) onChunk(delegate func(chunk string, done bool)) func(chunk string, done bool) {
+	return func(chunk string, done bool) {
+		if chunk != "" {
+			s.chunked = true
+		}
+		delegate(chunk, done)
+	}
+}
+
+func (s *streamingState) onReasoning(delegate func(reasoningChunk string)) func(reasoningChunk string) {
+	if delegate == nil {
+		return nil
+	}
+	return func(reasoningChunk string) {
+		if reasoningChunk != "" {
+			s.chunked = true
+		}
+		delegate(reasoningChunk)
+	}
+}
+
 // llmCaller handles communication with LLM providers including fallback and retry
 type llmCaller struct {
 	al *AgentLoop
@@ -122,11 +147,25 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 	// Try streaming if available and requested
 	if opts.streamOnChunk != nil {
 		if sp, ok := opts.agent.Provider.(providers.StreamingLLMProvider); ok {
-			if len(opts.candidates) > 0 && lc.al.fallback != nil {
-				// Streaming with fallback is handled differently - fall through to non-streaming
-			} else {
-				return sp.ChatStream(opts.ctx, opts.messages, opts.toolDefs, opts.model, llmOptions, opts.streamOnChunk, opts.streamOnReason)
+			state := &streamingState{}
+			response, err := sp.ChatStream(
+				opts.ctx,
+				opts.messages,
+				opts.toolDefs,
+				opts.model,
+				llmOptions,
+				state.onChunk(opts.streamOnChunk),
+				state.onReasoning(opts.streamOnReason),
+			)
+			shouldFallback := err != nil && !state.chunked && len(opts.candidates) > 0 && lc.al.fallback != nil
+			if !shouldFallback {
+				return response, err
 			}
+			logger.WarnCF("agent", "Streaming provider failed before producing chunks; trying fallback chain", map[string]interface{}{
+				"agent_id": opts.agent.ID,
+				"model":    opts.model,
+				"error":    err.Error(),
+			})
 		}
 	}
 

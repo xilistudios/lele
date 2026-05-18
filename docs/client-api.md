@@ -166,6 +166,47 @@ Response (201 Created):
 
 If `session_key` is omitted, the default session is `native:<client_id>`.
 
+#### Send Message With REST Streaming
+
+```http
+POST /api/v1/chat/send/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{
+  "content": "Hello",
+  "attachments": ["/home/user/.lele/tmp/uploads/file.pdf"],
+  "session_key": "native:client-id:1712339123",
+  "agent_id": "main"
+}
+```
+
+The response is an SSE stream. Each event uses the same event names and payloads as the WebSocket API, beginning with `message.ack`:
+
+```text
+event: message.ack
+data: {"message_id":"uuid","session_key":"native:client-id:1712339123"}
+
+event: message.stream
+data: {"message_id":"uuid","session_key":"native:client-id:1712339123","chunk":"partial","done":false}
+
+event: message.complete
+data: {"message_id":"uuid","session_key":"native:client-id:1712339123","content":"Complete response text"}
+```
+
+Example:
+
+```bash
+curl -N \
+  -H "Authorization: Bearer <token>" \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Hello","session_key":"native:client-id:1712339123","agent_id":"main"}' \
+  http://127.0.0.1:18793/api/v1/chat/send/stream
+```
+
+Initial provider support is OpenAI-compatible chat completions streaming (`stream: true`). Non-streaming providers still return the final response through the same SSE event sequence.
+
 #### Get History
 
 ```http

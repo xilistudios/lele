@@ -362,11 +362,11 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onRea
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		if !strings.HasPrefix(line, "data: ") {
+		if !strings.HasPrefix(line, "data:") {
 			continue
 		}
 
-		data := strings.TrimPrefix(line, "data: ")
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break
 		}

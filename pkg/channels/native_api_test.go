@@ -1008,6 +1008,95 @@ func TestNativeChannelWebSocketSupportsQueryTokenAndStructuredEvents(t *testing.
 	}
 }
 
+func TestNativeRESTChatSendStream(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		inbound, ok := ts.bus.ConsumeInbound(ctx)
+		if !ok {
+			return
+		}
+
+		messageID := inbound.Metadata["message_id"]
+		ts.channel.Send(context.Background(), bus.OutboundMessage{
+			Channel:   ChannelName,
+			ChatID:    inbound.ChatID,
+			Event:     "message.stream",
+			Content:   "Hello ",
+			MessageID: messageID,
+			Metadata:  map[string]string{"done": "false"},
+		})
+		ts.channel.Send(context.Background(), bus.OutboundMessage{
+			Channel:   ChannelName,
+			ChatID:    inbound.ChatID,
+			Event:     "message.stream",
+			Content:   "back",
+			MessageID: messageID,
+			Metadata:  map[string]string{"done": "false"},
+		})
+		ts.channel.Send(context.Background(), bus.OutboundMessage{
+			Channel:   ChannelName,
+			ChatID:    inbound.ChatID,
+			Content:   "Hello back",
+			MessageID: messageID,
+		})
+	}()
+
+	body, err := json.Marshal(ChatSendRequest{
+		Content:    "Hello from REST stream",
+		SessionKey: ts.clientID,
+		AgentID:    "main",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/chat/send/stream", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, payload)
+	}
+	if contentType := resp.Header.Get("Content-Type"); !strings.Contains(contentType, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", contentType)
+	}
+
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	stream := string(payload)
+	for _, expected := range []string{
+		"event: message.ack",
+		"event: message.stream",
+		`"chunk":"Hello "`,
+		`"chunk":"back"`,
+		"event: message.complete",
+		`"content":"Hello back"`,
+		"event: history.updated",
+	} {
+		if !strings.Contains(stream, expected) {
+			t.Fatalf("SSE stream missing %q:\n%s", expected, stream)
+		}
+	}
+}
+
 type wsEnvelope struct {
 	Event string          `json:"event"`
 	Data  json.RawMessage `json:"data"`

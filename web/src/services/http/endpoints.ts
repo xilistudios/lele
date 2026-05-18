@@ -15,6 +15,7 @@ export const endpoints = {
   },
   chat: {
     send: '/api/v1/chat/send',
+    sendStream: '/api/v1/chat/send/stream',
     history: (sessionKey: string, parentSessionKey?: string) => {
       if (parentSessionKey) {
         if (sessionKey.startsWith(`${parentSessionKey}:`)) {

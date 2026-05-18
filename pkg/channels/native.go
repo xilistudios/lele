@@ -34,6 +34,7 @@ type NativeChannel struct {
 	approvalManager  *ApprovalManager
 	running          bool
 	wsClients        map[string]*WSClient
+	restStreams      map[string]*restStreamSubscriber
 	leleDir          string
 	configPath       string // path to config file, defaults to DefaultConfigPath() if empty
 	mu               sync.RWMutex
@@ -93,6 +94,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		agentLoop:        agentLoop,
 		approvalManager:  approvalManager,
 		wsClients:        make(map[string]*WSClient),
+		restStreams:      make(map[string]*restStreamSubscriber),
 		leleDir:          leleDir,
 		pinLimiter:       pinLimiter,
 		pairLimiter:      pairLimiter,
@@ -161,6 +163,10 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 		client.Conn.Close()
 		delete(n.wsClients, id)
 	}
+	for id, stream := range n.restStreams {
+		close(stream.ch)
+		delete(n.restStreams, id)
+	}
 
 	n.pinLimiter.Stop()
 	n.pairLimiter.Stop()
@@ -227,6 +233,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 
 	// Chat
 	mux.HandleFunc("POST /api/v1/chat/send", withAuth(applyBodyLimit(n.handleChatSend)))
+	mux.HandleFunc("POST /api/v1/chat/send/stream", withAuth(applyBodyLimit(n.handleChatSendStream)))
 	mux.HandleFunc("GET /api/v1/chat/sessions", withAuth(n.handleChatSessions))
 	mux.HandleFunc("POST /api/v1/chat/sessions", withAuth(applyBodyLimit(n.handleCreateSession)))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionGet))
@@ -394,62 +401,62 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	switch msg.Event {
 	case "message.stream":
 		done := msg.Metadata["done"] == "true"
-		n.sendWSEvent(sessionKey, "message.stream", WSStreamPayload{
+		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 			MessageID:  msg.MessageID,
 			SessionKey: sessionKey,
 			Chunk:      msg.Content,
 			Done:       done,
-		})
+		}, msg.MessageID)
 		return
 	case "message.thinking":
-		n.sendWSEvent(sessionKey, "message.thinking", WSThinkingPayload{
+		n.emitNativeEvent(sessionKey, "message.thinking", WSThinkingPayload{
 			MessageID:  msg.MessageID,
 			SessionKey: sessionKey,
 			Chunk:      msg.Content,
-		})
+		}, msg.MessageID)
 		return
 	case "tool.executing":
 		var toolArgs map[string]interface{}
 		if argsStr := msg.Metadata["arguments"]; argsStr != "" {
 			_ = json.Unmarshal([]byte(argsStr), &toolArgs)
 		}
-		n.sendWSEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
+		n.emitNativeEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],
 			Action:             msg.Metadata["action"],
 			Arguments:          toolArgs,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 			ToolCallID:         msg.Metadata["tool_call_id"],
-		})
+		}, "")
 		return
 	case "tool.result":
 		result := msg.Content
 		if msg.Metadata != nil && msg.Metadata["result"] != "" {
 			result = msg.Metadata["result"]
 		}
-		n.sendWSEvent(sessionKey, "tool.result", WSToolResultPayload{
+		n.emitNativeEvent(sessionKey, "tool.result", WSToolResultPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],
 			Result:             result,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 			ToolCallID:         msg.Metadata["tool_call_id"],
-		})
+		}, "")
 		return
 	case "subagent.result":
-		n.sendWSEvent(sessionKey, "subagent.result", WSToolResultPayload{
+		n.emitNativeEvent(sessionKey, "subagent.result", WSToolResultPayload{
 			SessionKey:         sessionKey,
 			Tool:               msg.Metadata["tool"],
 			Result:             msg.Metadata["result"],
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 			ToolCallID:         msg.Metadata["tool_call_id"],
-		})
+		}, "")
 		return
 	case "approval.request":
-		n.sendWSEvent(sessionKey, "approval.request", WSApprovalRequestPayload{
+		n.emitNativeEvent(sessionKey, "approval.request", WSApprovalRequestPayload{
 			ID:      msg.Metadata["id"],
 			Command: msg.Metadata["command"],
 			Reason:  msg.Metadata["reason"],
-		})
+		}, "")
 		return
 	}
 
@@ -459,30 +466,30 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}
 
 	if msg.Content != "" {
-		n.sendWSEvent(sessionKey, "message.stream", WSStreamPayload{
+		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 			MessageID:  messageID,
 			SessionKey: sessionKey,
 			Chunk:      msg.Content,
 			Done:       true,
-		})
+		}, messageID)
 	}
 
 	if msg.Content == "" && len(msg.Attachments) == 0 {
 		return
 	}
 
-	n.sendWSEvent(sessionKey, "message.complete", WSMessageCompletePayload{
+	n.emitNativeEvent(sessionKey, "message.complete", WSMessageCompletePayload{
 		MessageID:   messageID,
 		SessionKey:  sessionKey,
 		Content:     msg.Content,
 		Attachments: attachmentsToMaps(msg.Attachments),
-	})
+	}, messageID)
 
 	// Signal that session data has been persisted and is safe to refetch
-	n.sendWSEvent(sessionKey, "history.updated", map[string]interface{}{
+	n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
 		"session_key": sessionKey,
 		"name":        n.agentLoop.GetName(sessionKey),
-	})
+	}, "")
 }
 
 func (n *NativeChannel) addWSClient(client *WSClient) {
