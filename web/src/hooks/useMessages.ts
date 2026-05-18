@@ -14,7 +14,7 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import { wsDebug } from '../lib/debug'
-import type { ApprovalRequest, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
+import type { ApprovalRequest, ApprovalResult, ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
 import {
   type HistoryMessage,
   chatHistoryQueryKey,
@@ -79,6 +79,20 @@ export const toChatMessages = (
     }
 
     if (message.role === 'tool') {
+      // Approval messages should render as simple text, not tool cards
+      if (message.tool_call_id && message.tool_call_id.startsWith('approval:')) {
+        return [
+          {
+            id: message.id,
+            role: 'assistant' as const,
+            content: message.content,
+            streaming: false,
+            createdAt: new Date().toISOString(),
+            sessionKey,
+          },
+        ]
+      }
+
       const matchedToolCall = message.tool_call_id
         ? toolCallMap.get(message.tool_call_id)
         : undefined
@@ -115,6 +129,8 @@ export function useMessages(
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
+  const [approvalResult, setApprovalResult] = useState<ApprovalResult | null>(null)
+  const approvalTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
   const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set())
   const streamingRef = useRef(streamingMessages)
@@ -582,6 +598,23 @@ export function useMessages(
         case 'approval.request':
           setApprovalRequest(event.data as ApprovalRequest)
           break
+        case 'approve.result':
+          setApprovalRequest(null)
+          {
+            const resultData = event.data as {
+              request_id: string
+              approved: boolean
+              command: string
+            }
+            if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
+            setApprovalResult({
+              requestId: resultData.request_id,
+              approved: resultData.approved,
+              command: resultData.command,
+            })
+            approvalTimerRef.current = setTimeout(() => setApprovalResult(null), 5000)
+          }
+          break
         case 'cancel.ack':
           setToolStatus(null)
           processingSessionKeyRef.current = null
@@ -622,15 +655,19 @@ export function useMessages(
     [currentSessionKeyRef, ensureAssistantPlaceholder, queryClient],
   )
 
-  const approveRequest = useCallback((approved: boolean, requestId: string) => {
+  const approveRequest = useCallback((approved: boolean, requestId: string, command: string) => {
     setApprovalRequest(null)
-    return { request_id: requestId, approved }
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
+    setApprovalResult({ requestId, approved, command })
+    approvalTimerRef.current = setTimeout(() => setApprovalResult(null), 5000)
   }, [])
 
   const clearStreaming = useCallback(() => {
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
+    setApprovalResult(null)
     setPendingAttachments([])
     // Don't clear processingSessions - this tracks ALL sessions processing,
     // not just the current one. It's updated by WebSocket events.
@@ -641,6 +678,8 @@ export function useMessages(
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
+    if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
+    setApprovalResult(null)
     setPendingAttachments([])
     setProcessingSessions(new Set())
     processingSessionKeyRef.current = null
@@ -651,6 +690,7 @@ export function useMessages(
     streamingRef,
     toolStatus,
     approvalRequest,
+    approvalResult,
     pendingAttachments,
     processingSessions,
     setProcessingSessions,

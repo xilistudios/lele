@@ -30,6 +30,7 @@ export type AppLogicContextValue = {
   parentSessionKey: ReturnType<typeof useAppLogicHook>['parentSessionKey']
   messages: ReturnType<typeof useAppLogicHook>['messages']
   approvalRequest: ReturnType<typeof useAppLogicHook>['approvalRequest']
+  approvalResult: ReturnType<typeof useAppLogicHook>['approvalResult']
   pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
   toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
 
@@ -107,6 +108,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     parentSessionKey: app.parentSessionKey,
     messages: app.messages,
     approvalRequest: app.approvalRequest,
+    approvalResult: app.approvalResult,
     pendingAttachments: app.pendingAttachments,
     toolStatus: app.toolStatus,
 

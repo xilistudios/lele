@@ -13,6 +13,7 @@ export function MessageList() {
   const {
     messages,
     approvalRequest,
+    approvalResult,
     onApprove,
     currentSessionKey,
     loadMore,
@@ -152,7 +153,7 @@ export function MessageList() {
           apiUrl={apiUrl}
         />
       ))}
-      {approvalRequest && (
+      {approvalRequest && !approvalResult && (
         <div className="py-2">
           <div className="rounded-lg border border-border bg-background-primary p-4">
             <p className="text-sm font-medium text-text-secondary mb-2">
@@ -175,6 +176,35 @@ export function MessageList() {
                 Reject
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {approvalResult && (
+        <div className="py-2">
+          <div
+            className={`rounded-lg border p-4 ${
+              approvalResult.approved
+                ? 'border-state-success bg-state-success-light/10'
+                : 'border-state-error bg-state-error-light/10'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-lg">
+                {approvalResult.approved ? '✅' : '❌'}
+              </span>
+              <span
+                className={`text-sm font-medium ${
+                  approvalResult.approved ? 'text-state-success' : 'text-state-error'
+                }`}
+              >
+                {approvalResult.approved ? 'Command approved' : 'Command rejected'}
+              </span>
+            </div>
+            {approvalResult.command && (
+              <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap break-all">
+                {approvalResult.command}
+              </pre>
+            )}
           </div>
         </div>
       )}

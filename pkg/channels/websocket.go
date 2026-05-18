@@ -279,8 +279,10 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 		return
 	}
 
+	command := ""
 	if n.approvalManager != nil {
-		_, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
+		// HandleApproval atomically finds, removes and returns the approval
+		handledApproval, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
 		if err != nil {
 			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
 				"error":      err.Error(),
@@ -289,7 +291,18 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 			n.sendError(client, "approval_error", "approval request expired or not found")
 			return
 		}
+		command = handledApproval.Command
+
+		// Persist the approval decision in session history
+		n.persistApprovalMessage(client.SessionKey, payload.RequestID, payload.Approved, command, "")
 	}
+
+	// Broadcast approval result to the session
+	n.broadcastToSession(client.SessionKey, "approve.result", map[string]interface{}{
+		"request_id": payload.RequestID,
+		"approved":   payload.Approved,
+		"command":    command,
+	})
 
 	ackData := map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}
 	if err := client.Send(marshalWithID("approve.ack", ackData, eventID)); err != nil {

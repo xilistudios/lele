@@ -426,6 +426,19 @@ type UploadedFile struct {
 	Size     int64  `json:"size"`
 }
 
+// ApproveRequest is the request body for approving/rejecting a command via HTTP.
+type ApproveRequest struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`
+}
+
+// ApproveResponse is the response for an approval action.
+type ApproveResponse struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`
+	Message   string `json:"message,omitempty"`
+}
+
 // FetchModelsRequest is the request body for fetching remote model lists.
 type FetchModelsRequest struct {
 	APIBase string `json:"api_base"`

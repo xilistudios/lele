@@ -39,6 +39,8 @@ export const endpoints = {
     clear: (sessionKey: string) => `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/clear`,
     compact: (sessionKey: string) =>
       `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
+    approve: (sessionKey: string) =>
+      `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/approve`,
   },
   system: {
     config: '/api/v1/config',

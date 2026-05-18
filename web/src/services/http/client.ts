@@ -3,6 +3,7 @@ import type {
   AgentFilesResponse,
   AgentStatusResponse,
   AgentsResponse,
+  ApproveResponse,
   AuthPairResponse,
   AuthRefreshResponse,
   AuthSession,
@@ -300,6 +301,11 @@ export const createApiClient = (baseUrl: string) => {
           ...payload,
           session_key: payload.session_key || undefined,
         }),
+      }),
+    approve: (sessionKey: string, requestId: string, approved: boolean) =>
+      request<ApproveResponse>(endpoints.chat.approve(sessionKey), {
+        method: 'POST',
+        body: JSON.stringify({ request_id: requestId, approved }),
       }),
     clearSession: async (sessionKey: string) => {
       await request<unknown>(endpoints.chat.clear(sessionKey), { method: 'POST' })

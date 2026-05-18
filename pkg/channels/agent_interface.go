@@ -24,6 +24,8 @@ type AgentProvidable interface {
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
 	// GetSessionHistory devuelve el historial persistido de una sesión
 	GetSessionHistory(sessionKey string) []providers.Message
+	// AddSessionMessage añade un mensaje al historial persistido de una sesión
+	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión
 	GetSessionModel(sessionKey string) string
 	// GetSessionModelSupportsImages returns true if the session's current model supports vision
