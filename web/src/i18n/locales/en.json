@@ -297,7 +297,8 @@
     },
     "theme": {
       "dark": "Dark",
-      "light": "Light"
+      "light": "Light",
+      "auto": "Auto"
     },
     "options": {
       "daily": "Daily",

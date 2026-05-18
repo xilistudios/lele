@@ -15,7 +15,7 @@ import {
 } from '../../molecules'
 
 export function GeneralSettings() {
-  const { theme, setTheme } = useTheme()
+  const { themeSetting, setThemeSetting } = useTheme()
   const {
     draftConfig,
     dirtyPaths,
@@ -214,11 +214,12 @@ export function GeneralSettings() {
         <SettingsField label={t('settings.fields.theme')} path="display.theme">
           <SelectInput
             id="display.theme"
-            value={theme}
-            onChange={(v) => setTheme(v as 'dark' | 'light')}
+            value={themeSetting}
+            onChange={(v) => setThemeSetting(v as 'dark' | 'light' | 'auto')}
             options={[
               { value: 'dark', label: t('settings.theme.dark') },
               { value: 'light', label: t('settings.theme.light') },
+              { value: 'auto', label: t('settings.theme.auto') },
             ]}
           />
         </SettingsField>
