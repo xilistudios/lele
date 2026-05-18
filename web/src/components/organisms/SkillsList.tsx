@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SkillInfo } from '../../lib/types'
+import { IconButton } from '../atoms/IconButton'
 
 type Props = {
   skills: SkillInfo[]
@@ -126,11 +127,10 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => handleRemoveClick(skill.name, skill.source)}
                     disabled={isRemoving === skill.name}
-                    className="rounded-lg p-1.5 text-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                    variant="danger"
                     title={t('skills.removeSkill', 'Remove')}
                   >
                     <svg
@@ -145,7 +145,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       <path d="M3 6h18" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
-                  </button>
+                  </IconButton>
                 )}
               </div>
             )}
@@ -158,7 +158,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
           <div className="mt-auto pt-3 flex items-center gap-2">
             {skill.source && (
               <span
-                className={`inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border ${SOURCE_COLORS[skill.source] || SOURCE_COLORS.builtin}`}
+                className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${SOURCE_COLORS[skill.source] || 'bg-surface-muted text-text-tertiary border-border/50'}`}
               >
                 {SOURCE_LABELS[skill.source] || skill.source}
               </span>

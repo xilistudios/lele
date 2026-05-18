@@ -226,14 +226,20 @@ export function useAppLogic(
       messagesHook.setPendingAttachments([])
       // Optimistic update: bump message_count immediately so sidebar
       // shows the session activity instead of "New Chat"
-      touchSession(sessionsHook.currentSessionKey)
+      // Also generate a title from the first message so we don't show a UUID
+      const title = content
+        .replace(/[\n\r\t]+/g, ' ')
+        .replace(/[.,!?;:'"`]+/g, '')
+        .trim()
+        .slice(0, 50)
+      touchSession(sessionsHook.currentSessionKey, title || undefined)
     },
     [
       sessionsHook.currentSessionKey,
       currentAgentId,
       messagesHook.sendMessage,
       messagesHook.setPendingAttachments,
-      sessionsHook.refreshSessions,
+      touchSession,
     ],
   )
 
@@ -258,7 +264,13 @@ export function useAppLogic(
         wsSend('approve', { request_id: requestId, approved })
       }
     },
-    [messagesHook.approvalRequest, messagesHook.approveRequest, sessionsHook.currentSessionKey, api, wsSend],
+    [
+      messagesHook.approvalRequest,
+      messagesHook.approveRequest,
+      sessionsHook.currentSessionKey,
+      api,
+      wsSend,
+    ],
   )
 
   const handleCancel = useCallback(() => {
@@ -377,7 +389,11 @@ export function useAppLogic(
   }, [])
 
   const handleToggleSidebar = useCallback(() => {
-    setSidebarOpen((current) => !current)
+    setSidebarOpen((current) => {
+      const newValue = !current
+      saveSidebarOpen(newValue)
+      return newValue
+    })
   }, [])
 
   useEffect(() => {
@@ -401,14 +417,36 @@ export function useAppLogic(
       (m) => m.sessionKey === sessionKey && (m.streaming || m.id === '__processing_placeholder__'),
     )
 
+    // Ensure placeholder when agent starts processing
     if (chatHistory.processing && !hasStreamingPlaceholder) {
       ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
     }
 
-    if (!chatHistory.processing && prevProcessingRef.current) {
-      clearStreamingRef.current()
-      // Sync processingSessions with HTTP polling state
-      // This ensures the sidebar updates even when WebSocket events are missed
+    if (chatHistory.processing) {
+      // Agent is processing - ensure session is tracked in processingSessions
+      // This covers the case where sendMessage() optimistically added the session
+      // but polling hadn't yet confirmed processing=true, or the session was
+      // prematurely removed by an intermediate event.
+      if (!prevProcessingRef.current) {
+        messagesHook.setProcessingSessions((prev: Set<string>) => {
+          if (!prev.has(sessionKey)) {
+            const next = new Set(prev)
+            next.add(sessionKey)
+            return next
+          }
+          return prev
+        })
+      }
+    } else {
+      // Agent is NOT processing - remove from processingSessions
+      // regardless of prev state. This handles:
+      // 1. Normal transition: processing→done (prevProcessing was true)
+      // 2. Fast finish: agent finished before first poll saw processing=true
+      //    (session was added by sendMessage() but polling never saw true)
+      // 3. Stale state cleanup
+      if (prevProcessingRef.current) {
+        clearStreamingRef.current()
+      }
       messagesHook.setProcessingSessions((prev: Set<string>) => {
         if (prev.has(sessionKey)) {
           const next = new Set(prev)

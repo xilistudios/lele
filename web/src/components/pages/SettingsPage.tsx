@@ -107,10 +107,7 @@ export function SettingsPage() {
           onClose={() => onToggleSidebar()}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
-          <SettingsHeader
-            onToggleSidebar={onToggleSidebar}
-            configPath={settingsState.metadata?.config_path}
-          />
+          <SettingsHeader configPath={settingsState.metadata?.config_path} />
 
           <div className="flex flex-1 overflow-hidden">
             <SettingsTabs activeTab={activeTab} onTabChange={handleTabChange} />

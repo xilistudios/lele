@@ -82,15 +82,15 @@ export function SessionItem({
         </span>
       </span>
       <button
+        type="button"
         onClick={(event) => {
           event.stopPropagation()
           onDelete()
         }}
-        type="button"
         aria-label={t('chat.deleteSession')}
         className="ml-auto flex items-center justify-center rounded-md p-2 text-text-tertiary opacity-0 transition-all hover:bg-state-error-light hover:text-state-error group-hover:opacity-100"
       >
-        <TrashIcon />
+        <TrashIcon size={12} />
       </button>
     </div>
   )

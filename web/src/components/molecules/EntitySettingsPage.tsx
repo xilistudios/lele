@@ -35,11 +35,7 @@ export function EntitySettingsPage({ titleKey, children }: Props) {
           onClose={() => onToggleSidebar()}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
-          <SettingsHeader
-            title={t(titleKey)}
-            onToggleSidebar={onToggleSidebar}
-            configPath={settingsState.metadata?.config_path}
-          />
+          <SettingsHeader title={t(titleKey)} configPath={settingsState.metadata?.config_path} />
 
           <div className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-6">{children}</div>

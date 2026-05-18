@@ -12,6 +12,7 @@ import {
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
 import { AgentsPage } from './components/pages/AgentsPage'
 import { AuthPage } from './components/pages/AuthPage'
+import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SettingsPage } from './components/pages/SettingsPage'
@@ -249,6 +250,7 @@ function AppContent() {
         <Route path="agents" element={<AgentsPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="skills" element={<SkillsPage />} />
+        <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
         <Route path="settings/agent/:agentId" element={<AgentFilesPage />} />
         <Route path="settings/agents" element={<Navigate to="/agents" replace />} />

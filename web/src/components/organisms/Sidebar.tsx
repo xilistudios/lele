@@ -1,21 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { IconButton } from '../atoms/IconButton'
 import {
   AgentsIcon,
   ChatBubbleIcon,
-  EditIcon,
+  HistoryIcon,
   LogoutIcon,
+  MoreIcon,
+  PlusCircleIcon,
   ProvidersIcon,
+  SearchIcon,
   SettingsIcon,
+  SidebarToggleIcon,
   SkillsIcon,
+  TrashIcon,
+  UserIcon,
 } from '../atoms/Icons'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
 import { SessionItem } from '../molecules/SessionItem'
+import { QuickChatPanel } from './QuickChatPanel'
 
 const MAX_VISIBLE_SESSIONS = 5
 
@@ -37,44 +45,45 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     processingSessions,
     onCreateSession,
     onDeleteSession,
+    onToggleSidebar,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
 
   const deviceName = session?.device_name ?? 'lele'
 
-  const sortedSessions = useMemo(() => {
-    const visible = sessions.filter((s) => !s.key.startsWith('subagent:'))
-    return [...visible].sort(
-      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
-    )
-  }, [sessions])
-
-  // Only show current session on chat pages
   const isOnChatPage = ['/', '/chat/'].some((prefix) => {
     if (prefix === '/') return location.pathname === '/'
     return location.pathname.startsWith(prefix)
   })
 
   const selectedKey = parentSessionKey ?? currentSessionKey
+
+  const sortedSessions = useMemo(() => {
+    const visible = sessions.filter(
+      (s) => !s.key.startsWith('subagent:') && (s.message_count > 0 || s.key === selectedKey),
+    )
+    return [...visible].sort(
+      (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+    )
+  }, [sessions, selectedKey])
+
+  // Only show current session on chat pages
   const currentSession = isOnChatPage
     ? (sortedSessions.find((s) => s.key === selectedKey) ?? sortedSessions[0] ?? null)
     : null
 
-  // Expanded state - shows all sessions when true
-  const [expanded, setExpanded] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelFocusSearch, setPanelFocusSearch] = useState(false)
+  const [recentExpanded, setRecentExpanded] = useState(false)
 
-  const prevCountRef = useRef(sessions.length)
+  const openPanel = (focusSearch = false) => {
+    setPanelFocusSearch(focusSearch)
+    setPanelOpen(true)
+  }
 
-  // Only reset expanded when sessions are removed (user deleted one),
-  // not when a new session arrives while the user is browsing the expanded list.
-  useEffect(() => {
-    if (sessions.length < prevCountRef.current) {
-      setExpanded(false)
-    }
-    prevCountRef.current = sessions.length
-  }, [sessions.length])
-
-  const visibleSessions = expanded ? sortedSessions : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
+  const recentSessions = recentExpanded
+    ? sortedSessions
+    : sortedSessions.slice(0, MAX_VISIBLE_SESSIONS)
 
   const handleSessionSelect = (key: string) => {
     navigate(`/chat/${encodeURIComponent(key)}`)
@@ -84,6 +93,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const isActiveRoute = (path: string) => location.pathname === path
 
   const navItems = [
+    {
+      path: '/chats',
+      label: t('sidebar.chats'),
+      icon: ChatBubbleIcon,
+    },
     {
       path: '/agents',
       label: t('sidebar.agents'),
@@ -120,45 +134,122 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
-          className={`flex items-center border-b border-border px-4 py-3 ${collapsed ? 'justify-center' : ''}`}
+          className={`flex items-center px-4 py-3 ${collapsed ? 'justify-center' : 'justify-between'}`}
         >
-          <Logo collapsed={collapsed} />
+          {!collapsed && <Logo collapsed={collapsed} />}
+          {collapsed && (
+            <div className="hidden md:flex group relative items-center justify-center">
+              <IconButton
+                onClick={onToggleSidebar}
+                ariaLabel={t('sidebar.expand')}
+                className="flex items-center justify-center h-8 w-8"
+              >
+                <SidebarToggleIcon size={16} />
+              </IconButton>
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                {t('sidebar.expand')}
+              </span>
+            </div>
+          )}
+          {!collapsed && (
+            <div className="hidden md:flex group relative items-center justify-center">
+              <IconButton
+                onClick={onToggleSidebar}
+                ariaLabel={t('sidebar.collapse')}
+                className="flex items-center justify-center h-8 w-8"
+              >
+                <SidebarToggleIcon size={16} />
+              </IconButton>
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                {t('sidebar.collapse')}
+              </span>
+            </div>
+          )}
         </div>
 
-        <div className="border-b border-border px-2 py-3">
-          <button
-            onClick={onCreateSession}
-            type="button"
-            className={`flex w-full items-center gap-2 rounded-md text-xs text-text-secondary hover-highlight ${collapsed ? 'px-2 justify-center' : 'px-3 py-2'}`}
-            style={collapsed ? { paddingTop: '12px', paddingBottom: '12px' } : undefined}
-            title={collapsed ? t('chat.newChat') : undefined}
-          >
-            <EditIcon />
-            {!collapsed && <span>{t('chat.newChat')}</span>}
-          </button>
+        <div
+          className={`px-2 ${collapsed ? 'flex flex-col items-center gap-1' : 'flex flex-col gap-1'}`}
+        >
+          {collapsed ? (
+            <>
+              <div className="group relative flex items-center justify-center">
+                <IconButton
+                  onClick={onCreateSession}
+                  ariaLabel={t('chat.newChat')}
+                  variant="nav"
+                  className="flex items-center justify-center h-8 w-8"
+                >
+                  <PlusCircleIcon size={24} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('chat.newChat')}
+                </span>
+              </div>
+              <div className="group relative flex items-center justify-center">
+                <IconButton
+                  onClick={() => openPanel(true)}
+                  ariaLabel={t('chat.search')}
+                  variant="nav"
+                  className="flex items-center justify-center h-8 w-8"
+                >
+                  <SearchIcon size={16} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('chat.search')}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onCreateSession}
+                aria-label={t('chat.newChat')}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                <div className="h-8 w-8 flex items-center justify-center">
+                  <PlusCircleIcon size={24} />
+                </div>
+                <span className="leading-none">{t('chat.newChat')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openPanel(true)}
+                aria-label={t('chat.search')}
+                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                <div className="h-8 w-8 flex items-center justify-center">
+                  <SearchIcon size={16} />
+                </div>
+                <span>{t('chat.search')}</span>
+              </button>
+            </>
+          )}
         </div>
 
-        <div className={`border-b border-border ${collapsed ? 'px-2' : 'px-3'} py-3`}>
+        <div className={`${collapsed ? 'px-2' : 'px-3 py-3'}`}>
           {collapsed ? (
             <Popover
               block
+              tooltip={t('chat.recent')}
               trigger={
-                <div
-                  // biome-ignore lint/a11y/useSemanticElements: div needed for Popover trigger compatibility
-                  role="button"
-                  tabIndex={0}
-                  className="flex w-full items-center justify-center rounded-md px-2 text-text-secondary hover-highlight-group"
-                  style={{ paddingTop: '12px', paddingBottom: '12px' }}
-                  title={t('chat.recent')}
-                  aria-label={t('chat.recent')}
-                >
-                  <ChatBubbleIcon />
+                <div className="group relative flex items-center justify-center">
+                  <IconButton
+                    ariaLabel={t('chat.recent')}
+                    variant="nav"
+                    className="flex items-center justify-center h-8 w-8"
+                  >
+                    <HistoryIcon size={16} />
+                  </IconButton>
+                  <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                    {t('chat.recent')}
+                  </span>
                 </div>
               }
-              popoverWidth={200}
-              popoverHeight={250}
+              popoverWidth={220}
+              popoverHeight={280}
             >
-              <div className="border-b border-border pb-2 mb-2">
+              <div className="pb-2 mb-2 border-b border-border">
                 <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
                   {t('chat.recentChats')}
                 </p>
@@ -168,7 +259,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   <p className="text-xs text-text-tertiary px-3 py-2">{t('chat.noSessions')}</p>
                 ) : (
                   <>
-                    {visibleSessions.map((s) => (
+                    {recentSessions.map((s) => (
                       <button
                         key={s.key}
                         type="button"
@@ -182,31 +273,59 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         <span className="truncate">{s.name || s.key}</span>
                       </button>
                     ))}
-                    {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
-                      <button
-                        type="button"
-                        onClick={() => setExpanded((v) => !v)}
-                        className="text-xs text-brand-rosa hover:text-brand-rosa/80 px-3 py-1 mt-1 border-t border-border pt-2"
-                      >
-                        {expanded ? t('chat.showLess') : t('chat.showMore')} (
-                        {sortedSessions.length - MAX_VISIBLE_SESSIONS})
-                      </button>
-                    )}
                   </>
                 )}
               </div>
+              {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
+                <button
+                  type="button"
+                  onClick={() => setRecentExpanded((v) => !v)}
+                  className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                >
+                  <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
+                  {!recentExpanded && (
+                    <span className="text-text-tertiary">
+                      ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
+                    </span>
+                  )}
+                </button>
+              )}
             </Popover>
           ) : (
             <>
-              <div className="overflow-hidden max-h-8 opacity-100">
-                <p className="px-1 text-[10px] uppercase tracking-wider text-text-tertiary">
+              <div className="flex items-center justify-between px-1 py-1">
+                <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
+                <Popover
+                  tooltip={t('chat.more')}
+                  trigger={
+                    <button
+                      type="button"
+                      className="flex items-center justify-center rounded p-0.5 text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+                      aria-label={t('chat.more')}
+                    >
+                      <MoreIcon size={12} />
+                    </button>
+                  }
+                  popoverWidth={200}
+                  popoverHeight={60}
+                >
+                  <div className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors"
+                    >
+                      <TrashIcon size={14} />
+                      <span>{t('chat.deleteAllChats')}</span>
+                    </button>
+                  </div>
+                </Popover>
               </div>
               {sortedSessions.length > 0 && (
                 <>
                   <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
-                    {visibleSessions.map((s) => (
+                    {recentSessions.map((s) => (
                       <SessionItem
                         key={s.key}
                         sessionKey={s.key}
@@ -223,21 +342,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   {sortedSessions.length > MAX_VISIBLE_SESSIONS && (
                     <button
                       type="button"
-                      onClick={() => setExpanded((v) => !v)}
+                      onClick={() => setRecentExpanded((v) => !v)}
                       className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
                     >
-                      <svg
-                        className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <title>{expanded ? 'Show less' : 'Show more'}</title>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                      <span>{expanded ? t('chat.showLess') : t('chat.showMore')}</span>
-                      {!expanded && (
+                      <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
+                      {!recentExpanded && (
                         <span className="text-text-tertiary">
                           ({sortedSessions.length - MAX_VISIBLE_SESSIONS})
                         </span>
@@ -251,10 +360,32 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Agents & Providers navigation */}
-        <nav
-          className={`border-t border-border px-2 py-3 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}
-        >
+        <nav className="px-2 flex flex-col gap-1">
           {collapsed ? (
+            <>
+              {navItems.map((item) => (
+                <div key={item.path} className="group relative flex items-center justify-center">
+                  <IconButton
+                    onClick={() => {
+                      navigate(item.path)
+                      if (isMobile) onClose()
+                    }}
+                    title={item.label}
+                    ariaLabel={item.label}
+                    variant="nav"
+                    className={`flex items-center justify-center h-8 w-8 ${
+                      isActiveRoute(item.path) ? 'text-brand-rosa bg-surface-selected' : ''
+                    }`}
+                  >
+                    <item.icon size={16} />
+                  </IconButton>
+                  <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                    {item.label}
+                  </span>
+                </div>
+              ))}
+            </>
+          ) : (
             <>
               {navItems.map((item) => (
                 <button
@@ -264,37 +395,20 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     navigate(item.path)
                     if (isMobile) onClose()
                   }}
-                  className={`flex w-full items-center justify-center rounded-md py-2 transition-colors ${
-                    isActiveRoute(item.path)
-                      ? 'text-brand-rosa bg-surface-selected'
-                      : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                  }`}
-                  title={item.label}
                   aria-label={item.label}
+                  className={`flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover ${
+                    isActiveRoute(item.path)
+                      ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
                 >
-                  <item.icon size={16} />
+                  <div className="h-8 w-8 flex items-center justify-center">
+                    <item.icon size={16} />
+                  </div>
+                  <span>{item.label}</span>
                 </button>
               ))}
             </>
-          ) : (
-            navItems.map((item) => (
-              <button
-                key={item.path}
-                type="button"
-                onClick={() => {
-                  navigate(item.path)
-                  if (isMobile) onClose()
-                }}
-                className={`flex items-center gap-2 w-full rounded-md px-2 py-2 text-sm transition-colors ${
-                  isActiveRoute(item.path)
-                    ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
-              >
-                <item.icon size={16} />
-                <span>{item.label}</span>
-              </button>
-            ))
           )}
         </nav>
 
@@ -307,16 +421,19 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             trigger={
               <button
                 type="button"
-                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-1 w-full py-2 px-2'}`}
+                className={`flex items-center rounded-md hover-highlight-group ${collapsed ? 'w-full justify-center py-2' : 'gap-2 w-full py-2 px-2'}`}
                 aria-label={collapsed ? t('chat.deviceMenu') : undefined}
               >
                 <div
-                  className={`flex flex-shrink-0 items-center justify-center rounded ${collapsed ? 'h-6 w-6' : 'px-2 py-1'} bg-surface-hover text-xs font-medium text-text-primary`}
+                  className="flex flex-shrink-0 items-center justify-center bg-surface-hover text-text-primary h-7 w-7 rounded"
+                  style={{ transform: 'rotate(45deg)' }}
                 >
-                  {deviceName?.[0]?.toUpperCase() ?? 'L'}
+                  <div style={{ transform: 'rotate(-45deg)' }}>
+                    <UserIcon size={12} />
+                  </div>
                 </div>
                 {!collapsed && (
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 text-left">
                     <p className="truncate text-sm font-medium text-text-primary">{deviceName}</p>
                   </div>
                 )}
@@ -326,11 +443,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             popoverHeight={80}
           >
             <div className="flex flex-col gap-1">
-              <button
-                type="button"
+              <IconButton
                 title={t('chat.settings')}
-                aria-label={t('chat.settings')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                ariaLabel={t('chat.settings')}
+                variant="nav-full"
+                className="px-3 py-2"
                 onClick={() => {
                   navigate('/settings/general')
                   if (isMobile) onClose()
@@ -338,7 +455,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               >
                 <SettingsIcon />
                 <span>{t('chat.settings')}</span>
-              </button>
+              </IconButton>
               <button
                 type="button"
                 aria-label={t('chat.logout')}
@@ -354,6 +471,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           </Popover>
         </div>
       </aside>
+
+      <QuickChatPanel
+        isOpen={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        initialFocusSearch={panelFocusSearch}
+      />
     </>
   )
 }

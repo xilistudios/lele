@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { Badge } from '../atoms/Badge'
 
 type Props = {
   label: string
@@ -28,11 +29,7 @@ export function SettingsField({
           {label}
           {required && <span className="ml-1 text-state-error">*</span>}
         </label>
-        {isDirty && (
-          <span className="rounded bg-state-info-light px-1.5 py-0.5 text-[10px] text-state-info">
-            {t('settings.modified')}
-          </span>
-        )}
+        {isDirty && <Badge variant="info">{t('settings.modified')}</Badge>}
       </div>
       {description && <p className="text-xs text-text-tertiary">{description}</p>}
       <div className="mt-1.5">{children}</div>

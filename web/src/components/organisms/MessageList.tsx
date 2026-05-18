@@ -189,9 +189,7 @@ export function MessageList() {
             }`}
           >
             <div className="flex items-center gap-2">
-              <span className="text-lg">
-                {approvalResult.approved ? '✅' : '❌'}
-              </span>
+              <span className="text-lg">{approvalResult.approved ? '✅' : '❌'}</span>
               <span
                 className={`text-sm font-medium ${
                   approvalResult.approved ? 'text-state-success' : 'text-state-error'

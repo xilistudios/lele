@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { IconButton } from '../atoms/IconButton'
 import { ChevronLeftIcon } from '../atoms/Icons'
-import { RemoveButton } from '../atoms/RemoveButton'
 
 type Props = {
   title: ReactNode
@@ -39,7 +39,24 @@ export function NamedItemCard({
           />
         </button>
         <span className="font-medium text-sm text-text-primary flex-1">{title}</span>
-        <RemoveButton onClick={onRemove} ariaLabel={removeLabel} />
+        <IconButton
+          onClick={onRemove}
+          variant="danger"
+          ariaLabel={removeLabel}
+          className="p-1 rounded"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </IconButton>
       </div>
 
       <div

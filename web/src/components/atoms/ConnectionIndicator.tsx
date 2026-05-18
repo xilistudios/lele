@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePopoverPosition } from '../../hooks/usePopoverPosition'
+import { IconButton } from './IconButton'
 import { ServerIcon } from './Icons'
 
 type Props = {
@@ -53,11 +54,9 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
 
   return (
     <div ref={ref} className={`relative ${!isOpen ? 'group' : ''}`}>
-      <button
-        type="button"
+      <IconButton
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-150"
-        aria-label={t('connection.statusAria', { status })}
+        ariaLabel={t('connection.statusAria', { status })}
       >
         <div className="relative">
           <ServerIcon />
@@ -66,7 +65,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
             aria-hidden="true"
           />
         </div>
-      </button>
+      </IconButton>
 
       <span
         className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap ${

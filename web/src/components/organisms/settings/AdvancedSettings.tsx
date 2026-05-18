@@ -82,7 +82,7 @@ export function AdvancedSettings() {
         if (!textarea) return
         const start = textarea.selectionStart
         const end = textarea.selectionEnd
-        const newValue = rawJsonText.substring(0, start) + '  ' + rawJsonText.substring(end)
+        const newValue = `${rawJsonText.substring(0, start)}  ${rawJsonText.substring(end)}`
         isInternalChange.current = true
         setRawJsonText(newValue)
         // Restore cursor position after React re-render
@@ -277,9 +277,7 @@ export function AdvancedSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.rawJson')}>
-        <p className="mb-3 text-xs text-text-tertiary">
-          {t('settings.rawJsonDescription')}
-        </p>
+        <p className="mb-3 text-xs text-text-tertiary">{t('settings.rawJsonDescription')}</p>
         <div className="mb-3 flex flex-wrap gap-2">
           <button
             type="button"
@@ -343,9 +341,7 @@ export function AdvancedSettings() {
                     <p className="mt-1 text-xs text-text-secondary font-mono whitespace-pre-wrap">
                       {jsonParseError}
                     </p>
-                    <p className="mt-2 text-xs text-text-tertiary">
-                      {t('settings.jsonErrorHint')}
-                    </p>
+                    <p className="mt-2 text-xs text-text-tertiary">{t('settings.jsonErrorHint')}</p>
                   </div>
                 </div>
               </div>

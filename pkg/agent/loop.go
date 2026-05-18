@@ -228,10 +228,11 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	al.sessionThinking.Delete(newSessionKey)
 
 	if sessionAgent != nil {
+		// GetOrCreate ensures the session exists in memory.
+		// Do NOT save to disk yet — the session should only persist
+		// once the user actually sends a message.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
-		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
-		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
 	return newSessionKey

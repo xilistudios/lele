@@ -7,12 +7,12 @@ import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
-import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
+import { ChevronLeftIcon } from '../atoms/Icons'
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, onToggleSidebar, wsStatus } = useAppLogicContext()
+  const { currentAgent, wsStatus } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
 
@@ -27,15 +27,6 @@ export const ChatHeader = memo(function ChatHeader() {
   return (
     <div className="flex items-center justify-between border-b border-border px-6 py-3">
       <div className="flex items-center gap-3 min-w-0">
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="hidden md:flex text-text-secondary transition-colors hover:text-text-primary"
-          aria-label={t('chat.toggleSidebar')}
-        >
-          <SidebarToggleIcon />
-        </button>
-
         <div className="min-w-0">
           {parentSession && (
             <button

@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect } from 'react'
+import { IconButton } from './IconButton'
 
 type Size = 'sm' | 'md' | 'lg' | 'xl' | 'full'
 
@@ -57,11 +58,11 @@ export function Modal({
             {title}
           </h2>
           {showCloseButton && (
-            <button
-              type="button"
+            <IconButton
               onClick={onClose}
-              className="flex items-center justify-center w-8 h-8 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-all duration-200"
-              aria-label="Close"
+              variant="ghost"
+              ariaLabel="Close"
+              className="flex items-center justify-center w-8 h-8"
             >
               <svg
                 width="18"
@@ -75,7 +76,7 @@ export function Modal({
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-            </button>
+            </IconButton>
           )}
         </div>
         <div className="overflow-y-auto max-h-[calc(90vh-4rem)]">{children}</div>

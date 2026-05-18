@@ -213,7 +213,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
                   className="rounded-lg border border-border bg-background-primary overflow-hidden"
                 >
                   {block.label && (
-                    <div className="border-b border-border px-4 py-1.5 text-[10px] text-text-tertiary font-mono">
+                    <div className="px-4 py-1.5 text-[10px] text-text-tertiary font-mono">
                       {block.label}
                     </div>
                   )}

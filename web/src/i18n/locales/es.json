@@ -61,7 +61,30 @@
     "thinkingMedium": "Medio",
     "thinkingHigh": "Alto",
     "previous": "Anterior",
-    "next": "Siguiente"
+    "next": "Siguiente",
+    "more": "Más",
+    "organizeChats": "Organizar chats",
+    "filterChats": "Filtrar chats",
+    "deleteAllChats": "Eliminar todos los chats",
+    "search": "Buscar",
+    "allChats": "Todos los chats",
+    "searchChats": "Buscar chats...",
+    "sortBy": "Ordenar por",
+    "sortRecent": "Recientes",
+    "sortName": "Nombre",
+    "sortDate": "Fecha",
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "thisWeek": "Esta semana",
+    "thisMonth": "Este mes",
+    "justNow": "Ahora mismo",
+    "minutesAgo": "Hace {{count}} min",
+    "hoursAgo": "Hace {{count}} h",
+    "unnamedSession": "Chat sin nombre ({{key}})",
+    "rename": "Renombrar",
+    "closePanel": "Cerrar panel",
+    "manageChats": "Administrar chats",
+    "totalChats": "{{count}} chats en total"
   },
   "connection": {
     "connected": "Conectado",
@@ -462,10 +485,13 @@
     "genericAction": "Acción"
   },
   "sidebar": {
+    "chats": "Chats",
     "agents": "Agentes",
     "providers": "Proveedores",
     "skills": "Habilidades",
-    "navigation": "Navegación"
+    "navigation": "Navegación",
+    "collapse": "Minimizar",
+    "expand": "Expandir"
   },
   "skills": {
     "title": "Habilidades",
