@@ -61,7 +61,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   }, [sessions])
 
   // Only show current session on chat pages
-  const isOnChatPage = ['/', '/chat/'].some(prefix => {
+  const isOnChatPage = ['/', '/chat/'].some((prefix) => {
     if (prefix === '/') return location.pathname === '/'
     return location.pathname.startsWith(prefix)
   })

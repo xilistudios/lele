@@ -7,6 +7,7 @@ import {
   parseFileDiffRow,
 } from '../lib/markdown'
 import type { Attachment, ChatMessage } from '../lib/types'
+import { CanvasBlock } from './molecules/CanvasBlock'
 import { MarkdownText } from './molecules/MarkdownText'
 import { ToolCallDisplay } from './molecules/ToolCallDisplay'
 
@@ -29,6 +30,20 @@ function isImageAttachment(attachment: Attachment): boolean {
 function buildFileUrl(apiUrl: string, path: string): string {
   const base = apiUrl.replace(/\/$/, '')
   return `${base}/api/v1/files/view?path=${encodeURIComponent(path)}`
+}
+
+function looksLikeHTMLorSVG(content: string): 'html' | 'svg' | null {
+  const trimmed = content.trim().toLowerCase()
+  if (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) return 'html'
+  if (trimmed.startsWith('<svg')) return 'svg'
+
+  // Check for HTML snippet with multiple tags
+  const hasMultipleTags = (content.match(/<[a-zA-Z][^>]*>/g) ?? []).length >= 2
+  const hasClosingTag = (content.match(/<\/[a-zA-Z][^>]*>/g) ?? []).length >= 1
+  if (trimmed.startsWith('<') && hasMultipleTags && hasClosingTag) {
+    return 'html'
+  }
+  return null
 }
 
 type Props = {
@@ -182,6 +197,16 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
             }
 
             if (block.type === 'code') {
+              const lang = block.label?.toLowerCase()
+              if (lang === 'html' || lang === 'svg') {
+                return (
+                  <CanvasBlock
+                    key={`canvasblock-${block.label ?? 'canvas'}-${i}`}
+                    content={block.content}
+                    language={lang}
+                  />
+                )
+              }
               return (
                 <div
                   key={`codeblock-${block.label ?? 'code'}-${i}`}
@@ -203,6 +228,16 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
             const hasSpecialRows = lines.some((line) => isDiffStatLine(line) || isFileDiffRow(line))
 
             if (!hasSpecialRows) {
+              const detectedLang = looksLikeHTMLorSVG(block.content)
+              if (detectedLang) {
+                return (
+                  <CanvasBlock
+                    key={`canvasblock-fallback-${detectedLang}-${block.content.slice(0, 30)}`}
+                    content={block.content}
+                    language={detectedLang}
+                  />
+                )
+              }
               return (
                 <MarkdownText
                   key={`textblock-${block.content.slice(0, 50)}-${i}`}

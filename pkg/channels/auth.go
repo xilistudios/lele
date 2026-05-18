@@ -103,7 +103,7 @@ func (am *AuthManager) loadStore() error {
 	am.store = &store
 	for clientID, client := range am.store.Clients {
 		if len(client.SessionKeys) == 0 {
-			client.SessionKeys = []string{"native:" + clientID}
+			client.SessionKeys = []string{clientID}
 		}
 	}
 	am.cleanupExpired()
@@ -252,7 +252,7 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 		Created:     time.Now(),
 		Expires:     time.Now().AddDate(0, 0, expiryDays),
 		LastSeen:    time.Now(),
-		SessionKeys: []string{"native:" + clientID},
+		SessionKeys: []string{clientID},
 	}
 
 	am.store.Clients[clientID] = client
@@ -335,6 +335,9 @@ func (am *AuthManager) UpdateLastSeen(clientID string) {
 
 func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
 	if sessionKey == "" {
+		logger.DebugCF("native", "TrackSessionKey: empty session key, skipping", map[string]interface{}{
+			"client_id": clientID,
+		})
 		return
 	}
 
@@ -343,16 +346,30 @@ func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
 
 	client, exists := am.store.Clients[clientID]
 	if !exists {
+		logger.DebugCF("native", "TrackSessionKey: client not found in store", map[string]interface{}{
+			"client_id":   clientID,
+			"session_key": sessionKey,
+		})
 		return
 	}
 
 	for _, existing := range client.SessionKeys {
 		if existing == sessionKey {
+			logger.DebugCF("native", "TrackSessionKey: session key already tracked", map[string]interface{}{
+				"client_id":   clientID,
+				"session_key": sessionKey,
+				"total_keys":  len(client.SessionKeys),
+			})
 			return
 		}
 	}
 
 	client.SessionKeys = append(client.SessionKeys, sessionKey)
+	logger.InfoCF("native", "TrackSessionKey: new session key tracked", map[string]interface{}{
+		"client_id":   clientID,
+		"session_key": sessionKey,
+		"total_keys":  len(client.SessionKeys),
+	})
 	if err := am.saveStoreUnlocked(); err != nil {
 		logger.ErrorCF("native", "Failed to save store after tracking session", map[string]interface{}{
 			"client_id":   clientID,
@@ -360,6 +377,23 @@ func (am *AuthManager) TrackSessionKey(clientID, sessionKey string) {
 			"error":       err.Error(),
 		})
 	}
+}
+
+func (am *AuthManager) IsSessionKeyAvailable(sessionKey string, exceptClientID string) bool {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	for cid, client := range am.store.Clients {
+		if cid == exceptClientID {
+			continue
+		}
+		for _, sk := range client.SessionKeys {
+			if sk == sessionKey {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (am *AuthManager) GetClient(clientID string) (*ClientInfo, bool) {

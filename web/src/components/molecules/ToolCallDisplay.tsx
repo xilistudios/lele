@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next'
 import type { ToolMessageStatus } from '../../lib/types'
-import { Badge } from '../atoms/Badge'
 
 type IconConfig = { icon: string; color: string }
 
@@ -19,67 +18,67 @@ const FILE_OPS = new Set([
 const TOOL_ICONS: Record<string, IconConfig> = {
   read_file: {
     icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
-    color: 'text-blue-400',
+    color: 'text-state-info',
   },
   write_file: {
     icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6 M9 15l3 3 3-3',
-    color: 'text-green-400',
+    color: 'text-state-success',
   },
   edit_file: {
     icon: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
-    color: 'text-yellow-400',
+    color: 'text-state-warning',
   },
   smart_edit: {
     icon: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
-    color: 'text-yellow-400',
+    color: 'text-state-warning',
   },
   patch: {
     icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83',
-    color: 'text-orange-400',
+    color: 'text-brand-naranja',
   },
   sequential_replace: {
     icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83',
-    color: 'text-orange-400',
+    color: 'text-brand-naranja',
   },
   append_file: {
     icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M12 18v-6 M9 15l3 3 3-3',
-    color: 'text-emerald-400',
+    color: 'text-state-success',
   },
   list_dir: {
     icon: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z',
-    color: 'text-cyan-400',
+    color: 'text-state-info',
   },
   exec: {
     icon: 'M4 17l6-6-6-6 M12 19h8',
-    color: 'text-purple-400',
+    color: 'text-brand-morado',
   },
   web_search: {
     icon: 'M21 12a9 9 0 1 1-6.219-8.56 M21 12c0 1.66-4 3-9 3s-9-1.34-9-3 M3 12v-3c0-1.66 4-3 9-3s9 1.34 9 3v3',
-    color: 'text-sky-400',
+    color: 'text-interaction-primary',
   },
   web_fetch: {
     icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z',
-    color: 'text-indigo-400',
+    color: 'text-brand-morado',
   },
   cron: {
     icon: 'M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
-    color: 'text-pink-400',
+    color: 'text-brand-rosa',
   },
   spawn: {
     icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
-    color: 'text-amber-400',
+    color: 'text-state-warning',
   },
   i2c: {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 6v6l4 2',
-    color: 'text-rose-400',
+    color: 'text-brand-rosa',
   },
   spi: {
     icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M8 12h8',
-    color: 'text-fuchsia-400',
+    color: 'text-brand-morado',
   },
   read_image: {
     icon: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
-    color: 'text-violet-400',
+    color: 'text-interaction-primary',
   },
 }
 
@@ -223,9 +222,9 @@ export function ToolCallDisplay({
 
             {/* Error badge */}
             {toolStatus === 'error' && (
-              <Badge variant="error" className="ml-auto">
+              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-state-error-light text-state-error border border-state-error/30 ml-auto">
                 {t('toolCalls.error')}
-              </Badge>
+              </span>
             )}
           </div>
         </div>
@@ -279,14 +278,18 @@ export function ToolCallDisplay({
           )}
 
           {/* Error badge only */}
-          {toolStatus === 'error' && <Badge variant="error">{t('toolCalls.error')}</Badge>}
+          {toolStatus === 'error' && (
+            <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-state-error-light text-state-error border border-state-error/30">
+              {t('toolCalls.error')}
+            </span>
+          )}
 
           {/* Subagent nav */}
           {subagentSessionKey && toolStatus !== 'executing' && onNavigateToSession && (
             <button
               type="button"
               aria-label={t('toolCalls.openSubagent')}
-              className="ml-auto p-0.5 rounded-md hover:bg-background-secondary transition-colors"
+              className="ml-auto p-0.5 rounded-md hover:bg-background-secondary transition-colors cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation()
                 onNavigateToSession(subagentSessionKey)

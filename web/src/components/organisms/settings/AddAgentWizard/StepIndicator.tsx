@@ -20,7 +20,7 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
 
       {/* Progress line fill */}
       <div
-        className="absolute top-5 left-0 h-0.5 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-300"
+        className="absolute top-5 left-0 h-0.5 bg-gradient-to-r from-interaction-primary to-interaction-hover transition-all duration-300"
         style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
       />
 
@@ -41,9 +41,9 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
                   transition-all duration-300 shadow-sm
                   ${
                     isActive
-                      ? 'bg-blue-500 text-white shadow-blue-500/25 scale-110'
+                      ? 'bg-interaction-primary text-text-on-accent shadow-interaction-primary/25 scale-110'
                       : isCompleted
-                        ? 'bg-blue-500/20 text-blue-400 border-2 border-blue-500 hover:bg-blue-500/30'
+                        ? 'bg-interaction-primary/20 text-interaction-primary border-2 border-interaction-primary hover:bg-interaction-primary/30'
                         : 'bg-background-secondary text-text-tertiary border-2 border-border'
                   }
                   ${isClickable ? 'cursor-pointer' : 'cursor-default'}
@@ -58,6 +58,7 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
                     stroke="currentColor"
                     strokeWidth="2.5"
                   >
+                    <title>Completed</title>
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 ) : (
@@ -67,7 +68,7 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
               <span
                 className={`
                   text-xs font-medium transition-colors duration-200
-                  ${isActive ? 'text-blue-400' : isCompleted ? 'text-text-secondary' : 'text-text-tertiary'}
+                  ${isActive ? 'text-interaction-primary' : isCompleted ? 'text-text-secondary' : 'text-text-tertiary'}
                 `}
               >
                 {step.title}

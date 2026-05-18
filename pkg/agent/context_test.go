@@ -602,18 +602,15 @@ func TestBuildMessages_WithNativeSessionInfoUsesStableChatID(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:1776905338147", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:uuid-abc-123", "")
 
 	if len(messages) != 2 {
 		t.Fatalf("Expected 2 messages, got %d", len(messages))
 	}
 
 	systemMsg := messages[0]
-	if !strings.Contains(systemMsg.Content, "Chat ID: native:client-123") {
-		t.Error("Expected native session prompt to use stable chat ID without timestamp suffix")
-	}
-	if strings.Contains(systemMsg.Content, "Chat ID: native:client-123:1776905338147") {
-		t.Error("Expected native session prompt to omit timestamp suffix from chat ID")
+	if !strings.Contains(systemMsg.Content, "Chat ID: native:client-123:uuid-abc-123") {
+		t.Error("Expected native session prompt to use the full UUID-based chat ID")
 	}
 
 	messages = cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:chat:7", "")

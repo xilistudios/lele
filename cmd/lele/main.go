@@ -9,6 +9,12 @@ import (
 )
 
 func main() {
+	configDir, remaining := parseConfigDirFlag(os.Args[1:])
+	if configDir != "" {
+		os.Setenv("LELE_CONFIG_DIR", configDir)
+	}
+	os.Args = append([]string{os.Args[0]}, remaining...)
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(1)
@@ -90,4 +96,26 @@ func main() {
 		printHelp()
 		os.Exit(1)
 	}
+}
+
+func parseConfigDirFlag(args []string) (configDir string, remaining []string) {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--config-dir" || args[i] == "-c" {
+			if i+1 < len(args) {
+				configDir = args[i+1]
+				// Validate the path
+				if info, err := os.Stat(configDir); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: config directory does not exist: %s\n", configDir)
+					os.Exit(1)
+				} else if !info.IsDir() {
+					fmt.Fprintf(os.Stderr, "Error: config path is not a directory: %s\n", configDir)
+					os.Exit(1)
+				}
+				remaining = append(remaining, args[:i]...)
+				remaining = append(remaining, args[i+2:]...)
+				return
+			}
+		}
+	}
+	return "", args
 }

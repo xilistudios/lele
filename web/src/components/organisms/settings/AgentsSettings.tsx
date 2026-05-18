@@ -38,33 +38,16 @@ export function AgentsSettings() {
     )
   }
 
-  const getThinkingEnabled = (agent: { reasoning?: { enable?: boolean } } | undefined): boolean => {
-    return agent?.reasoning?.enable ?? false
-  }
-
-  const toggleThinking = (index: number, agent: Record<string, unknown>, enabled: boolean) => {
-    const current = (agent as Record<string, unknown>).reasoning as
-      | Record<string, unknown>
-      | undefined
-    updateField(`agents.list.${index}.reasoning`, {
-      ...(current ?? {}),
-      enable: enabled,
-    })
-  }
-
   return (
     <div className="space-y-6">
       <SettingsSection title={t('settings.sections.agentsList')}>
         {/* Header with Add button */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-text-secondary">
-            {t('settings.descriptions.agentsList') ||
-              'Create and manage AI agents with custom configurations'}
-          </p>
+          <p className="text-sm text-text-secondary">{t('settings.descriptions.agentsList')}</p>
           <button
             type="button"
             onClick={() => setShowWizard(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200 shadow-sm hover:shadow-md"
+            className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200 shadow-sm hover:shadow-md"
           >
             <svg
               width="16"
@@ -74,6 +57,7 @@ export function AgentsSettings() {
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Add agent</title>
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -84,7 +68,8 @@ export function AgentsSettings() {
         {/* Empty state */}
         {list.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-background-secondary/20">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-interaction-primary/20 to-brand-morado/20 flex items-center justify-center mb-4">
+              {' '}
               <svg
                 width="32"
                 height="32"
@@ -92,20 +77,20 @@ export function AgentsSettings() {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
-                className="text-blue-400"
+                className="text-interaction-primary"
               >
+                <title>Agent icon</title>
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
             </div>
-            <p className="text-sm text-text-secondary mb-2">
-              {t('settings.noAgents')}
-            </p>
+            <p className="text-sm text-text-secondary mb-2">{t('settings.noAgents')}</p>
             <button
               type="button"
               onClick={() => setShowWizard(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-all duration-200"
+              className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200"
             >
+              {' '}
               <svg
                 width="16"
                 height="16"
@@ -114,6 +99,7 @@ export function AgentsSettings() {
                 stroke="currentColor"
                 strokeWidth="2"
               >
+                <title>Add agent</title>
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
@@ -132,6 +118,7 @@ export function AgentsSettings() {
               workspace?: string
               model?: { primary?: string; fallbacks?: string[] }
               skills?: string[]
+              subagents?: { allow_agents?: string[] }
               temperature?: number
               max_iterations?: number
               max_tokens?: number
@@ -151,8 +138,10 @@ export function AgentsSettings() {
                 title={
                   <div className="flex items-center gap-3">
                     {/* Agent avatar */}
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-xs text-white font-medium flex-shrink-0">
-                      {agent.name ? agent.name.charAt(0).toUpperCase() : agent.id.charAt(0).toUpperCase()}
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
+                      {agent.name
+                        ? agent.name.charAt(0).toUpperCase()
+                        : agent.id.charAt(0).toUpperCase()}
                     </div>
                     <span className="font-medium">{agent.id}</span>
                     {agent.name && (
@@ -175,8 +164,9 @@ export function AgentsSettings() {
                         navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
                       }}
                       className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5"
-                      title="Edit context files"
+                      title={t('settings.agentFilesTooltip')}
                     >
+                      {' '}
                       <svg
                         width="14"
                         height="14"
@@ -185,12 +175,13 @@ export function AgentsSettings() {
                         stroke="currentColor"
                         strokeWidth="2"
                       >
+                        <title>Edit files</title>
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                         <line x1="16" y1="13" x2="8" y2="13" />
                         <line x1="16" y1="17" x2="8" y2="17" />
                       </svg>
-                      Files
+                      {t('settings.agentFilesButton')}
                     </button>
                   </div>
                 }
@@ -323,107 +314,7 @@ export function AgentsSettings() {
                       }
                     />
                   </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentMaxIterations')}
-                    description={t('settings.descriptions.agentMaxIterations')}
-                    path={`agents.list.${index}.max_iterations`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.max_iterations`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.max_iterations`}
-                      value={agent.max_iterations ?? 10}
-                      min={1}
-                      max={100}
-                      step={1}
-                      onChange={(v) =>
-                        updateField(`agents.list.${index}.max_iterations`, v === 10 ? undefined : v)
-                      }
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentMaxTokens')}
-                    description={t('settings.descriptions.agentMaxTokens')}
-                    path={`agents.list.${index}.max_tokens`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.max_tokens`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.max_tokens`}
-                      value={agent.max_tokens ?? 4096}
-                      min={256}
-                      max={128000}
-                      step={256}
-                      onChange={(v) =>
-                        updateField(`agents.list.${index}.max_tokens`, v === 4096 ? undefined : v)
-                      }
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentContextWindow')}
-                    description={t('settings.descriptions.agentContextWindow')}
-                    path={`agents.list.${index}.context_window`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.context_window`)}
-                  >
-                    <NumberInput
-                      id={`agents.list.${index}.context_window`}
-                      value={agent.context_window ?? 128000}
-                      min={4096}
-                      max={2097152}
-                      step={4096}
-                      onChange={(v) =>
-                        updateField(
-                          `agents.list.${index}.context_window`,
-                          v === 128000 ? undefined : v,
-                        )
-                      }
-                    />
-                  </SettingsField>
                 </div>
-
-                {/* Section: Features */}
-                <div className="pb-4 mb-5 border-b border-border-light">
-                  <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
-                    {t('settings.sections.features')}
-                  </div>
-
-                  <SettingsField
-                    label={t('settings.fields.agentThinking')}
-                    description={t('settings.descriptions.agentThinking')}
-                    path={`agents.list.${index}.reasoning.enable`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.reasoning.enable`)}
-                  >
-                    <BooleanInput
-                      id={`agents.list.${index}.reasoning.enable`}
-                      value={getThinkingEnabled(
-                        agent as Record<string, unknown> as {
-                          reasoning?: { enable?: boolean }
-                        },
-                      )}
-                      onChange={(v) => toggleThinking(index, agent as Record<string, unknown>, v)}
-                    />
-                  </SettingsField>
-
-                  <SettingsField
-                    label={t('settings.fields.agentSupportsImages')}
-                    description={t('settings.descriptions.agentSupportsImages')}
-                    path={`agents.list.${index}.supports_images`}
-                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.supports_images`)}
-                  >
-                    <BooleanInput
-                      id={`agents.list.${index}.supports_images`}
-                      value={agent.supports_images ?? false}
-                      onChange={(v) =>
-                        updateField(
-                          `agents.list.${index}.supports_images`,
-                          v === false ? undefined : v,
-                        )
-                      }
-                    />
-                  </SettingsField>
-                </div>
-
                 {/* Section: Skills */}
                 <div>
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
@@ -442,6 +333,73 @@ export function AgentsSettings() {
                       onChange={(v) => updateField(`agents.list.${index}.skills`, v)}
                     />
                   </SettingsField>
+                </div>
+
+                {/* Section: Subagents */}
+                <div>
+                  <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
+                    {t('settings.sections.subagents')}
+                  </div>
+
+                  <SettingsField
+                    label={t('settings.fields.agentSubagentsEnabled')}
+                    description={t('settings.descriptions.agentSubagentsEnabled')}
+                    path={`agents.list.${index}.subagents`}
+                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.subagents`)}
+                  >
+                    <BooleanInput
+                      id={`agents.list.${index}.subagents.enabled`}
+                      value={
+                        agent.subagents?.allow_agents !== undefined &&
+                        agent.subagents?.allow_agents !== null
+                      }
+                      onChange={(v) => {
+                        if (v) {
+                          // Enable subagents - create empty config with all other agents as options
+                          const otherAgents = list
+                            .filter((a: { id: string }) => a.id !== agent.id)
+                            .map((a: { id: string }) => a.id)
+                          updateField(`agents.list.${index}.subagents`, {
+                            allow_agents: otherAgents.length > 0 ? otherAgents : [],
+                          })
+                        } else {
+                          // Disable subagents - remove the config
+                          updateField(`agents.list.${index}.subagents`, undefined)
+                        }
+                      }}
+                    />
+                  </SettingsField>
+
+                  {agent.subagents?.allow_agents !== undefined && (
+                    <SettingsField
+                      label={t('settings.fields.agentSubagentsAllowed')}
+                      description={t('settings.descriptions.agentSubagentsAllowed')}
+                      path={`agents.list.${index}.subagents.allow_agents`}
+                      isDirty={isDirtyPath(
+                        dirtyPaths,
+                        `agents.list.${index}.subagents.allow_agents`,
+                      )}
+                    >
+                      <StringListEditor
+                        id={`agents.list.${index}.subagents.allow_agents`}
+                        value={agent.subagents?.allow_agents || []}
+                        onChange={(v) =>
+                          updateField(`agents.list.${index}.subagents`, {
+                            ...agent.subagents,
+                            allow_agents: v,
+                          })
+                        }
+                        options={list
+                          .filter((a: { id: string }) => a.id !== agent.id)
+                          .map((a: { id: string; name?: string }) => ({
+                            value: a.id,
+                            label: a.name ? `${a.id} (${a.name})` : a.id,
+                          }))}
+                        placeholder={t('settings.selectAgent')}
+                        emptyLabel={t('settings.noOtherAgents')}
+                      />
+                    </SettingsField>
+                  )}
                 </div>
               </NamedItemCard>
             )

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/channels"
@@ -26,8 +25,7 @@ func clientCmd() {
 
 	subcommand := parseClientSubcommand(os.Args[2:])
 
-	home, _ := os.UserHomeDir()
-	leleDir := filepath.Join(home, ".lele")
+	leleDir := config.GetLeleDir()
 
 	cfg, err := loadConfig()
 	if err != nil {

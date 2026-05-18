@@ -79,13 +79,12 @@ export function SkillsStep({ skills, setSkills }: Props) {
                         strokeWidth="2.5"
                         className="text-blue-400 flex-shrink-0"
                       >
+                        <title>Selected</title>
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     )}
                   </div>
-                  <p className="text-xs text-text-tertiary truncate">
-                    {t(descKey)}
-                  </p>
+                  <p className="text-xs text-text-tertiary truncate">{t(descKey)}</p>
                 </div>
               </button>
             )
@@ -95,7 +94,7 @@ export function SkillsStep({ skills, setSkills }: Props) {
 
       {/* Custom skills */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-text-primary">
+        <label htmlFor="wizard-agent-skills" className="text-sm font-medium text-text-primary">
           {t('settings.fields.agentSkills')}
         </label>
         <div className="rounded-lg border border-border bg-background-secondary/30 p-4">
@@ -116,11 +115,15 @@ export function SkillsStep({ skills, setSkills }: Props) {
             strokeWidth="2"
             className="text-blue-400"
           >
+            <title>Skills selected</title>
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
             <polyline points="22 4 12 14.01 9 11.01" />
           </svg>
           <span>
-            {skills.length} {skills.length === 1 ? t('settings.addAgentModal.skillsSelected') : t('settings.addAgentModal.skillsSelectedPlural')}
+            {skills.length}{' '}
+            {skills.length === 1
+              ? t('settings.addAgentModal.skillsSelected')
+              : t('settings.addAgentModal.skillsSelectedPlural')}
           </span>
         </div>
       )}

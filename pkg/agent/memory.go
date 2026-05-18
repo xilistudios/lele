@@ -8,6 +8,7 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,7 +30,9 @@ func NewMemoryStore(workspace string) *MemoryStore {
 	memoryFile := filepath.Join(workspace, "MEMORY.md")
 
 	// Ensure memory directory exists (for daily notes)
-	os.MkdirAll(memoryDir, 0755)
+	if err := os.MkdirAll(memoryDir, 0755); err != nil {
+		log.Printf("Warning: failed to create memory directory: %v", err)
+	}
 
 	return &MemoryStore{
 		workspace:  workspace,
@@ -77,7 +80,9 @@ func (ms *MemoryStore) AppendToday(content string) error {
 
 	// Ensure month directory exists
 	monthDir := filepath.Dir(todayFile)
-	os.MkdirAll(monthDir, 0755)
+	if err := os.MkdirAll(monthDir, 0755); err != nil {
+		return fmt.Errorf("failed to create month directory: %w", err)
+	}
 
 	var existingContent string
 	if data, err := os.ReadFile(todayFile); err == nil {

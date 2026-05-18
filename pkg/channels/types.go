@@ -32,8 +32,10 @@ type ClientStore struct {
 }
 
 type WSMessage struct {
-	Event string          `json:"event"`
-	Data  json.RawMessage `json:"data"`
+	Version int             `json:"v,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Event   string          `json:"event"`
+	Data    json.RawMessage `json:"data"`
 }
 
 type WSMessagePayload struct {
@@ -84,6 +86,7 @@ type WSToolExecutingPayload struct {
 	Action             string                 `json:"action"`
 	Arguments          map[string]interface{} `json:"arguments,omitempty"`
 	SubagentSessionKey string                 `json:"subagent_session_key,omitempty"`
+	ToolCallID         string                 `json:"tool_call_id,omitempty"`
 }
 
 type WSToolResultPayload struct {
@@ -91,6 +94,7 @@ type WSToolResultPayload struct {
 	Tool               string `json:"tool"`
 	Result             string `json:"result"`
 	SubagentSessionKey string `json:"subagent_session_key,omitempty"`
+	ToolCallID         string `json:"tool_call_id,omitempty"`
 }
 
 type WSErrorPayload struct {
@@ -153,14 +157,17 @@ type ChatHistoryResponse struct {
 	SessionKey string               `json:"session_key"`
 	Messages   []ChatHistoryMessage `json:"messages"`
 	Processing bool                 `json:"processing"`
+	HasMore    bool                 `json:"has_more"`
 }
 
 type ChatHistoryMessage struct {
+	ID               string            `json:"id"`
 	Role             string            `json:"role"`
 	Content          string            `json:"content"`
 	ReasoningContent string            `json:"reasoning_content,omitempty"`
 	ToolCalls        []HistoryToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string            `json:"tool_call_id,omitempty"`
+	ToolName         string            `json:"tool_name,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -181,6 +188,8 @@ type ChatSession struct {
 
 type ChatSessionsResponse struct {
 	Sessions []ChatSession `json:"sessions"`
+	Total    int           `json:"total"`
+	HasMore  bool          `json:"has_more"`
 }
 
 type CreateSessionRequest struct {
@@ -228,6 +237,11 @@ type SessionNameUpdateRequest struct {
 type SessionNameResponse struct {
 	SessionKey string `json:"session_key"`
 	Name       string `json:"name"`
+}
+
+type SessionSummaryResponse struct {
+	SessionKey string `json:"session_key"`
+	Summary    string `json:"summary"`
 }
 
 type SessionContextResponse struct {
@@ -378,12 +392,27 @@ type ChannelInfo struct {
 	Running bool   `json:"running"`
 }
 
-type ErrorResponse struct {
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
-	Code    string `json:"code,omitempty"`
-	Details string `json:"details,omitempty"`
+type APIError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Error   string `json:"error"`
+	Details any    `json:"details,omitempty"`
 }
+
+type PaginationParams struct {
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
+}
+
+type PaginatedResponse struct {
+	Items   any  `json:"items"`
+	Total   int  `json:"total"`
+	Offset  int  `json:"offset"`
+	Limit   int  `json:"limit"`
+	HasMore bool `json:"has_more"`
+}
+
+const WSProtocolVersion = 1
 
 type FileUploadResponse struct {
 	Files []UploadedFile `json:"files"`
@@ -395,6 +424,19 @@ type UploadedFile struct {
 	Name     string `json:"name"`
 	MIMEType string `json:"mime_type"`
 	Size     int64  `json:"size"`
+}
+
+// ApproveRequest is the request body for approving/rejecting a command via HTTP.
+type ApproveRequest struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`
+}
+
+// ApproveResponse is the response for an approval action.
+type ApproveResponse struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`
+	Message   string `json:"message,omitempty"`
 }
 
 // FetchModelsRequest is the request body for fetching remote model lists.

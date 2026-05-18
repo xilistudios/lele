@@ -30,6 +30,7 @@ export type AppLogicContextValue = {
   parentSessionKey: ReturnType<typeof useAppLogicHook>['parentSessionKey']
   messages: ReturnType<typeof useAppLogicHook>['messages']
   approvalRequest: ReturnType<typeof useAppLogicHook>['approvalRequest']
+  approvalResult: ReturnType<typeof useAppLogicHook>['approvalResult']
   pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
   toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
 
@@ -40,6 +41,7 @@ export type AppLogicContextValue = {
   onCancel: ReturnType<typeof useAppLogicHook>['onCancel']
   onSelectSession: ReturnType<typeof useAppLogicHook>['onSelectSession']
   onCreateSession: ReturnType<typeof useAppLogicHook>['onCreateSession']
+  createSession: ReturnType<typeof useAppLogicHook>['createSession']
   onDeleteSession: ReturnType<typeof useAppLogicHook>['onDeleteSession']
   onClearSession: ReturnType<typeof useAppLogicHook>['onClearSession']
   onSelectAgent: ReturnType<typeof useAppLogicHook>['onSelectAgent']
@@ -50,6 +52,11 @@ export type AppLogicContextValue = {
   onLogout: ReturnType<typeof useAppLogicHook>['onLogout']
   onToggleDiagnostics: ReturnType<typeof useAppLogicHook>['onToggleDiagnostics']
   onToggleSidebar: ReturnType<typeof useAppLogicHook>['onToggleSidebar']
+
+  // Pagination
+  loadMore: ReturnType<typeof useAppLogicHook>['loadMore']
+  hasMore: ReturnType<typeof useAppLogicHook>['hasMore']
+  isLoadingMore: ReturnType<typeof useAppLogicHook>['isLoadingMore']
 
   // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
@@ -101,6 +108,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     parentSessionKey: app.parentSessionKey,
     messages: app.messages,
     approvalRequest: app.approvalRequest,
+    approvalResult: app.approvalResult,
     pendingAttachments: app.pendingAttachments,
     toolStatus: app.toolStatus,
 
@@ -111,6 +119,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onCancel: app.onCancel,
     onSelectSession: app.onSelectSession,
     onCreateSession: app.onCreateSession,
+    createSession: app.createSession,
     onDeleteSession: app.onDeleteSession,
     onClearSession: app.onClearSession,
     onSelectAgent: app.onSelectAgent,
@@ -121,6 +130,11 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     onLogout: app.onLogout,
     onToggleDiagnostics: app.onToggleDiagnostics,
     onToggleSidebar: app.onToggleSidebar,
+
+    // Pagination
+    loadMore: app.loadMore,
+    hasMore: app.hasMore,
+    isLoadingMore: app.isLoadingMore,
 
     // Ref for internal wiring
     eventHandlerRef,

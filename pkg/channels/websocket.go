@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -40,29 +41,27 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		WriteBufferSize: 1024,
 		CheckOrigin:     n.checkOrigin,
 	}
+	clientID := uuid.New().String()
+	sessionKey := getQueryParam(r, "session_key")
+	if sessionKey == "" {
+		sessionKey = clientInfo.ClientID
+	}
+
+	// Validate session key before upgrade (response writer is still valid).
+	if !isValidSessionKeyFormat(sessionKey) {
+		writeError(w, http.StatusBadRequest, "invalid session_key format", "session_key_invalid")
+		return
+	}
+	if !n.validateSessionOwnership(clientInfo.ClientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "forbidden")
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.ErrorCF("native", "WebSocket upgrade failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		return
-	}
-
-	clientID := uuid.New().String()
-	sessionKey := getQueryParam(r, "session_key")
-	if sessionKey == "" {
-		sessionKey = "native:" + clientInfo.ClientID
-	}
-
-	// Validate session key before the upgrade side effects continue.
-	if !isValidSessionKeyFormat(sessionKey) {
-		writeError(w, http.StatusBadRequest, "invalid session_key format", "session_key_invalid")
-		conn.Close()
-		return
-	}
-	if !n.validateSessionOwnership(clientInfo.ClientID, sessionKey) {
-		writeError(w, http.StatusForbidden, "access denied to this session", "forbidden")
-		conn.Close()
 		return
 	}
 
@@ -173,35 +172,46 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 }
 
 func (n *NativeChannel) handleWSMessage(client *WSClient, msg WSMessage) {
+	if msg.Version > 0 && msg.Version != WSProtocolVersion {
+		n.sendError(client, "unsupported_version", fmt.Sprintf("unsupported protocol version: %d", msg.Version))
+		return
+	}
+
+	eventID := msg.ID
+
 	switch msg.Event {
 	case "message":
-		n.handleWSClientMessage(client, msg.Data)
+		n.handleWSClientMessage(client, msg.Data, eventID)
 
 	case "approve":
-		n.handleWSApprove(client, msg.Data)
+		n.handleWSApprove(client, msg.Data, eventID)
 
 	case "subscribe":
-		n.handleWSSubscribe(client, msg.Data)
+		n.handleWSSubscribe(client, msg.Data, eventID)
 
 	case "unsubscribe":
-		n.handleWSUnsubscribe(client, msg.Data)
+		n.handleWSUnsubscribe(client, msg.Data, eventID)
 
 	case "typing":
 		n.handleWSTyping(client, msg.Data)
 
 	case "cancel":
-		n.handleWSCancel(client, msg.Data)
+		n.handleWSCancel(client, msg.Data, eventID)
 
 	case "ping":
-		_ = client.Send(mustMarshal(WSMessage{Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})}))
+		if err := client.Send(mustMarshal(WSMessage{Version: WSProtocolVersion, Event: "pong", Data: mustMarshal(map[string]string{"time": time.Now().Format(time.RFC3339)})})); err != nil {
+			logger.WarnCF("native", "Failed to send pong", map[string]interface{}{
+				"client_id": client.ID,
+				"error":     err.Error(),
+			})
+		}
 
 	default:
 		n.sendError(client, "unknown_event", "unknown event type: "+msg.Event)
 	}
 }
 
-func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMessage) {
-	// Check rate limit for message events
+func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMessage, eventID string) {
 	if !n.wsMessageLimiter.allow(client.ClientInfo.ClientID) {
 		n.sendError(client, "rate_limit_exceeded", "rate limit exceeded, please slow down")
 		return
@@ -223,8 +233,7 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		sessionKey = client.SessionKey
 	}
 
-	// Validate session key format if provided
-	if payload.SessionKey != "" && !isValidSessionKeyFormat(payload.SessionKey) {
+	if payload.SessionKey != "" && !isValidSessionKeyFormat(sessionKey) {
 		n.sendError(client, "session_key_invalid", "invalid session_key format")
 		return
 	}
@@ -253,21 +262,27 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		Metadata:    map[string]string{"message_id": messageID},
 	})
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "message.ack",
-		Data:  mustMarshal(map[string]string{"message_id": messageID, "session_key": sessionKey}),
-	}))
+	ackData := map[string]string{"message_id": messageID, "session_key": sessionKey}
+	ack := marshalWithID("message.ack", ackData, eventID)
+	if err := client.Send(ack); err != nil {
+		logger.WarnCF("native", "Failed to send message.ack", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
+	}
 }
 
-func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage) {
+func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, eventID string) {
 	var payload WSApprovePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid approve payload")
 		return
 	}
 
+	command := ""
 	if n.approvalManager != nil {
-		_, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
+		// HandleApproval atomically finds, removes and returns the approval
+		handledApproval, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
 		if err != nil {
 			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
 				"error":      err.Error(),
@@ -276,15 +291,30 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage) 
 			n.sendError(client, "approval_error", "approval request expired or not found")
 			return
 		}
+		command = handledApproval.Command
+
+		// Persist the approval decision in session history
+		n.persistApprovalMessage(client.SessionKey, payload.RequestID, payload.Approved, command, "")
 	}
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "approve.ack",
-		Data:  mustMarshal(map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}),
-	}))
+	// Broadcast approval result to the session
+	n.broadcastToSession(client.SessionKey, "approve.result", map[string]interface{}{
+		"request_id": payload.RequestID,
+		"approved":   payload.Approved,
+		"command":    command,
+	})
+
+	ackData := map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}
+	if err := client.Send(marshalWithID("approve.ack", ackData, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send approve.ack", map[string]interface{}{
+			"client_id":  client.ID,
+			"request_id": payload.RequestID,
+			"error":      err.Error(),
+		})
+	}
 }
 
-func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage) {
+func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage, eventID string) {
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid subscribe payload")
@@ -295,8 +325,8 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
-	// Validate session key format
-	if !isValidSessionKeyFormat(payload.SessionKey) {
+	sessionKey := payload.SessionKey
+	if !isValidSessionKeyFormat(sessionKey) {
 		n.sendError(client, "session_key_invalid", "invalid session_key format")
 		logger.WarnCF("native", "Subscribe invalid session_key format", map[string]interface{}{
 			"client_id":   client.ID,
@@ -305,7 +335,9 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
-	if !n.validateSessionOwnership(client.ClientInfo.ClientID, payload.SessionKey) {
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
+
+	if !n.validateSessionOwnership(client.ClientInfo.ClientID, sessionKey) {
 		n.sendError(client, "forbidden", "access denied to this session")
 		logger.WarnCF("native", "Subscribe ownership validation failed", map[string]interface{}{
 			"client_id":   client.ID,
@@ -315,39 +347,42 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	}
 
 	oldSessionKey := client.SessionKey
-	client.SessionKey = payload.SessionKey
+	client.SessionKey = sessionKey
 
-	// Track subscription so events for this session continue flowing
-	// even when the client switches to another session
 	if client.Subscriptions == nil {
 		client.Subscriptions = make(map[string]bool)
 	}
-	client.Subscriptions[payload.SessionKey] = true
+	client.Subscriptions[sessionKey] = true
 
-	n.auth.TrackSessionKey(client.ClientInfo.ClientID, payload.SessionKey)
+	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
 	logger.InfoCF("native", "Client subscribed to session", map[string]interface{}{
 		"client_id":       client.ID,
+		"client_info_id":  client.ClientInfo.ClientID,
 		"old_session_key": oldSessionKey,
-		"new_session_key": payload.SessionKey,
+		"new_session_key": sessionKey,
 		"subscriptions":   len(client.Subscriptions),
 	})
 
 	processing := false
 	if n.agentLoop != nil {
-		processing = n.agentLoop.IsSessionProcessing(payload.SessionKey)
+		processing = n.agentLoop.IsSessionProcessing(sessionKey)
 	}
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "subscribe.ack",
-		Data: mustMarshal(map[string]interface{}{
-			"session_key": payload.SessionKey,
-			"processing":  processing,
-		}),
-	}))
+	ackData := map[string]interface{}{
+		"session_key": sessionKey,
+		"processing":  processing,
+	}
+	if err := client.Send(marshalWithID("subscribe.ack", ackData, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send subscribe.ack", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+	}
 }
 
-func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessage) {
+func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessage, eventID string) {
 	var payload WSSubscribePayload
 	if err := json.Unmarshal(data, &payload); err != nil {
 		n.sendError(client, "payload_error", "invalid unsubscribe payload")
@@ -360,15 +395,12 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 
 	oldSessionKey := client.SessionKey
 
-	// Remove from subscriptions map
 	if payload.SessionKey != "" {
 		delete(client.Subscriptions, payload.SessionKey)
 	}
 
-	// Only reset to default if unsubscribing from the current session
-	// or if no specific session_key is provided (full unsubscribe)
 	if payload.SessionKey == "" || payload.SessionKey == client.SessionKey {
-		client.SessionKey = "native:" + client.ClientInfo.ClientID
+		client.SessionKey = client.ClientInfo.ClientID
 	}
 
 	logger.InfoCF("native", "Client unsubscribed from session", map[string]interface{}{
@@ -379,10 +411,13 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 		"subscriptions":   len(client.Subscriptions),
 	})
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "unsubscribe.ack",
-		Data:  mustMarshal(map[string]string{"session_key": payload.SessionKey}),
-	}))
+	if err := client.Send(marshalWithID("unsubscribe.ack", map[string]string{"session_key": payload.SessionKey}, eventID)); err != nil {
+		logger.WarnCF("native", "Failed to send unsubscribe.ack", map[string]interface{}{
+			"client_id":   client.ID,
+			"session_key": payload.SessionKey,
+			"error":       err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
@@ -392,11 +427,9 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 	}
 }
 
-func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage) {
+func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, eventID string) {
 	n.agentLoop.StopAgent(client.SessionKey)
 
-	// Broadcast to all subscribed sessions so the frontend
-	// can update processing status correctly
 	n.broadcastToSession(client.SessionKey, "cancel.ack", map[string]interface{}{
 		"status":      "cancelled",
 		"session_key": client.SessionKey,
@@ -425,8 +458,9 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 		processing = n.agentLoop.IsSessionProcessing(client.SessionKey)
 	}
 
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "welcome",
+	if err := client.Send(mustMarshal(WSMessage{
+		Version: WSProtocolVersion,
+		Event:   "welcome",
 		Data: mustMarshal(map[string]interface{}{
 			"client_id":   client.ClientInfo.ClientID,
 			"device_name": client.ClientInfo.DeviceName,
@@ -436,14 +470,35 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"server_time": time.Now().Format(time.RFC3339),
 			"processing":  processing,
 		}),
-	}))
+	})); err != nil {
+		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
+	}
 }
 
 func (n *NativeChannel) sendError(client *WSClient, code, message string) {
-	_ = client.Send(mustMarshal(WSMessage{
-		Event: "error",
-		Data:  mustMarshal(WSErrorPayload{Code: code, Message: message}),
-	}))
+	if err := client.Send(mustMarshal(WSMessage{
+		Version: WSProtocolVersion,
+		Event:   "error",
+		Data:    mustMarshal(WSErrorPayload{Code: code, Message: message}),
+	})); err != nil {
+		logger.WarnCF("native", "Failed to send error to client", map[string]interface{}{
+			"client_id": client.ID,
+			"code":      code,
+			"error":     err.Error(),
+		})
+	}
+}
+
+func marshalWithID(event string, data interface{}, id string) json.RawMessage {
+	return mustMarshal(WSMessage{
+		Version: WSProtocolVersion,
+		ID:      id,
+		Event:   event,
+		Data:    mustMarshal(data),
+	})
 }
 
 func (n *NativeChannel) StreamMessage(sessionKey, messageID, chunk string, done bool) {
@@ -485,13 +540,32 @@ func boolToString(b bool) string {
 }
 
 // isValidSessionKeyFormat validates that a session key follows the expected format:
-// - native:{client_id}
-// - native:{client_id}:{timestamp}
+// - Non-empty, max 256 chars, printable ASCII only
+// - No path traversal sequences (.., /, \)
+// - native:{client_id} or native:{client_id}:{suffix} (deprecated, kept for backward compatibility)
+// - subagent:{task_id} (deprecated, kept for backward compatibility)
+// - Plain client IDs and custom session keys
 // Returns true if the format is valid, false otherwise.
 func isValidSessionKeyFormat(sessionKey string) bool {
 	if strings.TrimSpace(sessionKey) == "" {
 		return false
 	}
+	if len(sessionKey) > 256 {
+		return false
+	}
+	// Reject path traversal and control characters
+	if strings.Contains(sessionKey, "..") {
+		return false
+	}
+	if strings.Contains(sessionKey, "/") || strings.Contains(sessionKey, "\\") {
+		return false
+	}
+	for _, r := range sessionKey {
+		if r < 32 || r > 126 {
+			return false
+		}
+	}
+	// Subagent keys have strict format requirements
 	if strings.HasPrefix(sessionKey, "subagent:") {
 		taskID := strings.TrimPrefix(sessionKey, "subagent:")
 		if !strings.HasPrefix(taskID, "subagent-") {
@@ -507,25 +581,29 @@ func isValidSessionKeyFormat(sessionKey string) bool {
 		}
 		return true
 	}
-	if !strings.HasPrefix(sessionKey, "native:") {
-		return false
-	}
-	parts := strings.Split(sessionKey[7:], ":")
-	if len(parts) < 1 || len(parts) > 2 {
-		return false
-	}
-	if parts[0] == "" {
-		return false
-	}
-	if len(parts) == 2 {
-		if parts[1] == "" {
+	// For backward compat, validate old native: format if present
+	if strings.HasPrefix(sessionKey, "native:") {
+		parts := strings.Split(sessionKey[7:], ":")
+		if len(parts) < 1 || parts[0] == "" {
 			return false
 		}
-		for _, c := range parts[1] {
-			if c < '0' || c > '9' {
-				return false
-			}
+		if len(parts) >= 2 && parts[1] == "" {
+			return false
 		}
+		return true
 	}
+	// Accept any valid string for plain session keys
 	return true
+}
+
+// sessionKeyMatches checks if two session keys match, handling backward compatibility
+// for the deprecated native: prefix.
+func sessionKeyMatches(a, b string) bool {
+	if a == b {
+		return true
+	}
+	// Strip native: prefix for comparison (backward compat)
+	aNorm := strings.TrimPrefix(a, "native:")
+	bNorm := strings.TrimPrefix(b, "native:")
+	return aNorm == bNorm
 }

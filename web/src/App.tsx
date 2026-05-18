@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Navigate,
   Outlet,
@@ -9,16 +9,17 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom'
-import { AuthPage } from './components/pages/AuthPage'
-import { ChatPage } from './components/pages/ChatPage'
-import { SettingsPage } from './components/pages/SettingsPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
 import { AgentsPage } from './components/pages/AgentsPage'
+import { AuthPage } from './components/pages/AuthPage'
+import { ChatPage } from './components/pages/ChatPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
+import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
+import { wsDebug } from './lib/debug'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
@@ -75,11 +76,11 @@ function AuthRoute() {
     // Show loading state during auto-auth
     return (
       <main className="flex min-h-screen items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md space-y-5 rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl shadow-sky-950/30">
+        <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-background-secondary p-6 shadow-2xl shadow-interaction-primary/10">
           <div className="flex items-center justify-center py-8">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
           </div>
-          <p className="text-center text-slate-300">Connecting...</p>
+          <p className="text-center text-text-secondary">Connecting...</p>
         </div>
       </main>
     )
@@ -115,12 +116,30 @@ function ChatRoute() {
   }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { sessions, currentSessionKey, parentSessionKey, onSelectSession } = useAppLogicContext()
+  const { sessions, currentSessionKey, parentSessionKey, onSelectSession, createSession } =
+    useAppLogicContext()
   const targetSessionKey = child_chat_id ?? chat_id
   const derivedParentSessionKey = child_chat_id ? (parent_chat_id ?? null) : null
   const availableKeys = useMemo(() => new Set(sessions.map((s) => s.key)), [sessions])
+  const creatingRef = useRef(false)
 
   useEffect(() => {
+    if (chat_id === 'new') {
+      if (creatingRef.current) return
+      creatingRef.current = true
+      wsDebug('[ChatRoute] Creating new session...')
+      const sessionKey = createSession()
+      wsDebug('[ChatRoute] createSession returned:', sessionKey)
+      if (sessionKey) {
+        wsDebug(`[ChatRoute] Navigating to /chat/${sessionKey}`)
+        navigate(`/chat/${sessionKey}`, { replace: true })
+        return
+      }
+      navigate('/', { replace: true })
+      return
+    }
+    creatingRef.current = false
+
     if (!targetSessionKey) return
 
     if (currentSessionKey === targetSessionKey && parentSessionKey === derivedParentSessionKey) {
@@ -142,6 +161,7 @@ function ChatRoute() {
     }
   }, [
     targetSessionKey,
+    chat_id,
     child_chat_id,
     derivedParentSessionKey,
     sessions,
@@ -150,9 +170,13 @@ function ChatRoute() {
     parentSessionKey,
     onSelectSession,
     navigate,
+    createSession,
   ])
 
   useEffect(() => {
+    // Skip when creating new session — first useEffect handles this
+    if (chat_id === 'new') return
+
     if (!currentSessionKey) return
 
     if (targetSessionKey && currentSessionKey !== targetSessionKey) {
@@ -164,8 +188,8 @@ function ChatRoute() {
     }
 
     const newPath = parentSessionKey
-      ? `/chat/${encodeURIComponent(parentSessionKey)}/subagent/${encodeURIComponent(currentSessionKey)}`
-      : `/chat/${encodeURIComponent(currentSessionKey)}`
+      ? `/chat/${parentSessionKey}/subagent/${currentSessionKey}`
+      : `/chat/${currentSessionKey}`
 
     if (location.pathname !== newPath) {
       navigate(newPath, { replace: true })
@@ -177,6 +201,7 @@ function ChatRoute() {
     derivedParentSessionKey,
     location.pathname,
     navigate,
+    chat_id,
   ])
 
   // Note: onCreateSession, onDeleteSession, onClearSession, and onLogout are handled
@@ -197,14 +222,6 @@ function ProtectedLayout() {
 
 // Settings route component (layout wrapper with shared state)
 function SettingsRoute() {
-  const navigate = useNavigate()
-  const { onLogout } = useAppLogicContext()
-
-  const handleLogout = useCallback(() => {
-    onLogout()
-    navigate('/pair', { replace: true })
-  }, [onLogout, navigate])
-
   return <SettingsPage />
 }
 

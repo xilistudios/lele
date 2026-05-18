@@ -47,9 +47,9 @@ export function Modal({
         onClick={onClose}
         aria-label="Close modal"
       />
-      <div
+      <dialog
+        open
         className={`relative z-10 w-full ${SIZE_CLASSES[size]} rounded-xl border border-border bg-background-primary shadow-2xl max-h-[90vh] overflow-hidden`}
-        role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
       >
@@ -72,6 +72,7 @@ export function Modal({
                 stroke="currentColor"
                 strokeWidth="2"
               >
+                <title>Close</title>
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
@@ -79,7 +80,7 @@ export function Modal({
           )}
         </div>
         <div className="overflow-y-auto max-h-[calc(90vh-4rem)]">{children}</div>
-      </div>
+      </dialog>
     </div>
   )
 }

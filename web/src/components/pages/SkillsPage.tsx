@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useSkills } from '../../hooks/useSkills'
-import { SkillsList } from '../organisms/SkillsList'
 import { InstallSkillModal } from '../organisms/InstallSkillModal'
 import { Sidebar } from '../organisms/Sidebar'
+import { SkillsList } from '../organisms/SkillsList'
 
 export function SkillsPage() {
   const { t } = useTranslation()
@@ -59,6 +59,7 @@ export function SkillsPage() {
               className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors"
               title={t('chat.toggleSidebar')}
             >
+              {' '}
               <svg
                 width="20"
                 height="20"
@@ -67,6 +68,7 @@ export function SkillsPage() {
                 stroke="currentColor"
                 strokeWidth="2"
               >
+                <title>Toggle sidebar</title>
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                 <line x1="9" y1="3" x2="9" y2="21" />
               </svg>
@@ -88,6 +90,7 @@ export function SkillsPage() {
               stroke="currentColor"
               strokeWidth="2"
             >
+              <title>Install</title>
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -98,14 +101,15 @@ export function SkillsPage() {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {error && (
-            <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <div className="mb-4 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-3 text-sm text-state-error">
               {error}
             </div>
           )}
 
           {!isLoading && skills.length > 0 && (
             <p className="mb-4 text-xs text-text-tertiary">
-              {skills.length} {skills.length === 1 ? 'skill' : 'skills'} {t('skills.installed', 'installed')}
+              {skills.length} {skills.length === 1 ? 'skill' : 'skills'}{' '}
+              {t('skills.installed', 'installed')}
             </p>
           )}
 

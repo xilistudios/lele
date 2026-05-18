@@ -9,6 +9,7 @@ It is centered around:
 - session-scoped chat operations
 - local file upload support
 - real-time streaming over WebSocket
+- RESTful resource-oriented URL patterns
 
 ## CLI Commands
 
@@ -89,7 +90,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+Response (201 Created):
 
 ```json
 {
@@ -124,6 +125,20 @@ If the header is missing or invalid, the endpoint returns `valid: false` instead
 
 All endpoints below require `Authorization: Bearer <token>` unless stated otherwise.
 
+### API Conventions
+
+- URLs follow RESTful resource-oriented patterns with path parameters (e.g., `/api/v1/chat/session/{sessionKey}/model`)
+- HTTP methods are specific per route (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`)
+- Responses use proper HTTP status codes (200 OK, 201 Created, 422 Unprocessable Entity for validation)
+- Errors return a structured `APIError` payload:
+  ```json
+  {
+    "code": "error_code",
+    "message": "Human-readable description"
+  }
+  ```
+- List endpoints support pagination via `?offset=0&limit=50` query params
+
 ### Chat
 
 #### Send Message
@@ -140,7 +155,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+Response (201 Created):
 
 ```json
 {
@@ -154,15 +169,17 @@ If `session_key` is omitted, the default session is `native:<client_id>`.
 #### Get History
 
 ```http
-GET /api/v1/chat/history?session_key=<session_key>
+GET /api/v1/chat/sessions/{sessionKey}/history?offset=0&limit=50
+
+GET /api/v1/chat/sessions/{sessionKey}/history/{subagentId}
 ```
 
-Returned messages may include `user`, `assistant`, and `tool` roles.
+Returned messages may include `user`, `assistant`, and `tool` roles. Pagination is supported via `offset` and `limit` query parameters.
 
 #### List Sessions
 
 ```http
-GET /api/v1/chat/sessions
+GET /api/v1/chat/sessions?offset=0&limit=50
 ```
 
 Response items include:
@@ -184,30 +201,57 @@ Content-Type: application/json
 }
 ```
 
+Response (201 Created).
+
 The session key must belong to the authenticated client namespace.
 
-#### Session Actions
+#### Get Session
 
-Session-scoped actions are handled under:
-
-```text
-/api/v1/chat/session/<session_key>
+```http
+GET /api/v1/chat/session/{sessionKey}
 ```
 
-Supported actions:
+Returns session metadata (agent_id, model, name, think_level).
 
-| Method | Query | Behavior |
+#### Delete Session
+
+```http
+DELETE /api/v1/chat/sessions/{sessionKey}
+```
+
+#### Clear Session History
+
+```http
+POST /api/v1/chat/sessions/{sessionKey}/clear
+```
+
+Removes the session mapping and clears history.
+
+#### Clear Session History
+
+```http
+POST /api/v1/chat/{sessionKey}/clear
+```
+
+Clears the conversation history without deleting the session.
+
+#### Session Sub-resources
+
+Session properties are accessed via sub-resource paths:
+
+| Method | Path | Behavior |
 | --- | --- | --- |
-| `DELETE` | none | Clear session history |
-| `DELETE` | `action=delete` | Delete the session mapping and clear history |
-| `GET` | `action=model` | Get current model and available models |
-| `PATCH` | `action=model` | Set the current session model |
-| `GET` | `action=agent` | Get the current session agent |
-| `PATCH` | `action=agent` | Set the current session agent |
-| `POST` or `GET` | `action=compact` | Compact the session |
-| `GET` | `action=name` | Read the session name |
-| `PATCH` | `action=name` | Update the session name |
-| `GET` | `action=summary` | Return session summary placeholder |
+| `GET` | `/api/v1/chat/sessions/{key}/model` | Get current model and available models |
+| `PATCH` | `/api/v1/chat/sessions/{key}/model` | Set the current session model |
+| `GET` | `/api/v1/chat/sessions/{key}/agent` | Get the current session agent |
+| `PATCH` | `/api/v1/chat/sessions/{key}/agent` | Set the current session agent |
+| `GET` | `/api/v1/chat/sessions/{key}/thinking` | Get thinking level |
+| `PATCH` | `/api/v1/chat/sessions/{key}/thinking` | Set thinking level (off, low, medium, high) |
+| `GET` | `/api/v1/chat/sessions/{key}/name` | Read the session name |
+| `PATCH` | `/api/v1/chat/sessions/{key}/name` | Update the session name |
+| `GET` | `/api/v1/chat/sessions/{key}/context` | Get context token usage |
+| `GET` | `/api/v1/chat/sessions/{key}/summary` | Return session summary |
+| `POST` | `/api/v1/chat/sessions/{key}/compact` | Compact the session |
 
 ### File Uploads
 
@@ -262,13 +306,30 @@ GET /api/v1/agents
 #### Get Agent Info
 
 ```http
-GET /api/v1/agents/<agent_id>
+GET /api/v1/agents/{agentId}
 ```
 
 #### Get Agent Status
 
 ```http
-GET /api/v1/agents/<agent_id>?action=status
+GET /api/v1/agents/{agentId}/status
+```
+
+#### Get Agent Files
+
+```http
+GET /api/v1/agents/{agentId}/files
+```
+
+#### Save Agent File
+
+```http
+PUT /api/v1/agents/{agentId}/files/{fileName}
+Content-Type: application/json
+
+{
+  "content": "file contents..."
+}
 ```
 
 ### Config
@@ -321,7 +382,14 @@ Notes:
 
 ## WebSocket API
 
-Connect with either query token or bearer auth:
+Connect with bearer auth:
+
+```text
+ws://127.0.0.1:18793/api/v1/ws
+Authorization: Bearer <token>
+```
+
+Or via query parameter (legacy):
 
 ```text
 ws://127.0.0.1:18793/api/v1/ws?token=<token>
@@ -332,6 +400,26 @@ Optional query parameter:
 ```text
 session_key=native:<client_id>[:suffix]
 ```
+
+### Protocol
+
+Messages follow a versioned envelope:
+
+```json
+{
+  "v": 1,
+  "id": "cmd-1-1712339123000",
+  "event": "message",
+  "data": { ... }
+}
+```
+
+- `v` (number, optional) — protocol version (currently `1`, defined as `WSProtocolVersion` in the server). New clients should send `v: 1`. The field is optional for backward compatibility — if omitted, the server treats the message as v0.
+- `id` (string, optional) — correlation ID for request-response pairing. When a client includes an `id` on an outbound event, the server echoes the same `id` in the corresponding ack response (`*.ack` events), enabling the client to correlate responses to requests.
+- `event` (string) — event type.
+- `data` (object) — event payload.
+
+The server sends `v: 1` on all outbound events (`welcome`, `ack`s, `error`, streaming events, etc.). Clients should send `v: 1` on outbound events for forward compatibility. Clients that omit `v` will have their messages processed with v0 semantics (backward compatible fallback).
 
 ### Client Events
 
@@ -401,11 +489,24 @@ session_key=native:<client_id>[:suffix]
 }
 ```
 
+#### `typing`
+
+Indicates the user is typing in a session. Currently a no-op on the server side (reserved for future use).
+
+```json
+{
+  "event": "typing",
+  "data": {
+    "session_key": "native:client-id:1712339123"
+  }
+}
+```
+
 ### Server Events
 
 #### `welcome`
 
-Sent immediately after connect.
+Sent immediately after connect. The envelope `v` field is set to `1` (the current `WSProtocolVersion`).
 
 Includes:
 
@@ -419,7 +520,7 @@ Includes:
 
 #### `message.ack`
 
-Acknowledges accepted inbound messages.
+Acknowledges accepted inbound messages. Includes `id` (correlation ID from the request) when provided.
 
 #### `message.stream`
 
@@ -434,37 +535,129 @@ Streaming chunk payload:
 }
 ```
 
+#### `message.thinking`
+
+Emitted for streaming thinking/chain-of-thought content (when the model supports reasoning). Same shape as `message.stream` but conveys internal reasoning rather than the final response.
+
+```json
+{
+  "message_id": "uuid",
+  "session_key": "native:client-id",
+  "chunk": "internal reasoning step..."
+}
+```
+
 #### `message.complete`
 
-Final assembled message payload, including attachments when present.
+Final assembled message payload (always emitted after streaming completes), including attachments when present.
+
+```json
+{
+  "message_id": "uuid",
+  "session_key": "native:client-id",
+  "content": "Complete response text",
+  "attachments": [
+    {
+      "name": "file.pdf",
+      "mime_type": "application/pdf",
+      "size": 1024,
+      "path": "/home/user/.lele/tmp/uploads/uuid_file.pdf"
+    }
+  ]
+}
+```
 
 #### `tool.executing`
 
-Emitted when a tool starts.
+Emitted when a tool starts. Includes tool name, action, arguments, and optional `subagent_session_key` / `tool_call_id`.
 
-Includes optional `subagent_session_key`.
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "web_search",
+  "action": "Searching the web for...",
+  "arguments": {
+    "query": "latest news"
+  },
+  "tool_call_id": "call_abc123",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
 
 #### `tool.result`
 
 Emitted when a tool returns.
 
-Includes optional `subagent_session_key`.
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "web_search",
+  "result": "Search results...",
+  "tool_call_id": "call_abc123",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
 
 #### `subagent.result`
 
 Emitted for async subagent outcomes when surfaced through the native channel.
 
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "tool": "subagent",
+  "result": "...",
+  "tool_call_id": "...",
+  "subagent_session_key": "subagent:subagent-9876543210"
+}
+```
+
 #### `approval.request`
 
 Sent when user approval is required for a guarded action.
+
+```json
+{
+  "id": "approval-uuid",
+  "command": "rm -rf /tmp/test",
+  "reason": "This action requires your approval"
+}
+```
 
 #### `attachments`
 
 Sent when attachment metadata is delivered separately from text.
 
+#### `history.updated`
+
+Emitted after a message is fully processed and persisted to storage. Signals that the client can safely refetch session history.
+
+```json
+{
+  "session_key": "native:client-id:timestamp",
+  "name": "Session Name"
+}
+```
+
 #### `subscribe.ack`, `unsubscribe.ack`, `approve.ack`, `cancel.ack`, `pong`
 
 Acknowledgement and control events for client-side state handling.
+
+Each ack event echoes the `id` field from the client's original request for correlation.
+
+Example response to a `subscribe` event with `id: "sub-1-1712339123000"`:
+
+```json
+{
+  "v": 1,
+  "id": "sub-1-1712339123000",
+  "event": "subscribe.ack",
+  "data": {
+    "session_key": "native:client-id:timestamp",
+    "processing": false
+  }
+}
+```
 
 #### `error`
 
@@ -492,8 +685,10 @@ Clients may only access session keys that belong to their own namespace.
 - tokens are validated server-side and tied to paired clients
 - CORS is restricted to configured origins
 - uploads are size-limited and cleaned up periodically
-- WebSocket access requires a valid token
+- WebSocket access requires a valid token (via Authorization header or query param)
 - session ownership is validated on both REST and WebSocket paths
+- request bodies are limited to 1MB
+- WebSocket messages use protocol versioning for forward compatibility
 
 ## Related Docs
 

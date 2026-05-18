@@ -49,6 +49,7 @@ export function SearchableSelect({
   const [isMounted, setIsMounted] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [isOpenUp, setIsOpenUp] = useState(false)
 
   const allOptions = useMemo(() => {
     return groups ? groups.flatMap((group) => group.options) : options
@@ -97,6 +98,17 @@ export function SearchableSelect({
     if (!isMounted) return undefined
 
     const frame = window.requestAnimationFrame(() => {
+      // Check if there's enough space below
+      if (rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect()
+        const windowHeight = window.innerHeight
+        const spaceBelow = windowHeight - rect.bottom
+        const popupHeight = 256 // max-h-64
+
+        // If not enough space below, open upwards
+        setIsOpenUp(spaceBelow < popupHeight + 20)
+      }
+
       setIsOpen(true)
       window.requestAnimationFrame(() => searchRef.current?.focus())
     })
@@ -151,6 +163,25 @@ export function SearchableSelect({
     [],
   )
 
+  // Recalculate direction on window resize
+  useEffect(() => {
+    if (!isMounted) return
+
+    const handleResize = () => {
+      if (rootRef.current) {
+        const rect = rootRef.current.getBoundingClientRect()
+        const windowHeight = window.innerHeight
+        const spaceBelow = windowHeight - rect.bottom
+        const popupHeight = 256
+
+        setIsOpenUp(spaceBelow < popupHeight + 20)
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isMounted])
+
   const open = () => {
     if (disabled) return
     setQuery('')
@@ -198,13 +229,9 @@ export function SearchableSelect({
         </svg>
       </button>
 
-      {isMounted ? (
+      {isMounted && isOpen ? (
         <div
-          className={`absolute ${direction === 'down' ? 'top-full left-0 mt-2' : 'bottom-full left-0 mb-2'} z-30 w-[min(24rem,calc(100vw-3rem))] rounded-xl border border-border bg-background-secondary shadow-xl transition-all duration-200 ease-out ${
-            isOpen
-              ? 'translate-y-0 scale-100 opacity-100'
-              : 'pointer-events-none translate-y-2 scale-95 opacity-0'
-          }`}
+          className={`absolute ${isOpenUp ? 'bottom-full left-0 mb-2' : 'top-full left-0 mt-2'} z-[9999] w-[min(28rem,calc(100vw-4rem))] rounded-xl border border-border bg-background-secondary shadow-xl transition-all duration-200 ease-out`}
         >
           <div className="border-b border-border p-3">
             <div className="flex items-center gap-2 rounded-lg border border-border bg-background-tertiary px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-border-focus">
@@ -230,7 +257,7 @@ export function SearchableSelect({
             </div>
           </div>
 
-          <div className="max-h-60 overflow-y-auto p-2">
+          <div className="max-h-64 overflow-y-auto p-2">
             {hasResults ? (
               <div className="space-y-2">
                 {filteredGroups.map((group) => (
@@ -247,7 +274,7 @@ export function SearchableSelect({
                         return (
                           <button
                             key={option.value}
-                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-all duration-150 ${
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-150 ${
                               active
                                 ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
                                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
@@ -255,7 +282,9 @@ export function SearchableSelect({
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
-                            <span className="truncate">{option.label}</span>
+                            <span className="truncate text-[11px] leading-relaxed">
+                              {option.label}
+                            </span>
                             {active ? (
                               <span className="ml-3 text-xs text-state-success">●</span>
                             ) : null}

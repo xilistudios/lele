@@ -474,6 +474,8 @@ export type ChannelsResponse = {
 
 export type ChatSessionsResponse = {
   sessions: ChatSession[]
+  total: number
+  has_more: boolean
 }
 
 export type CreateSessionResponse = {
@@ -513,6 +515,7 @@ export type ChatMessage = {
   toolArgs?: string
   toolResult?: string
   toolStatus?: ToolMessageStatus
+  toolCallId?: string
   subagentSessionKey?: string
 }
 
@@ -528,6 +531,12 @@ export type ApprovalRequest = {
   id: string
   command: string
   reason: string
+}
+
+export type ApprovalResult = {
+  requestId: string
+  approved: boolean
+  command: string
 }
 
 export type AuthPairResponse = AuthSession
@@ -565,15 +574,18 @@ export type HistoryResponse = {
   session_key: string
   processing: boolean
   messages: Array<{
+    id: string
     role: 'user' | 'assistant' | 'tool'
     content: string
     reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
   }>
+  has_more: boolean
 }
 
 export type ApiErrorResponse = {
+  error?: string
   code?: string
   message?: string
 }
@@ -623,8 +635,6 @@ export type FileUploadResponse = {
   files: UploadedFile[]
 }
 
-
-
 export type ClientEvent =
   | {
       event: 'welcome'
@@ -664,6 +674,7 @@ export type ClientEvent =
         catchup_count: number
         is_initial: boolean
         messages: Array<{
+          id?: string
           role: 'user' | 'assistant' | 'tool'
           content: string
           tool_call_id?: string
@@ -671,21 +682,35 @@ export type ClientEvent =
         }>
       }
     }
-  | { event: 'tool.executing'; data: ToolStatus }
+  | { event: 'tool.executing'; data: ToolStatus & { tool_call_id?: string } }
   | {
       event: 'tool.result' | 'subagent.result'
-      data: { session_key?: string; tool: string; result: string; subagent_session_key?: string }
+      data: {
+        session_key?: string
+        tool: string
+        result: string
+        subagent_session_key?: string
+        tool_call_id?: string
+      }
     }
   | { event: 'approval.request'; data: ApprovalRequest }
   | { event: 'approve.ack'; data: { request_id: string; approved: string } }
+  | { event: 'approve.result'; data: { request_id: string; approved: boolean; command: string } }
   | { event: 'subscribe.ack'; data: { session_key: string; processing?: boolean } }
   | { event: 'unsubscribe.ack'; data: { session_key: string } }
   | { event: 'cancel.ack'; data: { status: string } }
   | { event: 'pong'; data: { time: string } }
   | { event: 'attachments'; data: Attachment[] }
   | { event: 'error'; data: { code: string; message: string } }
+  | { event: 'history.updated'; data: { session_key: string; name?: string } }
 
 export type ApprovalDecision = {
   request_id: string
   approved: boolean
+}
+
+export type ApproveResponse = {
+  request_id: string
+  approved: boolean
+  message?: string
 }

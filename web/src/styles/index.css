@@ -3,25 +3,20 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
 
   /* 
    * Color System - Lele Brand Palette
    * 
-   * Neutros (60% - Fondos):
-   * Carbón #0F1115 - Fondo principal
-   * Gris Pizarra #1E2128 - Fondo secundario
-   * Gris Medio #3A3F46 - Elevado/Hover
-   * 
-   * UI Elements (30% - Surfaces):
-   * Variaciones de grises para cards, sidebar, surfaces
-   * 
+   * Neutros (60% - Fondos)
+   * UI Elements (30% - Surfaces)
    * Acentos (10% - CTAs & Highlights):
-   * Rosa Lele #E83E8C - Branding principal
-   * Naranja #FF6B35 - CTAs principales
-   * Turquesa #17B3B8 - Interacción
+   *   Rosa Lele #E83E8C - Branding principal
+   *   Naranja #FF6B35 - CTAs principales
+   *   Turquesa #17B3B8 - Interacción
    */
 
+  /* ═══════════════ DARK (default) ═══════════════ */
   /* 60% - Neutros Oscuros (Fondos) */
   --color-bg-primary: #0f1115;
   --color-bg-secondary: #1e2128;
@@ -58,7 +53,7 @@
   --color-secondary-rosa-pastel: #ffb6d5;
   --color-secondary-aqua: #a7e7e7;
 
-  /* CTA Colors - WCAG AA compliant (white text) */
+  /* CTA Colors */
   --color-cta-primary: #c24a17;
   --color-cta-hover: #d4551e;
   --color-cta-active: #a83d14;
@@ -76,7 +71,7 @@
   --color-border-strong: rgba(59, 65, 72, 0.6);
   --color-border-focus: #17b3b8;
 
-  /* Text Colors - WCAG AA compliant */
+  /* Text Colors */
   --color-text-primary: #f2f4f7;
   --color-text-secondary: #b0b6bd;
   --color-text-tertiary: #9ca3af;
@@ -84,7 +79,7 @@
   --color-text-on-surface: #f2f4f7;
   --color-text-on-accent: #ffffff;
 
-  /* State Colors - WCAG AA compliant */
+  /* State Colors */
   --color-state-success: #7bc943;
   --color-state-success-light: rgba(123, 201, 67, 0.15);
   --color-state-warning: #ffc107;
@@ -125,6 +120,225 @@
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+}
+
+/* System preference: light (when no data-theme is set) */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --color-bg-primary: #f5f6f8;
+    --color-bg-secondary: #ffffff;
+    --color-bg-tertiary: #eef0f3;
+    --color-bg-elevated: #e4e6ea;
+    --color-bg-hover: #d9dce2;
+
+    --color-surface-primary: #e4e6ea;
+    --color-surface-secondary: #d9dce2;
+    --color-surface-tertiary: #ffffff;
+    --color-surface-hover: #d9dce2;
+    --color-surface-muted: #eef0f3;
+    --color-surface-selected: rgba(232, 62, 140, 0.1);
+
+    --color-accent-primary: #e83e8c;
+    --color-accent-hover: #d02a7c;
+    --color-accent-active: #b81e6a;
+    --color-accent-muted: rgba(232, 62, 140, 0.12);
+    --color-accent-subtle: rgba(232, 62, 140, 0.06);
+
+    --color-secondary-verde: #5da82f;
+    --color-secondary-azul: #2563eb;
+    --color-secondary-rojo: #dc2626;
+    --color-secondary-rosa-pastel: #f472b6;
+    --color-secondary-aqua: #6dd5d5;
+
+    --color-cta-primary: #c24a17;
+    --color-cta-hover: #d4551e;
+    --color-cta-active: #a83d14;
+    --color-cta-secondary: #d4a000;
+    --color-cta-secondary-hover: #e6b800;
+
+    --color-interaction-primary: #0f9da1;
+    --color-interaction-hover: #17b3b8;
+    --color-interaction-active: #0b8588;
+
+    --color-border-default: rgba(0, 0, 0, 0.1);
+    --color-border-light: rgba(0, 0, 0, 0.15);
+    --color-border-strong: rgba(0, 0, 0, 0.25);
+    --color-border-focus: #17b3b8;
+
+    --color-text-primary: #1a1d23;
+    --color-text-secondary: #4a4e57;
+    --color-text-tertiary: #6b717a;
+    --color-text-muted: #9ca3af;
+    --color-text-on-surface: #1a1d23;
+    --color-text-on-accent: #ffffff;
+
+    --color-state-success: #16a34a;
+    --color-state-success-light: rgba(22, 163, 74, 0.12);
+    --color-state-warning: #ca8a04;
+    --color-state-warning-light: rgba(202, 138, 4, 0.12);
+    --color-state-error: #dc2626;
+    --color-state-error-light: rgba(220, 38, 38, 0.12);
+    --color-state-info: #2563eb;
+    --color-state-info-light: rgba(37, 99, 235, 0.12);
+
+    --color-overlay: rgba(0, 0, 0, 0.4);
+    --color-overlay-light: rgba(0, 0, 0, 0.2);
+
+    --color-glass: rgba(255, 255, 255, 0.85);
+    --color-glass-border: rgba(232, 62, 140, 0.12);
+  }
+}
+
+/* Forced light mode via data-theme */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg-primary: #f5f6f8;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eef0f3;
+  --color-bg-elevated: #e4e6ea;
+  --color-bg-hover: #d9dce2;
+
+  --color-surface-primary: #e4e6ea;
+  --color-surface-secondary: #d9dce2;
+  --color-surface-tertiary: #ffffff;
+  --color-surface-hover: #d9dce2;
+  --color-surface-muted: #eef0f3;
+  --color-surface-selected: rgba(232, 62, 140, 0.1);
+
+  --color-accent-primary: #e83e8c;
+  --color-accent-hover: #d02a7c;
+  --color-accent-active: #b81e6a;
+  --color-accent-muted: rgba(232, 62, 140, 0.12);
+  --color-accent-subtle: rgba(232, 62, 140, 0.06);
+
+  --color-secondary-verde: #5da82f;
+  --color-secondary-azul: #2563eb;
+  --color-secondary-rojo: #dc2626;
+  --color-secondary-rosa-pastel: #f472b6;
+  --color-secondary-aqua: #6dd5d5;
+
+  --color-cta-primary: #c24a17;
+  --color-cta-hover: #d4551e;
+  --color-cta-active: #a83d14;
+  --color-cta-secondary: #d4a000;
+  --color-cta-secondary-hover: #e6b800;
+
+  --color-interaction-primary: #0f9da1;
+  --color-interaction-hover: #17b3b8;
+  --color-interaction-active: #0b8588;
+
+  --color-border-default: rgba(0, 0, 0, 0.1);
+  --color-border-light: rgba(0, 0, 0, 0.15);
+  --color-border-strong: rgba(0, 0, 0, 0.25);
+  --color-border-focus: #17b3b8;
+
+  --color-text-primary: #1a1d23;
+  --color-text-secondary: #4a4e57;
+  --color-text-tertiary: #6b717a;
+  --color-text-muted: #9ca3af;
+  --color-text-on-surface: #1a1d23;
+  --color-text-on-accent: #ffffff;
+
+  --color-state-success: #16a34a;
+  --color-state-success-light: rgba(22, 163, 74, 0.12);
+  --color-state-warning: #ca8a04;
+  --color-state-warning-light: rgba(202, 138, 4, 0.12);
+  --color-state-error: #dc2626;
+  --color-state-error-light: rgba(220, 38, 38, 0.12);
+  --color-state-info: #2563eb;
+  --color-state-info-light: rgba(37, 99, 235, 0.12);
+
+  --color-overlay: rgba(0, 0, 0, 0.4);
+  --color-overlay-light: rgba(0, 0, 0, 0.2);
+
+  --color-glass: rgba(255, 255, 255, 0.85);
+  --color-glass-border: rgba(232, 62, 140, 0.12);
+}
+
+/* Light mode */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* 60% - Fondos claros */
+  --color-bg-primary: #f5f6f8;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eef0f3;
+  --color-bg-elevated: #e4e6ea;
+  --color-bg-hover: #d9dce2;
+
+  /* 30% - Surfaces claros */
+  --color-surface-primary: #e4e6ea;
+  --color-surface-secondary: #d9dce2;
+  --color-surface-tertiary: #ffffff;
+  --color-surface-hover: #d9dce2;
+  --color-surface-muted: #eef0f3;
+  --color-surface-selected: rgba(232, 62, 140, 0.1);
+
+  /* Accents - se mantienen (rosa Lele) */
+  --color-accent-primary: #e83e8c;
+  --color-accent-hover: #d02a7c;
+  --color-accent-active: #b81e6a;
+  --color-accent-muted: rgba(232, 62, 140, 0.12);
+  --color-accent-subtle: rgba(232, 62, 140, 0.06);
+
+  /* Brand - se mantienen */
+  --color-brand-rosa: #e83e8c;
+  --color-brand-morado: #9d4edd;
+  --color-brand-turquesa: #17b3b8;
+  --color-brand-amarillo: #ffc107;
+  --color-brand-naranja: #ff6b35;
+
+  /* Secondary - ajustados para light */
+  --color-secondary-verde: #5da82f;
+  --color-secondary-azul: #2563eb;
+  --color-secondary-rojo: #dc2626;
+  --color-secondary-rosa-pastel: #f472b6;
+  --color-secondary-aqua: #6dd5d5;
+
+  /* CTA */
+  --color-cta-primary: #c24a17;
+  --color-cta-hover: #d4551e;
+  --color-cta-active: #a83d14;
+  --color-cta-secondary: #d4a000;
+  --color-cta-secondary-hover: #e6b800;
+
+  /* Interaction */
+  --color-interaction-primary: #0f9da1;
+  --color-interaction-hover: #17b3b8;
+  --color-interaction-active: #0b8588;
+
+  /* Borders - más visibles en light */
+  --color-border-default: rgba(0, 0, 0, 0.1);
+  --color-border-light: rgba(0, 0, 0, 0.15);
+  --color-border-strong: rgba(0, 0, 0, 0.25);
+  --color-border-focus: #17b3b8;
+
+  /* Text Colors - oscuros para fondo claro */
+  --color-text-primary: #1a1d23;
+  --color-text-secondary: #4a4e57;
+  --color-text-tertiary: #6b717a;
+  --color-text-muted: #9ca3af;
+  --color-text-on-surface: #1a1d23;
+  --color-text-on-accent: #ffffff;
+
+  /* State */
+  --color-state-success: #16a34a;
+  --color-state-success-light: rgba(22, 163, 74, 0.12);
+  --color-state-warning: #ca8a04;
+  --color-state-warning-light: rgba(202, 138, 4, 0.12);
+  --color-state-error: #dc2626;
+  --color-state-error-light: rgba(220, 38, 38, 0.12);
+  --color-state-info: #2563eb;
+  --color-state-info-light: rgba(37, 99, 235, 0.12);
+
+  /* Overlay */
+  --color-overlay: rgba(0, 0, 0, 0.4);
+  --color-overlay-light: rgba(0, 0, 0, 0.2);
+
+  /* Glass */
+  --color-glass: rgba(255, 255, 255, 0.85);
+  --color-glass-border: rgba(232, 62, 140, 0.12);
 }
 
 html,

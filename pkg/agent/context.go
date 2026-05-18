@@ -11,6 +11,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -35,11 +36,7 @@ type ContextBuilder struct {
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
 
 func getGlobalConfigDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".lele")
+	return config.GetLeleDir()
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {
@@ -115,7 +112,9 @@ Your workspace is at: %s
 
 2. **Be helpful and accurate** - When using tools, briefly explain what you're doing.
 
-3. **Memory** - When remembering something, write to %s/MEMORY.md`,
+3. **Memory** - When remembering something, write to %s/MEMORY.md
+
+4. **HTML/SVG output** - When generating HTML or SVG content for the user to view, always wrap it in a markdown code block with the appropriate language tag (e.g. html or svg).`,
 		rt, workspacePath, workspacePath, workspacePath, toolsSection, workspacePath)
 }
 
@@ -265,7 +264,8 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		history = history[1:]
 	}
 
-	messages = append(messages, history...)
+	contextMessages := filterContextMessages(history)
+	messages = append(messages, contextMessages...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
 		messages = append(messages, buildSummaryMessage(summary))
@@ -325,6 +325,32 @@ func stripSummaryMessages(history []providers.Message) []providers.Message {
 	return filtered
 }
 
+func filterContextMessages(history []providers.Message) []providers.Message {
+	filtered := make([]providers.Message, 0, len(history))
+	for _, msg := range history {
+		if msg.ExcludeFromContext {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
+// ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
+// Returns the updated history (may be the same slice if no changes needed).
+func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
+	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
+		return history
+	}
+
+	agent.Sessions.GetOrCreate(sessionKey)
+	updatedHistory := make([]providers.Message, 0, len(history)+1)
+	updatedHistory = append(updatedHistory, history...)
+	updatedHistory = append(updatedHistory, buildSummaryMessage(summary))
+	agent.Sessions.SetHistory(sessionKey, updatedHistory)
+	return updatedHistory
+}
+
 func (cb *ContextBuilder) BuildCurrentUserMessage(currentMessage string, attachments []bus.FileAttachment, channel, chatID string) string {
 	return cb.RenderUserMessage(currentMessage, attachments)
 }
@@ -370,18 +396,7 @@ func normalizeNativeChatID(chatID string) string {
 		return chatID
 	}
 
-	last := parts[len(parts)-1]
-	allDigits := last != ""
-	for _, ch := range last {
-		if ch < '0' || ch > '9' {
-			allDigits = false
-			break
-		}
-	}
-	if allDigits {
-		return strings.Join(parts[:len(parts)-1], ":")
-	}
-
+	// Strip :chat: alias if present
 	if len(parts) >= 4 && parts[len(parts)-2] == "chat" {
 		return strings.Join(parts[:len(parts)-2], ":")
 	}

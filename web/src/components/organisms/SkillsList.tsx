@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SkillInfo } from '../../lib/types'
-import { Badge } from '../atoms/Badge'
 import { IconButton } from '../atoms/IconButton'
 
 type Props = {
@@ -11,10 +10,10 @@ type Props = {
   onRemove: (name: string) => void
 }
 
-const SOURCE_VARIANTS: Record<string, 'primary' | 'success' | 'default'> = {
-  workspace: 'primary',
-  global: 'success',
-  builtin: 'default',
+const SOURCE_COLORS: Record<string, string> = {
+  workspace: 'bg-state-info-light text-state-info border-state-info/30',
+  global: 'bg-state-success-light text-state-success border-state-success/30',
+  builtin: 'bg-surface-muted text-text-tertiary border-border/50',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -59,13 +58,16 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
             strokeWidth="1.5"
             className="text-text-tertiary"
           >
+            <title>Code icon</title>
             <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
             <path d="M17 5v.01" />
           </svg>
         </div>
-        <h3 className="text-sm font-medium text-text-primary">{t('skills.noSkills', 'No skills installed')}</h3>
+        <h3 className="text-sm font-medium text-text-primary">
+          {t('skills.noSkills', 'No skills installed')}
+        </h3>
         <p className="mt-1 text-xs text-text-secondary max-w-sm">
-          {t('skills.noSkillsDesc', 'Install skills to extend your agent\'s capabilities')}
+          {t('skills.noSkillsDesc', "Install skills to extend your agent's capabilities")}
         </p>
       </div>
     )
@@ -92,6 +94,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                   strokeLinejoin="round"
                   className="text-brand-rosa"
                 >
+                  <title>Skill icon</title>
                   <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
                   <path d="M17 5v.01" />
                 </svg>
@@ -110,7 +113,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
                     >
                       {isRemoving === skill.name ? (
-                        <div className="h-3 w-3 animate-spin rounded-full border border-red-400 border-t-transparent" />
+                        <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
                       ) : (
                         t('skills.removeConfirmYes', 'Yes, remove')
                       )}
@@ -138,6 +141,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
                       stroke="currentColor"
                       strokeWidth="2"
                     >
+                      <title>Delete</title>
                       <path d="M3 6h18" />
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     </svg>
@@ -153,14 +157,16 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
 
           <div className="mt-auto pt-3 flex items-center gap-2">
             {skill.source && (
-              <Badge variant={SOURCE_VARIANTS[skill.source] || 'default'} bordered>
+              <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${SOURCE_COLORS[skill.source] || 'bg-surface-muted text-text-tertiary border-border/50'}`}>
                 {SOURCE_LABELS[skill.source] || skill.source}
-              </Badge>
+              </span>
             )}
-            <Badge variant={skill.installed ? 'success' : 'default'}>
-              <span className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+            <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-state-success' : 'bg-text-tertiary'}`}
+              />
               {skill.installed ? t('common.enabled') : t('common.disabled')}
-            </Badge>
+            </span>
           </div>
         </div>
       ))}

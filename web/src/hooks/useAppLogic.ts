@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ApiClient } from '../lib/api'
+import { wsDebug } from '../lib/debug'
 import { clearCurrentSessionKey, loadSidebarOpen, saveSidebarOpen } from '../lib/storage'
 import type {
   Agent,
@@ -52,18 +53,21 @@ export function useAppLogic(
   const navigate = useNavigate()
 
   const sessionsHook = useChatSessions(api, token, clientId)
+  const { touchSession } = sessionsHook
   const { modelState, loadModels, selectModel } = useModels(api, token)
   const messagesHook = useMessages(
     api,
     token,
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
+    sessionsHook.refreshSessions,
   )
   const chatHistory = useChatHistory(
     api,
     sessionsHook.currentSessionKey,
     token,
     messagesHook.streamingMessages,
+    parentSessionKey ?? undefined,
   )
 
   const wsStatusRef = useRef(wsStatus)
@@ -161,6 +165,11 @@ export function useAppLogic(
       // subscriptions via TTL, so we avoid unnecessary unsub/resub chatter and
       // keep receiving background events (e.g., message.complete) for sessions
       // that are still processing.
+      wsDebug('[AppLogic] Subscribing to session', {
+        sessionKey: sessionsHook.currentSessionKey,
+        agentId: currentAgentId,
+        wsStatus,
+      })
       wsSend('subscribe', { session_key: sessionsHook.currentSessionKey, agent_id: currentAgentId })
       subscribedSessionRef.current = sessionsHook.currentSessionKey
     }
@@ -215,7 +224,9 @@ export function useAppLogic(
         currentAgentId,
       )
       messagesHook.setPendingAttachments([])
-      sessionsHook.refreshSessions()
+      // Optimistic update: bump message_count immediately so sidebar
+      // shows the session activity instead of "New Chat"
+      touchSession(sessionsHook.currentSessionKey)
     },
     [
       sessionsHook.currentSessionKey,
@@ -227,12 +238,27 @@ export function useAppLogic(
   )
 
   const handleApprove = useCallback(
-    (approved: boolean) => {
+    async (approved: boolean) => {
       if (!messagesHook.approvalRequest) return
-      const result = messagesHook.approveRequest(approved, messagesHook.approvalRequest.id)
-      wsSend('approve', result)
+      const { id: requestId, command } = messagesHook.approvalRequest
+      const sessionKey = sessionsHook.currentSessionKey
+
+      // Optimistic UI update: show feedback immediately
+      messagesHook.approveRequest(approved, requestId, command)
+
+      // Send via HTTP as primary method (persists in history).
+      // If HTTP fails, fall back to WebSocket (which also persists on the backend).
+      if (sessionKey) {
+        api.approve(sessionKey, requestId, approved).catch((err) => {
+          console.warn('[Approve] HTTP failed, falling back to WS:', err)
+          wsSend('approve', { request_id: requestId, approved })
+        })
+      } else {
+        // No session key available, use WebSocket directly
+        wsSend('approve', { request_id: requestId, approved })
+      }
     },
-    [messagesHook.approvalRequest, messagesHook.approveRequest, wsSend],
+    [messagesHook.approvalRequest, messagesHook.approveRequest, sessionsHook.currentSessionKey, api, wsSend],
   )
 
   const handleCancel = useCallback(() => {
@@ -278,24 +304,17 @@ export function useAppLogic(
     ],
   )
 
-  const handleCreateSession = useCallback(() => {
-    const currentSession = sessionsHook.sessions.find(
-      (s) => s.key === sessionsHook.currentSessionKey,
-    )
-
-    if (currentSession && currentSession.message_count === 0 && sessionsHook.currentSessionKey) {
-      navigate(`/chat/${encodeURIComponent(sessionsHook.currentSessionKey)}`)
-      return
-    }
-
+  const handleCreateSession = useCallback(async () => {
     subscribedSessionRef.current = null
     setParentSessionKey(null)
-    const newKey = sessionsHook.createSession()
-    if (newKey) {
-      messagesHook.clearStreaming()
-      navigate(`/chat/${encodeURIComponent(newKey)}`)
+    messagesHook.clearStreaming()
+    // Await backend session registration before navigating, so the subsequent
+    // WebSocket subscribe passes ownership validation on the first attempt.
+    const sessionKey = await sessionsHook.createSession()
+    if (sessionKey) {
+      navigate(`/chat/${sessionKey}`, { replace: true })
     }
-  }, [sessionsHook, messagesHook.clearStreaming, navigate])
+  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -365,6 +384,10 @@ export function useAppLogic(
     })
   }, [])
 
+  useEffect(() => {
+    saveSidebarOpen(sidebarOpen)
+  }, [sidebarOpen])
+
   const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
   ensurePlaceholderRef.current = messagesHook.ensureAssistantPlaceholder
   const clearStreamingRef = useRef(messagesHook.clearStreaming)
@@ -373,6 +396,7 @@ export function useAppLogic(
   streamingMessagesRef.current = messagesHook.streamingMessages
 
   const prevProcessingRef = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally excluded, they hold stable values
   useEffect(() => {
     const sessionKey = sessionsHook.currentSessionKey
     if (!sessionKey) return
@@ -387,6 +411,16 @@ export function useAppLogic(
 
     if (!chatHistory.processing && prevProcessingRef.current) {
       clearStreamingRef.current()
+      // Sync processingSessions with HTTP polling state
+      // This ensures the sidebar updates even when WebSocket events are missed
+      messagesHook.setProcessingSessions((prev: Set<string>) => {
+        if (prev.has(sessionKey)) {
+          const next = new Set(prev)
+          next.delete(sessionKey)
+          return next
+        }
+        return prev
+      })
     }
 
     prevProcessingRef.current = chatHistory.processing
@@ -413,14 +447,17 @@ export function useAppLogic(
     parentSessionKey,
     messages: chatHistory.messages,
     approvalRequest: messagesHook.approvalRequest,
+    approvalResult: messagesHook.approvalResult,
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,
+    setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
     onSend: handleSend,
     onApprove: handleApprove,
     onCancel: handleCancel,
     onSelectSession: handleSelectSession,
     onCreateSession: handleCreateSession,
+    createSession: sessionsHook.createSession,
     onDeleteSession: handleDeleteSession,
     onClearSession: handleClearSession,
     onSelectAgent: handleSelectAgent,
@@ -431,5 +468,8 @@ export function useAppLogic(
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
     onToggleSidebar: handleToggleSidebar,
+    loadMore: chatHistory.loadMore,
+    hasMore: chatHistory.hasMore,
+    isLoadingMore: chatHistory.isLoadingMore,
   }
 }

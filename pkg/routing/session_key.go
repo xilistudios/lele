@@ -133,7 +133,18 @@ func IsSubagentSessionKey(sessionKey string) bool {
 	if parsed == nil {
 		return false
 	}
-	return strings.HasPrefix(strings.ToLower(parsed.Rest), "subagent:")
+	if strings.HasPrefix(strings.ToLower(parsed.Rest), "subagent:") {
+		return true
+	}
+	// Check for channel:chat_id:subagent_id format (e.g., "native:uuid:subagent-1")
+	parts := strings.Split(raw, ":")
+	if len(parts) >= 3 {
+		lastPart := parts[len(parts)-1]
+		if strings.HasPrefix(strings.ToLower(lastPart), "subagent-") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeChannel(channel string) string {

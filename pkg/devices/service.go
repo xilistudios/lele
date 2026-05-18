@@ -89,7 +89,7 @@ func (s *Service) Stop() {
 	}
 
 	for _, src := range s.sources {
-		src.Stop()
+		_ = src.Stop() // Ignore errors during shutdown
 	}
 
 	logger.InfoC("devices", "Device event service stopped")

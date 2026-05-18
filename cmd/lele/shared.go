@@ -22,8 +22,7 @@ func getConfigPath() string {
 }
 
 func getLeleDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".lele")
+	return config.GetLeleDir()
 }
 
 func loadConfig() (*config.Config, error) {

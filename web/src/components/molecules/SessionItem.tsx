@@ -88,7 +88,8 @@ export function SessionItem({
           onDelete()
         }}
         aria-label={t('chat.deleteSession')}
-        className="ml-auto flex items-center justify-center rounded p-1 text-text-tertiary opacity-0 transition-all hover:bg-state-error-light hover:text-[#FF7B7B] group-hover:opacity-100"
+<<<<<<< HEAD
+        className="ml-auto flex items-center justify-center rounded-md p-2 text-text-tertiary opacity-0 transition-all hover:bg-state-error-light hover:text-state-error group-hover:opacity-100"
       >
         <TrashIcon size={12} />
       </button>

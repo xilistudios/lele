@@ -158,13 +158,15 @@
       "model": "Model",
       "behavior": "Behavior",
       "features": "Features",
-      "skills": "Skills"
+      "skills": "Skills",
+      "subagents": "Subagents"
     },
     "fields": {
       "gatewayHost": "Host",
       "gatewayPort": "Port",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restrict to workspace",
+      "theme": "Theme",
       "language": "Language",
       "provider": "Default provider",
       "model": "Default model",
@@ -285,7 +287,9 @@
       "agentMaxIterations": "Max Iterations",
       "agentMaxTokens": "Max Tokens",
       "agentContextWindow": "Context Window",
-      "agentSupportsImages": "Supports Images"
+      "agentSupportsImages": "Supports Images",
+      "agentSubagentsEnabled": "Enable subagents",
+      "agentSubagentsAllowed": "Allowed agents"
     },
     "descriptions": {
       "ephemeralThreshold": "Time in seconds before messages are removed",
@@ -310,7 +314,14 @@
       "agentThinking": "Enables extended reasoning mode",
       "agentSupportsImages": "This model supports image and vision inputs",
       "agentSkills": "Active skills available for this agent",
-      "agentsList": "Create and manage AI agents with custom configurations"
+      "agentsList": "Create and manage AI agents with custom configurations",
+      "agentSubagentsEnabled": "Allow this agent to spawn subagents for delegated tasks",
+      "agentSubagentsAllowed": "Agents that this agent can spawn. Use '*' to allow all."
+    },
+    "theme": {
+      "dark": "Dark",
+      "light": "Light",
+      "auto": "Auto"
     },
     "options": {
       "daily": "Daily",
@@ -333,6 +344,13 @@
     "enableRawJson": "Enable raw JSON to edit",
     "showRawJson": "Show raw JSON",
     "hideRawJson": "Hide raw JSON",
+    "formatJson": "Format",
+    "copyJson": "Copy",
+    "jsonValidationError": "Invalid JSON",
+    "jsonErrorHint": "Fix the JSON syntax above. The config will not be saved while errors exist. Check for missing commas, unmatched brackets, or trailing commas.",
+    "jsonEditorPlaceholder": "Paste or edit JSON config here...",
+    "jsonLinesCount": "{{count}} lines",
+    "rawJsonDescription": "Edit the full configuration directly as JSON. Changes are validated in real time and applied to all settings fields.",
     "comingSoon": "Coming soon...",
     "addProvider": "Add provider",
     "removeProvider": "Remove",
@@ -355,6 +373,10 @@
     "noConfiguredProviders": "No providers configured. Add one to get started.",
     "defaultBadge": "Default",
     "modifiedBadge": "Unsaved changes",
+    "agentFilesButton": "Files",
+    "agentFilesTooltip": "Edit context files",
+    "selectAgent": "Select agent",
+    "noOtherAgents": "No other agents available",
     "addProviderModal": {
       "title": "Add Provider",
       "stepType": "Step 1: Select provider type",
@@ -437,6 +459,19 @@
     "status": "Status",
     "expand": "Expand",
     "collapse": "Collapse"
+  },
+  "canvas": {
+    "code": "Code",
+    "preview": "Preview",
+    "viewCode": "View code",
+    "viewPreview": "View preview",
+    "copy": "Copy",
+    "copyCode": "Copy code",
+    "copied": "Copied",
+    "loadingPreview": "Loading preview…",
+    "renderError": "Failed to render preview",
+    "noContent": "No content to preview",
+    "previewTitle": "HTML preview"
   },
   "toolCalls": {
     "action": "Action",

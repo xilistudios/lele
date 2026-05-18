@@ -45,6 +45,11 @@ func (r *recordingSessionRecorder) History(sessionKey string) []providers.Messag
 	return result
 }
 
+func (r *recordingSessionRecorder) Save(sessionKey string) error {
+	// Test recorder doesn't persist to disk, so this is a no-op
+	return nil
+}
+
 func (m *scriptedSubagentProvider) Chat(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, options map[string]interface{}) (*providers.LLMResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -499,7 +504,9 @@ func TestSubagentManager_SpawnDoesNotDuplicateInitialUserMessage(t *testing.T) {
 
 	waitForSubagentCallback(t, resultCh)
 
-	history := recorder.History("subagent:subagent-1")
+	// New session key format: origin_session_key:subagent-id
+	sessionKey := "telegram:chat-123:subagent-1"
+	history := recorder.History(sessionKey)
 	if len(history) != 2 {
 		t.Fatalf("expected 2 recorded messages, got %d: %#v", len(history), history)
 	}

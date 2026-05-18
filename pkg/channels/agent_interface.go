@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"context"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -23,6 +24,8 @@ type AgentProvidable interface {
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
 	// GetSessionHistory devuelve el historial persistido de una sesión
 	GetSessionHistory(sessionKey string) []providers.Message
+	// AddSessionMessage añade un mensaje al historial persistido de una sesión
+	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión
 	GetSessionModel(sessionKey string) string
 	// GetSessionModelSupportsImages returns true if the session's current model supports vision
@@ -55,6 +58,8 @@ type AgentProvidable interface {
 	ClearSession(sessionKey string) string
 	// GetName devuelve el nombre de una sesión
 	GetName(sessionKey string) string
+	// GetSessionSummary devuelve el resumen de una sesión
+	GetSessionSummary(sessionKey string) string
 	// GetUpdated devuelve el timestamp de última actualización de una sesión
 	GetUpdated(sessionKey string) time.Time
 	// SetName establece el nombre de una sesión
@@ -71,6 +76,12 @@ type AgentProvidable interface {
 	// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
 	// this reflects what would actually be sent to the LLM on the next turn.
 	GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int)
+	// ProcessDirect processes a message directly without going through the message bus.
+	ProcessDirect(ctx context.Context, content, sessionKey string) (string, error)
+	// ProcessDirectWithChannel processes a message directly with channel information.
+	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
+	// ProcessHeartbeat processes a heartbeat request without session history.
+	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
 }
 
 // AgentBasicInfo contiene información pública de un agente

@@ -8,8 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
+
+// maxStoredMessages is the maximum number of messages kept in a session file.
+// When exceeded, the oldest excluded messages are pruned on save.
+const maxStoredMessages = 10000
 
 type Session struct {
 	Key          string              `json:"key"`
@@ -18,6 +23,7 @@ type Session struct {
 	Summary      string              `json:"summary,omitempty"`
 	VerboseMode  bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
 	VerboseLevel string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
+	Model        string              `json:"model,omitempty"`         // Session-specific model override
 	Created      time.Time           `json:"created"`
 	Updated      time.Time           `json:"updated"`
 	// Token tracking
@@ -43,6 +49,11 @@ func NewSessionManager(storage string) *SessionManager {
 	}
 
 	return sm
+}
+
+// StoragePath returns the storage directory path.
+func (sm *SessionManager) StoragePath() string {
+	return sm.storage
 }
 
 func (sm *SessionManager) GetOrCreate(key string) *Session {
@@ -132,11 +143,18 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 
 	session, ok := sm.sessions[key]
 	if !ok {
+		logger.DebugCF("session", "GetHistory: session not found", map[string]interface{}{
+			"session_key": key,
+		})
 		return []providers.Message{}
 	}
 
 	history := make([]providers.Message, len(session.Messages))
 	copy(history, session.Messages)
+	logger.DebugCF("session", "GetHistory: returning history", map[string]interface{}{
+		"session_key":    key,
+		"messages_count": len(history),
+	})
 	return history
 }
 
@@ -227,8 +245,28 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
-// RemoveLastMessage removes the most recent message from the session history.
-// Returns true if a message was removed, false if the history is empty or session doesn't exist.
+// ExcludeOldMessagesFromContext marks the first len(messages)-keepCount messages
+// as excluded from the LLM context, preserving them in storage for the web UI.
+// If keepCount <= 0, all messages are excluded.
+func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return
+	}
+
+	if len(session.Messages) <= keepCount {
+		return
+	}
+
+	excludeUpTo := len(session.Messages) - keepCount
+	for i := 0; i < excludeUpTo; i++ {
+		session.Messages[i].ExcludeFromContext = true
+	}
+	session.Updated = time.Now()
+}
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -434,6 +472,41 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	return sm.saveUnlocked(key)
 }
 
+// GetModel returns the model override for a session.
+func (sm *SessionManager) GetModel(key string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return ""
+	}
+	return session.Model
+}
+
+// SetModel sets the model override for a session and persists it.
+func (sm *SessionManager) SetModel(key string, model string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		// Create session if it doesn't exist
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	session.Model = model
+	session.Updated = time.Now()
+
+	// Persist immediately
+	return sm.saveUnlocked(key)
+}
+
 // GetTokenCounts returns the input and output token counts for a session.
 func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens int) {
 	sm.mu.RLock()
@@ -498,11 +571,28 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 		return nil
 	}
 
+	// Prune old excluded messages when over the storage limit
+	if len(stored.Messages) > maxStoredMessages {
+		toRemove := len(stored.Messages) - maxStoredMessages
+		kept := make([]providers.Message, 0, maxStoredMessages)
+		removed := 0
+		for _, msg := range stored.Messages {
+			if removed < toRemove && msg.ExcludeFromContext {
+				removed++
+				continue
+			}
+			kept = append(kept, msg)
+		}
+		stored.Messages = kept
+	}
+
 	snapshot := Session{
 		Key:          stored.Key,
 		Name:         stored.Name,
 		Summary:      stored.Summary,
 		VerboseMode:  stored.VerboseMode,
+		VerboseLevel: stored.VerboseLevel,
+		Model:        stored.Model,
 		Created:      stored.Created,
 		Updated:      stored.Updated,
 		InputTokens:  stored.InputTokens,

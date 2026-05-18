@@ -21,6 +21,7 @@ type VerboseCallback func(iteration int, toolName string, args map[string]interf
 
 type SessionRecorder interface {
 	AddFullMessage(sessionKey string, msg providers.Message)
+	Save(sessionKey string) error
 }
 
 // ToolLoopConfig configures the tool execution loop.
@@ -102,7 +103,6 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				Content:          response.Content,
 				ReasoningContent: response.ReasoningContent,
 			}
-			messages = append(messages, assistantMsg)
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
 			}

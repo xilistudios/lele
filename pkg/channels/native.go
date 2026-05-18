@@ -61,8 +61,10 @@ type WSClient struct {
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
 	nativeCfg := cfg.Channels.Native
 
-	home, _ := os.UserHomeDir()
-	leleDir := filepath.Join(home, ".lele")
+	leleDir := nativeCfg.LeleDir
+	if leleDir == "" {
+		leleDir = config.GetLeleDir()
+	}
 
 	auth, err := NewAuthManager(&nativeCfg, leleDir)
 	if err != nil {
@@ -199,43 +201,79 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 // RegisterRoutes registers all native channel API routes on the given mux.
 // This is called by the unified server to mount the native channel endpoints.
 func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
-	// Helper: wrap handler with auth middleware (which internally skips public paths)
 	withAuth := func(h http.HandlerFunc) http.HandlerFunc {
 		return n.authMiddleware(h).ServeHTTP
 	}
 
-	// Public auth endpoints (auth middleware auto-skips /api/v1/auth/*, /api/v1/ws, /api/v1/files/view)
-	mux.HandleFunc("/api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
-	mux.HandleFunc("/api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
-	mux.HandleFunc("/api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
-	mux.HandleFunc("/api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
-	mux.HandleFunc("/api/v1/ws", n.handleWebSocket)
+	withBodyLimit := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
+			next.ServeHTTP(w, r)
+		})
+	}
 
-	// Authenticated API endpoints
-	mux.HandleFunc("/api/v1/chat/send", withAuth(n.handleChatSend))
-	mux.HandleFunc("/api/v1/chat/history", withAuth(n.handleChatHistory))
-	mux.HandleFunc("/api/v1/chat/sessions", withAuth(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			n.handleCreateSession(w, r)
-			return
-		}
-		n.handleChatSessions(w, r)
-	}))
-	mux.HandleFunc("/api/v1/chat/session/", withAuth(n.handleChatSession))
-	mux.HandleFunc("/api/v1/agents", withAuth(n.handleAgents))
-	mux.HandleFunc("/api/v1/agents/", withAuth(n.handleAgentDispatcher))
-	mux.HandleFunc("/api/v1/config", withAuth(n.handleConfig))
-	mux.HandleFunc("/api/v1/config/validate", withAuth(n.handleConfig))
-	mux.HandleFunc("/api/v1/tools", withAuth(n.handleTools))
-	mux.HandleFunc("/api/v1/models", withAuth(n.handleModels))
-	mux.HandleFunc("/api/v1/providers/", withAuth(n.handleProviderModels))
-	mux.HandleFunc("/api/v1/skills", withAuth(n.handleSkills))
-	mux.HandleFunc("/api/v1/skills/available", withAuth(n.handleSkillsAvailable))
-	mux.HandleFunc("/api/v1/skills/", withAuth(n.handleSkillDispatcher))
-	mux.HandleFunc("/api/v1/status", withAuth(n.handleStatus))
-	mux.HandleFunc("/api/v1/channels", withAuth(n.handleChannels))
-	mux.HandleFunc("/api/v1/files/upload", withAuth(n.handleFileUpload))
-	mux.HandleFunc("/api/v1/files/view", n.handleFileView)
+	applyBodyLimit := func(h http.HandlerFunc) http.HandlerFunc {
+		return withBodyLimit(h).ServeHTTP
+	}
+
+	// Public auth endpoints
+	mux.HandleFunc("GET /api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
+
+	// WebSocket
+	mux.HandleFunc("GET /api/v1/ws", n.handleWebSocket)
+
+	// Chat
+	mux.HandleFunc("POST /api/v1/chat/send", withAuth(applyBodyLimit(n.handleChatSend)))
+	mux.HandleFunc("GET /api/v1/chat/sessions", withAuth(n.handleChatSessions))
+	mux.HandleFunc("POST /api/v1/chat/sessions", withAuth(applyBodyLimit(n.handleCreateSession)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionGet))
+	mux.HandleFunc("DELETE /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionDelete))
+	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/clear", withAuth(n.handleChatClear))
+	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/approve", withAuth(applyBodyLimit(n.handleChatApprove)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/history", withAuth(n.handleChatHistory))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/history/{subagentId}", withAuth(n.handleChatHistory))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/model", withAuth(n.handleSessionModel))
+	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/model", withAuth(applyBodyLimit(n.handleSessionModel)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/agent", withAuth(n.handleSessionAgent))
+	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/agent", withAuth(applyBodyLimit(n.handleSessionAgent)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/thinking", withAuth(n.handleSessionThinking))
+	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/thinking", withAuth(applyBodyLimit(n.handleSessionThinking)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/name", withAuth(n.handleSessionName))
+	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/name", withAuth(applyBodyLimit(n.handleSessionName)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/context", withAuth(n.handleSessionContext))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/summary", withAuth(n.handleSessionSummary))
+	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/compact", withAuth(n.handleSessionCompact))
+
+	// Agents
+	mux.HandleFunc("GET /api/v1/agents", withAuth(n.handleAgents))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}", withAuth(n.handleAgentInfo))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/status", withAuth(n.handleAgentStatus))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/files", withAuth(n.handleAgentFiles))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/files/{fileName}", withAuth(n.handleAgentFileRead))
+	mux.HandleFunc("PUT /api/v1/agents/{agentID}/files/{fileName}", withAuth(applyBodyLimit(n.handleAgentFileSave)))
+
+	// Config
+	mux.HandleFunc("GET /api/v1/config", withAuth(n.handleGetConfig))
+	mux.HandleFunc("PUT /api/v1/config", withAuth(applyBodyLimit(n.handlePutConfig)))
+	mux.HandleFunc("POST /api/v1/config/validate", withAuth(applyBodyLimit(n.handleValidateConfig)))
+
+	// Tools, Models, Skills, Status, Channels
+	mux.HandleFunc("GET /api/v1/tools", withAuth(n.handleTools))
+	mux.HandleFunc("GET /api/v1/models", withAuth(n.handleModels))
+	mux.HandleFunc("GET /api/v1/providers/{name}/models", withAuth(n.handleProviderModels))
+	mux.HandleFunc("GET /api/v1/skills", withAuth(n.handleSkills))
+	mux.HandleFunc("POST /api/v1/skills", withAuth(applyBodyLimit(n.handleSkillInstall)))
+	mux.HandleFunc("GET /api/v1/skills/available", withAuth(n.handleSkillsAvailable))
+	mux.HandleFunc("DELETE /api/v1/skills/{name}", withAuth(n.handleSkillRemove))
+	mux.HandleFunc("GET /api/v1/status", withAuth(n.handleStatus))
+	mux.HandleFunc("GET /api/v1/channels", withAuth(n.handleChannels))
+
+	// Files
+	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
+	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
@@ -307,13 +345,6 @@ func (n *NativeChannel) checkOrigin(r *http.Request) bool {
 
 func (n *NativeChannel) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		if path == "/api/v1/ws" || strings.HasPrefix(path, "/api/v1/auth/") || strings.HasPrefix(path, "/api/v1/files/view") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			writeError(w, http.StatusUnauthorized, "missing authorization header", "auth_missing")
@@ -388,6 +419,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Action:             msg.Metadata["action"],
 			Arguments:          toolArgs,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "tool.result":
@@ -400,6 +432,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Tool:               msg.Metadata["tool"],
 			Result:             result,
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "subagent.result":
@@ -408,6 +441,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Tool:               msg.Metadata["tool"],
 			Result:             msg.Metadata["result"],
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
+			ToolCallID:         msg.Metadata["tool_call_id"],
 		})
 		return
 	case "approval.request":
@@ -447,6 +481,7 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	// Signal that session data has been persisted and is safe to refetch
 	n.sendWSEvent(sessionKey, "history.updated", map[string]interface{}{
 		"session_key": sessionKey,
+		"name":        n.agentLoop.GetName(sessionKey),
 	})
 }
 
@@ -471,31 +506,60 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 
 func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
 	msg := WSMessage{
-		Event: event,
-		Data:  mustMarshal(data),
+		Version: WSProtocolVersion,
+		Event:   event,
+		Data:    mustMarshal(data),
 	}
 	payload := mustMarshal(msg)
 
+	logger.DebugCF("native", "Broadcast to session - starting", map[string]interface{}{
+		"session_key":   sessionKey,
+		"event":         event,
+		"total_clients": len(n.wsClients),
+	})
+
 	n.mu.RLock()
 	var targets []*WSClient
-	for _, client := range n.wsClients {
+	for clientID, client := range n.wsClients {
+
 		// Match by current session key (active subscription)
-		if client.SessionKey == sessionKey {
+		if sessionKeyMatches(client.SessionKey, sessionKey) {
+			logger.DebugCF("native", "Client matched by SessionKey", map[string]interface{}{
+				"client_id":          clientID,
+				"client_session_key": client.SessionKey,
+				"target_session_key": sessionKey,
+			})
 			targets = append(targets, client)
 			continue
 		}
 		// Match by tracked subscriptions (sessions the client has subscribed to)
-		if client.Subscriptions != nil && client.Subscriptions[sessionKey] {
-			targets = append(targets, client)
-			continue
+		if client.Subscriptions != nil {
+			for subKey := range client.Subscriptions {
+				if sessionKeyMatches(subKey, sessionKey) {
+					logger.DebugCF("native", "Client matched by Subscriptions", map[string]interface{}{
+						"client_id":            clientID,
+						"matched_subscription": subKey,
+						"target_session_key":   sessionKey,
+					})
+					targets = append(targets, client)
+					goto nextClient
+				}
+			}
 		}
 		// Match by resolved session key (subagent parent sessions)
 		if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
-			if resolved == sessionKey {
+			if sessionKeyMatches(resolved, sessionKey) {
+				logger.DebugCF("native", "Client matched by resolved SessionKey", map[string]interface{}{
+					"client_id":            clientID,
+					"client_session_key":   client.SessionKey,
+					"resolved_session_key": resolved,
+					"target_session_key":   sessionKey,
+				})
 				targets = append(targets, client)
 			}
 		}
+	nextClient:
 	}
 	n.mu.RUnlock()
 
@@ -527,17 +591,25 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		"matched":     found,
 	})
 
-	// Fallback: if no clients matched and this is an approval request,
-	// broadcast to all connected clients so the approval UI can receive it.
+	// Fallback: if no clients matched, broadcast to all connected clients.
+	// This is a workaround for session key mismatches - every client receives the event
+	// and the frontend filters by session_key in handleEvent.
+	// TODO: Fix the root cause of why clients don't match
 	if found == 0 && event == "approval.request" {
+		logger.WarnCF("native", "No clients matched for approval broadcast, falling back to all clients", map[string]interface{}{
+			"session_key": sessionKey,
+			"event":       event,
+			"clients":     len(n.wsClients),
+		})
 		n.broadcastAll(event, data)
 	}
 }
 
 func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 	msg := WSMessage{
-		Event: event,
-		Data:  mustMarshal(data),
+		Version: WSProtocolVersion,
+		Event:   event,
+		Data:    mustMarshal(data),
 	}
 	payload := mustMarshal(msg)
 
@@ -628,81 +700,153 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
 	client, ok := n.auth.GetClient(clientID)
 	if !ok {
+		logger.DebugCF("native", "validateSessionOwnership: client not found", map[string]interface{}{
+			"client_id":   clientID,
+			"session_key": sessionKey,
+		})
 		return false
 	}
-	if strings.HasPrefix(sessionKey, "subagent:") {
+
+	logger.DebugCF("native", "validateSessionOwnership: checking", map[string]interface{}{
+		"client_id":      clientID,
+		"session_key":    sessionKey,
+		"client_keys":    client.SessionKeys,
+		"num_ws_clients": len(n.wsClients),
+	})
+
+	// Check for subagent session key (old format: subagent:{id} or new format: {parent}:subagent-{n})
+	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
+	if !isSubagent {
+		// Check if it ends with subagent-{n} pattern (works with or without native: prefix)
+		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
+			isSubagent = true
+		}
+	}
+	if isSubagent {
 		if n.agentLoop == nil {
+			logger.WarnCF("native", "validateSessionOwnership: agentLoop is nil for subagent", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+			})
 			return false
 		}
 		resolvedParent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
 		if resolvedParent == "" {
+			logger.WarnCF("native", "validateSessionOwnership: resolved parent is empty", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+			})
 			return false
 		}
+		resolvedParent = strings.TrimPrefix(resolvedParent, "native:")
+
+		if resolvedParent == clientID {
+			logger.DebugCF("native", "validateSessionOwnership: subagent parent matches clientID", map[string]interface{}{
+				"session_key":     sessionKey,
+				"client_id":       clientID,
+				"resolved_parent": resolvedParent,
+			})
+			return true
+		}
+
+		logger.InfoCF("native", "validateSessionOwnership: checking subagent parent", map[string]interface{}{
+			"session_key":     sessionKey,
+			"client_id":       clientID,
+			"resolved_parent": resolvedParent,
+			"client_keys":     client.SessionKeys,
+		})
+		resolvedParentBase := resolvedParent
+		if strings.Contains(resolvedParent, ":chat:") {
+			chatIdx := strings.LastIndex(resolvedParent, ":chat:")
+			if chatIdx >= 0 {
+				resolvedParentBase = resolvedParent[:chatIdx]
+			}
+		}
 		for _, sk := range client.SessionKeys {
-			if sk == resolvedParent {
+			skNorm := strings.TrimPrefix(sk, "native:")
+			if skNorm == resolvedParent {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParent", map[string]interface{}{
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
+				})
+				return true
+			}
+			if skNorm == resolvedParentBase {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParentBase", map[string]interface{}{
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
+				})
+				return true
+			}
+			skBase := skNorm
+			if strings.Contains(skNorm, ":chat:") {
+				chatIdx := strings.LastIndex(skNorm, ":chat:")
+				if chatIdx >= 0 {
+					skBase = skNorm[:chatIdx]
+				}
+			}
+			if skBase == resolvedParent || skBase == resolvedParentBase {
+				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skBase", map[string]interface{}{
+					"session_key": sessionKey,
+					"sk":          sk,
+					"client_id":   clientID,
+				})
 				return true
 			}
 		}
+		logger.WarnCF("native", "validateSessionOwnership: no matching session key for subagent", map[string]interface{}{
+			"session_key":          sessionKey,
+			"client_id":            clientID,
+			"resolved_parent":      resolvedParent,
+			"resolved_parent_base": resolvedParentBase,
+			"client_keys":          client.SessionKeys,
+		})
 		return false
 	}
-	// Extract base session key (without timestamp suffix)
-	baseSessionKey := sessionKey
-	if idx := strings.LastIndex(sessionKey, ":"); idx > len("native:") {
-		// Check if suffix is a timestamp (all digits)
-		suffix := sessionKey[idx+1:]
-		if len(suffix) > 0 {
-			allDigits := true
-			for _, c := range suffix {
-				if c < '0' || c > '9' {
-					allDigits = false
-					break
-				}
-			}
-			if allDigits {
-				baseSessionKey = sessionKey[:idx]
-			}
-		}
+	// Default session key (client's own ID) is always valid — used for initial
+	// WebSocket connections before any sessions have been created.
+	// Also handles deprecated native: prefix for backward compatibility.
+	if sessionKey == clientID || strings.TrimPrefix(sessionKey, "native:") == clientID {
+		logger.DebugCF("native", "validateSessionOwnership: default/clientID match", map[string]interface{}{
+			"session_key": sessionKey,
+			"client_id":   clientID,
+		})
+		return true
 	}
 	for _, sk := range client.SessionKeys {
 		// Exact match
 		if sk == sessionKey {
+			logger.DebugCF("native", "validateSessionOwnership: exact match", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+				"matched_key": sk,
+			})
 			return true
 		}
-		// Allow base session key to match timestamped versions
-		if sk == baseSessionKey {
-			return true
-		}
-		// Allow timestamped session key to match base
-		skBase := sk
-		if idx := strings.LastIndex(sk, ":"); idx > len("native:") {
-			suffix := sk[idx+1:]
-			if len(suffix) > 0 {
-				allDigits := true
-				for _, c := range suffix {
-					if c < '0' || c > '9' {
-						allDigits = false
-						break
-					}
-				}
-				if allDigits {
-					skBase = sk[:idx]
-				}
-			}
-		}
-		if skBase == baseSessionKey || skBase == sessionKey {
+		// Backward compatibility: match with/without native: prefix
+		if sessionKeyMatches(sk, sessionKey) {
+			logger.DebugCF("native", "validateSessionOwnership: prefix-insensitive match", map[string]interface{}{
+				"session_key": sessionKey,
+				"client_id":   clientID,
+				"matched_key": sk,
+			})
 			return true
 		}
 	}
+
+	logger.WarnCF("native", "validateSessionOwnership: no matching key found", map[string]interface{}{
+		"client_id":       clientID,
+		"session_key":     sessionKey,
+		"client_keys":     client.SessionKeys,
+		"ws_client_count": len(n.wsClients),
+	})
 	return false
 }
 
 func (c *WSClient) Send(data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.Conn != nil {
-		return c.Conn.WriteMessage(websocket.TextMessage, data)
-	}
-	return fmt.Errorf("connection is nil")
+	return c.QueueSend(data)
 }
 
 func (c *WSClient) QueueSend(data []byte) error {
@@ -712,18 +856,21 @@ func (c *WSClient) QueueSend(data []byte) error {
 		return fmt.Errorf("client is closed")
 	}
 	c.mu.Unlock()
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
 	select {
 	case c.SendChan <- data:
 		return nil
-	default:
-		timer := time.NewTimer(5 * time.Second)
-		defer timer.Stop()
-		select {
-		case c.SendChan <- data:
-			return nil
-		case <-timer.C:
-			return fmt.Errorf("send channel full, client likely disconnected")
+	case <-timer.C:
+		c.mu.Lock()
+		if !c.closed {
+			c.closed = true
+			c.Conn.Close()
 		}
+		c.mu.Unlock()
+		return fmt.Errorf("send timeout, client disconnected")
 	}
 }
 
@@ -753,10 +900,10 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string, code string) {
-	writeJSON(w, status, ErrorResponse{
-		Error:   message,
-		Message: message,
+	writeJSON(w, status, APIError{
 		Code:    code,
+		Message: message,
+		Error:   message,
 	})
 }
 

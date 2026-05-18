@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -38,7 +39,7 @@ func TestStatusCommand_SessionKeyWithoutAgentPrefix(t *testing.T) {
 
 	// Create command handler and test /status
 	ch := newCommandHandler(al)
-	response, handled := ch.handleCommand(nil, bus.InboundMessage{
+	response, handled := ch.handleCommand(context.TODO(), bus.InboundMessage{
 		Channel:    "telegram",
 		ChatID:     "12345",
 		SessionKey: sessionKey,

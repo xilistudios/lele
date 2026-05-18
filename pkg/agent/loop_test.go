@@ -157,23 +157,23 @@ func TestAgentLoop_GetVerboseLevel_UsesTelegramConfigDefault(t *testing.T) {
 
 	al := NewAgentLoop(cfg, bus.NewMessageBus())
 
-	if got := al.GetVerboseLevel("telegram:123"); got != "basic" {
+	if got := al.providable.GetVerboseLevel("telegram:123"); got != "basic" {
 		t.Fatalf("GetVerboseLevel(telegram) = %q, want %q", got, "basic")
 	}
-	if got := al.GetVerboseLevel("discord:123"); got != "off" {
+	if got := al.providable.GetVerboseLevel("discord:123"); got != "off" {
 		t.Fatalf("GetVerboseLevel(discord) = %q, want %q", got, "off")
 	}
 
 	cfg.SetTelegramVerbose(config.VerboseFull)
-	if got := al.GetVerboseLevel("telegram:123"); got != "full" {
+	if got := al.providable.GetVerboseLevel("telegram:123"); got != "full" {
 		t.Fatalf("GetVerboseLevel(telegram) after config update = %q, want %q", got, "full")
 	}
 
-	if !al.SetVerboseLevel("telegram:123", "off") {
+	if !al.providable.SetVerboseLevel("telegram:123", "off") {
 		t.Fatal("SetVerboseLevel returned false")
 	}
 	cfg.SetTelegramVerbose(config.VerboseBasic)
-	if got := al.GetVerboseLevel("telegram:123"); got != "off" {
+	if got := al.providable.GetVerboseLevel("telegram:123"); got != "off" {
 		t.Fatalf("explicit session verbose should win over config default, got %q", got)
 	}
 }
@@ -226,7 +226,7 @@ func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T)
 	var processErr error
 	processDone := make(chan struct{})
 	go func() {
-		response, processErr = al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
+		response, processErr = al.providable.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
 		close(processDone)
 	}()
 
@@ -805,7 +805,7 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	var processErr error
 	processDone := make(chan struct{})
 	go func() {
-		_, processErr = al.ProcessDirectWithChannel(context.Background(), "Trigger message", sessionKey, "test", "test-chat")
+		_, processErr = al.providable.ProcessDirectWithChannel(context.Background(), "Trigger message", sessionKey, "test", "test-chat")
 		close(processDone)
 	}()
 
@@ -912,7 +912,7 @@ func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
 		t.Fatal("provider did not start processing")
 	}
 
-	response := al.StopAgent("telegram:123")
+	response := al.providable.StopAgent("telegram:123")
 	if !strings.Contains(response, "Agente detenido") {
 		t.Fatalf("unexpected stop response: %s", response)
 	}
@@ -1169,7 +1169,7 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 		t.Fatalf("Expected tokens (2000, 1000) before ephemeral reset, got (%d, %d)", inputTokens, outputTokens)
 	}
 
-	response, err := al.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
+	response, err := al.providable.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
 	if err != nil {
 		t.Fatalf("ProcessDirectWithChannel failed: %v", err)
 	}
@@ -1372,7 +1372,7 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 	}
 
 	// Obtener el subagent manager para el agente por defecto
-	subagentManager, ok := al.subagents[defaultAgent.ID]
+	subagentManager, ok := al.GetSubagents()[defaultAgent.ID]
 	if !ok {
 		t.Fatal("No subagent manager found for default agent")
 	}
@@ -1447,7 +1447,7 @@ func TestSubagentManager_ToolExecution(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 	if subagentManager == nil {
 		t.Fatal("No subagent manager found")
 	}
@@ -1511,7 +1511,7 @@ func TestSubagentManager_WebTools(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Verificar herramientas de fetching web disponibles
 	// (web_search requiere configuración API key)
@@ -1554,7 +1554,7 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Verificar herramientas hardware
 	hwTools := []string{"i2c", "spi"}
@@ -1593,7 +1593,7 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Verificar herramientas de edición avanzadas
 	editingTools := []string{"smart_edit", "patch", "sequential_replace"}
@@ -1639,7 +1639,7 @@ func TestSubagentManager_NestedSpawn(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Verificar que el subagente tiene acceso a spawn
 	if !subagentManager.HasTool("spawn") {
@@ -1675,7 +1675,7 @@ func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Verificar que read_file existe (el workspace validate workspace check by try)
 	result := subagentManager.GetToolRegistry().ExecuteWithContext(
@@ -1727,7 +1727,7 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 		t.Fatal("No default agent found")
 	}
 
-	subagentManager := al.subagents[defaultAgent.ID]
+	subagentManager := al.GetSubagents()[defaultAgent.ID]
 
 	// Ver configuración de LLM
 	if subagentManager == nil {
@@ -1737,6 +1737,63 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 	// Las opciones de LLM deberían estar configuradas desde el agente padre
 	// Nota: No podemos verificar directamente los valores internos sin exponerlos,
 	// pero el hecho de que no haya errores indica que la configuración se aplicó
+}
+
+// TestAgentLoop_ReloadRegistry_PreservesSpawnTool verifies that spawn tool is registered
+// after agent reload. This is the key fix for the issue where ReloadRegistry only calls
+// registry.ReloadAgents(cfg) without re-registering shared tools.
+func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "reload-spawn-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
+
+	// Verify spawn is registered initially
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	if _, hasSpawn := defaultAgent.Tools.Get("spawn"); !hasSpawn {
+		t.Fatal("Spawn tool should be registered initially")
+	}
+
+	// Reload with changed config (different model)
+	newCfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "different-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	al.ReloadRegistry(newCfg)
+
+	// Verify spawn is still registered after reload
+	reloadedAgent := al.registry.GetDefaultAgent()
+	if reloadedAgent == nil {
+		t.Fatal("Default agent should exist after reload")
+	}
+	if _, hasSpawn := reloadedAgent.Tools.Get("spawn"); !hasSpawn {
+		t.Error("Spawn tool should be registered after reload")
+	}
 }
 
 // TestSetSessionAgent_PreservesModelWhenAgentUnchanged verifies that SetSessionAgent
@@ -1749,6 +1806,7 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1783,31 +1841,31 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 	sessionKey := "test-session:model-preserve"
 
 	// Set initial agent
-	al.SetSessionAgent(sessionKey, "agent1")
+	al.providable.SetSessionAgent(sessionKey, "agent1")
 
 	// Set custom model (different from agent's default)
-	al.SetSessionModel(sessionKey, "custom-model")
+	al.providable.SetSessionModel(sessionKey, "custom-model")
 
 	// Verify model is set (resolved with provider prefix)
-	model := al.GetSessionModel(sessionKey)
+	model := al.providable.GetSessionModel(sessionKey)
 	if model != "test/custom-model" {
 		t.Fatalf("Expected model 'test/custom-model', got '%s'", model)
 	}
 
 	// Call SetSessionAgent with the SAME agent ID (simulates frontend sending agent_id with message)
-	al.SetSessionAgent(sessionKey, "agent1")
+	al.providable.SetSessionAgent(sessionKey, "agent1")
 
 	// Verify model is STILL preserved (not reset to agent1-model)
-	modelAfter := al.GetSessionModel(sessionKey)
+	modelAfter := al.providable.GetSessionModel(sessionKey)
 	if modelAfter != "test/custom-model" {
 		t.Fatalf("Expected model to remain 'test/custom-model', got '%s' - SetSessionAgent incorrectly cleared model", modelAfter)
 	}
 
 	// Now change to a different agent
-	al.SetSessionAgent(sessionKey, "agent2")
+	al.providable.SetSessionAgent(sessionKey, "agent2")
 
 	// Verify model IS cleared when agent actually changes
-	modelAfterChange := al.GetSessionModel(sessionKey)
+	modelAfterChange := al.providable.GetSessionModel(sessionKey)
 	if modelAfterChange != "test/agent2-model" {
 		t.Fatalf("Expected model 'test/agent2-model' after agent change, got '%s'", modelAfterChange)
 	}

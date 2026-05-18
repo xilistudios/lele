@@ -303,6 +303,9 @@ func resolveLeleHome(override string) (string, error) {
 	if override != "" {
 		return expandHome(override), nil
 	}
+	if envHome := os.Getenv("LELE_CONFIG_DIR"); envHome != "" {
+		return expandHome(envHome), nil
+	}
 	if envHome := os.Getenv("LELE_HOME"); envHome != "" {
 		return expandHome(envHome), nil
 	}

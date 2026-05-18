@@ -68,7 +68,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	}
 	baseSessionKey := sessionKey
 	sessionKey = ch.al.ResolveSessionKey(sessionKey)
-	if sessionAgentID := ch.al.GetSessionAgent(sessionKey); sessionAgentID != "" {
+	if sessionAgentID := ch.al.getSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
@@ -233,7 +233,7 @@ func (ch *commandHandlerImpl) handleModelCommand(agent *AgentInstance, sessionKe
 	if agent == nil {
 		return "No default agent configured"
 	}
-	currentModel := ch.al.sessionManager.(*sessionManagerImpl).modelForSession(agent, sessionKey)
+	currentModel := ch.al.sessionManager.ModelForSession(agent, sessionKey)
 	if len(args) == 0 {
 		return fmt.Sprintf("Current model: %s\n\nUse /model <name> to change.\nUse /models to see available options.", currentModel)
 	}
@@ -385,7 +385,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	if agent == nil {
 		return "No default agent configured"
 	}
-	currentModel := ch.al.sessionManager.(*sessionManagerImpl).modelForSession(agent, sessionKey)
+	currentModel := ch.al.sessionManager.ModelForSession(agent, sessionKey)
 	providerName := ch.al.cfg().Agents.Defaults.Provider
 	if idx := strings.Index(currentModel, "/"); idx > 0 {
 		providerName = currentModel[:idx]
@@ -418,7 +418,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	// Total context = system prompt + summary (if any) + history
 	contextTokens := systemTokens + summaryTokens + historyTokens
 
-	contextWindow := ch.al.GetSessionContextWindow(sessionKey)
+	contextWindow := ch.al.getSessionContextWindow(sessionKey)
 	contextPercent := contextTokens * 100 / contextWindow
 	if contextPercent > 100 {
 		contextPercent = 100

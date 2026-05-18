@@ -10,19 +10,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"sort"
 	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
-	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/utils"
 )
@@ -102,16 +95,28 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		opts.SessionKey,
 	)
 
-	// 3. Save user message to session
+	// 3. Save user message to session and persist immediately
 	if !opts.SkipUserMessage {
 		agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
 	} else if opts.Channel == "system" {
 		agent.Sessions.AddMessage(opts.SessionKey, "system", renderedUserMessage)
 	}
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save user message to disk", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
 	if err != nil {
+		if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+			logger.WarnCF("agent", "Failed to save session after LLM error", map[string]interface{}{
+				"session_key": opts.SessionKey,
+				"error":       saveErr.Error(),
+			})
+		}
 		return "", err
 	}
 
@@ -131,7 +136,12 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if iteration == 0 && finalContent != "" {
 		agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	}
-	agent.Sessions.Save(opts.SessionKey)
+	if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+		logger.WarnCF("agent", "Failed to save session to disk", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"error":       saveErr.Error(),
+		})
+	}
 
 	// 7. Optional: summarization
 	if opts.EnableSummary {
@@ -167,36 +177,12 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	return finalContent, nil
 }
 
-// messageSignature tracks repeated LLM responses to detect loops
-type messageSignature struct {
-	toolCalls []toolCallSignature
-	count     int
-}
-
-type toolCallSignature struct {
-	name      string
-	arguments string
-}
-
-// messageSignaturesEqual compares two sets of tool call signatures
-func messageSignaturesEqual(a, b []toolCallSignature) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].name != b[i].name || a[i].arguments != b[i].arguments {
-			return false
-		}
-	}
-	return true
-}
-
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
-	var lastMessage *messageSignature
-	model := lr.modelForSession(agent, opts.SessionKey)
+	loopDetector := newLoopDetector()
+	model := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
 	candidates := agent.Candidates
 	if model != agent.Model {
 		if ref := providers.ParseModelRef(model, lr.al.cfg().Agents.Defaults.Provider); ref != nil {
@@ -231,6 +217,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
+		// Filter out read_image tool if the current model doesn't support vision
+		modelHasVision := getSupportsImages(lr.al.cfg(), model, extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider))
+		if !modelHasVision {
+			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
+			for _, def := range providerToolDefs {
+				if def.Function.Name != "read_image" {
+					filtered = append(filtered, def)
+				}
+			}
+			providerToolDefs = filtered
+		}
+
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
@@ -252,208 +250,35 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"tools_json":    FormatToolsForLog(providerToolDefs),
 			})
 
-		// Call LLM with fallback chain if candidates are configured.
-		var response *providers.LLMResponse
-		var err error
-
+		// Setup streaming handlers for native channel
 		var streamOnChunk func(chunk string, done bool)
 		var streamOnReasoning func(reasoningChunk string)
-		if opts.Channel == channels.ChannelName && opts.SendResponse {
-			messageID := opts.MessageID
-			if messageID == "" {
-				messageID = uuid.New().String()
-			}
-			msgID := messageID
-			streamOnChunk = func(chunk string, done bool) {
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel:   opts.Channel,
-					ChatID:    opts.SessionKey,
-					Event:     "message.stream",
-					MessageID: msgID,
-					Content:   chunk,
-					Metadata: map[string]string{
-						"done": fmt.Sprintf("%v", done),
-					},
-				})
-			}
-			streamOnReasoning = func(reasoningChunk string) {
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel:   opts.Channel,
-					ChatID:    opts.SessionKey,
-					Event:     "message.thinking",
-					MessageID: msgID,
-					Content:   reasoningChunk,
-				})
-			}
+		streamer := newStreamHandler(lr.al.bus, opts.Channel, opts.SessionKey, opts.MessageID)
+		if streamer.shouldStream(opts.SendResponse) {
+			streamOnChunk = streamer.onChunk
+			streamOnReasoning = streamer.onReasoning
 		}
 
-		callLLM := func() (*providers.LLMResponse, error) {
-			// Build LLM options including reasoning config
-			llmOptions := map[string]interface{}{
-				"max_tokens":  agent.MaxTokens,
-				"temperature": agent.Temperature,
-			}
-
-			if streamOnChunk != nil {
-				if sp, ok := agent.Provider.(providers.StreamingLLMProvider); ok {
-					if len(candidates) > 0 && lr.al.fallback != nil {
-					} else {
-						return sp.ChatStream(ctx, messages, providerToolDefs, model, llmOptions, streamOnChunk, streamOnReasoning)
-					}
-				}
-			}
-			// Add reasoning config if available, with per-session override support
-			sessionEffort := ""
-			if opts.SessionKey != "" {
-				if v, ok := lr.al.sessionThinking.Load(opts.SessionKey); ok {
-					if s, ok := v.(string); ok {
-						sessionEffort = s
-					}
-				}
-			}
-			if sessionEffort == "off" {
-				// Explicitly disabled for this session – do not send reasoning.
-			} else if sessionEffort != "" {
-				reasoningMap := map[string]interface{}{
-					"effort": sessionEffort,
-				}
-				if agent.Reasoning != nil && agent.Reasoning.Summary != nil {
-					reasoningMap["summary"] = *agent.Reasoning.Summary
-				}
-				llmOptions["reasoning"] = reasoningMap
-				logger.DebugCF("agent", "Session reasoning override applied", map[string]interface{}{
-					"agent_id":    agent.ID,
-					"session_key": opts.SessionKey,
-					"effort":      sessionEffort,
-				})
-			} else if agent.Reasoning != nil {
-				reasoningMap := map[string]interface{}{}
-				if agent.Reasoning.Effort != nil {
-					reasoningMap["effort"] = *agent.Reasoning.Effort
-				}
-				if agent.Reasoning.Summary != nil {
-					reasoningMap["summary"] = *agent.Reasoning.Summary
-				}
-				if len(reasoningMap) > 0 {
-					llmOptions["reasoning"] = reasoningMap
-					logger.DebugCF("agent", "Reasoning config applied", map[string]interface{}{
-						"agent_id": agent.ID,
-						"effort":   agent.Reasoning.Effort,
-						"summary":  agent.Reasoning.Summary,
-					})
-				}
-			}
-
-			if agent.Reasoning != nil && agent.Reasoning.Enable {
-				// Only set thinking=true for providers that support it (DeepSeek family).
-				// Covers both native DeepSeek models (deepseek-chat, deepseek-v4-flash)
-				// and OpenRouter-proxied models (deepseek/deepseek-v4-flash).
-				if isDeepSeekModel(model) {
-					llmOptions["thinking"] = true
-					logger.DebugCF("agent", "Thinking mode enabled for DeepSeek model",
-						map[string]interface{}{
-							"agent_id": agent.ID,
-							"model":    model,
-						})
-				}
-			}
-
-			if len(candidates) > 0 && lr.al.fallback != nil {
-				fbResult, fbErr := lr.al.fallback.Execute(ctx, candidates,
-					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						// Create provider dynamically for each candidate
-						providerInst, err := providers.CreateProviderForCandidate(lr.al.cfg(), provider)
-						if err != nil {
-							// If we can't create a provider (e.g., in tests with mock providers),
-							// fall back to using the agent's provider directly
-							log.Printf("[DEBUG] Failed to create provider for %s: %v", provider, err)
-							if agent.Provider != nil {
-								return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOptions)
-							}
-							return nil, fmt.Errorf("no provider available for model %s", model)
-						}
-						fullModel := FormatProviderModel(provider, model)
-						log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
-						return providerInst.Chat(ctx, messages, providerToolDefs, fullModel, llmOptions)
-					},
-				)
-				if fbErr != nil {
-					return nil, fbErr
-				}
-				if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
-					logger.InfoCF("agent", fmt.Sprintf("Fallback: succeeded with %s/%s after %d attempts",
-						fbResult.Provider, fbResult.Model, len(fbResult.Attempts)+1),
-						map[string]interface{}{"agent_id": agent.ID, "iteration": iteration})
-				}
-				return fbResult.Response, nil
-			}
-			return agent.Provider.Chat(ctx, messages, providerToolDefs, model, llmOptions)
+		// Call LLM using llmCaller with retry logic
+		llmCallerInstance := newLLMCaller(lr.al)
+		callOpts := llmCallOptions{
+			ctx:            ctx,
+			agent:          agent,
+			messages:       messages,
+			toolDefs:       providerToolDefs,
+			model:          model,
+			candidates:     candidates,
+			sessionKey:     opts.SessionKey,
+			channel:        opts.Channel,
+			chatID:         opts.ChatID,
+			iteration:      iteration,
+			streamOnChunk:  streamOnChunk,
+			streamOnReason: streamOnReasoning,
 		}
 
-		// Retry loop for context/token errors
-		maxRetries := 2
-		for retry := 0; retry <= maxRetries; retry++ {
-			response, err = callLLM()
-			if err == nil {
-				break
-			}
-			if ctx.Err() != nil {
-				return "", iteration, ctx.Err()
-			}
-
-			errMsg := strings.ToLower(err.Error())
-			isContextError := strings.Contains(errMsg, "token") ||
-				strings.Contains(errMsg, "invalidparameter") ||
-				strings.Contains(errMsg, "length")
-			isNetworkTimeout := strings.Contains(errMsg, "context deadline exceeded") ||
-				strings.Contains(errMsg, "timeout") ||
-				strings.Contains(errMsg, "client.timeout")
-
-			if isNetworkTimeout {
-				logger.WarnCF("agent", "Network timeout, retrying without compression", map[string]interface{}{
-					"error": err.Error(),
-					"retry": retry,
-				})
-				waitTime := time.Duration(retry+1) * 2 * time.Second
-				select {
-				case <-time.After(waitTime):
-				case <-ctx.Done():
-					return "", iteration, ctx.Err()
-				}
-				continue
-			}
-
-			if isContextError && retry < maxRetries {
-				logger.WarnCF("agent", "Context window error detected, attempting summarization", map[string]interface{}{
-					"error": err.Error(),
-					"retry": retry,
-				})
-
-				if retry == 0 && !constants.IsInternalChannel(opts.Channel) {
-					lr.al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel: opts.Channel,
-						ChatID:  opts.ChatID,
-						Content: "Context window exceeded. Summarizing history and retrying...",
-					})
-				}
-
-				// Use summarizeSession instead of forceCompression to preserve context
-				stats := lr.al.sessionManager.summarizeSession(agent, opts.SessionKey)
-				if stats == nil {
-					logger.ErrorCF("agent", "Summarization failed, falling back to compression", nil)
-					lr.al.sessionManager.(*sessionManagerImpl).forceCompression(agent, opts.SessionKey)
-				}
-				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
-				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
-				newHistory = ensureSummaryMaterialized(agent, opts.SessionKey, newHistory, newSummary)
-				messages = agent.ContextBuilder.BuildMessages(
-					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID, opts.SessionKey,
-				)
-				continue
-			}
-			break
-		}
+		var response *providers.LLMResponse
+		var err error
+		response, messages, err = llmCallerInstance.executeWithRetry(callOpts, messages)
 
 		if err != nil {
 			logger.ErrorCF("agent", "LLM call failed",
@@ -466,33 +291,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 
 		// Track token usage from response
-		if opts.SessionKey != "" {
-			if response.Usage != nil {
-				lr.al.sessionManager.AddTokenCounts(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
-				logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
-					"agent_id":          agent.ID,
-					"session_key":       opts.SessionKey,
-					"prompt_tokens":     response.Usage.PromptTokens,
-					"completion_tokens": response.Usage.CompletionTokens,
-					"total_tokens":      response.Usage.TotalTokens,
-				})
-			} else {
-				// Provider returned no usage data — estimate using 2.5 chars/token heuristic
-				var inputChars int
-				for _, msg := range messages {
-					inputChars += utf8.RuneCountInString(msg.Content)
-				}
-				inputEst := inputChars * 2 / 5
-				outputEst := utf8.RuneCountInString(response.Content) * 2 / 5
-				lr.al.sessionManager.AddTokenCounts(opts.SessionKey, inputEst, outputEst)
-				logger.DebugCF("agent", "Token usage estimated (provider returned no usage data)", map[string]interface{}{
-					"agent_id":    agent.ID,
-					"session_key": opts.SessionKey,
-					"input_est":   inputEst,
-					"output_est":  outputEst,
-				})
-			}
-		}
+		trackTokenUsage(agent.Sessions, opts.SessionKey, agent.ID, messages, response)
 
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
@@ -571,41 +370,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"iteration": iteration,
 			})
 
-		// Build signature of this message to detect loops
-		currentSignature := messageSignature{
-			toolCalls: make([]toolCallSignature, 0, len(response.ToolCalls)),
-		}
-		for _, tc := range response.ToolCalls {
-			argsJSON, _ := json.Marshal(tc.Arguments)
-			currentSignature.toolCalls = append(currentSignature.toolCalls, toolCallSignature{
-				name:      tc.Name,
-				arguments: string(argsJSON),
-			})
-		}
-
-		// Check if this message matches the last one (loop detection)
-		if lastMessage != nil && messageSignaturesEqual(lastMessage.toolCalls, currentSignature.toolCalls) {
-			lastMessage.count++
-			if lastMessage.count >= 3 {
-				logger.WarnCF("agent", "Detected repeated message loop, injecting guidance",
-					map[string]interface{}{"agent_id": agent.ID,
-						"repetitions": lastMessage.count,
-						"iteration":   iteration,
-						"tools":       toolNames,
-					})
-				// Inject guidance message to break the loop
-				guidanceMsg := providers.Message{
-					Role:    "user",
-					Content: fmt.Sprintf("⚠️ GUIDANCE: You have sent the same tool calls multiple times consecutively. This appears to be a loop. The previous tool calls have already been executed and their results are in the conversation history. Please STOP repeating the same tool calls and either:\n1. Analyze the results you've already received, or\n2. Try a different approach, or\n3. Provide a final response based on the information gathered."),
-				}
-				messages = append(messages, guidanceMsg)
-				agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
-				// Reset counter after injecting guidance
-				lastMessage.count = 0
-			}
-		} else {
-			lastMessage = &currentSignature
-			lastMessage.count = 1
+		// Check for loop patterns and inject guidance if needed
+		if guidanceMsg := loopDetector.Check(response.ToolCalls, agent.ID, iteration); guidanceMsg != nil {
+			messages = append(messages, *guidanceMsg)
+			agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
 		}
 
 		// Build assistant message with tool calls
@@ -633,380 +401,60 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
 		// Execute tool calls
+		executor := newToolExecutor(lr.al)
+
+		// Phase 1: Execute all tools and collect results
+		type toolExecResult struct {
+			tc  providers.ToolCall
+			res *tools.ToolResult
+			err error
+		}
+		var execResults []toolExecResult
 		for _, tc := range response.ToolCalls {
-			if err := ctx.Err(); err != nil {
-				return "", iteration, err
+			toolResult, execErr := executor.Execute(toolExecOptions{
+				ctx:          ctx,
+				agent:        agent,
+				tc:           tc,
+				channel:      opts.Channel,
+				chatID:       opts.ChatID,
+				sessionKey:   opts.SessionKey,
+				iteration:    iteration,
+				sendResponse: opts.SendResponse,
+			})
+
+			if execErr != nil {
+				return "", iteration, execErr
 			}
 
-			argsJSON, _ := json.Marshal(tc.Arguments)
-			argsPreview := utils.Truncate(string(argsJSON), 200)
-			logger.InfoCF("agent", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
-				map[string]interface{}{
-					"agent_id":  agent.ID,
-					"tool":      tc.Name,
-					"iteration": iteration,
-				})
+			execResults = append(execResults, toolExecResult{tc: tc, res: toolResult})
+		}
 
-			// Native clients consume structured tool events; other channels keep the
-			// existing verbose text notifications.
-			level := lr.al.verboseManager.GetLevel(opts.SessionKey)
-			if opts.Channel == channels.ChannelName {
-				actionDesc := formatBasicToolMessage(tc.Name, tc.Arguments)
-				argsJSON, _ := json.Marshal(tc.Arguments)
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.SessionKey,
-					Event:   "tool.executing",
-					Metadata: map[string]string{
-						"tool":      tc.Name,
-						"action":    actionDesc,
-						"arguments": string(argsJSON),
-					},
-				})
-			} else if level != session.VerboseOff {
-				var verboseMsg string
-				if level == session.VerboseFull {
-					// Full mode: detailed tool call with JSON args
-					verboseMsg = fmt.Sprintf("🔧 **Tool Call (%d):** `%s`", iteration, tc.Name)
-					if argsPreview != "" && argsPreview != "{}" {
-						verboseMsg += fmt.Sprintf("\n```json\n%s\n```", argsPreview)
-					}
-				} else {
-					// Basic mode: simplified description
-					verboseMsg = formatBasicToolMessage(tc.Name, tc.Arguments)
-				}
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel:        opts.Channel,
-					ChatID:         opts.ChatID,
-					Content:        verboseMsg,
-					IsIntermediate: true, // Don't stop typing indicator for verbose notifications
-				})
-			}
-
-			var toolResult *tools.ToolResult
-
-			// Create async callback for tools that implement AsyncTool
-			// Async completion is routed back as a system inbound event so the
-			// parent agent loop can notify the original chat reliably.
-			asyncCallback := func(callbackCtx context.Context, result *tools.ToolResult) {
-				if result == nil {
-					return
-				}
-
-				logger.InfoCF("agent", "Async tool completed",
-					map[string]interface{}{
-						"tool": tc.Name,
-					})
-
-				taskID := ""
-				if result.Metadata != nil {
-					taskID = result.Metadata["task_id"]
-				}
-				publishSubagentAsyncResult(lr.al, opts.SessionKey, opts.Channel, opts.ChatID, taskID, result)
-			}
-
-			// Special handling for exec tool with approval
-			if tc.Name == "exec" && lr.al.approvalManager != nil {
-				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
-
-				// Check if approval is required
-				if toolResult.ApprovalRequired != nil {
-					// Send approval request to user
-					approvalMsg := fmt.Sprintf("⚠️ **Se requiere aprobación**\n\n"+
-						"El siguiente comando puede ser peligroso:\n"+
-						"`%s`\n\n"+
-						"Razón: %s",
-						toolResult.ApprovalRequired.Command,
-						toolResult.ApprovalRequired.Reason)
-
-					// Parse chatID as int64 for approval manager
-					var chatIDInt int64
-					fmt.Sscanf(opts.ChatID, "%d", &chatIDInt)
-
-					// Create approval request
-					approval := lr.al.approvalManager.CreateApproval(
-						opts.SessionKey,
-						toolResult.ApprovalRequired.Command,
-						toolResult.ApprovalRequired.Reason,
-						chatIDInt,
-					)
-
-					if opts.Channel == channels.ChannelName {
-						lr.al.bus.PublishOutbound(bus.OutboundMessage{
-							Channel: opts.Channel,
-							ChatID:  opts.SessionKey,
-							Event:   "approval.request",
-							Metadata: map[string]string{
-								"id":      approval.ID,
-								"command": toolResult.ApprovalRequired.Command,
-								"reason":  toolResult.ApprovalRequired.Reason,
-							},
-						})
-					} else {
-						// Build inline keyboard
-						keyboard := lr.al.approvalManager.BuildApprovalKeyboard(approval.ID)
-
-						// Send message with keyboard
-						lr.al.bus.PublishOutbound(bus.OutboundMessage{
-							Channel:     opts.Channel,
-							ChatID:      opts.ChatID,
-							Content:     approvalMsg,
-							ReplyMarkup: keyboard,
-						})
-					}
-
-					// Wait for user response
-					approved, err := approval.WaitForResponse(ctx, lr.al.approvalManager.GetTimeout())
-					if err != nil {
-						if ctx.Err() != nil {
-							return "", iteration, ctx.Err()
-						}
-						toolResult = &tools.ToolResult{
-							IsError: true,
-							ForLLM:  "Error: timeout esperando aprobación del usuario",
-						}
-					} else if approved {
-						// User approved - execute the command directly
-						// We need to get the exec tool and set it to bypass guard
-						if execTool, ok := agent.Tools.Get("exec"); ok {
-							if et, ok := execTool.(*tools.ExecTool); ok {
-								// Temporarily bypass all security guards for approved command
-								et.SetBypassGuard(true)
-								toolResult = et.Execute(ctx, tc.Arguments)
-								// Re-enable approval mode
-								et.SetBypassGuard(false)
-							}
-						}
-						// If tool execution failed or tool not found, use error result
-						if toolResult == nil {
-							toolResult = tools.ErrorResult("Failed to execute approved command")
-						}
-					} else {
-						// User rejected
-						toolResult = &tools.ToolResult{
-							IsError: true,
-							ForLLM:  "El comando fue rechazado por el usuario por razones de seguridad.",
-						}
-					}
-				}
-			} else {
-				toolResult = agent.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
-			}
-
-			if toolResult == nil {
-				if err := ctx.Err(); err != nil {
-					return "", iteration, err
-				}
-				toolResult = tools.ErrorResult(fmt.Sprintf("tool %s returned no result", tc.Name))
-			}
-
-			if err := ctx.Err(); err != nil {
-				return "", iteration, err
-			}
-
-			// Native clients consume structured tool results; other channels keep the
-			// existing full verbose message.
-			if opts.Channel == channels.ChannelName {
-				resultPreview := toolResult.ForLLM
-				if resultPreview == "" && toolResult.Err != nil {
-					resultPreview = toolResult.Err.Error()
-				}
-				resultPreview = utils.Truncate(resultPreview, 300)
-				metadata := map[string]string{
-					"tool":   tc.Name,
-					"result": resultPreview,
-				}
-				if tc.Name == "spawn" && toolResult.Metadata != nil {
-					if subagentSessionKey := toolResult.Metadata["subagent_session_key"]; subagentSessionKey != "" {
-						metadata["subagent_session_key"] = subagentSessionKey
-					}
-				}
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel:  opts.Channel,
-					ChatID:   opts.SessionKey,
-					Event:    "tool.result",
-					Metadata: metadata,
-				})
-			} else if lr.al.verboseManager.IsFull(opts.SessionKey) {
-				status := "✅"
-				if toolResult.IsError {
-					status = "❌"
-				}
-				resultPreview := toolResult.ForLLM
-				resultPreview = utils.Truncate(resultPreview, 300)
-				verboseResult := fmt.Sprintf("%s **Result:** `%s`\n```\n%s\n```", status, tc.Name, resultPreview)
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel:        opts.Channel,
-					ChatID:         opts.ChatID,
-					Content:        verboseResult,
-					IsIntermediate: true, // Don't stop typing indicator for verbose result notifications
-				})
-			}
-
-			// Send ForUser content to user immediately if not Silent
-			// Native channel always receives results (handles them via structured events)
-			// Other channels only receive results in verbose full mode
-			if !toolResult.Silent && toolResult.ForUser != "" && opts.SendResponse && (opts.Channel == channels.ChannelName || lr.al.verboseManager.IsFull(opts.SessionKey)) {
-				lr.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.Channel,
-					ChatID:  opts.ChatID,
-					Content: toolResult.ForUser,
-				})
-				logger.DebugCF("agent", "Sent tool result to user",
-					map[string]interface{}{
-						"tool":        tc.Name,
-						"content_len": len(toolResult.ForUser),
-					})
-			}
-
-			// Determine content for LLM based on tool result
-			contentForLLM := toolResult.ForLLM
-			if contentForLLM == "" && toolResult.Err != nil {
-				contentForLLM = toolResult.Err.Error()
-			}
-
+		// Phase 2: Append all tool result messages (role: "tool") in order
+		var allContextMsgs []providers.Message
+		for _, er := range execResults {
+			contentForLLM := buildToolResultContent(er.res)
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,
-				ToolCallID: tc.ID,
+				ToolCallID: er.tc.ID,
 			}
 			messages = append(messages, toolResultMsg)
-
-			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 
-			if len(toolResult.ContextMessages) > 0 {
-				messages = append(messages, toolResult.ContextMessages...)
-				for _, contextMsg := range toolResult.ContextMessages {
-					agent.Sessions.AddFullMessage(opts.SessionKey, contextMsg)
-				}
+			// Collect context messages for phase 3
+			if len(er.res.ContextMessages) > 0 {
+				allContextMsgs = append(allContextMsgs, er.res.ContextMessages...)
 			}
+		}
+
+		// Phase 3: Append all context messages (role: "user") after all tool messages
+		// This ensures tool messages are contiguous, satisfying the API requirement
+		// that all tool responses follow immediately after the assistant's tool_calls.
+		for _, ctxMsg := range allContextMsgs {
+			messages = append(messages, ctxMsg)
+			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
 		}
 	}
 
 	return finalContent, iteration, nil
-}
-
-func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
-	if agent == nil || agent.Sessions == nil || sessionKey == "" || summary == "" || hasSummaryMessage(history, summary) {
-		return history
-	}
-
-	agent.Sessions.GetOrCreate(sessionKey)
-	updatedHistory := make([]providers.Message, 0, len(history)+1)
-	updatedHistory = append(updatedHistory, history...)
-	updatedHistory = append(updatedHistory, buildSummaryMessage(summary))
-	agent.Sessions.SetHistory(sessionKey, updatedHistory)
-	return updatedHistory
-}
-
-// updateToolContexts updates the context for tools that need channel/chatID info.
-func (lr *llmRunnerImpl) updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string) {
-	// Use ContextualTool interface instead of type assertions
-	if tool, ok := agent.Tools.Get("send_file"); ok {
-		if mt, ok := tool.(tools.ContextualTool); ok {
-			mt.SetContext(channel, chatID)
-		}
-	}
-	if tool, ok := agent.Tools.Get("spawn"); ok {
-		if st, ok := tool.(tools.ContextualTool); ok {
-			st.SetContext(channel, chatID)
-		}
-	}
-	if tool, ok := agent.Tools.Get("subagent"); ok {
-		if st, ok := tool.(tools.ContextualTool); ok {
-			st.SetContext(channel, chatID)
-		}
-	}
-}
-
-// modelForSession gets the model for a session (user-selected or agent default)
-func (lr *llmRunnerImpl) modelForSession(agent *AgentInstance, sessionKey string) string {
-	if sessionKey != "" {
-		resolvedSessionKey := lr.al.ResolveSessionKey(sessionKey)
-		if model, ok := lr.al.sessionModels.Load(resolvedSessionKey); ok {
-			if selected, ok := model.(string); ok && selected != "" {
-				return selected
-			}
-		}
-	}
-	return agent.Model
-}
-
-// formatProviderModel formats provider/model string
-func (lr *llmRunnerImpl) formatProviderModel(provider, model string) string {
-	provider = strings.TrimSpace(provider)
-	model = strings.TrimSpace(model)
-	if provider == "" {
-		return model
-	}
-	if strings.HasPrefix(model, provider+"/") {
-		return model
-	}
-	return provider + "/" + model
-}
-
-// knownToolNames returns a sorted list of registered tool names for an agent.
-func knownToolNames(agent *AgentInstance) []string {
-	names := agent.Tools.List()
-	// Sort for deterministic output
-	sort.Strings(names)
-	return names
-}
-
-// containsPlainToolCall checks if the response content contains plain-text tool
-// invocations like `read_file{"path":"..."}` or `exec{"command":"ls"}` instead of
-// proper function calling. This catches a common failure mode where the model
-// outputs tool syntax as text.
-func containsPlainToolCall(content string, agent *AgentInstance) bool {
-	if len(strings.TrimSpace(content)) == 0 {
-		return false
-	}
-
-	// Check for common patterns: toolName{...}
-	// Look for any registered tool name followed by a JSON object in braces
-	toolNames := agent.Tools.List()
-	for _, name := range toolNames {
-		// Pattern: toolName{ (e.g., read_file{, exec{, web_search{)
-		// The opening brace after the tool name is a strong indicator of a plain-text tool call
-		pattern := name + "{"
-		if strings.Contains(content, pattern) {
-			// Verify it looks like toolName{"key":value...} (has JSON inside)
-			idx := strings.Index(content, pattern)
-			if idx >= 0 {
-				remaining := content[idx+len(pattern):]
-				// Look for the closing brace and verify JSON-like content
-				endIdx := strings.Index(remaining, "}")
-				if endIdx > 0 {
-					inner := strings.TrimSpace(remaining[:endIdx])
-					// Should contain at least a quoted key
-					if strings.Contains(inner, "\"") {
-						return true
-					}
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-// knownDeepSeekPrefixes lists model name prefixes that support DeepSeek's
-// native thinking mode. This is more specific than a generic strings.Contains
-// to avoid false matches on models from other providers that happen to
-// include "deepseek" in their name.
-var knownDeepSeekPrefixes = []string{
-	"deepseek/",
-	"deepseek-",
-	"deepseek_v",
-}
-
-func isDeepSeekModel(model string) bool {
-	lower := strings.ToLower(model)
-	for _, prefix := range knownDeepSeekPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
 }

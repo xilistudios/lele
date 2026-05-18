@@ -94,6 +94,7 @@ func TestNewAgentInstance_AgentTemperatureOverridesDefaults(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := createTestConfig(tmpDir)
 	defaultTemp := 0.5
@@ -196,7 +197,7 @@ func TestNewAgentInstance_RegistersReadImageToolWhenVisionEnabled(t *testing.T) 
 	}
 }
 
-func TestNewAgentInstance_DoesNotRegisterReadImageToolWithoutVision(t *testing.T) {
+func TestNewAgentInstance_ReadImageToolAlwaysRegistered(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -217,11 +218,13 @@ func TestNewAgentInstance_DoesNotRegisterReadImageToolWithoutVision(t *testing.T
 	}
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
-	if _, ok := agent.Tools.Get("read_image"); ok {
-		t.Fatal("did not expect read_image tool to be registered")
+	// read_image is always registered now, but filtered out dynamically
+	// based on the current session model
+	if _, ok := agent.Tools.Get("read_image"); !ok {
+		t.Fatal("expected read_image tool to be registered regardless of vision support")
 	}
 	if agent.SupportsImages {
-		t.Fatal("expected SupportsImages to be false")
+		t.Fatal("expected SupportsImages to be false for non-vision model")
 	}
 }
 

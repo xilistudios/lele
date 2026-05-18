@@ -14,11 +14,6 @@ import (
 )
 
 func (n *NativeChannel) handleFileUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
-		return
-	}
-
 	clientID := getClientID(r)
 
 	maxSize := n.cfg.MaxUploadSizeMB * 1024 * 1024
@@ -158,11 +153,6 @@ func detectMimeType(path string) string {
 }
 
 func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
-		return
-	}
-
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		writeError(w, http.StatusBadRequest, "missing path parameter", "path_missing")

@@ -3,6 +3,7 @@ import type {
   AgentFilesResponse,
   AgentStatusResponse,
   AgentsResponse,
+  ApproveResponse,
   AuthPairResponse,
   AuthRefreshResponse,
   AuthSession,
@@ -232,8 +233,16 @@ export const createApiClient = (baseUrl: string) => {
         method: 'PUT',
         body: JSON.stringify({ content }),
       }),
-    history: (sessionKey: string) =>
-      request<HistoryResponse>(endpoints.chat.history(sessionKey), { method: 'GET' }),
+    history: (sessionKey: string, parentSessionKey?: string, beforeId?: string, limit?: number) => {
+      const params = new URLSearchParams()
+      if (beforeId !== undefined && beforeId !== null) params.set('before_id', beforeId)
+      if (limit !== undefined) params.set('limit', String(limit))
+      const query = params.toString()
+      const baseEndpoint = endpoints.chat.history(sessionKey, parentSessionKey)
+      return request<HistoryResponse>(query ? `${baseEndpoint}?${query}` : baseEndpoint, {
+        method: 'GET',
+      })
+    },
     sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),
     createSession: (sessionKey: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {
@@ -288,15 +297,21 @@ export const createApiClient = (baseUrl: string) => {
     sendMessage: (payload: SendMessageRequest) =>
       request<SendMessageResponse>(endpoints.chat.send, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          session_key: payload.session_key || undefined,
+        }),
+      }),
+    approve: (sessionKey: string, requestId: string, approved: boolean) =>
+      request<ApproveResponse>(endpoints.chat.approve(sessionKey), {
+        method: 'POST',
+        body: JSON.stringify({ request_id: requestId, approved }),
       }),
     clearSession: async (sessionKey: string) => {
-      await request<unknown>(endpoints.chat.session(sessionKey), { method: 'DELETE' })
+      await request<unknown>(endpoints.chat.clear(sessionKey), { method: 'POST' })
     },
     deleteSession: async (sessionKey: string) => {
-      await request<unknown>(endpoints.chat.session(sessionKey, 'delete'), {
-        method: 'DELETE',
-      })
+      await request<unknown>(endpoints.chat.session(sessionKey), { method: 'DELETE' })
     },
     config: () => request<ConfigResponse>(endpoints.system.config, { method: 'GET' }),
     saveConfig: (config: EditableConfig) =>

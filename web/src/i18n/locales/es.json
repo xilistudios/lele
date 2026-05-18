@@ -153,13 +153,15 @@
       "namedProviders": "Proveedores nombrados",
       "bindings": "Bindings",
       "identityLinks": "Links de identidad",
-      "rawJson": "Configuración JSON raw"
+      "rawJson": "Configuración JSON raw",
+      "subagents": "Subagentes"
     },
     "fields": {
       "gatewayHost": "Host",
       "gatewayPort": "Puerto",
       "workspace": "Workspace",
       "restrictToWorkspace": "Restringir al workspace",
+      "theme": "Tema",
       "language": "Idioma",
       "provider": "Proveedor por defecto",
       "model": "Modelo por defecto",
@@ -301,7 +303,14 @@
       "agentThinking": "Habilita modo de razonamiento extendido",
       "agentSupportsImages": "Este modelo soporta imágenes y visión",
       "agentSkills": "Skills activos disponibles para este agente",
-      "agentsList": "Crea y gestiona agentes IA con configuraciones personalizadas"
+      "agentsList": "Crea y gestiona agentes IA con configuraciones personalizadas",
+      "agentSubagentsEnabled": "Permitir que este agente cree subagentes para tareas delegadas",
+      "agentSubagentsAllowed": "Agentes que este agente puede crear. Use '*' para permitir todos."
+    },
+    "theme": {
+      "dark": "Oscuro",
+      "light": "Claro",
+      "auto": "Automático"
     },
     "options": {
       "daily": "Diario",
@@ -324,6 +333,13 @@
     "enableRawJson": "Habilitar JSON raw para editar",
     "showRawJson": "Mostrar JSON raw",
     "hideRawJson": "Ocultar JSON raw",
+    "formatJson": "Formatear",
+    "copyJson": "Copiar",
+    "jsonValidationError": "JSON inválido",
+    "jsonErrorHint": "Corrige la sintaxis JSON de arriba. La configuración no se guardará mientras haya errores. Revisa comas faltantes, llaves no cerradas o comas sobrantes.",
+    "jsonEditorPlaceholder": "Pega o edita la configuración JSON aquí...",
+    "jsonLinesCount": "{{count}} líneas",
+    "rawJsonDescription": "Edita la configuración completa directamente como JSON. Los cambios se validan en tiempo real y se aplican a todos los campos de configuración.",
     "comingSoon": "Próximamente...",
     "addProvider": "Agregar proveedor",
     "removeProvider": "Eliminar",
@@ -344,6 +360,12 @@
     "noModelsFound": "No se encontraron modelos",
     "noModels": "No hay modelos configurados",
     "noConfiguredProviders": "No hay proveedores configurados. Agrega uno para comenzar.",
+    "defaultBadge": "Default",
+    "modifiedBadge": "Modificado",
+    "agentFilesButton": "Archivos",
+    "agentFilesTooltip": "Editar archivos de contexto",
+    "selectAgent": "Seleccionar agente",
+    "noOtherAgents": "No hay otros agentes disponibles",
     "addProviderModal": {
       "title": "Agregar proveedor",
       "stepType": "Paso 1: Seleccionar tipo de proveedor",
@@ -424,6 +446,19 @@
     "enabled": "Habilitado",
     "disabled": "Deshabilitado",
     "status": "Estado"
+  },
+  "canvas": {
+    "code": "Código",
+    "preview": "Preview",
+    "viewCode": "Ver código",
+    "viewPreview": "Ver preview",
+    "copy": "Copiar",
+    "copyCode": "Copiar código",
+    "copied": "Copiado",
+    "loadingPreview": "Cargando preview…",
+    "renderError": "Error al renderizar preview",
+    "noContent": "Sin contenido para previsualizar",
+    "previewTitle": "Vista previa HTML"
   },
   "toolCalls": {
     "action": "Acción",
