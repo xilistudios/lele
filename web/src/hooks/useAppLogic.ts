@@ -422,23 +422,22 @@ export function useAppLogic(
     }
 
     if (!chatHistory.processing) {
-      // Only clear streaming on actual processing→done transition
+      // Only clear streaming and processingSessions on actual
+      // processing→done transition confirmed by polling.
+      // This avoids prematurely removing the session from processingSessions
+      // when sendMessage() optimistically set it, but the first poll cycle
+      // hasn't seen processing=true yet.
       if (prevProcessingRef.current) {
         clearStreamingRef.current()
+        messagesHook.setProcessingSessions((prev: Set<string>) => {
+          if (prev.has(sessionKey)) {
+            const next = new Set(prev)
+            next.delete(sessionKey)
+            return next
+          }
+          return prev
+        })
       }
-      // Always sync processingSessions regardless of prev state.
-      // This catches race conditions where:
-      // - sendMessage() added the session to processingSessions
-      // - Agent finished before the first polling cycle saw processing=true
-      // - Without this, the session stays in processingSessions forever
-      messagesHook.setProcessingSessions((prev: Set<string>) => {
-        if (prev.has(sessionKey)) {
-          const next = new Set(prev)
-          next.delete(sessionKey)
-          return next
-        }
-        return prev
-      })
     }
 
     prevProcessingRef.current = chatHistory.processing
