@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import type { EditableConfig } from '../../../lib/types'
@@ -19,6 +19,89 @@ export function AdvancedSettings() {
     t,
   } = useSettings()
   const [showRawJson, setShowRawJson] = useState(false)
+  const [rawJsonText, setRawJsonText] = useState('')
+  const [jsonParseError, setJsonParseError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const isInternalChange = useRef(false)
+
+  // Sync raw text when opening the editor or when draftConfig changes externally (not from textarea edits)
+  useEffect(() => {
+    if (showRawJson && draftConfig && !isInternalChange.current) {
+      setRawJsonText(JSON.stringify(draftConfig, null, 2))
+      setJsonParseError(null)
+    }
+    isInternalChange.current = false
+  }, [showRawJson, draftConfig])
+
+  const handleJsonChange = useCallback(
+    (value: string) => {
+      isInternalChange.current = true
+      setRawJsonText(value)
+      try {
+        const parsed = JSON.parse(value) as EditableConfig
+        replaceDraft(parsed)
+        setJsonParseError(null)
+      } catch (err) {
+        const message = err instanceof SyntaxError ? err.message : 'Invalid JSON'
+        setJsonParseError(message)
+      }
+    },
+    [replaceDraft],
+  )
+
+  const handleFormatJson = useCallback(() => {
+    try {
+      const parsed = JSON.parse(rawJsonText)
+      const formatted = JSON.stringify(parsed, null, 2)
+      isInternalChange.current = true
+      setRawJsonText(formatted)
+      setJsonParseError(null)
+      replaceDraft(parsed as EditableConfig)
+    } catch {
+      // Can't format invalid JSON
+    }
+  }, [rawJsonText, replaceDraft])
+
+  const handleCopyJson = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(rawJsonText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard not available
+    }
+  }, [rawJsonText])
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Tab key inserts spaces
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const textarea = textareaRef.current
+        if (!textarea) return
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
+        const newValue = rawJsonText.substring(0, start) + '  ' + rawJsonText.substring(end)
+        isInternalChange.current = true
+        setRawJsonText(newValue)
+        // Restore cursor position after React re-render
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = start + 2
+        })
+        // Also parse
+        try {
+          const parsed = JSON.parse(newValue) as EditableConfig
+          replaceDraft(parsed)
+          setJsonParseError(null)
+        } catch (err) {
+          const message = err instanceof SyntaxError ? err.message : 'Invalid JSON'
+          setJsonParseError(message)
+        }
+      }
+    },
+    [rawJsonText, replaceDraft],
+  )
 
   if (!draftConfig) return null
   const bindings = draftConfig.bindings || []
@@ -194,29 +277,80 @@ export function AdvancedSettings() {
       </SettingsSection>
 
       <SettingsSection title={t('settings.sections.rawJson')}>
-        <div className="mb-3">
+        <p className="mb-3 text-xs text-text-tertiary">
+          {t('settings.rawJsonDescription')}
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setShowRawJson(!showRawJson)}
+            onClick={() => {
+              setShowRawJson(!showRawJson)
+              if (showRawJson) {
+                setJsonParseError(null)
+              }
+            }}
             className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-hover"
           >
             {showRawJson ? t('settings.hideRawJson') : t('settings.showRawJson')}
           </button>
+          {showRawJson && (
+            <>
+              <button
+                type="button"
+                onClick={handleFormatJson}
+                disabled={!!jsonParseError}
+                title={t('settings.formatJson')}
+                className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t('settings.formatJson')}
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyJson}
+                className="rounded border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-hover"
+              >
+                {copied ? t('common.copied') : t('settings.copyJson')}
+              </button>
+              <span className="ml-auto self-center pr-1 text-xs text-text-tertiary">
+                {t('settings.jsonLinesCount', { count: rawJsonText.split('\n').length })}
+              </span>
+            </>
+          )}
         </div>
         {showRawJson && (
-          <textarea
-            value={JSON.stringify(draftConfig, null, 2)}
-            onChange={(e) => {
-              try {
-                const parsed = JSON.parse(e.target.value) as EditableConfig
-                replaceDraft(parsed)
-              } catch {
-                // ignore invalid JSON while typing
-              }
-            }}
-            className="h-[500px] w-full rounded border border-border bg-background-primary p-3 font-mono text-xs text-text-primary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary"
-            spellCheck={false}
-          />
+          <div className="relative">
+            <textarea
+              ref={textareaRef}
+              value={rawJsonText}
+              onChange={(e) => handleJsonChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className={`h-[500px] w-full rounded border p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary ${
+                jsonParseError
+                  ? 'border-error-primary bg-error-surface text-text-primary focus:border-error-primary focus:ring-error-primary'
+                  : 'border-border bg-background-primary text-text-primary focus:border-interaction-primary focus:ring-interaction-primary'
+              }`}
+              spellCheck={false}
+              placeholder={t('settings.jsonEditorPlaceholder')}
+            />
+            {jsonParseError && (
+              <div className="mt-2 rounded border border-error-primary bg-error-surface p-3">
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0 text-sm">⚠️</span>
+                  <div>
+                    <p className="text-xs font-medium text-error-primary">
+                      {t('settings.jsonValidationError')}
+                    </p>
+                    <p className="mt-1 text-xs text-text-secondary font-mono whitespace-pre-wrap">
+                      {jsonParseError}
+                    </p>
+                    <p className="mt-2 text-xs text-text-tertiary">
+                      {t('settings.jsonErrorHint')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </SettingsSection>
     </div>
