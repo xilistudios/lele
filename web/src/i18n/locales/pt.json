@@ -286,7 +286,8 @@
     },
     "theme": {
       "dark": "Escuro",
-      "light": "Claro"
+      "light": "Claro",
+      "auto": "Automático"
     },
     "options": {
       "daily": "Diário",

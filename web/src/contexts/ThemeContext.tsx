@@ -5,27 +5,37 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 
+type ThemeSetting = 'dark' | 'light' | 'auto'
 type Theme = 'dark' | 'light'
 
 type ThemeContextValue = {
   theme: Theme
-  setTheme: (theme: Theme) => void
+  themeSetting: ThemeSetting
+  setThemeSetting: (setting: ThemeSetting) => void
   toggleTheme: () => void
 }
 
 const THEME_STORAGE_KEY = 'lele-theme'
 
-export function getStoredTheme(): Theme {
+export function getStoredThemeSetting(): ThemeSetting {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)
-    if (stored === 'dark' || stored === 'light') return stored
+    if (stored === 'dark' || stored === 'light' || stored === 'auto') return stored
   } catch {
     // localStorage not available
   }
   return 'dark'
+}
+
+function resolveTheme(setting: ThemeSetting): Theme {
+  if (setting === 'auto') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return setting
 }
 
 const THEME_META_COLORS: Record<Theme, string> = {
@@ -35,13 +45,15 @@ const THEME_META_COLORS: Record<Theme, string> = {
 
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme)
-  // Update theme-color meta for browser chrome
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) {
     meta.setAttribute('content', THEME_META_COLORS[theme])
   }
+}
+
+function persistThemeSetting(setting: ThemeSetting) {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme)
+    localStorage.setItem(THEME_STORAGE_KEY, setting)
   } catch {
     // localStorage not available
   }
@@ -50,21 +62,53 @@ function applyTheme(theme: Theme) {
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => getStoredTheme())
+  const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() =>
+    getStoredThemeSetting(),
+  )
+  const [theme, setThemeState] = useState<Theme>(() => resolveTheme(getStoredThemeSetting()))
 
+  // Track the media query listener ref so we can clean up
+  const mediaQueryRef = useRef<MediaQueryList | null>(null)
+
+  // Sync resolved theme when setting changes
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
+    const resolved = resolveTheme(themeSetting)
+    setThemeState(resolved)
+    applyTheme(resolved)
+    persistThemeSetting(themeSetting)
 
-  const setTheme = useCallback((newTheme: Theme) => {
-    setThemeState(newTheme)
+    // Set up listener for system preference changes when in auto mode
+    if (themeSetting === 'auto') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
+      mediaQueryRef.current = mq
+      const handler = () => {
+        const newResolved = resolveTheme('auto')
+        setThemeState(newResolved)
+        applyTheme(newResolved)
+      }
+      mq.addEventListener('change', handler)
+      return () => {
+        mq.removeEventListener('change', handler)
+        mediaQueryRef.current = null
+      }
+    }
+  }, [themeSetting])
+
+  const setThemeSetting = useCallback((newSetting: ThemeSetting) => {
+    setThemeSettingState(newSetting)
   }, [])
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'))
+    setThemeSettingState((prev) => {
+      if (prev === 'auto') return 'dark' // toggle from auto goes to dark
+      return prev === 'dark' ? 'light' : 'dark'
+    })
   }, [])
 
-  const value = useMemo(() => ({ theme, setTheme, toggleTheme }), [theme, setTheme, toggleTheme])
+  const value = useMemo(
+    () => ({ theme, themeSetting, setThemeSetting, toggleTheme }),
+    [theme, themeSetting, setThemeSetting, toggleTheme],
+  )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
