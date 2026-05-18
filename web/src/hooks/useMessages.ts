@@ -348,15 +348,11 @@ export function useMessages(
             completedSessionKey,
           })
 
-          // Always update processingSessions regardless of which session
-          setProcessingSessions((prev) => {
-            if (completedSessionKey && prev.has(completedSessionKey)) {
-              const next = new Set(prev)
-              next.delete(completedSessionKey)
-              return next
-            }
-            return prev
-          })
+          // NOTE: intentionally NOT removing from processingSessions here.
+          // message.complete fires for every individual assistant message,
+          // but the agent may still be processing (tool calls, follow-ups).
+          // processingSessions is cleaned up by the polling-based useEffect
+          // in useAppLogic.ts when chatHistory.processing transitions to false.
 
           // Only update streaming messages if this is the current session
           if (completedSessionKey && completedSessionKey !== currentSessionKeyRef.current) {
@@ -398,32 +394,27 @@ export function useMessages(
         }
         case 'history.updated': {
           const historySessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
-          if (historySessionKey) {
-            setProcessingSessions((prev) => {
-              if (prev.has(historySessionKey)) {
-                const next = new Set(prev)
-                next.delete(historySessionKey)
-                return next
-              }
-              return prev
-            })
-            queryClient.invalidateQueries({
-              queryKey: chatHistoryQueryKey(historySessionKey),
-            })
-            onSessionUpdated?.()
-            // Clean up streaming messages for this session now that history is confirmed
-            if (historySessionKey === currentSessionKeyRef.current) {
-              setStreamingMessages((current) =>
-                current.filter((m) => {
-                  if (m.sessionKey !== historySessionKey) return true
-                  if (m.role === 'tool') return false
-                  if (m.role === 'assistant' && !m.streaming) return false
-                  if (m.id === '__processing_placeholder__') return false
-                  if (m.role === 'user' && m.optimistic) return false
-                  return true
-                }),
-              )
-            }
+          // NOTE: intentionally NOT removing from processingSessions here.
+          // history.updated fires for every individual assistant message,
+          // but the agent may still be processing (tool calls, follow-ups).
+          // This is cleaned up by the polling-based useEffect in useAppLogic.ts
+          // when chatHistory.processing transitions to false.
+          queryClient.invalidateQueries({
+            queryKey: chatHistoryQueryKey(historySessionKey),
+          })
+          onSessionUpdated?.()
+          // Clean up streaming messages for this session now that history is confirmed
+          if (historySessionKey === currentSessionKeyRef.current) {
+            setStreamingMessages((current) =>
+              current.filter((m) => {
+                if (m.sessionKey !== historySessionKey) return true
+                if (m.role === 'tool') return false
+                if (m.role === 'assistant' && !m.streaming) return false
+                if (m.id === '__processing_placeholder__') return false
+                if (m.role === 'user' && m.optimistic) return false
+                return true
+              }),
+            )
           }
           break
         }

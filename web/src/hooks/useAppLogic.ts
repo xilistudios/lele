@@ -417,27 +417,44 @@ export function useAppLogic(
       (m) => m.sessionKey === sessionKey && (m.streaming || m.id === '__processing_placeholder__'),
     )
 
+    // Ensure placeholder when agent starts processing
     if (chatHistory.processing && !hasStreamingPlaceholder) {
       ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
     }
 
-    if (!chatHistory.processing) {
-      // Only clear streaming and processingSessions on actual
-      // processing→done transition confirmed by polling.
-      // This avoids prematurely removing the session from processingSessions
-      // when sendMessage() optimistically set it, but the first poll cycle
-      // hasn't seen processing=true yet.
-      if (prevProcessingRef.current) {
-        clearStreamingRef.current()
+    if (chatHistory.processing) {
+      // Agent is processing - ensure session is tracked in processingSessions
+      // This covers the case where sendMessage() optimistically added the session
+      // but polling hadn't yet confirmed processing=true, or the session was
+      // prematurely removed by an intermediate event.
+      if (!prevProcessingRef.current) {
         messagesHook.setProcessingSessions((prev: Set<string>) => {
-          if (prev.has(sessionKey)) {
+          if (!prev.has(sessionKey)) {
             const next = new Set(prev)
-            next.delete(sessionKey)
+            next.add(sessionKey)
             return next
           }
           return prev
         })
       }
+    } else {
+      // Agent is NOT processing - remove from processingSessions
+      // regardless of prev state. This handles:
+      // 1. Normal transition: processing→done (prevProcessing was true)
+      // 2. Fast finish: agent finished before first poll saw processing=true
+      //    (session was added by sendMessage() but polling never saw true)
+      // 3. Stale state cleanup
+      if (prevProcessingRef.current) {
+        clearStreamingRef.current()
+      }
+      messagesHook.setProcessingSessions((prev: Set<string>) => {
+        if (prev.has(sessionKey)) {
+          const next = new Set(prev)
+          next.delete(sessionKey)
+          return next
+        }
+        return prev
+      })
     }
 
     prevProcessingRef.current = chatHistory.processing
