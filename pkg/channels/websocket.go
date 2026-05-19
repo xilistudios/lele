@@ -298,11 +298,11 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 	}
 
 	// Broadcast approval result to the session
-	n.broadcastToSession(client.SessionKey, "approve.result", map[string]interface{}{
+	n.emitNativeEvent(client.SessionKey, "approve.result", map[string]interface{}{
 		"request_id": payload.RequestID,
 		"approved":   payload.Approved,
 		"command":    command,
-	})
+	}, "")
 
 	ackData := map[string]string{"request_id": payload.RequestID, "approved": boolToString(payload.Approved)}
 	if err := client.Send(marshalWithID("approve.ack", ackData, eventID)); err != nil {
@@ -430,10 +430,10 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, eventID string) {
 	n.agentLoop.StopAgent(client.SessionKey)
 
-	n.broadcastToSession(client.SessionKey, "cancel.ack", map[string]interface{}{
+	n.emitNativeEvent(client.SessionKey, "cancel.ack", map[string]interface{}{
 		"status":      "cancelled",
 		"session_key": client.SessionKey,
-	})
+	}, "")
 }
 
 func (n *NativeChannel) sendWelcome(client *WSClient) {
@@ -502,34 +502,34 @@ func marshalWithID(event string, data interface{}, id string) json.RawMessage {
 }
 
 func (n *NativeChannel) StreamMessage(sessionKey, messageID, chunk string, done bool) {
-	n.broadcastToSession(sessionKey, "message.stream", WSStreamPayload{
+	n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 		MessageID:  messageID,
 		SessionKey: sessionKey,
 		Chunk:      chunk,
 		Done:       done,
-	})
+	}, messageID)
 }
 
 func (n *NativeChannel) SendToolExecuting(sessionKey, tool, action string) {
-	n.broadcastToSession(sessionKey, "tool.executing", WSToolExecutingPayload{
+	n.emitNativeEvent(sessionKey, "tool.executing", WSToolExecutingPayload{
 		Tool:   tool,
 		Action: action,
-	})
+	}, "")
 }
 
 func (n *NativeChannel) SendToolResult(sessionKey, tool, result string) {
-	n.broadcastToSession(sessionKey, "tool.result", WSToolResultPayload{
+	n.emitNativeEvent(sessionKey, "tool.result", WSToolResultPayload{
 		Tool:   tool,
 		Result: result,
-	})
+	}, "")
 }
 
 func (n *NativeChannel) SendApprovalRequest(sessionKey, id, command, reason string) {
-	n.broadcastToSession(sessionKey, "approval.request", WSApprovalRequestPayload{
+	n.emitNativeEvent(sessionKey, "approval.request", WSApprovalRequestPayload{
 		ID:      id,
 		Command: command,
 		Reason:  reason,
-	})
+	}, "")
 }
 
 func boolToString(b bool) string {

@@ -88,7 +88,7 @@ describe('createApiClient', () => {
                 },
               ],
             }
-          : url.includes('/api/v1/chat/session/')
+          : url.includes('/api/v1/chat/sessions/')
             ? {
                 session_key: 'native:client',
                 model: 'gpt-4',
@@ -183,5 +183,57 @@ describe('createApiClient', () => {
     await expect(api.channels()).rejects.toThrow()
 
     expect(refreshCalls).toBe(2)
+  })
+
+  test('streams chat send events over SSE', async () => {
+    const encoder = new TextEncoder()
+    const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://127.0.0.1:18793/api/v1/chat/send/stream')
+      expect((init?.headers as Record<string, string>).Accept).toBe('text/event-stream')
+
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                [
+                  'event: message.ack',
+                  'data: {"message_id":"msg-1","session_key":"native:client"}',
+                  '',
+                  'event: message.stream',
+                  'data: {"message_id":"msg-1","session_key":"native:client","chunk":"Hi","done":false}',
+                  '',
+                  'event: message.complete',
+                  'data: {"message_id":"msg-1","session_key":"native:client","content":"Hi"}',
+                  '',
+                  '',
+                ].join('\n'),
+              ),
+            )
+            controller.close()
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        },
+      )
+    })
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('token', 'refresh_token')
+
+    const events: string[] = []
+    const ack = await api.sendMessageStream(
+      { content: 'Hola', session_key: 'native:client', agent_id: 'main' },
+      (event) => events.push(event.event),
+    )
+
+    expect(ack.message_id).toBe('msg-1')
+    expect(events).toContain('message.ack')
+    expect(events).toContain('message.stream')
+    expect(events).toContain('message.complete')
   })
 })

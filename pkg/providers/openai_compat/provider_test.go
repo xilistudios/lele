@@ -113,6 +113,50 @@ func TestProviderChat_HTTPError(t *testing.T) {
 	}
 }
 
+func TestProviderChatStream_AcceptsSSEDataWithoutSpace(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data:[DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	var chunks []string
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"openrouter/auto",
+		nil,
+		func(chunk string, done bool) {
+			if chunk != "" {
+				chunks = append(chunks, chunk)
+			}
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+	if requestBody["stream"] != true {
+		t.Fatalf("stream = %v, want true", requestBody["stream"])
+	}
+	if out.Content != "Hello" {
+		t.Fatalf("Content = %q, want Hello", out.Content)
+	}
+	if !reflect.DeepEqual(chunks, []string{"Hel", "lo"}) {
+		t.Fatalf("chunks = %#v, want Hel/lo", chunks)
+	}
+}
+
 func TestProviderChat_StripsMoonshotPrefixAndNormalizesKimiTemperature(t *testing.T) {
 	var requestBody map[string]interface{}
 

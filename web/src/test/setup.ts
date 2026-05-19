@@ -34,6 +34,10 @@ if (!dom.window.matchMedia) {
 // Mock scrollIntoView for jsdom
 dom.window.Element.prototype.scrollIntoView = () => undefined
 
+// Mock scrollTo for jsdom
+dom.window.Element.prototype.scrollTo = () => undefined
+dom.window.scrollTo = () => undefined
+
 afterEach(() => {
   document.body.innerHTML = ''
 })

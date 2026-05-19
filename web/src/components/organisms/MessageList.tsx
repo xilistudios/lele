@@ -26,7 +26,21 @@ export function MessageList() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLoadingMoreRef = useRef(false)
   const lastMessageCountRef = useRef(0)
-  const shouldScrollToBottomRef = useRef(false)
+
+  const isNearBottom = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return true
+    return container.scrollHeight - container.scrollTop - container.clientHeight < SCROLL_THRESHOLD
+  }, [])
+
+  const scrollToBottomSmooth = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    })
+  }, [])
 
   const handleNavigateToSession = useCallback(
     (sessionKey: string) => {
@@ -53,7 +67,6 @@ export function MessageList() {
         // Insert sentinel at current scroll position before loading
         setShowSentinel(true)
         isLoadingMoreRef.current = true
-        shouldScrollToBottomRef.current = false
         loadMore()
       }, DEBOUNCE_MS)
     }
@@ -80,24 +93,18 @@ export function MessageList() {
     // Check if new messages were added (not from loading more)
     if (messages.length > lastMessageCountRef.current && !isLoadingMoreRef.current) {
       const lastMessage = messages[messages.length - 1]
-      // Only scroll to bottom if it's a new user message or streaming message
-      if (lastMessage && (lastMessage.role === 'user' || lastMessage.streaming)) {
-        shouldScrollToBottomRef.current = true
+      // Only auto-scroll if it's a new user message, streaming message,
+      // or a complete assistant response
+      if (lastMessage) {
+        const shouldScroll = lastMessage.role === 'user' || lastMessage.streaming
+          || (lastMessage.role === 'assistant' && !lastMessage.streaming)
+        if (shouldScroll && isNearBottom()) {
+          scrollToBottomSmooth()
+        }
       }
     }
     lastMessageCountRef.current = messages.length
-  }, [messages])
-
-  // Scroll to bottom when needed
-  useEffect(() => {
-    if (shouldScrollToBottomRef.current) {
-      const container = containerRef.current
-      if (container) {
-        container.scrollTop = container.scrollHeight
-      }
-      shouldScrollToBottomRef.current = false
-    }
-  }, [])
+  }, [messages, isNearBottom, scrollToBottomSmooth])
 
   // Cleanup debounce timer
   useEffect(() => {
@@ -113,7 +120,6 @@ export function MessageList() {
   useEffect(() => {
     isLoadingMoreRef.current = false
     lastMessageCountRef.current = 0
-    shouldScrollToBottomRef.current = false
     setShowSentinel(false)
   }, [currentSessionKey])
 

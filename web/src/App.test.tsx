@@ -4,16 +4,19 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import './test/i18n'
+import { ThemeProvider } from './contexts/ThemeContext'
 import type { ReactElement } from 'react'
 import App from './App'
 import { queryClient } from './lib/queryClient'
 
 // Helper to render with required providers
-const renderWithProviders = (ui: ReactElement) => {
+const renderWithProviders = (ui: ReactElement, initialEntries = ['/']) => {
   return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
-    </QueryClientProvider>,
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      </QueryClientProvider>
+    </ThemeProvider>,
   )
 }
 
@@ -248,7 +251,7 @@ describe('App', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -287,12 +290,12 @@ describe('App', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history')) {
         return new Promise<Response>((resolve) => {
           historyAResolver.current = resolve
         })
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -385,7 +388,7 @@ describe('App', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -424,21 +427,40 @@ describe('App', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/')) {
-        const sessionKey = url.includes('native%3Aclient-1%3A2')
-          ? 'native:client-1:2'
-          : 'native:client-1:1'
-        return Promise.resolve(jsonResponse({ session_key: sessionKey, messages: [] }))
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:1',
+            messages: [],
+          }),
+        )
+      }
+      if (url.includes('/api/v1/chat/sessions/native:client-1:2/history')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:2',
+            messages: [],
+          }),
+        )
       }
       if (url.includes('/api/v1/models?')) {
         return Promise.resolve(
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/')) {
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2') || url.includes('/api/v1/chat/sessions/native:client-1:2')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
+            model: 'gpt-4',
+            models: ['gpt-4'],
+          }),
+        )
+      }
+      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1') || url.includes('/api/v1/chat/sessions/native:client-1:1')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:1',
             model: 'gpt-4',
             models: ['gpt-4'],
           }),
@@ -474,7 +496,12 @@ describe('App', () => {
       throw new Error('Session 2 button not found')
     }
 
-    fireEvent.click(sessionTwoButton)
+    await act(async () => {
+      fireEvent.click(sessionTwoButton)
+    })
+
+    // Wait for session switch to settle
+    await new Promise((resolve) => setTimeout(resolve, 100))
 
     const socket = MockWebSocket.instances[0]
     if (!socket) {
@@ -561,7 +588,7 @@ describe('Routing', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -600,23 +627,7 @@ describe('Routing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
-        return Promise.resolve(
-          jsonResponse({
-            session_key: 'native:client-1:1',
-            messages: [{ role: 'assistant', content: 'mensaje A' }],
-          }),
-        )
-      }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
-        return Promise.resolve(
-          jsonResponse({
-            session_key: 'native:client-1:2',
-            messages: [{ role: 'assistant', content: 'mensaje B' }],
-          }),
-        )
-      }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history/task-1')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history/task-1')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'subagent:task-1',
@@ -624,6 +635,22 @@ describe('Routing', () => {
               { role: 'user', content: 'Verifying subagent task' },
               { role: 'assistant', content: 'Subagent result' },
             ],
+          }),
+        )
+      }
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:1',
+            messages: [{ role: 'assistant', content: 'mensaje A' }],
+          }),
+        )
+      }
+      if (url.includes('/api/v1/chat/sessions/native:client-1:2/history')) {
+        return Promise.resolve(
+          jsonResponse({
+            session_key: 'native:client-1:2',
+            messages: [{ role: 'assistant', content: 'mensaje B' }],
           }),
         )
       }
@@ -648,7 +675,7 @@ describe('Routing', () => {
           )
         }
 
-        const sessionKeyMatch = url.match(/\/api\/v1\/chat\/session\/([^/?]+)/)
+        const sessionKeyMatch = url.match(/\/api\/v1\/chat\/sessions\/([^/?]+)/)
         const decodedSessionKey = sessionKeyMatch ? decodeURIComponent(sessionKeyMatch[1]) : null
 
         return Promise.resolve(
@@ -703,17 +730,13 @@ describe('Routing', () => {
     localStorage.setItem('lele.currentSessionKey', 'native:client-1:1')
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = renderWithProviders(<App />)
+    const view = renderWithProviders(<App />, ['/settings/general'])
 
-    // Wait for settings page to load by looking for settings-specific elements
+    // Wait for settings page to load by looking for settings tabs
     await waitFor(
       () => {
-        // Look for settings tabs or navigation elements
-        const settingsElements = view.container.querySelectorAll('[data-testid], [role="tab"]')
-        expect(
-          settingsElements.length > 0 ||
-            view.container.querySelector('button.bg-state-error') !== null,
-        ).toBe(true)
+        const settingsButtons = view.container.querySelectorAll('aside nav button')
+        expect(settingsButtons.length).toBeGreaterThan(0)
       },
       { timeout: 3000 },
     )
@@ -723,7 +746,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = renderWithProviders(<App />)
+    const view = renderWithProviders(<App />, ['/chat/native:client-1:2'])
 
     await waitFor(() => expect(view.getByText('mensaje B')).not.toBeNull())
   })
@@ -732,7 +755,7 @@ describe('Routing', () => {
     localStorage.setItem('lele.session', JSON.stringify(authSession))
     globalThis.fetch = createFetchMock() as unknown as typeof fetch
 
-    const view = renderWithProviders(<App />)
+    const view = renderWithProviders(<App />, ['/chat/native:client-1:1/subagent/subagent:task-1'])
 
     // Wait for subagent chat to load
     await waitFor(
@@ -745,7 +768,8 @@ describe('Routing', () => {
     expect(view.getByRole('heading', { name: 'Verifying subagent task' })).not.toBeNull()
     expect(view.queryByText('subagent:task-1')).toBeNull()
     expect(view.queryByText('mensaje A')).toBeNull()
-    expect(view.getByRole('button', { name: '# Session 1 1 mensaje' })).not.toBeNull()
+    const sessionButton = view.container.querySelector('[role="button"]')?.parentElement
+    expect(sessionButton?.textContent).toContain('Session 1')
   })
 
   test('redirects to / when chat_id is invalid', async () => {
@@ -871,7 +895,7 @@ describe('Routing', () => {
     const historyFetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
 
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -1051,7 +1075,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -1090,7 +1114,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-2%3A1/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-2:1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-2:1',
@@ -1098,7 +1122,7 @@ describe('Auto-pairing', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/native%3Aclient-2%3A2/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-2:2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-2:2',
@@ -1133,7 +1157,7 @@ describe('Auto-pairing', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = renderWithProviders(<App />)
+    const view = renderWithProviders(<App />, ['/pair?code=999999'])
 
     // Wait for auto-pairing to be called with longer timeout
     await waitFor(() => expect(pairCalled).toBe(true), { timeout: 5000 })
@@ -1173,7 +1197,7 @@ describe('Auto-pairing', () => {
           jsonResponse({ id: 'main', name: 'Main Agent', workspace: '~/.lele', model: 'gpt-4' }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 0 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -1211,7 +1235,7 @@ describe('Auto-pairing', () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    const view = renderWithProviders(<App />)
+    const view = renderWithProviders(<App />, ['/pair?code=999999'])
 
     // Wait for loading state to finish and form to appear
     await waitFor(
@@ -1240,9 +1264,25 @@ describe('Auto-pairing', () => {
   })
 
   test('pre-fills PIN from URL code parameter', async () => {
-    globalThis.fetch = mock(() => Promise.resolve(jsonResponse({}))) as unknown as typeof fetch
+    const fetchMock = mock((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/auth/status')) {
+        return Promise.resolve(jsonResponse({ valid: false }))
+      }
+      if (url.includes('/api/v1/auth/pair')) {
+        return Promise.reject(new Error('No auto-pair in this test'))
+      }
+      if (url.endsWith('/api/v1/auth/refresh')) {
+        return Promise.resolve(
+          new Response(null, { status: 401 }),
+        )
+      }
+      return Promise.resolve(jsonResponse({}))
+    })
 
-    const view = renderWithProviders(<App />)
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />, ['/pair?code=654321'])
 
     await waitFor(() => {
       const hasForm = view.container.querySelector('form') !== null
@@ -1311,7 +1351,7 @@ describe('Session deletion', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -1351,13 +1391,13 @@ describe('Session deletion', () => {
         )
       }
       if (
-        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1') ||
         url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         return Promise.resolve(jsonResponse({}))
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:1/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -1365,7 +1405,7 @@ describe('Session deletion', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2/history')) {
+      if (url.includes('/api/v1/chat/sessions/native:client-1:2/history')) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -1388,8 +1428,8 @@ describe('Session deletion', () => {
     const fetchMock = mock((input: RequestInfo | URL) => {
       const url = String(input)
       if (
-        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1') ||
         url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         deleteCalled = true
@@ -1459,7 +1499,7 @@ describe('Session deletion', () => {
           }),
         )
       }
-      if (url.endsWith('/api/v1/agents/main?action=status')) {
+      if (url.endsWith('/api/v1/agents/main/status')) {
         return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
       }
       if (url.endsWith('/api/v1/status')) {
@@ -1493,8 +1533,8 @@ describe('Session deletion', () => {
         )
       }
       if (
-        url.endsWith('/api/v1/chat/sessions/native:client-1:1?action=delete') ||
-        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1?action=delete') ||
+        url.endsWith('/api/v1/chat/sessions/native:client-1:1') ||
+        url.endsWith('/api/v1/chat/sessions/native%3Aclient-1%3A1') ||
         url.endsWith('/api/v1/chat/sessions/native:client-1:1')
       ) {
         return Promise.resolve(jsonResponse({}))

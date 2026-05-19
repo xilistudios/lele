@@ -29,6 +29,18 @@ import {
 
 export { parseAttachmentsFromContent, parseSubagentSessionKey }
 
+// Interval between characters when animating streaming text in the UI.
+// 12ms ≈ 83 updates/second — chosen to feel fluid without overwhelming the
+// browser's render loop. React 18 batches the setState calls, keeping actual
+// paints near the display refresh rate.
+const STREAM_CHAR_INTERVAL_MS = 12
+
+type StreamClientEvent = {
+  event: string
+  data: unknown
+  transport?: 'sse'
+}
+
 export const toChatMessages = (
   history: Array<{
     id: string
@@ -141,6 +153,20 @@ export function useMessages(
   const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set())
   const streamingRef = useRef(streamingMessages)
   const processingSessionKeyRef = useRef<string | null>(null)
+  const eventHandlerRef = useRef<(event: StreamClientEvent) => void>(() => {})
+  const activeStreamControllersRef = useRef<Set<AbortController>>(new Set())
+  const activeSSEMessageIdsRef = useRef<Set<string>>(new Set())
+  const streamQueuesRef = useRef<
+    Map<
+      string,
+      {
+        sessionKey: string
+        chars: string[]
+        done: boolean
+        timer: ReturnType<typeof setInterval> | null
+      }
+    >
+  >(new Map())
 
   const queryClient = useQueryClient()
 
@@ -191,6 +217,79 @@ export function useMessages(
     [],
   )
 
+  const clearStreamQueue = useCallback((messageId: string) => {
+    const queue = streamQueuesRef.current.get(messageId)
+    if (queue?.timer) {
+      clearInterval(queue.timer)
+    }
+    streamQueuesRef.current.delete(messageId)
+  }, [])
+
+  const clearAllStreamQueues = useCallback(() => {
+    for (const queue of streamQueuesRef.current.values()) {
+      if (queue.timer) {
+        clearInterval(queue.timer)
+      }
+    }
+    streamQueuesRef.current.clear()
+  }, [])
+
+  const abortActiveStreams = useCallback(() => {
+    for (const controller of activeStreamControllersRef.current) {
+      controller.abort()
+    }
+    activeStreamControllersRef.current.clear()
+  }, [])
+
+  const drainStreamQueue = useCallback(
+    (messageId: string) => {
+      const queue = streamQueuesRef.current.get(messageId)
+      if (!queue) return
+
+      const nextChar = queue.chars.shift()
+      if (nextChar) {
+        ensureAssistantPlaceholder(messageId, queue.sessionKey, nextChar, false)
+        return
+      }
+
+      if (queue.done) {
+        clearStreamQueue(messageId)
+        ensureAssistantPlaceholder(messageId, queue.sessionKey, '', true)
+      }
+    },
+    [clearStreamQueue, ensureAssistantPlaceholder],
+  )
+
+  const enqueueStreamChunk = useCallback(
+    (messageId: string, sessionKey: string, chunk: string, done: boolean) => {
+      if (!messageId || !sessionKey) return
+
+      let queue = streamQueuesRef.current.get(messageId)
+      if (!queue) {
+        queue = {
+          sessionKey,
+          chars: [],
+          done: false,
+          timer: null,
+        }
+        streamQueuesRef.current.set(messageId, queue)
+      }
+
+      queue.sessionKey = sessionKey
+      if (chunk) {
+        queue.chars.push(...Array.from(chunk))
+      }
+      if (done) {
+        queue.done = true
+      }
+
+      if (!queue.timer) {
+        queue.timer = setInterval(() => drainStreamQueue(messageId), STREAM_CHAR_INTERVAL_MS)
+      }
+    },
+    [drainStreamQueue],
+  )
+
   const sendMessage = useCallback(
     async (content: string, attachments: string[], sessionKey: string, agentId: string | null) => {
       if (!token || !sessionKey) return
@@ -235,13 +334,51 @@ export function useMessages(
         })
       }
 
+      const payload = {
+        content: normalizedContent,
+        session_key: sessionKey,
+        agent_id: agentId ?? undefined,
+        attachments: attachments.length > 0 ? attachments : undefined,
+      }
+
       try {
-        const response = await api.sendMessage({
-          content: normalizedContent,
-          session_key: sessionKey,
-          agent_id: agentId ?? undefined,
-          attachments: attachments.length > 0 ? attachments : undefined,
-        })
+        let response: Awaited<ReturnType<ApiClient['sendMessage']>> | undefined
+
+        if (api.sendMessageStream) {
+          const controller = new AbortController()
+          let streamMessageId: string | null = null
+          activeStreamControllersRef.current.add(controller)
+          try {
+            response = await api.sendMessageStream(
+              payload,
+              (event) => {
+                if (event.event === 'message.ack') {
+                  streamMessageId = event.data.message_id
+                }
+                eventHandlerRef.current({ ...event, transport: 'sse' })
+              },
+              {
+                signal: controller.signal,
+                onDone: () => {
+                  activeStreamControllersRef.current.delete(controller)
+                  if (streamMessageId) {
+                    activeSSEMessageIdsRef.current.delete(streamMessageId)
+                  }
+                },
+              },
+            )
+          } catch (streamError) {
+            activeStreamControllersRef.current.delete(controller)
+            if (controller.signal.aborted) {
+              throw streamError
+            }
+            console.warn('[SSE] Streaming send failed, falling back to JSON send:', streamError)
+          }
+        }
+
+        if (!response) {
+          response = await api.sendMessage(payload)
+        }
 
         // Mark session as processing only after API confirms the send
         setProcessingSessions((prev) => new Set(prev).add(sessionKey))
@@ -269,9 +406,15 @@ export function useMessages(
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable, refs are intentionally excluded
   const handleEvent = useCallback(
-    (event: { event: string; data: unknown }) => {
+    (event: StreamClientEvent) => {
       const data = event.data as Record<string, unknown>
       const eventSessionKey = data.session_key as string | undefined
+      const messageId = data.message_id as string | undefined
+      const isSSEEvent = event.transport === 'sse'
+
+      if (!isSSEEvent && messageId && activeSSEMessageIdsRef.current.has(messageId)) {
+        return
+      }
 
       switch (event.event) {
         case 'welcome': {
@@ -305,12 +448,20 @@ export function useMessages(
             chunkLength: (data.chunk as string)?.length ?? 0,
             done: data.done,
           })
-          ensureAssistantPlaceholder(
-            data.message_id as string,
-            (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string,
-            (data.chunk as string) ?? '',
-            (data.done as boolean) ?? false,
-          )
+          {
+            const messageId = data.message_id as string
+            const sessionKey = (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string
+            const chunk = (data.chunk as string) ?? ''
+            const done = (data.done as boolean) ?? false
+
+            if (done && chunk) {
+              clearStreamQueue(messageId)
+              ensureAssistantPlaceholder(messageId, sessionKey, chunk, true)
+              break
+            }
+
+            enqueueStreamChunk(messageId, sessionKey, chunk, done)
+          }
           break
         case 'message.thinking':
           if (eventSessionKey && eventSessionKey !== currentSessionKeyRef.current) {
@@ -330,6 +481,10 @@ export function useMessages(
           break
         case 'message.ack': {
           const ackSessionKey = (data.session_key as string) ?? ''
+          const ackMessageId = data.message_id as string | undefined
+          if (isSSEEvent && ackMessageId) {
+            activeSSEMessageIdsRef.current.add(ackMessageId)
+          }
           if (ackSessionKey) {
             setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
             processingSessionKeyRef.current = ackSessionKey
@@ -341,6 +496,7 @@ export function useMessages(
         }
         case 'message.complete': {
           const completedSessionKey = eventSessionKey ?? currentSessionKeyRef.current
+          clearStreamQueue(data.message_id as string)
           wsDebug('[WS] message.complete received', {
             messageId: data.message_id,
             eventSessionKey,
@@ -388,6 +544,9 @@ export function useMessages(
           setToolStatus(null)
           setPendingAttachments([])
           processingSessionKeyRef.current = null
+          if (isSSEEvent && messageId) {
+            activeSSEMessageIdsRef.current.delete(messageId)
+          }
           // Refresh sessions so sidebar shows updated message count
           onSessionUpdated?.()
           break
@@ -619,6 +778,8 @@ export function useMessages(
         case 'cancel.ack':
           setToolStatus(null)
           processingSessionKeyRef.current = null
+          abortActiveStreams()
+          clearAllStreamQueues()
           // Only remove the cancelled session from processing set
           {
             const cancelledSessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
@@ -649,12 +810,39 @@ export function useMessages(
           }
           break
         }
+        case 'stream.error': {
+          // Backend SSE stream failed after delivering ack.
+          // Mark any in-progress assistant message as errored so the UI
+          // shows an indicator instead of an eternal typing animation.
+          const errorSessionKey = (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string
+          setStreamingMessages((current) =>
+            current.map((m) => {
+              if (m.sessionKey === errorSessionKey && m.role === 'assistant' && m.streaming) {
+                return { ...m, streaming: false, error: (data.error as string) || 'Stream error' }
+              }
+              return m
+            }),
+          )
+          break
+        }
         default:
           break
       }
     },
-    [currentSessionKeyRef, ensureAssistantPlaceholder, queryClient],
+    [
+      abortActiveStreams,
+      clearAllStreamQueues,
+      clearStreamQueue,
+      currentSessionKeyRef,
+      enqueueStreamChunk,
+      ensureAssistantPlaceholder,
+      queryClient,
+    ],
   )
+
+  useEffect(() => {
+    eventHandlerRef.current = handleEvent
+  }, [handleEvent])
 
   const approveRequest = useCallback((approved: boolean, requestId: string, command: string) => {
     setApprovalRequest(null)
@@ -664,6 +852,9 @@ export function useMessages(
   }, [])
 
   const clearStreaming = useCallback(() => {
+    abortActiveStreams()
+    clearAllStreamQueues()
+    activeSSEMessageIdsRef.current.clear()
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
@@ -673,9 +864,12 @@ export function useMessages(
     // Don't clear processingSessions - this tracks ALL sessions processing,
     // not just the current one. It's updated by WebSocket events.
     processingSessionKeyRef.current = null
-  }, [])
+  }, [abortActiveStreams, clearAllStreamQueues])
 
   const clearAll = useCallback(() => {
+    abortActiveStreams()
+    clearAllStreamQueues()
+    activeSSEMessageIdsRef.current.clear()
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
@@ -684,7 +878,15 @@ export function useMessages(
     setPendingAttachments([])
     setProcessingSessions(new Set())
     processingSessionKeyRef.current = null
-  }, [])
+  }, [abortActiveStreams, clearAllStreamQueues])
+
+  useEffect(() => {
+    return () => {
+      abortActiveStreams()
+      clearAllStreamQueues()
+      activeSSEMessageIdsRef.current.clear()
+    }
+  }, [abortActiveStreams, clearAllStreamQueues])
 
   return {
     streamingMessages,

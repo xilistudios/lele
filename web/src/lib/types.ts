@@ -517,6 +517,7 @@ export type ChatMessage = {
   toolStatus?: ToolMessageStatus
   toolCallId?: string
   subagentSessionKey?: string
+  error?: string
 }
 
 export type ToolStatus = {
@@ -702,6 +703,7 @@ export type ClientEvent =
   | { event: 'pong'; data: { time: string } }
   | { event: 'attachments'; data: Attachment[] }
   | { event: 'error'; data: { code: string; message: string } }
+  | { event: 'stream.error'; data: { error: string } }
   | { event: 'history.updated'; data: { session_key: string; name?: string } }
 
 export type ApprovalDecision = {

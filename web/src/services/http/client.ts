@@ -11,6 +11,7 @@ import type {
   AvailableSkillsResponse,
   ChannelsResponse,
   ChatSessionsResponse,
+  ClientEvent,
   ConfigResponse,
   ConfigUpdateResponse,
   ConfigValidateResponse,
@@ -47,6 +48,34 @@ type TokenState = {
   token: string | null
   refreshToken: string | null
   onTokenRefresh?: (session: AuthSession) => void
+}
+
+type SendMessageStreamOptions = {
+  signal?: AbortSignal
+  onDone?: () => void
+}
+
+const parseSSEBlock = (block: string): ClientEvent | null => {
+  let eventName = ''
+  const dataLines: string[] = []
+
+  for (const rawLine of block.split(/\r?\n/)) {
+    const line = rawLine.trimEnd()
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart())
+    }
+  }
+
+  if (!eventName || dataLines.length === 0) {
+    return null
+  }
+
+  return {
+    event: eventName,
+    data: JSON.parse(dataLines.join('\n')),
+  } as ClientEvent
 }
 
 export const createApiClient = (baseUrl: string) => {
@@ -191,6 +220,112 @@ export const createApiClient = (baseUrl: string) => {
     return requestWithRetry<T>(path, init)
   }
 
+  const sendMessageStream = async (
+    payload: SendMessageRequest,
+    onEvent: (event: ClientEvent) => void,
+    options: SendMessageStreamOptions = {},
+  ): Promise<SendMessageResponse> => {
+    const startRequest = (token: string | null) => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      }
+      if (token) {
+        headers.Authorization = `Bearer ${token}`
+      }
+      return fetch(joinUrl(baseUrl, endpoints.chat.sendStream), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...payload,
+          session_key: payload.session_key || undefined,
+        }),
+        signal: options.signal,
+      })
+    }
+
+    let response = await startRequest(tokenState.token)
+    if (response.status === 401 && tokenState.refreshToken) {
+      const newToken = await refreshToken()
+      if (newToken) {
+        response = await startRequest(newToken)
+      }
+    }
+
+    if (!response.ok) {
+      throw await parseApiError(response)
+    }
+
+    if (!response.body) {
+      throw new Error('Streaming response body is unavailable')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let ackResolved = false
+    let resolveAck!: (response: SendMessageResponse) => void
+    let rejectAck!: (error: Error) => void
+    const ackPromise = new Promise<SendMessageResponse>((resolve, reject) => {
+      resolveAck = resolve
+      rejectAck = reject
+    })
+
+    const handleBlock = (block: string) => {
+      const event = parseSSEBlock(block)
+      if (!event) return
+
+      onEvent(event)
+      if (event.event === 'message.ack' && !ackResolved) {
+        ackResolved = true
+        resolveAck(event.data)
+      }
+    }
+
+    const pump = async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          let separatorIndex = buffer.search(/\r?\n\r?\n/)
+          while (separatorIndex >= 0) {
+            const block = buffer.slice(0, separatorIndex)
+            buffer = buffer.slice(separatorIndex + (buffer[separatorIndex] === '\r' ? 4 : 2))
+            handleBlock(block)
+            separatorIndex = buffer.search(/\r?\n\r?\n/)
+          }
+        }
+
+        buffer += decoder.decode()
+        if (buffer.trim()) {
+          handleBlock(buffer)
+        }
+
+        if (!ackResolved) {
+          rejectAck(new Error('Streaming response ended before message acknowledgement'))
+        }
+      } catch (error) {
+        if (!ackResolved) {
+          rejectAck(error as Error)
+        } else {
+          // Stream failed after ack — notify the UI so it can show an error indicator
+          // on the incomplete message instead of silently hanging.
+          onEvent({
+            event: 'stream.error',
+            data: { error: (error as Error).message || 'Stream connection lost' },
+          })
+        }
+      } finally {
+        options.onDone?.()
+      }
+    }
+
+    void pump()
+    return ackPromise
+  }
+
   return {
     setToken,
     clearToken,
@@ -302,6 +437,7 @@ export const createApiClient = (baseUrl: string) => {
           session_key: payload.session_key || undefined,
         }),
       }),
+    sendMessageStream,
     approve: (sessionKey: string, requestId: string, approved: boolean) =>
       request<ApproveResponse>(endpoints.chat.approve(sessionKey), {
         method: 'POST',
