@@ -28,7 +28,7 @@ func gatewayCmd() {
 	args := os.Args[2:]
 	for _, arg := range args {
 		if arg == "--debug" || arg == "-d" {
-			logger.SetLevel(logger.DEBUG)
+			logger.SetConsoleLevel(logger.DEBUG)
 			fmt.Println("🔍 Debug mode enabled")
 			break
 		}
@@ -171,6 +171,20 @@ func gatewayCmd() {
 	if nativeCh, ok := channelManager.GetChannel("native"); ok {
 		if nc, ok := nativeCh.(*channels.NativeChannel); ok {
 			nc.RegisterRoutes(srv.Mux())
+			// Set up a reload callback so config changes via the API trigger
+			// an immediate runtime reload (not waiting for fsnotify/kqueue).
+			nc.SetReloadConfig(func() error {
+				updated, err := config.LoadConfig(getConfigPath())
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+				agentLoop.ReloadRegistry(updated)
+				if err := channelManager.ReloadConfig(updated); err != nil {
+					return fmt.Errorf("failed to reload channels: %w", err)
+				}
+				heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
+				return nil
+			})
 			logger.InfoC("server", "Native channel API routes registered")
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 func (n *NativeChannel) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +74,16 @@ func (n *NativeChannel) handlePutConfig(w http.ResponseWriter, r *http.Request) 
 	if err := config.SaveEditableDocument(configPath, &doc); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save config: "+err.Error(), "config_save_failed")
 		return
+	}
+
+	// Reload runtime config synchronously so changes take effect immediately
+	// without waiting for the file watcher (fsnotify/kqueue which can be unreliable).
+	if n.reloadConfig != nil {
+		if err := n.reloadConfig(); err != nil {
+			logger.WarnCF("native", "Runtime config reload after save failed", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
 	}
 
 	_, meta, err := config.LoadEditableDocument(configPath)

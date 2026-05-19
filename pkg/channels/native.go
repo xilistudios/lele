@@ -46,6 +46,16 @@ type NativeChannel struct {
 	skillsLoader     *skills.SkillsLoader
 	skillInstaller   *skills.SkillInstaller
 	workspacePath    string
+	reloadConfig     func() error // called after config save to reload runtime config
+}
+
+// SetReloadConfig sets a callback to be called after config is saved via the API.
+// This enables the gateway to reload runtime config (agent registry, channels, etc.)
+// synchronously instead of relying on the file watcher (which can be slow/unreliable).
+func (n *NativeChannel) SetReloadConfig(fn func() error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.reloadConfig = fn
 }
 
 type WSClient struct {
