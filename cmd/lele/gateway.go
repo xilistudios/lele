@@ -28,7 +28,7 @@ func gatewayCmd() {
 	args := os.Args[2:]
 	for _, arg := range args {
 		if arg == "--debug" || arg == "-d" {
-			logger.SetConsoleLevel(logger.DEBUG)
+			logger.SetLevel(logger.DEBUG)
 			fmt.Println("🔍 Debug mode enabled")
 			break
 		}
