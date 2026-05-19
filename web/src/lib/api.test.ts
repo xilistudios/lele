@@ -88,7 +88,7 @@ describe('createApiClient', () => {
                 },
               ],
             }
-          : url.includes('/api/v1/chat/session/')
+          : url.includes('/api/v1/chat/sessions/')
             ? {
                 session_key: 'native:client',
                 model: 'gpt-4',
