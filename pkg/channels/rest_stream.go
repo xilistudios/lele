@@ -195,10 +195,10 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 
 		case <-deadline:
 			logger.WarnCF("native", "SSE stream deadline reached; closing connection", map[string]interface{}{
-				"session_key":     sessionKey,
-				"message_id":      messageID,
-				"complete_seen":   completeSeen,
-				"history_seen":    historySeen,
+				"session_key":   sessionKey,
+				"message_id":    messageID,
+				"complete_seen": completeSeen,
+				"history_seen":  historySeen,
 			})
 			writeSSE(w, "error", map[string]interface{}{
 				"message_id":  messageID,
