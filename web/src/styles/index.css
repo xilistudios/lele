@@ -679,3 +679,67 @@ pre,
 .progress-bar {
   transition: background-color 0.3s ease, width 0.3s ease;
 }
+
+/* Panel / Sidebar slide animations — slides from right */
+@keyframes panel-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes panel-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes panel-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-panel-in {
+  animation: panel-in 0.2s ease-out forwards;
+}
+
+.animate-panel-out {
+  animation: panel-out 0.2s ease-in forwards;
+}
+
+.animate-panel-slide-in {
+  animation: panel-slide-in 0.25s ease-out forwards;
+}
+
+.animate-panel-slide-out {
+  animation: panel-slide-out 0.2s ease-in forwards;
+}
+
+/* Overlay fade */
+.modal-backdrop-in {
+  animation: modal-backdrop-in 0.2s ease-out forwards;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.modal-backdrop-out {
+  animation: modal-backdrop-out 0.2s ease-in forwards;
+  background: rgba(0, 0, 0, 0.2);
+}

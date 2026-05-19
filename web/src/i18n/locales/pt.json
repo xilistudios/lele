@@ -84,7 +84,8 @@
     "rename": "Renomear",
     "closePanel": "Fechar painel",
     "manageChats": "Gerenciar chats",
-    "totalChats": "{{count}} chats no total"
+    "totalChats": "{{count}} chats no total",
+    "noSearchResults": "Nenhum chat corresponde à sua pesquisa"
   },
   "connection": {
     "connected": "Conectado",

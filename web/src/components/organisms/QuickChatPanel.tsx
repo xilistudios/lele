@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -24,27 +24,50 @@ export function QuickChatPanel({
   const { query, setQuery, sortMode, setSortMode, grouped } = useChatFilters(sessions)
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // Animation state: track if component should render (for exit animation)
+  const [closing, setClosing] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // On open
   useEffect(() => {
-    if (isOpen && initialFocusSearch && searchRef.current) {
+    if (isOpen) {
+      setMounted(true)
+      setClosing(false)
+    }
+  }, [isOpen])
+
+  // Focus search on open
+  useEffect(() => {
+    if (mounted && !closing && initialFocusSearch && searchRef.current) {
       searchRef.current.focus()
     }
-  }, [isOpen, initialFocusSearch])
+  }, [mounted, closing, initialFocusSearch])
 
+  // Keyboard handler
   useEffect(() => {
-    if (!isOpen) return
+    if (!mounted || closing) return
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') handleClose()
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [isOpen, onClose])
+  }, [mounted, closing, onClose])
+
+  const handleClose = useCallback(() => {
+    setClosing(true)
+    setTimeout(() => {
+      setMounted(false)
+      setClosing(false)
+      onClose()
+    }, 200) // match animation duration
+  }, [onClose])
 
   const handleSelect = useCallback(
     (key: string) => {
       onSelectSession(key)
-      onClose()
+      handleClose()
     },
-    [onSelectSession, onClose],
+    [onSelectSession, handleClose],
   )
 
   const handleDelete = useCallback(
@@ -55,28 +78,32 @@ export function QuickChatPanel({
   )
 
   const goToAdmin = useCallback(() => {
-    onClose()
+    handleClose()
     navigate('/chats')
-  }, [onClose, navigate])
+  }, [handleClose, navigate])
 
-  if (!isOpen) return null
+  if (!mounted) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      {/* Overlay */}
+    <div
+      className={`fixed inset-0 z-50 flex ${closing ? 'animate-panel-out' : 'animate-panel-in'}`}
+    >
+      {/* Overlay — left side */}
       <div
-        className="flex-1 bg-black/20 transition-opacity cursor-pointer"
-        onClick={onClose}
+        className={`flex-1 cursor-pointer ${closing ? 'modal-backdrop-out' : 'modal-backdrop-in'}`}
+        onClick={handleClose}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') onClose()
+          if (e.key === 'Enter' || e.key === ' ') handleClose()
         }}
         role="button"
         tabIndex={-1}
         aria-hidden="true"
       />
 
-      {/* Panel */}
-      <aside className="flex h-full w-full max-w-sm flex-shrink-0 flex-col border-r border-border bg-background-primary shadow-2xl">
+      {/* Panel — right side */}
+      <aside
+        className={`flex h-full w-full max-w-sm flex-shrink-0 flex-col border-l border-border bg-background-primary shadow-2xl ${closing ? 'animate-panel-slide-out' : 'animate-panel-slide-in'}`}
+      >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-3">
           <ChatSearchBar

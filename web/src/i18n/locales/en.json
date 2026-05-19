@@ -84,7 +84,8 @@
     "rename": "Rename",
     "closePanel": "Close panel",
     "manageChats": "Manage chats",
-    "totalChats": "{{count}} chats total"
+    "totalChats": "{{count}} chats total",
+    "noSearchResults": "No chats match your search"
   },
   "connection": {
     "connected": "Connected",
