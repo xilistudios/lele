@@ -1,4 +1,5 @@
 import type { ClientEvent } from '../../lib/types'
+import { generateUUID } from '../../lib/uuid'
 
 export type ClientCommand =
   | { event: 'subscribe'; data: { session_key: string; agent_id?: string } }
@@ -17,7 +18,7 @@ export type { ClientEvent }
 export function serializeCommand(command: ClientCommand): string {
   return JSON.stringify({
     v: 1,
-    id: crypto.randomUUID(),
+    id: generateUUID(),
     event: command.event,
     data: command.data,
   })

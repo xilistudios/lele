@@ -6,6 +6,7 @@ import {
   saveCurrentSessionKey,
 } from '../lib/storage'
 import type { ChatSession } from '../lib/types'
+import { generateUUID } from '../lib/uuid'
 
 const buildDefaultSessionKey = (clientId: string) => clientId
 const isSubagentSessionKey = (sessionKey: string | null | undefined) =>
@@ -120,7 +121,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
   const createSession = useCallback(async (): Promise<string | null> => {
     if (!clientId) return null
 
-    const sessionKey = crypto.randomUUID()
+    const sessionKey = generateUUID()
     const newSession: ChatSession = {
       key: sessionKey,
       created: new Date().toISOString(),
