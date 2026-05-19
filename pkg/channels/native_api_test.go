@@ -19,27 +19,32 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/skills"
 )
 
 type nativeTestAgentLoop struct {
-	config           *config.Config
-	histories        map[string][]providers.Message
-	sessionAgents    map[string]string
-	sessionModels    map[string]string
-	sessionAliases   map[string]string // base -> resolved
-	sessionAliasesMu sync.RWMutex
-	subagentParents  map[string]string // subagent_key -> parent_key
-	workspace        string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	config             *config.Config
+	histories          map[string][]providers.Message
+	sessionAgents      map[string]string
+	sessionModels      map[string]string
+	sessionAliases     map[string]string // base -> resolved
+	sessionAliasesMu   sync.RWMutex
+	subagentParents    map[string]string // subagent_key -> parent_key
+	workspace          string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	sessionNames       map[string]string
+	sessionThinkLevels map[string]string
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
-		config:          cfg,
-		histories:       make(map[string][]providers.Message),
-		sessionAgents:   make(map[string]string),
-		sessionModels:   make(map[string]string),
-		sessionAliases:  make(map[string]string),
-		subagentParents: make(map[string]string),
+		config:             cfg,
+		histories:          make(map[string][]providers.Message),
+		sessionAgents:      make(map[string]string),
+		sessionModels:      make(map[string]string),
+		sessionAliases:     make(map[string]string),
+		subagentParents:    make(map[string]string),
+		sessionNames:       make(map[string]string),
+		sessionThinkLevels: make(map[string]string),
 	}
 }
 
@@ -158,10 +163,14 @@ func (m *nativeTestAgentLoop) SetVerboseLevel(sessionKey string, level string) b
 }
 
 func (m *nativeTestAgentLoop) GetThinkLevel(sessionKey string) string {
+	if level, ok := m.sessionThinkLevels[sessionKey]; ok {
+		return level
+	}
 	return "default"
 }
 
 func (m *nativeTestAgentLoop) SetThinkLevel(sessionKey string, level string) bool {
+	m.sessionThinkLevels[sessionKey] = level
 	return true
 }
 
@@ -174,6 +183,9 @@ func (m *nativeTestAgentLoop) ClearSession(sessionKey string) string {
 }
 
 func (m *nativeTestAgentLoop) GetName(sessionKey string) string {
+	if name, ok := m.sessionNames[sessionKey]; ok {
+		return name
+	}
 	return ""
 }
 
@@ -182,6 +194,7 @@ func (m *nativeTestAgentLoop) GetUpdated(sessionKey string) time.Time {
 }
 
 func (m *nativeTestAgentLoop) SetName(sessionKey string, name string) error {
+	m.sessionNames[sessionKey] = name
 	return nil
 }
 
@@ -285,6 +298,7 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 		pairLimiter:      newRateLimiter(5, time.Minute),
 		apiLimiter:       newRateLimiter(120, time.Minute),
 		wsMessageLimiter: newRateLimiter(30, time.Minute),
+		skillsLoader:     &skills.SkillsLoader{},
 	}
 
 	mux := http.NewServeMux()
@@ -366,6 +380,7 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 		apiLimiter:       newRateLimiter(120, time.Minute),
 		wsMessageLimiter: newRateLimiter(30, time.Minute),
 		configPath:       configPath,
+		skillsLoader:     &skills.SkillsLoader{},
 	}
 
 	mux := http.NewServeMux()
