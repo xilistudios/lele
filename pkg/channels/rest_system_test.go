@@ -229,12 +229,12 @@ func TestIsAllowedProviderURL(t *testing.T) {
 	}{
 		{"https://api.openai.com/v1", true},
 		{"https://api.groq.com/openai/v1", true},
-		{"http://api.openai.com/v1", false},  // no HTTPS
+		{"http://api.openai.com/v1", false}, // no HTTPS
 		{"https://localhost:11434/v1", false},
 		{"https://127.0.0.1:8080", false},
-		{"https://192.168.1.1/v1", false},    // private IP
-		{"https://10.0.0.1/v1", false},       // private IP
-		{"https://[::1]:11434/v1", false},    // loopback
+		{"https://192.168.1.1/v1", false}, // private IP
+		{"https://10.0.0.1/v1", false},    // private IP
+		{"https://[::1]:11434/v1", false}, // loopback
 		{"", false},
 		{"not-a-url", false},
 	}
@@ -257,7 +257,7 @@ func TestParsePagination(t *testing.T) {
 		{"", "", 0, 50},
 		{"10", "", 10, 50},
 		{"", "5", 0, 5},
-		{"-5", "300", 0, 50},  // negative offset → 0, over limit 200 → default 50
+		{"-5", "300", 0, 50}, // negative offset → 0, over limit 200 → default 50
 		{"0", "100", 0, 100},
 	}
 

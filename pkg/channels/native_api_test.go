@@ -23,27 +23,27 @@ import (
 )
 
 type nativeTestAgentLoop struct {
-	config            *config.Config
-	histories         map[string][]providers.Message
-	sessionAgents     map[string]string
-	sessionModels     map[string]string
-	sessionAliases    map[string]string // base -> resolved
-	sessionAliasesMu  sync.RWMutex
-	subagentParents   map[string]string // subagent_key -> parent_key
-	workspace         string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
-	sessionNames      map[string]string
+	config             *config.Config
+	histories          map[string][]providers.Message
+	sessionAgents      map[string]string
+	sessionModels      map[string]string
+	sessionAliases     map[string]string // base -> resolved
+	sessionAliasesMu   sync.RWMutex
+	subagentParents    map[string]string // subagent_key -> parent_key
+	workspace          string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
-		config:            cfg,
-		histories:         make(map[string][]providers.Message),
-		sessionAgents:     make(map[string]string),
-		sessionModels:     make(map[string]string),
-		sessionAliases:    make(map[string]string),
-		subagentParents:   make(map[string]string),
-		sessionNames:      make(map[string]string),
+		config:             cfg,
+		histories:          make(map[string][]providers.Message),
+		sessionAgents:      make(map[string]string),
+		sessionModels:      make(map[string]string),
+		sessionAliases:     make(map[string]string),
+		subagentParents:    make(map[string]string),
+		sessionNames:       make(map[string]string),
 		sessionThinkLevels: make(map[string]string),
 	}
 }
