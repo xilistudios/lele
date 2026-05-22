@@ -22,14 +22,18 @@ function mergeMessages(
   baseMessages: ChatMessage[],
   streamingMessages: ChatMessage[],
 ): ChatMessage[] {
-  const streamingAssistantIds = new Set<string>()
+  // Track IDs of assistant messages that are still actively streaming.
+  // Once streaming is done (streaming=false), the server/base version
+  // should take over — otherwise both the base and streaming copies
+  // get filtered out and the message disappears during HTTP polling.
+  const activeStreamingAssistantIds = new Set<string>()
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
 
   const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
   for (const msg of streamingMessages) {
-    if (msg.role === 'assistant') {
-      streamingAssistantIds.add(msg.id)
+    if (msg.role === 'assistant' && msg.streaming) {
+      activeStreamingAssistantIds.add(msg.id)
     }
     if (msg.role === 'tool') {
       if (msg.toolCallId) {
@@ -46,7 +50,7 @@ function mergeMessages(
 
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
-    if (msg.role === 'assistant' && streamingAssistantIds.has(msg.id)) {
+    if (msg.role === 'assistant' && activeStreamingAssistantIds.has(msg.id)) {
       continue
     }
     if (msg.role === 'tool' && msg.toolCallId && streamingToolCallIds.has(msg.toolCallId)) {
