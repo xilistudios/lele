@@ -74,26 +74,29 @@ export function ChatComposer() {
     }
     const normalizedSelectedModel = normalizeModelName(selectedModel)
 
-    // Build a lookup map for O(1) access
-    const modelReasoningMap = new Map<string, boolean>()
+    // Build a lookup set of models with reasoning enabled.
+    // Only store models that actually have reasoning — flat availableModels
+    // lack reasoning metadata, so they must not overwrite grouped model data.
+    const modelsWithReasoning = new Set<string>()
 
-    // Check grouped models
     for (const group of groupedModels ?? []) {
       for (const model of group.options) {
-        modelReasoningMap.set(model.value, model.reasoning?.enable ?? false)
-        modelReasoningMap.set(normalizeModelName(model.value), model.reasoning?.enable ?? false)
+        if (model.reasoning?.enable) {
+          modelsWithReasoning.add(model.value)
+          modelsWithReasoning.add(normalizeModelName(model.value))
+        }
       }
     }
-    // Check flat available models
     for (const model of availableModels ?? []) {
-      modelReasoningMap.set(model.value, model.reasoning?.enable ?? false)
-      modelReasoningMap.set(normalizeModelName(model.value), model.reasoning?.enable ?? false)
+      if (model.reasoning?.enable) {
+        modelsWithReasoning.add(model.value)
+        modelsWithReasoning.add(normalizeModelName(model.value))
+      }
     }
 
     return (
-      modelReasoningMap.get(selectedModel) ??
-      modelReasoningMap.get(normalizedSelectedModel) ??
-      false
+      modelsWithReasoning.has(selectedModel) ||
+      modelsWithReasoning.has(normalizedSelectedModel)
     )
   }, [selectedModel, groupedModels, availableModels])
   const thinkOptions = [
