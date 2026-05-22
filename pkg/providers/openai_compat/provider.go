@@ -102,21 +102,35 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 		}
 	}
 
-	// Handle reasoning config (for OpenAI o-series and compatible models)
+	// Handle reasoning config (for OpenAI o-series, OpenRouter, and compatible models)
 	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
 		reasoningBody := map[string]interface{}{}
-		if effort, ok := reasoning["effort"].(string); ok && effort != "" {
-			reasoningBody["effort"] = effort
+		if v, ok := reasoning["effort"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				reasoningBody["effort"] = s
+			}
+		}
+		if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
+			reasoningBody["max_tokens"] = maxTokens
+		}
+		if exclude, ok := reasoning["exclude"].(bool); ok {
+			reasoningBody["exclude"] = exclude
 		}
 		if summary, ok := reasoning["summary"].(string); ok && summary != "" {
-			reasoningBody["summary"] = summary
+			// summary is OpenAI-specific; only send to OpenAI API endpoints
+			if isOpenAIEndpoint(p.apiBase) {
+				reasoningBody["summary"] = summary
+			}
+		}
+		if enabled, ok := reasoning["enabled"].(bool); ok {
+			reasoningBody["enabled"] = enabled
 		}
 		if len(reasoningBody) > 0 {
 			requestBody["reasoning"] = reasoningBody
 		}
 	}
 
-	applyThinkingMode(requestBody, options)
+	applyThinkingMode(requestBody, options, p.apiBase)
 
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
@@ -193,20 +207,34 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		}
 	}
 
+	// Handle reasoning config (for OpenAI o-series, OpenRouter, and compatible models)
 	if reasoning, ok := options["reasoning"].(map[string]interface{}); ok && reasoning != nil {
 		reasoningBody := map[string]interface{}{}
-		if effort, ok := reasoning["effort"].(string); ok && effort != "" {
-			reasoningBody["effort"] = effort
+		if v, ok := reasoning["effort"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				reasoningBody["effort"] = s
+			}
+		}
+		if maxTokens, ok := reasoning["max_tokens"].(int); ok && maxTokens > 0 {
+			reasoningBody["max_tokens"] = maxTokens
+		}
+		if exclude, ok := reasoning["exclude"].(bool); ok {
+			reasoningBody["exclude"] = exclude
 		}
 		if summary, ok := reasoning["summary"].(string); ok && summary != "" {
-			reasoningBody["summary"] = summary
+			if isOpenAIEndpoint(p.apiBase) {
+				reasoningBody["summary"] = summary
+			}
+		}
+		if enabled, ok := reasoning["enabled"].(bool); ok {
+			reasoningBody["enabled"] = enabled
 		}
 		if len(reasoningBody) > 0 {
 			requestBody["reasoning"] = reasoningBody
 		}
 	}
 
-	applyThinkingMode(requestBody, options)
+	applyThinkingMode(requestBody, options, p.apiBase)
 
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
@@ -245,8 +273,10 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 	var apiResponse struct {
 		Choices []struct {
 			Message struct {
-				Content          string `json:"content"`
-				ReasoningContent string `json:"reasoning_content"`
+				Content          string                        `json:"content"`
+				ReasoningContent string                        `json:"reasoning_content"`
+				Reasoning        string                        `json:"reasoning"`
+				ReasoningDetails []protocoltypes.ReasoningDetail `json:"reasoning_details"`
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -298,6 +328,8 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 	return &LLMResponse{
 		Content:          choice.Message.Content,
 		ReasoningContent: choice.Message.ReasoningContent,
+		Reasoning:        choice.Message.Reasoning,
+		ReasoningDetails: choice.Message.ReasoningDetails,
 		ToolCalls:        toolCalls,
 		FinishReason:     choice.FinishReason,
 		Usage:            apiResponse.Usage,
@@ -317,6 +349,18 @@ func normalizeModel(model, apiBase string) string {
 		return model
 	}
 	return model[idx+1:]
+}
+
+// isOpenRouterEndpoint checks if the apiBase belongs to OpenRouter.
+func isOpenRouterEndpoint(apiBase string) bool {
+	return strings.Contains(strings.ToLower(apiBase), "openrouter.ai")
+}
+
+// isOpenAIEndpoint checks if the apiBase belongs to OpenAI directly.
+func isOpenAIEndpoint(apiBase string) bool {
+	lower := strings.ToLower(apiBase)
+	return strings.Contains(lower, "api.openai.com") ||
+		strings.Contains(lower, "openai.azure.com")
 }
 
 func asInt(v interface{}) (int, bool) {
@@ -376,6 +420,7 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onRea
 				Delta struct {
 					Content          string `json:"content"`
 					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
 					ToolCalls        []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
@@ -405,6 +450,13 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onRea
 			reasoningBuf.WriteString(choice.Delta.ReasoningContent)
 			if onReasoning != nil {
 				onReasoning(choice.Delta.ReasoningContent)
+			}
+		}
+
+		if choice.Delta.Reasoning != "" {
+			reasoningBuf.WriteString(choice.Delta.Reasoning)
+			if onReasoning != nil {
+				onReasoning(choice.Delta.Reasoning)
 			}
 		}
 
@@ -473,12 +525,36 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onRea
 	}, nil
 }
 
-func applyThinkingMode(requestBody map[string]interface{}, options map[string]interface{}) {
+func applyThinkingMode(requestBody map[string]interface{}, options map[string]interface{}, apiBase string) {
 	thinkingEnabled, _ := options["thinking"].(bool)
 	if !thinkingEnabled {
 		return
 	}
 
+	// For OpenRouter, reasoning_effort belongs inside the reasoning object,
+	// not at top-level. OpenRouter ignores top-level reasoning_effort.
+	if isOpenRouterEndpoint(apiBase) {
+		// Ensure the reasoning object exists
+		if _, ok := requestBody["reasoning"]; !ok {
+			requestBody["reasoning"] = map[string]interface{}{}
+		}
+		reasoningObj := requestBody["reasoning"].(map[string]interface{})
+
+		if effort, ok := options["reasoning_effort"].(string); ok && effort != "" {
+			reasoningObj["effort"] = effort
+		} else if reasoning, ok := options["reasoning"].(map[string]interface{}); ok {
+			if effort, ok := reasoning["effort"].(string); ok && effort != "" {
+				reasoningObj["effort"] = effort
+			}
+		}
+
+		requestBody["thinking"] = map[string]interface{}{
+			"type": "enabled",
+		}
+		return
+	}
+
+	// Non-OpenRouter: keep original behavior (OpenAI direct, DeepSeek, etc.)
 	requestBody["thinking"] = map[string]interface{}{
 		"type": "enabled",
 	}

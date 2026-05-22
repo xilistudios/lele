@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
@@ -500,4 +502,464 @@ func TestNormalizeModel_UsesAPIBase(t *testing.T) {
 	if got := normalizeModel("openrouter/auto", "https://openrouter.ai/api/v1"); got != "auto" {
 		t.Fatalf("normalizeModel(openrouter/auto) = %q, want %q", got, "auto")
 	}
+}
+
+// --- Reasoning tests ---
+
+func TestProviderChat_ReasoningConfigEffort(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"effort": "high",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning in request body, got %#v", requestBody)
+	}
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning.effort = %v, want high", reasoning["effort"])
+	}
+}
+
+func TestProviderChat_ReasoningConfigMaxTokensAndExclude(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"effort":    "low",
+				"max_tokens": 2000,
+				"exclude":   true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning in request body, got %#v", requestBody)
+	}
+	if reasoning["effort"] != "low" {
+		t.Fatalf("reasoning.effort = %v, want low", reasoning["effort"])
+	}
+	if reasoning["max_tokens"] != float64(2000) { // JSON numbers unmarshal to float64
+		t.Fatalf("reasoning.max_tokens = %v, want 2000", reasoning["max_tokens"])
+	}
+	if reasoning["exclude"] != true {
+		t.Fatalf("reasoning.exclude = %v, want true", reasoning["exclude"])
+	}
+}
+
+func TestProviderChat_ReasoningConfigEnabled(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"enabled": true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning in request body, got %#v", requestBody)
+	}
+	if reasoning["enabled"] != true {
+		t.Fatalf("reasoning.enabled = %v, want true", reasoning["enabled"])
+	}
+}
+
+func TestProviderChat_ReasoningSummaryOnlySentToOpenAI(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	// Use a mock transport that routes OpenRouter URLs to our test server
+	transport := &mockTransport{
+		fallback:    server.Client().Transport,
+		redirectTo:  server.URL,
+		triggerHost: "openrouter.ai",
+	}
+	p := &Provider{
+		apiKey:  "key",
+		apiBase: "https://openrouter.ai/api/v1",
+		httpClient: &http.Client{
+			Timeout:   120 * time.Second,
+			Transport: transport,
+		},
+	}
+
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"effort":  "medium",
+				"summary": "concise",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning in request body")
+	}
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("reasoning.effort = %v, want medium", reasoning["effort"])
+	}
+	if _, hasSummary := reasoning["summary"]; hasSummary {
+		t.Fatalf("summary should NOT be sent to OpenRouter, but was: %v", reasoning["summary"])
+	}
+}
+
+func TestProviderChat_ReasoningSummarySentToOpenAI(t *testing.T) {
+	var requestBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message":       map[string]interface{}{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	// OpenAI endpoint: summary SHOULD be included
+	p := NewProvider("key", server.URL, "") // using test server, not OpenAI
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"o1",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"effort":  "high",
+				"summary": "detailed",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	// The test server is NOT OpenAI, so summary should NOT be included
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning in request body")
+	}
+	if _, hasSummary := reasoning["summary"]; hasSummary {
+		t.Fatalf("summary should NOT be sent to non-OpenAI endpoints, but was: %v", reasoning["summary"])
+	}
+}
+
+func TestProviderChat_ReasoningParseResponseWithBothReasoningFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content":           "The answer is 42",
+						"reasoning":         "Let me think step by step...",
+						"reasoning_content": "Step 1: analyze...",
+						"reasoning_details": []map[string]interface{}{
+							{"type": "text", "text": "detailed reasoning trace"},
+						},
+					},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.Chat(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil, "gpt-4o", nil)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if out.Content != "The answer is 42" {
+		t.Fatalf("Content = %q, want 'The answer is 42'", out.Content)
+	}
+	if out.Reasoning != "Let me think step by step..." {
+		t.Fatalf("Reasoning = %q, want 'Let me think step by step...'", out.Reasoning)
+	}
+	if out.ReasoningContent != "Step 1: analyze..." {
+		t.Fatalf("ReasoningContent = %q, want 'Step 1: analyze...'", out.ReasoningContent)
+	}
+	if len(out.ReasoningDetails) != 1 {
+		t.Fatalf("len(ReasoningDetails) = %d, want 1", len(out.ReasoningDetails))
+	}
+	if out.ReasoningDetails[0].Text != "detailed reasoning trace" {
+		t.Fatalf("ReasoningDetails[0].Text = %q", out.ReasoningDetails[0].Text)
+	}
+}
+
+func TestProviderChatStream_ReasoningInSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		// Simulate OpenRouter-style reasoning in delta (reasoning field, not reasoning_content)
+		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"reasoning\":\"Let me think\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"reasoning\":\" step by step\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"content\":\"Answer is 42\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data:[DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	var reasoningChunks []string
+	var contentChunks []string
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		nil,
+		func(chunk string, done bool) {
+			if chunk != "" {
+				contentChunks = append(contentChunks, chunk)
+			}
+		},
+		func(reasoningChunk string) {
+			if reasoningChunk != "" {
+				reasoningChunks = append(reasoningChunks, reasoningChunk)
+			}
+		},
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+	if out.Content != "Answer is 42" {
+		t.Fatalf("Content = %q, want 'Answer is 42'", out.Content)
+	}
+	if out.ReasoningContent != "Let me think step by step" {
+		t.Fatalf("ReasoningContent = %q, want 'Let me think step by step'", out.ReasoningContent)
+	}
+	if len(reasoningChunks) != 2 || reasoningChunks[0] != "Let me think" || reasoningChunks[1] != " step by step" {
+		t.Fatalf("reasoningChunks = %#v, want ['Let me think', ' step by step']", reasoningChunks)
+	}
+	if len(contentChunks) != 1 || contentChunks[0] != "Answer is 42" {
+		t.Fatalf("contentChunks = %#v", contentChunks)
+	}
+}
+
+func TestApplyThinkingMode_OpenRouter(t *testing.T) {
+	requestBody := map[string]interface{}{}
+	options := map[string]interface{}{
+		"thinking":         true,
+		"reasoning_effort": "high",
+	}
+	apiBase := "https://openrouter.ai/api/v1"
+
+	applyThinkingMode(requestBody, options, apiBase)
+
+	// Should have thinking.type = enabled
+	thinking, ok := requestBody["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want {type: enabled}", requestBody["thinking"])
+	}
+	// reasoning_effort should be inside reasoning, not top-level
+	if _, ok := requestBody["reasoning_effort"]; ok {
+		t.Fatalf("reasoning_effort should NOT be at top-level for OpenRouter")
+	}
+	reasoning, ok := requestBody["reasoning"].(map[string]interface{})
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("reasoning = %#v, want {effort: high}", requestBody["reasoning"])
+	}
+}
+
+func TestApplyThinkingMode_NonOpenRouter(t *testing.T) {
+	requestBody := map[string]interface{}{}
+	options := map[string]interface{}{
+		"thinking":         true,
+		"reasoning_effort": "medium",
+	}
+	apiBase := "https://api.deepseek.com/v1"
+
+	applyThinkingMode(requestBody, options, apiBase)
+
+	// Non-OpenRouter: reasoning_effort at top-level (classic behavior)
+	if requestBody["reasoning_effort"] != "medium" {
+		t.Fatalf("reasoning_effort = %v, want medium", requestBody["reasoning_effort"])
+	}
+	// Should also have thinking
+	thinking, ok := requestBody["thinking"].(map[string]interface{})
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want {type: enabled}", requestBody["thinking"])
+	}
+}
+
+func TestIsOpenRouterEndpoint(t *testing.T) {
+	tests := []struct {
+		apiBase string
+		want    bool
+	}{
+		{"https://openrouter.ai/api/v1", true},
+		{"https://OPENROUTER.AI/api/v1", true},
+		{"http://openrouter.ai/anything", true},
+		{"https://api.openai.com/v1", false},
+		{"https://api.deepseek.com/v1", false},
+		{"https://api.moonshot.cn/v1", false},
+	}
+	for _, tt := range tests {
+		got := isOpenRouterEndpoint(tt.apiBase)
+		if got != tt.want {
+			t.Errorf("isOpenRouterEndpoint(%q) = %v, want %v", tt.apiBase, got, tt.want)
+		}
+	}
+}
+
+func TestIsOpenAIEndpoint(t *testing.T) {
+	tests := []struct {
+		apiBase string
+		want    bool
+	}{
+		{"https://api.openai.com/v1", true},
+		{"https://openai.azure.com/openai/deployments/gpt4", true},
+		{"https://openrouter.ai/api/v1", false},
+		{"https://api.deepseek.com/v1", false},
+	}
+	for _, tt := range tests {
+		got := isOpenAIEndpoint(tt.apiBase)
+		if got != tt.want {
+			t.Errorf("isOpenAIEndpoint(%q) = %v, want %v", tt.apiBase, got, tt.want)
+		}
+	}
+}
+
+// mockTransport redirects requests for a specific host to a test server.
+// This allows testing host-based logic (like isOpenRouterEndpoint) without making
+// real network requests.
+type mockTransport struct {
+	fallback    http.RoundTripper
+	redirectTo  string
+	triggerHost string
+}
+
+func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Host, m.triggerHost) {
+		// Redirect to test server but preserve the path
+		u, _ := url.Parse(m.redirectTo)
+		req.URL.Scheme = u.Scheme
+		req.URL.Host = u.Host
+		req.Host = u.Host
+	}
+	if m.fallback != nil {
+		return m.fallback.RoundTrip(req)
+	}
+	return http.DefaultTransport.RoundTrip(req)
 }
