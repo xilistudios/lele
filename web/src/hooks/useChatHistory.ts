@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
+import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
-import { toChatMessages } from './useMessages'
 
 const POLLING_INTERVAL = 5000
 const DEFAULT_LIMIT = 50

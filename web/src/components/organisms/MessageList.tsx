@@ -96,8 +96,10 @@ export function MessageList() {
       // Only auto-scroll if it's a new user message, streaming message,
       // or a complete assistant response
       if (lastMessage) {
-        const shouldScroll = lastMessage.role === 'user' || lastMessage.streaming
-          || (lastMessage.role === 'assistant' && !lastMessage.streaming)
+        const shouldScroll =
+          lastMessage.role === 'user' ||
+          lastMessage.streaming ||
+          (lastMessage.role === 'assistant' && !lastMessage.streaming)
         if (shouldScroll && isNearBottom()) {
           scrollToBottomSmooth()
         }

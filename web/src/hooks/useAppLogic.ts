@@ -25,7 +25,9 @@ type DiagnosticsState = {
   agentInfo: AgentDetails | null
 }
 
-type SendFn = (event: string, data: Record<string, unknown>) => void
+import type { ClientCommand } from '../services/ws/events'
+
+type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
 
 export function useAppLogic(
   api: ApiClient,

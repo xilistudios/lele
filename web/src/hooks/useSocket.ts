@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClientEvent } from '../lib/types'
 import { LeleSocket } from '../services/ws/client'
+import type { ClientCommand } from '../services/ws/events'
 
 export type SocketStatus = 'disconnected' | 'connecting' | 'connected'
 
@@ -61,8 +62,8 @@ export function useSocket(
     }
   }, [apiUrl, token])
 
-  const send = useCallback((event: string, data: Record<string, unknown>) => {
-    socketRef.current?.send(event as 'subscribe', data as never)
+  const send = useCallback((event: ClientCommand['event'], data: Record<string, unknown>) => {
+    socketRef.current?.send(event, data as never)
   }, [])
 
   const close = useCallback(() => {

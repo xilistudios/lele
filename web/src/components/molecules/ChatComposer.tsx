@@ -1,4 +1,11 @@
-import { type ChangeEvent, type FormEvent, type KeyboardEvent, useRef, useState } from 'react'
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
@@ -57,39 +64,38 @@ export function ChatComposer() {
   const selectedAgentId = currentAgent?.id ?? ''
 
   // Check if the currently selected model has reasoning enabled
-  // Normalize model names for comparison (with/without provider prefix)
-  const normalizeModelName = (modelName: string): string => {
-    const parts = modelName.split('/')
-    return parts.length > 1 ? parts[parts.length - 1] : modelName
-  }
-  const normalizedSelectedModel = normalizeModelName(selectedModel)
+  const thinkingEnabled = useMemo(() => {
+    if (!selectedModel) return false
 
-  const findModelReasoning = (): boolean => {
-    // First check grouped models (they have the full provider/model format)
+    // Normalize model names for comparison (with/without provider prefix)
+    const normalizeModelName = (modelName: string): string => {
+      const parts = modelName.split('/')
+      return parts.length > 1 ? parts[parts.length - 1] : modelName
+    }
+    const normalizedSelectedModel = normalizeModelName(selectedModel)
+
+    // Build a lookup map for O(1) access
+    const modelReasoningMap = new Map<string, boolean>()
+
+    // Check grouped models
     for (const group of groupedModels ?? []) {
       for (const model of group.options) {
-        const normalizedValue = normalizeModelName(model.value)
-        if (
-          (model.value === selectedModel || normalizedValue === normalizedSelectedModel) &&
-          model.reasoning?.enable
-        ) {
-          return true
-        }
+        modelReasoningMap.set(model.value, model.reasoning?.enable ?? false)
+        modelReasoningMap.set(normalizeModelName(model.value), model.reasoning?.enable ?? false)
       }
     }
-    // Then check flat available models
+    // Check flat available models
     for (const model of availableModels ?? []) {
-      const normalizedValue = normalizeModelName(model.value)
-      if (
-        (model.value === selectedModel || normalizedValue === normalizedSelectedModel) &&
-        model.reasoning?.enable
-      ) {
-        return true
-      }
+      modelReasoningMap.set(model.value, model.reasoning?.enable ?? false)
+      modelReasoningMap.set(normalizeModelName(model.value), model.reasoning?.enable ?? false)
     }
-    return false
-  }
-  const thinkingEnabled = findModelReasoning()
+
+    return (
+      modelReasoningMap.get(selectedModel) ??
+      modelReasoningMap.get(normalizedSelectedModel) ??
+      false
+    )
+  }, [selectedModel, groupedModels, availableModels])
   const thinkOptions = [
     { value: 'default', label: t('chat.thinkingDefault') },
     { value: 'off', label: t('chat.thinkingOff') },

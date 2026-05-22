@@ -2,16 +2,15 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import {
-  buildToolCallMap,
   createAssistantMessage,
   createDeterministicToolMessageId,
   createOptimisticUserId,
   createToolMessage,
   createToolMessageId,
   createUserMessage,
-  formatToolCallArgs,
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
+  toChatMessages,
 } from '../lib/chatMessageBuilder'
 import { wsDebug } from '../lib/debug'
 import type {
@@ -27,7 +26,7 @@ import {
   updateChatHistoryFromRaw,
 } from './useChatHistory'
 
-export { parseAttachmentsFromContent, parseSubagentSessionKey }
+export { parseAttachmentsFromContent, parseSubagentSessionKey, toChatMessages }
 
 // Interval between characters when animating streaming text in the UI.
 // 12ms ≈ 83 updates/second — chosen to feel fluid without overwhelming the
@@ -39,102 +38,6 @@ type StreamClientEvent = {
   event: string
   data: unknown
   transport?: 'sse'
-}
-
-export const toChatMessages = (
-  history: Array<{
-    id: string
-    role: 'user' | 'assistant' | 'tool'
-    content: string
-    reasoning_content?: string
-    tool_calls?: HistoryToolCall[]
-    tool_call_id?: string
-    tool_name?: string
-  }>,
-  sessionKey: string,
-): ChatMessage[] => {
-  const toolCallMap = buildToolCallMap(history)
-
-  return history.flatMap((message) => {
-    let messageContent = message.content
-    let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
-
-    if (message.role === 'user') {
-      const parsed = parseAttachmentsFromContent(messageContent)
-      messageContent = parsed.content
-      if (parsed.attachments.length > 0) {
-        parsedAttachments = parsed.attachments
-      }
-    }
-
-    if (message.role === 'user') {
-      return [
-        createUserMessage({
-          id: message.id,
-          sessionKey,
-          content: messageContent,
-          attachments: parsedAttachments,
-        }),
-      ]
-    }
-
-    if (message.role === 'assistant') {
-      const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
-      const shouldAddAssistant = (message.content && message.content !== '') || !hasToolCalls
-      if (shouldAddAssistant) {
-        return [
-          createAssistantMessage({
-            id: message.id,
-            sessionKey,
-            content: messageContent,
-            reasoningContent: message.reasoning_content,
-            streaming: false,
-            attachments: parsedAttachments,
-          }),
-        ]
-      }
-      return []
-    }
-
-    if (message.role === 'tool') {
-      // Approval messages should render as simple text, not tool cards
-      if (message.tool_call_id?.startsWith('approval:')) {
-        return [
-          {
-            id: message.id,
-            role: 'assistant' as const,
-            content: message.content,
-            streaming: false,
-            createdAt: new Date().toISOString(),
-            sessionKey,
-          },
-        ]
-      }
-
-      const matchedToolCall = message.tool_call_id
-        ? toolCallMap.get(message.tool_call_id)
-        : undefined
-      const toolName = matchedToolCall?.name ?? message.tool_name ?? message.tool_call_id ?? 'tool'
-      const toolArgs = matchedToolCall ? formatToolCallArgs(matchedToolCall) : ''
-      const subagentSessionKey =
-        toolName === 'spawn' ? parseSubagentSessionKey(message.content) : undefined
-
-      return [
-        createToolMessage({
-          id: message.id,
-          sessionKey,
-          toolName,
-          toolArgs,
-          toolResult: message.content,
-          toolStatus: 'completed',
-          toolCallId: message.tool_call_id,
-          subagentSessionKey,
-        }),
-      ]
-    }
-
-    return []
-  })
 }
 
 export function useMessages(

@@ -4,9 +4,9 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import './test/i18n'
-import { ThemeProvider } from './contexts/ThemeContext'
 import type { ReactElement } from 'react'
 import App from './App'
+import { ThemeProvider } from './contexts/ThemeContext'
 import { queryClient } from './lib/queryClient'
 
 // Helper to render with required providers
@@ -448,7 +448,10 @@ describe('App', () => {
           jsonResponse({ agent_id: 'main', model: 'gpt-4', models: ['gpt-4'] }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2') || url.includes('/api/v1/chat/sessions/native:client-1:2')) {
+      if (
+        url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A2') ||
+        url.includes('/api/v1/chat/sessions/native:client-1:2')
+      ) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:2',
@@ -457,7 +460,10 @@ describe('App', () => {
           }),
         )
       }
-      if (url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1') || url.includes('/api/v1/chat/sessions/native:client-1:1')) {
+      if (
+        url.includes('/api/v1/chat/sessions/native%3Aclient-1%3A1') ||
+        url.includes('/api/v1/chat/sessions/native:client-1:1')
+      ) {
         return Promise.resolve(
           jsonResponse({
             session_key: 'native:client-1:1',
@@ -1273,9 +1279,7 @@ describe('Auto-pairing', () => {
         return Promise.reject(new Error('No auto-pair in this test'))
       }
       if (url.endsWith('/api/v1/auth/refresh')) {
-        return Promise.resolve(
-          new Response(null, { status: 401 }),
-        )
+        return Promise.resolve(new Response(null, { status: 401 }))
       }
       return Promise.resolve(jsonResponse({}))
     })
