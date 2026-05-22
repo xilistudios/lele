@@ -369,6 +369,13 @@ export function useMessages(
             )
           } catch (streamError) {
             activeStreamControllersRef.current.delete(controller)
+            // Clean up the SSE message ID so WebSocket events for this
+            // message aren't permanently blocked. The SSE stream may have
+            // registered the ID via message.ack but failed before onDone
+            // could clean it up, leaving WebSocket events silently dropped.
+            if (streamMessageId) {
+              activeSSEMessageIdsRef.current.delete(streamMessageId)
+            }
             if (controller.signal.aborted) {
               throw streamError
             }
@@ -562,13 +569,15 @@ export function useMessages(
             queryKey: chatHistoryQueryKey(historySessionKey),
           })
           onSessionUpdated?.()
-          // Clean up streaming messages for this session now that history is confirmed
+          // Clean up only transient UI elements from streaming state.
+          // Keep tool messages and completed assistants — mergeMessages()
+          // in useChatHistory will naturally deduplicate them when the
+          // HTTP poll delivers the canonical data. Removing them here
+          // causes a visible flicker while waiting for the poll refetch.
           if (historySessionKey === currentSessionKeyRef.current) {
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
-                if (m.role === 'tool') return false
-                if (m.role === 'assistant' && !m.streaming) return false
                 if (m.id === '__processing_placeholder__') return false
                 if (m.role === 'user' && m.optimistic) return false
                 return true
