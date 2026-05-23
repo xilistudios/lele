@@ -408,10 +408,8 @@ export function useAppLogic(
     if (!sessionKey) return
 
     if (chatHistory.processing) {
-      // Agent is processing - ensure session is tracked in processingSessions
-      // This covers the case where sendMessage() optimistically added the session
-      // but polling hadn't yet confirmed processing=true, or the session was
-      // prematurely removed by an intermediate event.
+      // Agent is processing - ensure session is tracked in processingSessions.
+      // This is a safety net for when message.ack hasn't fired yet (e.g., reconnect).
       if (!prevProcessingRef.current) {
         messagesHook.setProcessingSessions((prev: Set<string>) => {
           if (!prev.has(sessionKey)) {
@@ -422,39 +420,28 @@ export function useAppLogic(
           return prev
         })
       }
-    } else {
-      // Agent is NOT processing - remove from processingSessions.
-      // This handles three cases:
-      //   1. Normal transition: processing→done (prevProcessing was true)
-      //   2. Fast finish: agent finished before first poll saw processing=true
-      //      (session was added by sendMessage() but polling never saw true)
-      //   3. Stale state cleanup after reconnect
-      //
-      // IMPORTANT: Do NOT call clearStreaming() here. The HTTP poll may
-      // transiently report processing=false during an active SSE stream
-      // (race between IsSessionProcessing check and agent state).
-      // Aborting the SSE stream mid-flight would leave the message incomplete.
-      // Instead, let message.complete and history.updated events handle
-      // the natural cleanup of streaming state.
-      messagesHook.setProcessingSessions((prev: Set<string>) => {
-        if (prev.has(sessionKey)) {
-          const next = new Set(prev)
-          next.delete(sessionKey)
-          return next
-        }
-        return prev
-      })
     }
+    // IMPORTANT: Do NOT remove from processingSessions when chatHistory.processing
+    // becomes false. The HTTP poll may transiently report processing=false during
+    // an active SSE stream (race between IsSessionProcessing check and agent state).
+    // message.complete and cancel.ack WebSocket events are the authoritative
+    // signals for when processing truly ends.
 
     prevProcessingRef.current = chatHistory.processing
   }, [chatHistory.processing, sessionsHook.currentSessionKey])
 
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
+  const processingSessions = messagesHook.processingSessions
   // isProcessing covers both active SSE streaming and agent thinking/tool-calls.
   // It drives the loading indicator (dots) and scroll-pin behavior in MessageList.
+  // Uses processingSessions (WebSocket-driven) instead of chatHistory.processing
+  // (HTTP poll) because the HTTP poll can transiently report false during active
+  // SSE streams, causing the loading dots and cancel button to disappear prematurely.
   const isProcessing =
-    messagesHook.streamingMessages.some((m) => m.streaming) || chatHistory.processing
-  const processingSessions = messagesHook.processingSessions
+    messagesHook.streamingMessages.some((m) => m.streaming) ||
+    (sessionsHook.currentSessionKey
+      ? processingSessions.has(sessionsHook.currentSessionKey)
+      : false)
 
   return {
     error,

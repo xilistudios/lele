@@ -330,6 +330,18 @@ export function useMessages(
             completedSessionKey,
           })
 
+          // Always remove the completed session from processingSessions.
+          // This ensures the sidebar spinner disappears immediately when the
+          // agent finishes, even for background sessions or when the HTTP poll
+          // hasn't caught up yet.
+          if (completedSessionKey) {
+            setProcessingSessions((prev) => {
+              const next = new Set(prev)
+              next.delete(completedSessionKey)
+              return next
+            })
+          }
+
           if (completedSessionKey && completedSessionKey !== currentSessionKeyRef.current) {
             console.warn('[WS] message.complete for different session, skipping streaming update')
             setPendingAttachments([])
@@ -607,8 +619,20 @@ export function useMessages(
         case 'subscribe.ack': {
           const ackSessionKey = (data.session_key as string) ?? ''
           const ackProcessing = data.processing === true
-          if (ackProcessing && ackSessionKey) {
-            setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
+          if (ackSessionKey) {
+            setProcessingSessions((prev) => {
+              if (ackProcessing && !prev.has(ackSessionKey)) {
+                const next = new Set(prev)
+                next.add(ackSessionKey)
+                return next
+              }
+              if (!ackProcessing && prev.has(ackSessionKey)) {
+                const next = new Set(prev)
+                next.delete(ackSessionKey)
+                return next
+              }
+              return prev
+            })
           }
           break
         }
@@ -650,6 +674,12 @@ export function useMessages(
               return m
             }),
           )
+          setProcessingSessions((prev) => {
+            const next = new Set(prev)
+            next.delete(errorSessionKey)
+            return next
+          })
+          processingSessionKeyRef.current = null
           break
         }
         default:
