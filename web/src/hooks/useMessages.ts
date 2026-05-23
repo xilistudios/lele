@@ -835,6 +835,15 @@ export function useMessages(
     processingSessionKeyRef.current = null
   }, [abortActiveStreams, clearAllStreamQueues])
 
+  // Remove the __processing_placeholder__ for a given session.
+  // Used when polling detects the agent has finished processing
+  // but the WebSocket events (message.complete) may have been missed.
+  const clearProcessingPlaceholder = useCallback((sessionKey: string) => {
+    setStreamingMessages((current) =>
+      current.filter((m) => !(m.id === '__processing_placeholder__' && m.sessionKey === sessionKey)),
+    )
+  }, [])
+
   useEffect(() => {
     return () => {
       abortActiveStreams()
@@ -860,5 +869,6 @@ export function useMessages(
     setPendingAttachments,
     clearStreaming,
     clearAll,
+    clearProcessingPlaceholder,
   }
 }

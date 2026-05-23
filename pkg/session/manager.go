@@ -21,9 +21,9 @@ type Session struct {
 	Name          string              `json:"name,omitempty"`
 	Messages      []providers.Message `json:"messages"`
 	Summary       string              `json:"summary,omitempty"`
-	VerboseMode   bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
-	VerboseLevel  string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
-	Model         string              `json:"model,omitempty"`         // Session-specific model override
+	VerboseMode   bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
+	VerboseLevel  string              `json:"verbose_level,omitempty"`  // "off", "basic", or "full"
+	Model         string              `json:"model,omitempty"`          // Session-specific model override
 	ThinkingLevel string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
 	Created       time.Time           `json:"created"`
 	Updated       time.Time           `json:"updated"`

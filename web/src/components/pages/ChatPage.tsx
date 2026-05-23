@@ -25,7 +25,7 @@ export function ChatPage() {
           {error && <ErrorBanner message={error} />}
           {diagnosticsOpen && <DiagnosticsPanel />}
 
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="flex-1 overflow-hidden px-6 py-4">
             <MessageList />
           </div>
 

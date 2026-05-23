@@ -461,7 +461,7 @@ pre,
 }
 
 .animate-message-enter {
-  animation: fadeIn 0.3s ease-out, slideUp 0.4s ease-out;
+  animation: fadeIn 0.3s ease-out both, slideUp 0.35s ease-out both;
 }
 
 @layer utilities {

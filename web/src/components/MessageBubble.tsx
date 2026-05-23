@@ -57,7 +57,19 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
-  const [animate, setAnimate] = useState(false)
+  const [animate, setAnimate] = useState(
+    // Start animated immediately unless it's a streaming placeholder (no content yet).
+    // Streaming messages with empty content show loading dots — animating the wrapper
+    // would delay the dots visibility by the fade-in duration.
+    !(message.streaming && message.content === ''),
+  )
+
+  // When a streaming message receives its first content, trigger the animation
+  useEffect(() => {
+    if (message.streaming && message.content !== '' && !animate) {
+      setAnimate(true)
+    }
+  }, [message.streaming, message.content, animate])
   const [thinkingOpen, setThinkingOpen] = useState(message.streaming && !!message.reasoningContent)
 
   // Auto-open thinking when streaming starts
@@ -66,12 +78,6 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
       setThinkingOpen(true)
     }
   }, [message.streaming, message.reasoningContent])
-
-  useEffect(() => {
-    if (!isUser && !isTool && message.content) {
-      setAnimate(true)
-    }
-  }, [isUser, isTool, message.content])
 
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
@@ -87,7 +93,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const subagentSessionKey = message.subagentSessionKey
 
     return (
-      <div className="py-1.5">
+      <div className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}>
         <ToolCallDisplay
           toolName={message.toolName}
           toolArgs={message.toolArgs}
@@ -107,7 +113,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
 
     return (
-      <div className="flex justify-end py-1">
+      <div className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}>
         <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-muted px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {imageAttachments.length > 0 ? (

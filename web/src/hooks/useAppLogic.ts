@@ -451,6 +451,13 @@ export function useAppLogic(
       // Aborting the SSE stream mid-flight would leave the message incomplete.
       // Instead, let message.complete and history.updated events handle
       // the natural cleanup of streaming state.
+      //
+      // However, the __processing_placeholder__ (loading dots) MUST be
+      // cleaned up here because it can be left behind when:
+      // - WebSocket reconnection creates it via 'welcome' event
+      // - message.complete/history.updated fire before the placeholder exists
+      // - Polling creates it but no event removes it
+      messagesHook.clearProcessingPlaceholder(sessionKey)
       messagesHook.setProcessingSessions((prev: Set<string>) => {
         if (prev.has(sessionKey)) {
           const next = new Set(prev)
