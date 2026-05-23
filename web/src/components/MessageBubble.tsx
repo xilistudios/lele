@@ -13,6 +13,30 @@ import { ToolCallDisplay } from './molecules/ToolCallDisplay'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
+// Track recently animated message content to prevent animation replay
+// when the React key changes during streaming→base transition (mergeMessages).
+// The module-level Map survives component remounts from key changes.
+const ANIMATION_COOLDOWN_MS = 3000
+const recentlyAnimated = new Map<string, number>()
+const MAX_TRACKED_ANIMATIONS = 200
+
+function hasRecentlyAnimated(role: string, content: string): boolean {
+  const key = `${role}:${content.slice(0, 200)}`
+  const ts = recentlyAnimated.get(key)
+  if (ts && Date.now() - ts < ANIMATION_COOLDOWN_MS) {
+    return true
+  }
+  recentlyAnimated.set(key, Date.now())
+  // Prune old entries to prevent memory leak
+  if (recentlyAnimated.size > MAX_TRACKED_ANIMATIONS) {
+    const cutoff = Date.now() - ANIMATION_COOLDOWN_MS * 2
+    for (const [k, v] of recentlyAnimated) {
+      if (v < cutoff) recentlyAnimated.delete(k)
+    }
+  }
+  return false
+}
+
 function isImageByExtension(name: string): boolean {
   const ext = name.toLowerCase().split('.').pop()
   return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
@@ -58,15 +82,18 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
   const [animate, setAnimate] = useState(
-    // Start animated immediately unless it's a streaming placeholder (no content yet).
-    // Streaming messages with empty content show loading dots — animating the wrapper
-    // would delay the dots visibility by the fade-in duration.
-    !(message.streaming && message.content === ''),
+    // Skip animation if this exact content was animated recently
+    // (prevents flicker when React key changes during streaming→base transition).
+    // Also skip for streaming placeholders (empty content shows loading dots).
+    !(message.streaming && message.content === '') &&
+      !hasRecentlyAnimated(message.role, message.content),
   )
 
   // When a streaming message receives its first content, trigger the animation
+  // and mark the content as recently animated to prevent replay on key change
   useEffect(() => {
     if (message.streaming && message.content !== '' && !animate) {
+      hasRecentlyAnimated(message.role, message.content)
       setAnimate(true)
     }
   }, [message.streaming, message.content, animate])

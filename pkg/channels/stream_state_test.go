@@ -213,3 +213,97 @@ func TestStreamStateManager_RemoveStream(t *testing.T) {
 		t.Error("expected disk file to be removed")
 	}
 }
+
+func TestStreamStateManager_WasStreamed(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewStreamStateManager(dir)
+
+	// Empty stream (started but no content) → not streamed
+	mgr.StartStream("sess", "empty-msg")
+	if mgr.WasStreamed("sess", "empty-msg") {
+		t.Error("empty stream should not be considered streamed")
+	}
+
+	// Stream with content → streamed
+	mgr.AppendChunk("sess", "content-msg", "hello")
+	if !mgr.WasStreamed("sess", "content-msg") {
+		t.Error("stream with content should be considered streamed")
+	}
+
+	// Stream with only reasoning → streamed
+	mgr.AppendReasoning("sess", "reasoning-msg", "thinking...")
+	if !mgr.WasStreamed("sess", "reasoning-msg") {
+		t.Error("stream with reasoning should be considered streamed")
+	}
+
+	// Non-existent stream → not streamed
+	if mgr.WasStreamed("sess", "nonexistent") {
+		t.Error("non-existent stream should not be considered streamed")
+	}
+}
+
+func TestStreamStateManager_WasStreamedPrefix(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewStreamStateManager(dir)
+
+	sessionKey := "prefix-session"
+	baseMsgID := "msg-456"
+
+	// Base message — no content yet
+	if mgr.WasStreamedPrefix(sessionKey, baseMsgID) {
+		t.Error("no streams exist yet, should return false")
+	}
+
+	// Stream iteration 1 (exact match)
+	mgr.AppendChunk(sessionKey, baseMsgID, "iteration 1 content")
+	if !mgr.WasStreamedPrefix(sessionKey, baseMsgID) {
+		t.Error("exact match with content should return true")
+	}
+
+	// Stream iteration 2 (prefixed: msg-456-2)
+	iter2ID := baseMsgID + "-2"
+	mgr.AppendChunk(sessionKey, iter2ID, "iteration 2 content")
+
+	// WasStreamedPrefix for baseMsgID should find iteration 2 via prefix
+	if !mgr.WasStreamedPrefix(sessionKey, baseMsgID) {
+		t.Error("prefix match for iteration 2 should return true")
+	}
+
+	// But WasStreamed (exact) for iteration 2 should also work
+	if !mgr.WasStreamed(sessionKey, iter2ID) {
+		t.Error("exact match for iteration 2 should return true")
+	}
+
+	// Different base message — no streams
+	if mgr.WasStreamedPrefix(sessionKey, "other-msg") {
+		t.Error("unrelated message should not match")
+	}
+
+	// Prefix with only reasoning content
+	mgr.AppendReasoning(sessionKey, baseMsgID+"-3", "thinking iter 3")
+	if !mgr.WasStreamedPrefix(sessionKey, baseMsgID) {
+		t.Error("prefix match with reasoning content should return true")
+	}
+}
+
+func TestStreamStateManager_WasStreamedPrefix_DiskPersistence(t *testing.T) {
+	dir := t.TempDir()
+	mgr := NewStreamStateManager(dir)
+
+	sessionKey := "disk-prefix"
+	baseMsgID := "msg-789"
+
+	// Create iteration streams on disk
+	mgr.AppendChunk(sessionKey, baseMsgID+"-2", "disk iteration 2")
+
+	// Simulate a new manager (restart) — iteration stream should be on disk
+	mgr2 := NewStreamStateManager(dir)
+	if !mgr2.WasStreamedPrefix(sessionKey, baseMsgID) {
+		t.Error("prefix match should survive disk roundtrip")
+	}
+
+	// Exact match on disk
+	if !mgr2.WasStreamed(sessionKey, baseMsgID+"-2") {
+		t.Error("exact match should survive disk roundtrip")
+	}
+}

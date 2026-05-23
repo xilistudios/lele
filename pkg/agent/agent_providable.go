@@ -480,6 +480,16 @@ func (ap *agentProvidableImpl) GetUpdated(sessionKey string) time.Time {
 	return agent.Sessions.GetUpdated(sessionKey)
 }
 
+// GetCreated returns the creation timestamp of a session.
+func (ap *agentProvidableImpl) GetCreated(sessionKey string) time.Time {
+	sessionKey = ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(sessionKey)
+	if agent == nil {
+		return time.Time{}
+	}
+	return agent.Sessions.GetCreated(sessionKey)
+}
+
 // SetName sets the name of a session.
 func (ap *agentProvidableImpl) SetName(sessionKey string, name string) error {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)

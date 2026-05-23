@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,71 @@ func (m *StreamStateManager) GetStream(sessionKey, messageID string) *StreamMess
 		return nil
 	}
 	return state
+}
+
+// WasStreamed returns true if a stream with this exact key exists and has
+// accumulated content, indicating that the message content was already delivered
+// via streaming chunks. Used to prevent duplicate message.stream events.
+func (m *StreamStateManager) WasStreamed(sessionKey, messageID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	key := stateKey(sessionKey, messageID)
+	state, ok := m.states[key]
+	if !ok {
+		// Try loading from disk
+		state = m.loadFromDisk(key)
+	}
+	return state != nil && (state.Content != "" || state.ReasoningContent != "")
+}
+
+// WasStreamedPrefix returns true if any stream key with this sessionKey and
+// messageID (or messageID suffixed with "-N" for multi-iteration LLM runs)
+// has accumulated content. This prevents duplicate message.stream events for
+// the final outbound message after a multi-iteration run where each iteration
+// streamed under a distinct iteration messageID (e.g., "msg-123-2").
+func (m *StreamStateManager) WasStreamedPrefix(sessionKey, messageID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Check exact match first
+	exactKey := stateKey(sessionKey, messageID)
+	if state, ok := m.states[exactKey]; ok && (state.Content != "" || state.ReasoningContent != "") {
+		return true
+	}
+	if state := m.loadFromDisk(exactKey); state != nil && (state.Content != "" || state.ReasoningContent != "") {
+		return true
+	}
+
+	// Check iteration-suffixed keys: "sessionKey/messageID-2", "sessionKey/messageID-3", etc.
+	prefix := exactKey + "-"
+	for key, state := range m.states {
+		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+			if state.Content != "" || state.ReasoningContent != "" {
+				return true
+			}
+		}
+	}
+
+	// Also check disk for iteration-suffixed files in the session's directory
+	if m.storeDir != "" {
+		sessionDir := filepath.Join(m.storeDir, sessionKey)
+		entries, err := os.ReadDir(sessionDir)
+		if err == nil {
+			diskPrefix := messageID + "-"
+			for _, entry := range entries {
+				name := entry.Name()
+				if !entry.IsDir() && strings.HasPrefix(name, diskPrefix) && filepath.Ext(name) == ".json" {
+					state := m.loadFromDisk(stateKey(sessionKey, strings.TrimSuffix(name, ".json")))
+					if state != nil && (state.Content != "" || state.ReasoningContent != "") {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // ListActiveStreams returns all non-done streams for a given session

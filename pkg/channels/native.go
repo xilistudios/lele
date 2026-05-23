@@ -485,6 +485,35 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		messageID = uuid.New().String()
 	}
 
+	// Skip duplicate message.stream if content was already delivered via
+	// streaming (the provider's ChatStream already sent chunks via onChunk).
+	// This prevents the frontend from receiving two message.stream events
+	// with Done=true, which causes visual flickering.
+	//
+	// WasStreamedPrefix checks both the exact messageID and iteration-suffixed
+	// variants (e.g., "msg-123-2", "msg-123-3") since multi-iteration LLM runs
+	// stream each response under a distinct iteration messageID.
+	alreadyStreamed := n.streamState != nil && n.streamState.WasStreamedPrefix(sessionKey, messageID)
+
+	if alreadyStreamed {
+		// Content was already delivered via streaming chunks.
+		// Only send message.complete + history.updated — these signal the
+		// frontend to finalize the message and refetch canonical history.
+		// Do NOT re-emit message.stream regardless of attachments.
+		n.emitNativeEvent(sessionKey, "message.complete", WSMessageCompletePayload{
+			MessageID:   messageID,
+			SessionKey:  sessionKey,
+			Content:     msg.Content,
+			Attachments: attachmentsToMaps(msg.Attachments),
+		}, messageID)
+
+		n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
+			"session_key": sessionKey,
+			"name":        n.agentLoop.GetName(sessionKey),
+		}, "")
+		return
+	}
+
 	if msg.Content != "" {
 		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 			MessageID:  messageID,
@@ -688,12 +717,16 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 }
 
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
-	client, ok := n.auth.GetClient(clientID)
+	// Native channel clients are all on the same machine/lele instance.
+	// All native sessions are shared across all native clients.
+	// We still validate the client exists (valid auth token) but don't
+	// restrict session access to individual clients.
+	_, ok := n.auth.GetClient(clientID)
 	if !ok {
 		return false
 	}
 
-	// Check for subagent session key (old format: subagent:{id} or new format: {parent}:subagent-{n})
+	// Subagent sessions require the parent session to exist in the agent loop
 	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
 	if !isSubagent {
 		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
@@ -708,52 +741,11 @@ func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bo
 		if resolvedParent == "" {
 			return false
 		}
-		resolvedParent = strings.TrimPrefix(resolvedParent, "native:")
-
-		if resolvedParent == clientID {
-			return true
-		}
-
-		resolvedParentBase := resolvedParent
-		if strings.Contains(resolvedParent, ":chat:") {
-			chatIdx := strings.LastIndex(resolvedParent, ":chat:")
-			if chatIdx >= 0 {
-				resolvedParentBase = resolvedParent[:chatIdx]
-			}
-		}
-		for _, sk := range client.SessionKeys {
-			skNorm := strings.TrimPrefix(sk, "native:")
-			if skNorm == resolvedParent || skNorm == resolvedParentBase {
-				return true
-			}
-			skBase := skNorm
-			if strings.Contains(skNorm, ":chat:") {
-				chatIdx := strings.LastIndex(skNorm, ":chat:")
-				if chatIdx >= 0 {
-					skBase = skNorm[:chatIdx]
-				}
-			}
-			if skBase == resolvedParent || skBase == resolvedParentBase {
-				return true
-			}
-		}
-		return false
-	}
-	// Default session key (client's own ID) is always valid
-	if sessionKey == clientID || strings.TrimPrefix(sessionKey, "native:") == clientID {
-		return true
-	}
-	for _, sk := range client.SessionKeys {
-		if sk == sessionKey || sessionKeyMatches(sk, sessionKey) {
-			return true
-		}
 	}
 
-	logger.WarnCF("native", "Session ownership validation failed", map[string]interface{}{
-		"client_id":   clientID,
-		"session_key": sessionKey,
-	})
-	return false
+	// All native sessions are shared — any authenticated native client
+	// can access any native session.
+	return true
 }
 
 func (c *WSClient) Send(data []byte) error {

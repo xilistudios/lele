@@ -193,6 +193,10 @@ func (m *nativeTestAgentLoop) GetUpdated(sessionKey string) time.Time {
 	return time.Time{}
 }
 
+func (m *nativeTestAgentLoop) GetCreated(sessionKey string) time.Time {
+	return time.Time{}
+}
+
 func (m *nativeTestAgentLoop) SetName(sessionKey string, name string) error {
 	m.sessionNames[sessionKey] = name
 	return nil

@@ -370,18 +370,16 @@ export function useMessages(
             queryKey: chatHistoryQueryKey(historySessionKey),
           })
           debouncedSessionRefresh()
-          // Clean up streaming state for the updated session.
-          // Remove completed assistants and tools because mergeMessages() in
-          // useChatHistory CANNOT deduplicate them by ID — WS events use UUID
-          // while HTTP history uses content-hash-based IDs. The HTTP refetch
-          // triggered by invalidateQueries will deliver the canonical data.
+          // Only remove optimistic user messages — let mergeMessages() handle
+          // deduplication of completed assistants and tools against the base
+          // (HTTP history). Removing them here causes a visual flicker because
+          // the streaming copies disappear before the HTTP refetch delivers
+          // the canonical versions with different IDs.
           if (historySessionKey === currentSessionKeyRef.current) {
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
                 if (m.role === 'user' && m.optimistic) return false
-                if (m.role === 'assistant' && !m.streaming) return false
-                if (m.role === 'tool' && m.toolStatus !== 'executing') return false
                 return true
               }),
             )
@@ -472,13 +470,13 @@ export function useMessages(
                 )
               }
             }
+            // Always insert tool messages after the last assistant message.
+            // This preserves chronological order: all tool calls from the
+            // current LLM iteration appear after the assistant text that
+            // preceded them, and before any subsequent assistant text.
             const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
             if (lastAssistantIdx < 0) return [...current, toolMsg]
-            const lastAssistant = current[current.length - lastAssistantIdx - 1]
-            const insertBefore = lastAssistant.content === '' && lastAssistant.streaming
-            const targetIndex = insertBefore
-              ? current.length - lastAssistantIdx - 1
-              : current.length - lastAssistantIdx
+            const targetIndex = current.length - lastAssistantIdx
             const arr = [...current]
             arr.splice(targetIndex, 0, toolMsg)
             return arr

@@ -192,6 +192,17 @@ func (sm *SessionManager) GetUpdated(key string) time.Time {
 	return session.Updated
 }
 
+func (sm *SessionManager) GetCreated(key string) time.Time {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return time.Time{}
+	}
+	return session.Created
+}
+
 func (sm *SessionManager) SetSummary(key string, summary string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
