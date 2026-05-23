@@ -35,7 +35,6 @@ type NativeChannel struct {
 	running          bool
 	wsClients        map[string]*WSClient
 	restStreams      map[string]*restStreamSubscriber
-	streamState      *StreamStateManager // persists streaming chunks for reconnect resilience
 	leleDir          string
 	configPath       string // path to config file, defaults to DefaultConfigPath() if empty
 	mu               sync.RWMutex
@@ -67,7 +66,14 @@ type WSClient struct {
 	Subscriptions map[string]bool // all sessions this client is subscribed to
 	SendChan      chan []byte
 	closed        bool
-	mu            sync.Mutex
+
+	// Reconnection support
+	reconnecting   bool
+	disconnectedAt time.Time
+	pendingMsgs    []json.RawMessage
+	maxPendingMsgs int
+	reconnectTimer *time.Timer
+	mu             sync.Mutex
 }
 
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
@@ -97,9 +103,6 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	skillsLoader := skills.NewSkillsLoader(workspacePath, globalSkillsDir, builtinSkillsDir)
 	skillInstaller := skills.NewSkillInstaller(workspacePath)
 
-	streamStateDir := filepath.Join(leleDir, "streams")
-	streamState := NewStreamStateManager(streamStateDir)
-
 	return &NativeChannel{
 		base:             base,
 		cfg:              &nativeCfg,
@@ -109,7 +112,6 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		approvalManager:  approvalManager,
 		wsClients:        make(map[string]*WSClient),
 		restStreams:      make(map[string]*restStreamSubscriber),
-		streamState:      streamState,
 		leleDir:          leleDir,
 		pinLimiter:       pinLimiter,
 		pairLimiter:      pairLimiter,
@@ -172,9 +174,16 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 	for id, client := range n.wsClients {
 		client.mu.Lock()
 		client.closed = true
+		if client.reconnectTimer != nil {
+			client.reconnectTimer.Stop()
+			client.reconnectTimer = nil
+		}
+		client.reconnecting = false
 		client.mu.Unlock()
 		close(client.SendChan)
-		client.Conn.Close()
+		if client.Conn != nil {
+			client.Conn.Close()
+		}
 		delete(n.wsClients, id)
 	}
 	for id, stream := range n.restStreams {
@@ -410,12 +419,12 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	switch msg.Event {
 	case "message.stream":
 		done := msg.Metadata["done"] == "true"
-		// Persist stream chunk for reconnect resilience
-		if n.streamState != nil {
+		// Persist stream chunk directly in the session file
+		if n.agentLoop != nil {
 			if !done {
-				n.streamState.AppendChunk(sessionKey, msg.MessageID, msg.Content)
+				n.agentLoop.AppendAssistantChunk(sessionKey, msg.Content)
 			} else {
-				n.streamState.MarkDone(sessionKey, msg.MessageID)
+				n.agentLoop.FinalizeAssistantMessage(sessionKey)
 			}
 		}
 		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
@@ -426,8 +435,8 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, msg.MessageID)
 		return
 	case "message.thinking":
-		if n.streamState != nil {
-			n.streamState.AppendReasoning(sessionKey, msg.MessageID, msg.Content)
+		if n.agentLoop != nil {
+			n.agentLoop.AppendReasoningChunk(sessionKey, msg.Content)
 		}
 		n.emitNativeEvent(sessionKey, "message.thinking", WSThinkingPayload{
 			MessageID:  msg.MessageID,
@@ -490,10 +499,11 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	// This prevents the frontend from receiving two message.stream events
 	// with Done=true, which causes visual flickering.
 	//
-	// WasStreamedPrefix checks both the exact messageID and iteration-suffixed
-	// variants (e.g., "msg-123-2", "msg-123-3") since multi-iteration LLM runs
-	// stream each response under a distinct iteration messageID.
-	alreadyStreamed := n.streamState != nil && n.streamState.WasStreamedPrefix(sessionKey, messageID)
+	// HasStreamedContent checks if the session already has a streaming
+	// assistant message with content. Since multi-iteration LLM runs stream
+	// each response, the streaming message covers both the exact messageID
+	// and iteration-suffixed variants.
+	alreadyStreamed := n.agentLoop != nil && n.agentLoop.HasStreamedContent(sessionKey)
 
 	if alreadyStreamed {
 		// Content was already delivered via streaming chunks.
@@ -541,23 +551,137 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}, "")
 }
 
+const (
+	// wsReconnectWindow is how long a disconnected client can reconnect
+	// and resume its session without losing subscriptions or buffered events.
+	wsReconnectWindow = 30 * time.Second
+	// wsMaxPendingMsgs caps the number of events buffered during the reconnect window.
+	wsMaxPendingMsgs = 512
+)
+
 func (n *NativeChannel) addWSClient(client *WSClient) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.wsClients[client.ID] = client
 }
 
+// removeWSClient permanently removes and cleans up a WebSocket client.
+// It cancels any pending reconnect timer and frees all resources.
 func (n *NativeChannel) removeWSClient(clientID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if client, exists := n.wsClients[clientID]; exists {
 		client.mu.Lock()
+		if client.reconnectTimer != nil {
+			client.reconnectTimer.Stop()
+			client.reconnectTimer = nil
+		}
+		client.reconnecting = false
 		client.closed = true
 		client.mu.Unlock()
 		close(client.SendChan)
-		client.Conn.Close()
+		if client.Conn != nil {
+			client.Conn.Close()
+		}
 		delete(n.wsClients, clientID)
 	}
+}
+
+// markWSClientReconnecting puts a client into reconnecting state instead of
+// fully removing it. A 30-second timer is started; if the client doesn't
+// reconnect before it fires, the client is permanently removed.
+func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
+	client.mu.Lock()
+	client.reconnecting = true
+	client.disconnectedAt = time.Now()
+	client.closed = false // not closed yet, QueueSend will buffer
+	client.pendingMsgs = nil
+	client.maxPendingMsgs = wsMaxPendingMsgs
+	// Close the old connection — the write loop goroutine is already dead.
+	if client.Conn != nil {
+		client.Conn.Close()
+		client.Conn = nil
+	}
+	client.mu.Unlock()
+
+	// Start the expiry timer. If the timer fires, remove permanently.
+	client.mu.Lock()
+	if client.reconnectTimer != nil {
+		client.reconnectTimer.Stop()
+	}
+	client.reconnectTimer = time.AfterFunc(wsReconnectWindow, func() {
+		n.removeWSClient(client.ID)
+		logger.InfoCF("native", "WebSocket reconnect window expired", map[string]interface{}{
+			"client_id": client.ID,
+		})
+	})
+	client.mu.Unlock()
+
+	logger.InfoCF("native", "WebSocket client entered reconnecting state", map[string]interface{}{
+		"client_id":   client.ID,
+		"session_key": client.SessionKey,
+		"window_secs": int(wsReconnectWindow.Seconds()),
+	})
+}
+
+// findReconnectingClient looks for an existing client in reconnecting state
+// that matches the given userID. Only one reconnecting slot per userID is
+// allowed; the most recent disconnected session is returned.
+func (n *NativeChannel) findReconnectingClient(userID string) *WSClient {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	for _, client := range n.wsClients {
+		client.mu.Lock()
+		isReconnecting := client.reconnecting
+		matchesUser := client.ClientInfo != nil && client.ClientInfo.ClientID == userID
+		client.mu.Unlock()
+		if isReconnecting && matchesUser {
+			return client
+		}
+	}
+	return nil
+}
+
+// reconnectWSClient resumes a disconnected WebSocket client with a new
+// connection. It restores the read/write loops, flushes buffered messages,
+// and sends a reconnected welcome event.
+func (n *NativeChannel) reconnectWSClient(client *WSClient, conn *websocket.Conn) []json.RawMessage {
+	client.mu.Lock()
+	// Stop the expiry timer
+	if client.reconnectTimer != nil {
+		client.reconnectTimer.Stop()
+		client.reconnectTimer = nil
+	}
+
+	// Drain any stale messages from the old SendChan
+	for {
+		select {
+		case <-client.SendChan:
+		default:
+			goto drained
+		}
+	}
+drained:
+
+	// Capture buffered messages before clearing state
+	buffered := client.pendingMsgs
+
+	// Restore active state
+	client.Conn = conn
+	client.reconnecting = false
+	client.closed = false
+	client.pendingMsgs = nil
+
+	// Also add the new sessionKey to subscriptions if it changed
+	client.mu.Unlock()
+
+	logger.InfoCF("native", "WebSocket client reconnected", map[string]interface{}{
+		"client_id":       client.ID,
+		"session_key":     client.SessionKey,
+		"buffered_events": len(buffered),
+	})
+
+	return buffered
 }
 
 func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
@@ -607,7 +731,10 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		n.mu.Lock()
 		for _, id := range cleanup {
 			if client, exists := n.wsClients[id]; exists {
-				client.Conn.Close()
+				client.closed = true
+				if client.Conn != nil {
+					client.Conn.Close()
+				}
 				delete(n.wsClients, id)
 			}
 		}
@@ -650,7 +777,10 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 		n.mu.Lock()
 		for _, id := range cleanup {
 			if client, exists := n.wsClients[id]; exists {
-				client.Conn.Close()
+				client.closed = true
+				if client.Conn != nil {
+					client.Conn.Close()
+				}
 				delete(n.wsClients, id)
 			}
 		}
@@ -758,6 +888,16 @@ func (c *WSClient) QueueSend(data []byte) error {
 		c.mu.Unlock()
 		return fmt.Errorf("client is closed")
 	}
+	// If reconnecting, buffer messages so they can be flushed on reconnection.
+	if c.reconnecting {
+		if len(c.pendingMsgs) >= c.maxPendingMsgs {
+			c.mu.Unlock()
+			return fmt.Errorf("reconnect buffer full, dropping message")
+		}
+		c.pendingMsgs = append(c.pendingMsgs, json.RawMessage(data))
+		c.mu.Unlock()
+		return nil
+	}
 	c.mu.Unlock()
 
 	timer := time.NewTimer(5 * time.Second)
@@ -770,7 +910,9 @@ func (c *WSClient) QueueSend(data []byte) error {
 		c.mu.Lock()
 		if !c.closed {
 			c.closed = true
-			c.Conn.Close()
+			if c.Conn != nil {
+				c.Conn.Close()
+			}
 		}
 		c.mu.Unlock()
 		return fmt.Errorf("send timeout, client disconnected")

@@ -36,12 +36,6 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	upgrader := websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin:     n.checkOrigin,
-	}
-	clientID := uuid.New().String()
 	sessionKey := getQueryParam(r, "session_key")
 	if sessionKey == "" {
 		sessionKey = clientInfo.ClientID
@@ -57,6 +51,15 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this user has a client in reconnecting state.
+	existingClient := n.findReconnectingClient(clientInfo.ClientID)
+
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:    1024,
+		WriteBufferSize:   1024,
+		CheckOrigin:       n.checkOrigin,
+		EnableCompression: true,
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.ErrorCF("native", "WebSocket upgrade failed", map[string]interface{}{
@@ -65,6 +68,32 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	n.auth.TrackSessionKey(clientInfo.ClientID, sessionKey)
+	n.auth.UpdateLastSeen(clientInfo.ClientID)
+
+	if existingClient != nil {
+		// Reconnect: resume the existing client with the new connection.
+		buffered := n.reconnectWSClient(existingClient, conn)
+
+		// If the session key changed, update it.
+		if sessionKey != existingClient.SessionKey {
+			existingClient.SessionKey = sessionKey
+			if existingClient.Subscriptions == nil {
+				existingClient.Subscriptions = make(map[string]bool)
+			}
+			existingClient.Subscriptions[sessionKey] = true
+		}
+
+		go n.wsReadLoop(existingClient)
+		go n.wsWriteLoop(existingClient)
+
+		// Send reconnected event with server state.
+		n.sendReconnected(existingClient, buffered)
+		return
+	}
+
+	// New connection: create a fresh WSClient.
+	clientID := uuid.New().String()
 	client := &WSClient{
 		ID:            clientID,
 		Conn:          conn,
@@ -75,8 +104,6 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	}
 
 	n.addWSClient(client)
-	n.auth.TrackSessionKey(clientInfo.ClientID, sessionKey)
-	n.auth.UpdateLastSeen(clientInfo.ClientID)
 
 	logger.InfoCF("native", "WebSocket client connected", map[string]interface{}{
 		"client_id":   clientID,
@@ -92,7 +119,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 func (n *NativeChannel) wsReadLoop(client *WSClient) {
 	defer func() {
-		n.removeWSClient(client.ID)
+		n.markWSClientReconnecting(client)
 		logger.InfoCF("native", "WebSocket client disconnected", map[string]interface{}{
 			"client_id": client.ID,
 		})
@@ -467,6 +494,72 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"error":     err.Error(),
 		})
 	}
+}
+
+// sendReconnected sends a reconnected welcome event and flushes any buffered
+// messages that accumulated while the client was disconnected.
+func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMessage) {
+	status := n.agentLoop.GetStatus(client.SessionKey)
+	agents := make([]map[string]interface{}, 0)
+	defaultID := n.agentLoop.GetDefaultAgentID()
+	for _, id := range n.agentLoop.ListAvailableAgentIDs() {
+		info, ok := n.agentLoop.GetAgentInfo(id)
+		if ok {
+			agents = append(agents, map[string]interface{}{
+				"id":        info.ID,
+				"name":      info.Name,
+				"workspace": info.Workspace,
+				"model":     info.Model,
+				"default":   info.ID == defaultID,
+			})
+		}
+	}
+
+	processing := false
+	if n.agentLoop != nil {
+		processing = n.agentLoop.IsSessionProcessing(client.SessionKey)
+	}
+
+	disconnectedSecs := time.Since(client.disconnectedAt).Seconds()
+
+	if err := client.Send(mustMarshal(WSMessage{
+		Version: WSProtocolVersion,
+		Event:   "reconnected",
+		Data: mustMarshal(map[string]interface{}{
+			"client_id":         client.ClientInfo.ClientID,
+			"device_name":       client.ClientInfo.DeviceName,
+			"session_key":       client.SessionKey,
+			"status":            status,
+			"agents":            agents,
+			"server_time":       time.Now().Format(time.RFC3339),
+			"processing":        processing,
+			"buffered_events":   len(buffered),
+			"disconnected_secs": disconnectedSecs,
+			"subscriptions":     client.Subscriptions,
+		}),
+	})); err != nil {
+		logger.WarnCF("native", "Failed to send reconnected event", map[string]interface{}{
+			"client_id": client.ID,
+			"error":     err.Error(),
+		})
+		return
+	}
+
+	// Flush buffered events that accumulated during the disconnect window.
+	for _, payload := range buffered {
+		if err := client.Send(payload); err != nil {
+			logger.WarnCF("native", "Failed to flush buffered event during reconnect", map[string]interface{}{
+				"client_id": client.ID,
+				"error":     err.Error(),
+			})
+			return
+		}
+	}
+
+	logger.InfoCF("native", "Reconnected client buffered events flushed", map[string]interface{}{
+		"client_id":       client.ID,
+		"buffered_events": len(buffered),
+	})
 }
 
 func (n *NativeChannel) sendError(client *WSClient, code, message string) {

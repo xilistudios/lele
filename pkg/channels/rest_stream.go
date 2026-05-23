@@ -35,9 +35,9 @@ func (n *NativeChannel) registerRESTStreamSubscriber(sessionKey, messageID strin
 		id:         uuid.New().String(),
 		sessionKey: sessionKey,
 		messageID:  messageID,
-		// Buffer 128 events — large enough to absorb bursts of streaming chunks,
+		// Buffer 512 events — large enough to absorb bursts of streaming chunks,
 		// tool events, and completion signals without blocking the publisher.
-		ch: make(chan restStreamEvent, 128),
+		ch: make(chan restStreamEvent, 512),
 	}
 
 	n.mu.Lock()
@@ -159,11 +159,6 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		Metadata:    map[string]string{"message_id": messageID},
 	})
 
-	// Start tracking stream state for reconnect resilience
-	if n.streamState != nil {
-		n.streamState.StartStream(sessionKey, messageID)
-	}
-
 	// Stream events to the client until the message is complete,
 	// an error occurs, the client disconnects, or the deadline expires.
 	deadline := time.After(restStreamDeadline)
@@ -222,7 +217,8 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 
 // handleStreamStatus returns a list of active streams for a session.
 // This allows the frontend to discover in-progress streams after a page reload
-// and retrieve their accumulated content.
+// and retrieve their accumulated content. Now uses the session's in-progress
+// assistant message instead of a separate stream state store.
 func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	if sessionKey == "" {
@@ -236,11 +232,23 @@ func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if n.streamState == nil {
-		writeError(w, http.StatusServiceUnavailable, "stream state tracking is not available", "stream_state_unavailable")
+	if n.agentLoop == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent loop not available", "agent_unavailable")
 		return
 	}
-	streams := n.streamState.ListActiveStreams(sessionKey)
+
+	inProgress := n.agentLoop.GetInProgressAssistant(sessionKey)
+	var streams []map[string]interface{}
+	if inProgress != nil {
+		streams = append(streams, map[string]interface{}{
+			"message_id":        "",
+			"session_key":       sessionKey,
+			"content":           inProgress.Content,
+			"reasoning_content": inProgress.ReasoningContent,
+			"done":              false,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"streams": streams,
 	})
@@ -248,7 +256,7 @@ func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Reques
 
 // handleStreamState returns the current accumulated state of a specific stream.
 // Used by the frontend after reconnection to recover the streaming content that
-// was produced while disconnected.
+// was produced while disconnected. Now uses the session's in-progress message.
 func (n *NativeChannel) handleStreamState(w http.ResponseWriter, r *http.Request) {
 	sessionKey := r.PathValue("sessionKey")
 	messageID := r.PathValue("messageID")
@@ -263,15 +271,22 @@ func (n *NativeChannel) handleStreamState(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if n.streamState == nil {
-		writeError(w, http.StatusServiceUnavailable, "stream state tracking is not available", "stream_state_unavailable")
-		return
-	}
-	state := n.streamState.GetStream(sessionKey, messageID)
-	if state == nil {
-		writeError(w, http.StatusNotFound, "stream not found", "stream_not_found")
+	if n.agentLoop == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent loop not available", "agent_unavailable")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, state)
+	inProgress := n.agentLoop.GetInProgressAssistant(sessionKey)
+	if inProgress == nil {
+		writeError(w, http.StatusNotFound, "no in-progress stream found", "stream_not_found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message_id":        "",
+		"session_key":       sessionKey,
+		"content":           inProgress.Content,
+		"reasoning_content": inProgress.ReasoningContent,
+		"done":              false,
+	})
 }

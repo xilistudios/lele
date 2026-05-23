@@ -17,16 +17,18 @@ import (
 const maxStoredMessages = 10000
 
 type Session struct {
-	Key           string              `json:"key"`
-	Name          string              `json:"name,omitempty"`
-	Messages      []providers.Message `json:"messages"`
-	Summary       string              `json:"summary,omitempty"`
-	VerboseMode   bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
-	VerboseLevel  string              `json:"verbose_level,omitempty"`  // "off", "basic", or "full"
-	Model         string              `json:"model,omitempty"`          // Session-specific model override
-	ThinkingLevel string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
-	Created       time.Time           `json:"created"`
-	Updated       time.Time           `json:"updated"`
+	Key                string              `json:"key"`
+	Name               string              `json:"name,omitempty"`
+	Messages           []providers.Message `json:"messages"`
+	Summary            string              `json:"summary,omitempty"`
+	VerboseMode        bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
+	VerboseLevel       string              `json:"verbose_level,omitempty"`  // "off", "basic", or "full"
+	Model              string              `json:"model,omitempty"`          // Session-specific model override
+	ThinkingLevel      string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
+	Created            time.Time           `json:"created"`
+	Updated            time.Time           `json:"updated"`
+	lastStreamFlush    time.Time           // throttle for stream persistence (not persisted)
+	hadStreamedContent bool                // tracks if content was delivered via streaming this turn (not persisted)
 	// Token tracking
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
@@ -50,6 +52,82 @@ func NewSessionManager(storage string) *SessionManager {
 	}
 
 	return sm
+}
+
+// MigrateFromWorkspace moves session JSON files from an old per-workspace
+// sessions directory into the unified global sessions directory. Existing
+// files in the destination are never overwritten (first migration wins).
+// Errors are logged but not returned — migration is best-effort.
+func MigrateFromWorkspace(oldDir, newDir string) {
+	if oldDir == "" || newDir == "" || oldDir == newDir {
+		return
+	}
+
+	info, err := os.Stat(oldDir)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	entries, err := os.ReadDir(oldDir)
+	if err != nil {
+		return
+	}
+
+	if err := os.MkdirAll(newDir, 0755); err != nil {
+		logger.WarnCF("session", "Cannot create unified sessions dir",
+			map[string]interface{}{"path": newDir, "error": err.Error()})
+		return
+	}
+
+	migrated := 0
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+
+		srcPath := filepath.Join(oldDir, entry.Name())
+		dstPath := filepath.Join(newDir, entry.Name())
+
+		// Never overwrite — the first agent that migrates wins.
+		if _, err := os.Stat(dstPath); err == nil {
+			continue
+		}
+
+		if err := os.Rename(srcPath, dstPath); err != nil {
+			// If rename fails (e.g. cross-device), fall back to copy+delete.
+			if err := copyFile(srcPath, dstPath); err != nil {
+				logger.WarnCF("session", "Failed to migrate session file",
+					map[string]interface{}{
+						"file":  entry.Name(),
+						"src":   oldDir,
+						"dst":   newDir,
+						"error": err.Error(),
+					})
+				continue
+			}
+			// Remove source after successful copy
+			_ = os.Remove(srcPath)
+		}
+		migrated++
+	}
+
+	if migrated > 0 {
+		logger.InfoCF("session", "Migrated sessions to unified directory",
+			map[string]interface{}{
+				"count": migrated,
+				"from":  oldDir,
+				"to":    newDir,
+			})
+	}
+}
+
+// copyFile copies a file from src to dst. Used as fallback when os.Rename fails.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
 }
 
 // StoragePath returns the storage directory path.
@@ -116,6 +194,8 @@ func (sm *SessionManager) AddMessage(sessionKey, role, content string) {
 
 // AddFullMessage adds a complete message with tool calls and tool call ID to the session.
 // This is used to save the full conversation flow including tool calls and tool results.
+// If the last message is a streaming assistant message (added by AppendAssistantChunk),
+// it updates that message in-place instead of appending a duplicate.
 func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Message) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -132,6 +212,27 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
 		session.Name = generateSessionName(msg.Content)
+	}
+
+	// New user message starts a new turn — clear the streamed content flag
+	// so the deduplication logic is fresh for the next assistant response.
+	if msg.Role == "user" {
+		session.hadStreamedContent = false
+	}
+
+	// If the last message is a streaming assistant and this is an assistant
+	// message, update it in-place to avoid duplicates.
+	if msg.Role == "assistant" && len(session.Messages) > 0 {
+		lastMsg := &session.Messages[len(session.Messages)-1]
+		if lastMsg.Role == "assistant" && lastMsg.Streaming {
+			// Replace the streaming message with the final version.
+			// Keep hadStreamedContent=true so HasStreamedContent still returns
+			// true until the next user message arrives.
+			msg.Streaming = false
+			*lastMsg = msg
+			session.Updated = time.Now()
+			return
+		}
 	}
 
 	session.Messages = append(session.Messages, msg)
@@ -689,6 +790,187 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	}
 	cleanup = false
 	return nil
+}
+
+// ============================================================================
+// Streaming support — persists assistant message chunks directly in the session
+// file instead of using a separate streams/ directory.
+// ============================================================================
+
+// streamFlushInterval is the minimum time between session saves during active streaming.
+const streamFlushInterval = 200 * time.Millisecond
+
+// AppendAssistantChunk appends a content chunk to the in-progress assistant message.
+// If no in-progress message exists, it creates one with Streaming=true.
+// The session is saved to disk periodically (throttled) so the partial content
+// survives restarts and allows reconnecting clients to recover the stream.
+func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session := sm.getOrCreateUnlocked(key)
+	if session == nil {
+		return
+	}
+
+	// Find or create the in-progress assistant message
+	msg := sm.getOrCreateStreamingMsg(session)
+	msg.Content += chunk
+	session.Updated = time.Now()
+	session.hadStreamedContent = true
+
+	sm.maybeFlushStream(key)
+}
+
+// AppendReasoningChunk appends a reasoning/thinking chunk to the in-progress
+// assistant message. Creates the streaming message if it doesn't exist yet.
+func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session := sm.getOrCreateUnlocked(key)
+	if session == nil {
+		return
+	}
+
+	msg := sm.getOrCreateStreamingMsg(session)
+	msg.ReasoningContent += chunk
+	session.Updated = time.Now()
+	session.hadStreamedContent = true
+
+	sm.maybeFlushStream(key)
+}
+
+// FinalizeAssistantMessage marks the in-progress assistant message as complete
+// by persisting the session to disk immediately. The Streaming flag is NOT
+// cleared here — it stays until AddFullMessage replaces the streaming message
+// with the final version. This allows HasStreamedContent to detect that content
+// was already delivered via streaming chunks for deduplication.
+func (sm *SessionManager) FinalizeAssistantMessage(key string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || len(session.Messages) == 0 {
+		return
+	}
+
+	lastMsg := &session.Messages[len(session.Messages)-1]
+	if lastMsg.Role == "assistant" && lastMsg.Streaming {
+		session.Updated = time.Now()
+		sm.flushStreamNow(key)
+	}
+}
+
+// HasStreamedContent returns true if the session already had content delivered
+// via streaming chunks this turn. Used to prevent duplicate message.stream
+// delivery. It checks the in-memory flag (set by AppendAssistantChunk and
+// cleared when a new user message arrives).
+func (sm *SessionManager) HasStreamedContent(key string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return false
+	}
+
+	// Check the in-memory flag first (survives Streaming flag being cleared by AddFullMessage)
+	if session.hadStreamedContent {
+		return true
+	}
+
+	// Fallback: check if the last message is still streaming
+	if len(session.Messages) > 0 {
+		lastMsg := session.Messages[len(session.Messages)-1]
+		if lastMsg.Role == "assistant" && lastMsg.Streaming &&
+			(lastMsg.Content != "" || lastMsg.ReasoningContent != "") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetInProgressAssistant returns the in-progress assistant message, if any.
+func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok || len(session.Messages) == 0 {
+		return nil
+	}
+
+	lastMsg := session.Messages[len(session.Messages)-1]
+	if lastMsg.Role == "assistant" && lastMsg.Streaming {
+		msg := lastMsg
+		return &msg
+	}
+	return nil
+}
+
+// getOrCreateUnlocked returns or creates a session (caller must hold mu).
+func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:      key,
+			Messages: []providers.Message{},
+			Created:  time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+	return session
+}
+
+// getOrCreateStreamingMsg finds or creates the in-progress assistant message.
+// Caller must hold sm.mu.
+func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.Message {
+	if len(session.Messages) > 0 {
+		lastMsg := &session.Messages[len(session.Messages)-1]
+		if lastMsg.Role == "assistant" && lastMsg.Streaming {
+			return lastMsg
+		}
+	}
+
+	// Create a new streaming assistant message
+	session.Messages = append(session.Messages, providers.Message{
+		Role:      "assistant",
+		Streaming: true,
+	})
+	return &session.Messages[len(session.Messages)-1]
+}
+
+// maybeFlushStream saves the session to disk if enough time has passed since
+// the last stream flush. Caller must hold sm.mu.
+func (sm *SessionManager) maybeFlushStream(key string) {
+	if sm.storage == "" {
+		return
+	}
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return
+	}
+
+	now := time.Now()
+	if now.Sub(session.lastStreamFlush) >= streamFlushInterval {
+		session.lastStreamFlush = now
+		sm.saveUnlocked(key)
+	}
+}
+
+// flushStreamNow saves the session to disk immediately. Caller must hold sm.mu.
+func (sm *SessionManager) flushStreamNow(key string) {
+	if sm.storage == "" {
+		return
+	}
+	session, ok := sm.sessions[key]
+	if ok {
+		session.lastStreamFlush = time.Now()
+	}
+	sm.saveUnlocked(key)
 }
 
 // ActiveCount returns the number of sessions that have at least one message.

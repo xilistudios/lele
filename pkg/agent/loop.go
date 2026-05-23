@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -275,16 +276,32 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	cooldown := providers.NewCooldownTracker()
 	fallbackChain := providers.NewFallbackChain(cooldown)
 
+	// Create a single, shared session manager for all agents.
+	// Sessions are stored in <lele-dir>/sessions (unified, not per-workspace).
+	// Migration from old per-workspace session dirs happens here too.
+	unifiedSessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
+	sharedSessionManager := session.NewSessionManager(unifiedSessionsDir)
+
+	// Migrate sessions from all per-workspace locations to the unified directory.
+	for _, agentID := range registry.ListAgentIDs() {
+		if agent, ok := registry.GetAgent(agentID); ok && agent != nil {
+			oldSessionsDir := filepath.Join(agent.Workspace, "sessions")
+			session.MigrateFromWorkspace(oldSessionsDir, unifiedSessionsDir)
+		}
+	}
+
+	// Replace per-agent session managers with the shared one.
+	registry.SetSharedSessionManager(sharedSessionManager)
+
 	// Create state manager using default agent's workspace for channel recording
 	defaultAgent := registry.GetDefaultAgent()
 	var stateManager *state.Manager
-	var sessionManager *session.SessionManager
 	if defaultAgent != nil {
 		stateManager = state.NewManager(defaultAgent.Workspace)
-		sessionManager = defaultAgent.Sessions
 	}
 
 	// Create verbose manager with session persistence
+	sessionManager := sharedSessionManager
 	verboseManager := session.NewVerboseManager()
 	if sessionManager != nil {
 		verboseManager.SetSessionManager(sessionManager)
