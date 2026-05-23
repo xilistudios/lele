@@ -2,7 +2,6 @@ package providers
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/auth"
@@ -12,13 +11,6 @@ import (
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"
 
 var getCredential = auth.GetCredential
-
-func maskKey(key string) string {
-	if len(key) < 8 {
-		return "***"
-	}
-	return key[:4] + "..." + key[len(key)-4:]
-}
 
 type providerType int
 
@@ -119,9 +111,6 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 	if sel.apiBase == "" {
 		sel.apiBase = defaultAPIBaseByType(typ)
 	}
-
-	log.Printf("[DEBUG] selectionFromNamedProvider: provider=%s, type=%s, apiBase=%s, model=%s, apiKey=%s",
-		providerName, typ, sel.apiBase, sel.model, maskKey(sel.apiKey))
 
 	switch typ {
 	case "openai", "gpt":
@@ -580,7 +569,6 @@ func CreateProvider(cfg *config.Config) (LLMProvider, error) {
 		return nil, err
 	}
 
-	log.Printf("[DEBUG] CreateProvider: providerType=%d, apiBase=%s, model=%s", sel.providerType, sel.apiBase, sel.model)
 	return createProviderFromSelection(&sel)
 }
 
@@ -590,7 +578,6 @@ func CreateProviderForCandidate(cfg *config.Config, providerName string) (LLMPro
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[DEBUG] CreateProviderForCandidate: provider=%s, apiBase=%s, model=%s", providerName, sel.apiBase, sel.model)
 	return createProviderFromSelection(&sel)
 }
 

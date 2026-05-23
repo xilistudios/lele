@@ -54,7 +54,6 @@ func (s *Service) Start(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	if !s.enabled || len(s.sources) == 0 {
-		logger.InfoC("devices", "Device event service disabled or no sources")
 		return nil
 	}
 
@@ -70,12 +69,8 @@ func (s *Service) Start(ctx context.Context) error {
 			continue
 		}
 		go s.handleEvents(src.Kind(), eventCh)
-		logger.InfoCF("devices", "Device source started", map[string]interface{}{
-			"kind": src.Kind(),
-		})
 	}
 
-	logger.InfoC("devices", "Device event service started")
 	return nil
 }
 
@@ -91,8 +86,6 @@ func (s *Service) Stop() {
 	for _, src := range s.sources {
 		_ = src.Stop() // Ignore errors during shutdown
 	}
-
-	logger.InfoC("devices", "Device event service stopped")
 }
 
 func (s *Service) UpdateConfig(cfg Config) {

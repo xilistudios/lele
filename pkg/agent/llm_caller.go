@@ -9,7 +9,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -88,6 +87,13 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		if v, ok := lc.al.sessionThinking.Load(opts.sessionKey); ok {
 			if s, ok := v.(string); ok {
 				sessionEffort = s
+			}
+		}
+		// Fallback: check persisted session (survives restarts)
+		if sessionEffort == "" {
+			agent := lc.al.agentForSession(opts.sessionKey)
+			if agent != nil && agent.Sessions != nil {
+				sessionEffort = agent.Sessions.GetThinkingLevel(opts.sessionKey)
 			}
 		}
 	}
@@ -209,14 +215,12 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 		func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)
 			if err != nil {
-				log.Printf("[DEBUG] Failed to create provider for %s: %v", provider, err)
 				if opts.agent.Provider != nil {
 					return opts.agent.Provider.Chat(ctx, opts.messages, opts.toolDefs, model, llmOptions)
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
 			fullModel := FormatProviderModel(provider, model)
-			log.Printf("[DEBUG] Fallback attempt: provider=%s, model=%s, fullModel=%s", provider, model, fullModel)
 			return providerInst.Chat(ctx, opts.messages, opts.toolDefs, fullModel, llmOptions)
 		},
 	)

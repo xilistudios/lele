@@ -33,21 +33,12 @@ func NewAgentRegistry(cfg *config.Config) *AgentRegistry {
 		}
 		instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg)
 		registry.agents["main"] = instance
-		logger.InfoCF("agent", "Created implicit main agent (no agents.list configured)", nil)
 	} else {
 		for i := range agentConfigs {
 			ac := &agentConfigs[i]
 			id := routing.NormalizeAgentID(ac.ID)
 			instance := NewAgentInstance(ac, &cfg.Agents.Defaults, cfg)
 			registry.agents[id] = instance
-			logger.InfoCF("agent", "Registered agent",
-				map[string]interface{}{
-					"agent_id":  id,
-					"name":      ac.Name,
-					"workspace": instance.Workspace,
-					"model":     instance.Model,
-					"provider":  extractProviderFromModel(instance.Model, cfg.Agents.Defaults.Provider),
-				})
 		}
 	}
 
@@ -173,7 +164,6 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 			}
 			instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg)
 			r.agents["main"] = instance
-			logger.InfoCF("agent", "Created implicit main agent (no agents.list configured)", nil)
 		}
 		return
 	}
@@ -189,9 +179,6 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 	for id, instance := range r.agents {
 		if !newIDs[id] {
 			logActiveSessions(id, instance)
-			logger.InfoCF("agent", "Removing agent from registry", map[string]interface{}{
-				"agent_id": id,
-			})
 			delete(r.agents, id)
 		}
 	}
@@ -215,21 +202,9 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		if old, ok := r.agents[id]; ok {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
-			logger.InfoCF("agent", "Updated agent (config changed), migrated sessions",
-				map[string]interface{}{
-					"agent_id": id,
-				})
 		}
 
 		r.agents[id] = instance
-		logger.InfoCF("agent", "Registered agent",
-			map[string]interface{}{
-				"agent_id":  id,
-				"name":      ac.Name,
-				"workspace": instance.Workspace,
-				"model":     instance.Model,
-				"provider":  extractProviderFromModel(instance.Model, cfg.Agents.Defaults.Provider),
-			})
 	}
 }
 

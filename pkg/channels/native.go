@@ -35,6 +35,7 @@ type NativeChannel struct {
 	running          bool
 	wsClients        map[string]*WSClient
 	restStreams      map[string]*restStreamSubscriber
+	streamState      *StreamStateManager // persists streaming chunks for reconnect resilience
 	leleDir          string
 	configPath       string // path to config file, defaults to DefaultConfigPath() if empty
 	mu               sync.RWMutex
@@ -96,6 +97,9 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	skillsLoader := skills.NewSkillsLoader(workspacePath, globalSkillsDir, builtinSkillsDir)
 	skillInstaller := skills.NewSkillInstaller(workspacePath)
 
+	streamStateDir := filepath.Join(leleDir, "streams")
+	streamState := NewStreamStateManager(streamStateDir)
+
 	return &NativeChannel{
 		base:             base,
 		cfg:              &nativeCfg,
@@ -105,6 +109,7 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 		approvalManager:  approvalManager,
 		wsClients:        make(map[string]*WSClient),
 		restStreams:      make(map[string]*restStreamSubscriber),
+		streamState:      streamState,
 		leleDir:          leleDir,
 		pinLimiter:       pinLimiter,
 		pairLimiter:      pairLimiter,
@@ -153,7 +158,6 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	n.running = true
 	n.base.setRunning(true)
 
-	logger.InfoC("native", "Native channel started (routes registered via unified server)")
 	return nil
 }
 
@@ -186,7 +190,6 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 	n.running = false
 	n.base.setRunning(false)
 
-	logger.InfoC("native", "Native channel stopped")
 	return nil
 }
 
@@ -244,6 +247,8 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// Chat
 	mux.HandleFunc("POST /api/v1/chat/send", withAuth(applyBodyLimit(n.handleChatSend)))
 	mux.HandleFunc("POST /api/v1/chat/send/stream", withAuth(applyBodyLimit(n.handleChatSendStream)))
+	mux.HandleFunc("GET /api/v1/chat/streams/{sessionKey}", withAuth(n.handleStreamStatus))
+	mux.HandleFunc("GET /api/v1/chat/streams/{sessionKey}/{messageID}", withAuth(n.handleStreamState))
 	mux.HandleFunc("GET /api/v1/chat/sessions", withAuth(n.handleChatSessions))
 	mux.HandleFunc("POST /api/v1/chat/sessions", withAuth(applyBodyLimit(n.handleCreateSession)))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/{$}", withAuth(n.handleChatSessionGet))
@@ -402,15 +407,17 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	if n.agentLoop != nil {
 		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
 	}
-	logger.InfoCF("native", "Dispatching outbound message", map[string]interface{}{
-		"session_key": sessionKey,
-		"event":       msg.Event,
-		"content_len": len(msg.Content),
-		"message_id":  msg.MessageID,
-	})
 	switch msg.Event {
 	case "message.stream":
 		done := msg.Metadata["done"] == "true"
+		// Persist stream chunk for reconnect resilience
+		if n.streamState != nil {
+			if !done {
+				n.streamState.AppendChunk(sessionKey, msg.MessageID, msg.Content)
+			} else {
+				n.streamState.MarkDone(sessionKey, msg.MessageID)
+			}
+		}
 		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 			MessageID:  msg.MessageID,
 			SessionKey: sessionKey,
@@ -419,6 +426,9 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		}, msg.MessageID)
 		return
 	case "message.thinking":
+		if n.streamState != nil {
+			n.streamState.AppendReasoning(sessionKey, msg.MessageID, msg.Content)
+		}
 		n.emitNativeEvent(sessionKey, "message.thinking", WSThinkingPayload{
 			MessageID:  msg.MessageID,
 			SessionKey: sessionKey,
@@ -475,6 +485,35 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 		messageID = uuid.New().String()
 	}
 
+	// Skip duplicate message.stream if content was already delivered via
+	// streaming (the provider's ChatStream already sent chunks via onChunk).
+	// This prevents the frontend from receiving two message.stream events
+	// with Done=true, which causes visual flickering.
+	//
+	// WasStreamedPrefix checks both the exact messageID and iteration-suffixed
+	// variants (e.g., "msg-123-2", "msg-123-3") since multi-iteration LLM runs
+	// stream each response under a distinct iteration messageID.
+	alreadyStreamed := n.streamState != nil && n.streamState.WasStreamedPrefix(sessionKey, messageID)
+
+	if alreadyStreamed {
+		// Content was already delivered via streaming chunks.
+		// Only send message.complete + history.updated — these signal the
+		// frontend to finalize the message and refetch canonical history.
+		// Do NOT re-emit message.stream regardless of attachments.
+		n.emitNativeEvent(sessionKey, "message.complete", WSMessageCompletePayload{
+			MessageID:   messageID,
+			SessionKey:  sessionKey,
+			Content:     msg.Content,
+			Attachments: attachmentsToMaps(msg.Attachments),
+		}, messageID)
+
+		n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
+			"session_key": sessionKey,
+			"name":        n.agentLoop.GetName(sessionKey),
+		}, "")
+		return
+	}
+
 	if msg.Content != "" {
 		n.emitNativeEvent(sessionKey, "message.stream", WSStreamPayload{
 			MessageID:  messageID,
@@ -529,50 +568,24 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	}
 	payload := mustMarshal(msg)
 
-	logger.DebugCF("native", "Broadcast to session - starting", map[string]interface{}{
-		"session_key":   sessionKey,
-		"event":         event,
-		"total_clients": len(n.wsClients),
-	})
-
 	n.mu.RLock()
 	var targets []*WSClient
-	for clientID, client := range n.wsClients {
-
-		// Match by current session key (active subscription)
+	for _, client := range n.wsClients {
 		if sessionKeyMatches(client.SessionKey, sessionKey) {
-			logger.DebugCF("native", "Client matched by SessionKey", map[string]interface{}{
-				"client_id":          clientID,
-				"client_session_key": client.SessionKey,
-				"target_session_key": sessionKey,
-			})
 			targets = append(targets, client)
 			continue
 		}
-		// Match by tracked subscriptions (sessions the client has subscribed to)
 		if client.Subscriptions != nil {
 			for subKey := range client.Subscriptions {
 				if sessionKeyMatches(subKey, sessionKey) {
-					logger.DebugCF("native", "Client matched by Subscriptions", map[string]interface{}{
-						"client_id":            clientID,
-						"matched_subscription": subKey,
-						"target_session_key":   sessionKey,
-					})
 					targets = append(targets, client)
 					goto nextClient
 				}
 			}
 		}
-		// Match by resolved session key (subagent parent sessions)
 		if n.agentLoop != nil && client.SessionKey != "" {
 			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
 			if sessionKeyMatches(resolved, sessionKey) {
-				logger.DebugCF("native", "Client matched by resolved SessionKey", map[string]interface{}{
-					"client_id":            clientID,
-					"client_session_key":   client.SessionKey,
-					"resolved_session_key": resolved,
-					"target_session_key":   sessionKey,
-				})
 				targets = append(targets, client)
 			}
 		}
@@ -601,17 +614,6 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 		n.mu.Unlock()
 	}
 
-	logger.InfoCF("native", "Broadcast to session", map[string]interface{}{
-		"session_key": sessionKey,
-		"event":       event,
-		"clients":     len(n.wsClients),
-		"matched":     found,
-	})
-
-	// Fallback: if no clients matched, broadcast to all connected clients.
-	// This is a workaround for session key mismatches - every client receives the event
-	// and the frontend filters by session_key in handleEvent.
-	// TODO: Fix the root cause of why clients don't match
 	if found == 0 && event == "approval.request" {
 		logger.WarnCF("native", "No clients matched for approval broadcast, falling back to all clients", map[string]interface{}{
 			"session_key": sessionKey,
@@ -715,151 +717,35 @@ func (n *NativeChannel) processAttachments(paths []string, sessionKey string) []
 }
 
 func (n *NativeChannel) validateSessionOwnership(clientID, sessionKey string) bool {
-	client, ok := n.auth.GetClient(clientID)
+	// Native channel clients are all on the same machine/lele instance.
+	// All native sessions are shared across all native clients.
+	// We still validate the client exists (valid auth token) but don't
+	// restrict session access to individual clients.
+	_, ok := n.auth.GetClient(clientID)
 	if !ok {
-		logger.DebugCF("native", "validateSessionOwnership: client not found", map[string]interface{}{
-			"client_id":   clientID,
-			"session_key": sessionKey,
-		})
 		return false
 	}
 
-	logger.DebugCF("native", "validateSessionOwnership: checking", map[string]interface{}{
-		"client_id":      clientID,
-		"session_key":    sessionKey,
-		"client_keys":    client.SessionKeys,
-		"num_ws_clients": len(n.wsClients),
-	})
-
-	// Check for subagent session key (old format: subagent:{id} or new format: {parent}:subagent-{n})
+	// Subagent sessions require the parent session to exist in the agent loop
 	isSubagent := strings.HasPrefix(sessionKey, "subagent:")
 	if !isSubagent {
-		// Check if it ends with subagent-{n} pattern (works with or without native: prefix)
 		if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
 			isSubagent = true
 		}
 	}
 	if isSubagent {
 		if n.agentLoop == nil {
-			logger.WarnCF("native", "validateSessionOwnership: agentLoop is nil for subagent", map[string]interface{}{
-				"session_key": sessionKey,
-				"client_id":   clientID,
-			})
 			return false
 		}
 		resolvedParent := n.agentLoop.GetSubagentParentSessionKey(sessionKey)
 		if resolvedParent == "" {
-			logger.WarnCF("native", "validateSessionOwnership: resolved parent is empty", map[string]interface{}{
-				"session_key": sessionKey,
-				"client_id":   clientID,
-			})
 			return false
 		}
-		resolvedParent = strings.TrimPrefix(resolvedParent, "native:")
-
-		if resolvedParent == clientID {
-			logger.DebugCF("native", "validateSessionOwnership: subagent parent matches clientID", map[string]interface{}{
-				"session_key":     sessionKey,
-				"client_id":       clientID,
-				"resolved_parent": resolvedParent,
-			})
-			return true
-		}
-
-		logger.InfoCF("native", "validateSessionOwnership: checking subagent parent", map[string]interface{}{
-			"session_key":     sessionKey,
-			"client_id":       clientID,
-			"resolved_parent": resolvedParent,
-			"client_keys":     client.SessionKeys,
-		})
-		resolvedParentBase := resolvedParent
-		if strings.Contains(resolvedParent, ":chat:") {
-			chatIdx := strings.LastIndex(resolvedParent, ":chat:")
-			if chatIdx >= 0 {
-				resolvedParentBase = resolvedParent[:chatIdx]
-			}
-		}
-		for _, sk := range client.SessionKeys {
-			skNorm := strings.TrimPrefix(sk, "native:")
-			if skNorm == resolvedParent {
-				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParent", map[string]interface{}{
-					"session_key": sessionKey,
-					"sk":          sk,
-					"client_id":   clientID,
-				})
-				return true
-			}
-			if skNorm == resolvedParentBase {
-				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skNorm==resolvedParentBase", map[string]interface{}{
-					"session_key": sessionKey,
-					"sk":          sk,
-					"client_id":   clientID,
-				})
-				return true
-			}
-			skBase := skNorm
-			if strings.Contains(skNorm, ":chat:") {
-				chatIdx := strings.LastIndex(skNorm, ":chat:")
-				if chatIdx >= 0 {
-					skBase = skNorm[:chatIdx]
-				}
-			}
-			if skBase == resolvedParent || skBase == resolvedParentBase {
-				logger.DebugCF("native", "validateSessionOwnership: subagent matched via skBase", map[string]interface{}{
-					"session_key": sessionKey,
-					"sk":          sk,
-					"client_id":   clientID,
-				})
-				return true
-			}
-		}
-		logger.WarnCF("native", "validateSessionOwnership: no matching session key for subagent", map[string]interface{}{
-			"session_key":          sessionKey,
-			"client_id":            clientID,
-			"resolved_parent":      resolvedParent,
-			"resolved_parent_base": resolvedParentBase,
-			"client_keys":          client.SessionKeys,
-		})
-		return false
-	}
-	// Default session key (client's own ID) is always valid — used for initial
-	// WebSocket connections before any sessions have been created.
-	// Also handles deprecated native: prefix for backward compatibility.
-	if sessionKey == clientID || strings.TrimPrefix(sessionKey, "native:") == clientID {
-		logger.DebugCF("native", "validateSessionOwnership: default/clientID match", map[string]interface{}{
-			"session_key": sessionKey,
-			"client_id":   clientID,
-		})
-		return true
-	}
-	for _, sk := range client.SessionKeys {
-		// Exact match
-		if sk == sessionKey {
-			logger.DebugCF("native", "validateSessionOwnership: exact match", map[string]interface{}{
-				"session_key": sessionKey,
-				"client_id":   clientID,
-				"matched_key": sk,
-			})
-			return true
-		}
-		// Backward compatibility: match with/without native: prefix
-		if sessionKeyMatches(sk, sessionKey) {
-			logger.DebugCF("native", "validateSessionOwnership: prefix-insensitive match", map[string]interface{}{
-				"session_key": sessionKey,
-				"client_id":   clientID,
-				"matched_key": sk,
-			})
-			return true
-		}
 	}
 
-	logger.WarnCF("native", "validateSessionOwnership: no matching key found", map[string]interface{}{
-		"client_id":       clientID,
-		"session_key":     sessionKey,
-		"client_keys":     client.SessionKeys,
-		"ws_client_count": len(n.wsClients),
-	})
-	return false
+	// All native sessions are shared — any authenticated native client
+	// can access any native session.
+	return true
 }
 
 func (c *WSClient) Send(data []byte) error {

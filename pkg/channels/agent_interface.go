@@ -62,6 +62,8 @@ type AgentProvidable interface {
 	GetSessionSummary(sessionKey string) string
 	// GetUpdated devuelve el timestamp de última actualización de una sesión
 	GetUpdated(sessionKey string) time.Time
+	// GetCreated devuelve el timestamp de creación de una sesión
+	GetCreated(sessionKey string) time.Time
 	// SetName establece el nombre de una sesión
 	SetName(sessionKey string, name string) error
 	// ResolveSessionKey resuelve el alias de session_key si existe

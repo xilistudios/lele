@@ -348,7 +348,8 @@ func TestHandleSessionCompact(t *testing.T) {
 func TestHandleSession_Forbidden(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// A session key that belongs to a different client
+	// Native sessions are shared across all clients, so accessing
+	// another client's session should succeed (200) instead of 403.
 	sessionKey := "native:other-client-id"
 	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/model", nil)
 	req.Header.Set("Authorization", "Bearer "+ts.token)
@@ -359,7 +360,7 @@ func TestHandleSession_Forbidden(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 }

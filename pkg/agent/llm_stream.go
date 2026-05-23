@@ -22,8 +22,12 @@ type streamHandler struct {
 	messageID string
 }
 
-// newStreamHandler creates a new stream handler
+// newStreamHandler creates a new stream handler.
+// If messageID is empty, a stable UUID is generated once and reused for all chunks.
 func newStreamHandler(bus *bus.MessageBus, channel, chatID, messageID string) *streamHandler {
+	if messageID == "" {
+		messageID = uuid.New().String()
+	}
 	return &streamHandler{
 		bus:       bus,
 		channel:   channel,
@@ -39,15 +43,11 @@ func (sh *streamHandler) shouldStream(sendResponse bool) bool {
 
 // onChunk sends a streaming chunk to the client
 func (sh *streamHandler) onChunk(chunk string, done bool) {
-	messageID := sh.messageID
-	if messageID == "" {
-		messageID = uuid.New().String()
-	}
 	sh.bus.PublishOutbound(bus.OutboundMessage{
 		Channel:   sh.channel,
 		ChatID:    sh.chatID,
 		Event:     "message.stream",
-		MessageID: messageID,
+		MessageID: sh.messageID,
 		Content:   chunk,
 		Metadata: map[string]string{
 			"done": fmt.Sprintf("%v", done),
@@ -57,15 +57,11 @@ func (sh *streamHandler) onChunk(chunk string, done bool) {
 
 // onReasoning sends a reasoning/thinking chunk to the client
 func (sh *streamHandler) onReasoning(reasoningChunk string) {
-	messageID := sh.messageID
-	if messageID == "" {
-		messageID = uuid.New().String()
-	}
 	sh.bus.PublishOutbound(bus.OutboundMessage{
 		Channel:   sh.channel,
 		ChatID:    sh.chatID,
 		Event:     "message.thinking",
-		MessageID: messageID,
+		MessageID: sh.messageID,
 		Content:   reasoningChunk,
 	})
 }

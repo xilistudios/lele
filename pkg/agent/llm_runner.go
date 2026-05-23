@@ -164,16 +164,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		return "", nil
 	}
 
-	// 9. Log response
-	responsePreview := utils.Truncate(finalContent, 120)
-	logger.InfoCF("agent", fmt.Sprintf("Response: %s", responsePreview),
-		map[string]interface{}{
-			"agent_id":     agent.ID,
-			"session_key":  opts.SessionKey,
-			"iterations":   iteration,
-			"final_length": len(finalContent),
-		})
-
 	return finalContent, nil
 }
 
@@ -250,10 +240,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				"tools_json":    FormatToolsForLog(providerToolDefs),
 			})
 
-		// Setup streaming handlers for native channel
+		// Setup streaming handlers for native channel.
+		// Each iteration gets a unique messageID so that separate
+		// LLM responses (with their own reasoning + text) render as
+		// separate sections in the chat, not merged into one slot.
 		var streamOnChunk func(chunk string, done bool)
 		var streamOnReasoning func(reasoningChunk string)
-		streamer := newStreamHandler(lr.al.bus, opts.Channel, opts.SessionKey, opts.MessageID)
+		iterationMsgID := opts.MessageID
+		if iteration > 1 && iterationMsgID != "" {
+			// Append iteration suffix for >1st response so the
+			// frontend creates a fresh assistant bubble instead of
+			// appending to the previous LLM response.
+			iterationMsgID = fmt.Sprintf("%s-%d", iterationMsgID, iteration)
+		}
+		streamer := newStreamHandler(lr.al.bus, opts.Channel, opts.SessionKey, iterationMsgID)
 		if streamer.shouldStream(opts.SendResponse) {
 			streamOnChunk = streamer.onChunk
 			streamOnReasoning = streamer.onReasoning
@@ -296,13 +296,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
-			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
-				map[string]interface{}{
-					"agent_id":          agent.ID,
-					"iteration":         iteration,
-					"content_chars":     len(finalContent),
-					"reasoning_present": response.ReasoningContent != "",
-				})
 
 			// Save assistant message with reasoning content (important for thinking models like DeepSeek)
 			assistantMsg := providers.Message{
@@ -363,12 +356,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		for _, tc := range response.ToolCalls {
 			toolNames = append(toolNames, tc.Name)
 		}
-		logger.InfoCF("agent", "LLM requested tool calls",
-			map[string]interface{}{"agent_id": agent.ID,
-				"tools":     toolNames,
-				"count":     len(response.ToolCalls),
-				"iteration": iteration,
-			})
 
 		// Check for loop patterns and inject guidance if needed
 		if guidanceMsg := loopDetector.Check(response.ToolCalls, agent.ID, iteration); guidanceMsg != nil {

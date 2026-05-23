@@ -44,15 +44,6 @@ export function QuickChatPanel({
   }, [mounted, closing, initialFocusSearch])
 
   // Keyboard handler
-  useEffect(() => {
-    if (!mounted || closing) return
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [mounted, closing, onClose])
-
   const handleClose = useCallback(() => {
     setClosing(true)
     setTimeout(() => {
@@ -61,6 +52,15 @@ export function QuickChatPanel({
       onClose()
     }, 200) // match animation duration
   }, [onClose])
+
+  useEffect(() => {
+    if (!mounted || closing) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [mounted, closing, handleClose])
 
   const handleSelect = useCallback(
     (key: string) => {

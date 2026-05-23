@@ -4,7 +4,6 @@ import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
 
-const POLLING_INTERVAL = 5000
 const DEFAULT_LIMIT = 50
 
 export type HistoryMessage = Array<{
@@ -27,15 +26,28 @@ function mergeMessages(
   // Once streaming is done (streaming=false), the server/base version
   // should take over — otherwise both the base and streaming copies
   // get filtered out and the message disappears during HTTP polling.
-  const activeStreamingAssistantIds = new Set<string>()
+  //
+  // NOTE: WebSocket events use UUID-based IDs while HTTP history uses
+  // content-hash-based IDs. Therefore we MUST use position-based matching
+  // (not ID-based) to associate base messages with their streaming
+  // counterparts. Failure to do this causes duplicate messages and
+  // incorrect ordering during live updates.
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
 
   const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
   const streamingToolByCallId = new Map<string, ChatMessage>()
+  // Build an ordered list of streaming assistants for position-based matching.
+  // Store whether each is actively streaming so we know whether to prefer
+  // the streaming copy or the base copy.
+  const orderedStreamingAssistants: Array<{
+    msg: ChatMessage
+    isStreaming: boolean
+    used: boolean
+  }> = []
   for (const msg of streamingMessages) {
-    if (msg.role === 'assistant' && msg.streaming) {
-      activeStreamingAssistantIds.add(msg.id)
+    if (msg.role === 'assistant') {
+      orderedStreamingAssistants.push({ msg, isStreaming: msg.streaming === true, used: false })
     }
     if (msg.role === 'tool') {
       if (msg.toolCallId) {
@@ -54,10 +66,32 @@ function mergeMessages(
   // Build filteredBase: keep base messages but update tool messages in-place
   // with streaming data instead of removing them. This preserves the canonical
   // order from the server while showing live streaming updates.
+  //
+  // For assistant messages, use position-based matching: the Nth assistant in
+  // base corresponds to the Nth assistant in streaming. If the streaming copy
+  // is actively streaming, use it in-place to preserve message order.
   const consumedStreamingToolIds = new Set<string>()
+  let streamAsstIdx = 0
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
-    if (msg.role === 'assistant' && activeStreamingAssistantIds.has(msg.id)) {
+    if (msg.role === 'assistant') {
+      // Position-based matching: find corresponding streaming assistant
+      if (streamAsstIdx < orderedStreamingAssistants.length) {
+        const entry = orderedStreamingAssistants[streamAsstIdx]
+        if (entry.isStreaming) {
+          // Actively streaming → use streaming version in-place to preserve order
+          filteredBase.push(entry.msg)
+          entry.used = true
+          streamAsstIdx++
+          continue
+        }
+        // Both are completed → base version takes precedence.
+        // The streaming copy will be deduped in filteredStreaming below.
+        entry.used = true
+        streamAsstIdx++
+      }
+      // Fall through: keep the base version
+      filteredBase.push(msg)
       continue
     }
     if (msg.role === 'tool' && msg.toolCallId && streamingToolCallIds.has(msg.toolCallId)) {
@@ -95,14 +129,28 @@ function mergeMessages(
     return baseUserCount <= (msg.optimisticBaseCount ?? 0)
   })
 
+  // Build a set of streaming assistant IDs that were already placed in filteredBase
+  const usedStreamingAssistantIds = new Set(
+    orderedStreamingAssistants.filter((e) => e.used).map((e) => e.msg.id),
+  )
+
   // Only keep streaming items that haven't been incorporated into base yet
   const filteredStreaming = streamingWithoutConfirmedUsers.filter((msg) => {
+    if (msg.role === 'assistant' && usedStreamingAssistantIds.has(msg.id)) {
+      // Already placed in filteredBase via position-based matching
+      return false
+    }
     if (msg.role === 'assistant' && !msg.streaming && baseHasCurrentTurn) {
-      // Only drop the streaming copy when the base already has this message.
-      // Otherwise the assistant vanishes between message.complete (which sets
-      // streaming=false) and the next HTTP poll delivering the canonical version.
-      const existsInBase = baseMessages.some((bm) => bm.id === msg.id && bm.role === 'assistant')
-      if (existsInBase) return false
+      // Completed streaming assistant that was NOT placed in filteredBase.
+      // Check if it was matched with a base counterpart during position-based
+      // matching. If used=true, the base copy is already in filteredBase and
+      // this streaming copy is a duplicate.
+      // If used=false, there is no base counterpart yet (HTTP poll hasn't
+      // caught up), so keep the streaming copy.
+      const entry = orderedStreamingAssistants.find((e) => e.msg.id === msg.id)
+      if (entry?.used) {
+        return false
+      }
     }
     if (msg.role === 'tool' && msg.toolCallId && consumedStreamingToolIds.has(msg.toolCallId)) {
       return false
@@ -202,10 +250,7 @@ export function useChatHistory(
       sessionKey !== null &&
       token !== null &&
       !(sessionKey.startsWith('subagent:') && !parentSessionKey),
-    staleTime: 5_000,
-    refetchInterval: POLLING_INTERVAL,
-    refetchOnWindowFocus: false,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true, // safety net: recovers from WS gaps after tab switch
     retry: false,
   })
 

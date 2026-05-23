@@ -39,6 +39,8 @@
     "sendMessage": "Enviar mensaje",
     "send": "Enviar",
     "startConversation": "Envía un mensaje para comenzar",
+    "emptyState": "Inicia una conversación",
+    "scrollUpForMore": "Desplázate hacia arriba para ver más",
     "session": "Sesión",
     "moreOptions": "Más opciones",
     "messageCount_one": "{{count}} mensaje",
@@ -105,7 +107,9 @@
     "inlineTitle": "Aprobación requerida",
     "pendingCommand": "Comando pendiente de ejecución",
     "approve": "Aprobar",
-    "reject": "Rechazar"
+    "reject": "Rechazar",
+    "commandApproved": "Comando aprobado",
+    "commandRejected": "Comando rechazado"
   },
   "errors": {
     "connectionFailed": "No se pudo conectar",

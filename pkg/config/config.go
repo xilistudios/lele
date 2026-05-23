@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -640,7 +639,6 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	provider := normalizeProviderKey(defaultProvider)
 	if provider != "" && strings.Contains(rawModel, "/") {
 		if resolved, found := p.resolveModelAliasInProvider(provider, rawModel, true); found {
-			log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provider, resolved, provider)
 			return provider + "/" + resolved
 		}
 	}
@@ -663,9 +661,6 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 
 	// Try to find model in the specified provider first.
 	if resolved, found := p.resolveModelAliasInProvider(provider, model, strings.Contains(model, "/")); found {
-		// Always return with the provider from config
-		// Format: provider/resolved_model (e.g., chutes/Qwen/Qwen3-Coder-Next)
-		log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provider, resolved, provider)
 		return provider + "/" + resolved
 	}
 
@@ -691,15 +686,11 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		}
 		if found && strings.TrimSpace(aliasCfg.Model) != "" {
 			resolved := strings.TrimSpace(aliasCfg.Model)
-			// Return with the provider from config where we found it
-			// Format: provider/resolved_model (e.g., chutes/Qwen/Qwen3.5-397B-A17B-TEE)
-			log.Printf("[DEBUG] ResolveModelAlias: %s -> %s/%s (found in %s)\n", rawModel, provName, resolved, provName)
 			return provName + "/" + resolved
 		}
 	}
 
 	// Model not found anywhere, return original
-	log.Printf("[DEBUG] ResolveModelAlias: %s -> %s (NOT FOUND)\n", rawModel, rawModel)
 	return rawModel
 }
 

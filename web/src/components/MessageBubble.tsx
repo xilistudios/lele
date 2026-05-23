@@ -13,6 +13,30 @@ import { ToolCallDisplay } from './molecules/ToolCallDisplay'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
+// Track recently animated message content to prevent animation replay
+// when the React key changes during streaming→base transition (mergeMessages).
+// The module-level Map survives component remounts from key changes.
+const ANIMATION_COOLDOWN_MS = 3000
+const recentlyAnimated = new Map<string, number>()
+const MAX_TRACKED_ANIMATIONS = 200
+
+function hasRecentlyAnimated(role: string, content: string): boolean {
+  const key = `${role}:${content.slice(0, 200)}`
+  const ts = recentlyAnimated.get(key)
+  if (ts && Date.now() - ts < ANIMATION_COOLDOWN_MS) {
+    return true
+  }
+  recentlyAnimated.set(key, Date.now())
+  // Prune old entries to prevent memory leak
+  if (recentlyAnimated.size > MAX_TRACKED_ANIMATIONS) {
+    const cutoff = Date.now() - ANIMATION_COOLDOWN_MS * 2
+    for (const [k, v] of recentlyAnimated) {
+      if (v < cutoff) recentlyAnimated.delete(k)
+    }
+  }
+  return false
+}
+
 function isImageByExtension(name: string): boolean {
   const ext = name.toLowerCase().split('.').pop()
   return ext ? IMAGE_EXTENSIONS.has(`.${ext}`) : false
@@ -57,7 +81,22 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
-  const [animate, setAnimate] = useState(false)
+  const [animate, setAnimate] = useState(
+    // Skip animation if this exact content was animated recently
+    // (prevents flicker when React key changes during streaming→base transition).
+    // Also skip for streaming placeholders (empty content shows loading dots).
+    !(message.streaming && message.content === '') &&
+      !hasRecentlyAnimated(message.role, message.content),
+  )
+
+  // When a streaming message receives its first content, trigger the animation
+  // and mark the content as recently animated to prevent replay on key change
+  useEffect(() => {
+    if (message.streaming && message.content !== '' && !animate) {
+      hasRecentlyAnimated(message.role, message.content)
+      setAnimate(true)
+    }
+  }, [message.streaming, message.content, animate])
   const [thinkingOpen, setThinkingOpen] = useState(message.streaming && !!message.reasoningContent)
 
   // Auto-open thinking when streaming starts
@@ -66,12 +105,6 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
       setThinkingOpen(true)
     }
   }, [message.streaming, message.reasoningContent])
-
-  useEffect(() => {
-    if (!isUser && !isTool && message.content) {
-      setAnimate(true)
-    }
-  }, [isUser, isTool, message.content])
 
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
@@ -87,7 +120,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const subagentSessionKey = message.subagentSessionKey
 
     return (
-      <div className="py-1.5">
+      <div data-message-id={message.id} className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}>
         <ToolCallDisplay
           toolName={message.toolName}
           toolArgs={message.toolArgs}
@@ -107,7 +140,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
 
     return (
-      <div className="flex justify-end py-1">
+      <div data-message-id={message.id} className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}>
         <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-muted px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {imageAttachments.length > 0 ? (
@@ -141,7 +174,7 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   }
 
   return (
-    <div className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
+    <div data-message-id={message.id} className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
       {message.excludeFromContext && (
         <div className="mb-1 flex items-center gap-1.5 text-[10px] text-text-tertiary opacity-60">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

@@ -48,21 +48,6 @@ func newMessageProcessor(al *AgentLoop) *messageProcessorImpl {
 
 // processMessage is the main entry point for processing inbound messages.
 func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
-	// Add message preview to log (show full content for error messages)
-	var logContent string
-	if strings.Contains(msg.Content, "Error:") || strings.Contains(msg.Content, "error") {
-		logContent = msg.Content // Full content for errors
-	} else {
-		logContent = utils.Truncate(msg.Content, 80)
-	}
-	logger.InfoCF("agent", fmt.Sprintf("Processing message from %s:%s: %s", msg.Channel, msg.SenderID, logContent),
-		map[string]interface{}{
-			"channel":     msg.Channel,
-			"chat_id":     msg.ChatID,
-			"sender_id":   msg.SenderID,
-			"session_key": msg.SessionKey,
-		})
-
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
 		return mp.processSystemMessage(ctx, msg)
@@ -113,13 +98,6 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		}
 	}
 
-	logger.InfoCF("agent", "Routed message",
-		map[string]interface{}{
-			"agent_id":    agent.ID,
-			"session_key": sessionKey,
-			"matched_by":  route.MatchedBy,
-		})
-
 	// Delegate to llmRunner for processing
 	ephemeralNotice := mp.maybeStartEphemeralSession(agent, sessionKey)
 	messageID := ""
@@ -158,12 +136,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", fmt.Errorf("processSystemMessage called with non-system message channel: %s", msg.Channel)
 	}
 
-	logger.InfoCF("agent", "Processing system message",
-		map[string]interface{}{
-			"sender_id": msg.SenderID,
-			"chat_id":   msg.ChatID,
-		})
-
 	// Parse origin channel from chat_id (format: "channel:chat_id")
 	var originChannel, originChatID string
 	if idx := strings.Index(msg.ChatID, ":"); idx > 0 {
@@ -188,10 +160,6 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 	}
 	cmd := parts[0]
 	args := parts[1:]
-	logger.InfoCF("agent", "System message content", map[string]interface{}{
-		"content": content,
-		"cmd":     cmd,
-	})
 
 	// Use default agent for system messages
 	agent := mp.al.registry.GetDefaultAgent()

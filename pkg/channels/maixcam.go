@@ -38,7 +38,6 @@ func NewMaixCamChannel(cfg config.MaixCamConfig, bus *bus.MessageBus) (*MaixCamC
 }
 
 func (c *MaixCamChannel) Start(ctx context.Context) error {
-	logger.InfoC("maixcam", "Starting MaixCam channel server")
 
 	addr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
 	listener, err := net.Listen("tcp", addr)
@@ -60,12 +59,10 @@ func (c *MaixCamChannel) Start(ctx context.Context) error {
 }
 
 func (c *MaixCamChannel) acceptConnections(ctx context.Context) {
-	logger.DebugC("maixcam", "Starting connection acceptor")
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.InfoC("maixcam", "Stopping connection acceptor")
 			return
 		default:
 			conn, err := c.listener.Accept()
@@ -92,14 +89,12 @@ func (c *MaixCamChannel) acceptConnections(ctx context.Context) {
 }
 
 func (c *MaixCamChannel) handleConnection(conn net.Conn, ctx context.Context) {
-	logger.DebugC("maixcam", "Handling MaixCam connection")
 
 	defer func() {
 		conn.Close()
 		c.clientsMux.Lock()
 		delete(c.clients, conn)
 		c.clientsMux.Unlock()
-		logger.DebugC("maixcam", "Connection closed")
 	}()
 
 	decoder := json.NewDecoder(conn)
@@ -129,7 +124,6 @@ func (c *MaixCamChannel) processMessage(msg MaixCamMessage, conn net.Conn) {
 	case "person_detected":
 		c.handlePersonDetection(msg)
 	case "heartbeat":
-		logger.DebugC("maixcam", "Received heartbeat")
 	case "status":
 		c.handleStatusUpdate(msg)
 	default:
@@ -140,11 +134,6 @@ func (c *MaixCamChannel) processMessage(msg MaixCamMessage, conn net.Conn) {
 }
 
 func (c *MaixCamChannel) handlePersonDetection(msg MaixCamMessage) {
-	logger.InfoCF("maixcam", "", map[string]interface{}{
-		"timestamp": msg.Timestamp,
-		"data":      msg.Data,
-	})
-
 	senderID := "maixcam"
 	chatID := "default"
 
@@ -182,7 +171,6 @@ func (c *MaixCamChannel) handleStatusUpdate(msg MaixCamMessage) {
 }
 
 func (c *MaixCamChannel) Stop(ctx context.Context) error {
-	logger.InfoC("maixcam", "Stopping MaixCam channel")
 	c.setRunning(false)
 
 	if c.listener != nil {
@@ -197,7 +185,6 @@ func (c *MaixCamChannel) Stop(ctx context.Context) error {
 	}
 	c.clients = make(map[net.Conn]bool)
 
-	logger.InfoC("maixcam", "MaixCam channel stopped")
 	return nil
 }
 

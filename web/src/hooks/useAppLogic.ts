@@ -58,8 +58,7 @@ export function useAppLogic(
   const { touchSession } = sessionsHook
   const { modelState, loadModels, selectModel } = useModels(api, token)
   const messagesHook = useMessages(
-    api,
-    token,
+    wsSend,
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
     sessionsHook.refreshSessions,
@@ -402,25 +401,11 @@ export function useAppLogic(
     saveSidebarOpen(sidebarOpen)
   }, [sidebarOpen])
 
-  const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
-  ensurePlaceholderRef.current = messagesHook.ensureAssistantPlaceholder
-  const streamingMessagesRef = useRef(messagesHook.streamingMessages)
-  streamingMessagesRef.current = messagesHook.streamingMessages
-
   const prevProcessingRef = useRef(false)
   // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally excluded, they hold stable values
   useEffect(() => {
     const sessionKey = sessionsHook.currentSessionKey
     if (!sessionKey) return
-
-    const hasStreamingPlaceholder = streamingMessagesRef.current.some(
-      (m) => m.sessionKey === sessionKey && (m.streaming || m.id === '__processing_placeholder__'),
-    )
-
-    // Ensure placeholder when agent starts processing
-    if (chatHistory.processing && !hasStreamingPlaceholder) {
-      ensurePlaceholderRef.current('__processing_placeholder__', sessionKey)
-    }
 
     if (chatHistory.processing) {
       // Agent is processing - ensure session is tracked in processingSessions
@@ -438,12 +423,12 @@ export function useAppLogic(
         })
       }
     } else {
-      // Agent is NOT processing - remove from processingSessions
-      // regardless of prev state. This handles:
-      // 1. Normal transition: processing→done (prevProcessing was true)
-      // 2. Fast finish: agent finished before first poll saw processing=true
-      //    (session was added by sendMessage() but polling never saw true)
-      // 3. Stale state cleanup
+      // Agent is NOT processing - remove from processingSessions.
+      // This handles three cases:
+      //   1. Normal transition: processing→done (prevProcessing was true)
+      //   2. Fast finish: agent finished before first poll saw processing=true
+      //      (session was added by sendMessage() but polling never saw true)
+      //   3. Stale state cleanup after reconnect
       //
       // IMPORTANT: Do NOT call clearStreaming() here. The HTTP poll may
       // transiently report processing=false during an active SSE stream
@@ -465,7 +450,9 @@ export function useAppLogic(
   }, [chatHistory.processing, sessionsHook.currentSessionKey])
 
   const currentAgent = agents.find((a) => a.id === currentAgentId) ?? null
-  const isStreaming =
+  // isProcessing covers both active SSE streaming and agent thinking/tool-calls.
+  // It drives the loading indicator (dots) and scroll-pin behavior in MessageList.
+  const isProcessing =
     messagesHook.streamingMessages.some((m) => m.streaming) || chatHistory.processing
   const processingSessions = messagesHook.processingSessions
 
@@ -478,7 +465,7 @@ export function useAppLogic(
     sidebarOpen,
     modelState,
     thinkLevel,
-    isStreaming,
+    isProcessing,
     processingSessions,
     sessions: sessionsHook.sessions,
     currentSessionKey: sessionsHook.currentSessionKey,

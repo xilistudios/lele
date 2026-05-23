@@ -1,6 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ApiClient } from '../lib/api'
 import {
   createAssistantMessage,
   createDeterministicToolMessageId,
@@ -20,6 +19,7 @@ import type {
   HistoryToolCall,
   ToolStatus,
 } from '../lib/types'
+import type { ClientCommand } from '../services/ws/events'
 import {
   type HistoryMessage,
   chatHistoryQueryKey,
@@ -29,20 +29,17 @@ import {
 export { parseAttachmentsFromContent, parseSubagentSessionKey, toChatMessages }
 
 // Interval between characters when animating streaming text in the UI.
-// 12ms ≈ 83 updates/second — chosen to feel fluid without overwhelming the
-// browser's render loop. React 18 batches the setState calls, keeping actual
-// paints near the display refresh rate.
 const STREAM_CHAR_INTERVAL_MS = 12
 
-type StreamClientEvent = {
+type ClientEvent = {
   event: string
   data: unknown
-  transport?: 'sse'
 }
 
+type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
+
 export function useMessages(
-  api: ApiClient,
-  token: string | null,
+  wsSend: SendFn,
   _currentSessionKey: string | null,
   currentSessionKeyRef: React.MutableRefObject<string | null>,
   onSessionUpdated?: () => void,
@@ -56,9 +53,8 @@ export function useMessages(
   const [processingSessions, setProcessingSessions] = useState<Set<string>>(new Set())
   const streamingRef = useRef(streamingMessages)
   const processingSessionKeyRef = useRef<string | null>(null)
-  const eventHandlerRef = useRef<(event: StreamClientEvent) => void>(() => {})
-  const activeStreamControllersRef = useRef<Set<AbortController>>(new Set())
-  const activeSSEMessageIdsRef = useRef<Set<string>>(new Set())
+  const lastSessionRefreshRef = useRef<number>(0)
+  const eventHandlerRef = useRef<(event: ClientEvent) => void>(() => {})
   const streamQueuesRef = useRef<
     Map<
       string,
@@ -87,6 +83,15 @@ export function useMessages(
     streamingRef.current = streamingMessages
   }, [streamingMessages])
 
+  // Debounce session refreshes to avoid double sidebar updates when
+  // message.ack and history.updated fire in rapid succession (< 300ms apart).
+  const debouncedSessionRefresh = useCallback(() => {
+    const now = Date.now()
+    if (now - lastSessionRefreshRef.current < 300) return
+    lastSessionRefreshRef.current = now
+    onSessionUpdated?.()
+  }, [onSessionUpdated])
+
   const ensureAssistantPlaceholder = useCallback(
     (messageId: string, sessionKey: string, chunk = '', isDone = false) => {
       setStreamingMessages((current) => {
@@ -103,11 +108,8 @@ export function useMessages(
               : m,
           )
         }
-        const filtered = current.filter(
-          (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === sessionKey),
-        )
         return [
-          ...filtered,
+          ...current,
           createAssistantMessage({
             id: messageId,
             sessionKey,
@@ -135,13 +137,6 @@ export function useMessages(
       }
     }
     streamQueuesRef.current.clear()
-  }, [])
-
-  const abortActiveStreams = useCallback(() => {
-    for (const controller of activeStreamControllersRef.current) {
-      controller.abort()
-    }
-    activeStreamControllersRef.current.clear()
   }, [])
 
   const drainStreamQueue = useCallback(
@@ -195,7 +190,7 @@ export function useMessages(
 
   const sendMessage = useCallback(
     async (content: string, attachments: string[], sessionKey: string, agentId: string | null) => {
-      if (!token || !sessionKey) return
+      if (!sessionKey) return
 
       const normalizedContent = content.trim()
       if (normalizedContent.length === 0) return
@@ -237,94 +232,23 @@ export function useMessages(
         })
       }
 
-      const payload = {
+      // Send via WebSocket — the server responds with message.ack containing
+      // the message_id, and all streaming events flow through the same WS connection.
+      wsSend('message', {
         content: normalizedContent,
         session_key: sessionKey,
         agent_id: agentId ?? undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
-      }
-
-      try {
-        let response: Awaited<ReturnType<ApiClient['sendMessage']>> | undefined
-
-        if (api.sendMessageStream) {
-          const controller = new AbortController()
-          let streamMessageId: string | null = null
-          activeStreamControllersRef.current.add(controller)
-          try {
-            response = await api.sendMessageStream(
-              payload,
-              (event) => {
-                if (event.event === 'message.ack') {
-                  streamMessageId = event.data.message_id
-                }
-                eventHandlerRef.current({ ...event, transport: 'sse' })
-              },
-              {
-                signal: controller.signal,
-                onDone: () => {
-                  activeStreamControllersRef.current.delete(controller)
-                  if (streamMessageId) {
-                    activeSSEMessageIdsRef.current.delete(streamMessageId)
-                  }
-                },
-              },
-            )
-          } catch (streamError) {
-            activeStreamControllersRef.current.delete(controller)
-            // Clean up the SSE message ID so WebSocket events for this
-            // message aren't permanently blocked. The SSE stream may have
-            // registered the ID via message.ack but failed before onDone
-            // could clean it up, leaving WebSocket events silently dropped.
-            if (streamMessageId) {
-              activeSSEMessageIdsRef.current.delete(streamMessageId)
-            }
-            if (controller.signal.aborted) {
-              throw streamError
-            }
-            console.warn('[SSE] Streaming send failed, falling back to JSON send:', streamError)
-          }
-        }
-
-        if (!response) {
-          response = await api.sendMessage(payload)
-        }
-
-        // Mark session as processing only after API confirms the send
-        setProcessingSessions((prev) => new Set(prev).add(sessionKey))
-        processingSessionKeyRef.current = sessionKey
-
-        ensureAssistantPlaceholder(response.message_id, response.session_key)
-        console.log('[WS] Message sent, messageId:', response.message_id)
-        return response
-      } catch (error) {
-        // Rollback cache on failure
-        if (previousCache) {
-          queryClient.setQueryData(chatHistoryQueryKey(sessionKey), previousCache)
-        } else {
-          queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
-        }
-        // Remove optimistic user message from streamingMessages
-        setStreamingMessages((current) =>
-          current.filter((m) => !(m.role === 'user' && m.optimistic)),
-        )
-        throw error
-      }
+      })
     },
-    [api, token, ensureAssistantPlaceholder, getHistoryUserCount, queryClient],
+    [wsSend, getHistoryUserCount, queryClient],
   )
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable, refs are intentionally excluded
   const handleEvent = useCallback(
-    (event: StreamClientEvent) => {
+    (event: ClientEvent) => {
       const data = event.data as Record<string, unknown>
       const eventSessionKey = data.session_key as string | undefined
-      const messageId = data.message_id as string | undefined
-      const isSSEEvent = event.transport === 'sse'
-
-      if (!isSSEEvent && messageId && activeSSEMessageIdsRef.current.has(messageId)) {
-        return
-      }
 
       switch (event.event) {
         case 'welcome': {
@@ -337,9 +261,6 @@ export function useMessages(
             const sessionKey = welcomeData.session_key
             processingSessionKeyRef.current = sessionKey
             setProcessingSessions((prev) => new Set(prev).add(sessionKey))
-            if (sessionKey === currentSessionKeyRef.current) {
-              ensureAssistantPlaceholder('__processing_placeholder__', sessionKey)
-            }
           }
           break
         }
@@ -359,18 +280,18 @@ export function useMessages(
             done: data.done,
           })
           {
-            const messageId = data.message_id as string
+            const msgId = data.message_id as string
             const sessionKey = (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string
             const chunk = (data.chunk as string) ?? ''
             const done = (data.done as boolean) ?? false
 
             if (done && chunk) {
-              clearStreamQueue(messageId)
-              ensureAssistantPlaceholder(messageId, sessionKey, chunk, true)
+              clearStreamQueue(msgId)
+              ensureAssistantPlaceholder(msgId, sessionKey, chunk, true)
               break
             }
 
-            enqueueStreamChunk(messageId, sessionKey, chunk, done)
+            enqueueStreamChunk(msgId, sessionKey, chunk, done)
           }
           break
         case 'message.thinking':
@@ -391,15 +312,11 @@ export function useMessages(
           break
         case 'message.ack': {
           const ackSessionKey = (data.session_key as string) ?? ''
-          const ackMessageId = data.message_id as string | undefined
-          if (isSSEEvent && ackMessageId) {
-            activeSSEMessageIdsRef.current.add(ackMessageId)
-          }
           if (ackSessionKey) {
             setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
             processingSessionKeyRef.current = ackSessionKey
             // Trigger session refresh so backend data replaces optimistic state
-            onSessionUpdated?.()
+            debouncedSessionRefresh()
           }
           ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
           break
@@ -410,17 +327,9 @@ export function useMessages(
           wsDebug('[WS] message.complete received', {
             messageId: data.message_id,
             eventSessionKey,
-            currentSessionKey: currentSessionKeyRef.current,
             completedSessionKey,
           })
 
-          // NOTE: intentionally NOT removing from processingSessions here.
-          // message.complete fires for every individual assistant message,
-          // but the agent may still be processing (tool calls, follow-ups).
-          // processingSessions is cleaned up by the polling-based useEffect
-          // in useAppLogic.ts when chatHistory.processing transitions to false.
-
-          // Only update streaming messages if this is the current session
           if (completedSessionKey && completedSessionKey !== currentSessionKeyRef.current) {
             console.warn('[WS] message.complete for different session, skipping streaming update')
             setPendingAttachments([])
@@ -431,9 +340,6 @@ export function useMessages(
           setStreamingMessages((current) => {
             const targetSessionKey = eventSessionKey ?? currentSessionKeyRef.current
             return current.flatMap((m) => {
-              if (m.id === '__processing_placeholder__' && m.sessionKey === targetSessionKey) {
-                return []
-              }
               if (m.role === 'assistant' && m.id === (data.message_id as string)) {
                 const content = (data.content as string) || m.content
                 return [{ ...m, content, streaming: false }]
@@ -454,34 +360,25 @@ export function useMessages(
           setToolStatus(null)
           setPendingAttachments([])
           processingSessionKeyRef.current = null
-          if (isSSEEvent && messageId) {
-            activeSSEMessageIdsRef.current.delete(messageId)
-          }
           // Refresh sessions so sidebar shows updated message count
-          onSessionUpdated?.()
+          debouncedSessionRefresh()
           break
         }
         case 'history.updated': {
           const historySessionKey = (data.session_key as string) ?? currentSessionKeyRef.current
-          // NOTE: intentionally NOT removing from processingSessions here.
-          // history.updated fires for every individual assistant message,
-          // but the agent may still be processing (tool calls, follow-ups).
-          // This is cleaned up by the polling-based useEffect in useAppLogic.ts
-          // when chatHistory.processing transitions to false.
           queryClient.invalidateQueries({
             queryKey: chatHistoryQueryKey(historySessionKey),
           })
-          onSessionUpdated?.()
-          // Clean up only transient UI elements from streaming state.
-          // Keep tool messages and completed assistants — mergeMessages()
-          // in useChatHistory will naturally deduplicate them when the
-          // HTTP poll delivers the canonical data. Removing them here
-          // causes a visible flicker while waiting for the poll refetch.
+          debouncedSessionRefresh()
+          // Only remove optimistic user messages — let mergeMessages() handle
+          // deduplication of completed assistants and tools against the base
+          // (HTTP history). Removing them here causes a visual flicker because
+          // the streaming copies disappear before the HTTP refetch delivers
+          // the canonical versions with different IDs.
           if (historySessionKey === currentSessionKeyRef.current) {
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
-                if (m.id === '__processing_placeholder__') return false
                 if (m.role === 'user' && m.optimistic) return false
                 return true
               }),
@@ -516,7 +413,7 @@ export function useMessages(
                 if (message.role === 'assistant') {
                   if (message.streaming) return true
                   if (message.content && message.content.length > 0) return true
-                  return message.id === '__processing_placeholder__'
+                  return false
                 }
                 if (message.role === 'tool') {
                   return message.toolStatus === 'executing'
@@ -573,13 +470,13 @@ export function useMessages(
                 )
               }
             }
+            // Always insert tool messages after the last assistant message.
+            // This preserves chronological order: all tool calls from the
+            // current LLM iteration appear after the assistant text that
+            // preceded them, and before any subsequent assistant text.
             const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
             if (lastAssistantIdx < 0) return [...current, toolMsg]
-            const lastAssistant = current[current.length - lastAssistantIdx - 1]
-            const insertBefore = lastAssistant.content === '' && lastAssistant.streaming
-            const targetIndex = insertBefore
-              ? current.length - lastAssistantIdx - 1
-              : current.length - lastAssistantIdx
+            const targetIndex = current.length - lastAssistantIdx
             const arr = [...current]
             arr.splice(targetIndex, 0, toolMsg)
             return arr
@@ -690,7 +587,6 @@ export function useMessages(
         case 'cancel.ack':
           setToolStatus(null)
           processingSessionKeyRef.current = null
-          abortActiveStreams()
           clearAllStreamQueues()
           // Only remove the cancelled session from processing set
           {
@@ -705,9 +601,7 @@ export function useMessages(
             })
           }
           setStreamingMessages((current) =>
-            current
-              .filter((m) => m.id !== '__processing_placeholder__')
-              .map((m) => ({ ...m, streaming: false })),
+            current.map((m) => ({ ...m, streaming: false })),
           )
           break
         case 'subscribe.ack': {
@@ -716,16 +610,37 @@ export function useMessages(
           if (ackProcessing && ackSessionKey) {
             setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
           }
-          if (ackProcessing && ackSessionKey === currentSessionKeyRef.current) {
-            processingSessionKeyRef.current = ackSessionKey
-            ensureAssistantPlaceholder('__processing_placeholder__', ackSessionKey)
+          break
+        }
+        case 'message.error': {
+          // Backend rejected the message (e.g., invalid content, rate limit).
+          // Rollback optimistic user message from both streaming state and cache.
+          const errorSessionKey = (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string
+          setStreamingMessages((current) =>
+            current.filter((m) => !(m.role === 'user' && m.optimistic && m.sessionKey === errorSessionKey)),
+          )
+          // Remove optimistic user from query cache
+          const cached = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
+            chatHistoryQueryKey(errorSessionKey),
+          )
+          if (cached) {
+            queryClient.setQueryData(chatHistoryQueryKey(errorSessionKey), {
+              ...cached,
+              messages: (cached.messages ?? []).filter(
+                (m) => !(m.role === 'user' && m.optimistic),
+              ),
+            })
           }
+          setProcessingSessions((prev) => {
+            const next = new Set(prev)
+            next.delete(errorSessionKey)
+            return next
+          })
+          processingSessionKeyRef.current = null
           break
         }
         case 'stream.error': {
-          // Backend SSE stream failed after delivering ack.
-          // Mark any in-progress assistant message as errored so the UI
-          // shows an indicator instead of an eternal typing animation.
+          // Backend stream failed — mark any in-progress assistant message as errored
           const errorSessionKey = (eventSessionKey ?? currentSessionKeyRef.current ?? '') as string
           setStreamingMessages((current) =>
             current.map((m) => {
@@ -742,13 +657,14 @@ export function useMessages(
       }
     },
     [
-      abortActiveStreams,
       clearAllStreamQueues,
       clearStreamQueue,
       currentSessionKeyRef,
+      debouncedSessionRefresh,
       enqueueStreamChunk,
       ensureAssistantPlaceholder,
       queryClient,
+      onSessionUpdated,
     ],
   )
 
@@ -764,24 +680,18 @@ export function useMessages(
   }, [])
 
   const clearStreaming = useCallback(() => {
-    abortActiveStreams()
     clearAllStreamQueues()
-    activeSSEMessageIdsRef.current.clear()
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
     if (approvalTimerRef.current) clearTimeout(approvalTimerRef.current)
     setApprovalResult(null)
     setPendingAttachments([])
-    // Don't clear processingSessions - this tracks ALL sessions processing,
-    // not just the current one. It's updated by WebSocket events.
     processingSessionKeyRef.current = null
-  }, [abortActiveStreams, clearAllStreamQueues])
+  }, [clearAllStreamQueues])
 
   const clearAll = useCallback(() => {
-    abortActiveStreams()
     clearAllStreamQueues()
-    activeSSEMessageIdsRef.current.clear()
     setStreamingMessages([])
     setToolStatus(null)
     setApprovalRequest(null)
@@ -790,15 +700,13 @@ export function useMessages(
     setPendingAttachments([])
     setProcessingSessions(new Set())
     processingSessionKeyRef.current = null
-  }, [abortActiveStreams, clearAllStreamQueues])
+  }, [clearAllStreamQueues])
 
   useEffect(() => {
     return () => {
-      abortActiveStreams()
       clearAllStreamQueues()
-      activeSSEMessageIdsRef.current.clear()
     }
-  }, [abortActiveStreams, clearAllStreamQueues])
+  }, [clearAllStreamQueues])
 
   return {
     streamingMessages,
