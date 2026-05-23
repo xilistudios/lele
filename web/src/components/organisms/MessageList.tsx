@@ -28,6 +28,7 @@ export function MessageList() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLoadingMoreRef = useRef(false);
   const isScrollRestoringRef = useRef(false); // guard against scroll events during sentinel restoration
+  const anchorMessageIdRef = useRef<string | null>(null); // message to scroll to after loadMore
   const lastMessageCountRef = useRef(0);
   const forceScrollRef = useRef(false);
 
@@ -79,6 +80,14 @@ export function MessageList() {
       }
 
       debounceTimerRef.current = setTimeout(() => {
+        // Save the first visible message as scroll anchor before loading more
+        const el = containerRef.current;
+        if (el) {
+          const firstMsg = el.querySelector('[data-message-id]');
+          if (firstMsg) {
+            anchorMessageIdRef.current = firstMsg.getAttribute('data-message-id');
+          }
+        }
         // Insert sentinel at current scroll position before loading
         setShowSentinel(true);
         isLoadingMoreRef.current = true;
@@ -87,18 +96,33 @@ export function MessageList() {
     }
   }, [hasMore, loadMore]);
 
-  // Restore scroll position after loading older messages using sentinel
+  // Restore scroll position after loading older messages:
+  // scroll to the message that was first (oldest) before loadMore,
+  // so the user sees where old and new messages join.
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages.length change triggers scroll restore
   useEffect(() => {
     if (!isLoadingMore && isLoadingMoreRef.current) {
       // Set scroll-restoring guard BEFORE scrollIntoView to prevent
       // the resulting scroll event from triggering another loadMore.
       isScrollRestoringRef.current = true;
-      // Restore scroll using sentinel
-      if (sentinelRef.current) {
-        sentinelRef.current.scrollIntoView();
-        setShowSentinel(false);
+
+      const anchorId = anchorMessageIdRef.current;
+      if (anchorId) {
+        const anchorEl = containerRef.current?.querySelector(
+          `[data-message-id="${anchorId}"]`
+        );
+        if (anchorEl) {
+          anchorEl.scrollIntoView();
+        } else {
+          // Fallback: scroll sentinel if anchor not found
+          sentinelRef.current?.scrollIntoView();
+        }
+        anchorMessageIdRef.current = null;
+      } else {
+        sentinelRef.current?.scrollIntoView();
       }
+      setShowSentinel(false);
+
       // Clear guards after scroll restoration is complete.
       // Use rAF to ensure the scroll event has been processed.
       window.requestAnimationFrame(() => {
