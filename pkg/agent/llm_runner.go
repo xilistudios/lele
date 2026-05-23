@@ -150,11 +150,17 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 
 	// 8. Optional: send response via bus
 	if opts.SendResponse {
+		// Use the iteration-suffixed messageID so the frontend's message.complete
+		// handler can match the streaming bubble created during runLLMIteration.
+		// Without this, multi-iteration LLM runs (iteration > 1) produce duplicate
+		// message bubbles: one from streaming (msgID-2) and one from message.complete
+		// (msgID), because the IDs don't match.
+		finalMsgID := iterationMsgID(opts.MessageID, iteration)
 		outboundMsg := bus.OutboundMessage{
 			Channel:   opts.Channel,
 			ChatID:    opts.ChatID,
 			Content:   finalContent,
-			MessageID: opts.MessageID,
+			MessageID: finalMsgID,
 		}
 		if opts.ReplyTo != "" {
 			outboundMsg.ReplyTo = opts.ReplyTo
@@ -246,13 +252,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// separate sections in the chat, not merged into one slot.
 		var streamOnChunk func(chunk string, done bool)
 		var streamOnReasoning func(reasoningChunk string)
-		iterationMsgID := opts.MessageID
-		if iteration > 1 && iterationMsgID != "" {
-			// Append iteration suffix for >1st response so the
-			// frontend creates a fresh assistant bubble instead of
-			// appending to the previous LLM response.
-			iterationMsgID = fmt.Sprintf("%s-%d", iterationMsgID, iteration)
-		}
+		iterationMsgID := iterationMsgID(opts.MessageID, iteration)
 		streamer := newStreamHandler(lr.al.bus, opts.Channel, opts.SessionKey, iterationMsgID)
 		if streamer.shouldStream(opts.SendResponse) {
 			streamOnChunk = streamer.onChunk
@@ -444,4 +444,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	}
 
 	return finalContent, iteration, nil
+}
+
+// iterationMsgID appends the iteration number as a suffix to baseID for
+// iterations >1 so that the frontend creates distinct assistant bubbles
+// for each LLM response instead of merging them into one slot.
+func iterationMsgID(baseID string, iteration int) string {
+	if iteration > 1 && baseID != "" {
+		return fmt.Sprintf("%s-%d", baseID, iteration)
+	}
+	return baseID
 }
