@@ -43,6 +43,7 @@ const isJsonBody = (body: BodyInit | null | undefined) => body !== null && body 
 
 const DEFAULT_MAX_RETRIES = 1
 const DEFAULT_RETRY_DELAY = 1000
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 
 type TokenState = {
   token: string | null
@@ -72,10 +73,18 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
     return null
   }
 
-  return {
-    event: eventName,
-    data: JSON.parse(dataLines.join('\n')),
-  } as ClientEvent
+  try {
+    return {
+      event: eventName,
+      data: JSON.parse(dataLines.join('\n')),
+    } as ClientEvent
+  } catch {
+    // Non-JSON data payload (e.g., plain text error from proxy)
+    return {
+      event: eventName,
+      data: { raw: dataLines.join('\n') },
+    } as ClientEvent
+  }
 }
 
 export const createApiClient = (baseUrl: string) => {
@@ -164,10 +173,27 @@ export const createApiClient = (baseUrl: string) => {
           headers['Content-Type'] = 'application/json'
         }
 
-        const response = await fetch(joinUrl(baseUrl, path), {
-          ...init,
-          headers,
-        })
+        const existingSignal = init.signal
+        const timeoutController = new AbortController()
+        const timeoutId = setTimeout(() => timeoutController.abort(), DEFAULT_REQUEST_TIMEOUT_MS)
+
+        let combinedSignal: AbortSignal
+        if (existingSignal) {
+          combinedSignal = AbortSignal.any([existingSignal, timeoutController.signal])
+        } else {
+          combinedSignal = timeoutController.signal
+        }
+
+        let response: Response
+        try {
+          response = await fetch(joinUrl(baseUrl, path), {
+            ...init,
+            headers,
+            signal: combinedSignal,
+          })
+        } finally {
+          clearTimeout(timeoutId)
+        }
 
         if (response.status === 401 && tokenState.refreshToken && retryCount === 0) {
           const newToken = await refreshToken()

@@ -85,6 +85,9 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Tools.Cron.ExecTimeoutMinutes == 0 {
 		doc.Tools.Cron.ExecTimeoutMinutes = defaults.Tools.Cron.ExecTimeoutMinutes
 	}
+	if doc.Tools.Exec.TimeoutSeconds == 0 {
+		doc.Tools.Exec.TimeoutSeconds = defaults.Tools.Exec.TimeoutSeconds
+	}
 
 	// Inicializar mapas si son nil
 	if doc.Providers == nil {
@@ -208,6 +211,7 @@ func defaultEditableDocument() *EditableDocument {
 			Cron: defaults.Tools.Cron,
 			Exec: EditableExecConfig{
 				EnableDenyPatterns: defaults.Tools.Exec.EnableDenyPatterns,
+				TimeoutSeconds:     defaults.Tools.Exec.TimeoutSeconds,
 			},
 		},
 		Heartbeat: defaults.Heartbeat,

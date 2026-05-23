@@ -260,9 +260,12 @@ func (te *toolExecutor) publishResult(opts toolExecOptions, toolResult *tools.To
 		})
 	}
 
-	// Send ForUser content to user immediately if not Silent
+	// Send ForUser content to user immediately if not Silent.
+	// For the native channel, skip ForUser publish — the tool.result event
+	// already provides visual feedback via ToolCallDisplay. ForUser is meant
+	// for messaging channels (Telegram, WhatsApp) that don't have rich tool cards.
 	if !toolResult.Silent && toolResult.ForUser != "" && opts.sendResponse &&
-		(opts.channel == channels.ChannelName || te.al.verboseManager.IsFull(opts.sessionKey)) {
+		opts.channel != channels.ChannelName && te.al.verboseManager.IsFull(opts.sessionKey) {
 		te.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel: opts.channel,
 			ChatID:  opts.chatID,

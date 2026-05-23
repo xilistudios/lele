@@ -2,11 +2,12 @@ import { type MutableRefObject, type ReactNode, createContext, useContext, useRe
 import { useAppLogic as useAppLogicHook } from '../hooks/useAppLogic'
 import { type SocketStatus, useSocket } from '../hooks/useSocket'
 import type { AuthSession, ClientEvent } from '../lib/types'
+import type { ClientCommand } from '../services/ws/events'
 import { useAuthContext } from './AuthContext'
 
 // Re-export types for convenience
 export type { SocketStatus }
-export type SendFn = (event: string, data: Record<string, unknown>) => void
+export type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
 
 export type AppLogicContextValue = {
   // Connection & socket

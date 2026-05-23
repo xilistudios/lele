@@ -25,7 +25,9 @@ type DiagnosticsState = {
   agentInfo: AgentDetails | null
 }
 
-type SendFn = (event: string, data: Record<string, unknown>) => void
+import type { ClientCommand } from '../services/ws/events'
+
+type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
 
 export function useAppLogic(
   api: ApiClient,
@@ -402,8 +404,6 @@ export function useAppLogic(
 
   const ensurePlaceholderRef = useRef(messagesHook.ensureAssistantPlaceholder)
   ensurePlaceholderRef.current = messagesHook.ensureAssistantPlaceholder
-  const clearStreamingRef = useRef(messagesHook.clearStreaming)
-  clearStreamingRef.current = messagesHook.clearStreaming
   const streamingMessagesRef = useRef(messagesHook.streamingMessages)
   streamingMessagesRef.current = messagesHook.streamingMessages
 
@@ -444,9 +444,13 @@ export function useAppLogic(
       // 2. Fast finish: agent finished before first poll saw processing=true
       //    (session was added by sendMessage() but polling never saw true)
       // 3. Stale state cleanup
-      if (prevProcessingRef.current) {
-        clearStreamingRef.current()
-      }
+      //
+      // IMPORTANT: Do NOT call clearStreaming() here. The HTTP poll may
+      // transiently report processing=false during an active SSE stream
+      // (race between IsSessionProcessing check and agent state).
+      // Aborting the SSE stream mid-flight would leave the message incomplete.
+      // Instead, let message.complete and history.updated events handle
+      // the natural cleanup of streaming state.
       messagesHook.setProcessingSessions((prev: Set<string>) => {
         if (prev.has(sessionKey)) {
           const next = new Set(prev)

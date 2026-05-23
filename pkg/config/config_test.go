@@ -694,3 +694,115 @@ func TestLoadConfig_WithEnvVars(t *testing.T) {
 		t.Errorf("Anthropic API key = %q, want 'test-api-key-123'", cfg.Providers.Anthropic.APIKey)
 	}
 }
+
+func TestReasoningConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *ReasoningConfig
+		wantErr bool
+	}{
+		{
+			name:    "nil config",
+			cfg:     nil,
+			wantErr: false,
+		},
+		{
+			name:    "valid effort low",
+			cfg:     &ReasoningConfig{Effort: strPtr("low")},
+			wantErr: false,
+		},
+		{
+			name:    "valid effort high",
+			cfg:     &ReasoningConfig{Effort: strPtr("high")},
+			wantErr: false,
+		},
+		{
+			name:    "invalid effort",
+			cfg:     &ReasoningConfig{Effort: strPtr("extreme")},
+			wantErr: true,
+		},
+		{
+			name:    "valid summary",
+			cfg:     &ReasoningConfig{Summary: strPtr("auto")},
+			wantErr: false,
+		},
+		{
+			name:    "invalid summary",
+			cfg:     &ReasoningConfig{Summary: strPtr("bad")},
+			wantErr: true,
+		},
+		{
+			name:    "valid max_tokens",
+			cfg:     &ReasoningConfig{MaxTokens: intPtr(4096)},
+			wantErr: false,
+		},
+		{
+			name:    "invalid max_tokens zero",
+			cfg:     &ReasoningConfig{MaxTokens: intPtr(0)},
+			wantErr: true,
+		},
+		{
+			name:    "invalid max_tokens negative",
+			cfg:     &ReasoningConfig{MaxTokens: intPtr(-1)},
+			wantErr: true,
+		},
+		{
+			name: "all fields valid",
+			cfg: &ReasoningConfig{
+				Effort:    strPtr("high"),
+				MaxTokens: intPtr(4096),
+				Exclude:   boolPtr(false),
+				Summary:   strPtr("auto"),
+				Enable:    true,
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestReasoningConfig_EffortLowercased(t *testing.T) {
+	cfg := &ReasoningConfig{Effort: strPtr("HIGH")}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if *cfg.Effort != "high" {
+		t.Errorf("effort = %q, want 'high'", *cfg.Effort)
+	}
+}
+
+func TestReasoningConfig_SummaryLowercased(t *testing.T) {
+	cfg := &ReasoningConfig{Summary: strPtr("DETAILED")}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if *cfg.Summary != "detailed" {
+		t.Errorf("summary = %q, want 'detailed'", *cfg.Summary)
+	}
+}
+
+func TestProviderModelConfig_ValidateWithReasoning(t *testing.T) {
+	pmc := &ProviderModelConfig{
+		Model: "gpt-5",
+		Reasoning: &ReasoningConfig{
+			Effort:    strPtr("high"),
+			MaxTokens: intPtr(8192),
+			Exclude:   boolPtr(false),
+		},
+	}
+	if err := pmc.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+func intPtr(i int) *int       { return &i }
+func boolPtr(b bool) *bool    { return &b }

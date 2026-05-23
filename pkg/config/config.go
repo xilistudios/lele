@@ -352,11 +352,13 @@ type OpenAIProviderConfig struct {
 }
 
 // ReasoningConfig holds reasoning-related configuration for models that support it.
-// Based on OpenAI's reasoning API specification.
+// Compatible with OpenAI reasoning API and OpenRouter reasoning parameters.
 type ReasoningConfig struct {
-	Effort  *string `json:"effort,omitempty"`  // "low", "medium", "high"
-	Summary *string `json:"summary,omitempty"` // "auto", "detailed", "concise"
-	Enable  bool    `json:"enable,omitempty"`  // enables thinking/reasoning mode (e.g. DeepSeek v4)
+	Effort    *string `json:"effort,omitempty"`     // "low", "medium", "high"
+	MaxTokens *int    `json:"max_tokens,omitempty"` // max reasoning tokens (OpenRouter)
+	Exclude   *bool   `json:"exclude,omitempty"`    // exclude reasoning tokens from response (OpenRouter)
+	Summary   *string `json:"summary,omitempty"`    // "auto", "detailed", "concise" (OpenAI o-series)
+	Enable    bool    `json:"enable,omitempty"`     // enables thinking/reasoning mode (e.g. DeepSeek v4)
 }
 
 // Validate checks if the reasoning config has valid values.
@@ -380,6 +382,9 @@ func (r *ReasoningConfig) Validate() error {
 		}
 		low := strings.ToLower(*r.Summary)
 		r.Summary = &low
+	}
+	if r.MaxTokens != nil && *r.MaxTokens < 1 {
+		return fmt.Errorf("invalid reasoning max_tokens: %d (must be >= 1)", *r.MaxTokens)
 	}
 	return nil
 }
@@ -792,6 +797,7 @@ type CronToolsConfig struct {
 type ExecConfig struct {
 	EnableDenyPatterns bool     `json:"enable_deny_patterns" env:"LELE_TOOLS_EXEC_ENABLE_DENY_PATTERNS"`
 	CustomDenyPatterns []string `json:"custom_deny_patterns" env:"LELE_TOOLS_EXEC_CUSTOM_DENY_PATTERNS"`
+	TimeoutSeconds     int      `json:"timeout_seconds" env:"LELE_TOOLS_EXEC_TIMEOUT_SECONDS"` // 0 means no timeout
 }
 
 type ToolsConfig struct {
@@ -949,6 +955,7 @@ func DefaultConfig() *Config {
 			},
 			Exec: ExecConfig{
 				EnableDenyPatterns: true,
+				TimeoutSeconds:     60, // default 60 seconds for shell commands
 			},
 		},
 		Heartbeat: HeartbeatConfig{

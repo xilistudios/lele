@@ -190,6 +190,10 @@
     },
     "cron": {
       "exec_timeout_minutes": 5
+    },
+    "exec": {
+      "enable_deny_patterns": true,
+      "timeout_seconds": 60
     }
   },
   "heartbeat": {

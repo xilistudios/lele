@@ -98,8 +98,20 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		reasoningMap := map[string]interface{}{
 			"effort": sessionEffort,
 		}
-		if opts.agent.Reasoning != nil && opts.agent.Reasoning.Summary != nil {
-			reasoningMap["summary"] = *opts.agent.Reasoning.Summary
+		// Merge other reasoning fields from agent config (if any)
+		if opts.agent.Reasoning != nil {
+			if opts.agent.Reasoning.MaxTokens != nil {
+				reasoningMap["max_tokens"] = *opts.agent.Reasoning.MaxTokens
+			}
+			if opts.agent.Reasoning.Exclude != nil {
+				reasoningMap["exclude"] = *opts.agent.Reasoning.Exclude
+			}
+			if opts.agent.Reasoning.Summary != nil {
+				reasoningMap["summary"] = *opts.agent.Reasoning.Summary
+			}
+			if opts.agent.Reasoning.Enable {
+				reasoningMap["enabled"] = true
+			}
 		}
 		llmOptions["reasoning"] = reasoningMap
 		logger.DebugCF("agent", "Session reasoning override applied", map[string]interface{}{
@@ -112,20 +124,33 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		if opts.agent.Reasoning.Effort != nil {
 			reasoningMap["effort"] = *opts.agent.Reasoning.Effort
 		}
+		if opts.agent.Reasoning.MaxTokens != nil {
+			reasoningMap["max_tokens"] = *opts.agent.Reasoning.MaxTokens
+		}
+		if opts.agent.Reasoning.Exclude != nil {
+			reasoningMap["exclude"] = *opts.agent.Reasoning.Exclude
+		}
 		if opts.agent.Reasoning.Summary != nil {
 			reasoningMap["summary"] = *opts.agent.Reasoning.Summary
+		}
+		if opts.agent.Reasoning.Enable {
+			reasoningMap["enabled"] = true
 		}
 		if len(reasoningMap) > 0 {
 			llmOptions["reasoning"] = reasoningMap
 			logger.DebugCF("agent", "Reasoning config applied", map[string]interface{}{
-				"agent_id": opts.agent.ID,
-				"effort":   opts.agent.Reasoning.Effort,
-				"summary":  opts.agent.Reasoning.Summary,
+				"agent_id":   opts.agent.ID,
+				"effort":     opts.agent.Reasoning.Effort,
+				"max_tokens": opts.agent.Reasoning.MaxTokens,
+				"exclude":    opts.agent.Reasoning.Exclude,
+				"summary":    opts.agent.Reasoning.Summary,
+				"enable":     opts.agent.Reasoning.Enable,
 			})
 		}
 	}
 
-	// Enable thinking mode for DeepSeek models if configured
+	// Enable thinking mode for DeepSeek models if reasoning is enabled.
+	// For OpenRouter, thinking is handled via reasoning.enabled / reasoning.effort.
 	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable {
 		if isDeepSeekModel(opts.model) {
 			llmOptions["thinking"] = true

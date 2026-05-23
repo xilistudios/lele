@@ -291,6 +291,22 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 		keepCount = 0
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
+
+	// Ensure summary messages are never excluded from context.
+	// Without this, after a second compaction the summary message gets
+	// pushed past the keepCount window and is excluded, breaking context.
+	historyAfter := agent.Sessions.GetHistory(sessionKey)
+	needsSave := false
+	for i := range historyAfter {
+		if isSummaryMessage(historyAfter[i]) && historyAfter[i].ExcludeFromContext {
+			historyAfter[i].ExcludeFromContext = false
+			needsSave = true
+		}
+	}
+	if needsSave {
+		agent.Sessions.SetHistory(sessionKey, historyAfter)
+	}
+
 	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats
@@ -513,6 +529,20 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 		keepCount = 0
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
+
+	// Ensure summary messages are never excluded from context.
+	historyAfter := agent.Sessions.GetHistory(sessionKey)
+	needsSave := false
+	for i := range historyAfter {
+		if isSummaryMessage(historyAfter[i]) && historyAfter[i].ExcludeFromContext {
+			historyAfter[i].ExcludeFromContext = false
+			needsSave = true
+		}
+	}
+	if needsSave {
+		agent.Sessions.SetHistory(sessionKey, historyAfter)
+	}
+
 	agent.Sessions.Save(sessionKey)
 
 	// Calculate after stats

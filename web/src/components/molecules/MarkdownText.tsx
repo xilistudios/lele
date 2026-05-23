@@ -145,7 +145,12 @@ function InlineMarkdown({ text }: { text: string }) {
 }
 
 export function MarkdownText({ content }: { content: string }) {
+  // Strip trailing empty lines — these are artifacts during character-by-character
+  // streaming when the last char is a newline, causing flickering blank divs.
   const lines = content.split('\n')
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
   const chunks: ReactNode[] = useMemo(() => {
     const result: ReactNode[] = []
 
