@@ -132,29 +132,32 @@ export function MessageList() {
     }
   }, [isLoadingMore, messages.length]);
 
-  // Track new messages and decide if we should scroll to bottom
+  // Track new messages and streaming updates, scroll to bottom if near
+  // biome-ignore lint/correctness/useExhaustiveDependencies: messages ref triggers on any update
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Check if new messages were added (not from loading more)
-    if (
-      messages.length > lastMessageCountRef.current &&
-      !isLoadingMoreRef.current
-    ) {
-      const lastMessage = messages[messages.length - 1];
-      // Only auto-scroll if it's a new user message, streaming message,
-      // or a complete assistant response
-      if (lastMessage) {
-        const shouldScroll =
-          lastMessage.role === "user" ||
-          lastMessage.streaming ||
-          (lastMessage.role === "assistant" && !lastMessage.streaming);
-        if (shouldScroll && isNearBottom()) {
-          scrollToBottomSmooth();
-        }
-      }
+    if (isLoadingMoreRef.current) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) return;
+
+    const isNewMessage = messages.length > lastMessageCountRef.current;
+    const isStreaming = lastMessage.streaming;
+
+    // Scroll for: new user messages, new assistant messages, or streaming updates
+    const shouldScroll =
+      lastMessage.role === "user" || isStreaming || lastMessage.role === "assistant";
+
+    if ((isNewMessage || isStreaming) && shouldScroll && isNearBottom()) {
+      // Use rAF to ensure the browser has laid out the new content
+      // before reading scrollHeight, otherwise we scroll to the old bottom
+      requestAnimationFrame(() => {
+        scrollToBottomSmooth();
+      });
     }
+
     lastMessageCountRef.current = messages.length;
   }, [messages, isNearBottom, scrollToBottomSmooth]);
 
