@@ -138,24 +138,23 @@ export function MessageList() {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
     if (isLoadingMoreRef.current) return;
 
     const lastMessage = messages[messages.length - 1];
-    if (!lastMessage) return;
 
-    const isNewMessage = messages.length > lastMessageCountRef.current;
-    const isStreaming = lastMessage.streaming;
+    // Only scroll if user hasn't scrolled up to read history
+    if (!isNearBottom()) {
+      lastMessageCountRef.current = messages.length;
+      return;
+    }
 
-    // Scroll for: new user messages, new assistant messages, or streaming updates
-    const shouldScroll =
-      lastMessage.role === "user" ||
-      isStreaming ||
-      lastMessage.role === "assistant";
-
-    if ((isNewMessage || isStreaming) && shouldScroll && isNearBottom()) {
-      // Use rAF to ensure the browser has laid out the new content
-      // before reading scrollHeight, otherwise we scroll to the old bottom
+    if (lastMessage.streaming) {
+      // During streaming: pin to bottom instantly.
+      // Smooth scroll would be interrupted by rapid (~12ms) streaming updates,
+      // causing the animation to stutter and never reach the bottom.
+      container.scrollTop = container.scrollHeight;
+    } else if (messages.length > lastMessageCountRef.current) {
+      // New complete message: smooth scroll after browser layout
       requestAnimationFrame(() => {
         scrollToBottomSmooth();
       });
