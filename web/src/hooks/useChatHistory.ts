@@ -4,7 +4,6 @@ import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, HistoryToolCall } from '../lib/types'
 
-const POLLING_INTERVAL = 5000
 const DEFAULT_LIMIT = 50
 
 export type HistoryMessage = Array<{
@@ -251,10 +250,7 @@ export function useChatHistory(
       sessionKey !== null &&
       token !== null &&
       !(sessionKey.startsWith('subagent:') && !parentSessionKey),
-    staleTime: 5_000,
-    refetchInterval: POLLING_INTERVAL,
-    refetchOnWindowFocus: false,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true, // safety net: recovers from WS gaps after tab switch
     retry: false,
   })
 

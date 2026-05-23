@@ -58,8 +58,7 @@ export function useAppLogic(
   const { touchSession } = sessionsHook
   const { modelState, loadModels, selectModel } = useModels(api, token)
   const messagesHook = useMessages(
-    api,
-    token,
+    wsSend,
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
     sessionsHook.refreshSessions,
