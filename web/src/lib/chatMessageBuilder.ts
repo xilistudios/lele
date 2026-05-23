@@ -132,6 +132,7 @@ interface BaseMessageProps {
   sessionKey: string
   createdAt?: string
   attachments?: Attachment[]
+  excludeFromContext?: boolean
 }
 
 interface UserMessageProps extends BaseMessageProps {
@@ -166,6 +167,7 @@ export function createUserMessage(props: UserMessageProps): ChatMessage {
     attachments: props.attachments,
     optimistic: props.optimistic,
     optimisticBaseCount: props.optimisticBaseCount,
+    excludeFromContext: props.excludeFromContext,
   }
 }
 
@@ -179,6 +181,7 @@ export function createAssistantMessage(props: AssistantMessageProps): ChatMessag
     createdAt: props.createdAt ?? new Date().toISOString(),
     sessionKey: props.sessionKey,
     attachments: props.attachments,
+    excludeFromContext: props.excludeFromContext,
   }
 }
 
@@ -196,6 +199,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
     toolStatus: props.toolStatus,
     toolCallId: props.toolCallId,
     subagentSessionKey: props.subagentSessionKey,
+    excludeFromContext: props.excludeFromContext,
   }
 }
 
@@ -216,6 +220,7 @@ export function toChatMessages(
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
     tool_name?: string
+    exclude_from_context?: boolean
   }>,
   sessionKey: string,
 ): ChatMessage[] {
@@ -240,6 +245,7 @@ export function toChatMessages(
           sessionKey,
           content: messageContent,
           attachments: parsedAttachments,
+          excludeFromContext: message.exclude_from_context,
         }),
       ]
     }
@@ -256,6 +262,7 @@ export function toChatMessages(
             reasoningContent: message.reasoning_content,
             streaming: false,
             attachments: parsedAttachments,
+            excludeFromContext: message.exclude_from_context,
           }),
         ]
       }

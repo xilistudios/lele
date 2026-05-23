@@ -14,6 +14,7 @@ export type HistoryMessage = Array<{
   reasoning_content?: string
   tool_calls?: HistoryToolCall[]
   tool_call_id?: string
+  exclude_from_context?: boolean
 }>
 
 export const chatHistoryQueryKey = (sessionKey: string) => ['chatHistory', sessionKey] as const
@@ -31,6 +32,7 @@ function mergeMessages(
 
   const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
+  const streamingToolByCallId = new Map<string, ChatMessage>()
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant' && msg.streaming) {
       activeStreamingAssistantIds.add(msg.id)
@@ -38,6 +40,7 @@ function mergeMessages(
     if (msg.role === 'tool') {
       if (msg.toolCallId) {
         streamingToolCallIds.add(msg.toolCallId)
+        streamingToolByCallId.set(msg.toolCallId, msg)
       }
       if (msg.sessionKey) {
         streamingToolSessions.add(msg.sessionKey)
@@ -48,12 +51,24 @@ function mergeMessages(
   const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
   const baseHasCurrentTurn = baseUserCount > (optimisticUser?.optimisticBaseCount ?? 0)
 
+  // Build filteredBase: keep base messages but update tool messages in-place
+  // with streaming data instead of removing them. This preserves the canonical
+  // order from the server while showing live streaming updates.
+  const consumedStreamingToolIds = new Set<string>()
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
     if (msg.role === 'assistant' && activeStreamingAssistantIds.has(msg.id)) {
       continue
     }
     if (msg.role === 'tool' && msg.toolCallId && streamingToolCallIds.has(msg.toolCallId)) {
+      // Replace base tool with streaming version, but keep base position
+      const streamingTool = streamingToolByCallId.get(msg.toolCallId)
+      if (streamingTool) {
+        filteredBase.push(streamingTool)
+        consumedStreamingToolIds.add(msg.toolCallId)
+      } else {
+        filteredBase.push(msg)
+      }
       continue
     }
     if (
@@ -80,8 +95,16 @@ function mergeMessages(
     return baseUserCount <= (msg.optimisticBaseCount ?? 0)
   })
 
+  // Only keep streaming items that haven't been incorporated into base yet
   const filteredStreaming = streamingWithoutConfirmedUsers.filter((msg) => {
     if (msg.role === 'assistant' && !msg.streaming && baseHasCurrentTurn) {
+      // Only drop the streaming copy when the base already has this message.
+      // Otherwise the assistant vanishes between message.complete (which sets
+      // streaming=false) and the next HTTP poll delivering the canonical version.
+      const existsInBase = baseMessages.some((bm) => bm.id === msg.id && bm.role === 'assistant')
+      if (existsInBase) return false
+    }
+    if (msg.role === 'tool' && msg.toolCallId && consumedStreamingToolIds.has(msg.toolCallId)) {
       return false
     }
     if (msg.role === 'tool' && msg.toolCallId) {

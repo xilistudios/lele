@@ -139,12 +139,12 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		if len(reasoningMap) > 0 {
 			llmOptions["reasoning"] = reasoningMap
 			logger.DebugCF("agent", "Reasoning config applied", map[string]interface{}{
-				"agent_id":  opts.agent.ID,
-				"effort":    opts.agent.Reasoning.Effort,
+				"agent_id":   opts.agent.ID,
+				"effort":     opts.agent.Reasoning.Effort,
 				"max_tokens": opts.agent.Reasoning.MaxTokens,
-				"exclude":   opts.agent.Reasoning.Exclude,
-				"summary":   opts.agent.Reasoning.Summary,
-				"enable":    opts.agent.Reasoning.Enable,
+				"exclude":    opts.agent.Reasoning.Exclude,
+				"summary":    opts.agent.Reasoning.Summary,
+				"enable":     opts.agent.Reasoning.Enable,
 			})
 		}
 	}

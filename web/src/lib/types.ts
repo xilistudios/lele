@@ -518,6 +518,7 @@ export type ChatMessage = {
   toolCallId?: string
   subagentSessionKey?: string
   error?: string
+  excludeFromContext?: boolean
 }
 
 export type ToolStatus = {

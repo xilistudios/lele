@@ -75,8 +75,11 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
 
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
+    // Don't parse blocks while streaming — partial content causes false positives
+    // (e.g., an unclosed ``` triggers code-block mode for all subsequent text).
+    if (message.streaming) return null
     return parseBlocks(message.content)
-  }, [isUser, isTool, message.content])
+  }, [isUser, isTool, message.content, message.streaming])
 
   const hasThinking = !!message.reasoningContent
 
@@ -139,6 +142,15 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
 
   return (
     <div className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
+      {message.excludeFromContext && (
+        <div className="mb-1 flex items-center gap-1.5 text-[10px] text-text-tertiary opacity-60">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+          <span>Archived from context</span>
+        </div>
+      )}
       <div className="space-y-3">
         {hasThinking ? (
           <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">

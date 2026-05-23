@@ -173,11 +173,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 	for i := resultStartIdx; i < endIdx; i++ {
 		vm := validMessages[i]
 		historyMsg := ChatHistoryMessage{
-			ID:               vm.id,
-			Role:             vm.msg.Role,
-			Content:          vm.msg.Content,
-			ReasoningContent: vm.msg.ReasoningContent,
-			ToolCallID:       vm.msg.ToolCallID,
+			ID:                 vm.id,
+			Role:               vm.msg.Role,
+			Content:            vm.msg.Content,
+			ReasoningContent:   vm.msg.ReasoningContent,
+			ToolCallID:         vm.msg.ToolCallID,
+			ExcludeFromContext: vm.msg.ExcludeFromContext,
 		}
 		// For tool messages, look up the tool name from the assistant message that initiated the call
 		if vm.msg.Role == "tool" && vm.msg.ToolCallID != "" {

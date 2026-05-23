@@ -581,9 +581,9 @@ func TestProviderChat_ReasoningConfigMaxTokensAndExclude(t *testing.T) {
 		"gpt-4o",
 		map[string]interface{}{
 			"reasoning": map[string]interface{}{
-				"effort":    "low",
+				"effort":     "low",
 				"max_tokens": 2000,
-				"exclude":   true,
+				"exclude":    true,
 			},
 		},
 	)

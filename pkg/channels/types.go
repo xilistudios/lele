@@ -161,13 +161,14 @@ type ChatHistoryResponse struct {
 }
 
 type ChatHistoryMessage struct {
-	ID               string            `json:"id"`
-	Role             string            `json:"role"`
-	Content          string            `json:"content"`
-	ReasoningContent string            `json:"reasoning_content,omitempty"`
-	ToolCalls        []HistoryToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string            `json:"tool_call_id,omitempty"`
-	ToolName         string            `json:"tool_name,omitempty"`
+	ID                 string            `json:"id"`
+	Role               string            `json:"role"`
+	Content            string            `json:"content"`
+	ReasoningContent   string            `json:"reasoning_content,omitempty"`
+	ToolCalls          []HistoryToolCall `json:"tool_calls,omitempty"`
+	ToolCallID         string            `json:"tool_call_id,omitempty"`
+	ToolName           string            `json:"tool_name,omitempty"`
+	ExcludeFromContext bool              `json:"exclude_from_context,omitempty"`
 }
 
 type HistoryToolCall struct {
