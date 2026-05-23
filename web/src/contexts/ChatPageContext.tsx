@@ -35,7 +35,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
   const {
     messages,
-    isStreaming,
+    isProcessing,
     toolStatus,
     modelState,
     thinkLevel,
@@ -46,7 +46,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   } = useAppLogicContext()
 
   const hasConversation = messages.length > 0
-  const canCancel = isStreaming || Boolean(toolStatus)
+  const canCancel = isProcessing || Boolean(toolStatus)
   const currentSession = useMemo<ChatSession | null>(() => {
     if (!currentSessionKey) return null
 

@@ -103,11 +103,8 @@ export function useMessages(
               : m,
           )
         }
-        const filtered = current.filter(
-          (m) => !(m.id === '__processing_placeholder__' && m.sessionKey === sessionKey),
-        )
         return [
-          ...filtered,
+          ...current,
           createAssistantMessage({
             id: messageId,
             sessionKey,
@@ -376,9 +373,6 @@ export function useMessages(
             const sessionKey = welcomeData.session_key
             processingSessionKeyRef.current = sessionKey
             setProcessingSessions((prev) => new Set(prev).add(sessionKey))
-            if (sessionKey === currentSessionKeyRef.current) {
-              ensureAssistantPlaceholder('__processing_placeholder__', sessionKey)
-            }
           }
           break
         }
@@ -470,11 +464,6 @@ export function useMessages(
           setStreamingMessages((current) => {
             const targetSessionKey = eventSessionKey ?? currentSessionKeyRef.current
             return current.flatMap((m) => {
-              // Do NOT remove __processing_placeholder__ here.
-              // message.complete fires per individual assistant message,
-              // but the agent may still be processing (tool calls, follow-ups).
-              // Let clearProcessingPlaceholder() handle cleanup when
-              // chatHistory.processing transitions to false.
               if (m.role === 'assistant' && m.id === (data.message_id as string)) {
                 const content = (data.content as string) || m.content
                 return [{ ...m, content, streaming: false }]
@@ -524,11 +513,6 @@ export function useMessages(
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
-                // Do NOT remove __processing_placeholder__ here.
-                // Let clearProcessingPlaceholder() in useAppLogic.ts handle
-                // cleanup when chatHistory.processing transitions to false.
-                // Removing it here leaves a gap if processing stays true
-                // (agent still working on tool calls/follow-ups).
                 if (m.role === 'user' && m.optimistic) return false
                 if (m.role === 'assistant' && !m.streaming) return false
                 if (m.role === 'tool' && m.toolStatus !== 'executing') return false
@@ -565,7 +549,7 @@ export function useMessages(
                 if (message.role === 'assistant') {
                   if (message.streaming) return true
                   if (message.content && message.content.length > 0) return true
-                  return message.id === '__processing_placeholder__'
+                  return false
                 }
                 if (message.role === 'tool') {
                   return message.toolStatus === 'executing'
@@ -755,7 +739,6 @@ export function useMessages(
           }
           setStreamingMessages((current) =>
             current
-              .filter((m) => m.id !== '__processing_placeholder__')
               .map((m) => ({ ...m, streaming: false })),
           )
           break
@@ -764,10 +747,6 @@ export function useMessages(
           const ackProcessing = data.processing === true
           if (ackProcessing && ackSessionKey) {
             setProcessingSessions((prev) => new Set(prev).add(ackSessionKey))
-          }
-          if (ackProcessing && ackSessionKey === currentSessionKeyRef.current) {
-            processingSessionKeyRef.current = ackSessionKey
-            ensureAssistantPlaceholder('__processing_placeholder__', ackSessionKey)
           }
           break
         }
@@ -841,15 +820,6 @@ export function useMessages(
     processingSessionKeyRef.current = null
   }, [abortActiveStreams, clearAllStreamQueues])
 
-  // Remove the __processing_placeholder__ for a given session.
-  // Used when polling detects the agent has finished processing
-  // but the WebSocket events (message.complete) may have been missed.
-  const clearProcessingPlaceholder = useCallback((sessionKey: string) => {
-    setStreamingMessages((current) =>
-      current.filter((m) => !(m.id === '__processing_placeholder__' && m.sessionKey === sessionKey)),
-    )
-  }, [])
-
   useEffect(() => {
     return () => {
       abortActiveStreams()
@@ -875,6 +845,5 @@ export function useMessages(
     setPendingAttachments,
     clearStreaming,
     clearAll,
-    clearProcessingPlaceholder,
   }
 }

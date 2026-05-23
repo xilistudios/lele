@@ -24,7 +24,7 @@ export type AppLogicContextValue = {
   sidebarOpen: ReturnType<typeof useAppLogicHook>['sidebarOpen']
   modelState: ReturnType<typeof useAppLogicHook>['modelState']
   thinkLevel: ReturnType<typeof useAppLogicHook>['thinkLevel']
-  isStreaming: ReturnType<typeof useAppLogicHook>['isStreaming']
+  isProcessing: ReturnType<typeof useAppLogicHook>['isProcessing']
   processingSessions: ReturnType<typeof useAppLogicHook>['processingSessions']
   sessions: ReturnType<typeof useAppLogicHook>['sessions']
   currentSessionKey: ReturnType<typeof useAppLogicHook>['currentSessionKey']
@@ -102,7 +102,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     sidebarOpen: app.sidebarOpen,
     modelState: app.modelState,
     thinkLevel: app.thinkLevel,
-    isStreaming: app.isStreaming,
+    isProcessing: app.isProcessing,
     processingSessions: app.processingSessions,
     sessions: app.sessions,
     currentSessionKey: app.currentSessionKey,

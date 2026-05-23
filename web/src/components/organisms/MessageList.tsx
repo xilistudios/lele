@@ -18,6 +18,7 @@ export function MessageList() {
     approvalResult,
     onApprove,
     currentSessionKey,
+    isProcessing,
     loadMore,
     hasMore,
     isLoadingMore,
@@ -148,10 +149,8 @@ export function MessageList() {
       return;
     }
 
-    if (lastMessage.streaming) {
-      // During streaming: pin to bottom instantly.
-      // Smooth scroll would be interrupted by rapid (~12ms) streaming updates,
-      // causing the animation to stutter and never reach the bottom.
+    // During streaming or idle processing: pin to bottom instantly
+    if (lastMessage?.streaming || isProcessing) {
       container.scrollTop = container.scrollHeight;
     } else if (messages.length > lastMessageCountRef.current) {
       // New complete message: smooth scroll after browser layout
@@ -161,7 +160,7 @@ export function MessageList() {
     }
 
     lastMessageCountRef.current = messages.length;
-  }, [messages, isNearBottom, scrollToBottomSmooth]);
+  }, [messages, isProcessing, isNearBottom, scrollToBottomSmooth]);
 
   // Cleanup debounce timer
   useEffect(() => {
@@ -291,6 +290,13 @@ export function MessageList() {
               </pre>
             )}
           </div>
+        </div>
+      )}
+      {isProcessing && !messages.some((m) => m.streaming) && (
+        <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
+          <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
+          <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />
+          <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
         </div>
       )}
     </div>
