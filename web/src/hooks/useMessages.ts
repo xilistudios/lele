@@ -472,17 +472,21 @@ export function useMessages(
             queryKey: chatHistoryQueryKey(historySessionKey),
           })
           onSessionUpdated?.()
-          // Clean up only transient UI elements from streaming state.
-          // Keep tool messages and completed assistants — mergeMessages()
-          // in useChatHistory will naturally deduplicate them when the
-          // HTTP poll delivers the canonical data. Removing them here
-          // causes a visible flicker while waiting for the poll refetch.
+          // Clean up streaming state for the updated session.
+          // Remove completed assistants and tools because mergeMessages() in
+          // useChatHistory CANNOT deduplicate them by ID — WS events use UUID
+          // while HTTP history uses content-hash-based IDs. The HTTP poll
+          // triggered by invalidateQueries will deliver the canonical data.
+          // Only keep: active streaming assistants, executing tools, and
+          // messages from other sessions.
           if (historySessionKey === currentSessionKeyRef.current) {
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
                 if (m.id === '__processing_placeholder__') return false
                 if (m.role === 'user' && m.optimistic) return false
+                if (m.role === 'assistant' && !m.streaming) return false
+                if (m.role === 'tool' && m.toolStatus !== 'executing') return false
                 return true
               }),
             )
