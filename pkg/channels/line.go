@@ -69,7 +69,6 @@ func NewLINEChannel(cfg config.LINEConfig, messageBus *bus.MessageBus) (*LINECha
 // Start initializes state but doesn't listen — webhook routes are registered
 // via RegisterWebhook on the unified server.
 func (c *LINEChannel) Start(ctx context.Context) error {
-	logger.InfoC("line", "Starting LINE channel (Webhook Mode)")
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
@@ -87,7 +86,6 @@ func (c *LINEChannel) Start(ctx context.Context) error {
 	}
 
 	c.setRunning(true)
-	logger.InfoC("line", "LINE channel started (Webhook Mode)")
 	return nil
 }
 
@@ -127,14 +125,12 @@ func (c *LINEChannel) fetchBotInfo() error {
 
 // Stop gracefully shuts down the LINE channel.
 func (c *LINEChannel) Stop(ctx context.Context) error {
-	logger.InfoC("line", "Stopping LINE channel")
 
 	if c.cancel != nil {
 		c.cancel()
 	}
 
 	c.setRunning(false)
-	logger.InfoC("line", "LINE channel stopped")
 	return nil
 }
 

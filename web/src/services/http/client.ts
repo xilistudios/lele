@@ -31,6 +31,8 @@ import type {
   SkillInstallResponse,
   SkillRemoveResponse,
   SkillsResponse,
+  StreamMessageState,
+  StreamStatusResponse,
   SystemStatus,
   ToolsResponse,
 } from '../../lib/types'
@@ -499,6 +501,12 @@ export const createApiClient = (baseUrl: string) => {
       }),
     removeSkill: (name: string) =>
       request<SkillRemoveResponse>(endpoints.skills.remove(name), { method: 'DELETE' }),
+    streamStatus: (sessionKey: string) =>
+      request<StreamStatusResponse>(endpoints.chat.streams(sessionKey), { method: 'GET' }),
+    streamState: (sessionKey: string, messageID: string) =>
+      request<StreamMessageState>(endpoints.chat.streamState(sessionKey, messageID), {
+        method: 'GET',
+      }),
     providerModels: (providerName: string) =>
       request<ProviderModelsResponse>(endpoints.providers.models(providerName), {
         method: 'GET',

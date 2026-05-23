@@ -45,8 +45,6 @@ func (c *QQChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("QQ app_id and app_secret not configured")
 	}
 
-	logger.InfoC("qq", "Starting QQ bot (WebSocket mode)")
-
 	// 创建 token source
 	credentials := &token.QQBotCredentials{
 		AppID:     c.config.AppID,
@@ -95,13 +93,11 @@ func (c *QQChannel) Start(ctx context.Context) error {
 	}()
 
 	c.setRunning(true)
-	logger.InfoC("qq", "QQ bot started successfully")
 
 	return nil
 }
 
 func (c *QQChannel) Stop(ctx context.Context) error {
-	logger.InfoC("qq", "Stopping QQ bot")
 	c.setRunning(false)
 
 	if c.cancel != nil {

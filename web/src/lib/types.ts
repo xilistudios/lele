@@ -572,6 +572,23 @@ export type SendMessageResponse = {
   session_key: string
 }
 
+// StreamMessageState mirrors the backend's StreamMessageState struct.
+// It represents the accumulated state of an in-progress streaming message.
+export type StreamMessageState = {
+  message_id: string
+  session_key: string
+  content: string
+  reasoning_content: string
+  done: boolean
+  error?: string
+  started_at: number
+  last_chunk_at: number
+}
+
+export type StreamStatusResponse = {
+  streams: StreamMessageState[]
+}
+
 export type HistoryResponse = {
   session_key: string
   processing: boolean

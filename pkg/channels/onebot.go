@@ -136,10 +136,6 @@ func (c *OneBotChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("OneBot ws_url not configured")
 	}
 
-	logger.InfoCF("onebot", "Starting OneBot channel", map[string]interface{}{
-		"ws_url": c.config.WSUrl,
-	})
-
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	if err := c.connect(); err != nil {
@@ -160,7 +156,6 @@ func (c *OneBotChannel) Start(ctx context.Context) error {
 	}
 
 	c.setRunning(true)
-	logger.InfoC("onebot", "OneBot channel started successfully")
 
 	return nil
 }
@@ -191,7 +186,6 @@ func (c *OneBotChannel) connect() error {
 
 	go c.pinger(conn)
 
-	logger.InfoC("onebot", "WebSocket connected")
 	return nil
 }
 
@@ -208,59 +202,10 @@ func (c *OneBotChannel) pinger(conn *websocket.Conn) {
 			err := conn.WriteMessage(websocket.PingMessage, nil)
 			c.writeMu.Unlock()
 			if err != nil {
-				logger.DebugCF("onebot", "Ping write failed, stopping pinger", map[string]interface{}{
-					"error": err.Error(),
-				})
 				return
 			}
 		}
 	}
-}
-
-func (c *OneBotChannel) fetchSelfID() {
-	resp, err := c.sendAPIRequest("get_login_info", nil, 5*time.Second)
-	if err != nil {
-		logger.WarnCF("onebot", "Failed to get_login_info", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	type loginInfo struct {
-		UserID   json.RawMessage `json:"user_id"`
-		Nickname string          `json:"nickname"`
-	}
-	for _, extract := range []func() (*loginInfo, error){
-		func() (*loginInfo, error) {
-			var w struct {
-				Data loginInfo `json:"data"`
-			}
-			err := json.Unmarshal(resp, &w)
-			return &w.Data, err
-		},
-		func() (*loginInfo, error) {
-			var f loginInfo
-			err := json.Unmarshal(resp, &f)
-			return &f, err
-		},
-	} {
-		info, err := extract()
-		if err != nil || len(info.UserID) == 0 {
-			continue
-		}
-		if uid, err := parseJSONInt64(info.UserID); err == nil && uid > 0 {
-			atomic.StoreInt64(&c.selfID, uid)
-			logger.InfoCF("onebot", "Bot self ID retrieved", map[string]interface{}{
-				"self_id":  uid,
-				"nickname": info.Nickname,
-			})
-			return
-		}
-	}
-
-	logger.WarnCF("onebot", "Could not parse self ID from get_login_info response", map[string]interface{}{
-		"response": string(resp),
-	})
 }
 
 func (c *OneBotChannel) sendAPIRequest(action string, params interface{}, timeout time.Duration) (json.RawMessage, error) {
@@ -345,7 +290,6 @@ func (c *OneBotChannel) reconnectLoop() {
 }
 
 func (c *OneBotChannel) Stop(ctx context.Context) error {
-	logger.InfoC("onebot", "Stopping OneBot channel")
 	c.setRunning(false)
 
 	if c.cancel != nil {
@@ -494,18 +438,8 @@ func (c *OneBotChannel) listen() {
 
 			var raw oneBotRawEvent
 			if err := json.Unmarshal(message, &raw); err != nil {
-				logger.WarnCF("onebot", "Failed to unmarshal raw event", map[string]interface{}{
-					"error":   err.Error(),
-					"payload": string(message),
-				})
 				continue
 			}
-
-			logger.DebugCF("onebot", "WebSocket event", map[string]interface{}{
-				"length":    len(message),
-				"post_type": raw.PostType,
-				"sub_type":  raw.SubType,
-			})
 
 			if raw.Echo != "" {
 				c.pendingMu.Lock()
@@ -517,19 +451,11 @@ func (c *OneBotChannel) listen() {
 					case ch <- message:
 					default:
 					}
-				} else {
-					logger.DebugCF("onebot", "Received API response (no waiter)", map[string]interface{}{
-						"echo":   raw.Echo,
-						"status": string(raw.Status),
-					})
 				}
 				continue
 			}
 
 			if isAPIResponse(raw.Status) {
-				logger.DebugCF("onebot", "Received API response without echo, skipping", map[string]interface{}{
-					"status": string(raw.Status),
-				})
 				continue
 			}
 
@@ -713,19 +639,13 @@ func (c *OneBotChannel) handleRawEvent(raw *oneBotRawEvent) {
 	case "message":
 		if userID, err := parseJSONInt64(raw.UserID); err == nil && userID > 0 {
 			if !c.IsAllowed(strconv.FormatInt(userID, 10)) {
-				logger.DebugCF("onebot", "Message rejected by allowlist", map[string]interface{}{
-					"user_id": userID,
-				})
 				return
 			}
 		}
 		c.handleMessage(raw)
 
 	case "message_sent":
-		logger.DebugCF("onebot", "Bot sent message event", map[string]interface{}{
-			"message_type": raw.MessageType,
-			"message_id":   parseJSONString(raw.MessageID),
-		})
+		// bot's own sent message, ignore
 
 	case "meta_event":
 		c.handleMetaEvent(raw)
@@ -734,46 +654,23 @@ func (c *OneBotChannel) handleRawEvent(raw *oneBotRawEvent) {
 		c.handleNoticeEvent(raw)
 
 	case "request":
-		logger.DebugCF("onebot", "Request event received", map[string]interface{}{
-			"sub_type": raw.SubType,
-		})
+		// friend/add group requests, ignore for now
 
 	case "":
-		logger.DebugCF("onebot", "Event with empty post_type (possibly API response)", map[string]interface{}{
-			"echo":   raw.Echo,
-			"status": raw.Status,
-		})
+		// API response, already handled
 
 	default:
-		logger.DebugCF("onebot", "Unknown post_type", map[string]interface{}{
-			"post_type": raw.PostType,
-		})
+		// unknown, ignore
 	}
 }
 
 func (c *OneBotChannel) handleMetaEvent(raw *oneBotRawEvent) {
-	if raw.MetaEventType == "lifecycle" {
-		logger.InfoCF("onebot", "Lifecycle event", map[string]interface{}{"sub_type": raw.SubType})
-	} else if raw.MetaEventType != "heartbeat" {
-		logger.DebugCF("onebot", "Meta event: "+raw.MetaEventType, nil)
-	}
+	// lifecycle events and heartbeats are normal, ignore
 }
 
 func (c *OneBotChannel) handleNoticeEvent(raw *oneBotRawEvent) {
-	fields := map[string]interface{}{
-		"notice_type": raw.NoticeType,
-		"sub_type":    raw.SubType,
-		"group_id":    parseJSONString(raw.GroupID),
-		"user_id":     parseJSONString(raw.UserID),
-		"message_id":  parseJSONString(raw.MessageID),
-	}
-	switch raw.NoticeType {
-	case "group_recall", "group_increase", "group_decrease",
-		"friend_add", "group_admin", "group_ban":
-		logger.InfoCF("onebot", "Notice: "+raw.NoticeType, fields)
-	default:
-		logger.DebugCF("onebot", "Notice: "+raw.NoticeType, fields)
-	}
+	// group_recall, group_increase, group_decrease, friend_add, group_admin, group_ban, etc.
+	// No action needed for typical notice events
 }
 
 func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
@@ -828,27 +725,16 @@ func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
 	if len(parsed.LocalFiles) > 0 {
 		defer func() {
 			for _, f := range parsed.LocalFiles {
-				if err := os.Remove(f); err != nil {
-					logger.DebugCF("onebot", "Failed to remove temp file", map[string]interface{}{
-						"path":  f,
-						"error": err.Error(),
-					})
-				}
+				os.Remove(f)
 			}
 		}()
 	}
 
 	if c.isDuplicate(messageID) {
-		logger.DebugCF("onebot", "Duplicate message, skipping", map[string]interface{}{
-			"message_id": messageID,
-		})
 		return
 	}
 
 	if content == "" {
-		logger.DebugCF("onebot", "Received empty message, ignoring", map[string]interface{}{
-			"message_id": messageID,
-		})
 		return
 	}
 
@@ -885,33 +771,13 @@ func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
 
 		triggered, strippedContent := c.checkGroupTrigger(content, isBotMentioned)
 		if !triggered {
-			logger.DebugCF("onebot", "Group message ignored (no trigger)", map[string]interface{}{
-				"sender":       senderID,
-				"group":        groupIDStr,
-				"is_mentioned": isBotMentioned,
-				"content":      truncate(content, 100),
-			})
 			return
 		}
 		content = strippedContent
 
 	default:
-		logger.WarnCF("onebot", "Unknown message type, cannot route", map[string]interface{}{
-			"type":       raw.MessageType,
-			"message_id": messageID,
-			"user_id":    userID,
-		})
 		return
 	}
-
-	logger.InfoCF("onebot", "Received "+raw.MessageType+" message", map[string]interface{}{
-		"sender":      senderID,
-		"chat_id":     chatID,
-		"message_id":  messageID,
-		"length":      len(content),
-		"content":     truncate(content, 100),
-		"media_count": len(parsed.Media),
-	})
 
 	if sender.Nickname != "" {
 		metadata["nickname"] = sender.Nickname
@@ -949,12 +815,39 @@ func (c *OneBotChannel) isDuplicate(messageID string) bool {
 	return false
 }
 
-func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
+func (c *OneBotChannel) fetchSelfID() {
+	resp, err := c.sendAPIRequest("get_login_info", nil, 5*time.Second)
+	if err != nil {
+		return
 	}
-	return string(runes[:n]) + "..."
+
+	type loginInfo struct {
+		UserID   json.RawMessage `json:"user_id"`
+		Nickname string          `json:"nickname"`
+	}
+	for _, extract := range []func() (*loginInfo, error){
+		func() (*loginInfo, error) {
+			var w struct {
+				Data loginInfo `json:"data"`
+			}
+			err := json.Unmarshal(resp, &w)
+			return &w.Data, err
+		},
+		func() (*loginInfo, error) {
+			var f loginInfo
+			err := json.Unmarshal(resp, &f)
+			return &f, err
+		},
+	} {
+		info, err := extract()
+		if err != nil || len(info.UserID) == 0 {
+			continue
+		}
+		if uid, err := parseJSONInt64(info.UserID); err == nil && uid > 0 {
+			atomic.StoreInt64(&c.selfID, uid)
+			return
+		}
+	}
 }
 
 func (c *OneBotChannel) checkGroupTrigger(content string, isBotMentioned bool) (triggered bool, strippedContent string) {

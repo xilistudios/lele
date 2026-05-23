@@ -17,15 +17,16 @@ import (
 const maxStoredMessages = 10000
 
 type Session struct {
-	Key          string              `json:"key"`
-	Name         string              `json:"name,omitempty"`
-	Messages     []providers.Message `json:"messages"`
-	Summary      string              `json:"summary,omitempty"`
-	VerboseMode  bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
-	VerboseLevel string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
-	Model        string              `json:"model,omitempty"`         // Session-specific model override
-	Created      time.Time           `json:"created"`
-	Updated      time.Time           `json:"updated"`
+	Key           string              `json:"key"`
+	Name          string              `json:"name,omitempty"`
+	Messages      []providers.Message `json:"messages"`
+	Summary       string              `json:"summary,omitempty"`
+	VerboseMode   bool                `json:"verbose_mode,omitempty"`  // Deprecated: use VerboseLevel
+	VerboseLevel  string              `json:"verbose_level,omitempty"` // "off", "basic", or "full"
+	Model         string              `json:"model,omitempty"`         // Session-specific model override
+	ThinkingLevel string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
+	Created       time.Time           `json:"created"`
+	Updated       time.Time           `json:"updated"`
 	// Token tracking
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
@@ -504,6 +505,38 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	session.Updated = time.Now()
 
 	// Persist immediately
+	return sm.saveUnlocked(key)
+}
+
+// GetThinkingLevel returns the thinking level for a session.
+func (sm *SessionManager) GetThinkingLevel(key string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		return ""
+	}
+	return session.ThinkingLevel
+}
+
+// SetThinkingLevel sets the thinking level for a session and persists it.
+func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session = &Session{
+			Key:     key,
+			Created: time.Now(),
+		}
+		sm.sessions[key] = session
+	}
+
+	session.ThinkingLevel = level
+	session.Updated = time.Now()
+
 	return sm.saveUnlocked(key)
 }
 

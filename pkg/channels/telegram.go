@@ -313,7 +313,6 @@ func (c *TelegramChannel) wrapUpdatesWithOffsetTracking(ctx context.Context, upd
 }
 
 func (c *TelegramChannel) Start(ctx context.Context) error {
-	logger.InfoC("telegram", "Starting Telegram bot (polling mode with auto-reconnect)...")
 
 	c.stopped = false
 	c.setRunning(true)
@@ -334,7 +333,6 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 		c.reconnectMu.Lock()
 		if c.stopped {
 			c.reconnectMu.Unlock()
-			logger.InfoC("telegram", "Polling loop stopped (explicit Stop() called)")
 			return
 		}
 		c.reconnectMu.Unlock()
@@ -368,7 +366,6 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 		c.reconnectMu.Lock()
 		if c.stopped {
 			c.reconnectMu.Unlock()
-			logger.InfoC("telegram", "Bot handler stopped (explicit Stop() called)")
 			return
 		}
 		c.reconnectMu.Unlock()
@@ -389,7 +386,6 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 }
 
 func (c *TelegramChannel) Stop(ctx context.Context) error {
-	logger.InfoC("telegram", "Stopping Telegram bot...")
 
 	// Mark as stopped to prevent reconnect
 	c.reconnectMu.Lock()

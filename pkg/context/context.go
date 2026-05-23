@@ -113,12 +113,6 @@ func InitializeWorkspace(workspace string) error {
 		}
 	}
 
-	logger.InfoCF("agent", "Workspace initialized with context files",
-		map[string]interface{}{
-			"workspace": workspace,
-			"template":  templateDir,
-		})
-
 	return nil
 }
 

@@ -58,9 +58,11 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 			summary := oldAgent.Sessions.GetSummary(resolvedKey)
 			name := oldAgent.Sessions.GetName(resolvedKey)
 			verboseLevel := oldAgent.Sessions.GetVerboseLevel(resolvedKey)
+			model := oldAgent.Sessions.GetModel(resolvedKey)
+			thinkingLevel := oldAgent.Sessions.GetThinkingLevel(resolvedKey)
 
 			// Copy history to new agent's session manager
-			if len(history) > 0 || summary != "" || name != "" {
+			if len(history) > 0 || summary != "" || name != "" || model != "" || thinkingLevel != "" {
 				newAgent.Sessions.GetOrCreate(resolvedKey)
 				if len(history) > 0 {
 					newAgent.Sessions.SetHistory(resolvedKey, history)
@@ -73,6 +75,12 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 				}
 				if verboseLevel != "off" {
 					newAgent.Sessions.SetVerboseLevel(resolvedKey, verboseLevel)
+				}
+				if model != "" {
+					newAgent.Sessions.SetModel(resolvedKey, model)
+				}
+				if thinkingLevel != "" {
+					newAgent.Sessions.SetThinkingLevel(resolvedKey, thinkingLevel)
 				}
 				logger.InfoCF("agent", "Migrated session history to new agent", map[string]interface{}{
 					"session_key":   resolvedKey,
@@ -151,12 +159,6 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
 				history := agent.Sessions.GetHistory(resolvedSessionKey)
 				if len(history) > 0 {
-					logger.InfoCF("agent", "GetSessionHistory result (fast path)", map[string]interface{}{
-						"session_key":          sessionKey,
-						"resolved_session_key": resolvedSessionKey,
-						"agent_id":             agent.ID,
-						"history_count":        len(history),
-					})
 					return history
 				}
 			}
@@ -172,38 +174,17 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 			if len(history) > 0 {
 				// Cache this mapping for future O(1) lookups
 				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
-				logger.InfoCF("agent", "GetSessionHistory result (cached)", map[string]interface{}{
-					"session_key":          sessionKey,
-					"resolved_session_key": resolvedSessionKey,
-					"agent_id":             agent.ID,
-					"history_count":        len(history),
-				})
 				return history
 			}
 		}
-		logger.InfoCF("agent", "GetSessionHistory: subagent history not found in any agent", map[string]interface{}{
-			"session_key":          sessionKey,
-			"resolved_session_key": resolvedSessionKey,
-		})
 		return []providers.Message{}
 	}
 
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent == nil {
-		logger.InfoCF("agent", "GetSessionHistory: agent is nil", map[string]interface{}{
-			"session_key":          sessionKey,
-			"resolved_session_key": resolvedSessionKey,
-		})
 		return []providers.Message{}
 	}
-	history := agent.Sessions.GetHistory(resolvedSessionKey)
-	logger.InfoCF("agent", "GetSessionHistory result", map[string]interface{}{
-		"session_key":          sessionKey,
-		"resolved_session_key": resolvedSessionKey,
-		"agent_id":             agent.ID,
-		"history_count":        len(history),
-	})
-	return history
+	return agent.Sessions.GetHistory(resolvedSessionKey)
 }
 
 // ============================================================================
@@ -404,9 +385,20 @@ func (ap *agentProvidableImpl) GetThinkLevel(sessionKey string) string {
 	if sessionKey == "" {
 		return "default"
 	}
+	// 1) In-memory (fast path)
 	if v, ok := ap.al.sessionThinking.Load(sessionKey); ok {
 		if s, ok := v.(string); ok && s != "" {
 			return s
+		}
+	}
+	// 2) Persisted (survives restarts)
+	agent := ap.al.agentForSession(sessionKey)
+	if agent != nil && agent.Sessions != nil {
+		persisted := agent.Sessions.GetThinkingLevel(sessionKey)
+		if persisted != "" {
+			// Sync back to in-memory
+			ap.al.sessionThinking.Store(sessionKey, persisted)
+			return persisted
 		}
 	}
 	return "default"
@@ -426,6 +418,15 @@ func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bo
 		ap.al.sessionThinking.Delete(sessionKey)
 	} else {
 		ap.al.sessionThinking.Store(sessionKey, level)
+	}
+	// Persist to survive restarts
+	agent := ap.al.agentForSession(sessionKey)
+	if agent != nil && agent.Sessions != nil {
+		persistLevel := level
+		if level == "default" {
+			persistLevel = "" // "default" means "no override"
+		}
+		agent.Sessions.SetThinkingLevel(sessionKey, persistLevel)
 	}
 	return true
 }

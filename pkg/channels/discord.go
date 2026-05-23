@@ -60,7 +60,6 @@ func (c *DiscordChannel) getContext() context.Context {
 }
 
 func (c *DiscordChannel) Start(ctx context.Context) error {
-	logger.InfoC("discord", "Starting Discord bot")
 
 	c.ctx = ctx
 	c.session.AddHandler(c.handleMessage)
@@ -71,20 +70,14 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 
 	c.setRunning(true)
 
-	botUser, err := c.session.User("@me")
-	if err != nil {
+	if _, err := c.session.User("@me"); err != nil {
 		return fmt.Errorf("failed to get bot user: %w", err)
 	}
-	logger.InfoCF("discord", "Discord bot connected", map[string]any{
-		"username": botUser.Username,
-		"user_id":  botUser.ID,
-	})
 
 	return nil
 }
 
 func (c *DiscordChannel) Stop(ctx context.Context) error {
-	logger.InfoC("discord", "Stopping Discord bot")
 	c.setRunning(false)
 
 	// Stop all typing goroutines before closing session

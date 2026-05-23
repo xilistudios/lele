@@ -65,13 +65,6 @@ func gatewayCmd() {
 		skillsInfo["available"],
 		skillsInfo["total"])
 
-	logger.InfoCF("agent", "Agent initialized",
-		map[string]interface{}{
-			"tools_count":      toolsInfo["count"],
-			"skills_total":     skillsInfo["total"],
-			"skills_available": skillsInfo["available"],
-		})
-
 	approvalManager := channels.NewApprovalManager()
 	agentLoop.SetApprovalManager(approvalManager)
 
@@ -109,32 +102,27 @@ func gatewayCmd() {
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {
 		transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
-		logger.InfoC("voice", "Groq voice transcription enabled")
 	}
 
 	if transcriber != nil {
 		if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
 			if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
 				tc.SetTranscriber(transcriber)
-				logger.InfoC("voice", "Groq transcription attached to Telegram channel")
 			}
 		}
 		if discordChannel, ok := channelManager.GetChannel("discord"); ok {
 			if dc, ok := discordChannel.(*channels.DiscordChannel); ok {
 				dc.SetTranscriber(transcriber)
-				logger.InfoC("voice", "Groq transcription attached to Discord channel")
 			}
 		}
 		if slackChannel, ok := channelManager.GetChannel("slack"); ok {
 			if sc, ok := slackChannel.(*channels.SlackChannel); ok {
 				sc.SetTranscriber(transcriber)
-				logger.InfoC("voice", "Groq transcription attached to Slack channel")
 			}
 		}
 		if onebotChannel, ok := channelManager.GetChannel("onebot"); ok {
 			if oc, ok := onebotChannel.(*channels.OneBotChannel); ok {
 				oc.SetTranscriber(transcriber)
-				logger.InfoC("voice", "Groq transcription attached to OneBot channel")
 			}
 		}
 	}
@@ -164,7 +152,6 @@ func gatewayCmd() {
 		logger.WarnC("server", "Web UI assets not available (build frontend with 'make build')")
 	} else {
 		srv.RegisterWebUI(http.FS(distFS))
-		logger.InfoC("server", "Web UI registered")
 	}
 
 	// Register native channel API routes
@@ -185,7 +172,6 @@ func gatewayCmd() {
 				heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
 				return nil
 			})
-			logger.InfoC("server", "Native channel API routes registered")
 		}
 	}
 
@@ -193,7 +179,6 @@ func gatewayCmd() {
 	if lineCh, ok := channelManager.GetChannel("line"); ok {
 		if lc, ok := lineCh.(*channels.LINEChannel); ok {
 			lc.RegisterWebhook(srv.Mux())
-			logger.InfoC("server", "LINE webhook registered")
 		}
 	}
 

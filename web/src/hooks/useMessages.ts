@@ -120,6 +120,45 @@ export function useMessages(
     [],
   )
 
+  // Poll for active streams on session change (recovers stream content after page reload)
+  useEffect(() => {
+    const sessionKey = _currentSessionKey
+    if (!sessionKey || !token) return
+
+    let cancelled = false
+    api
+      .streamStatus(sessionKey)
+      .then(({ streams }) => {
+        if (cancelled) return
+        for (const stream of streams) {
+          if (stream.content) {
+            ensureAssistantPlaceholder(
+              stream.message_id,
+              stream.session_key,
+              stream.content,
+              stream.done,
+            )
+          }
+          if (stream.reasoning_content) {
+            setStreamingMessages((current) =>
+              current.map((m) =>
+                m.id === stream.message_id && m.role === 'assistant'
+                  ? { ...m, reasoningContent: stream.reasoning_content }
+                  : m,
+              ),
+            )
+          }
+        }
+      })
+      .catch(() => {
+        // Stream status query is non-critical; ignore failures silently
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [_currentSessionKey, token, api, ensureAssistantPlaceholder])
+
   const clearStreamQueue = useCallback((messageId: string) => {
     const queue = streamQueuesRef.current.get(messageId)
     if (queue?.timer) {

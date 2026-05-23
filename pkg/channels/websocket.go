@@ -346,7 +346,6 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
-	oldSessionKey := client.SessionKey
 	client.SessionKey = sessionKey
 
 	if client.Subscriptions == nil {
@@ -355,14 +354,6 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 	client.Subscriptions[sessionKey] = true
 
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
-
-	logger.InfoCF("native", "Client subscribed to session", map[string]interface{}{
-		"client_id":       client.ID,
-		"client_info_id":  client.ClientInfo.ClientID,
-		"old_session_key": oldSessionKey,
-		"new_session_key": sessionKey,
-		"subscriptions":   len(client.Subscriptions),
-	})
 
 	processing := false
 	if n.agentLoop != nil {

@@ -82,21 +82,15 @@ func (hs *HeartbeatService) Start() error {
 	defer hs.mu.Unlock()
 
 	if hs.stopChan != nil {
-		logger.InfoC("heartbeat", "Heartbeat service already running")
 		return nil
 	}
 
 	if !hs.enabled {
-		logger.InfoC("heartbeat", "Heartbeat service disabled")
 		return nil
 	}
 
 	hs.stopChan = make(chan struct{})
 	go hs.runLoop(hs.stopChan)
-
-	logger.InfoCF("heartbeat", "Heartbeat service started", map[string]any{
-		"interval_minutes": hs.interval.Minutes(),
-	})
 
 	return nil
 }
@@ -110,7 +104,6 @@ func (hs *HeartbeatService) Stop() {
 		return
 	}
 
-	logger.InfoC("heartbeat", "Stopping heartbeat service")
 	close(hs.stopChan)
 	hs.stopChan = nil
 }

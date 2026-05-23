@@ -42,6 +42,10 @@ export const endpoints = {
       `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
     approve: (sessionKey: string) =>
       `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/approve`,
+    streams: (sessionKey: string) =>
+      `/api/v1/chat/streams/${encodeURIComponent(sessionKey)}`,
+    streamState: (sessionKey: string, messageID: string) =>
+      `/api/v1/chat/streams/${encodeURIComponent(sessionKey)}/${encodeURIComponent(messageID)}`,
   },
   system: {
     config: '/api/v1/config',

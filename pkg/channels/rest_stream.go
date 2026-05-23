@@ -159,6 +159,11 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		Metadata:    map[string]string{"message_id": messageID},
 	})
 
+	// Start tracking stream state for reconnect resilience
+	if n.streamState != nil {
+		n.streamState.StartStream(sessionKey, messageID)
+	}
+
 	// Stream events to the client until the message is complete,
 	// an error occurs, the client disconnects, or the deadline expires.
 	deadline := time.After(restStreamDeadline)
@@ -213,4 +218,60 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+}
+
+// handleStreamStatus returns a list of active streams for a session.
+// This allows the frontend to discover in-progress streams after a page reload
+// and retrieve their accumulated content.
+func (n *NativeChannel) handleStreamStatus(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	if sessionKey == "" {
+		writeError(w, http.StatusBadRequest, "session key is required", "session_key_missing")
+		return
+	}
+
+	clientID := getClientID(r)
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
+	if n.streamState == nil {
+		writeError(w, http.StatusServiceUnavailable, "stream state tracking is not available", "stream_state_unavailable")
+		return
+	}
+	streams := n.streamState.ListActiveStreams(sessionKey)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"streams": streams,
+	})
+}
+
+// handleStreamState returns the current accumulated state of a specific stream.
+// Used by the frontend after reconnection to recover the streaming content that
+// was produced while disconnected.
+func (n *NativeChannel) handleStreamState(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	messageID := r.PathValue("messageID")
+	if sessionKey == "" || messageID == "" {
+		writeError(w, http.StatusBadRequest, "session key and message ID are required", "params_missing")
+		return
+	}
+
+	clientID := getClientID(r)
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
+	if n.streamState == nil {
+		writeError(w, http.StatusServiceUnavailable, "stream state tracking is not available", "stream_state_unavailable")
+		return
+	}
+	state := n.streamState.GetStream(sessionKey, messageID)
+	if state == nil {
+		writeError(w, http.StatusNotFound, "stream not found", "stream_not_found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, state)
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
-	"github.com/xilistudios/lele/pkg/utils"
 )
 
 type WhatsAppChannel struct {
@@ -37,8 +36,6 @@ func NewWhatsAppChannel(cfg config.WhatsAppConfig, bus *bus.MessageBus) (*WhatsA
 }
 
 func (c *WhatsAppChannel) Start(ctx context.Context) error {
-	log.Printf("Starting WhatsApp channel connecting to %s...", c.url)
-
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
 
@@ -53,7 +50,6 @@ func (c *WhatsAppChannel) Start(ctx context.Context) error {
 	c.mu.Unlock()
 
 	c.setRunning(true)
-	log.Println("WhatsApp channel connected")
 
 	go c.listen(ctx)
 
@@ -61,8 +57,6 @@ func (c *WhatsAppChannel) Start(ctx context.Context) error {
 }
 
 func (c *WhatsAppChannel) Stop(ctx context.Context) error {
-	log.Println("Stopping WhatsApp channel...")
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -141,7 +135,6 @@ func (c *WhatsAppChannel) listen(ctx context.Context) {
 
 			var msg map[string]interface{}
 			if err := json.Unmarshal(message, &msg); err != nil {
-				log.Printf("Failed to unmarshal WhatsApp message: %v", err)
 				continue
 			}
 
@@ -216,8 +209,6 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]interface{}) {
 	if userName, ok := msg["from_name"].(string); ok {
 		metadata["user_name"] = userName
 	}
-
-	log.Printf("WhatsApp message from %s: %s...", senderID, utils.Truncate(content, 50))
 
 	c.HandleMessageWithAttachments(senderID, chatID, content, attachments, metadata, "")
 }

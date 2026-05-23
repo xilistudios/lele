@@ -51,10 +51,7 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentP
 }
 
 func (m *Manager) initChannels() error {
-	logger.InfoC("channels", "Initializing channel manager")
-
 	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
-		logger.DebugC("channels", "Attempting to initialize Telegram channel")
 		telegram, err := NewTelegramChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Telegram channel", map[string]interface{}{
@@ -63,12 +60,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["telegram"] = telegram
 			m.dispatchQueues["telegram"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "Telegram channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.WhatsApp.Enabled && m.config.Channels.WhatsApp.BridgeURL != "" {
-		logger.DebugC("channels", "Attempting to initialize WhatsApp channel")
 		whatsapp, err := NewWhatsAppChannel(m.config.Channels.WhatsApp, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize WhatsApp channel", map[string]interface{}{
@@ -77,12 +72,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["whatsapp"] = whatsapp
 			m.dispatchQueues["whatsapp"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "WhatsApp channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.Feishu.Enabled {
-		logger.DebugC("channels", "Attempting to initialize Feishu channel")
 		feishu, err := NewFeishuChannel(m.config.Channels.Feishu, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Feishu channel", map[string]interface{}{
@@ -91,12 +84,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["feishu"] = feishu
 			m.dispatchQueues["feishu"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "Feishu channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.Discord.Enabled && m.config.Channels.Discord.Token != "" {
-		logger.DebugC("channels", "Attempting to initialize Discord channel")
 		discord, err := NewDiscordChannel(m.config.Channels.Discord, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Discord channel", map[string]interface{}{
@@ -105,12 +96,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["discord"] = discord
 			m.dispatchQueues["discord"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "Discord channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.MaixCam.Enabled {
-		logger.DebugC("channels", "Attempting to initialize MaixCam channel")
 		maixcam, err := NewMaixCamChannel(m.config.Channels.MaixCam, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize MaixCam channel", map[string]interface{}{
@@ -119,12 +108,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["maixcam"] = maixcam
 			m.dispatchQueues["maixcam"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "MaixCam channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.QQ.Enabled {
-		logger.DebugC("channels", "Attempting to initialize QQ channel")
 		qq, err := NewQQChannel(m.config.Channels.QQ, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize QQ channel", map[string]interface{}{
@@ -133,12 +120,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["qq"] = qq
 			m.dispatchQueues["qq"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "QQ channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.DingTalk.Enabled && m.config.Channels.DingTalk.ClientID != "" {
-		logger.DebugC("channels", "Attempting to initialize DingTalk channel")
 		dingtalk, err := NewDingTalkChannel(m.config.Channels.DingTalk, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize DingTalk channel", map[string]interface{}{
@@ -147,12 +132,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["dingtalk"] = dingtalk
 			m.dispatchQueues["dingtalk"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "DingTalk channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.Slack.Enabled && m.config.Channels.Slack.BotToken != "" {
-		logger.DebugC("channels", "Attempting to initialize Slack channel")
 		slackCh, err := NewSlackChannel(m.config.Channels.Slack, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Slack channel", map[string]interface{}{
@@ -161,12 +144,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["slack"] = slackCh
 			m.dispatchQueues["slack"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "Slack channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.LINE.Enabled && m.config.Channels.LINE.ChannelAccessToken != "" {
-		logger.DebugC("channels", "Attempting to initialize LINE channel")
 		line, err := NewLINEChannel(m.config.Channels.LINE, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize LINE channel", map[string]interface{}{
@@ -175,12 +156,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["line"] = line
 			m.dispatchQueues["line"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "LINE channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.OneBot.Enabled && m.config.Channels.OneBot.WSUrl != "" {
-		logger.DebugC("channels", "Attempting to initialize OneBot channel")
 		onebot, err := NewOneBotChannel(m.config.Channels.OneBot, m.bus)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize OneBot channel", map[string]interface{}{
@@ -189,12 +168,10 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["onebot"] = onebot
 			m.dispatchQueues["onebot"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "OneBot channel enabled successfully")
 		}
 	}
 
 	if m.config.Channels.Native.Enabled {
-		logger.DebugC("channels", "Attempting to initialize Native channel")
 		native, err := NewNativeChannel(m.config, m.bus, m.agentLoop, m.approvalManager)
 		if err != nil {
 			logger.ErrorCF("channels", "Failed to initialize Native channel", map[string]interface{}{
@@ -203,13 +180,14 @@ func (m *Manager) initChannels() error {
 		} else {
 			m.channels["native"] = native
 			m.dispatchQueues["native"] = make(chan bus.OutboundMessage, 200)
-			logger.InfoC("channels", "Native channel enabled successfully")
 		}
 	}
 
-	logger.InfoCF("channels", "Channel initialization completed", map[string]interface{}{
-		"enabled_channels": len(m.channels),
-	})
+	if len(m.channels) > 0 {
+		logger.InfoCF("channels", "Channels initialized", map[string]interface{}{
+			"count": len(m.channels),
+		})
+	}
 
 	return nil
 }
@@ -224,17 +202,12 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		return nil
 	}
 
-	logger.InfoC("channels", "Starting all channels")
-
 	dispatchCtx, cancel := context.WithCancel(ctx)
 	m.dispatchTask = &asyncTask{cancel: cancel}
 
 	go m.dispatchOutbound(dispatchCtx)
 
 	for name, channel := range m.channels {
-		logger.InfoCF("channels", "Starting channel", map[string]interface{}{
-			"channel": name,
-		})
 		if err := channel.Start(ctx); err != nil {
 			logger.ErrorCF("channels", "Failed to start channel", map[string]interface{}{
 				"channel": name,
@@ -246,7 +219,6 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
 	}
 
-	logger.InfoC("channels", "All channels started")
 	return nil
 }
 
@@ -298,11 +270,12 @@ func (m *Manager) ReloadConfig(cfg *config.Config) error {
 			queue := m.dispatchQueues[name]
 			go m.startChannelDispatcher(dispatchCtx, name, channel, queue)
 		}
-		logger.InfoC("channels", "Channels reloaded")
+		logger.InfoCF("channels", "Channels reloaded", map[string]interface{}{
+			"count": len(m.channels),
+		})
 		return nil
 	}
 	m.mu.Unlock()
-	logger.InfoC("channels", "Channels reloaded")
 	return nil
 }
 
@@ -310,17 +283,12 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	logger.InfoC("channels", "Stopping all channels")
-
 	if m.dispatchTask != nil {
 		m.dispatchTask.cancel()
 		m.dispatchTask = nil
 	}
 
 	for name, channel := range m.channels {
-		logger.InfoCF("channels", "Stopping channel", map[string]interface{}{
-			"channel": name,
-		})
 		if err := channel.Stop(ctx); err != nil {
 			logger.ErrorCF("channels", "Error stopping channel", map[string]interface{}{
 				"channel": name,
@@ -329,17 +297,13 @@ func (m *Manager) StopAll(ctx context.Context) error {
 		}
 	}
 
-	logger.InfoC("channels", "All channels stopped")
 	return nil
 }
 
 func (m *Manager) dispatchOutbound(ctx context.Context) {
-	logger.InfoC("channels", "Outbound dispatcher started")
-
 	for {
 		select {
 		case <-ctx.Done():
-			logger.InfoC("channels", "Outbound dispatcher stopped")
 			return
 		default:
 			msg, ok := m.bus.SubscribeOutbound(ctx)

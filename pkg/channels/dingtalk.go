@@ -48,7 +48,6 @@ func NewDingTalkChannel(cfg config.DingTalkConfig, messageBus *bus.MessageBus) (
 
 // Start initializes the DingTalk channel with Stream Mode
 func (c *DingTalkChannel) Start(ctx context.Context) error {
-	logger.InfoC("dingtalk", "Starting DingTalk channel (Stream Mode)...")
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
@@ -70,13 +69,11 @@ func (c *DingTalkChannel) Start(ctx context.Context) error {
 	}
 
 	c.setRunning(true)
-	logger.InfoC("dingtalk", "DingTalk channel started (Stream Mode)")
 	return nil
 }
 
 // Stop gracefully stops the DingTalk channel
 func (c *DingTalkChannel) Stop(ctx context.Context) error {
-	logger.InfoC("dingtalk", "Stopping DingTalk channel...")
 
 	if c.cancel != nil {
 		c.cancel()
@@ -87,7 +84,6 @@ func (c *DingTalkChannel) Stop(ctx context.Context) error {
 	}
 
 	c.setRunning(false)
-	logger.InfoC("dingtalk", "DingTalk channel stopped")
 	return nil
 }
 

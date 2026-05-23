@@ -64,7 +64,6 @@ func (c *SlackChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 }
 
 func (c *SlackChannel) Start(ctx context.Context) error {
-	logger.InfoC("slack", "Starting Slack channel (Socket Mode)")
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
@@ -74,11 +73,6 @@ func (c *SlackChannel) Start(ctx context.Context) error {
 	}
 	c.botUserID = authResp.UserID
 	c.teamID = authResp.TeamID
-
-	logger.InfoCF("slack", "Slack bot connected", map[string]interface{}{
-		"bot_user_id": c.botUserID,
-		"team":        authResp.Team,
-	})
 
 	go c.eventLoop()
 
@@ -93,19 +87,16 @@ func (c *SlackChannel) Start(ctx context.Context) error {
 	}()
 
 	c.setRunning(true)
-	logger.InfoC("slack", "Slack channel started (Socket Mode)")
 	return nil
 }
 
 func (c *SlackChannel) Stop(ctx context.Context) error {
-	logger.InfoC("slack", "Stopping Slack channel")
 
 	if c.cancel != nil {
 		c.cancel()
 	}
 
 	c.setRunning(false)
-	logger.InfoC("slack", "Slack channel stopped")
 	return nil
 }
 

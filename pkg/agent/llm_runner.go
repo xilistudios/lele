@@ -164,16 +164,6 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		return "", nil
 	}
 
-	// 9. Log response
-	responsePreview := utils.Truncate(finalContent, 120)
-	logger.InfoCF("agent", fmt.Sprintf("Response: %s", responsePreview),
-		map[string]interface{}{
-			"agent_id":     agent.ID,
-			"session_key":  opts.SessionKey,
-			"iterations":   iteration,
-			"final_length": len(finalContent),
-		})
-
 	return finalContent, nil
 }
 
@@ -296,13 +286,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
-			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
-				map[string]interface{}{
-					"agent_id":          agent.ID,
-					"iteration":         iteration,
-					"content_chars":     len(finalContent),
-					"reasoning_present": response.ReasoningContent != "",
-				})
 
 			// Save assistant message with reasoning content (important for thinking models like DeepSeek)
 			assistantMsg := providers.Message{
@@ -363,12 +346,6 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		for _, tc := range response.ToolCalls {
 			toolNames = append(toolNames, tc.Name)
 		}
-		logger.InfoCF("agent", "LLM requested tool calls",
-			map[string]interface{}{"agent_id": agent.ID,
-				"tools":     toolNames,
-				"count":     len(response.ToolCalls),
-				"iteration": iteration,
-			})
 
 		// Check for loop patterns and inject guidance if needed
 		if guidanceMsg := loopDetector.Check(response.ToolCalls, agent.ID, iteration); guidanceMsg != nil {

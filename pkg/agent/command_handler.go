@@ -271,34 +271,19 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 		return "Think mode requires a session context. Please start a conversation first."
 	}
 
+	providable := ch.al.GetProvidable()
+
 	// If an explicit level is provided, set it directly.
 	if len(args) > 0 {
 		level := strings.ToLower(args[0])
-		valid := false
-		for _, l := range thinkLevels {
-			if l == level {
-				valid = true
-				break
-			}
-		}
-		if !valid {
+		if !providable.SetThinkLevel(sessionKey, level) {
 			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: off, low, medium, high", args[0])
-		}
-		if level == "off" {
-			ch.al.sessionThinking.Delete(sessionKey)
-		} else {
-			ch.al.sessionThinking.Store(sessionKey, level)
 		}
 		return thinkLevelResponse(level)
 	}
 
 	// Cycle to the next level.
-	current := "off"
-	if v, ok := ch.al.sessionThinking.Load(sessionKey); ok {
-		if s, ok := v.(string); ok && s != "" {
-			current = s
-		}
-	}
+	current := providable.GetThinkLevel(sessionKey)
 	next := "low"
 	for i, l := range thinkLevels {
 		if l == current {
@@ -306,11 +291,7 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 			break
 		}
 	}
-	if next == "off" {
-		ch.al.sessionThinking.Delete(sessionKey)
-	} else {
-		ch.al.sessionThinking.Store(sessionKey, next)
-	}
+	providable.SetThinkLevel(sessionKey, next)
 	return thinkLevelResponse(next)
 }
 

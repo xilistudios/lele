@@ -26,6 +26,7 @@ export function MessageList() {
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLoadingMoreRef = useRef(false)
   const lastMessageCountRef = useRef(0)
+  const forceScrollRef = useRef(false)
 
   const isNearBottom = useCallback(() => {
     const container = containerRef.current
@@ -117,13 +118,25 @@ export function MessageList() {
     }
   }, [])
 
-  // Reset refs when session changes
+  // Reset refs and mark for forced scroll when session changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally used for mutation
   useEffect(() => {
     isLoadingMoreRef.current = false
     lastMessageCountRef.current = 0
     setShowSentinel(false)
+    forceScrollRef.current = true
   }, [currentSessionKey])
+
+  // Force scroll to bottom when messages load after switching sessions
+  useEffect(() => {
+    if (forceScrollRef.current && messages.length > 0) {
+      // Use requestAnimationFrame to ensure DOM has rendered the new session's messages
+      window.requestAnimationFrame(() => {
+        scrollToBottomSmooth()
+        forceScrollRef.current = false
+      })
+    }
+  }, [messages.length, scrollToBottomSmooth])
 
   if (messages.length === 0) {
     return (
