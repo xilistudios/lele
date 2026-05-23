@@ -470,9 +470,11 @@ export function useMessages(
           setStreamingMessages((current) => {
             const targetSessionKey = eventSessionKey ?? currentSessionKeyRef.current
             return current.flatMap((m) => {
-              if (m.id === '__processing_placeholder__' && m.sessionKey === targetSessionKey) {
-                return []
-              }
+              // Do NOT remove __processing_placeholder__ here.
+              // message.complete fires per individual assistant message,
+              // but the agent may still be processing (tool calls, follow-ups).
+              // Let clearProcessingPlaceholder() handle cleanup when
+              // chatHistory.processing transitions to false.
               if (m.role === 'assistant' && m.id === (data.message_id as string)) {
                 const content = (data.content as string) || m.content
                 return [{ ...m, content, streaming: false }]
@@ -522,7 +524,11 @@ export function useMessages(
             setStreamingMessages((current) =>
               current.filter((m) => {
                 if (m.sessionKey !== historySessionKey) return true
-                if (m.id === '__processing_placeholder__') return false
+                // Do NOT remove __processing_placeholder__ here.
+                // Let clearProcessingPlaceholder() in useAppLogic.ts handle
+                // cleanup when chatHistory.processing transitions to false.
+                // Removing it here leaves a gap if processing stays true
+                // (agent still working on tool calls/follow-ups).
                 if (m.role === 'user' && m.optimistic) return false
                 if (m.role === 'assistant' && !m.streaming) return false
                 if (m.role === 'tool' && m.toolStatus !== 'executing') return false
