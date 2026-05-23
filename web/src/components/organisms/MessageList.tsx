@@ -6,7 +6,7 @@ import { useAuthContext } from "../../contexts/AuthContext";
 import { MessageBubble } from "../MessageBubble";
 
 const SCROLL_THRESHOLD = 300;
-const DEBOUNCE_MS = 150;
+const DEBOUNCE_MS = 350;
 
 export function MessageList() {
   const { t } = useTranslation();
@@ -83,9 +83,10 @@ export function MessageList() {
         // Save the first visible message as scroll anchor before loading more
         const el = containerRef.current;
         if (el) {
-          const firstMsg = el.querySelector('[data-message-id]');
+          const firstMsg = el.querySelector("[data-message-id]");
           if (firstMsg) {
-            anchorMessageIdRef.current = firstMsg.getAttribute('data-message-id');
+            anchorMessageIdRef.current =
+              firstMsg.getAttribute("data-message-id");
           }
         }
         // Insert sentinel at current scroll position before loading
@@ -148,7 +149,9 @@ export function MessageList() {
 
     // Scroll for: new user messages, new assistant messages, or streaming updates
     const shouldScroll =
-      lastMessage.role === "user" || isStreaming || lastMessage.role === "assistant";
+      lastMessage.role === "user" ||
+      isStreaming ||
+      lastMessage.role === "assistant";
 
     if ((isNewMessage || isStreaming) && shouldScroll && isNearBottom()) {
       // Use rAF to ensure the browser has laid out the new content
