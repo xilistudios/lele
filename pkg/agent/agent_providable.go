@@ -58,11 +58,10 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 			summary := oldAgent.Sessions.GetSummary(resolvedKey)
 			name := oldAgent.Sessions.GetName(resolvedKey)
 			verboseLevel := oldAgent.Sessions.GetVerboseLevel(resolvedKey)
-			model := oldAgent.Sessions.GetModel(resolvedKey)
 			thinkingLevel := oldAgent.Sessions.GetThinkingLevel(resolvedKey)
 
 			// Copy history to new agent's session manager
-			if len(history) > 0 || summary != "" || name != "" || model != "" || thinkingLevel != "" {
+			if len(history) > 0 || summary != "" || name != "" || thinkingLevel != "" {
 				newAgent.Sessions.GetOrCreate(resolvedKey)
 				if len(history) > 0 {
 					newAgent.Sessions.SetHistory(resolvedKey, history)
@@ -75,9 +74,6 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 				}
 				if verboseLevel != "off" {
 					newAgent.Sessions.SetVerboseLevel(resolvedKey, verboseLevel)
-				}
-				if model != "" {
-					newAgent.Sessions.SetModel(resolvedKey, model)
 				}
 				if thinkingLevel != "" {
 					newAgent.Sessions.SetThinkingLevel(resolvedKey, thinkingLevel)
