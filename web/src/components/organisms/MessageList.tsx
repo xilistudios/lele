@@ -32,8 +32,8 @@ export function MessageList() {
   const isScrollRestoringRef = useRef(false); // guard against scroll events during sentinel restoration
   const anchorMessageIdRef = useRef<string | null>(null); // message to scroll to after loadMore
   const lastMessageCountRef = useRef(0);
-  const forceScrollRef = useRef(false);
   const streamingRef = useRef(false); // track previous streaming state to detect end of stream
+  const prevSessionKeyRef = useRef(currentSessionKey);
 
   const isNearBottom = useCallback(() => {
     const container = containerRef.current;
@@ -125,20 +125,12 @@ export function MessageList() {
       isScrollRestoringRef.current = true;
 
       const anchorId = anchorMessageIdRef.current;
-      if (anchorId) {
-        const anchorEl = containerRef.current?.querySelector(
-          `[data-message-id="${anchorId}"]`
-        );
-        if (anchorEl) {
-          anchorEl.scrollIntoView();
-        } else {
-          // Fallback: scroll sentinel if anchor not found
-          sentinelRef.current?.scrollIntoView();
-        }
-        anchorMessageIdRef.current = null;
-      } else {
-        sentinelRef.current?.scrollIntoView();
-      }
+      const anchorEl = anchorId
+        ? containerRef.current?.querySelector(`[data-message-id="${anchorId}"]`)
+        : null;
+
+      (anchorEl || sentinelRef.current)?.scrollIntoView();
+      anchorMessageIdRef.current = null;
       setShowSentinel(false);
 
       // Clear guards after scroll restoration is complete.
@@ -150,71 +142,57 @@ export function MessageList() {
     }
   }, [isLoadingMore, messages.length]);
 
-  // Track new messages and streaming updates, scroll to bottom if near
-  // biome-ignore lint/correctness/useExhaustiveDependencies: messages ref triggers on any update
+  // Handle session changes, new messages, and streaming end in one effect.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs used for previous-state tracking
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     if (isLoadingMoreRef.current) return;
 
-    const lastMessage = messages[messages.length - 1];
-    const wasStreaming = streamingRef.current;
-    const isStreaming = !!(lastMessage?.streaming);
+    const isNewSession = prevSessionKeyRef.current !== currentSessionKey;
+    prevSessionKeyRef.current = currentSessionKey;
 
-    // Track streaming state for detecting stream end
+    // Reset per-session tracking when switching conversations
+    if (isNewSession) {
+      isLoadingMoreRef.current = false;
+      lastMessageCountRef.current = 0;
+      streamingRef.current = false;
+      setShowSentinel(false);
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    const isStreaming = !!(lastMessage?.streaming);
+    const prevCount = lastMessageCountRef.current;
+    const prevStreaming = streamingRef.current;
+
     streamingRef.current = isStreaming;
+    lastMessageCountRef.current = messages.length;
+
+    // After switching sessions, force scroll once messages are present
+    if (isNewSession && messages.length > 0) {
+      window.requestAnimationFrame(() => scrollToBottomSmooth());
+      return;
+    }
 
     // Only scroll if user hasn't scrolled up to read history
-    if (!isNearBottom()) {
-      lastMessageCountRef.current = messages.length;
-      return;
-    }
+    if (!isNearBottom()) return;
 
     // During streaming: don't force scroll — let user scroll freely
-    if (isStreaming) {
-      lastMessageCountRef.current = messages.length;
-      return;
-    }
+    if (isStreaming) return;
 
     // Streaming just ended OR new complete message: debounced smooth scroll
-    if (wasStreaming || messages.length > lastMessageCountRef.current) {
+    if (prevStreaming || messages.length > prevCount) {
       debouncedScrollToBottomSmooth();
     }
-
-    lastMessageCountRef.current = messages.length;
-  }, [messages, isProcessing, isNearBottom, debouncedScrollToBottomSmooth]);
+  }, [messages, currentSessionKey, isNearBottom, debouncedScrollToBottomSmooth, scrollToBottomSmooth]);
 
   // Cleanup timers
   useEffect(() => {
     return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      if (scrollDebounceTimerRef.current) {
-        clearTimeout(scrollDebounceTimerRef.current);
-      }
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (scrollDebounceTimerRef.current) clearTimeout(scrollDebounceTimerRef.current);
     };
   }, []);
-
-  // Reset refs and mark for forced scroll when session changes
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refs are intentionally used for mutation
-  useEffect(() => {
-    isLoadingMoreRef.current = false;
-    lastMessageCountRef.current = 0;
-    setShowSentinel(false);
-    forceScrollRef.current = true;
-  }, [currentSessionKey]);
-
-  // Force scroll to bottom when messages load after switching sessions
-  useEffect(() => {
-    if (forceScrollRef.current && messages.length > 0) {
-      // Use requestAnimationFrame to ensure DOM has rendered the new session's messages
-      window.requestAnimationFrame(() => {
-        scrollToBottomSmooth();
-        forceScrollRef.current = false;
-      });
-    }
-  }, [messages.length, scrollToBottomSmooth]);
 
   if (messages.length === 0) {
     return (
