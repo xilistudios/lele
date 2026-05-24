@@ -84,6 +84,21 @@ type AgentProvidable interface {
 	ProcessDirectWithChannel(ctx context.Context, content, sessionKey, channel, chatID string) (string, error)
 	// ProcessHeartbeat processes a heartbeat request without session history.
 	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
+
+	// ========================================================================
+	// Streaming support — persists assistant message chunks in the session file
+	// ========================================================================
+
+	// AppendAssistantChunk appends a content chunk to the in-progress assistant message.
+	AppendAssistantChunk(sessionKey, chunk string)
+	// AppendReasoningChunk appends a reasoning chunk to the in-progress assistant message.
+	AppendReasoningChunk(sessionKey, chunk string)
+	// FinalizeAssistantMessage marks the in-progress assistant message as complete.
+	FinalizeAssistantMessage(sessionKey string)
+	// HasStreamedContent returns true if the session has an in-progress streaming message with content.
+	HasStreamedContent(sessionKey string) bool
+	// GetInProgressAssistant returns the in-progress assistant message, if any.
+	GetInProgressAssistant(sessionKey string) *providers.Message
 }
 
 // AgentBasicInfo contiene información pública de un agente

@@ -91,6 +91,13 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 
 	ap.al.sessionAgents.Store(resolvedKey, agentID)
 	ap.al.sessionModels.Delete(resolvedKey)
+
+	// Clear the persisted model override in the shared session store.
+	// Since all agents share the same SessionManager now, the old model
+	// would otherwise survive across agent switches.
+	if agent, ok := ap.al.registry.GetAgent(agentID); ok && agent != nil && agent.Sessions != nil {
+		agent.Sessions.SetModel(resolvedKey, "")
+	}
 }
 
 // ListAvailableAgentIDs returns the list of available agent IDs.
@@ -600,4 +607,58 @@ func (ap *agentProvidableImpl) ProcessDirectWithChannel(ctx context.Context, con
 // ProcessHeartbeat processes a heartbeat request without session history.
 func (ap *agentProvidableImpl) ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error) {
 	return ap.al.messageProcessor.ProcessHeartbeat(ctx, content, channel, chatID)
+}
+
+// ============================================================================
+// Streaming support — persists assistant message chunks in the session file
+// ============================================================================
+
+// AppendAssistantChunk appends a content chunk to the in-progress assistant message.
+func (ap *agentProvidableImpl) AppendAssistantChunk(sessionKey, chunk string) {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.AppendAssistantChunk(resolvedKey, chunk)
+}
+
+// AppendReasoningChunk appends a reasoning chunk to the in-progress assistant message.
+func (ap *agentProvidableImpl) AppendReasoningChunk(sessionKey, chunk string) {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.AppendReasoningChunk(resolvedKey, chunk)
+}
+
+// FinalizeAssistantMessage marks the in-progress assistant message as complete.
+func (ap *agentProvidableImpl) FinalizeAssistantMessage(sessionKey string) {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.FinalizeAssistantMessage(resolvedKey)
+}
+
+// HasStreamedContent returns true if the session has an in-progress streaming message with content.
+func (ap *agentProvidableImpl) HasStreamedContent(sessionKey string) bool {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return false
+	}
+	return agent.Sessions.HasStreamedContent(resolvedKey)
+}
+
+// GetInProgressAssistant returns the in-progress assistant message, if any.
+func (ap *agentProvidableImpl) GetInProgressAssistant(sessionKey string) *providers.Message {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return nil
+	}
+	return agent.Sessions.GetInProgressAssistant(resolvedKey)
 }

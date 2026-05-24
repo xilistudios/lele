@@ -8,13 +8,15 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/routing"
+	"github.com/xilistudios/lele/pkg/session"
 )
 
 // AgentRegistry manages multiple agent instances and routes messages to them.
 type AgentRegistry struct {
-	agents   map[string]*AgentInstance
-	resolver *routing.RouteResolver
-	mu       sync.RWMutex
+	agents               map[string]*AgentInstance
+	resolver             *routing.RouteResolver
+	mu                   sync.RWMutex
+	sharedSessionManager *session.SessionManager // optionally set by AgentLoop
 }
 
 // NewAgentRegistry creates a registry from config, instantiating all agents.
@@ -68,6 +70,20 @@ func (r *AgentRegistry) ListAgentIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// SetSharedSessionManager replaces every agent's individual session manager
+// with the given shared instance, ensuring all agents operate on the same
+// session storage. New agents created during ReloadAgents also receive it.
+func (r *AgentRegistry) SetSharedSessionManager(sm *session.SessionManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sharedSessionManager = sm
+	if sm != nil {
+		for _, agent := range r.agents {
+			agent.Sessions = sm
+		}
+	}
 }
 
 // CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.
@@ -202,6 +218,9 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		if old, ok := r.agents[id]; ok {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
+		} else if r.sharedSessionManager != nil {
+			// New agent: use the shared session manager if one is configured.
+			instance.Sessions = r.sharedSessionManager
 		}
 
 		r.agents[id] = instance

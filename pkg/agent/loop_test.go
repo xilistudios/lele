@@ -141,6 +141,7 @@ func TestNewAgentLoop_StateInitialized(t *testing.T) {
 
 func TestAgentLoop_GetVerboseLevel_UsesTelegramConfigDefault(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -754,6 +755,7 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1124,6 +1126,7 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 
 func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{

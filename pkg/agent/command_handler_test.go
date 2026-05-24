@@ -2285,6 +2285,7 @@ func TestNewCommand_CleanSession(t *testing.T) {
 func TestAgentCommand_CleanSession(t *testing.T) {
 	tmpDir1 := t.TempDir()
 	tmpDir2 := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir1)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

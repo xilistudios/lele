@@ -246,6 +246,20 @@ func (m *nativeTestAgentLoop) ProcessHeartbeat(ctx context.Context, content, cha
 	return "HEARTBEAT_OK", nil
 }
 
+func (m *nativeTestAgentLoop) AppendAssistantChunk(sessionKey, chunk string) {}
+
+func (m *nativeTestAgentLoop) AppendReasoningChunk(sessionKey, chunk string) {}
+
+func (m *nativeTestAgentLoop) FinalizeAssistantMessage(sessionKey string) {}
+
+func (m *nativeTestAgentLoop) HasStreamedContent(sessionKey string) bool {
+	return false
+}
+
+func (m *nativeTestAgentLoop) GetInProgressAssistant(sessionKey string) *providers.Message {
+	return nil
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop

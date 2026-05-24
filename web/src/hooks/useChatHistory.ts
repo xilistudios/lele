@@ -63,26 +63,44 @@ function mergeMessages(
   const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
   const baseHasCurrentTurn = baseUserCount > (optimisticUser?.optimisticBaseCount ?? 0)
 
+  // Calculate the offset for position-based matching. Streaming assistants
+  // always correspond to the LAST N assistants in base (the most recent turn),
+  // not the first ones. Without this offset, the matching pairs streaming
+  // assistants with the wrong base assistants, causing duplicates when the
+  // HTTP history already includes the completed message.
+  //
+  // When baseHasCurrentTurn is false, the streaming assistants are new messages
+  // that don't exist in base yet, so no matching should occur (offset = total
+  // base assistants, meaning none will be matched).
+  const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
+  const streamingAssistantCount = orderedStreamingAssistants.length
+  const matchOffset = baseHasCurrentTurn
+    ? Math.max(0, baseAssistantCount - streamingAssistantCount)
+    : baseAssistantCount
+
   // Build filteredBase: keep base messages but update tool messages in-place
   // with streaming data instead of removing them. This preserves the canonical
   // order from the server while showing live streaming updates.
   //
-  // For assistant messages, use position-based matching: the Nth assistant in
-  // base corresponds to the Nth assistant in streaming. If the streaming copy
-  // is actively streaming, use it in-place to preserve message order.
+  // For assistant messages, use position-based matching with offset: the Nth
+  // assistant in base (counting from matchOffset) corresponds to the
+  // (N - matchOffset)th assistant in streaming. If the streaming copy is
+  // actively streaming, use it in-place to preserve message order.
   const consumedStreamingToolIds = new Set<string>()
+  let baseAssistantIdx = 0
   let streamAsstIdx = 0
   const filteredBase: ChatMessage[] = []
   for (const msg of baseMessages) {
     if (msg.role === 'assistant') {
-      // Position-based matching: find corresponding streaming assistant
-      if (streamAsstIdx < orderedStreamingAssistants.length) {
+      // Only attempt matching for assistants at or after the offset
+      if (baseAssistantIdx >= matchOffset && streamAsstIdx < orderedStreamingAssistants.length) {
         const entry = orderedStreamingAssistants[streamAsstIdx]
         if (entry.isStreaming) {
           // Actively streaming → use streaming version in-place to preserve order
           filteredBase.push(entry.msg)
           entry.used = true
           streamAsstIdx++
+          baseAssistantIdx++
           continue
         }
         // Both are completed → base version takes precedence.
@@ -90,6 +108,7 @@ function mergeMessages(
         entry.used = true
         streamAsstIdx++
       }
+      baseAssistantIdx++
       // Fall through: keep the base version
       filteredBase.push(msg)
       continue

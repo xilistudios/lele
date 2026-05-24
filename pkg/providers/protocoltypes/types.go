@@ -85,6 +85,7 @@ type Message struct {
 	Media              []string      `json:"media,omitempty"`
 	ReasoningContent   string        `json:"reasoning_content,omitempty"`
 	ExcludeFromContext bool          `json:"exclude_from_context,omitempty"`
+	Streaming          bool          `json:"streaming,omitempty"`
 }
 
 func (m *Message) MarshalJSON() ([]byte, error) {
@@ -95,6 +96,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ToolCallID         string      `json:"tool_call_id,omitempty"`
 		ReasoningContent   string      `json:"reasoning_content"`
 		ExcludeFromContext bool        `json:"exclude_from_context,omitempty"`
+		Streaming          bool        `json:"streaming,omitempty"`
 	}
 
 	content := interface{}(m.Content)
@@ -109,6 +111,7 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ToolCallID:         m.ToolCallID,
 		ReasoningContent:   m.ReasoningContent,
 		ExcludeFromContext: m.ExcludeFromContext,
+		Streaming:          m.Streaming,
 	})
 }
 
@@ -120,6 +123,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		ToolCallID         string          `json:"tool_call_id,omitempty"`
 		ReasoningContent   string          `json:"reasoning_content,omitempty"`
 		ExcludeFromContext bool            `json:"exclude_from_context,omitempty"`
+		Streaming          bool            `json:"streaming,omitempty"`
 	}
 
 	var raw rawMessage
@@ -132,6 +136,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ToolCallID = raw.ToolCallID
 	m.ReasoningContent = raw.ReasoningContent
 	m.ExcludeFromContext = raw.ExcludeFromContext
+	m.Streaming = raw.Streaming
 	m.Content = ""
 	m.ContentParts = nil
 
