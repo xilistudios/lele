@@ -41,11 +41,14 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context   string                // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace string                // Agent's workspace path
-	Name      string                // Agent display name
-	Model     string                // Agent's model (e.g., "alibaba/kimi-k2.5")
-	Provider  providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
+	Context        string                // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace      string                // Agent's workspace path
+	Name           string                // Agent display name
+	Model          string                // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Provider       providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
+	MaxIterations  int                   // Agent's max tool iterations (0 means use SubagentManager default)
+	MaxTokens      int                   // Agent's max tokens (0 means use SubagentManager default)
+	Temperature    float64               // Agent's temperature (0 means use SubagentManager default)
 }
 
 type subagentOutcome struct {
@@ -291,7 +294,10 @@ type SubagentManager struct {
 	sessionKeyCallback func(sessionKey, agentID string) // called when subagent session key is created
 }
 
-func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus) *SubagentManager {
+func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
+	if maxIterations <= 0 {
+		maxIterations = 100 // Sensible fallback, but callers should always provide a real value
+	}
 	return &SubagentManager{
 		tasks:         make(map[string]*SubagentTask),
 		cancels:       make(map[string]context.CancelFunc),
@@ -300,7 +306,7 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		bus:           bus,
 		workspace:     workspace,
 		tools:         NewToolRegistry(),
-		maxIterations: 100, // Default, will be overridden by SetMaxIterations
+		maxIterations: maxIterations,
 		nextID:        1,
 	}
 }
@@ -449,12 +455,18 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	var agentName string
 	var agentModel string
 	var agentProvider providers.LLMProvider
+	var agentMaxIterations int
+	var agentMaxTokens int
+	var agentTemperature float64
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
 		// Always use the agent's model and provider from its config, even if context is empty.
 		agentModel = ctxInfo.Model
 		agentProvider = ctxInfo.Provider
+		agentMaxIterations = ctxInfo.MaxIterations
+		agentMaxTokens = ctxInfo.MaxTokens
+		agentTemperature = ctxInfo.Temperature
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
@@ -492,7 +504,9 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	default:
 	}
 
-	// Run tool loop with access to tools
+	// Run tool loop with access to tools.
+	// Use target agent's MaxIterations/MaxTokens/Temperature if available,
+	// otherwise fall back to the SubagentManager's defaults.
 	sm.mu.RLock()
 	tools := sm.tools
 	maxIter := sm.maxIterations
@@ -502,6 +516,19 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	hasTemperature := sm.hasTemperature
 	recorder := sm.sessionRecorder
 	sm.mu.RUnlock()
+
+	// Target agent overrides take precedence over SubagentManager defaults
+	if agentMaxIterations > 0 {
+		maxIter = agentMaxIterations
+	}
+	if agentMaxTokens > 0 {
+		maxTokens = agentMaxTokens
+		hasMaxTokens = true
+	}
+	if agentTemperature > 0 {
+		temperature = agentTemperature
+		hasTemperature = true
+	}
 
 	// Build subagent session key: {origin_session_key}:{task_id}
 	// This ensures subagent history is saved alongside the parent session
@@ -799,6 +826,18 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		}
 		if ctxInfo.Provider != nil {
 			agentProvider = ctxInfo.Provider
+		}
+		// Use target agent's settings when available
+		if ctxInfo.MaxIterations > 0 {
+			maxIter = ctxInfo.MaxIterations
+		}
+		if ctxInfo.MaxTokens > 0 {
+			maxTokens = ctxInfo.MaxTokens
+			hasMaxTokens = true
+		}
+		if ctxInfo.Temperature > 0 {
+			temperature = ctxInfo.Temperature
+			hasTemperature = true
 		}
 	}
 

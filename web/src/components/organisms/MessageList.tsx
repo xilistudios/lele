@@ -27,11 +27,13 @@ export function MessageList() {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [showSentinel, setShowSentinel] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLoadingMoreRef = useRef(false);
   const isScrollRestoringRef = useRef(false); // guard against scroll events during sentinel restoration
   const anchorMessageIdRef = useRef<string | null>(null); // message to scroll to after loadMore
   const lastMessageCountRef = useRef(0);
   const forceScrollRef = useRef(false);
+  const streamingRef = useRef(false); // track previous streaming state to detect end of stream
 
   const isNearBottom = useCallback(() => {
     const container = containerRef.current;
@@ -49,6 +51,20 @@ export function MessageList() {
       top: container.scrollHeight,
       behavior: "smooth",
     });
+  }, []);
+
+  const debouncedScrollToBottomSmooth = useCallback(() => {
+    if (scrollDebounceTimerRef.current) {
+      clearTimeout(scrollDebounceTimerRef.current);
+    }
+    scrollDebounceTimerRef.current = setTimeout(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth",
+      });
+    }, DEBOUNCE_MS);
   }, []);
 
   const handleNavigateToSession = useCallback(
@@ -142,6 +158,11 @@ export function MessageList() {
     if (isLoadingMoreRef.current) return;
 
     const lastMessage = messages[messages.length - 1];
+    const wasStreaming = streamingRef.current;
+    const isStreaming = !!(lastMessage?.streaming);
+
+    // Track streaming state for detecting stream end
+    streamingRef.current = isStreaming;
 
     // Only scroll if user hasn't scrolled up to read history
     if (!isNearBottom()) {
@@ -149,24 +170,28 @@ export function MessageList() {
       return;
     }
 
-    // During streaming or idle processing: pin to bottom instantly
-    if (lastMessage?.streaming || isProcessing) {
-      container.scrollTop = container.scrollHeight;
-    } else if (messages.length > lastMessageCountRef.current) {
-      // New complete message: smooth scroll after browser layout
-      requestAnimationFrame(() => {
-        scrollToBottomSmooth();
-      });
+    // During streaming: don't force scroll — let user scroll freely
+    if (isStreaming) {
+      lastMessageCountRef.current = messages.length;
+      return;
+    }
+
+    // Streaming just ended OR new complete message: debounced smooth scroll
+    if (wasStreaming || messages.length > lastMessageCountRef.current) {
+      debouncedScrollToBottomSmooth();
     }
 
     lastMessageCountRef.current = messages.length;
-  }, [messages, isProcessing, isNearBottom, scrollToBottomSmooth]);
+  }, [messages, isProcessing, isNearBottom, debouncedScrollToBottomSmooth]);
 
-  // Cleanup debounce timer
+  // Cleanup timers
   useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+      }
+      if (scrollDebounceTimerRef.current) {
+        clearTimeout(scrollDebounceTimerRef.current);
       }
     };
   }, []);
