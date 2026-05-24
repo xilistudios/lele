@@ -41,14 +41,14 @@ type SubagentTask struct {
 
 // AgentContextInfo holds the context and workspace info for a subagent
 type AgentContextInfo struct {
-	Context        string                // Full context (AGENT.md, SOUL.md, etc.)
-	Workspace      string                // Agent's workspace path
-	Name           string                // Agent display name
-	Model          string                // Agent's model (e.g., "alibaba/kimi-k2.5")
-	Provider       providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
-	MaxIterations  int                   // Agent's max tool iterations (0 means use SubagentManager default)
-	MaxTokens      int                   // Agent's max tokens (0 means use SubagentManager default)
-	Temperature    float64               // Agent's temperature (0 means use SubagentManager default)
+	Context       string                // Full context (AGENT.md, SOUL.md, etc.)
+	Workspace     string                // Agent's workspace path
+	Name          string                // Agent display name
+	Model         string                // Agent's model (e.g., "alibaba/kimi-k2.5")
+	Provider      providers.LLMProvider // Agent's LLM provider (critical for correct API routing)
+	MaxIterations int                   // Agent's max tool iterations (0 means use SubagentManager default)
+	MaxTokens     int                   // Agent's max tokens (0 means use SubagentManager default)
+	Temperature   float64               // Agent's temperature (0 means use SubagentManager default)
 }
 
 type subagentOutcome struct {
