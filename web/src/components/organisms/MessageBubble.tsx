@@ -1,41 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   isDiffStatLine,
   isFileDiffRow,
   parseBlocks,
   parseDiffStat,
   parseFileDiffRow,
-} from '../lib/markdown'
-import type { Attachment, ChatMessage } from '../lib/types'
-import { CanvasBlock } from './molecules/CanvasBlock'
-import { MarkdownText } from './molecules/MarkdownText'
-import { ToolCallDisplay } from './molecules/ToolCallDisplay'
+} from '../../lib/markdown'
+import type { Attachment, ChatMessage } from '../../lib/types'
+import { CanvasBlock } from '../molecules/CanvasBlock'
+import { MarkdownText } from '../molecules/MarkdownText'
+import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
-
-// Track recently animated message content to prevent animation replay
-// when the React key changes during streaming→base transition (mergeMessages).
-// The module-level Map survives component remounts from key changes.
-const ANIMATION_COOLDOWN_MS = 3000
-const recentlyAnimated = new Map<string, number>()
-const MAX_TRACKED_ANIMATIONS = 200
-
-function hasRecentlyAnimated(role: string, content: string): boolean {
-  const key = `${role}:${content.slice(0, 200)}`
-  const ts = recentlyAnimated.get(key)
-  if (ts && Date.now() - ts < ANIMATION_COOLDOWN_MS) {
-    return true
-  }
-  recentlyAnimated.set(key, Date.now())
-  // Prune old entries to prevent memory leak
-  if (recentlyAnimated.size > MAX_TRACKED_ANIMATIONS) {
-    const cutoff = Date.now() - ANIMATION_COOLDOWN_MS * 2
-    for (const [k, v] of recentlyAnimated) {
-      if (v < cutoff) recentlyAnimated.delete(k)
-    }
-  }
-  return false
-}
 
 function isImageByExtension(name: string): boolean {
   const ext = name.toLowerCase().split('.').pop()
@@ -81,19 +57,33 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
-  const [animate, setAnimate] = useState(
-    // Skip animation if this exact content was animated recently
-    // (prevents flicker when React key changes during streaming→base transition).
-    // Also skip for streaming placeholders (empty content shows loading dots).
-    !(message.streaming && message.content === '') &&
-      !hasRecentlyAnimated(message.role, message.content),
-  )
 
-  // When a streaming message receives its first content, trigger the animation
-  // and mark the content as recently animated to prevent replay on key change
+  // Track whether the enter animation has already played for this component instance.
+  // Using a ref ensures animation plays exactly once per mount, even across
+  // re-renders caused by streaming content updates or block parsing.
+  const hasAnimatedRef = useRef(false)
+
+  // Determine initial animation state:
+  // - Non-empty streaming messages: animate immediately
+  // - Non-streaming messages (base/history): animate on mount
+  // - Empty streaming placeholders: wait for content via useEffect below
+  const [animate, setAnimate] = useState(() => {
+    if (hasAnimatedRef.current) return false
+    const isEmptyStreaming = message.streaming && message.content === ''
+    return !isEmptyStreaming
+  })
+
+  // Mark animation as played once applied
+  useEffect(() => {
+    if (animate) {
+      hasAnimatedRef.current = true
+    }
+  }, [animate])
+
+  // For streaming messages that start as empty placeholders, trigger the
+  // animation when the first content arrives (typewriter effect starts).
   useEffect(() => {
     if (message.streaming && message.content !== '' && !animate) {
-      hasRecentlyAnimated(message.role, message.content)
       setAnimate(true)
     }
   }, [message.streaming, message.content, animate])

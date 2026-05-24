@@ -18,7 +18,7 @@ export type HistoryMessage = Array<{
 
 export const chatHistoryQueryKey = (sessionKey: string) => ['chatHistory', sessionKey] as const
 
-function mergeMessages(
+export function mergeMessages(
   baseMessages: ChatMessage[],
   streamingMessages: ChatMessage[],
 ): ChatMessage[] {
@@ -32,7 +32,11 @@ function mergeMessages(
   // (not ID-based) to associate base messages with their streaming
   // counterparts. Failure to do this causes duplicate messages and
   // incorrect ordering during live updates.
+  // Count optimistic users separately so the position-based matching doesn't
+  // get confused by optimistic messages lingering in the query cache, while
+  // the user dedup filter below still sees the full count.
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
+  const baseUserCountNonOptimistic = baseMessages.filter((message) => message.role === 'user' && !message.optimistic).length
 
   const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
@@ -61,7 +65,20 @@ function mergeMessages(
   }
 
   const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
-  const baseHasCurrentTurn = baseUserCount > (optimisticUser?.optimisticBaseCount ?? 0)
+  const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
+  
+  // baseHasCurrentTurn is true only when the base (HTTP history) already
+  // contains BOTH the user message AND the assistant response for the current
+  // turn. Previously it only checked if the user count exceeded the optimistic
+  // base count, which became true as soon as the optimistic user message was
+  // added to the query cache — before the assistant response existed in base.
+  // This caused matchOffset to pair the streaming assistant with an OLD base
+  // assistant, placing the new response ABOVE the user message.
+  // Adding the `baseAssistantCount >= baseUserCount` guard ensures matching
+  // only happens once the base has caught up with the full turn.
+  const baseHasCurrentTurn =
+    baseUserCountNonOptimistic > (optimisticUser?.optimisticBaseCount ?? 0) &&
+    baseAssistantCount >= baseUserCountNonOptimistic
 
   // Calculate the offset for position-based matching. Streaming assistants
   // always correspond to the LAST N assistants in base (the most recent turn),
@@ -72,7 +89,6 @@ function mergeMessages(
   // When baseHasCurrentTurn is false, the streaming assistants are new messages
   // that don't exist in base yet, so no matching should occur (offset = total
   // base assistants, meaning none will be matched).
-  const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
   const streamingAssistantCount = orderedStreamingAssistants.length
   const matchOffset = baseHasCurrentTurn
     ? Math.max(0, baseAssistantCount - streamingAssistantCount)

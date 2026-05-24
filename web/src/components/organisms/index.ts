@@ -1,5 +1,6 @@
 export { DiagnosticsPanel } from './DiagnosticsPanel'
 export { ChatHeader } from './ChatHeader'
+export { MessageBubble } from './MessageBubble'
 export { MessageList } from './MessageList'
 export { Sidebar } from './Sidebar'
 export * from './settings'

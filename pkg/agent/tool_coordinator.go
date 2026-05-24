@@ -255,25 +255,30 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	agent.Tools.Register(execTool)
 
 	// Spawn tool with allowlist checker - use agent's own provider
-	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus)
+	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus, agent.MaxIterations)
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
-	subagentManager.SetMaxIterations(agent.MaxIterations)
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
 			return tools.AgentContextInfo{
-				Context:   targetAgent.ContextBuilder.GetInitialContext(),
-				Workspace: targetAgent.Workspace,
-				Name:      targetAgent.Name,
-				Model:     targetAgent.Model,
-				Provider:  targetAgent.Provider,
+				Context:       targetAgent.ContextBuilder.GetInitialContext(),
+				Workspace:     targetAgent.Workspace,
+				Name:          targetAgent.Name,
+				Model:         targetAgent.Model,
+				Provider:      targetAgent.Provider,
+				MaxIterations: targetAgent.MaxIterations,
+				MaxTokens:     targetAgent.MaxTokens,
+				Temperature:   targetAgent.Temperature,
 			}
 		}
 		return tools.AgentContextInfo{
-			Context:   agent.ContextBuilder.GetInitialContext(),
-			Workspace: agent.Workspace,
-			Name:      agent.Name,
-			Model:     agent.Model,
-			Provider:  agent.Provider,
+			Context:       agent.ContextBuilder.GetInitialContext(),
+			Workspace:     agent.Workspace,
+			Name:          agent.Name,
+			Model:         agent.Model,
+			Provider:      agent.Provider,
+			MaxIterations: agent.MaxIterations,
+			MaxTokens:     agent.MaxTokens,
+			Temperature:   agent.Temperature,
 		}
 	})
 	spawnTool := tools.NewSpawnTool(subagentManager)

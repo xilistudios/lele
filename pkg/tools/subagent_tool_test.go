@@ -118,7 +118,7 @@ func (m *MockLLMProvider) GetContextWindow() int {
 
 func TestSubagentManager_SetLLMOptions_AppliesToRunToolLoop(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	manager.SetLLMOptions(2048, 0.6)
 	tool := NewSubagentTool(manager)
 	tool.SetContext("cli", "direct")
@@ -145,7 +145,7 @@ func TestSubagentManager_SetLLMOptions_AppliesToRunToolLoop(t *testing.T) {
 // TestSubagentTool_Name verifies tool name
 func TestSubagentTool_Name(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	tool := NewSubagentTool(manager)
 
 	if tool.Name() != "subagent" {
@@ -156,7 +156,7 @@ func TestSubagentTool_Name(t *testing.T) {
 // TestSubagentTool_Description verifies tool description
 func TestSubagentTool_Description(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	tool := NewSubagentTool(manager)
 
 	desc := tool.Description()
@@ -171,7 +171,7 @@ func TestSubagentTool_Description(t *testing.T) {
 // TestSubagentTool_Parameters verifies tool parameters schema
 func TestSubagentTool_Parameters(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	tool := NewSubagentTool(manager)
 
 	params := tool.Parameters()
@@ -221,7 +221,7 @@ func TestSubagentTool_Parameters(t *testing.T) {
 // TestSubagentTool_SetContext verifies context setting
 func TestSubagentTool_SetContext(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	tool := NewSubagentTool(manager)
 
 	tool.SetContext("test-channel", "test-chat")
@@ -235,7 +235,7 @@ func TestSubagentTool_SetContext(t *testing.T) {
 func TestSubagentTool_Execute_Success(t *testing.T) {
 	provider := &MockLLMProvider{}
 	msgBus := bus.NewMessageBus()
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus, 20)
 	tool := NewSubagentTool(manager)
 	tool.SetContext("telegram", "chat-123")
 
@@ -291,7 +291,7 @@ func TestSubagentTool_Execute_Success(t *testing.T) {
 func TestSubagentTool_Execute_NoLabel(t *testing.T) {
 	provider := &MockLLMProvider{}
 	msgBus := bus.NewMessageBus()
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus, 20)
 	tool := NewSubagentTool(manager)
 
 	ctx := context.Background()
@@ -314,7 +314,7 @@ func TestSubagentTool_Execute_NoLabel(t *testing.T) {
 // TestSubagentTool_Execute_MissingTask tests error handling for missing task
 func TestSubagentTool_Execute_MissingTask(t *testing.T) {
 	provider := &MockLLMProvider{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	tool := NewSubagentTool(manager)
 
 	ctx := context.Background()
@@ -365,7 +365,7 @@ func TestSubagentTool_Execute_NilManager(t *testing.T) {
 func TestSubagentTool_Execute_ContextPassing(t *testing.T) {
 	provider := &MockLLMProvider{}
 	msgBus := bus.NewMessageBus()
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus, 20)
 	tool := NewSubagentTool(manager)
 
 	// Set context
@@ -394,7 +394,7 @@ func TestSubagentTool_ForUserTruncation(t *testing.T) {
 	// Create a mock provider that returns very long content
 	provider := &MockLLMProvider{}
 	msgBus := bus.NewMessageBus()
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", msgBus, 20)
 	tool := NewSubagentTool(manager)
 
 	ctx := context.Background()
@@ -424,7 +424,7 @@ func TestSubagentManager_ContinueTask(t *testing.T) {
 		"STATUS: needs_context\nSUMMARY: Missing repository target\nCONTEXT_NEEDED: Which repository should I inspect?\nDETAILS:\nI need the repository path before I can continue.",
 		"STATUS: completed\nSUMMARY: Repository inspected\nDETAILS:\nI used the supplied repository path and completed the task.",
 	}}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	resultCh := make(chan *ToolResult, 2)
 
 	spawned, err := manager.Spawn(context.Background(), "Inspect the repository", "repo-inspect", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
@@ -491,7 +491,7 @@ func TestSubagentManager_SpawnDoesNotDuplicateInitialUserMessage(t *testing.T) {
 		"STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted.",
 	}}
 	recorder := &recordingSessionRecorder{}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	manager.SetSessionRecorder(recorder)
 	resultCh := make(chan *ToolResult, 1)
 
@@ -522,7 +522,7 @@ func TestSubagentManager_StopPausedTask(t *testing.T) {
 	provider := &scriptedSubagentProvider{responses: []string{
 		"STATUS: needs_context\nSUMMARY: Missing target\nCONTEXT_NEEDED: Which file should I open?\nDETAILS:\nI need the target file.",
 	}}
-	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil)
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
 	resultCh := make(chan *ToolResult, 1)
 
 	_, err := manager.Spawn(context.Background(), "Open the file", "file-task", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
