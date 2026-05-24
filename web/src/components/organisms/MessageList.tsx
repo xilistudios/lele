@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useAppLogicContext } from "../../contexts/AppLogicContext";
 import { useAuthContext } from "../../contexts/AuthContext";
-import { MessageBubble } from "../MessageBubble";
+import { MessageBubble } from "./MessageBubble";
 
 const SCROLL_THRESHOLD = 300;
 const DEBOUNCE_MS = 350;
