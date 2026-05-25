@@ -170,9 +170,33 @@ func buildRequestBody(
 		"messages":   []any{},
 	}
 
-	// Set temperature from options
+	// Set temperature from options, unless reasoning/thinking is enabled
+	// (Anthropic models with extended thinking deprecate temperature)
 	if temp, ok := asFloat(options["temperature"]); ok {
-		result["temperature"] = temp
+		skipTemp := false
+		if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
+			if enabled, _ := reasonOpts["enabled"].(bool); enabled {
+				skipTemp = true
+			}
+		}
+		if !skipTemp {
+			result["temperature"] = temp
+		}
+	}
+
+	// Add thinking config for models with reasoning enabled
+	if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
+		if enabled, _ := reasonOpts["enabled"].(bool); enabled {
+			thinking := map[string]any{
+				"type": "enabled",
+			}
+			budgetTokens := 16000 // default
+			if bt, ok := asInt(reasonOpts["max_tokens"]); ok && bt > 0 {
+				budgetTokens = bt
+			}
+			thinking["budget_tokens"] = int64(budgetTokens)
+			result["thinking"] = thinking
+		}
 	}
 
 	// Process messages
