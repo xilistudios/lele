@@ -188,14 +188,17 @@ func buildRequestBody(
 	if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
 		if enabled, _ := reasonOpts["enabled"].(bool); enabled {
 			thinking := map[string]any{
-				"type": "enabled",
+				"type": "adaptive",
 			}
-			budgetTokens := 16000 // default
-			if bt, ok := asInt(reasonOpts["max_tokens"]); ok && bt > 0 {
-				budgetTokens = bt
-			}
-			thinking["budget_tokens"] = int64(budgetTokens)
 			result["thinking"] = thinking
+
+			effort := "high" // default
+			if e, ok := reasonOpts["effort"].(string); ok && e != "" {
+				effort = e
+			}
+			result["output_config"] = map[string]any{
+				"effort": effort,
+			}
 		}
 	}
 
