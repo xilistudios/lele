@@ -986,3 +986,69 @@ func (sm *SessionManager) ActiveCount() int {
 	}
 	return count
 }
+
+// SubagentSessionInfo contains metadata about a persisted subagent session.
+type SubagentSessionInfo struct {
+	Key        string
+	TaskID     string
+	Created    time.Time
+	Updated    time.Time
+	Iterations int    // number of assistant messages
+	Summary    string // session summary if available
+	Name       string // session name if available
+}
+
+// FindSubagentSessions returns persisted subagent sessions whose keys start
+// with the given parent prefix followed by ":subagent-". This allows the API
+// to surface past subagents even after a server restart when the in-memory
+// SubagentManager no longer tracks them.
+func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSessionInfo {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	prefix := parentPrefix + ":subagent-"
+	var results []SubagentSessionInfo
+
+	for key, session := range sm.sessions {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		taskID := key[len(parentPrefix)+1:] // everything after "{parent}:"
+
+		// Count assistant messages as iteration proxy
+		iterations := 0
+		for _, msg := range session.Messages {
+			if msg.Role == "assistant" {
+				iterations++
+			}
+		}
+
+		summary := session.Summary
+		if summary == "" && len(session.Messages) > 0 {
+			// Use the last assistant message content as a summary fallback
+			for i := len(session.Messages) - 1; i >= 0; i-- {
+				if session.Messages[i].Role == "assistant" {
+					content := strings.TrimSpace(session.Messages[i].Content)
+					if len(content) > 200 {
+						content = content[:200] + "…"
+					}
+					summary = content
+					break
+				}
+			}
+		}
+
+		results = append(results, SubagentSessionInfo{
+			Key:        key,
+			TaskID:     taskID,
+			Created:    session.Created,
+			Updated:    session.Updated,
+			Iterations: iterations,
+			Summary:    summary,
+			Name:       session.Name,
+		})
+	}
+
+	return results
+}

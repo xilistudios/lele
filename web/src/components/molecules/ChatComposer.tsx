@@ -95,8 +95,7 @@ export function ChatComposer() {
     }
 
     return (
-      modelsWithReasoning.has(selectedModel) ||
-      modelsWithReasoning.has(normalizedSelectedModel)
+      modelsWithReasoning.has(selectedModel) || modelsWithReasoning.has(normalizedSelectedModel)
     )
   }, [selectedModel, groupedModels, availableModels])
   const thinkOptions = [

@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
@@ -257,6 +258,12 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// Spawn tool with allowlist checker - use agent's own provider
 	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus, agent.MaxIterations)
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+	// Set subagent timeout from agent config (per-agent override or global default)
+	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
+		subagentManager.SetTimeout(time.Duration(agent.Subagents.TimeoutMin) * time.Minute)
+	} else if cfg.Agents.Defaults.SubagentTimeoutMinutes > 0 {
+		subagentManager.SetTimeout(time.Duration(cfg.Agents.Defaults.SubagentTimeoutMinutes) * time.Minute)
+	}
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
 			return tools.AgentContextInfo{

@@ -33,6 +33,7 @@ type nativeTestAgentLoop struct {
 	workspace          string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
+	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -45,6 +46,7 @@ func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 		subagentParents:    make(map[string]string),
 		sessionNames:       make(map[string]string),
 		sessionThinkLevels: make(map[string]string),
+		sessionSubagents:   make(map[string][]SubagentTaskInfo),
 	}
 }
 
@@ -176,6 +178,15 @@ func (m *nativeTestAgentLoop) SetThinkLevel(sessionKey string, level string) boo
 
 func (m *nativeTestAgentLoop) GetSubagents() string {
 	return ""
+}
+
+func (m *nativeTestAgentLoop) GetSessionSubagents(sessionKey string) []SubagentTaskInfo {
+	if tasks, ok := m.sessionSubagents[sessionKey]; ok {
+		result := make([]SubagentTaskInfo, len(tasks))
+		copy(result, tasks)
+		return result
+	}
+	return nil
 }
 
 func (m *nativeTestAgentLoop) ClearSession(sessionKey string) string {

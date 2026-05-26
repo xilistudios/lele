@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
-import type { ChatMessage } from '../lib/types'
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
+import type { ChatMessage } from '../lib/types'
 
 // Interval between characters when animating streaming text in the UI.
 const STREAM_CHAR_INTERVAL_MS = 12

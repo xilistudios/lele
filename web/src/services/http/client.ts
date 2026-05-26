@@ -27,6 +27,7 @@ import type {
   SessionContextResponse,
   SessionModelResponse,
   SessionNameResponse,
+  SessionSubagentsResponse,
   SessionThinkingResponse,
   SkillInstallResponse,
   SkillRemoveResponse,
@@ -85,7 +86,7 @@ const parseSSEBlock = (block: string): ClientEvent | null => {
     return {
       event: eventName,
       data: { raw: dataLines.join('\n') },
-    } as ClientEvent
+    } as unknown as ClientEvent
   }
 }
 
@@ -455,6 +456,10 @@ export const createApiClient = (baseUrl: string) => {
       }),
     sessionContext: (sessionKey: string) =>
       request<SessionContextResponse>(endpoints.chat.session(sessionKey, 'context'), {
+        method: 'GET',
+      }),
+    sessionSubagents: (sessionKey: string) =>
+      request<SessionSubagentsResponse>(endpoints.chat.session(sessionKey, 'subagents'), {
         method: 'GET',
       }),
     sendMessage: (payload: SendMessageRequest) =>

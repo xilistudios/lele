@@ -87,7 +87,12 @@
     "closePanel": "Fechar painel",
     "manageChats": "Gerenciar chats",
     "totalChats": "{{count}} chats no total",
-    "noSearchResults": "Nenhum chat corresponde à sua pesquisa"
+    "noSearchResults": "Nenhum chat corresponde à sua pesquisa",
+    "subagents": "{{count}} subagente",
+    "subagents_one": "{{count}} subagente",
+    "subagents_other": "{{count}} subagentes",
+    "subagentsTitle": "Subagentes",
+    "noSubagents": "Nenhum subagente nesta sessão"
   },
   "connection": {
     "connected": "Conectado",

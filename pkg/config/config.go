@@ -132,6 +132,7 @@ type AgentConfig struct {
 type SubagentsConfig struct {
 	AllowAgents []string          `json:"allow_agents,omitempty"`
 	Model       *AgentModelConfig `json:"model,omitempty"`
+	TimeoutMin  int               `json:"timeout_minutes,omitempty"` // 0 means no timeout
 }
 
 type PeerMatch struct {
@@ -162,17 +163,18 @@ type SessionConfig struct {
 const DefaultEphemeralThresholdSeconds = 560
 
 type AgentDefaults struct {
-	Workspace           string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	Provider            string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
-	Model               string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
-	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
-	ImageModel          string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens           int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature         *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations   int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines        int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	Workspace              string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace    bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	Provider               string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
+	Model                  string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
+	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
+	ImageModel             string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
+	MaxTokens              int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature            *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations      int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines           int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
 }
 
 type ChannelsConfig struct {
@@ -801,13 +803,14 @@ func DefaultConfig() *Config {
 	return &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Workspace:           "~/.lele/workspace",
-				RestrictToWorkspace: true,
-				Provider:            "nanogpt",
-				Model:               "nanogpt/qwen3-5-397b-a17b-thinking",
-				MaxTokens:           8192,
-				MaxToolIterations:   20,
-				MaxReadLines:        500,
+				Workspace:              "~/.lele/workspace",
+				RestrictToWorkspace:    true,
+				Provider:               "nanogpt",
+				Model:                  "nanogpt/qwen3-5-397b-a17b-thinking",
+				MaxTokens:              8192,
+				MaxToolIterations:      20,
+				MaxReadLines:           500,
+				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
 			},
 		},
 		Session: SessionConfig{

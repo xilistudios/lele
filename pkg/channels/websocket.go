@@ -454,6 +454,23 @@ func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, e
 	}, "")
 }
 
+// collectCatchupMessages returns in-progress assistant messages for a session
+// so the frontend can restore streaming content after a page reload or reconnect.
+func (n *NativeChannel) collectCatchupMessages(sessionKey string, processing bool) []map[string]interface{} {
+	if !processing || n.agentLoop == nil {
+		return nil
+	}
+	inProgress := n.agentLoop.GetInProgressAssistant(sessionKey)
+	if inProgress == nil {
+		return nil
+	}
+	return []map[string]interface{}{{
+		"role":              "assistant",
+		"content":           inProgress.Content,
+		"reasoning_content": inProgress.ReasoningContent,
+	}}
+}
+
 func (n *NativeChannel) sendWelcome(client *WSClient) {
 	status := n.agentLoop.GetStatus(client.SessionKey)
 	agents := make([]map[string]interface{}, 0)
@@ -476,17 +493,20 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 		processing = n.agentLoop.IsSessionProcessing(client.SessionKey)
 	}
 
+	catchupMessages := n.collectCatchupMessages(client.SessionKey, processing)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "welcome",
 		Data: mustMarshal(map[string]interface{}{
-			"client_id":   client.ClientInfo.ClientID,
-			"device_name": client.ClientInfo.DeviceName,
-			"session_key": client.SessionKey,
-			"status":      status,
-			"agents":      agents,
-			"server_time": time.Now().Format(time.RFC3339),
-			"processing":  processing,
+			"client_id":            client.ClientInfo.ClientID,
+			"device_name":          client.ClientInfo.DeviceName,
+			"session_key":          client.SessionKey,
+			"status":               status,
+			"agents":               agents,
+			"server_time":          time.Now().Format(time.RFC3339),
+			"processing":           processing,
+			"in_progress_messages": catchupMessages,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
@@ -522,20 +542,23 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	disconnectedSecs := time.Since(client.disconnectedAt).Seconds()
 
+	catchupMessages := n.collectCatchupMessages(client.SessionKey, processing)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "reconnected",
 		Data: mustMarshal(map[string]interface{}{
-			"client_id":         client.ClientInfo.ClientID,
-			"device_name":       client.ClientInfo.DeviceName,
-			"session_key":       client.SessionKey,
-			"status":            status,
-			"agents":            agents,
-			"server_time":       time.Now().Format(time.RFC3339),
-			"processing":        processing,
-			"buffered_events":   len(buffered),
-			"disconnected_secs": disconnectedSecs,
-			"subscriptions":     client.Subscriptions,
+			"client_id":            client.ClientInfo.ClientID,
+			"device_name":          client.ClientInfo.DeviceName,
+			"session_key":          client.SessionKey,
+			"status":               status,
+			"agents":               agents,
+			"server_time":          time.Now().Format(time.RFC3339),
+			"processing":           processing,
+			"buffered_events":      len(buffered),
+			"disconnected_secs":    disconnectedSecs,
+			"subscriptions":        client.Subscriptions,
+			"in_progress_messages": catchupMessages,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send reconnected event", map[string]interface{}{

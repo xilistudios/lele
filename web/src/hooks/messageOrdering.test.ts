@@ -233,13 +233,19 @@ describe('Message ordering fixes', () => {
         createTestMessage('a1', 'assistant', 'Hi!'),
         createTestMessage('u2', 'user', 'How are you?'),
         // Optimistic user that leaked into base cache after refetch merge:
-        createTestMessage('u2-opt', 'user', 'How are you?', { optimistic: true, optimisticBaseCount: 1 }),
+        createTestMessage('u2-opt', 'user', 'How are you?', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
         // Real assistant from HTTP history:
         createTestMessage('a2-base', 'assistant', 'Doing great!'),
       ]
 
       const streamingMessages: ChatMessage[] = [
-        createTestMessage('u2-opt', 'user', 'How are you?', { optimistic: true, optimisticBaseCount: 1 }),
+        createTestMessage('u2-opt', 'user', 'How are you?', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
         // Streaming assistant that just completed:
         createTestMessage('a2-ws', 'assistant', 'Doing great!', { streaming: false }),
       ]

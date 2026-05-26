@@ -501,9 +501,10 @@ describe('App', () => {
     if (!sessionTwoButton) {
       throw new Error('Session 2 button not found')
     }
+    const sessionBtn = sessionTwoButton
 
     await act(async () => {
-      fireEvent.click(sessionTwoButton)
+      fireEvent.click(sessionBtn)
     })
 
     // Wait for session switch to settle
