@@ -226,9 +226,9 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
 			// Use model directly - candidates already carry bare model names
-		// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
-		// Do NOT wrap with FormatProviderModel — the "provider:model" colon
-		// format is internal-only and would break the API call.
+			// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
+			// Do NOT wrap with FormatProviderModel — the "provider:model" colon
+			// format is internal-only and would break the API call.
 			return providerInst.Chat(ctx, opts.messages, opts.toolDefs, model, llmOptions)
 		},
 	)
