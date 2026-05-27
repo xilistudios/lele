@@ -20,6 +20,7 @@ type ClientEvent = { event: string; data: unknown }
 
 export type MessageEventContext = {
   currentSessionKeyRef: React.MutableRefObject<string | null>
+  parentSessionKeyRef: React.MutableRefObject<string | null>
   queryClient: QueryClient
   debouncedSessionRefresh: () => void
   setStreamingMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>
@@ -286,7 +287,7 @@ function handleMessagesCatchup(ctx: MessageEventContext, data: Record<string, un
     ...m,
     id: m.id ?? `catchup-${i}`,
   })) as unknown as HistoryMessage
-  updateChatHistoryFromRaw(ctx.queryClient, targetSessionKey, rawMessages)
+  updateChatHistoryFromRaw(ctx.queryClient, targetSessionKey, rawMessages, undefined, ctx.parentSessionKeyRef.current ?? undefined)
 
   ctx.setStreamingMessages((current) =>
     current.filter((message) => {

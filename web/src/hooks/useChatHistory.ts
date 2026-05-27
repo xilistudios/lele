@@ -18,6 +18,13 @@ export type HistoryMessage = Array<{
 
 export const chatHistoryQueryKey = (sessionKey: string) => ['chatHistory', sessionKey] as const
 
+export function buildChatHistoryQueryKey(sessionKey: string, parentSessionKey?: string) {
+  if (parentSessionKey) {
+    return [...chatHistoryQueryKey(sessionKey), parentSessionKey] as const
+  }
+  return chatHistoryQueryKey(sessionKey)
+}
+
 export function mergeMessages(
   baseMessages: ChatMessage[],
   streamingMessages: ChatMessage[],
@@ -219,9 +226,7 @@ export function useChatHistory(
   const isLoadingMoreRef = useRef(false)
 
   const query = useQuery({
-    queryKey: parentSessionKey
-      ? [...chatHistoryQueryKey(sessionKey ?? ''), parentSessionKey]
-      : chatHistoryQueryKey(sessionKey ?? ''),
+    queryKey: buildChatHistoryQueryKey(sessionKey ?? '', parentSessionKey),
     queryFn: async () => {
       if (!sessionKey || !token) return null
       const history = await api.history(sessionKey, parentSessionKey, undefined, DEFAULT_LIMIT)
@@ -243,9 +248,7 @@ export function useChatHistory(
       // doesn't wipe out paginated history. Without this, a polling refetch
       // replaces the entire cache with only the latest DEFAULT_LIMIT messages,
       // discarding any older messages the user loaded by scrolling up.
-      const queryKey = parentSessionKey
-        ? [...chatHistoryQueryKey(sessionKey), parentSessionKey]
-        : chatHistoryQueryKey(sessionKey)
+      const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
       const cachedData = queryClient.getQueryData<{
         sessionKey: string
         messages: ChatMessage[]
@@ -325,7 +328,7 @@ export function useChatHistory(
         return
       }
 
-      queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+      queryClient.setQueryData(buildChatHistoryQueryKey(sessionKey, parentSessionKey), {
         sessionKey: currentData.sessionKey,
         messages: [...uniqueOlderMessages, ...currentData.messages],
         rawMessages: [...history.messages, ...(currentData.rawMessages || [])],
@@ -359,7 +362,7 @@ export function useChatHistory(
   const invalidateHistory = useCallback(() => {
     if (!sessionKey) return
     setHasMore(true)
-    queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(sessionKey) })
+    queryClient.invalidateQueries({ queryKey: buildChatHistoryQueryKey(sessionKey, parentSessionKey) })
   }, [sessionKey, queryClient])
 
   return {
@@ -382,8 +385,9 @@ export function updateChatHistoryFromRaw(
   sessionKey: string,
   rawMessages: HistoryMessage,
   processing?: boolean,
+  parentSessionKey?: string,
 ) {
-  queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+  queryClient.setQueryData(buildChatHistoryQueryKey(sessionKey, parentSessionKey), {
     sessionKey,
     messages: toChatMessages(rawMessages, sessionKey),
     rawMessages,

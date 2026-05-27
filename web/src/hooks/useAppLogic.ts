@@ -62,6 +62,7 @@ export function useAppLogic(
     sessionsHook.currentSessionKey,
     sessionsHook.currentSessionKeyRef,
     sessionsHook.refreshSessions,
+    parentSessionKey,
   )
   const chatHistory = useChatHistory(
     api,

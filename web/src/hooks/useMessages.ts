@@ -25,6 +25,7 @@ export function useMessages(
   _currentSessionKey: string | null,
   currentSessionKeyRef: React.MutableRefObject<string | null>,
   onSessionUpdated?: () => void,
+  parentSessionKey?: string | null,
 ) {
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
@@ -33,6 +34,10 @@ export function useMessages(
   const lastSessionRefreshRef = useRef<number>(0)
 
   const queryClient = useQueryClient()
+
+  // ── Parent session key ref for subagent-aware cache operations ──────────
+  const parentSessionKeyRef = useRef<string | null>(null)
+  parentSessionKeyRef.current = parentSessionKey ?? null
 
   // ── Sub-hooks ────────────────────────────────────────────────────────────
 
@@ -71,6 +76,7 @@ export function useMessages(
   // event handler while keeping a stable function reference for the WS layer).
   eventContextRef.current = {
     currentSessionKeyRef,
+    parentSessionKeyRef,
     queryClient,
     debouncedSessionRefresh,
     setStreamingMessages,
