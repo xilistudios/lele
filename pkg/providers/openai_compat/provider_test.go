@@ -181,11 +181,13 @@ func TestProviderChat_StripsMoonshotPrefixAndNormalizesKimiTemperature(t *testin
 	defer server.Close()
 
 	p := NewProvider("key", server.URL, "")
+	// In production, StripProviderPrefix strips "moonshot:" before Chat is called,
+	// so Chat receives the bare model name directly.
 	_, err := p.Chat(
 		t.Context(),
 		[]Message{{Role: "user", Content: "hi"}},
 		nil,
-		"moonshot/kimi-k2.5",
+		"kimi-k2.5",
 		map[string]interface{}{"temperature": 0.3},
 	)
 	if err != nil {
@@ -201,24 +203,27 @@ func TestProviderChat_StripsMoonshotPrefixAndNormalizesKimiTemperature(t *testin
 }
 
 func TestProviderChat_StripsGroqAndOllamaPrefixes(t *testing.T) {
+	// In production, StripProviderPrefix strips "provider:" before Chat is called,
+	// so Chat receives bare model names. Models with slashes or colons in their
+	// name (e.g., "openai/gpt-oss-120b", "qwen2.5:14b") pass through as-is.
 	tests := []struct {
 		name      string
 		input     string
 		wantModel string
 	}{
 		{
-			name:      "strips groq prefix and keeps nested model",
-			input:     "groq/openai/gpt-oss-120b",
+			name:      "passes through nested model name",
+			input:     "openai/gpt-oss-120b",
 			wantModel: "openai/gpt-oss-120b",
 		},
 		{
-			name:      "strips ollama prefix",
-			input:     "ollama/qwen2.5:14b",
+			name:      "passes through ollama model tag",
+			input:     "qwen2.5:14b",
 			wantModel: "qwen2.5:14b",
 		},
 		{
-			name:      "strips deepseek prefix",
-			input:     "deepseek/deepseek-chat",
+			name:      "passes through bare model name",
+			input:     "deepseek-chat",
 			wantModel: "deepseek-chat",
 		},
 	}
@@ -493,26 +498,28 @@ func TestProviderChat_ToolOrderAffectsRequestOnlyWhenInputOrderChanges(t *testin
 }
 
 func TestNormalizeModel_UsesAPIBase(t *testing.T) {
-	// Colon format: "provider:model" → stripped to bare model
-	if got := normalizeModel("deepseek:deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
-		t.Fatalf("normalizeModel(deepseek:deepseek-chat) = %q, want %q", got, "deepseek-chat")
-	}
-	if got := normalizeModel("chutes:minimax-m2.5", "https://llm.chutes.ai/v1"); got != "minimax-m2.5" {
-		t.Fatalf("normalizeModel(chutes:minimax-m2.5) = %q, want %q", got, "minimax-m2.5")
-	}
-
-	// Bare model names (already stripped by StripProviderPrefix) pass through
+	// Bare model names pass through (already stripped by StripProviderPrefix upstream)
 	if got := normalizeModel("deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
 		t.Fatalf("normalizeModel(bare) = %q, want %q", got, "deepseek-chat")
+	}
+	if got := normalizeModel("minimax-m2.5", "https://llm.chutes.ai/v1"); got != "minimax-m2.5" {
+		t.Fatalf("normalizeModel(bare) = %q, want %q", got, "minimax-m2.5")
+	}
+
+	// Models containing colons (e.g., Ollama tags) pass through untouched
+	if got := normalizeModel("qwen2.5:14b", "http://localhost:11434/v1"); got != "qwen2.5:14b" {
+		t.Fatalf("normalizeModel(ollama tag) = %q, want %q", got, "qwen2.5:14b")
 	}
 
 	// Legacy: openrouter/ prefix still stripped for backward compat
 	if got := normalizeModel("openrouter/auto", "https://openrouter.ai/api/v1"); got != "auto" {
 		t.Fatalf("normalizeModel(openrouter/auto) = %q, want %q", got, "auto")
 	}
+	if got := normalizeModel("openrouter/deepseek/deepseek-v4-pro", "https://openrouter.ai/api/v1"); got != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("normalizeModel(openrouter legacy) = %q, want %q", got, "deepseek/deepseek-v4-pro")
+	}
 
 	// Deprecated slash format for non-OpenRouter: passes through as-is
-	// (the slash is treated as part of the model identifier)
 	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek/deepseek-chat" {
 		t.Fatalf("normalizeModel(deprecated slash) = %q, want %q", got, "deepseek/deepseek-chat")
 	}

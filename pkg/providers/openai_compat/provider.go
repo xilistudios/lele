@@ -318,15 +318,14 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 }
 
 func normalizeModel(model, apiBase string) string {
-	// Strip provider prefix in colon format ("provider:model").
-	// The provider prefix is for internal routing only and must not
-	// be sent to the external API.
-	if idx := strings.Index(model, ":"); idx > 0 {
-		model = model[idx+1:]
-	}
+	// NOTE: Provider prefix stripping ("provider:model") is handled by
+	// StripProviderPrefix in llm_caller.go before calling Chat.
+	// Do NOT strip ":" here — model names may legitimately contain colons
+	// (e.g., Ollama tags like "qwen2.5:14b").
 
 	// Legacy: handle old "openrouter/deepseek/..." slash format.
-	// The colon format ("openrouter:deepseek/...") is already handled above.
+	// The colon format ("openrouter:deepseek/...") is already handled by
+	// StripProviderPrefix upstream.
 	if strings.Contains(strings.ToLower(apiBase), "openrouter.ai") {
 		if idx := strings.Index(model, "/"); idx > 0 {
 			if strings.HasPrefix(strings.ToLower(model), "openrouter/") {
