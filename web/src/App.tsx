@@ -150,8 +150,10 @@ function ChatRoute() {
     const hasValidParent =
       !isNestedSubagent ||
       (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
+    // For nested subagents, the key comes from the subagent API (e.g. "UUID:taskID")
+    // and won't be in the sessions list. We trust the URL since the parent is validated.
     const hasValidTarget = isNestedSubagent
-      ? targetSessionKey.startsWith('subagent:')
+      ? targetSessionKey.length > 0
       : !targetSessionKey.startsWith('subagent:') && availableKeys.has(targetSessionKey)
 
     if (hasValidParent && hasValidTarget) {
