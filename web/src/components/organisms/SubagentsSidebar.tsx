@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SubagentTaskInfo } from '../../lib/types'
 import { CloseIcon } from '../atoms/Icons'
@@ -26,18 +26,24 @@ export function SubagentsSidebar({
   const [visible, setVisible] = useState(false)
   const [animate, setAnimate] = useState(false)
 
+  const rafRef = useRef<number>(0)
+
   useEffect(() => {
     if (isOpen) {
       setVisible(true)
-      // Trigger enter animation on next frame so CSS transitions work
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setAnimate(true))
+      // Use double-rAF via useLayoutEffect timing to ensure the browser has
+      // painted the initial off-screen state before we trigger the transition.
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = requestAnimationFrame(() => setAnimate(true))
       })
+      return () => cancelAnimationFrame(rafRef.current)
     } else {
       setAnimate(false)
-      // Wait for exit animation to finish before unmounting
       const timer = setTimeout(() => setVisible(false), ANIMATION_DURATION_MS)
-      return () => clearTimeout(timer)
+      return () => {
+        clearTimeout(timer)
+        cancelAnimationFrame(rafRef.current)
+      }
     }
   }, [isOpen])
 

@@ -15,7 +15,7 @@ import { SubagentsSidebar } from './SubagentsSidebar'
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onSelectSession } = useAppLogicContext()
+  const { currentAgent, wsStatus, currentSessionKey } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
