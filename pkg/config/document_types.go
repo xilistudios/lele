@@ -46,17 +46,18 @@ type EditableAgentsConfig struct {
 
 // EditableAgentDefaults represents agent defaults in editable mode.
 type EditableAgentDefaults struct {
-	Workspace           string   `json:"workspace"`
-	RestrictToWorkspace bool     `json:"restrict_to_workspace"`
-	Provider            string   `json:"provider"`
-	Model               string   `json:"model"`
-	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
-	ImageModel          string   `json:"image_model,omitempty"`
-	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens           int      `json:"max_tokens"`
-	Temperature         *float64 `json:"temperature,omitempty"`
-	MaxToolIterations   int      `json:"max_tool_iterations"`
-	MaxReadLines        int      `json:"max_read_lines"`
+	Workspace              string   `json:"workspace"`
+	RestrictToWorkspace    bool     `json:"restrict_to_workspace"`
+	Provider               string   `json:"provider"`
+	Model                  string   `json:"model"`
+	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
+	ImageModel             string   `json:"image_model,omitempty"`
+	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
+	MaxTokens              int      `json:"max_tokens"`
+	Temperature            *float64 `json:"temperature,omitempty"`
+	MaxToolIterations      int      `json:"max_tool_iterations"`
+	MaxReadLines           int      `json:"max_read_lines"`
+	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes,omitempty"`
 }
 
 // EditableAgentConfig represents an agent in editable mode.

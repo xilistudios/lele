@@ -36,7 +36,9 @@ export function mergeMessages(
   // get confused by optimistic messages lingering in the query cache, while
   // the user dedup filter below still sees the full count.
   const baseUserCount = baseMessages.filter((message) => message.role === 'user').length
-  const baseUserCountNonOptimistic = baseMessages.filter((message) => message.role === 'user' && !message.optimistic).length
+  const baseUserCountNonOptimistic = baseMessages.filter(
+    (message) => message.role === 'user' && !message.optimistic,
+  ).length
 
   const streamingToolCallIds = new Set<string>()
   const streamingToolSessions = new Set<string>()
@@ -66,7 +68,7 @@ export function mergeMessages(
 
   const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
   const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
-  
+
   // baseHasCurrentTurn is true only when the base (HTTP history) already
   // contains BOTH the user message AND the assistant response for the current
   // turn. Previously it only checked if the user count exceeded the optimistic
@@ -339,9 +341,19 @@ export function useChatHistory(
   }, [api, sessionKey, token, parentSessionKey, queryClient, query.data, hasMore])
 
   const baseMessages = query.data?.messages ?? []
+
+  // Filter streaming messages to only include those for the current session.
+  // Without this, messages from the previous session can briefly appear when
+  // switching chats because clearStreaming() runs asynchronously (in useEffect)
+  // while the URL/sessionKey changes immediately.
+  const sessionStreamingMessages = useMemo(
+    () => (sessionKey ? streamingMessages.filter((m) => m.sessionKey === sessionKey) : []),
+    [streamingMessages, sessionKey],
+  )
+
   const messages = useMemo(
-    () => mergeMessages(baseMessages, streamingMessages),
-    [baseMessages, streamingMessages],
+    () => mergeMessages(baseMessages, sessionStreamingMessages),
+    [baseMessages, sessionStreamingMessages],
   )
 
   const invalidateHistory = useCallback(() => {

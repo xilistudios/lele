@@ -110,7 +110,10 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const subagentSessionKey = message.subagentSessionKey
 
     return (
-      <div data-message-id={message.id} className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}>
+      <div
+        data-message-id={message.id}
+        className={`py-1.5 ${animate ? 'animate-message-enter' : ''}`}
+      >
         <ToolCallDisplay
           toolName={message.toolName}
           toolArgs={message.toolArgs}
@@ -130,7 +133,10 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     const nonImageAttachments = message.attachments?.filter((a) => !isImageAttachment(a)) ?? []
 
     return (
-      <div data-message-id={message.id} className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}>
+      <div
+        data-message-id={message.id}
+        className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}
+      >
         <div className="max-w-[70%] space-y-2 rounded-xl bg-surface-muted px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {imageAttachments.length > 0 ? (
@@ -167,7 +173,15 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
     <div data-message-id={message.id} className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
       {message.excludeFromContext && (
         <div className="mb-1 flex items-center gap-1.5 text-[10px] text-text-tertiary opacity-60">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <line x1="1" y1="1" x2="23" y2="23" />
           </svg>

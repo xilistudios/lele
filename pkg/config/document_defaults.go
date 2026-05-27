@@ -22,6 +22,9 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.MaxReadLines == 0 {
 		doc.Agents.Defaults.MaxReadLines = defaults.Agents.Defaults.MaxReadLines
 	}
+	if doc.Agents.Defaults.SubagentTimeoutMinutes == 0 {
+		doc.Agents.Defaults.SubagentTimeoutMinutes = defaults.Agents.Defaults.SubagentTimeoutMinutes
+	}
 
 	// Defaults for the native channel.
 	if doc.Channels.Native.Host == "" {
@@ -85,7 +88,7 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Tools.Cron.ExecTimeoutMinutes == 0 {
 		doc.Tools.Cron.ExecTimeoutMinutes = defaults.Tools.Cron.ExecTimeoutMinutes
 	}
-	if doc.Tools.Exec.TimeoutSeconds == 0 {
+	if doc.Tools.Exec.TimeoutSeconds < 0 {
 		doc.Tools.Exec.TimeoutSeconds = defaults.Tools.Exec.TimeoutSeconds
 	}
 
@@ -102,13 +105,14 @@ func defaultEditableDocument() *EditableDocument {
 	return &EditableDocument{
 		Agents: EditableAgentsConfig{
 			Defaults: EditableAgentDefaults{
-				Workspace:           defaults.Agents.Defaults.Workspace,
-				RestrictToWorkspace: defaults.Agents.Defaults.RestrictToWorkspace,
-				Provider:            defaults.Agents.Defaults.Provider,
-				Model:               defaults.Agents.Defaults.Model,
-				MaxTokens:           defaults.Agents.Defaults.MaxTokens,
-				MaxToolIterations:   defaults.Agents.Defaults.MaxToolIterations,
-				MaxReadLines:        defaults.Agents.Defaults.MaxReadLines,
+				Workspace:              defaults.Agents.Defaults.Workspace,
+				RestrictToWorkspace:    defaults.Agents.Defaults.RestrictToWorkspace,
+				Provider:               defaults.Agents.Defaults.Provider,
+				Model:                  defaults.Agents.Defaults.Model,
+				MaxTokens:              defaults.Agents.Defaults.MaxTokens,
+				MaxToolIterations:      defaults.Agents.Defaults.MaxToolIterations,
+				MaxReadLines:           defaults.Agents.Defaults.MaxReadLines,
+				SubagentTimeoutMinutes: defaults.Agents.Defaults.SubagentTimeoutMinutes,
 			},
 			List: []EditableAgentConfig{},
 		},

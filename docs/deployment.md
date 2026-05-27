@@ -143,7 +143,7 @@ Important paths to back up:
 
 - keep logs on persistent storage if you need auditability
 - keep the workspace on reliable local storage
-- prefer explicit provider/model settings for reproducible behavior
+- prefer explicit provider:model settings for reproducible behavior
 - review CORS and token expiry when exposing native/web access beyond localhost-style setups
 - single port simplifies firewall and reverse proxy configuration
 

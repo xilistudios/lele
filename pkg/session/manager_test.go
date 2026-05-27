@@ -292,3 +292,170 @@ func TestSessionManager_ResetTokenCounts_UpdatesTimestamp(t *testing.T) {
 		t.Errorf("Updated timestamp should be after original: got %v, want > %v", session.Updated, oldUpdated)
 	}
 }
+
+func TestFindSubagentSessions_Empty(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "native:client-1"
+
+	// No sessions at all
+	results := sm.FindSubagentSessions(key)
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestFindSubagentSessions_FindsMatchingSessions(t *testing.T) {
+	sm := NewSessionManager("")
+	parent := "native:client-1"
+
+	// Create subagent sessions
+	sm.AddMessage(parent+":subagent-1", "user", "do something")
+	sm.AddMessage(parent+":subagent-1", "assistant", "done")
+	sm.AddMessage(parent+":subagent-2", "user", "analyze this")
+	sm.AddMessage(parent+":subagent-2", "assistant", "analyzed")
+	sm.AddMessage(parent+":subagent-2", "assistant", "here are results")
+
+	// Create a non-subagent session (should be ignored)
+	sm.AddMessage(parent, "user", "hello")
+	sm.AddMessage("telegram:999:subagent-1", "user", "different parent")
+
+	results := sm.FindSubagentSessions(parent)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// Build a map for easier assertions
+	byTaskID := make(map[string]SubagentSessionInfo)
+	for _, r := range results {
+		byTaskID[r.TaskID] = r
+	}
+
+	sa1, ok := byTaskID["subagent-1"]
+	if !ok {
+		t.Fatal("expected to find subagent-1")
+	}
+	if sa1.Key != parent+":subagent-1" {
+		t.Errorf("key = %q, want %q", sa1.Key, parent+":subagent-1")
+	}
+	if sa1.Iterations != 1 {
+		t.Errorf("iterations = %d, want 1", sa1.Iterations)
+	}
+
+	sa2, ok := byTaskID["subagent-2"]
+	if !ok {
+		t.Fatal("expected to find subagent-2")
+	}
+	if sa2.Iterations != 2 {
+		t.Errorf("iterations = %d, want 2", sa2.Iterations)
+	}
+}
+
+func TestFindSubagentSessions_SkipsParentAndOtherSessions(t *testing.T) {
+	sm := NewSessionManager("")
+	parent := "native:client-1"
+
+	sm.AddMessage(parent, "user", "hello")
+	sm.AddMessage("telegram:123", "user", "other session")
+	sm.AddMessage("other:session:subagent-1", "user", "different parent prefix")
+
+	results := sm.FindSubagentSessions(parent)
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestFindSubagentSessions_SummaryFromSession(t *testing.T) {
+	sm := NewSessionManager("")
+	parent := "native:client-1"
+
+	key := parent + ":subagent-1"
+	sm.AddMessage(key, "user", "task")
+	sm.AddMessage(key, "assistant", "result")
+	sm.SetSummary(key, "Found 3 files")
+
+	results := sm.FindSubagentSessions(parent)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Summary != "Found 3 files" {
+		t.Errorf("summary = %q, want %q", results[0].Summary, "Found 3 files")
+	}
+}
+
+func TestFindSubagentSessions_SummaryFallbackFromLastAssistant(t *testing.T) {
+	sm := NewSessionManager("")
+	parent := "native:client-1"
+
+	key := parent + ":subagent-1"
+	sm.AddMessage(key, "user", "task")
+	sm.AddMessage(key, "assistant", "Here is my analysis of the codebase")
+
+	results := sm.FindSubagentSessions(parent)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Summary != "Here is my analysis of the codebase" {
+		t.Errorf("summary = %q, want %q", results[0].Summary, "Here is my analysis of the codebase")
+	}
+}
+
+func TestFindSubagentSessions_SummaryFallbackTruncatesLong(t *testing.T) {
+	sm := NewSessionManager("")
+	parent := "native:client-1"
+
+	key := parent + ":subagent-1"
+	sm.AddMessage(key, "user", "task")
+	longContent := ""
+	for i := 0; i < 300; i++ {
+		longContent += "x"
+	}
+	sm.AddMessage(key, "assistant", longContent)
+
+	results := sm.FindSubagentSessions(parent)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if len(results[0].Summary) > 210 { // 200 + "…" rune
+		t.Errorf("summary too long: %d chars", len(results[0].Summary))
+	}
+}
+
+func TestFindSubagentSessions_Persistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+	parent := "native:client-1"
+
+	// Create and save subagent sessions
+	sm.AddMessage(parent+":subagent-1", "user", "task 1")
+	sm.AddMessage(parent+":subagent-1", "assistant", "done 1")
+	sm.SetSummary(parent+":subagent-1", "Completed task 1")
+	sm.Save(parent + ":subagent-1")
+
+	sm.AddMessage(parent+":subagent-2", "user", "task 2")
+	sm.AddMessage(parent+":subagent-2", "assistant", "done 2")
+	sm.Save(parent + ":subagent-2")
+
+	// Load into a fresh manager — should discover the past subagents
+	sm2 := NewSessionManager(tmpDir)
+	results := sm2.FindSubagentSessions(parent)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results after reload, got %d", len(results))
+	}
+
+	byTaskID := make(map[string]SubagentSessionInfo)
+	for _, r := range results {
+		byTaskID[r.TaskID] = r
+	}
+
+	if _, ok := byTaskID["subagent-1"]; !ok {
+		t.Error("expected to find subagent-1 after reload")
+	}
+	if _, ok := byTaskID["subagent-2"]; !ok {
+		t.Error("expected to find subagent-2 after reload")
+	}
+
+	// Verify summary survived persistence
+	if byTaskID["subagent-1"].Summary != "Completed task 1" {
+		t.Errorf("summary = %q, want %q", byTaskID["subagent-1"].Summary, "Completed task 1")
+	}
+}

@@ -52,7 +52,7 @@ Check:
 
 - the provider exists in `providers`
 - the provider has the expected `models` aliases
-- the session/agent is using the expected provider or explicit `provider/model`
+- the session/agent is using the expected provider or explicit `provider:model`
 
 See:
 

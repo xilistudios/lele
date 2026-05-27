@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
-import type { ChatMessage } from '../lib/types'
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
+import type { ChatMessage } from '../lib/types'
 
 // Interval between characters when animating streaming text in the UI.
 const STREAM_CHAR_INTERVAL_MS = 12
@@ -38,15 +38,39 @@ export function useStreamQueues(setStreamingMessages: SetStreamingMessages) {
               : m,
           )
         }
-        return [
-          ...current,
-          createAssistantMessage({
-            id: messageId,
-            sessionKey,
-            content: chunk,
-            streaming: !isDone,
-          }),
-        ]
+        const newMsg = createAssistantMessage({
+          id: messageId,
+          sessionKey,
+          content: chunk,
+          streaming: !isDone,
+        })
+
+        // When tool.executing arrives before message.stream (e.g., ack delayed),
+        // tools are already in the array. Insert the new assistant BEFORE those
+        // trailing tools so the correct order is: assistant → tool calls.
+        //
+        // If there's already an existing assistant in the array, insert after
+        // all tools following it (the new assistant is a subsequent turn).
+        // If there's NO assistant, insert before all tool messages.
+        const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+
+        if (lastAssistantIdx >= 0) {
+          const assistantPos = current.length - 1 - lastAssistantIdx
+          let insertIdx = assistantPos + 1
+          while (insertIdx < current.length && current[insertIdx].role === 'tool') {
+            insertIdx++
+          }
+          const arr = [...current]
+          arr.splice(insertIdx, 0, newMsg)
+          return arr
+        }
+
+        // No assistant exists — insert before all tool messages
+        const firstToolIdx = current.findIndex((m) => m.role === 'tool')
+        const insertIdx = firstToolIdx >= 0 ? firstToolIdx : current.length
+        const arr = [...current]
+        arr.splice(insertIdx, 0, newMsg)
+        return arr
       })
     },
     [setStreamingMessages],

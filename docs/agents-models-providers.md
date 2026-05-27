@@ -214,19 +214,19 @@ In practice, Lele can resolve models from:
 
 Common forms are:
 
-- `provider/model`
-- a provider alias like `my-openai-compatible/fast`
+- `provider:model`
+- a provider alias like `my-openai-compatible:fast`
 - a raw model name that is resolved inside the active provider
 
 ### Recommended Convention
 
-Use explicit `provider/model` values whenever possible. This keeps agent behavior predictable and makes the UI model list clearer.
+Use explicit `provider:model` values whenever possible. This keeps agent behavior predictable and makes the UI model list clearer.
 
 Examples:
 
-- `openrouter/auto`
-- `my-openai-compatible/fast`
-- `anthropic/claude-sonnet`
+- `openrouter:auto`
+- `my-openai-compatible:fast`
+- `anthropic:claude-sonnet`
 
 ## Fallback Models
 

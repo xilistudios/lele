@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import {
+  createAssistantMessage,
   createDeterministicToolMessageId,
   createToolMessage,
   createToolMessageId,
@@ -29,7 +30,12 @@ export type MessageEventContext = {
   enqueueChunk: (messageId: string, sessionKey: string, chunk: string, done: boolean) => void
   clearQueue: (messageId: string) => void
   clearAllQueues: () => void
-  ensureAssistantPlaceholder: (messageId: string, sessionKey: string, chunk?: string, isDone?: boolean) => void
+  ensureAssistantPlaceholder: (
+    messageId: string,
+    sessionKey: string,
+    chunk?: string,
+    isDone?: boolean,
+  ) => void
   addProcessingSession: (sessionKey: string) => void
   removeProcessingSession: (sessionKey: string) => void
   syncProcessingSession: (sessionKey: string, processing: boolean) => void
@@ -79,6 +85,50 @@ function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) 
   if (processing && sessionKey) {
     ctx.addProcessingSession(sessionKey)
   }
+
+  // Restore in-progress streaming messages after page reload or reconnection.
+  // The backend includes accumulated content and reasoning so the frontend
+  // doesn't have to wait for the next chunk to see the current state.
+  const inProgress = data.in_progress_messages as
+    | Array<{
+        role: string
+        content?: string
+        reasoning_content?: string
+      }>
+    | undefined
+  if (inProgress && inProgress.length > 0 && sessionKey) {
+    ctx.setStreamingMessages((current) => {
+      const updated = [...current]
+      for (const msg of inProgress) {
+        if (msg.role !== 'assistant') continue
+        const content = msg.content ?? ''
+        const reasoning = msg.reasoning_content ?? ''
+        // Use a deterministic ID so we don't create duplicates if the
+        // real stream events arrive shortly after.
+        const restoreId = `restore-${sessionKey}`
+        const existingIdx = updated.findIndex((m) => m.id === restoreId)
+        if (existingIdx >= 0) {
+          updated[existingIdx] = {
+            ...updated[existingIdx],
+            content: content || updated[existingIdx].content,
+            reasoningContent: reasoning || updated[existingIdx].reasoningContent,
+            streaming: true,
+          }
+        } else {
+          updated.push(
+            createAssistantMessage({
+              id: restoreId,
+              sessionKey,
+              content,
+              reasoningContent: reasoning || undefined,
+              streaming: true,
+            }),
+          )
+        }
+      }
+      return updated
+    })
+  }
 }
 
 function handleMessageStream(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -109,12 +159,23 @@ function handleMessageStream(ctx: MessageEventContext, data: Record<string, unkn
 
 function handleMessageThinking(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
-  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.thinking')) return
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.thinking'))
+    return
+
+  const msgId = data.message_id as string
+  const chunk = (data.chunk as string) ?? ''
+  const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+
+  // Ensure the assistant placeholder exists before updating reasoning content.
+  // Without this, thinking chunks arriving before message.stream (e.g., after
+  // page reload or reconnection) are silently dropped because there's no
+  // assistant message to attach them to.
+  ctx.ensureAssistantPlaceholder(msgId, sessionKey)
 
   ctx.setStreamingMessages((current) =>
     current.map((m) =>
-      m.id === (data.message_id as string) && m.role === 'assistant'
-        ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${(data.chunk as string) ?? ''}` }
+      m.id === msgId && m.role === 'assistant'
+        ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${chunk}` }
         : m,
     ),
   )
@@ -127,6 +188,15 @@ function handleMessageAck(ctx: MessageEventContext, data: Record<string, unknown
     ctx.debouncedSessionRefresh()
   }
   ctx.ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
+
+  // Remove restored placeholder messages for this session now that a real
+  // message is starting. This prevents duplicates when the restored content
+  // and the real stream coexist briefly.
+  if (ackSessionKey) {
+    ctx.setStreamingMessages((current) =>
+      current.filter((m) => !(m.id.startsWith('restore-') && m.sessionKey === ackSessionKey)),
+    )
+  }
 }
 
 function handleMessageComplete(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -272,9 +342,7 @@ function handleToolExecuting(ctx: MessageEventContext, data: Record<string, unkn
       const existingIdx = current.findIndex((m) => m.role === 'tool' && m.toolCallId === toolCallId)
       if (existingIdx >= 0) {
         return current.map((m, i) =>
-          i === existingIdx
-            ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const }
-            : m,
+          i === existingIdx ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const } : m,
         )
       }
     }
@@ -320,8 +388,7 @@ function handleToolResult(ctx: MessageEventContext, data: Record<string, unknown
     const isError =
       data.result &&
       typeof data.result === 'string' &&
-      (data.result.toLowerCase().includes('error') ||
-        data.result.toLowerCase().includes('failed'))
+      (data.result.toLowerCase().includes('error') || data.result.toLowerCase().includes('failed'))
 
     return current.map((m, i) =>
       i === targetIndex
@@ -344,7 +411,8 @@ function handleToolResult(ctx: MessageEventContext, data: Record<string, unknown
 
 function handleSubagentResult(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
-  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'subagent.result')) return
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'subagent.result'))
+    return
 
   ctx.setStreamingMessages((current) => {
     const toolCallId = data.tool_call_id as string | undefined
@@ -361,8 +429,7 @@ function handleSubagentResult(ctx: MessageEventContext, data: Record<string, unk
       i === targetIndex
         ? {
             ...m,
-            subagentSessionKey:
-              (data.subagent_session_key as string) || m.subagentSessionKey,
+            subagentSessionKey: (data.subagent_session_key as string) || m.subagentSessionKey,
             toolResult: m.toolResult || (data.result as string),
           }
         : m,
@@ -389,9 +456,7 @@ function handleCancelAck(ctx: MessageEventContext, data: Record<string, unknown>
     ctx.removeProcessingSession(cancelledSessionKey)
   }
 
-  ctx.setStreamingMessages((current) =>
-    current.map((m) => ({ ...m, streaming: false })),
-  )
+  ctx.setStreamingMessages((current) => current.map((m) => ({ ...m, streaming: false })))
 }
 
 function handleSubscribeAck(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -444,23 +509,24 @@ function handleStreamError(ctx: MessageEventContext, data: Record<string, unknow
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) => void> = {
-  'welcome':            (ctx, e) => handleWelcome(ctx, e.data as Record<string, unknown>),
-  'message.stream':     (ctx, e) => handleMessageStream(ctx, e.data as Record<string, unknown>),
-  'message.thinking':   (ctx, e) => handleMessageThinking(ctx, e.data as Record<string, unknown>),
-  'message.ack':        (ctx, e) => handleMessageAck(ctx, e.data as Record<string, unknown>),
-  'message.complete':   (ctx, e) => handleMessageComplete(ctx, e.data as Record<string, unknown>),
-  'history.updated':    (ctx, e) => handleHistoryUpdated(ctx, e.data as Record<string, unknown>),
-  'messages.catchup':   (ctx, e) => handleMessagesCatchup(ctx, e.data as Record<string, unknown>),
-  'attachments':        (ctx, e) => handleAttachments(ctx, e),
-  'tool.executing':     (ctx, e) => handleToolExecuting(ctx, e.data as Record<string, unknown>),
-  'tool.result':        (ctx, e) => handleToolResult(ctx, e.data as Record<string, unknown>),
-  'subagent.result':    (ctx, e) => handleSubagentResult(ctx, e.data as Record<string, unknown>),
-  'approval.request':   (ctx, e) => handleApprovalRequest(ctx, e),
-  'approve.result':     (ctx, e) => handleApproveResult(ctx, e),
-  'cancel.ack':         (ctx, e) => handleCancelAck(ctx, e.data as Record<string, unknown>),
-  'subscribe.ack':      (ctx, e) => handleSubscribeAck(ctx, e.data as Record<string, unknown>),
-  'message.error':      (ctx, e) => handleMessageError(ctx, e.data as Record<string, unknown>),
-  'stream.error':       (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
+  welcome: (ctx, e) => handleWelcome(ctx, e.data as Record<string, unknown>),
+  reconnected: (ctx, e) => handleWelcome(ctx, e.data as Record<string, unknown>),
+  'message.stream': (ctx, e) => handleMessageStream(ctx, e.data as Record<string, unknown>),
+  'message.thinking': (ctx, e) => handleMessageThinking(ctx, e.data as Record<string, unknown>),
+  'message.ack': (ctx, e) => handleMessageAck(ctx, e.data as Record<string, unknown>),
+  'message.complete': (ctx, e) => handleMessageComplete(ctx, e.data as Record<string, unknown>),
+  'history.updated': (ctx, e) => handleHistoryUpdated(ctx, e.data as Record<string, unknown>),
+  'messages.catchup': (ctx, e) => handleMessagesCatchup(ctx, e.data as Record<string, unknown>),
+  attachments: (ctx, e) => handleAttachments(ctx, e),
+  'tool.executing': (ctx, e) => handleToolExecuting(ctx, e.data as Record<string, unknown>),
+  'tool.result': (ctx, e) => handleToolResult(ctx, e.data as Record<string, unknown>),
+  'subagent.result': (ctx, e) => handleSubagentResult(ctx, e.data as Record<string, unknown>),
+  'approval.request': (ctx, e) => handleApprovalRequest(ctx, e),
+  'approve.result': (ctx, e) => handleApproveResult(ctx, e),
+  'cancel.ack': (ctx, e) => handleCancelAck(ctx, e.data as Record<string, unknown>),
+  'subscribe.ack': (ctx, e) => handleSubscribeAck(ctx, e.data as Record<string, unknown>),
+  'message.error': (ctx, e) => handleMessageError(ctx, e.data as Record<string, unknown>),
+  'stream.error': (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
 }
 
 /**

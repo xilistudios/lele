@@ -443,6 +443,73 @@ func (ap *agentProvidableImpl) GetSubagents() string {
 	return formatSubagentTaskList(ap.al.toolCoordinator.listRunningSubagentTasks())
 }
 
+// GetSessionSubagents returns subagent tasks that belong to a given session.
+// It returns both in-memory tasks (from SubagentManagers) and persisted past
+// tasks discovered from session storage, so that completed subagents survive
+// server restarts.
+func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels.SubagentTaskInfo {
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	var result []channels.SubagentTaskInfo
+
+	// Track which task IDs we already have from in-memory managers
+	seen := make(map[string]bool)
+
+	// 1. Collect in-memory tasks (rich data: label, agentID, live status)
+	for _, manager := range ap.al.toolCoordinator.GetSubagents() {
+		for _, task := range manager.ListTasks() {
+			resolvedOrigin := ap.al.ResolveSessionKey(task.OriginSessionKey)
+			if resolvedOrigin != resolvedKey {
+				continue
+			}
+			seen[task.ID] = true
+			result = append(result, channels.SubagentTaskInfo{
+				TaskID:     task.ID,
+				SessionKey: resolvedKey + ":" + task.ID,
+				Label:      task.Label,
+				AgentID:    task.AgentID,
+				Status:     task.Status,
+				Summary:    task.Summary,
+				Created:    task.Created,
+				Updated:    task.Updated,
+				Iterations: task.Iterations,
+			})
+		}
+	}
+
+	// 2. Scan all agents' session storage for persisted past subagent sessions.
+	//    These are subagents that ran in previous server sessions and whose
+	//    in-memory tasks are gone, but whose history was saved to disk.
+	for _, agentID := range ap.al.registry.ListAgentIDs() {
+		agent, ok := ap.al.registry.GetAgent(agentID)
+		if !ok || agent == nil || agent.Sessions == nil {
+			continue
+		}
+		for _, past := range agent.Sessions.FindSubagentSessions(resolvedKey) {
+			if seen[past.TaskID] {
+				continue // in-memory version takes precedence
+			}
+			seen[past.TaskID] = true
+
+			// Determine a human-readable summary
+			summary := past.Summary
+
+			result = append(result, channels.SubagentTaskInfo{
+				TaskID:     past.TaskID,
+				SessionKey: past.Key,
+				Label:      past.Name, // session Name doubles as label fallback
+				AgentID:    agentID,   // owning agent of the session storage
+				Status:     "completed",
+				Summary:    summary,
+				Created:    past.Created.UnixMilli(),
+				Updated:    past.Updated.UnixMilli(),
+				Iterations: past.Iterations,
+			})
+		}
+	}
+
+	return result
+}
+
 // ============================================================================
 // AgentProvidable Interface - Session Management
 // ============================================================================

@@ -289,6 +289,7 @@ type SubagentManager struct {
 	temperature        float64
 	hasMaxTokens       bool
 	hasTemperature     bool
+	timeout            time.Duration // 0 means no timeout
 	nextID             int
 	sessionRecorder    SessionRecorder
 	sessionKeyCallback func(sessionKey, agentID string) // called when subagent session key is created
@@ -326,6 +327,14 @@ func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.maxIterations = maxIterations
+}
+
+// SetTimeout sets the maximum execution time for subagent tasks.
+// A value of 0 means no timeout (subagent runs until completion or iteration limit).
+func (sm *SubagentManager) SetTimeout(timeout time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.timeout = timeout
 }
 
 // SetTools sets the tool registry for subagent execution.
@@ -441,7 +450,17 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	previousTask := *task
 	task.Status = SubagentStatusRunning
 	task.Updated = time.Now().UnixMilli()
+	timeout := sm.timeout
 	sm.mu.Unlock()
+
+	// Apply timeout to the context if configured.
+	// This creates a child context that will be cancelled after the timeout,
+	// while the parent cancel func (stored in sm.cancels) can still cancel it earlier.
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 
 	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model, provider from its workspace)
 	sm.mu.RLock()
@@ -598,8 +617,13 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.Result = fmt.Sprintf("Error: %v", err)
 		task.ContextRequest = ""
 		task.Updated = time.Now().UnixMilli()
-		// Check if it was cancelled
-		if ctx.Err() != nil {
+		// Check if it was a timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			task.Status = SubagentStatusFailed
+			task.Summary = "Subagent timed out"
+			task.Result = fmt.Sprintf("The subagent exceeded its time limit and was stopped. Error: %v", err)
+		} else if ctx.Err() != nil {
+			// Check if it was cancelled
 			task.Status = SubagentStatusCancelled
 			task.Summary = "Task cancelled during execution"
 			task.Result = "Task cancelled during execution"
@@ -859,7 +883,22 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		originChatID = cid
 	}
 
-	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
+	// Use a background context to decouple the subagent from the parent agent's
+	// lifecycle. This prevents the subagent from being killed by parent context
+	// cancellation (e.g., timeouts, /stop commands). The subagent should run
+	// independently like its async counterpart (SpawnTool).
+	taskCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Apply timeout if configured
+	sm.mu.RLock()
+	timeout := sm.timeout
+	sm.mu.RUnlock()
+	if timeout > 0 {
+		var timeoutCancel context.CancelFunc
+		taskCtx, timeoutCancel = context.WithTimeout(taskCtx, timeout)
+		defer timeoutCancel()
+	}
+	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
 		Provider:      agentProvider,
 		Model:         agentModel,
 		Tools:         tools,

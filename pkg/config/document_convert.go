@@ -13,17 +13,18 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 
 	// Copiar agents
 	cfg.Agents.Defaults = AgentDefaults{
-		Workspace:           doc.Agents.Defaults.Workspace,
-		RestrictToWorkspace: doc.Agents.Defaults.RestrictToWorkspace,
-		Provider:            doc.Agents.Defaults.Provider,
-		Model:               doc.Agents.Defaults.Model,
-		ModelFallbacks:      doc.Agents.Defaults.ModelFallbacks,
-		ImageModel:          doc.Agents.Defaults.ImageModel,
-		ImageModelFallbacks: doc.Agents.Defaults.ImageModelFallbacks,
-		MaxTokens:           doc.Agents.Defaults.MaxTokens,
-		Temperature:         doc.Agents.Defaults.Temperature,
-		MaxToolIterations:   doc.Agents.Defaults.MaxToolIterations,
-		MaxReadLines:        doc.Agents.Defaults.MaxReadLines,
+		Workspace:              doc.Agents.Defaults.Workspace,
+		RestrictToWorkspace:    doc.Agents.Defaults.RestrictToWorkspace,
+		Provider:               doc.Agents.Defaults.Provider,
+		Model:                  doc.Agents.Defaults.Model,
+		ModelFallbacks:         doc.Agents.Defaults.ModelFallbacks,
+		ImageModel:             doc.Agents.Defaults.ImageModel,
+		ImageModelFallbacks:    doc.Agents.Defaults.ImageModelFallbacks,
+		MaxTokens:              doc.Agents.Defaults.MaxTokens,
+		Temperature:            doc.Agents.Defaults.Temperature,
+		MaxToolIterations:      doc.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:           doc.Agents.Defaults.MaxReadLines,
+		SubagentTimeoutMinutes: doc.Agents.Defaults.SubagentTimeoutMinutes,
 	}
 
 	for _, agent := range doc.Agents.List {
@@ -218,16 +219,17 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	// Agents
 	result["agents"] = map[string]interface{}{
 		"defaults": map[string]interface{}{
-			"workspace":             doc.Agents.Defaults.Workspace,
-			"restrict_to_workspace": doc.Agents.Defaults.RestrictToWorkspace,
-			"provider":              doc.Agents.Defaults.Provider,
-			"model":                 doc.Agents.Defaults.Model,
-			"model_fallbacks":       doc.Agents.Defaults.ModelFallbacks,
-			"image_model":           doc.Agents.Defaults.ImageModel,
-			"image_model_fallbacks": doc.Agents.Defaults.ImageModelFallbacks,
-			"max_tokens":            doc.Agents.Defaults.MaxTokens,
-			"temperature":           doc.Agents.Defaults.Temperature,
-			"max_tool_iterations":   doc.Agents.Defaults.MaxToolIterations,
+			"workspace":                doc.Agents.Defaults.Workspace,
+			"restrict_to_workspace":    doc.Agents.Defaults.RestrictToWorkspace,
+			"provider":                 doc.Agents.Defaults.Provider,
+			"model":                    doc.Agents.Defaults.Model,
+			"model_fallbacks":          doc.Agents.Defaults.ModelFallbacks,
+			"image_model":              doc.Agents.Defaults.ImageModel,
+			"image_model_fallbacks":    doc.Agents.Defaults.ImageModelFallbacks,
+			"max_tokens":               doc.Agents.Defaults.MaxTokens,
+			"temperature":              doc.Agents.Defaults.Temperature,
+			"max_tool_iterations":      doc.Agents.Defaults.MaxToolIterations,
+			"subagent_timeout_minutes": doc.Agents.Defaults.SubagentTimeoutMinutes,
 		},
 	}
 	if len(doc.Agents.List) > 0 {
@@ -521,17 +523,18 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc := defaultEditableDocument()
 	doc.Agents.Defaults = EditableAgentDefaults{
-		Workspace:           cfg.Agents.Defaults.Workspace,
-		RestrictToWorkspace: cfg.Agents.Defaults.RestrictToWorkspace,
-		Provider:            cfg.Agents.Defaults.Provider,
-		Model:               cfg.Agents.Defaults.Model,
-		ModelFallbacks:      cfg.Agents.Defaults.ModelFallbacks,
-		ImageModel:          cfg.Agents.Defaults.ImageModel,
-		ImageModelFallbacks: cfg.Agents.Defaults.ImageModelFallbacks,
-		MaxTokens:           cfg.Agents.Defaults.MaxTokens,
-		Temperature:         cfg.Agents.Defaults.Temperature,
-		MaxToolIterations:   cfg.Agents.Defaults.MaxToolIterations,
-		MaxReadLines:        cfg.Agents.Defaults.MaxReadLines,
+		Workspace:              cfg.Agents.Defaults.Workspace,
+		RestrictToWorkspace:    cfg.Agents.Defaults.RestrictToWorkspace,
+		Provider:               cfg.Agents.Defaults.Provider,
+		Model:                  cfg.Agents.Defaults.Model,
+		ModelFallbacks:         cfg.Agents.Defaults.ModelFallbacks,
+		ImageModel:             cfg.Agents.Defaults.ImageModel,
+		ImageModelFallbacks:    cfg.Agents.Defaults.ImageModelFallbacks,
+		MaxTokens:              cfg.Agents.Defaults.MaxTokens,
+		Temperature:            cfg.Agents.Defaults.Temperature,
+		MaxToolIterations:      cfg.Agents.Defaults.MaxToolIterations,
+		MaxReadLines:           cfg.Agents.Defaults.MaxReadLines,
+		SubagentTimeoutMinutes: cfg.Agents.Defaults.SubagentTimeoutMinutes,
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {

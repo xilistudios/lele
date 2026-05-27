@@ -32,7 +32,7 @@ export const endpoints = {
     sessions: '/api/v1/chat/sessions',
     session: (
       sessionKey: string,
-      subresource?: 'model' | 'name' | 'agent' | 'thinking' | 'context' | 'summary',
+      subresource?: 'model' | 'name' | 'agent' | 'thinking' | 'context' | 'summary' | 'subagents',
     ) => {
       const base = `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}`
       return subresource ? `${base}/${subresource}` : base
@@ -42,8 +42,7 @@ export const endpoints = {
       `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/compact`,
     approve: (sessionKey: string) =>
       `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}/approve`,
-    streams: (sessionKey: string) =>
-      `/api/v1/chat/streams/${encodeURIComponent(sessionKey)}`,
+    streams: (sessionKey: string) => `/api/v1/chat/streams/${encodeURIComponent(sessionKey)}`,
     streamState: (sessionKey: string, messageID: string) =>
       `/api/v1/chat/streams/${encodeURIComponent(sessionKey)}/${encodeURIComponent(messageID)}`,
   },

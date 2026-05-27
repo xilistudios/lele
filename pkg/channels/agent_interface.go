@@ -54,6 +54,8 @@ type AgentProvidable interface {
 	SetThinkLevel(sessionKey string, level string) bool
 	// GetSubagents list los subagentes activos
 	GetSubagents() string
+	// GetSessionSubagents returns subagent tasks that belong to a given session
+	GetSessionSubagents(sessionKey string) []SubagentTaskInfo
 	// ClearSession limpia el historial de una sesión
 	ClearSession(sessionKey string) string
 	// GetName devuelve el nombre de una sesión
@@ -114,4 +116,17 @@ type AgentBasicInfo struct {
 	SkillsFilter   []string
 	Reasoning      *config.ReasoningConfig
 	SupportsImages bool
+}
+
+// SubagentTaskInfo contains information about a subagent task for the API.
+type SubagentTaskInfo struct {
+	TaskID     string
+	SessionKey string
+	Label      string
+	AgentID    string
+	Status     string
+	Summary    string
+	Created    int64
+	Updated    int64
+	Iterations int
 }

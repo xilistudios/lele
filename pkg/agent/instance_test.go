@@ -126,7 +126,7 @@ func TestNewAgentInstance_ResolvesNamedProviderModelAlias(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = tmpDir
 	cfg.Agents.Defaults.Provider = "chutes"
-	cfg.Agents.Defaults.Model = "chutes/minimax"
+	cfg.Agents.Defaults.Model = "chutes:minimax"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"chutes": {
 			Type: "openai",
@@ -137,8 +137,8 @@ func TestNewAgentInstance_ResolvesNamedProviderModelAlias(t *testing.T) {
 	}
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
-	if agent.Model != "chutes/minimax_m2.5" {
-		t.Fatalf("Model = %q, want %q", agent.Model, "chutes/minimax_m2.5")
+	if agent.Model != "chutes:minimax_m2.5" {
+		t.Fatalf("Model = %q, want %q", agent.Model, "chutes:minimax_m2.5")
 	}
 }
 
@@ -152,7 +152,7 @@ func TestNewAgentInstance_ResolvesSlashModelAliasOnDefaultProvider(t *testing.T)
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = tmpDir
 	cfg.Agents.Defaults.Provider = "nanogpt"
-	cfg.Agents.Defaults.Model = "qwen/qwen3.5-397b-a17b-thinking"
+	cfg.Agents.Defaults.Model = "nanogpt:qwen/qwen3.5-397b-a17b-thinking"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"nanogpt": {
 			Type: "openai",
@@ -163,8 +163,8 @@ func TestNewAgentInstance_ResolvesSlashModelAliasOnDefaultProvider(t *testing.T)
 	}
 
 	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
-	if agent.Model != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
-		t.Fatalf("Model = %q, want %q", agent.Model, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	if agent.Model != "nanogpt:Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("Model = %q, want %q", agent.Model, "nanogpt:Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
 }
 
@@ -178,7 +178,7 @@ func TestNewAgentInstance_RegistersReadImageToolWhenVisionEnabled(t *testing.T) 
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = tmpDir
 	cfg.Agents.Defaults.Provider = "openai"
-	cfg.Agents.Defaults.Model = "openai/gpt-4o"
+	cfg.Agents.Defaults.Model = "openai:gpt-4o"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
 			Type: "openai",
@@ -207,7 +207,7 @@ func TestNewAgentInstance_ReadImageToolAlwaysRegistered(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = tmpDir
 	cfg.Agents.Defaults.Provider = "openai"
-	cfg.Agents.Defaults.Model = "openai/gpt-4o-mini"
+	cfg.Agents.Defaults.Model = "openai:gpt-4o-mini"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
 			Type: "openai",
@@ -242,7 +242,7 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Workspace = tmpDir
 	cfg.Agents.Defaults.Provider = "myprovider"
-	cfg.Agents.Defaults.Model = "myprovider/vision-model"
+	cfg.Agents.Defaults.Model = "myprovider:vision-model"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"myprovider": {
 			Type: "openai",

@@ -215,6 +215,120 @@ describe('Message ordering fixes', () => {
     })
   })
 
+  describe('Bug 4: Streaming text should appear after tool calls, not before', () => {
+    test('new assistant inserted before trailing tools when tools arrive first', () => {
+      // Scenario: tool.executing arrives before message.stream (ack delayed/lost)
+      // 1. tool.executing → streamingMessages: [tool1]
+      // 2. message.stream → should insert assistant BEFORE tool1
+      // Expected: [assistant, tool1], NOT [tool1, assistant]
+
+      // Simulate tool.executing arriving first (no assistant exists)
+      const current: ChatMessage[] = [
+        createTestMessage('t1', 'tool', '', {
+          toolName: 'exec',
+          toolStatus: 'executing',
+        }),
+        createTestMessage('t2', 'tool', '', {
+          toolName: 'read_file',
+          toolStatus: 'executing',
+        }),
+      ]
+
+      // Simulate ensureAssistantPlaceholder creating a new assistant
+      // with the fixed logic
+      const newMsg = createTestMessage('a1', 'assistant', 'Let me check...', {
+        streaming: true,
+      })
+
+      // Find insertion point (fixed logic from useStreamQueues)
+      const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+
+      let insertIdx: number
+      if (lastAssistantIdx >= 0) {
+        const assistantPos = current.length - 1 - lastAssistantIdx
+        insertIdx = assistantPos + 1
+        while (insertIdx < current.length && current[insertIdx].role === 'tool') {
+          insertIdx++
+        }
+      } else {
+        // No assistant exists — insert before all tool messages
+        const firstToolIdx = current.findIndex((m) => m.role === 'tool')
+        insertIdx = firstToolIdx >= 0 ? firstToolIdx : current.length
+      }
+
+      const arr = [...current]
+      arr.splice(insertIdx, 0, newMsg)
+
+      // Assistant should be BEFORE the tools
+      expect(arr.map((m) => m.id)).toEqual(['a1', 't1', 't2'])
+      expect(arr[0].role).toBe('assistant')
+      expect(arr[1].role).toBe('tool')
+      expect(arr[2].role).toBe('tool')
+    })
+
+    test('assistant appended after existing assistant and its tools', () => {
+      // Scenario: second assistant arrives while first has tools
+      // Streaming: [asst1, tool1, tool2]
+      // New assistant should go AFTER tool2 (it's a subsequent turn)
+
+      const current: ChatMessage[] = [
+        createTestMessage('a1', 'assistant', 'First response', { streaming: false }),
+        createTestMessage('t1', 'tool', '', { toolName: 'exec', toolStatus: 'completed' }),
+        createTestMessage('t2', 'tool', '', { toolName: 'read_file', toolStatus: 'completed' }),
+      ]
+
+      const newMsg = createTestMessage('a2', 'assistant', 'Second response', {
+        streaming: true,
+      })
+
+      const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+
+      let insertIdx: number
+      if (lastAssistantIdx >= 0) {
+        const assistantPos = current.length - 1 - lastAssistantIdx
+        insertIdx = assistantPos + 1
+        while (insertIdx < current.length && current[insertIdx].role === 'tool') {
+          insertIdx++
+        }
+      } else {
+        const firstToolIdx = current.findIndex((m) => m.role === 'tool')
+        insertIdx = firstToolIdx >= 0 ? firstToolIdx : current.length
+      }
+
+      const arr = [...current]
+      arr.splice(insertIdx, 0, newMsg)
+
+      // New assistant goes after all tools of the previous assistant
+      expect(arr.map((m) => m.id)).toEqual(['a1', 't1', 't2', 'a2'])
+    })
+
+    test('assistant appended at end when no tools exist', () => {
+      // Normal flow: message.ack creates assistant before any tools
+      const current: ChatMessage[] = []
+
+      const newMsg = createTestMessage('a1', 'assistant', 'Hello!', { streaming: true })
+
+      const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
+
+      let insertIdx: number
+      if (lastAssistantIdx >= 0) {
+        const assistantPos = current.length - 1 - lastAssistantIdx
+        insertIdx = assistantPos + 1
+        while (insertIdx < current.length && current[insertIdx].role === 'tool') {
+          insertIdx++
+        }
+      } else {
+        const firstToolIdx = current.findIndex((m) => m.role === 'tool')
+        insertIdx = firstToolIdx >= 0 ? firstToolIdx : current.length
+      }
+
+      const arr = [...current]
+      arr.splice(insertIdx, 0, newMsg)
+
+      expect(arr.map((m) => m.id)).toEqual(['a1'])
+    })
+  })
+
   describe('Bug 3: Duplicate assistant when optimistic user lingers in HTTP cache', () => {
     test('mergeMessages should not duplicate completed assistant when base cache still has optimistic user', () => {
       // Scenario:
@@ -233,13 +347,19 @@ describe('Message ordering fixes', () => {
         createTestMessage('a1', 'assistant', 'Hi!'),
         createTestMessage('u2', 'user', 'How are you?'),
         // Optimistic user that leaked into base cache after refetch merge:
-        createTestMessage('u2-opt', 'user', 'How are you?', { optimistic: true, optimisticBaseCount: 1 }),
+        createTestMessage('u2-opt', 'user', 'How are you?', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
         // Real assistant from HTTP history:
         createTestMessage('a2-base', 'assistant', 'Doing great!'),
       ]
 
       const streamingMessages: ChatMessage[] = [
-        createTestMessage('u2-opt', 'user', 'How are you?', { optimistic: true, optimisticBaseCount: 1 }),
+        createTestMessage('u2-opt', 'user', 'How are you?', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
         // Streaming assistant that just completed:
         createTestMessage('a2-ws', 'assistant', 'Doing great!', { streaming: false }),
       ]

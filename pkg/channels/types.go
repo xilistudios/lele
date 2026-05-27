@@ -257,6 +257,23 @@ type SessionContextResponse struct {
 	UsagePercent           float64 `json:"usage_percent"`
 }
 
+type SubagentTaskEntry struct {
+	TaskID     string `json:"task_id"`
+	SessionKey string `json:"session_key"`
+	Label      string `json:"label"`
+	AgentID    string `json:"agent_id"`
+	Status     string `json:"status"`
+	Summary    string `json:"summary"`
+	Created    int64  `json:"created"`
+	Updated    int64  `json:"updated"`
+	Iterations int    `json:"iterations"`
+}
+
+type SessionSubagentsResponse struct {
+	SessionKey string              `json:"session_key"`
+	Subagents  []SubagentTaskEntry `json:"subagents"`
+}
+
 type NativeAgentInfo struct {
 	ID        string                  `json:"id"`
 	Name      string                  `json:"name"`

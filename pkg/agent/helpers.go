@@ -83,17 +83,17 @@ func FormatToolsForLog(tools []providers.ToolDefinition) string {
 	return result
 }
 
-// FormatProviderModel formats provider/model string
+// FormatProviderModel formats provider:model string
 func FormatProviderModel(provider, model string) string {
 	provider = strings.TrimSpace(provider)
 	model = strings.TrimSpace(model)
 	if provider == "" {
 		return model
 	}
-	if strings.HasPrefix(model, provider+"/") {
+	if strings.HasPrefix(model, provider+":") {
 		return model
 	}
-	return provider + "/" + model
+	return provider + ":" + model
 }
 
 // ExtractPeer extracts the routing peer from inbound message metadata

@@ -19,8 +19,8 @@ Model selection can come from:
 
 Lele accepts these common forms:
 
-- explicit provider form: `provider/model`
-- provider alias form: `my-provider/fast`
+- explicit provider form: `provider:model`
+- provider alias form: `my-provider:fast`
 - raw model names in contexts where the provider is already known
 
 ## Named Provider Models

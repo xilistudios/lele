@@ -219,11 +219,12 @@ func resolveProviderSelection(cfg *config.Config) (providerSelection, error) {
 			providerName = ref.Provider
 		}
 		// OpenRouter requires fully qualified model names like
-		// "deepseek/deepseek-v4-pro". ParseModelRef strips the provider
-		// prefix, so restore the original model when the provider is
-		// explicitly OpenRouter.
-		if providerName == "openrouter" && strings.Contains(rawModel, "/") {
-			model = rawModel
+		// "deepseek/deepseek-v4-pro". ParseModelRef already correctly
+		// extracts the model name from both "openrouter:deepseek/deepseek-v4-pro"
+		// (colon format) and "openrouter/deepseek/deepseek-v4-pro" (slash format).
+		// ref.Model always contains the correct model name for the API.
+		if providerName == "openrouter" {
+			model = ref.Model
 		}
 	}
 	return resolveProviderSelectionByName(cfg, providerName, model)

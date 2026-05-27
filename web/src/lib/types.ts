@@ -468,6 +468,23 @@ export type SessionContextResponse = {
   usage_percent: number
 }
 
+export type SubagentTaskInfo = {
+  task_id: string
+  session_key: string
+  label: string
+  agent_id: string
+  status: 'running' | 'completed' | 'not_done' | 'needs_context' | 'failed' | 'cancelled'
+  summary: string
+  created: number
+  updated: number
+  iterations: number
+}
+
+export type SessionSubagentsResponse = {
+  session_key: string
+  subagents: SubagentTaskInfo[]
+}
+
 export type ChannelsResponse = {
   channels: ChannelInfo[]
 }

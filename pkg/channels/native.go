@@ -277,6 +277,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/context", withAuth(n.handleSessionContext))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/summary", withAuth(n.handleSessionSummary))
 	mux.HandleFunc("POST /api/v1/chat/sessions/{sessionKey}/compact", withAuth(n.handleSessionCompact))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/subagents", withAuth(n.handleSessionSubagents))
 
 	// Agents
 	mux.HandleFunc("GET /api/v1/agents", withAuth(n.handleAgents))

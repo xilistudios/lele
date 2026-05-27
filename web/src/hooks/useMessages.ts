@@ -9,12 +9,9 @@ import {
 } from '../lib/chatMessageBuilder'
 import type { ChatMessage, ToolStatus } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
-import { chatHistoryQueryKey } from './useChatHistory'
+import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
 import { useApprovals } from './useApprovals'
-import {
-  type MessageEventContext,
-  dispatchMessageEvent,
-} from './messageEventHandlers'
+import { chatHistoryQueryKey } from './useChatHistory'
 import { useProcessingSessions } from './useProcessingSessions'
 import { useStreamQueues } from './useStreamQueues'
 

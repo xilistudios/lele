@@ -378,9 +378,9 @@ func (n *NativeChannel) buildModelGroups(_ string, _ []string) []ModelGroup {
 			resolved := strings.TrimSpace(modelCfg.Model)
 			var value string
 			if resolved != "" {
-				value = providerName + "/" + resolved
+				value = providerName + ":" + resolved
 			} else {
-				value = providerName + "/" + alias
+				value = providerName + ":" + alias
 			}
 			group.Models = append(group.Models, ModelOption{
 				Value:     value,
@@ -420,7 +420,7 @@ func (n *NativeChannel) listAllModels() []string {
 		}
 		sort.Strings(aliases)
 		for _, alias := range aliases {
-			key := providerName + "/" + alias
+			key := providerName + ":" + alias
 			if seen[key] {
 				continue
 			}

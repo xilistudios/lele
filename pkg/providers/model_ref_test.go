@@ -2,8 +2,8 @@ package providers
 
 import "testing"
 
-func TestParseModelRef_WithSlash(t *testing.T) {
-	ref := ParseModelRef("anthropic/claude-opus", "openai")
+func TestParseModelRef_WithColon(t *testing.T) {
+	ref := ParseModelRef("anthropic:claude-opus", "openai")
 	if ref == nil {
 		t.Fatal("expected non-nil ref")
 	}
@@ -15,7 +15,7 @@ func TestParseModelRef_WithSlash(t *testing.T) {
 	}
 }
 
-func TestParseModelRef_WithoutSlash(t *testing.T) {
+func TestParseModelRef_WithoutColon(t *testing.T) {
 	ref := ParseModelRef("gpt-4", "openai")
 	if ref == nil {
 		t.Fatal("expected non-nil ref")
@@ -35,15 +35,15 @@ func TestParseModelRef_Empty(t *testing.T) {
 	}
 }
 
-func TestParseModelRef_EmptyModelAfterSlash(t *testing.T) {
-	ref := ParseModelRef("openai/", "default")
+func TestParseModelRef_EmptyModelAfterColon(t *testing.T) {
+	ref := ParseModelRef("openai:", "default")
 	if ref != nil {
 		t.Errorf("expected nil for empty model, got %+v", ref)
 	}
 }
 
 func TestParseModelRef_WhitespaceHandling(t *testing.T) {
-	ref := ParseModelRef("  anthropic / claude-opus  ", "openai")
+	ref := ParseModelRef("  anthropic : claude-opus  ", "openai")
 	if ref == nil {
 		t.Fatal("expected non-nil ref")
 	}
@@ -90,10 +90,10 @@ func TestModelKey(t *testing.T) {
 		model    string
 		want     string
 	}{
-		{"openai", "gpt-4", "openai/gpt-4"},
-		{"Anthropic", "Claude-Opus", "anthropic/claude-opus"},
-		{"claude", "sonnet", "anthropic/sonnet"},
-		{"z.ai", "Model-X", "zai/model-x"},
+		{"openai", "gpt-4", "openai:gpt-4"},
+		{"Anthropic", "Claude-Opus", "anthropic:claude-opus"},
+		{"claude", "sonnet", "anthropic:sonnet"},
+		{"z.ai", "Model-X", "zai:model-x"},
 	}
 
 	for _, tt := range tests {
@@ -105,7 +105,7 @@ func TestModelKey(t *testing.T) {
 }
 
 func TestParseModelRef_ProviderNormalization(t *testing.T) {
-	ref := ParseModelRef("Z.AI/model-x", "default")
+	ref := ParseModelRef("Z.AI:model-x", "default")
 	if ref == nil {
 		t.Fatal("expected non-nil ref")
 	}
@@ -121,5 +121,26 @@ func TestParseModelRef_DefaultProviderNormalization(t *testing.T) {
 	}
 	if ref.Provider != "openai" {
 		t.Errorf("provider = %q, want openai (normalized from GPT)", ref.Provider)
+	}
+}
+
+func TestStripProviderPrefix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"openrouter:deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro"},
+		{"anthropic:claude-opus", "claude-opus"},
+		{"claude-opus", "claude-opus"},
+		{"", ""},
+		{"  openai:gpt-4  ", "gpt-4"},
+		{"nanogpt:moonshotai/kimi-k2.5:thinking", "moonshotai/kimi-k2.5:thinking"},
+	}
+
+	for _, tt := range tests {
+		got := StripProviderPrefix(tt.input)
+		if got != tt.want {
+			t.Errorf("StripProviderPrefix(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }

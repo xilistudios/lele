@@ -540,23 +540,23 @@ func TestProvidersConfig_ResolveModelAlias(t *testing.T) {
 		},
 	}
 
-	if got := cfg.Providers.ResolveModelAlias("chutes/minimax", ""); got != "chutes/minimax_m2.5" {
-		t.Fatalf("ResolveModelAlias(chutes/minimax) = %q, want %q", got, "chutes/minimax_m2.5")
+	if got := cfg.Providers.ResolveModelAlias("chutes:minimax", ""); got != "chutes:minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(chutes:minimax) = %q, want %q", got, "chutes:minimax_m2.5")
 	}
-	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "chutes/minimax_m2.5" {
-		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "chutes/minimax_m2.5")
+	if got := cfg.Providers.ResolveModelAlias("minimax", "chutes"); got != "chutes:minimax_m2.5" {
+		t.Fatalf("ResolveModelAlias(minimax, default chutes) = %q, want %q", got, "chutes:minimax_m2.5")
 	}
-	if got := cfg.Providers.ResolveModelAlias("nanogpt/kimi", "nanogpt"); got != "nanogpt/moonshotai/kimi-k2.5:thinking" {
-		t.Fatalf("ResolveModelAlias(nanogpt/kimi, default nanogpt) = %q, want %q", got, "nanogpt/moonshotai/kimi-k2.5:thinking")
+	if got := cfg.Providers.ResolveModelAlias("nanogpt:kimi", "nanogpt"); got != "nanogpt:moonshotai/kimi-k2.5:thinking" {
+		t.Fatalf("ResolveModelAlias(nanogpt:kimi, default nanogpt) = %q, want %q", got, "nanogpt:moonshotai/kimi-k2.5:thinking")
 	}
-	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", "nanogpt"); got != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
-		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking, default nanogpt) = %q, want %q", got, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	if got := cfg.Providers.ResolveModelAlias("qwen:qwen3.5-397b-a17b-thinking", "nanogpt"); got != "qwen-portal:Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("ResolveModelAlias(qwen:qwen3.5-397b-a17b-thinking, default nanogpt) = %q, want %q", got, "qwen-portal:Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
-	if got := cfg.Providers.ResolveModelAlias("nanogpt/qwen/qwen3.5-397b-a17b-thinking", ""); got != "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
-		t.Fatalf("ResolveModelAlias(nanogpt/qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "nanogpt/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	if got := cfg.Providers.ResolveModelAlias("nanogpt:qwen/qwen3.5-397b-a17b-thinking", ""); got != "nanogpt:Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("ResolveModelAlias(nanogpt:qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "nanogpt:Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
-	if got := cfg.Providers.ResolveModelAlias("qwen/qwen3.5-397b-a17b-thinking", ""); got != "qwen-portal/Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
-		t.Fatalf("ResolveModelAlias(qwen/qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen-portal/Qwen/Qwen3.5-397B-A17B-Thinking-2507")
+	if got := cfg.Providers.ResolveModelAlias("qwen:qwen3.5-397b-a17b-thinking", ""); got != "qwen-portal:Qwen/Qwen3.5-397B-A17B-Thinking-2507" {
+		t.Fatalf("ResolveModelAlias(qwen:qwen3.5-397b-a17b-thinking) = %q, want %q", got, "qwen-portal:Qwen/Qwen3.5-397B-A17B-Thinking-2507")
 	}
 }
 
@@ -579,14 +579,14 @@ func TestProvidersConfig_ResolveModelAlias_KeyOnlyNoModelField(t *testing.T) {
 		},
 	}
 
-	if got := cfg.Providers.ResolveModelAlias("deepseek/deepseek-v4-flash", "alibaba"); got != "deepseek/deepseek-v4-flash" {
-		t.Fatalf("ResolveModelAlias(deepseek/deepseek-v4-flash, alibaba) = %q, want %q", got, "deepseek/deepseek-v4-flash")
+	if got := cfg.Providers.ResolveModelAlias("deepseek:deepseek-v4-flash", "alibaba"); got != "deepseek:deepseek-v4-flash" {
+		t.Fatalf("ResolveModelAlias(deepseek:deepseek-v4-flash, alibaba) = %q, want %q", got, "deepseek:deepseek-v4-flash")
 	}
-	if got := cfg.Providers.ResolveModelAlias("deepseek/deepseek-v4-pro", ""); got != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("ResolveModelAlias(deepseek/deepseek-v4-pro) = %q, want %q", got, "deepseek/deepseek-v4-pro")
+	if got := cfg.Providers.ResolveModelAlias("deepseek:deepseek-v4-pro", ""); got != "deepseek:deepseek-v4-pro" {
+		t.Fatalf("ResolveModelAlias(deepseek:deepseek-v4-pro) = %q, want %q", got, "deepseek:deepseek-v4-pro")
 	}
-	if got := cfg.Providers.ResolveModelAlias("deepseek-v4-flash", "deepseek"); got != "deepseek/deepseek-v4-flash" {
-		t.Fatalf("ResolveModelAlias(deepseek-v4-flash, deepseek) = %q, want %q", got, "deepseek/deepseek-v4-flash")
+	if got := cfg.Providers.ResolveModelAlias("deepseek-v4-flash", "deepseek"); got != "deepseek:deepseek-v4-flash" {
+		t.Fatalf("ResolveModelAlias(deepseek-v4-flash, deepseek) = %q, want %q", got, "deepseek:deepseek-v4-flash")
 	}
 }
 

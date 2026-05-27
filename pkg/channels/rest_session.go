@@ -3,6 +3,7 @@ package channels
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -213,4 +214,62 @@ func (n *NativeChannel) handleSessionCompact(w http.ResponseWriter, r *http.Requ
 
 	result := n.agentLoop.CompactSession(sessionKey)
 	writeJSON(w, http.StatusOK, map[string]string{"result": result})
+}
+
+func (n *NativeChannel) handleSessionSubagents(w http.ResponseWriter, r *http.Request) {
+	sessionKey := r.PathValue("sessionKey")
+	if sessionKey == "" {
+		writeError(w, http.StatusBadRequest, "session_key required", "missing_session_key")
+		return
+	}
+
+	// Normalize session key: subagent tasks store OriginSessionKey as
+	// "native:<sessionKey>", but the REST API receives the bare UUID.
+	// Match the format used in handleChatHistory for subagent lookups.
+	if !strings.HasPrefix(sessionKey, "native:") {
+		sessionKey = "native:" + sessionKey
+	}
+
+	clientID := getClientID(r)
+
+	if !n.validateSessionOwnership(clientID, sessionKey) {
+		writeError(w, http.StatusForbidden, "access denied to this session", "session_forbidden")
+		return
+	}
+
+	tasks := n.agentLoop.GetSessionSubagents(sessionKey)
+
+	// Sort by Created descending (newest first)
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Created > tasks[j].Created
+	})
+
+	// Convert to API response type
+	subagents := make([]SubagentTaskEntry, len(tasks))
+	origSessionKey := r.PathValue("sessionKey")
+	for i, task := range tasks {
+		// Strip "native:" prefix from subagent session keys so the
+		// frontend can match them against the bare-UUID parent session keys.
+		cleanSessionKey := task.SessionKey
+		if strings.HasPrefix(cleanSessionKey, "native:") {
+			cleanSessionKey = cleanSessionKey[len("native:"):]
+		}
+		subagents[i] = SubagentTaskEntry{
+			TaskID:     task.TaskID,
+			SessionKey: cleanSessionKey,
+			Label:      task.Label,
+			AgentID:    task.AgentID,
+			Status:     task.Status,
+			Summary:    task.Summary,
+			Created:    task.Created,
+			Updated:    task.Updated,
+			Iterations: task.Iterations,
+		}
+	}
+
+	// Return the original (non-normalized) session key for frontend consistency
+	writeJSON(w, http.StatusOK, SessionSubagentsResponse{
+		SessionKey: origSessionKey,
+		Subagents:  subagents,
+	})
 }
