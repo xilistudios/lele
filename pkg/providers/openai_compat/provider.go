@@ -318,18 +318,28 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 }
 
 func normalizeModel(model, apiBase string) string {
-	idx := strings.Index(model, "/")
-	if idx == -1 {
-		return model
+	// Strip provider prefix in colon format ("provider:model").
+	// The provider prefix is for internal routing only and must not
+	// be sent to the external API.
+	if idx := strings.Index(model, ":"); idx > 0 {
+		model = model[idx+1:]
 	}
 
+	// Legacy: handle old "openrouter/deepseek/..." slash format.
+	// The colon format ("openrouter:deepseek/...") is already handled above.
 	if strings.Contains(strings.ToLower(apiBase), "openrouter.ai") {
-		if strings.HasPrefix(strings.ToLower(model), "openrouter/") {
-			return model[idx+1:]
+		if idx := strings.Index(model, "/"); idx > 0 {
+			if strings.HasPrefix(strings.ToLower(model), "openrouter/") {
+				return model[idx+1:]
+			}
 		}
 		return model
 	}
-	return model[idx+1:]
+
+	// For all other providers: return model as-is.
+	// The deprecated "provider/model" slash format is no longer stripped here;
+	// models with slashes are legitimate identifiers (e.g., "namespace/model-name").
+	return model
 }
 
 // isOpenRouterEndpoint checks if the apiBase belongs to OpenRouter.

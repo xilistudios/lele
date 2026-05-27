@@ -1325,8 +1325,8 @@ func TestFormatProviderModel(t *testing.T) {
 		model    string
 		want     string
 	}{
-		{name: "provider and model", provider: "moonshotai", model: "Kimi-K2.5-TEE", want: "moonshotai/Kimi-K2.5-TEE"},
-		{name: "already prefixed", provider: "moonshotai", model: "moonshotai/Kimi-K2.5-TEE", want: "moonshotai/Kimi-K2.5-TEE"},
+		{name: "provider and model", provider: "moonshotai", model: "Kimi-K2.5-TEE", want: "moonshotai:Kimi-K2.5-TEE"},
+		{name: "already prefixed", provider: "moonshotai", model: "moonshotai:Kimi-K2.5-TEE", want: "moonshotai:Kimi-K2.5-TEE"},
 		{name: "no provider", provider: "", model: "Kimi-K2.5-TEE", want: "Kimi-K2.5-TEE"},
 	}
 
@@ -1851,8 +1851,8 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 
 	// Verify model is set (resolved with provider prefix)
 	model := al.providable.GetSessionModel(sessionKey)
-	if model != "test/custom-model" {
-		t.Fatalf("Expected model 'test/custom-model', got '%s'", model)
+	if model != "test:custom-model" {
+		t.Fatalf("Expected model 'test:custom-model', got '%s'", model)
 	}
 
 	// Call SetSessionAgent with the SAME agent ID (simulates frontend sending agent_id with message)
@@ -1860,8 +1860,8 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 
 	// Verify model is STILL preserved (not reset to agent1-model)
 	modelAfter := al.providable.GetSessionModel(sessionKey)
-	if modelAfter != "test/custom-model" {
-		t.Fatalf("Expected model to remain 'test/custom-model', got '%s' - SetSessionAgent incorrectly cleared model", modelAfter)
+	if modelAfter != "test:custom-model" {
+		t.Fatalf("Expected model to remain 'test:custom-model', got '%s' - SetSessionAgent incorrectly cleared model", modelAfter)
 	}
 
 	// Now change to a different agent
@@ -1869,7 +1869,7 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 
 	// Verify model IS cleared when agent actually changes
 	modelAfterChange := al.providable.GetSessionModel(sessionKey)
-	if modelAfterChange != "test/agent2-model" {
-		t.Fatalf("Expected model 'test/agent2-model' after agent change, got '%s'", modelAfterChange)
+	if modelAfterChange != "test:agent2-model" {
+		t.Fatalf("Expected model 'test:agent2-model' after agent change, got '%s'", modelAfterChange)
 	}
 }

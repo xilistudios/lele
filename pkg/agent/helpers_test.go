@@ -338,7 +338,7 @@ func TestFormatToolsForLog_LongParametersTruncation(t *testing.T) {
 // TestFormatProviderModel_NormalCase tests normal provider/model combination
 func TestFormatProviderModel_NormalCase(t *testing.T) {
 	result := FormatProviderModel("openai", "gpt-4")
-	expected := "openai/gpt-4"
+	expected := "openai:gpt-4"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -346,8 +346,8 @@ func TestFormatProviderModel_NormalCase(t *testing.T) {
 
 // TestFormatProviderModel_AlreadyPrefixed tests when model already has provider prefix
 func TestFormatProviderModel_AlreadyPrefixed(t *testing.T) {
-	result := FormatProviderModel("openai", "openai/gpt-4")
-	expected := "openai/gpt-4"
+	result := FormatProviderModel("openai", "openai:gpt-4")
+	expected := "openai:gpt-4"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -365,7 +365,7 @@ func TestFormatProviderModel_EmptyProvider(t *testing.T) {
 // TestFormatProviderModel_EmptyModel tests with empty model
 func TestFormatProviderModel_EmptyModel(t *testing.T) {
 	result := FormatProviderModel("openai", "")
-	expected := "openai/"
+	expected := "openai:"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -383,7 +383,7 @@ func TestFormatProviderModel_BothEmpty(t *testing.T) {
 // TestFormatProviderModel_WhitespaceTrimming tests that whitespace is trimmed
 func TestFormatProviderModel_WhitespaceTrimming(t *testing.T) {
 	result := FormatProviderModel("  openai  ", "  gpt-4  ")
-	expected := "openai/gpt-4"
+	expected := "openai:gpt-4"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -392,7 +392,7 @@ func TestFormatProviderModel_WhitespaceTrimming(t *testing.T) {
 // TestFormatProviderModel_DifferentProviderPrefix tests with different provider prefix
 func TestFormatProviderModel_DifferentProviderPrefix(t *testing.T) {
 	result := FormatProviderModel("anthropic", "claude-3")
-	expected := "anthropic/claude-3"
+	expected := "anthropic:claude-3"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -401,7 +401,7 @@ func TestFormatProviderModel_DifferentProviderPrefix(t *testing.T) {
 // TestFormatProviderModel_CaseSensitivity tests case sensitivity
 func TestFormatProviderModel_CaseSensitivity(t *testing.T) {
 	result := FormatProviderModel("OpenAI", "GPT-4")
-	expected := "OpenAI/GPT-4"
+	expected := "OpenAI:GPT-4"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}
@@ -410,8 +410,8 @@ func TestFormatProviderModel_CaseSensitivity(t *testing.T) {
 // TestFormatProviderModel_PartialPrefix tests model with partial/different prefix
 func TestFormatProviderModel_PartialPrefix(t *testing.T) {
 	// Model has a different prefix than provider
-	result := FormatProviderModel("openai", "anthropic/claude-3")
-	expected := "openai/anthropic/claude-3"
+	result := FormatProviderModel("openai", "anthropic:claude-3")
+	expected := "openai:anthropic:claude-3"
 	if result != expected {
 		t.Errorf("Expected '%s', got: %s", expected, result)
 	}

@@ -1510,13 +1510,13 @@ func TestLLMRunnerFormatProviderModel(t *testing.T) {
 			name:     "provider and model",
 			provider: "openai",
 			model:    "gpt-4",
-			want:     "openai/gpt-4",
+			want:     "openai:gpt-4",
 		},
 		{
 			name:     "already prefixed",
 			provider: "openai",
-			model:    "openai/gpt-4",
-			want:     "openai/gpt-4",
+			model:    "openai:gpt-4",
+			want:     "openai:gpt-4",
 		},
 		{
 			name:     "empty provider",
@@ -1528,13 +1528,13 @@ func TestLLMRunnerFormatProviderModel(t *testing.T) {
 			name:     "whitespace trimming",
 			provider: "  openai  ",
 			model:    "  gpt-4  ",
-			want:     "openai/gpt-4",
+			want:     "openai:gpt-4",
 		},
 		{
 			name:     "different provider",
 			provider: "anthropic",
 			model:    "claude-3",
-			want:     "anthropic/claude-3",
+			want:     "anthropic:claude-3",
 		},
 	}
 

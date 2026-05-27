@@ -639,19 +639,31 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	}
 
 	provider := normalizeProviderKey(defaultProvider)
-	if provider != "" && strings.Contains(rawModel, "/") {
-		if resolved, found := p.resolveModelAliasInProvider(provider, rawModel, true); found {
-			return provider + "/" + resolved
+	pattern := provider + ":"
+	if provider != "" && strings.HasPrefix(rawModel, pattern) {
+		// Strip the provider prefix before looking up the alias in the provider.
+		// The models map uses bare model names as keys (e.g., "minimax"),
+		// not prefixed ones (e.g., "chutes:minimax").
+		modelName := strings.TrimSpace(rawModel[len(pattern):])
+		if modelName != "" {
+			if resolved, found := p.resolveModelAliasInProvider(provider, modelName, true); found {
+				return pattern + resolved
+			}
 		}
 	}
 
-	model := rawModel
-	if idx := strings.Index(rawModel, "/"); idx > 0 {
+	// Handle "provider:model" format - extract provider and model
+	var model string
+	idx := strings.Index(rawModel, ":")
+	if idx > 0 {
 		provider = normalizeProviderKey(rawModel[:idx])
 		model = strings.TrimSpace(rawModel[idx+1:])
 		if model == "" {
 			return rawModel
 		}
+	} else {
+		// No colon present - use the raw model as-is with the default provider
+		model = rawModel
 	}
 
 	if provider == "" {
@@ -662,8 +674,8 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 	normalizedModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
 
 	// Try to find model in the specified provider first.
-	if resolved, found := p.resolveModelAliasInProvider(provider, model, strings.Contains(model, "/")); found {
-		return provider + "/" + resolved
+	if resolved, found := p.resolveModelAliasInProvider(provider, model, false); found {
+		return provider + ":" + resolved
 	}
 
 	// If not found in specified provider (or provider doesn't exist),
@@ -688,7 +700,7 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		}
 		if found && strings.TrimSpace(aliasCfg.Model) != "" {
 			resolved := strings.TrimSpace(aliasCfg.Model)
-			return provName + "/" + resolved
+			return provName + ":" + resolved
 		}
 	}
 

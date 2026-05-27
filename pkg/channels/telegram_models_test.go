@@ -30,13 +30,13 @@ func TestSelectedModelCommand(t *testing.T) {
 			name:     "provider and plain model",
 			provider: "nanogpt",
 			model:    "minimax-m2.5",
-			want:     "/model nanogpt/minimax-m2.5",
+			want:     "/model nanogpt:minimax-m2.5",
 		},
 		{
 			name:     "already prefixed model",
 			provider: "nanogpt",
-			model:    "minimax/minimax-m2.5",
-			want:     "/model minimax/minimax-m2.5",
+			model:    "minimax:minimax-m2.5",
+			want:     "/model minimax:minimax-m2.5",
 		},
 	}
 

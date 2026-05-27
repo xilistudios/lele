@@ -25,7 +25,7 @@ func testCfg(t *testing.T, agents []config.AgentConfig) *config.Config {
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         "/tmp/lele-test-registry",
-				Model:             "testprovider/test-model",
+				Model:             "testprovider:test-model",
 				MaxTokens:         8192,
 				MaxToolIterations: 10,
 			},
@@ -314,7 +314,7 @@ func TestAgentRegistry_ReloadAgents_RecreateOnModelChange(t *testing.T) {
 
 	// Change model
 	newCfg := testCfg(t, []config.AgentConfig{
-		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
+		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider:different-model"}},
 	})
 	registry.ReloadAgents(newCfg)
 
@@ -357,8 +357,8 @@ func TestAgentConfigChanged_Fallbacks(t *testing.T) {
 	// Change fallbacks via agent model config
 	newCfg := testCfg(t, []config.AgentConfig{
 		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{
-			Primary:   "testprovider/test-model",
-			Fallbacks: []string{"testprovider/fallback-model"},
+			Primary:   "testprovider:test-model",
+			Fallbacks: []string{"testprovider:fallback-model"},
 		}},
 	})
 	registry.ReloadAgents(newCfg)
@@ -367,8 +367,8 @@ func TestAgentConfigChanged_Fallbacks(t *testing.T) {
 	if reloaded == original {
 		t.Error("expected new agent instance when fallbacks changed, got same instance")
 	}
-	if len(reloaded.Fallbacks) != 1 || reloaded.Fallbacks[0] != "testprovider/fallback-model" {
-		t.Errorf("expected fallbacks [testprovider/fallback-model], got %v", reloaded.Fallbacks)
+	if len(reloaded.Fallbacks) != 1 || reloaded.Fallbacks[0] != "testprovider:fallback-model" {
+		t.Errorf("expected fallbacks [testprovider:fallback-model], got %v", reloaded.Fallbacks)
 	}
 }
 
@@ -401,7 +401,7 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 
 	// Change model to one with a different context window
 	newCfg := testCfg(t, []config.AgentConfig{
-		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider/different-model"}},
+		{ID: "alpha", Default: true, Model: &config.AgentModelConfig{Primary: "testprovider:different-model"}},
 	})
 	newCfg.Providers.Named["testprovider"] = config.NamedProviderConfig{
 		Type: "openai",

@@ -175,6 +175,11 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 	llmOptions := lc.buildLLMOptions(opts)
 
+	// Strip provider prefix from model for API calls.
+	// The provider prefix (e.g., "openrouter:") is for internal routing only
+	// and must not be sent to the external LLM API.
+	apiModel := providers.StripProviderPrefix(opts.model)
+
 	// Try streaming if available and requested
 	if opts.streamOnChunk != nil {
 		if sp, ok := opts.agent.Provider.(providers.StreamingLLMProvider); ok {
@@ -183,7 +188,7 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 				opts.ctx,
 				opts.messages,
 				opts.toolDefs,
-				opts.model,
+				apiModel,
 				llmOptions,
 				state.onChunk(opts.streamOnChunk),
 				state.onReasoning(opts.streamOnReason),
@@ -194,7 +199,7 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 			}
 			logger.WarnCF("agent", "Streaming provider failed before producing chunks; trying fallback chain", map[string]interface{}{
 				"agent_id": opts.agent.ID,
-				"model":    opts.model,
+				"model":    apiModel,
 				"error":    err.Error(),
 			})
 		}
@@ -206,7 +211,7 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 	}
 
 	// Direct call without fallback
-	return opts.agent.Provider.Chat(opts.ctx, opts.messages, opts.toolDefs, opts.model, llmOptions)
+	return opts.agent.Provider.Chat(opts.ctx, opts.messages, opts.toolDefs, apiModel, llmOptions)
 }
 
 // callWithFallback executes LLM call through the fallback chain
@@ -220,8 +225,11 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
-			fullModel := FormatProviderModel(provider, model)
-			return providerInst.Chat(ctx, opts.messages, opts.toolDefs, fullModel, llmOptions)
+			// Use model directly - candidates already carry bare model names
+		// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
+		// Do NOT wrap with FormatProviderModel — the "provider:model" colon
+		// format is internal-only and would break the API call.
+			return providerInst.Chat(ctx, opts.messages, opts.toolDefs, model, llmOptions)
 		},
 	)
 	if fbErr != nil {

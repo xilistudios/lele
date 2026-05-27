@@ -37,7 +37,7 @@ func TestResolveProviderSelection(t *testing.T) {
 			name: "explicit deepseek provider uses deepseek defaults",
 			setup: func(cfg *config.Config) {
 				cfg.Agents.Defaults.Provider = "deepseek"
-				cfg.Agents.Defaults.Model = "deepseek/deepseek-chat"
+				cfg.Agents.Defaults.Model = "deepseek:deepseek-chat"
 				cfg.Providers.DeepSeek.APIKey = "deepseek-key"
 				cfg.Providers.DeepSeek.Proxy = "http://127.0.0.1:7890"
 			},
@@ -70,7 +70,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "openrouter model uses openrouter defaults",
 			setup: func(cfg *config.Config) {
-				cfg.Agents.Defaults.Model = "openrouter/auto"
+				cfg.Agents.Defaults.Model = "openrouter:auto"
 				cfg.Providers.OpenRouter.APIKey = "sk-or-test"
 			},
 			wantType:    providerTypeHTTPCompat,
@@ -124,7 +124,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "groq model uses groq base default",
 			setup: func(cfg *config.Config) {
-				cfg.Agents.Defaults.Model = "groq/llama-3.3-70b"
+				cfg.Agents.Defaults.Model = "groq:llama-3.3-70b"
 				cfg.Providers.Groq.APIKey = "gsk-key"
 			},
 			wantType:    providerTypeHTTPCompat,
@@ -133,7 +133,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "ollama model uses ollama base default",
 			setup: func(cfg *config.Config) {
-				cfg.Agents.Defaults.Model = "ollama/qwen2.5:14b"
+				cfg.Agents.Defaults.Model = "ollama:qwen2.5:14b"
 				cfg.Providers.Ollama.APIKey = "ollama-key"
 			},
 			wantType:    providerTypeHTTPCompat,
@@ -142,7 +142,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "moonshot model keeps proxy and default base",
 			setup: func(cfg *config.Config) {
-				cfg.Agents.Defaults.Model = "moonshot/kimi-k2.5"
+				cfg.Agents.Defaults.Model = "moonshot:kimi-k2.5"
 				cfg.Providers.Moonshot.APIKey = "moonshot-key"
 				cfg.Providers.Moonshot.Proxy = "http://127.0.0.1:7890"
 			},
@@ -160,7 +160,7 @@ func TestResolveProviderSelection(t *testing.T) {
 		{
 			name: "openrouter prefix without key returns provider key error",
 			setup: func(cfg *config.Config) {
-				cfg.Agents.Defaults.Model = "openrouter/auto"
+				cfg.Agents.Defaults.Model = "openrouter:auto"
 			},
 			wantErrSubstr: "no API key configured for provider",
 		},
@@ -200,7 +200,7 @@ func TestResolveProviderSelection(t *testing.T) {
 
 func TestCreateProviderReturnsHTTPProviderForOpenRouter(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Agents.Defaults.Model = "openrouter/auto"
+	cfg.Agents.Defaults.Model = "openrouter:auto"
 	cfg.Providers.OpenRouter.APIKey = "sk-or-test"
 
 	provider, err := CreateProvider(cfg)
@@ -304,7 +304,7 @@ func TestCreateProviderReturnsCodexProviderForOpenAIOAuth(t *testing.T) {
 
 func TestResolveProviderSelection_UsesNamedProviderAndModelAlias(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Agents.Defaults.Model = "my-openai-compatible/fast"
+	cfg.Agents.Defaults.Model = "my-openai-compatible:fast"
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"my-openai-compatible": {
 			Type: "openai",

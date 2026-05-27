@@ -14,14 +14,15 @@ import (
 )
 
 // extractProviderFromModel extracts the provider name from a model string.
-// If model is "provider/model-name", returns "provider".
+// Delegates to providers.ParseModelRef for consistent parsing.
+// If model is "provider:model-name", returns "provider".
 // If model has no provider prefix, returns defaultProvider.
 func extractProviderFromModel(model, defaultProvider string) string {
-	model = strings.TrimSpace(model)
-	if idx := strings.Index(model, "/"); idx > 0 {
-		return strings.ToLower(strings.TrimSpace(model[:idx]))
+	ref := providers.ParseModelRef(model, defaultProvider)
+	if ref == nil {
+		return strings.ToLower(strings.TrimSpace(defaultProvider))
 	}
-	return strings.ToLower(strings.TrimSpace(defaultProvider))
+	return ref.Provider
 }
 
 // AgentInstance represents a fully configured agent with its own workspace,
@@ -52,23 +53,21 @@ type AgentInstance struct {
 
 func getProviderModelConfig(cfg *config.Config, model string, defaultProvider string) (config.ProviderModelConfig, bool) {
 	// The model parameter is the raw model specification which may be:
-	// 1. An alias like "myprovider/vision-model" that maps to a different resolved model
-	// 2. A direct model reference like "myprovider/gpt-4o-vision"
+	// 1. An alias like "myprovider:vision-model" that maps to a different resolved model
+	// 2. A direct model reference like "myprovider:gpt-4o-vision"
 	// We handle both by attempting multiple lookup strategies:
 	// - First: exact alias match
 	// - Second: normalized alias match (lowercase, dots replaced with dashes)
 	// - Third: search by resolved model name in the Model field
 	model = strings.TrimSpace(model)
 
-	// Extract provider and model name from the model string
-	var providerName, modelName string
-	if idx := strings.Index(model, "/"); idx > 0 {
-		providerName = strings.ToLower(strings.TrimSpace(model[:idx]))
-		modelName = strings.TrimSpace(model[idx+1:])
-	} else {
-		providerName = strings.ToLower(strings.TrimSpace(defaultProvider))
-		modelName = model
+	// Use ParseModelRef for consistent provider:model parsing
+	ref := providers.ParseModelRef(model, defaultProvider)
+	if ref == nil {
+		return config.ProviderModelConfig{}, false
 	}
+	providerName := ref.Provider
+	modelName := ref.Model
 
 	if providerName == "" || modelName == "" {
 		return config.ProviderModelConfig{}, false

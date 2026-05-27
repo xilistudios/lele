@@ -493,14 +493,28 @@ func TestProviderChat_ToolOrderAffectsRequestOnlyWhenInputOrderChanges(t *testin
 }
 
 func TestNormalizeModel_UsesAPIBase(t *testing.T) {
-	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
-		t.Fatalf("normalizeModel(deepseek) = %q, want %q", got, "deepseek-chat")
+	// Colon format: "provider:model" → stripped to bare model
+	if got := normalizeModel("deepseek:deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
+		t.Fatalf("normalizeModel(deepseek:deepseek-chat) = %q, want %q", got, "deepseek-chat")
 	}
-	if got := normalizeModel("chutes/minimax-m2.5", "https://llm.chutes.ai/v1"); got != "minimax-m2.5" {
-		t.Fatalf("normalizeModel(chutes) = %q, want %q", got, "minimax-m2.5")
+	if got := normalizeModel("chutes:minimax-m2.5", "https://llm.chutes.ai/v1"); got != "minimax-m2.5" {
+		t.Fatalf("normalizeModel(chutes:minimax-m2.5) = %q, want %q", got, "minimax-m2.5")
 	}
+
+	// Bare model names (already stripped by StripProviderPrefix) pass through
+	if got := normalizeModel("deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek-chat" {
+		t.Fatalf("normalizeModel(bare) = %q, want %q", got, "deepseek-chat")
+	}
+
+	// Legacy: openrouter/ prefix still stripped for backward compat
 	if got := normalizeModel("openrouter/auto", "https://openrouter.ai/api/v1"); got != "auto" {
 		t.Fatalf("normalizeModel(openrouter/auto) = %q, want %q", got, "auto")
+	}
+
+	// Deprecated slash format for non-OpenRouter: passes through as-is
+	// (the slash is treated as part of the model identifier)
+	if got := normalizeModel("deepseek/deepseek-chat", "https://api.deepseek.com/v1"); got != "deepseek/deepseek-chat" {
+		t.Fatalf("normalizeModel(deprecated slash) = %q, want %q", got, "deepseek/deepseek-chat")
 	}
 }
 

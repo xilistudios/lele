@@ -473,7 +473,7 @@ func TestImageFallback_NoCandidates(t *testing.T) {
 func TestResolveCandidates_Simple(t *testing.T) {
 	cfg := ModelConfig{
 		Primary:   "gpt-4",
-		Fallbacks: []string{"anthropic/claude-opus", "groq/llama-3"},
+		Fallbacks: []string{"anthropic:claude-opus", "groq:llama-3"},
 	}
 
 	candidates := ResolveCandidates(cfg, "openai")
@@ -494,8 +494,8 @@ func TestResolveCandidates_Simple(t *testing.T) {
 
 func TestResolveCandidates_Deduplication(t *testing.T) {
 	cfg := ModelConfig{
-		Primary:   "openai/gpt-4",
-		Fallbacks: []string{"openai/gpt-4", "anthropic/claude"},
+		Primary:   "openai:gpt-4",
+		Fallbacks: []string{"openai:gpt-4", "anthropic:claude"},
 	}
 
 	candidates := ResolveCandidates(cfg, "default")
@@ -519,7 +519,7 @@ func TestResolveCandidates_EmptyFallbacks(t *testing.T) {
 func TestResolveCandidates_EmptyPrimary(t *testing.T) {
 	cfg := ModelConfig{
 		Primary:   "",
-		Fallbacks: []string{"anthropic/claude"},
+		Fallbacks: []string{"anthropic:claude"},
 	}
 
 	candidates := ResolveCandidates(cfg, "openai")

@@ -387,7 +387,7 @@ func getConfiguredModels(cfg *config.Config) []string {
 			continue
 		}
 		for alias := range named.Models {
-			models = append(models, provName+"/"+alias)
+			models = append(models, provName+":"+alias)
 		}
 		if len(named.Models) == 0 && named.APIKey != "" {
 			models = append(models, provName+"/default")
@@ -417,7 +417,7 @@ func selectModel(cfg *config.Config, prompt string, defaultVal string) string {
 func configureAgentDefaults(cfg *config.Config) {
 	fmt.Println("\n=== Agent Configuration ===")
 
-	defaultModel := "nanogpt/qwen3-5-397b-thinking"
+	defaultModel := "nanogpt:qwen3-5-397b-thinking"
 	configuredModels := getConfiguredModels(cfg)
 	if len(configuredModels) > 0 {
 		defaultModel = configuredModels[0]
@@ -426,7 +426,7 @@ func configureAgentDefaults(cfg *config.Config) {
 	model := selectModel(cfg, "Default model", defaultModel)
 	cfg.Agents.Defaults.Model = model
 
-	if idx := strings.Index(model, "/"); idx > 0 {
+	if idx := strings.Index(model, ":"); idx > 0 {
 		cfg.Agents.Defaults.Provider = model[:idx]
 	}
 

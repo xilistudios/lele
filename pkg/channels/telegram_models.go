@@ -172,11 +172,11 @@ func selectedModelCommand(provider, model string) string {
 	if isModelReference(model) || provider == "" {
 		return "/model " + model
 	}
-	return fmt.Sprintf("/model %s/%s", provider, model)
+	return fmt.Sprintf("/model %s:%s", provider, model)
 }
 
 func isModelReference(model string) bool {
-	idx := strings.Index(model, "/")
+	idx := strings.Index(model, ":")
 	return idx > 0 && idx < len(model)-1
 }
 
