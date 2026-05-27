@@ -33,11 +33,14 @@ export const ChatHeader = memo(function ChatHeader() {
   const handleSelectSubagent = useCallback(
     (sessionKey: string) => {
       if (currentSessionKey) {
-        onSelectSession(sessionKey, { parentSessionKey: currentSessionKey })
+        // Only navigate — let ChatRoute's first useEffect handle onSelectSession.
+        // Calling onSelectSession here creates a race condition: the state updates
+        // (currentSessionKey → subagent) may be committed before the URL changes,
+        // causing the useEffect to see mismatched state/URL and reset the session.
         navigate(`/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`)
       }
     },
-    [currentSessionKey, onSelectSession, navigate],
+    [currentSessionKey, navigate],
   )
 
   const currentTitle = currentSession

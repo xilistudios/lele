@@ -188,8 +188,8 @@ function ChatRoute() {
     }
 
     const newPath = parentSessionKey
-      ? `/chat/${parentSessionKey}/subagent/${currentSessionKey}`
-      : `/chat/${currentSessionKey}`
+      ? `/chat/${encodeURIComponent(parentSessionKey)}/subagent/${encodeURIComponent(currentSessionKey)}`
+      : `/chat/${encodeURIComponent(currentSessionKey)}`
 
     if (location.pathname !== newPath) {
       navigate(newPath, { replace: true })
