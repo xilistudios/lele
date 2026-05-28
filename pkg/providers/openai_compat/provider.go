@@ -247,7 +247,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
 	}
 
-	return parseSSEStream(resp.Body, onChunk, onReasoning)
+	return parseSSEStream(ctx, resp.Body, onChunk, onReasoning)
 }
 
 func parseResponse(body []byte) (*LLMResponse, error) {
@@ -383,7 +383,7 @@ func asFloat(v interface{}) (float64, bool) {
 	}
 }
 
-func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
+func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
 	var contentBuf strings.Builder
 	var reasoningBuf strings.Builder
 	var toolCalls []protocoltypes.ToolCall
@@ -394,6 +394,12 @@ func parseSSEStream(body io.Reader, onChunk func(chunk string, done bool), onRea
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		// Check for context cancellation (e.g., user cancel) to stop processing
+		// the SSE stream promptly instead of waiting for the server to close.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		line := scanner.Text()
 
 		if !strings.HasPrefix(line, "data:") {

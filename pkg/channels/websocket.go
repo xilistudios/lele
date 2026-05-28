@@ -446,7 +446,18 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 }
 
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, eventID string) {
-	n.agentLoop.StopAgent(client.SessionKey)
+	logger.InfoCF("native", "Cancel request received", map[string]interface{}{
+		"client_id":   client.ID,
+		"session_key": client.SessionKey,
+	})
+
+	result := n.agentLoop.StopAgent(client.SessionKey)
+
+	logger.InfoCF("native", "Cancel request processed", map[string]interface{}{
+		"client_id":   client.ID,
+		"session_key": client.SessionKey,
+		"result":      result,
+	})
 
 	n.emitNativeEvent(client.SessionKey, "cancel.ack", map[string]interface{}{
 		"status":      "cancelled",

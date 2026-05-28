@@ -126,27 +126,45 @@ func (sm *sessionManagerImpl) RegisterSessionCancel(sessionKey string, cancel co
 // CancelSession cancels all active processing for a session and returns the count of stopped operations.
 func (sm *sessionManagerImpl) CancelSession(sessionKey string) int {
 	if sessionKey == "" {
+		logger.WarnCF("agent", "CancelSession called with empty session key", nil)
 		return 0
 	}
 
 	rawGroup, ok := sm.sessionCancels.Load(sessionKey)
 	if !ok {
+		logger.WarnCF("agent", "CancelSession: no cancel group found for session", map[string]interface{}{
+			"session_key": sessionKey,
+		})
 		return 0
 	}
+
+	logger.InfoCF("agent", "CancelSession: cancelling session", map[string]interface{}{
+		"session_key": sessionKey,
+	})
 
 	switch entry := rawGroup.(type) {
 	case *sessionCancelGroup:
 		stopped := entry.cancelAll()
 		sm.sessionCancels.Delete(sessionKey)
+		logger.InfoCF("agent", "CancelSession: cancelled session group", map[string]interface{}{
+			"session_key": sessionKey,
+			"stopped":     stopped,
+		})
 		return stopped
 	case context.CancelFunc:
 		if entry != nil {
 			entry()
 		}
 		sm.sessionCancels.Delete(sessionKey)
+		logger.InfoCF("agent", "CancelSession: cancelled single session func", map[string]interface{}{
+			"session_key": sessionKey,
+		})
 		return 1
 	default:
 		sm.sessionCancels.Delete(sessionKey)
+		logger.WarnCF("agent", "CancelSession: unknown cancel entry type", map[string]interface{}{
+			"session_key": sessionKey,
+		})
 		return 0
 	}
 }
@@ -159,9 +177,13 @@ func (sm *sessionManagerImpl) IsSessionProcessing(sessionKey string) bool {
 
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
 // Returns statistics about the compaction if it was triggered.
+//
+// The token estimate includes system prompt + summary + history to match the
+// actual context sent to the LLM (and shown by /status). Without this,
+// the compaction would only trigger based on history tokens, ignoring the
+// potentially large system prompt.
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
-	tokenEstimate := sm.EstimateTokens(newHistory)
 
 	if agent.ContextWindow <= 0 {
 		logger.DebugCF("agent", "maybeSummarize skipped: no context window configured", map[string]interface{}{
@@ -172,15 +194,34 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 		return nil
 	}
 
+	// Calculate total context tokens including system prompt and summary,
+	// matching what formatStatusResponse and the actual LLM request use.
+	historyTokens := sm.EstimateTokens(newHistory)
+
+	summaryTokens := 0
+	if summary := agent.Sessions.GetSummary(sessionKey); summary != "" {
+		summaryTokens = sm.EstimateTokens([]providers.Message{{Role: "user", Content: summary}})
+	}
+
+	systemPromptTokens := 0
+	if agent.ContextBuilder != nil {
+		systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+		systemPromptTokens = sm.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
+	}
+
+	tokenEstimate := systemPromptTokens + summaryTokens + historyTokens
 	threshold := agent.ContextWindow * 75 / 100
 
 	logger.DebugCF("agent", "maybeSummarize check", map[string]interface{}{
-		"session_key":    sessionKey,
-		"agent_id":       agent.ID,
-		"context_window": agent.ContextWindow,
-		"threshold":      threshold,
-		"token_estimate": tokenEstimate,
-		"history_count":  len(newHistory),
+		"session_key":          sessionKey,
+		"agent_id":             agent.ID,
+		"context_window":       agent.ContextWindow,
+		"threshold":            threshold,
+		"token_estimate":       tokenEstimate,
+		"system_prompt_tokens": systemPromptTokens,
+		"summary_tokens":       summaryTokens,
+		"history_tokens":       historyTokens,
+		"history_count":        len(newHistory),
 	})
 
 	if tokenEstimate > threshold {

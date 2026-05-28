@@ -414,6 +414,13 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			}
 
 			execResults = append(execResults, toolExecResult{tc: tc, res: toolResult})
+
+			// Check context after each tool execution to allow prompt cancellation.
+			// Without this, the agent would continue executing remaining tools
+			// even after the user requested cancellation.
+			if err := ctx.Err(); err != nil {
+				return "", iteration, err
+			}
 		}
 
 		// Phase 2: Append all tool result messages (role: "tool") in order
@@ -440,6 +447,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		for _, ctxMsg := range allContextMsgs {
 			messages = append(messages, ctxMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
+		}
+
+		// Check context after all tool results are processed to allow prompt cancellation
+		// before starting the next LLM iteration.
+		if err := ctx.Err(); err != nil {
+			return "", iteration, err
 		}
 	}
 

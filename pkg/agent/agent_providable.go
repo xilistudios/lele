@@ -300,12 +300,24 @@ func (ap *agentProvidableImpl) GetStatus(sessionKey string) string {
 
 // StopAgent stops the agent processing for a session.
 func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
-	sessionKey = ap.al.ResolveSessionKey(sessionKey)
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	logger.InfoCF("agent", "StopAgent called", map[string]interface{}{
+		"session_key":   sessionKey,
+		"resolved_key":  resolvedKey,
+		"is_processing": ap.al.sessionManager.IsSessionProcessing(resolvedKey),
+	})
+
 	subagentCount := 0
 	if ap.al.toolCoordinator != nil {
 		subagentCount = ap.al.toolCoordinator.stopAllSubagents()
 	}
-	ap.al.cancelSession(sessionKey)
+	cancelled := ap.al.cancelSession(resolvedKey)
+	logger.InfoCF("agent", "StopAgent completed", map[string]interface{}{
+		"session_key":    resolvedKey,
+		"cancelled":      cancelled,
+		"subagent_count": subagentCount,
+	})
+
 	if subagentCount > 0 {
 		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
 	}

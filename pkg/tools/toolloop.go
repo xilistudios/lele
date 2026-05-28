@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -34,12 +36,111 @@ type ToolLoopConfig struct {
 	VerboseCallback VerboseCallback
 	SessionRecorder SessionRecorder
 	SessionKey      string
+	Retry           *RetryConfig // Retry config for LLM calls. nil = no retry.
+	ContextWindow   int          // Max tokens for context. 0 = no compaction.
 }
 
 // ToolLoopResult contains the result of running the tool loop.
 type ToolLoopResult struct {
 	Content    string
 	Iterations int
+}
+
+// estimateLoopTokens estimates the number of tokens in a message list.
+// Uses 2.5 chars per token heuristic (same as session manager).
+func estimateLoopTokens(messages []providers.Message) int {
+	totalChars := 0
+	for _, m := range messages {
+		totalChars += utf8.RuneCountInString(m.Content)
+		totalChars += utf8.RuneCountInString(m.ReasoningContent)
+		for _, tc := range m.ToolCalls {
+			if tc.Function != nil {
+				totalChars += utf8.RuneCountInString(tc.Function.Arguments)
+			}
+		}
+	}
+	return totalChars * 2 / 5
+}
+
+// compactLoopMessages reduces context size by summarizing old tool interactions.
+// Keeps the system prompt (first message) and the last keepLast messages.
+// Everything in between is summarized via LLM and replaced with a single message.
+func compactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int) ([]providers.Message, bool) {
+	if len(messages) <= keepLast+2 {
+		return messages, false
+	}
+
+	systemMsg := messages[0]
+	tail := messages[len(messages)-keepLast:]
+	middle := messages[1 : len(messages)-keepLast]
+
+	// Build summary prompt from middle messages
+	var parts []string
+	for _, m := range middle {
+		switch m.Role {
+		case "assistant":
+			if m.Content != "" {
+				c := m.Content
+				if len(c) > 500 {
+					c = c[:500] + "..."
+				}
+				parts = append(parts, "Assistant: "+c)
+			}
+			for _, tc := range m.ToolCalls {
+				args := ""
+				if tc.Function != nil {
+					args = tc.Function.Arguments
+					if len(args) > 200 {
+						args = args[:200] + "..."
+					}
+				}
+				parts = append(parts, fmt.Sprintf("Tool call: %s(%s)", tc.Name, args))
+			}
+		case "tool":
+			c := m.Content
+			if len(c) > 300 {
+				c = c[:300] + "..."
+			}
+			parts = append(parts, "Tool result: "+c)
+		case "user":
+			c := m.Content
+			if len(c) > 500 {
+				c = c[:500] + "..."
+			}
+			parts = append(parts, "User: "+c)
+		}
+	}
+
+	summaryInput := strings.Join(parts, "\n")
+	prompt := "Summarize this conversation segment concisely, preserving all key facts, " +
+		"decisions, file paths, and action items:\n\n" + summaryInput
+
+	apiModel := providers.StripProviderPrefix(model)
+	resp, err := provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
+		"max_tokens":  1024,
+		"temperature": 0.3,
+	})
+
+	if err != nil || resp == nil || resp.Content == "" {
+		logger.WarnCF("toolloop", "Context compaction summarization failed, skipping", map[string]any{
+			"error": fmt.Sprintf("%v", err),
+		})
+		return messages, false
+	}
+
+	summaryMsg := providers.Message{
+		Role:    "user",
+		Content: "[Context compacted — summary of previous " + fmt.Sprintf("%d", len(middle)) + " messages]\n" + resp.Content,
+	}
+
+	compacted := append([]providers.Message{systemMsg, summaryMsg}, tail...)
+	logger.InfoCF("toolloop", "Context compacted", map[string]any{
+		"before_messages": len(messages),
+		"after_messages":  len(compacted),
+		"before_tokens":   estimateLoopTokens(messages),
+		"after_tokens":    estimateLoopTokens(compacted),
+	})
+	return compacted, true
 }
 
 // RunToolLoop executes the LLM + tool call iteration loop.
@@ -78,7 +179,17 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			llmOpts = map[string]any{}
 		}
 		// 3. Call LLM
-		response, err := config.Provider.Chat(ctx, messages, providerToolDefs, config.Model, llmOpts)
+		// Strip provider prefix from model for API calls.
+		// The provider prefix (e.g., "openrouter:") is for internal routing only
+		// and must not be sent to the external LLM API.
+		apiModel := providers.StripProviderPrefix(config.Model)
+		var response *providers.LLMResponse
+		var err error
+		if config.Retry != nil {
+			response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
+		} else {
+			response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
+		}
 		if err != nil {
 			logger.ErrorCF("toolloop", "LLM call failed",
 				map[string]any{
@@ -188,6 +299,25 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, toolResultMsg)
+			}
+		}
+
+		// 8. Context compaction — if context window is configured and we exceed 75%,
+		// summarize old messages to prevent hitting the model's token limit.
+		if config.ContextWindow > 0 {
+			tokens := estimateLoopTokens(messages)
+			threshold := config.ContextWindow * 75 / 100
+			if tokens > threshold {
+				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
+					"tokens":         tokens,
+					"threshold":      threshold,
+					"context_window": config.ContextWindow,
+					"iteration":      iteration,
+				})
+				// Keep last 6 messages (3 tool call/result pairs) for continuity
+				if compacted, ok := compactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {
+					messages = compacted
+				}
 			}
 		}
 	}

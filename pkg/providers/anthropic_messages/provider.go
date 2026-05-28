@@ -6,6 +6,7 @@
 package anthropicmessages
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -77,7 +78,8 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("API key not configured")
 	}
 
-	// Strip provider prefix if present (e.g. "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7")
+	// Strip provider prefix and anthropic. prefix if present
+	// (e.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7")
 	model = normalizeModel(model)
 
 	// Build request body
@@ -144,6 +146,65 @@ func (p *Provider) Chat(
 
 	// Parse response
 	return parseResponseBody(body)
+}
+
+// ChatStream sends messages to the Anthropic Messages API with streaming (SSE).
+func (p *Provider) ChatStream(
+	ctx context.Context,
+	messages []Message,
+	tools []ToolDefinition,
+	model string,
+	options map[string]any,
+	onChunk func(chunk string, done bool),
+	onReasoning func(reasoningChunk string),
+) (*LLMResponse, error) {
+	if p.apiKey == "" {
+		return nil, fmt.Errorf("API key not configured")
+	}
+	if onChunk == nil {
+		return p.Chat(ctx, messages, tools, model, options)
+	}
+
+	model = normalizeModel(model)
+
+	// Build request body with streaming enabled
+	requestBody, err := buildRequestBody(messages, tools, model, options)
+	if err != nil {
+		return nil, fmt.Errorf("building request body: %w", err)
+	}
+	requestBody["stream"] = true
+
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("serializing request body: %w", err)
+	}
+
+	endpointURL, err := url.JoinPath(p.apiBase, "messages")
+	if err != nil {
+		return nil, fmt.Errorf("building endpoint URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpointURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("creating HTTP request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", p.apiKey)
+	req.Header.Set("Anthropic-Version", defaultAPIVersion)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
+	}
+
+	return parseAnthropicSSEStream(ctx, resp.Body, onChunk, onReasoning)
 }
 
 // GetDefaultModel returns the default model for this provider.
@@ -386,6 +447,168 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 	}, nil
 }
 
+// parseAnthropicSSEStream parses the Anthropic SSE streaming response.
+// Events: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop, ping
+func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
+	var contentBuf strings.Builder
+	var reasoningBuf strings.Builder
+	var toolCalls []ToolCall
+	var finishReason string
+	var usage *UsageInfo
+
+	// Track content blocks by index for tool use accumulation
+	type blockState struct {
+		blockType string // "text", "thinking", "tool_use"
+		id        string
+		name      string
+		inputJSON strings.Builder
+	}
+	blocks := make(map[int]*blockState)
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		line := scanner.Text()
+
+		// SSE format: "event: <type>" followed by "data: <json>"
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+
+		var event struct {
+			Type         string `json:"type"`
+			Index        int    `json:"index"`
+			ContentBlock struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Text string `json:"text"`
+			} `json:"content_block"`
+			Delta struct {
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				Thinking    string `json:"thinking"`
+				PartialJSON string `json:"partial_json"`
+				StopReason  string `json:"stop_reason"`
+			} `json:"delta"`
+			Message struct {
+				Usage struct {
+					InputTokens  int64 `json:"input_tokens"`
+					OutputTokens int64 `json:"output_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+			Usage *struct {
+				OutputTokens int64 `json:"output_tokens"`
+			} `json:"usage"`
+		}
+
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "message_start":
+			if event.Message.Usage.InputTokens > 0 || event.Message.Usage.OutputTokens > 0 {
+				usage = &UsageInfo{
+					PromptTokens:     int(event.Message.Usage.InputTokens),
+					CompletionTokens: int(event.Message.Usage.OutputTokens),
+					TotalTokens:      int(event.Message.Usage.InputTokens + event.Message.Usage.OutputTokens),
+				}
+			}
+
+		case "content_block_start":
+			bs := &blockState{blockType: event.ContentBlock.Type}
+			switch event.ContentBlock.Type {
+			case "text":
+				// text blocks start empty
+			case "thinking":
+				// thinking blocks accumulate in reasoningBuf
+			case "tool_use":
+				bs.id = event.ContentBlock.ID
+				bs.name = event.ContentBlock.Name
+			}
+			blocks[event.Index] = bs
+
+		case "content_block_delta":
+			bs := blocks[event.Index]
+			if bs == nil {
+				continue
+			}
+			switch event.Delta.Type {
+			case "text_delta":
+				contentBuf.WriteString(event.Delta.Text)
+				onChunk(event.Delta.Text, false)
+			case "thinking_delta":
+				reasoningBuf.WriteString(event.Delta.Thinking)
+				if onReasoning != nil {
+					onReasoning(event.Delta.Thinking)
+				}
+			case "input_json_delta":
+				bs.inputJSON.WriteString(event.Delta.PartialJSON)
+			}
+
+		case "content_block_stop":
+			bs := blocks[event.Index]
+			if bs == nil {
+				continue
+			}
+			if bs.blockType == "tool_use" {
+				argsJSON := bs.inputJSON.String()
+				var args map[string]any
+				if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+					args = map[string]any{"raw": argsJSON}
+				}
+				toolCalls = append(toolCalls, ToolCall{
+					ID:        bs.id,
+					Name:      bs.name,
+					Arguments: args,
+					Function: &FunctionCall{
+						Name:      bs.name,
+						Arguments: argsJSON,
+					},
+				})
+			}
+
+		case "message_delta":
+			if event.Delta.StopReason != "" {
+				finishReason = mapStopReason(event.Delta.StopReason)
+			}
+			if event.Usage != nil {
+				if usage == nil {
+					usage = &UsageInfo{}
+				}
+				usage.CompletionTokens = int(event.Usage.OutputTokens)
+				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+			}
+
+		case "message_stop":
+			// Stream complete
+		}
+	}
+
+	onChunk("", true) // Signal completion
+
+	// If we didn't get usage from events, there's none available
+	if usage == nil {
+		usage = &UsageInfo{}
+	}
+
+	return &LLMResponse{
+		Content:      contentBuf.String(),
+		Reasoning:    reasoningBuf.String(),
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		Usage:        usage,
+	}, nil
+}
+
 // normalizeBaseURL ensures the base URL is properly formatted.
 // It removes /v1 suffix if present (to avoid duplication) and always appends /v1.
 // This handles edge cases like "https://api.example.com/v1/proxy" correctly.
@@ -415,12 +638,29 @@ func normalizeBaseURL(apiBase string) string {
 
 // Helper functions for type conversion
 
-// normalizeModel strips the provider prefix from model names.
-// E.g. "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7"
+func mapStopReason(anthropicStopReason string) string {
+	switch anthropicStopReason {
+	case "tool_use":
+		return "tool_calls"
+	case "max_tokens":
+		return "length"
+	case "end_turn", "stop_sequence":
+		return "stop"
+	default:
+		return anthropicStopReason
+	}
+}
+
+// normalizeModel strips provider and AWS Bedrock prefixes from model names.
+// AWS Bedrock model IDs (e.g. "anthropic.claude-opus-4-7") include an "anthropic."
+// prefix that is not part of the Anthropic Messages API model namespace.
+// E.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7"
 func normalizeModel(model string) string {
 	if idx := strings.Index(model, "/"); idx >= 0 {
-		return model[idx+1:]
+		model = model[idx+1:]
 	}
+	// Strip anthropic. prefix (AWS Bedrock model ID convention, not used by Anthropic API)
+	model = strings.TrimPrefix(model, "anthropic.")
 	return model
 }
 

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/config"
+	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
 )
 
 const defaultAnthropicAPIBase = "https://api.anthropic.com/v1"

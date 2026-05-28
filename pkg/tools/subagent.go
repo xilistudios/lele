@@ -49,6 +49,7 @@ type AgentContextInfo struct {
 	MaxIterations int                   // Agent's max tool iterations (0 means use SubagentManager default)
 	MaxTokens     int                   // Agent's max tokens (0 means use SubagentManager default)
 	Temperature   float64               // Agent's temperature (0 means use SubagentManager default)
+	ContextWindow int                   // Agent's context window for compaction (0 = no compaction)
 }
 
 type subagentOutcome struct {
@@ -446,12 +447,25 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 }
 
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
+	startTime := time.Now()
+
 	sm.mu.Lock()
 	previousTask := *task
 	task.Status = SubagentStatusRunning
 	task.Updated = time.Now().UnixMilli()
 	timeout := sm.timeout
 	sm.mu.Unlock()
+
+	logger.InfoCF("subagent", "Subagent task started",
+		map[string]interface{}{
+			"task_id":        task.ID,
+			"label":          task.Label,
+			"agent_id":       task.AgentID,
+			"origin_channel": task.OriginChannel,
+			"origin_chat_id": task.OriginChatID,
+			"timeout":        timeout.String(),
+			"task_preview":   truncateString(task.Task, 200),
+		})
 
 	// Apply timeout to the context if configured.
 	// This creates a child context that will be cancelled after the timeout,
@@ -477,6 +491,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	var agentMaxIterations int
 	var agentMaxTokens int
 	var agentTemperature float64
+	var agentContextWindow int
 
 	if getContextInfo != nil {
 		ctxInfo := getContextInfo(agentID)
@@ -486,6 +501,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		agentMaxIterations = ctxInfo.MaxIterations
 		agentMaxTokens = ctxInfo.MaxTokens
 		agentTemperature = ctxInfo.Temperature
+		agentContextWindow = ctxInfo.ContextWindow
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
 			agentName = ctxInfo.Name
@@ -580,7 +596,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		LLMOptions:      llmOptions,
 		SessionRecorder: recorder,
 		SessionKey:      sessionKey,
+		Retry:           retryConfigPtr(),
+		ContextWindow:   agentContextWindow,
 	}, messages, task.OriginChannel, task.OriginChatID)
+
+	duration := time.Since(startTime)
 
 	// Save subagent history to disk if recorder is available
 	if recorder != nil && sessionKey != "" {
@@ -612,22 +632,76 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	}()
 
 	if err != nil {
-		task.Status = SubagentStatusFailed
-		task.Summary = "Subagent execution failed"
-		task.Result = fmt.Sprintf("Error: %v", err)
-		task.ContextRequest = ""
-		task.Updated = time.Now().UnixMilli()
-		// Check if it was a timeout
+		// Classify the error for detailed logging
+		errType := "unknown"
+		errDetails := map[string]interface{}{
+			"task_id":        task.ID,
+			"label":          task.Label,
+			"agent_id":       task.AgentID,
+			"model":          agentModel,
+			"origin_channel": task.OriginChannel,
+			"origin_chat_id": task.OriginChatID,
+			"duration":       duration.String(),
+			"duration_ms":    duration.Milliseconds(),
+			"error":          err.Error(),
+			"error_type":     fmt.Sprintf("%T", err),
+		}
+
 		if ctx.Err() == context.DeadlineExceeded {
+			errType = "timeout"
+			errDetails["reason"] = "context deadline exceeded (subagent timeout)"
+			errDetails["timeout_config"] = timeout.String()
+			logger.ErrorCF("subagent", "Subagent FAILED: timeout exceeded",
+				errDetails)
+
 			task.Status = SubagentStatusFailed
 			task.Summary = "Subagent timed out"
-			task.Result = fmt.Sprintf("The subagent exceeded its time limit and was stopped. Error: %v", err)
-		} else if ctx.Err() != nil {
-			// Check if it was cancelled
+			task.Result = fmt.Sprintf("The subagent exceeded its time limit (%s) and was stopped. Error: %v", timeout, err)
+		} else if ctx.Err() == context.Canceled {
+			errType = "cancelled"
+			errDetails["reason"] = "context cancelled (manual stop or parent cancellation)"
+			logger.WarnCF("subagent", "Subagent CANCELLED: context was cancelled",
+				errDetails)
+
 			task.Status = SubagentStatusCancelled
 			task.Summary = "Task cancelled during execution"
 			task.Result = "Task cancelled during execution"
+		} else {
+			// Check for specific error patterns in the error message
+			errMsg := strings.ToLower(err.Error())
+			switch {
+			case strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline exceeded"):
+				errType = "http_timeout"
+				errDetails["reason"] = "HTTP request timeout (server did not respond in time)"
+				logger.ErrorCF("subagent", "Subagent FAILED: HTTP timeout - server did not respond",
+					errDetails)
+			case strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "429"):
+				errType = "rate_limited"
+				errDetails["reason"] = "API rate limit exceeded"
+				logger.ErrorCF("subagent", "Subagent FAILED: rate limited by API",
+					errDetails)
+			case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host"):
+				errType = "connection_error"
+				errDetails["reason"] = "cannot connect to LLM API endpoint"
+				logger.ErrorCF("subagent", "Subagent FAILED: connection error to LLM API",
+					errDetails)
+			case strings.Contains(errMsg, "500") || strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503"):
+				errType = "server_error"
+				errDetails["reason"] = "LLM API server error (5xx)"
+				logger.ErrorCF("subagent", "Subagent FAILED: LLM API server error",
+					errDetails)
+			default:
+				errDetails["reason"] = "unexpected error during LLM call or tool execution"
+				logger.ErrorCF("subagent", "Subagent FAILED: unexpected error",
+					errDetails)
+			}
 		}
+
+		task.Status = SubagentStatusFailed
+		task.Summary = fmt.Sprintf("Subagent execution failed [%s]", errType)
+		task.Result = fmt.Sprintf("Error [%s]: %v", errType, err)
+		task.ContextRequest = ""
+		task.Updated = time.Now().UnixMilli()
 		result = &ToolResult{
 			ForLLM:   task.statusMessage(),
 			Silent:   true,
@@ -644,6 +718,20 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.ContextRequest = outcome.ContextRequest
 		task.Iterations = loopResult.Iterations
 		task.Updated = time.Now().UnixMilli()
+
+		logger.InfoCF("subagent", "Subagent task completed",
+			map[string]interface{}{
+				"task_id":     task.ID,
+				"label":       task.Label,
+				"agent_id":    task.AgentID,
+				"model":       agentModel,
+				"status":      task.Status,
+				"iterations":  loopResult.Iterations,
+				"duration":    duration.String(),
+				"duration_ms": duration.Milliseconds(),
+				"summary":     task.Summary,
+			})
+
 		result = &ToolResult{
 			ForLLM:   task.statusMessage(),
 			Silent:   true,
@@ -904,6 +992,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		Tools:         tools,
 		MaxIterations: maxIter,
 		LLMOptions:    llmOptions,
+		Retry:         retryConfigPtr(),
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
@@ -923,4 +1012,26 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		IsError: false,
 		Async:   false,
 	}
+}
+
+// truncateString truncates a string to maxLen characters, appending "..." if truncated.
+func truncateString(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
+// retryConfigPtr returns a pointer to a default RetryConfig.
+// Used to enable automatic retry for subagent LLM calls.
+func retryConfigPtr() *RetryConfig {
+	c := DefaultRetryConfig()
+	return &c
 }
