@@ -77,6 +77,9 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("API key not configured")
 	}
 
+	// Strip provider prefix if present (e.g. "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7")
+	model = normalizeModel(model)
+
 	// Build request body
 	requestBody, err := buildRequestBody(messages, tools, model, options)
 	if err != nil {
@@ -167,9 +170,36 @@ func buildRequestBody(
 		"messages":   []any{},
 	}
 
-	// Set temperature from options
+	// Set temperature from options, unless reasoning/thinking is enabled
+	// (Anthropic models with extended thinking deprecate temperature)
 	if temp, ok := asFloat(options["temperature"]); ok {
-		result["temperature"] = temp
+		skipTemp := false
+		if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
+			if enabled, _ := reasonOpts["enabled"].(bool); enabled {
+				skipTemp = true
+			}
+		}
+		if !skipTemp {
+			result["temperature"] = temp
+		}
+	}
+
+	// Add thinking config for models with reasoning enabled
+	if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
+		if enabled, _ := reasonOpts["enabled"].(bool); enabled {
+			thinking := map[string]any{
+				"type": "adaptive",
+			}
+			result["thinking"] = thinking
+
+			effort := "high" // default
+			if e, ok := reasonOpts["effort"].(string); ok && e != "" {
+				effort = e
+			}
+			result["output_config"] = map[string]any{
+				"effort": effort,
+			}
+		}
 	}
 
 	// Process messages
@@ -384,6 +414,15 @@ func normalizeBaseURL(apiBase string) string {
 }
 
 // Helper functions for type conversion
+
+// normalizeModel strips the provider prefix from model names.
+// E.g. "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7"
+func normalizeModel(model string) string {
+	if idx := strings.Index(model, "/"); idx >= 0 {
+		return model[idx+1:]
+	}
+	return model
+}
 
 func asInt(v any) (int, bool) {
 	switch val := v.(type) {

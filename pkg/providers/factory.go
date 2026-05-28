@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/config"
 )
@@ -22,6 +23,7 @@ const (
 	providerTypeClaudeCLI
 	providerTypeCodexCLI
 	providerTypeGitHubCopilot
+	providerTypeAnthropic
 )
 
 type providerSelection struct {
@@ -132,6 +134,13 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 				sel.apiBase = defaultAnthropicAPIBase
 			}
 			sel.providerType = providerTypeClaudeAuth
+			return sel, nil
+		}
+		if sel.apiKey != "" {
+			if sel.apiBase == "" {
+				sel.apiBase = defaultAnthropicAPIBase
+			}
+			sel.providerType = providerTypeAnthropic
 			return sel, nil
 		}
 	case "claude-cli", "claude-code", "claudecode":
@@ -294,6 +303,7 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				sel.apiKey = cfg.Providers.Anthropic.APIKey
 				sel.apiBase = cfg.Providers.Anthropic.APIBase
 				sel.proxy = cfg.Providers.Anthropic.Proxy
+				sel.providerType = providerTypeAnthropic
 				if sel.apiBase == "" {
 					sel.apiBase = defaultAnthropicAPIBase
 				}
@@ -598,6 +608,8 @@ func createProviderFromSelection(sel *providerSelection) (LLMProvider, error) {
 		return NewCodexCliProvider(sel.workspace), nil
 	case providerTypeGitHubCopilot:
 		return NewGitHubCopilotProvider(sel.apiBase, sel.connectMode, sel.model)
+	case providerTypeAnthropic:
+		return anthropicmessages.NewProvider(sel.apiKey, sel.apiBase), nil
 	default:
 		return NewHTTPProvider(sel.apiKey, sel.apiBase, sel.proxy), nil
 	}
