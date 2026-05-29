@@ -78,9 +78,10 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("API key not configured")
 	}
 
-	// Strip provider prefix and anthropic. prefix if present
+	// Strip provider prefix from model name.
+	// Also strips anthropic. prefix only when using official Anthropic API
 	// (e.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7")
-	model = normalizeModel(model)
+	model = normalizeModel(model, p.apiBase)
 
 	// Build request body
 	requestBody, err := buildRequestBody(messages, tools, model, options)
@@ -165,7 +166,7 @@ func (p *Provider) ChatStream(
 		return p.Chat(ctx, messages, tools, model, options)
 	}
 
-	model = normalizeModel(model)
+	model = normalizeModel(model, p.apiBase)
 
 	// Build request body with streaming enabled
 	requestBody, err := buildRequestBody(messages, tools, model, options)
@@ -651,17 +652,33 @@ func mapStopReason(anthropicStopReason string) string {
 	}
 }
 
-// normalizeModel strips provider and AWS Bedrock prefixes from model names.
-// AWS Bedrock model IDs (e.g. "anthropic.claude-opus-4-7") include an "anthropic."
-// prefix that is not part of the Anthropic Messages API model namespace.
-// E.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7"
-func normalizeModel(model string) string {
+// normalizeModel strips provider prefixes from model names.
+// When the endpoint is the official Anthropic API (api.anthropic.com), it also strips
+// the "anthropic." prefix that AWS Bedrock model IDs use.
+// For Bedrock endpoints (e.g. bedrock-mantle.us-east-1.api.aws), the prefix is preserved
+// because those endpoints require the full model ID (e.g. "anthropic.claude-opus-4-7").
+//
+// Examples:
+//   - "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7" (official API)
+//   - "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7" (Bedrock endpoint)
+//   - "openrouter/deepseek/deepseek-chat" → "deepseek/deepseek-chat"
+func normalizeModel(model string, apiBase string) string {
 	if idx := strings.Index(model, "/"); idx >= 0 {
 		model = model[idx+1:]
 	}
-	// Strip anthropic. prefix (AWS Bedrock model ID convention, not used by Anthropic API)
-	model = strings.TrimPrefix(model, "anthropic.")
+	// Only strip anthropic. prefix for official Anthropic API.
+	// AWS Bedrock endpoints require the anthropic. prefix in model IDs.
+	if isOfficialAnthropicAPI(apiBase) {
+		model = strings.TrimPrefix(model, "anthropic.")
+	}
 	return model
+}
+
+// isOfficialAnthropicAPI returns true if the base URL points to the official
+// Anthropic API (api.anthropic.com) or is empty (defaults to official API).
+// Third-party endpoints like AWS Bedrock use different hostnames.
+func isOfficialAnthropicAPI(apiBase string) bool {
+	return apiBase == "" || strings.Contains(apiBase, "api.anthropic.com")
 }
 
 func asInt(v any) (int, bool) {
