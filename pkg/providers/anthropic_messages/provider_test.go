@@ -1,7 +1,7 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package anthropicmessages
 
@@ -754,4 +754,363 @@ func TestProviderChatErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestParseAnthropicSSEStream tests the Anthropic SSE streaming parser.
+func TestParseAnthropicSSEStream(t *testing.T) {
+	tests := []struct {
+		name          string
+		sseData       string
+		wantContent   string
+		wantReasoning string
+		wantTools     int
+		wantReason    string
+		wantErr       bool
+	}{
+		{
+			name: "basic text streaming",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-4-7","usage":{"input_tokens":10,"output_tokens":0}}}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+				sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent: "Hello world",
+			wantReason:  "stop",
+		},
+		{
+			name: "with thinking/reasoning",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":20,"output_tokens":0}}}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think about this."}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The answer is 42."}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":1}`),
+				sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent:   "The answer is 42.",
+			wantReasoning: "Let me think about this.",
+			wantReason:    "stop",
+		},
+		{
+			name: "with tool use",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":15,"output_tokens":0}}}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me check."}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather"}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\"}"}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":1}`),
+				sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent: "Let me check.",
+			wantTools:   1,
+			wantReason:  "tool_calls",
+		},
+		{
+			name: "max_tokens stop reason",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":100,"output_tokens":0}}}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Partial..."}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+				sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":4096}}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent: "Partial...",
+			wantReason:  "length",
+		},
+		{
+			name: "multiple tool calls in one response",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":30,"output_tokens":0}}}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather"}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\"}"}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+				sseEvent("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_02","name":"get_time"}}`),
+				sseEvent("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"timezone\":\"JST\"}"}}`),
+				sseEvent("content_block_stop", `{"type":"content_block_stop","index":1}`),
+				sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":35}}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent: "",
+			wantTools:   2,
+			wantReason:  "tool_calls",
+		},
+		{
+			name:        "empty body",
+			sseData:     "",
+			wantContent: "",
+			wantReason:  "",
+		},
+		{
+			name: "only pings and unknown events",
+			sseData: joinSSEEvents(
+				sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0}}}`),
+				sseEvent("ping", `{"type":"ping"}`),
+				sseEvent("message_stop", `{"type":"message_stop"}`),
+			),
+			wantContent: "",
+			wantReason:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var chunks []string
+			var reasoningChunks []string
+			onChunk := func(chunk string, done bool) {
+				if done {
+					return
+				}
+				chunks = append(chunks, chunk)
+			}
+			onReasoning := func(rc string) {
+				reasoningChunks = append(reasoningChunks, rc)
+			}
+
+			body := strings.NewReader(tt.sseData)
+			resp, err := parseAnthropicSSEStream(context.Background(), body, onChunk, onReasoning)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseAnthropicSSEStream() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+
+			if resp.Content != tt.wantContent {
+				t.Errorf("Content = %q, want %q", resp.Content, tt.wantContent)
+			}
+			if resp.Reasoning != tt.wantReasoning {
+				t.Errorf("Reasoning = %q, want %q", resp.Reasoning, tt.wantReasoning)
+			}
+			if len(resp.ToolCalls) != tt.wantTools {
+				t.Errorf("ToolCalls length = %d, want %d", len(resp.ToolCalls), tt.wantTools)
+			}
+			if resp.FinishReason != tt.wantReason {
+				t.Errorf("FinishReason = %q, want %q", resp.FinishReason, tt.wantReason)
+			}
+
+			// Verify chunk callbacks
+			gotContent := strings.Join(chunks, "")
+			if gotContent != tt.wantContent {
+				t.Errorf("chunked content = %q, want %q", gotContent, tt.wantContent)
+			}
+			gotReasoning := strings.Join(reasoningChunks, "")
+			if gotReasoning != tt.wantReasoning {
+				t.Errorf("chunked reasoning = %q, want %q", gotReasoning, tt.wantReasoning)
+			}
+		})
+	}
+}
+
+func TestParseAnthropicSSEStream_ToolCalls(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}`),
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather"}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Tokyo\",\"units\":\"metric\"}"}}`),
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":15}}`),
+		sseEvent("message_stop", `{"type":"message_stop"}`),
+	)
+
+	body := strings.NewReader(sseData)
+	resp, err := parseAnthropicSSEStream(context.Background(), body, func(chunk string, done bool) {}, nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicSSEStream() error = %v", err)
+	}
+
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(resp.ToolCalls))
+	}
+
+	tc := resp.ToolCalls[0]
+	if tc.ID != "toolu_01" {
+		t.Errorf("ToolCall.ID = %q, want %q", tc.ID, "toolu_01")
+	}
+	if tc.Name != "get_weather" {
+		t.Errorf("ToolCall.Name = %q, want %q", tc.Name, "get_weather")
+	}
+	if tc.Arguments == nil {
+		t.Fatal("ToolCall.Arguments is nil")
+	}
+	if tc.Arguments["city"] != "Tokyo" {
+		t.Errorf("ToolCall.Arguments[city] = %v, want Tokyo", tc.Arguments["city"])
+	}
+	if tc.Arguments["units"] != "metric" {
+		t.Errorf("ToolCall.Arguments[units] = %v, want metric", tc.Arguments["units"])
+	}
+	if tc.Function == nil {
+		t.Fatal("ToolCall.Function is nil")
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("ToolCall.Function.Name = %q, want %q", tc.Function.Name, "get_weather")
+	}
+
+	// Finish reason should be tool_calls
+	if resp.FinishReason != "tool_calls" {
+		t.Errorf("FinishReason = %q, want tool_calls", resp.FinishReason)
+	}
+}
+
+func TestParseAnthropicSSEStream_ContextCancellation(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0}}}`),
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`),
+		// No message_stop — simulate cancellation mid-stream
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	body := strings.NewReader(sseData)
+	_, err := parseAnthropicSSEStream(ctx, body, func(chunk string, done bool) {
+		// Cancel after first chunk
+		cancel()
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+}
+
+func TestParseAnthropicSSEStream_MalformedJSON(t *testing.T) {
+	sseData := joinSSEEvents(
+		sseEvent("message_start", `{"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":0}}}`),
+		"data: {this is not valid json}\n\n",
+		sseEvent("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`),
+		sseEvent("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"still works"}}`),
+		sseEvent("content_block_stop", `{"type":"content_block_stop","index":0}`),
+		sseEvent("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`),
+		sseEvent("message_stop", `{"type":"message_stop"}`),
+	)
+
+	body := strings.NewReader(sseData)
+	resp, err := parseAnthropicSSEStream(context.Background(), body, func(chunk string, done bool) {}, nil)
+	if err != nil {
+		t.Fatalf("parseAnthropicSSEStream() error = %v", err)
+	}
+	if resp.Content != "still works" {
+		t.Errorf("Content = %q, want %q", resp.Content, "still works")
+	}
+}
+
+func TestMapStopReason(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"end_turn", "stop"},
+		{"stop_sequence", "stop"},
+		{"tool_use", "tool_calls"},
+		{"max_tokens", "length"},
+		{"unknown_reason", "unknown_reason"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := mapStopReason(tt.input)
+			if got != tt.want {
+				t.Errorf("mapStopReason(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeModel(t *testing.T) {
+	// normalizeModel always strips provider prefix and anthropic. prefix.
+	// Bedrock proxy endpoints (e.g. bedrock-mantle) normalize the anthropic.
+	// prefix internally for non-streaming requests, but pass it through
+	// unchanged for SSE streaming, causing "Not supported model" errors.
+	// Always stripping is safe because all Anthropic Messages API-compatible
+	// endpoints use the base model name.
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Provider prefix stripping + anthropic. prefix stripping
+		{"aws_ant/anthropic.claude-opus-4-7", "claude-opus-4-7"},
+		{"aws_ant/anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		// Anthropic. prefix stripping (AWS Bedrock model IDs)
+		{"anthropic.claude-opus-4-7", "claude-opus-4-7"},
+		{"anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		{"anthropic.some-model", "some-model"},
+		// Non-anthropic provider prefix stripping
+		{"openrouter/deepseek/deepseek-chat", "deepseek/deepseek-chat"},
+		// Already clean model names
+		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"claude-opus-4-7", "claude-opus-4-7"},
+		// No prefix to strip
+		{"", ""},
+		{"test-model", "test-model"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeModel(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeModel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChatStream_MissingAPIKey(t *testing.T) {
+	provider := NewProvider("", "https://api.example.com")
+	_, err := provider.ChatStream(
+		context.Background(),
+		[]Message{{Role: "user", Content: "Test"}},
+		nil,
+		"test-model",
+		nil,
+		func(chunk string, done bool) {},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("ChatStream() expected error for missing API key, got nil")
+	}
+	if err.Error() != "API key not configured" {
+		t.Errorf("ChatStream() error = %q, want %q", err.Error(), "API key not configured")
+	}
+}
+
+func TestChatStream_NilOnChunkFallsBackToChat(t *testing.T) {
+	// When onChunk is nil, ChatStream should fall back to Chat.
+	// We can't easily test the fallback without a mock server, but we can verify
+	// that nil onChunk doesn't panic and properly delegates.
+	provider := NewProvider("test-key", "https://api.example.com")
+	_, err := provider.ChatStream(
+		context.Background(),
+		[]Message{{Role: "user", Content: "Test"}},
+		nil,
+		"test-model",
+		map[string]any{"max_tokens": 100},
+		nil, // nil onChunk → should fall back to Chat
+		nil,
+	)
+	// Will fail because the server doesn't exist, but shouldn't panic
+	if err == nil {
+		t.Log("ChatStream with nil onChunk unexpectedly succeeded (no real server)")
+	}
+}
+
+// Helper functions for constructing SSE test data
+
+// sseEvent formats an Anthropic SSE event with event type and data.
+func sseEvent(eventType, data string) string {
+	return "event: " + eventType + "\ndata: " + data + "\n\n"
+}
+
+// joinSSEEvents concatenates SSE event strings.
+func joinSSEEvents(events ...string) string {
+	return strings.Join(events, "")
 }

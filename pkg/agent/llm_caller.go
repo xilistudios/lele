@@ -67,11 +67,18 @@ func (s *streamingState) onReasoning(delegate func(reasoningChunk string)) func(
 // llmCaller handles communication with LLM providers including fallback and retry
 type llmCaller struct {
 	al *AgentLoop
+
+	// retryWait is called to wait between retry attempts.
+	// Defaults to time.After. Override in tests to avoid real sleeps.
+	retryWait func(time.Duration) <-chan time.Time
 }
 
 // newLLMCaller creates a new LLM caller
 func newLLMCaller(al *AgentLoop) *llmCaller {
-	return &llmCaller{al: al}
+	return &llmCaller{
+		al:        al,
+		retryWait: time.After,
+	}
 }
 
 // buildLLMOptions constructs LLM options including reasoning and thinking config
@@ -180,9 +187,23 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 	// and must not be sent to the external LLM API.
 	apiModel := providers.StripProviderPrefix(opts.model)
 
+	// Resolve the correct provider for this call.
+	// When a session overrides the model to use a different provider,
+	// the agent's default provider is stale — route to the provider
+	// specified in the model string instead.
+	callProvider := opts.agent.Provider
+	if ref := providers.ParseModelRef(opts.model, ""); ref != nil && ref.Provider != "" {
+		agentRef := providers.ParseModelRef(opts.agent.Model, "")
+		if agentRef == nil || agentRef.Provider != ref.Provider {
+			if newProv, err := providers.CreateProviderForCandidate(lc.al.cfg(), ref.Provider); err == nil {
+				callProvider = newProv
+			}
+		}
+	}
+
 	// Try streaming if available and requested
 	if opts.streamOnChunk != nil {
-		if sp, ok := opts.agent.Provider.(providers.StreamingLLMProvider); ok {
+		if sp, ok := callProvider.(providers.StreamingLLMProvider); ok {
 			state := &streamingState{}
 			response, err := sp.ChatStream(
 				opts.ctx,
@@ -211,7 +232,7 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 	}
 
 	// Direct call without fallback
-	return opts.agent.Provider.Chat(opts.ctx, opts.messages, opts.toolDefs, apiModel, llmOptions)
+	return callProvider.Chat(opts.ctx, opts.messages, opts.toolDefs, apiModel, llmOptions)
 }
 
 // callWithFallback executes LLM call through the fallback chain
@@ -279,7 +300,7 @@ func (lc *llmCaller) executeWithRetry(
 			})
 			waitTime := time.Duration(retry+1) * 2 * time.Second
 			select {
-			case <-time.After(waitTime):
+			case <-lc.retryWait(waitTime):
 			case <-opts.ctx.Done():
 				return nil, currentMessages, opts.ctx.Err()
 			}

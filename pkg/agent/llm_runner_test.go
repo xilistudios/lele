@@ -18,6 +18,14 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
+// instantRetryWait returns a channel that is already closed, causing any
+// select on it to fire immediately. Used to eliminate real sleeps in tests.
+func instantRetryWait(time.Duration) <-chan time.Time {
+	ch := make(chan time.Time)
+	close(ch)
+	return ch
+}
+
 // ============================================================================
 // Mock Implementations (unique to llm_runner_test.go)
 // ============================================================================
@@ -476,6 +484,8 @@ func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
+	// Isolate tests from real user sessions
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1263,6 +1273,7 @@ func TestRunLLMIteration_NetworkTimeoutRetry(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
+	runner.retryWait = instantRetryWait // avoid real 2s sleep
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	callCount := 0

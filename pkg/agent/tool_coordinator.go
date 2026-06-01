@@ -275,6 +275,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 				MaxIterations: targetAgent.MaxIterations,
 				MaxTokens:     targetAgent.MaxTokens,
 				Temperature:   targetAgent.Temperature,
+				ContextWindow: targetAgent.ContextWindow,
 			}
 		}
 		return tools.AgentContextInfo{
@@ -286,6 +287,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 			MaxIterations: agent.MaxIterations,
 			MaxTokens:     agent.MaxTokens,
 			Temperature:   agent.Temperature,
+			ContextWindow: agent.ContextWindow,
 		}
 	})
 	spawnTool := tools.NewSpawnTool(subagentManager)
