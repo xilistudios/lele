@@ -1,7 +1,7 @@
-// PicoClaw - Ultra-lightweight personal AI agent
+// Lele - Ultra-lightweight personal AI agent
 // License: MIT
 //
-// Copyright (c) 2026 PicoClaw contributors
+// Copyright (c) 2026 Lele contributors
 
 package anthropicmessages
 
@@ -109,7 +109,7 @@ func (p *Provider) Chat(
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Api-Key", p.apiKey) //nolint:canonicalheader // Anthropic API requires exact header name
+	req.Header.Set("X-Api-Key", p.apiKey)
 	req.Header.Set("Anthropic-Version", defaultAPIVersion)
 
 	// Execute request
