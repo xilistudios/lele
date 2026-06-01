@@ -81,7 +81,7 @@ func (p *Provider) Chat(
 	// Strip provider prefix from model name.
 	// Also strips anthropic. prefix only when using official Anthropic API
 	// (e.g. "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7")
-	model = normalizeModel(model, p.apiBase)
+	//model = normalizeModel(model)
 
 	// Build request body
 	requestBody, err := buildRequestBody(messages, tools, model, options)
@@ -141,7 +141,8 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("service unavailable (503): %s", string(body))
 	default:
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s \n Payload; %s", resp.StatusCode, string(body), endpointURL, string(jsonBody))
+
 		}
 	}
 
@@ -166,8 +167,6 @@ func (p *Provider) ChatStream(
 		return p.Chat(ctx, messages, tools, model, options)
 	}
 
-	model = normalizeModel(model, p.apiBase)
-
 	// Build request body with streaming enabled
 	requestBody, err := buildRequestBody(messages, tools, model, options)
 	if err != nil {
@@ -191,7 +190,7 @@ func (p *Provider) ChatStream(
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", p.apiKey)
+	req.Header.Set("X-Api-Key", p.apiKey)
 	req.Header.Set("Anthropic-Version", defaultAPIVersion)
 
 	resp, err := p.httpClient.Do(req)
@@ -202,7 +201,7 @@ func (p *Provider) ChatStream(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s \n Payload; %s", resp.StatusCode, string(body), endpointURL, string(jsonBody))
 	}
 
 	return parseAnthropicSSEStream(ctx, resp.Body, onChunk, onReasoning)
@@ -652,33 +651,25 @@ func mapStopReason(anthropicStopReason string) string {
 	}
 }
 
-// normalizeModel strips provider prefixes from model names.
-// When the endpoint is the official Anthropic API (api.anthropic.com), it also strips
-// the "anthropic." prefix that AWS Bedrock model IDs use.
-// For Bedrock endpoints (e.g. bedrock-mantle.us-east-1.api.aws), the prefix is preserved
-// because those endpoints require the full model ID (e.g. "anthropic.claude-opus-4-7").
+// normalizeModel strips provider and AWS Bedrock prefixes from model names.
+// AWS Bedrock model IDs (e.g. "anthropic.claude-opus-4-7") include an "anthropic."
+// prefix that is not part of the Anthropic Messages API model namespace.
+// Bedrock proxy endpoints (e.g. bedrock-mantle) normalize this internally for
+// non-streaming requests, but pass it through unchanged for SSE streaming,
+// causing "Not supported model" errors. Always stripping is safe because all
+// Anthropic Messages API-compatible endpoints use the base model name.
 //
 // Examples:
-//   - "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7" (official API)
-//   - "aws_ant/anthropic.claude-opus-4-7" → "anthropic.claude-opus-4-7" (Bedrock endpoint)
+//   - "aws_ant/anthropic.claude-opus-4-7" → "claude-opus-4-7"
+//   - "anthropic.claude-opus-4-7" → "claude-opus-4-7"
 //   - "openrouter/deepseek/deepseek-chat" → "deepseek/deepseek-chat"
-func normalizeModel(model string, apiBase string) string {
+func normalizeModel(model string) string {
 	if idx := strings.Index(model, "/"); idx >= 0 {
 		model = model[idx+1:]
 	}
-	// Only strip anthropic. prefix for official Anthropic API.
-	// AWS Bedrock endpoints require the anthropic. prefix in model IDs.
-	if isOfficialAnthropicAPI(apiBase) {
-		model = strings.TrimPrefix(model, "anthropic.")
-	}
+	// Strip anthropic. prefix (AWS Bedrock model ID convention, not used by Anthropic API)
+	model = strings.TrimPrefix(model, "anthropic.")
 	return model
-}
-
-// isOfficialAnthropicAPI returns true if the base URL points to the official
-// Anthropic API (api.anthropic.com) or is empty (defaults to official API).
-// Third-party endpoints like AWS Bedrock use different hostnames.
-func isOfficialAnthropicAPI(apiBase string) bool {
-	return apiBase == "" || strings.Contains(apiBase, "api.anthropic.com")
 }
 
 func asInt(v any) (int, bool) {

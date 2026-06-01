@@ -1027,81 +1027,41 @@ func TestMapStopReason(t *testing.T) {
 }
 
 func TestNormalizeModel(t *testing.T) {
-	// Tests for official Anthropic API (api.anthropic.com)
-	// Should strip both provider prefix and anthropic. prefix
-	t.Run("official Anthropic API", func(t *testing.T) {
-		apiBase := "https://api.anthropic.com/v1"
-		tests := []struct {
-			input string
-			want  string
-		}{
-			// Provider prefix stripping
-			{"aws_ant/anthropic.claude-opus-4-7", "claude-opus-4-7"},
-			{"openrouter/deepseek/deepseek-chat", "deepseek/deepseek-chat"},
-			// Anthropic. prefix stripping (AWS Bedrock model IDs)
-			{"anthropic.claude-opus-4-7", "claude-opus-4-7"},
-			{"anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
-			// Already clean model names
-			{"claude-sonnet-4-6", "claude-sonnet-4-6"},
-			{"claude-opus-4-7", "claude-opus-4-7"},
-			// No prefix to strip
-			{"", ""},
-			{"test-model", "test-model"},
-			// Only anthropic. prefix, no provider prefix
-			{"anthropic.some-model", "some-model"},
-		}
+	// normalizeModel always strips provider prefix and anthropic. prefix.
+	// Bedrock proxy endpoints (e.g. bedrock-mantle) normalize the anthropic.
+	// prefix internally for non-streaming requests, but pass it through
+	// unchanged for SSE streaming, causing "Not supported model" errors.
+	// Always stripping is safe because all Anthropic Messages API-compatible
+	// endpoints use the base model name.
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Provider prefix stripping + anthropic. prefix stripping
+		{"aws_ant/anthropic.claude-opus-4-7", "claude-opus-4-7"},
+		{"aws_ant/anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		// Anthropic. prefix stripping (AWS Bedrock model IDs)
+		{"anthropic.claude-opus-4-7", "claude-opus-4-7"},
+		{"anthropic.claude-sonnet-4-5-20250929", "claude-sonnet-4-5-20250929"},
+		{"anthropic.some-model", "some-model"},
+		// Non-anthropic provider prefix stripping
+		{"openrouter/deepseek/deepseek-chat", "deepseek/deepseek-chat"},
+		// Already clean model names
+		{"claude-sonnet-4-6", "claude-sonnet-4-6"},
+		{"claude-opus-4-7", "claude-opus-4-7"},
+		// No prefix to strip
+		{"", ""},
+		{"test-model", "test-model"},
+	}
 
-		for _, tt := range tests {
-			t.Run(tt.input, func(t *testing.T) {
-				got := normalizeModel(tt.input, apiBase)
-				if got != tt.want {
-					t.Errorf("normalizeModel(%q) = %q, want %q", tt.input, got, tt.want)
-				}
-			})
-		}
-	})
-
-	// Tests for AWS Bedrock endpoint
-	// Should strip provider prefix but KEEP anthropic. prefix
-	t.Run("AWS Bedrock endpoint", func(t *testing.T) {
-		apiBase := "https://bedrock-mantle.us-east-1.api.aws/anthropic/v1"
-		tests := []struct {
-			input string
-			want  string
-		}{
-			// Provider prefix stripping, but anthropic. prefix preserved
-			{"aws_ant/anthropic.claude-opus-4-7", "anthropic.claude-opus-4-7"},
-			{"aws_ant/anthropic.claude-sonnet-4-5-20250929", "anthropic.claude-sonnet-4-5-20250929"},
-			// anthropic. prefix preserved (Bedrock requires it)
-			{"anthropic.claude-opus-4-7", "anthropic.claude-opus-4-7"},
-			{"anthropic.claude-sonnet-4-5-20250929", "anthropic.claude-sonnet-4-5-20250929"},
-			// Non-anthropic provider prefix stripping
-			{"openrouter/deepseek/deepseek-chat", "deepseek/deepseek-chat"},
-			// Already clean model names
-			{"claude-sonnet-4-6", "claude-sonnet-4-6"},
-			{"claude-opus-4-7", "claude-opus-4-7"},
-			// No prefix to strip
-			{"", ""},
-			{"test-model", "test-model"},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.input, func(t *testing.T) {
-				got := normalizeModel(tt.input, apiBase)
-				if got != tt.want {
-					t.Errorf("normalizeModel(%q) = %q, want %q", tt.input, got, tt.want)
-				}
-			})
-		}
-	})
-
-	// Test for empty apiBase (should behave like official API)
-	t.Run("empty apiBase defaults to official API behavior", func(t *testing.T) {
-		got := normalizeModel("anthropic.claude-opus-4-7", "")
-		if got != "claude-opus-4-7" {
-			t.Errorf("normalizeModel with empty apiBase = %q, want %q", got, "claude-opus-4-7")
-		}
-	})
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := normalizeModel(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeModel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestChatStream_MissingAPIKey(t *testing.T) {

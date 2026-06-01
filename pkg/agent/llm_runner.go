@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/constants"
@@ -28,6 +29,11 @@ type llmRunner interface {
 // llmRunnerImpl implements the llmRunner interface
 type llmRunnerImpl struct {
 	al *AgentLoop
+
+	// retryWait is called to wait between retry attempts.
+	// nil means use default (time.After, set on llmCaller).
+	// Override in tests to avoid real sleeps.
+	retryWait func(time.Duration) <-chan time.Time
 }
 
 // newLLMRunner creates a new LLM runner
@@ -261,6 +267,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Call LLM using llmCaller with retry logic
 		llmCallerInstance := newLLMCaller(lr.al)
+		if lr.retryWait != nil {
+			llmCallerInstance.retryWait = lr.retryWait
+		}
 		callOpts := llmCallOptions{
 			ctx:            ctx,
 			agent:          agent,

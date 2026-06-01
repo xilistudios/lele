@@ -244,7 +244,8 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API request failed(OpenIA):\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), req.URL)
+
 	}
 
 	return parseSSEStream(ctx, resp.Body, onChunk, onReasoning)
