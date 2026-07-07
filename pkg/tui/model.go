@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 
@@ -149,6 +150,9 @@ func (m *Model) reloadSessions() {
 		}
 	}
 
+	// Clear streaming state if the assistant message is fully saved in history
+	m.cleanupStreamingIfComplete()
+
 	m.updateViewport()
 }
 
@@ -173,16 +177,52 @@ func (m *Model) createNewChat() {
 	m.currentKey = newKey
 }
 
+// cleanupStreamingIfComplete clears streaming/thinking state if the last assistant
+// message in history is no longer in streaming mode. This avoids stale content
+// leaking into the viewport after the message is fully saved.
+func (m *Model) cleanupStreamingIfComplete() {
+	if (m.currentStream == "" && m.currentThinking == "") || m.currentKey == "" {
+		return
+	}
+	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+	var lastAssistantMsg *providers.Message
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			lastAssistantMsg = &history[i]
+			break
+		}
+	}
+	if lastAssistantMsg != nil && !lastAssistantMsg.Streaming {
+		streamMatched := m.currentStream == "" || strings.Contains(lastAssistantMsg.Content, m.currentStream)
+		thinkingMatched := m.currentThinking == "" || strings.Contains(lastAssistantMsg.ReasoningContent, m.currentThinking)
+		if streamMatched && thinkingMatched {
+			m.currentStream = ""
+			m.currentThinking = ""
+			m.currentAssistantMsgID = ""
+		}
+	}
+}
+
 // clearStreamingState resets all streaming/processing state.
 // Called when switching sessions to avoid stale content leaking into the new session.
+// It preserves m.processing when the target session has an active LLM loop,
+// so the loading animation continues when switching to a busy session/subagent.
 func (m *Model) clearStreamingState() {
-	m.processing = false
+	// Check if the current session (already set to the target) is actively
+	// being processed by the LLM before resetting the flag.
+	isActive := false
+	if m.currentKey != "" {
+		isActive = m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
+	}
+	m.processing = isActive
+
 	m.currentStream = ""
 	m.currentThinking = ""
 	m.currentToolAction = ""
 	m.currentMessageID = ""
+	m.currentAssistantMsgID = ""
 	m.pendingUserMessage = ""
-	if !m.hasRunningSubagents() {
+	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
 	}
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
@@ -281,5 +321,3 @@ func (m *Model) printSessionSummary() {
 	fmt.Fprintf(os.Stderr, "Repeticiones de nombres: %d\n", totalNames)
 	fmt.Fprintf(os.Stderr, "Segundos: %.1f\n", duration)
 }
-
-

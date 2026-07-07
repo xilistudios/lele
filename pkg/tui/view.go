@@ -184,12 +184,15 @@ func (m *Model) View() string {
 	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.textInput.View())
 	leftBuilder.WriteString(inputBar + "\n")
 
-	tokens, limit := m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
+	// Cache token counts to avoid duplicate API calls
+	currentTokens, contextWindow := m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
+	cumInput, cumOutput, _ := m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
+
 	pct := 0.0
-	if limit > 0 {
-		pct = float64(tokens) / float64(limit) * 100
+	if contextWindow > 0 {
+		pct = float64(currentTokens) / float64(contextWindow) * 100
 	}
-	tokensText := fmt.Sprintf("%d (%.1f%%)", tokens, pct)
+	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)),
 		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s", tokensText, i18n.T("tui.ctrlCommands"))),
@@ -212,21 +215,15 @@ func (m *Model) View() string {
 	rightBuilder.WriteString(SidebarTitle.Render(sessionName) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
-	cumInput, cumOutput, limit := m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
-	cumPct := 0.0
-	if limit > 0 {
-		cumPct = float64(cumInput) / float64(limit) * 100
-	}
-	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf("%s %s", formatNumber(cumInput+cumOutput), i18n.T("tui.tokens"))) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf(i18n.T("tui.used"), cumPct)) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(i18n.T("tui.spent")) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.mcp")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" "+i18n.T("tui.workspaceConnected")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" "+i18n.T("tui.systemConnected")) + "\n\n")
+	// Current context usage (history + system prompt) — cached above
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.currentContext"), formatTokenK(currentTokens)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.contextWindow"), formatTokenK(contextWindow)) + "\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.lsp")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(i18n.T("tui.lspDisabled")) + "\n\n")
+	// Cumulative token counts for this session — cached above
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatTokenK(cumInput)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatTokenK(cumOutput)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatTokenK(cumInput+cumOutput)) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(m.workspacePath) + "\n")

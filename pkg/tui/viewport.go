@@ -15,6 +15,9 @@ func (m *Model) updateViewport() {
 		return
 	}
 
+	// Clear streaming state if the assistant message is fully saved in history
+	m.cleanupStreamingIfComplete()
+
 	// Determine if the rendered base cache is still valid.
 	// Invalidated when session key or viewport width changes.
 	// During processing, always rebuild to pick up tool calls and other
@@ -34,9 +37,27 @@ func (m *Model) updateViewport() {
 
 	// Show pending user message immediately (before agent responds)
 	if m.pendingUserMessage != "" {
-		sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-		sb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
-		lastRole = "user"
+		history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+		// Search from the end since the message is most likely recent
+		alreadyInHistory := false
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].Role == "user" && history[i].Content == m.pendingUserMessage {
+				alreadyInHistory = true
+				break
+			}
+			// Optimization: stop searching after going back 10 messages
+			// since the pending message should be very recent
+			if len(history)-i > 10 {
+				break
+			}
+		}
+		if !alreadyInHistory {
+			sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+			sb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
+			lastRole = "user"
+		} else {
+			m.pendingUserMessage = ""
+		}
 	}
 
 	if m.processing && (m.currentStream != "" || m.currentThinking != "" || m.currentToolAction != "") {

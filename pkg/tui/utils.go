@@ -204,3 +204,14 @@ func formatNumber(n int) string {
 	res = append([]string{s}, res...)
 	return strings.Join(res, ",")
 }
+
+func formatTokenK(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	k := float64(n) / 1000.0
+	if k >= 100 {
+		return fmt.Sprintf("%.0fK", k)
+	}
+	return fmt.Sprintf("%.1fK", k)
+}

@@ -84,6 +84,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q":
 				m.modalMode = ModalNone
 			}
+			// Restart tick animation if the target session is actively processing.
+			// This keeps the loading dots when switching to a busy session/subagent.
+			if m.processing || m.hasRunningSubagents() {
+				return m, tickCmd()
+			}
 			return m, nil
 		}
 
@@ -152,6 +157,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clearStreamingState()
 				m.reloadSessions()
 			}
+			// Restart tick animation if the parent session has active subagents.
+			if m.processing || m.hasRunningSubagents() {
+				return m, tickCmd()
+			}
 			return m, nil
 
 		case "ctrl+p":
@@ -211,12 +220,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.renderedBaseKey = "" // invalidate cache so history re-renders without duplicate
 				}
 				m.currentToolAction = "" // streaming text means tool call is done
+				// Only reset streaming state if the MessageID is truly different
+				// and we have existing content (avoids resetting on first chunk)
+				if msg.msg.MessageID != "" &&
+					msg.msg.MessageID != m.currentAssistantMsgID &&
+					m.currentAssistantMsgID != "" {
+					m.currentAssistantMsgID = msg.msg.MessageID
+					m.currentStream = ""
+					m.currentThinking = ""
+				}
 				m.currentStream += msg.msg.Content
 				m.updateViewport()
 			case "message.thinking":
+				// Only reset streaming state if the MessageID is truly different
+				// and we have existing content (avoids resetting on first chunk)
+				if msg.msg.MessageID != "" &&
+					msg.msg.MessageID != m.currentAssistantMsgID &&
+					m.currentAssistantMsgID != "" {
+					m.currentAssistantMsgID = msg.msg.MessageID
+					m.currentStream = ""
+					m.currentThinking = ""
+				}
 				m.currentThinking += msg.msg.Content
 				m.updateViewport()
 			case "tool.executing":
+				// Clear streaming state since we are now executing a tool
+				m.currentStream = ""
+				m.currentThinking = ""
+				m.currentAssistantMsgID = ""
+
 				// Show the currently executing tool call in the viewport.
 				// Use the compact "tool: action" format from metadata.
 				toolName := msg.msg.Metadata["tool"]

@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	// Dracula / Terminal-based premium color palette
@@ -41,6 +45,9 @@ var (
 	SidebarValue = lipgloss.NewStyle().
 			Foreground(Foreground).
 			PaddingLeft(1)
+
+	SidebarLabel = lipgloss.NewStyle().
+			Foreground(SecondaryColor)
 
 	SidebarConnectedDot = lipgloss.NewStyle().
 				Foreground(SecondaryColor)
@@ -198,3 +205,9 @@ var (
 	ModelSelectorLabel = lipgloss.NewStyle().
 				Foreground(CommentColor)
 )
+
+func SidebarLabelValue(label, value string) string {
+	labelPart := SidebarLabel.Render(fmt.Sprintf("%-18s", label))
+	valuePart := SidebarValue.Render(value)
+	return labelPart + valuePart
+}

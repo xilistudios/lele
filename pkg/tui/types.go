@@ -104,15 +104,16 @@ type Model struct {
 	subagentProgress map[string]string
 
 	// Message processing / streaming
-	processing        bool
-	currentMessageID  string
-	currentStream     string
-	currentThinking   string
-	currentToolAction string // active tool call shown during streaming ("tool: args")
-	startTime         time.Time
-	elapsedTime       time.Duration
-	lastDuration      time.Duration
-	animationTick     int
+	processing            bool
+	currentMessageID      string
+	currentAssistantMsgID string
+	currentStream         string
+	currentThinking       string
+	currentToolAction     string // active tool call shown during streaming ("tool: args")
+	startTime             time.Time
+	elapsedTime           time.Duration
+	lastDuration          time.Duration
+	animationTick         int
 
 	// Double-ESC cancel tracking
 	escPressCount int
