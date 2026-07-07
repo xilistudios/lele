@@ -326,8 +326,8 @@ export function ToolCallDisplay({
 
         {/* Expanded: result only for non-file ops */}
         {expanded && showResult && (
-          <div className="px-3 pb-2">
-            <pre className="text-xs text-text-tertiary font-mono whitespace-pre-wrap overflow-x-auto max-h-[300px]">
+          <div className="border-t border-border bg-background-primary/30">
+            <pre className="w-full max-w-full text-xs text-text-tertiary font-mono whitespace-pre-wrap overflow-x-auto max-h-[300px] px-4 py-3 leading-5">
               {toolResult}
             </pre>
           </div>

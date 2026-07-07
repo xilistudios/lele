@@ -136,37 +136,46 @@ export function AgentsSettings() {
               <NamedItemCard
                 key={agent.id}
                 title={
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                     {/* Agent avatar */}
                     <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
                       {agent.name
                         ? agent.name.charAt(0).toUpperCase()
                         : agent.id.charAt(0).toUpperCase()}
                     </div>
-                    <span className="font-medium">{agent.id}</span>
-                    {agent.name && (
-                      <span className="text-text-tertiary text-sm">— {agent.name}</span>
-                    )}
-                    {agent.default && (
-                      <span className="rounded-full bg-accent-subtle text-accent-primary px-2 py-0.5 text-xs font-medium">
-                        {t('settings.defaultBadge')}
-                      </span>
-                    )}
-                    {isModified && (
-                      <span className="rounded-full bg-state-info-light text-state-info px-2 py-0.5 text-xs">
-                        {t('settings.modifiedBadge')}
-                      </span>
-                    )}
+
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                        <span className="font-medium text-sm text-text-primary truncate">
+                          {agent.id}
+                        </span>
+                        {agent.default && (
+                          <span className="rounded-full bg-accent-subtle text-accent-primary px-1.5 py-0.5 text-[9px] sm:text-xs font-medium flex-shrink-0">
+                            {t('settings.defaultBadge')}
+                          </span>
+                        )}
+                        {isModified && (
+                          <span className="rounded-full bg-state-info-light text-state-info px-1.5 py-0.5 text-[9px] sm:text-xs font-medium flex-shrink-0">
+                            {t('settings.modifiedBadge')}
+                          </span>
+                        )}
+                      </div>
+                      {agent.name && (
+                        <span className="text-text-tertiary text-xs sm:text-sm truncate">
+                          {agent.name}
+                        </span>
+                      )}
+                    </div>
+
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
                         navigate(`/settings/agent/${encodeURIComponent(agent.id)}`)
                       }}
-                      className="ml-auto rounded-lg px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5"
+                      className="ml-auto rounded-lg px-2 sm:px-2.5 py-1 text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors flex items-center gap-1.5 flex-shrink-0"
                       title={t('settings.agentFilesTooltip')}
                     >
-                      {' '}
                       <svg
                         width="14"
                         height="14"
@@ -174,6 +183,7 @@ export function AgentsSettings() {
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="2"
+                        className="flex-shrink-0"
                       >
                         <title>Edit files</title>
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -181,7 +191,7 @@ export function AgentsSettings() {
                         <line x1="16" y1="13" x2="8" y2="13" />
                         <line x1="16" y1="17" x2="8" y2="17" />
                       </svg>
-                      {t('settings.agentFilesButton')}
+                      <span className="hidden sm:inline">{t('settings.agentFilesButton')}</span>
                     </button>
                   </div>
                 }

@@ -1,8 +1,11 @@
 export const endpoints = {
   auth: {
+    pin: '/api/v1/auth/pin',
     pair: '/api/v1/auth/pair',
     refresh: '/api/v1/auth/refresh',
     status: '/api/v1/auth/status',
+    listClients: '/api/v1/auth/clients',
+    removeClient: (clientId: string) => `/api/v1/auth/clients/${encodeURIComponent(clientId)}`,
   },
   agents: {
     list: '/api/v1/agents',

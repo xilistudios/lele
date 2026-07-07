@@ -1,4 +1,4 @@
-.PHONY: all build install uninstall clean help test web-build
+.PHONY: all build install uninstall clean help test web-build dev
 
 # Build variables
 BINARY_NAME=lele
@@ -161,6 +161,13 @@ check: deps fmt vet test
 run: build
 	@$(BUILD_DIR)/$(BINARY_NAME) $(ARGS)
 
+## dev: Run frontend and backend in development mode with hotreload
+dev:
+	@echo "Starting development environment..."
+	@(cd $(WEB_DIR) && bun run dev) & \
+	(go run github.com/air-verse/air@latest) & \
+	wait
+
 ## help: Show this help message
 help:
 	@echo "lele Makefile"
@@ -176,6 +183,7 @@ help:
 	@echo "  make install            # Install to ~/.local/bin"
 	@echo "  make uninstall          # Remove from /usr/local/bin"
 	@echo "  make install-skills     # Install skills to workspace"
+	@echo "  make dev                # Run frontend and backend in dev mode with hotreload"
 	@echo ""
 	@echo "Environment Variables:"
 	@echo "  INSTALL_PREFIX          # Installation prefix (default: ~/.local)"

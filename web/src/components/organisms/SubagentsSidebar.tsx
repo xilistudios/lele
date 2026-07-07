@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SubagentTaskInfo } from '../../lib/types'
-import { CloseIcon } from '../atoms/Icons'
 import { IconButton } from '../atoms/IconButton'
+import { CloseIcon } from '../atoms/Icons'
 import { Spinner } from '../atoms/Spinner'
 
 interface SubagentsSidebarProps {
@@ -37,13 +37,12 @@ export function SubagentsSidebar({
         rafRef.current = requestAnimationFrame(() => setAnimate(true))
       })
       return () => cancelAnimationFrame(rafRef.current)
-    } else {
-      setAnimate(false)
-      const timer = setTimeout(() => setVisible(false), ANIMATION_DURATION_MS)
-      return () => {
-        clearTimeout(timer)
-        cancelAnimationFrame(rafRef.current)
-      }
+    }
+    setAnimate(false)
+    const timer = setTimeout(() => setVisible(false), ANIMATION_DURATION_MS)
+    return () => {
+      clearTimeout(timer)
+      cancelAnimationFrame(rafRef.current)
     }
   }, [isOpen])
 
@@ -70,7 +69,9 @@ export function SubagentsSidebar({
       />
 
       {/* Sidebar — slides in from right */}
-      <div className={`fixed right-0 top-0 z-50 h-full w-80 bg-background-primary border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}>
+      <div
+        className={`fixed right-0 top-0 z-50 h-full w-80 bg-background-primary border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-medium text-text-primary">{t('chat.subagentsTitle')}</h3>

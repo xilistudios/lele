@@ -18,6 +18,15 @@ type ClientInfo struct {
 	SessionKeys []string  `json:"session_keys,omitempty"`
 }
 
+type SafeClientInfo struct {
+	ClientID    string    `json:"client_id"`
+	DeviceName  string    `json:"device_name"`
+	Created     time.Time `json:"created"`
+	Expires     time.Time `json:"expires"`
+	LastSeen    time.Time `json:"last_seen"`
+	SessionKeys []string  `json:"session_keys,omitempty"`
+}
+
 type PendingPIN struct {
 	PIN        string    `json:"pin"`
 	DeviceName string    `json:"device_name"`

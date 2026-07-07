@@ -180,8 +180,10 @@ export function MarkdownText({ content }: { content: string }) {
             key={`list-${index}`}
             className="flex gap-2 pl-4 text-sm leading-6 text-text-secondary"
           >
-            <span className="mt-2 h-1.5 w-1.5 rounded-full bg-text-tertiary" />
-            <InlineMarkdown text={listMatch[1]} />
+            <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-text-tertiary" />
+            <span className="min-w-0 flex-1">
+              <InlineMarkdown text={listMatch[1]} />
+            </span>
           </div>,
         )
         continue

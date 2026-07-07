@@ -38,7 +38,7 @@ export function NamedItemCard({
             className={`transition-transform duration-150 ${collapsed ? 'rotate-90' : '-rotate-90'}`}
           />
         </button>
-        <span className="font-medium text-sm text-text-primary flex-1">{title}</span>
+        <span className="font-medium text-sm text-text-primary flex-1 min-w-0">{title}</span>
         <IconButton
           onClick={onRemove}
           variant="danger"

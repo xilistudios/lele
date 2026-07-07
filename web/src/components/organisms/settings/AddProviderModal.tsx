@@ -130,151 +130,156 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const canAdd = canProceedStep1 && canProceedStep2
 
   const SELECT_CLS =
-    'w-full rounded border border-border bg-background-tertiary px-3 py-2 text-xs text-text-primary focus:border-interaction-primary focus:outline-none'
+    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary focus:border-interaction-primary focus:outline-none transition-all duration-200 focus:ring-2 focus:ring-interaction-primary/20'
   const INPUT_CLS =
-    'w-full rounded border border-border bg-background-tertiary px-3 py-2 text-xs text-text-primary placeholder-text-tertiary focus:border-interaction-primary focus:outline-none'
-  const BTN_CLS = 'rounded px-3 py-1.5 text-xs transition-colors'
-  const BTN_PRIMARY = `${BTN_CLS} bg-interaction-primary text-text-on-accent hover:bg-interaction-hover disabled:opacity-50`
+    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary placeholder-text-tertiary focus:border-interaction-primary focus:outline-none transition-all duration-200 focus:ring-2 focus:ring-interaction-primary/20'
+  const BTN_CLS =
+    'rounded-lg px-4 py-2.5 text-xs font-medium transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed'
+  const BTN_PRIMARY = `${BTN_CLS} bg-cta-primary text-text-on-accent hover:bg-cta-hover`
   const BTN_SECONDARY = `${BTN_CLS} bg-surface-secondary text-text-secondary hover:bg-surface-hover`
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={t('settings.addProviderModal.title')}>
-      <div className="mb-4 flex gap-2">
-        {[1, 2, 3].map((s) => (
-          <div
-            key={s}
-            className={`flex-1 h-1 rounded ${step >= s ? 'bg-interaction-primary' : 'bg-surface-tertiary'}`}
-          />
-        ))}
-      </div>
+      <div className="p-6">
+        <div className="mb-4 flex gap-2">
+          {[1, 2, 3].map((s) => (
+            <div
+              key={s}
+              className={`flex-1 h-1 rounded ${step >= s ? 'bg-interaction-primary' : 'bg-surface-tertiary'}`}
+            />
+          ))}
+        </div>
 
-      {step === 1 && (
-        <div className="space-y-4">
-          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepType')}</p>
-          <select
-            value={providerType}
-            onChange={(e) => handleTypeChange(e.target.value)}
-            className={SELECT_CLS}
-          >
-            <option value="" disabled>
-              {t('settings.addProviderModal.selectType')}
-            </option>
-            {PROVIDER_TYPES.map((pt) => (
-              <option key={pt.value} value={pt.value}>
-                {pt.label}
+        {step === 1 && (
+          <div className="space-y-4 animate-step-enter">
+            <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepType')}</p>
+            <select
+              value={providerType}
+              onChange={(e) => handleTypeChange(e.target.value)}
+              className={SELECT_CLS}
+            >
+              <option value="" disabled>
+                {t('settings.addProviderModal.selectType')}
               </option>
-            ))}
-          </select>
-          {providerType === 'custom' && (
+              {PROVIDER_TYPES.map((pt) => (
+                <option key={pt.value} value={pt.value}>
+                  {pt.label}
+                </option>
+              ))}
+            </select>
+            {providerType === 'custom' && (
+              <input
+                type="text"
+                value={customType}
+                onChange={(e) => setCustomType(e.target.value)}
+                placeholder={t('settings.addProviderModal.customTypePlaceholder')}
+                className={INPUT_CLS}
+              />
+            )}
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4 animate-step-enter">
+            <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepName')}</p>
             <input
               type="text"
-              value={customType}
-              onChange={(e) => setCustomType(e.target.value)}
-              placeholder={t('settings.addProviderModal.customTypePlaceholder')}
+              value={providerName}
+              onChange={(e) => setProviderName(e.target.value)}
+              placeholder={t('settings.addProviderModal.namePlaceholder')}
               className={INPUT_CLS}
             />
-          )}
-        </div>
-      )}
+            <p className="text-xs text-text-tertiary">{t('settings.addProviderModal.nameHint')}</p>
+          </div>
+        )}
 
-      {step === 2 && (
-        <div className="space-y-4">
-          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepName')}</p>
-          <input
-            type="text"
-            value={providerName}
-            onChange={(e) => setProviderName(e.target.value)}
-            placeholder={t('settings.addProviderModal.namePlaceholder')}
-            className={INPUT_CLS}
-          />
-          <p className="text-xs text-text-tertiary">{t('settings.addProviderModal.nameHint')}</p>
-        </div>
-      )}
-
-      {step === 3 && (
-        <div className="space-y-4">
-          <p className="text-xs text-text-secondary">{t('settings.addProviderModal.stepConfig')}</p>
-          <div className="space-y-3">
-            <div>
-              <label
-                htmlFor="new-provider-api-key"
-                className="mb-1 block text-xs text-text-secondary"
-              >
-                {t('settings.fields.providerApiKey')}
-              </label>
-              <SecretInput
-                id="new-provider-api-key"
-                value={{
-                  mode: apiKeyMode,
-                  value: apiKeyValue,
-                  env_name: apiKeyEnvName,
-                  has_env_var: apiKeyMode === 'env' && !!apiKeyEnvName,
-                }}
-                onChange={(v: SecretValue) => {
-                  setApiKeyMode(v.mode)
-                  if (v.mode === 'literal') setApiKeyValue(v.value || '')
-                  if (v.mode === 'env') setApiKeyEnvName(v.env_name || '')
-                }}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="new-provider-api-base"
-                className="mb-1 block text-xs text-text-secondary"
-              >
-                {t('settings.fields.providerApiBase')}
-              </label>
-              <TextInput id="new-provider-api-base" value={apiBase} onChange={setApiBase} />
-            </div>
-            <div>
-              <label
-                htmlFor="new-provider-proxy"
-                className="mb-1 block text-xs text-text-secondary"
-              >
-                {t('settings.fields.providerProxy')}
-              </label>
-              <TextInput id="new-provider-proxy" value={proxy} onChange={setProxy} />
-            </div>
-            <div>
-              <label
-                htmlFor="new-provider-web-search"
-                className="mb-1 block text-xs text-text-secondary"
-              >
-                {t('settings.fields.providerWebSearch')}
-              </label>
-              <BooleanInput
-                id="new-provider-web-search"
-                value={webSearch}
-                onChange={setWebSearch}
-              />
+        {step === 3 && (
+          <div className="space-y-4 animate-step-enter">
+            <p className="text-xs text-text-secondary">
+              {t('settings.addProviderModal.stepConfig')}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label
+                  htmlFor="new-provider-api-key"
+                  className="mb-1 block text-xs text-text-secondary"
+                >
+                  {t('settings.fields.providerApiKey')}
+                </label>
+                <SecretInput
+                  id="new-provider-api-key"
+                  value={{
+                    mode: apiKeyMode,
+                    value: apiKeyValue,
+                    env_name: apiKeyEnvName,
+                    has_env_var: apiKeyMode === 'env' && !!apiKeyEnvName,
+                  }}
+                  onChange={(v: SecretValue) => {
+                    setApiKeyMode(v.mode)
+                    if (v.mode === 'literal') setApiKeyValue(v.value || '')
+                    if (v.mode === 'env') setApiKeyEnvName(v.env_name || '')
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="new-provider-api-base"
+                  className="mb-1 block text-xs text-text-secondary"
+                >
+                  {t('settings.fields.providerApiBase')}
+                </label>
+                <TextInput id="new-provider-api-base" value={apiBase} onChange={setApiBase} />
+              </div>
+              <div>
+                <label
+                  htmlFor="new-provider-proxy"
+                  className="mb-1 block text-xs text-text-secondary"
+                >
+                  {t('settings.fields.providerProxy')}
+                </label>
+                <TextInput id="new-provider-proxy" value={proxy} onChange={setProxy} />
+              </div>
+              <div>
+                <label
+                  htmlFor="new-provider-web-search"
+                  className="mb-1 block text-xs text-text-secondary"
+                >
+                  {t('settings.fields.providerWebSearch')}
+                </label>
+                <BooleanInput
+                  id="new-provider-web-search"
+                  value={webSearch}
+                  onChange={setWebSearch}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="mt-6 flex justify-between">
-        <button
-          type="button"
-          onClick={() => setStep(step - 1)}
-          disabled={step === 1}
-          className={BTN_SECONDARY}
-        >
-          {t('settings.addProviderModal.back')}
-        </button>
-        {step < 3 ? (
+        <div className="mt-6 flex justify-between">
           <button
             type="button"
-            onClick={() => setStep(step + 1)}
-            disabled={step === 1 ? !canProceedStep1 : !canProceedStep2}
-            className={BTN_PRIMARY}
+            onClick={() => setStep(step - 1)}
+            disabled={step === 1}
+            className={BTN_SECONDARY}
           >
-            {t('settings.addProviderModal.next')}
+            {t('settings.addProviderModal.back')}
           </button>
-        ) : (
-          <button type="button" onClick={handleAdd} disabled={!canAdd} className={BTN_PRIMARY}>
-            {t('settings.addProviderModal.add')}
-          </button>
-        )}
+          {step < 3 ? (
+            <button
+              type="button"
+              onClick={() => setStep(step + 1)}
+              disabled={step === 1 ? !canProceedStep1 : !canProceedStep2}
+              className={BTN_PRIMARY}
+            >
+              {t('settings.addProviderModal.next')}
+            </button>
+          ) : (
+            <button type="button" onClick={handleAdd} disabled={!canAdd} className={BTN_PRIMARY}>
+              {t('settings.addProviderModal.add')}
+            </button>
+          )}
+        </div>
       </div>
     </Modal>
   )

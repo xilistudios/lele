@@ -86,3 +86,35 @@ func (n *NativeChannel) handleAuthStatus(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func (n *NativeChannel) handleListClients(w http.ResponseWriter, r *http.Request) {
+	clients := n.auth.ListClients()
+	safeClients := make([]SafeClientInfo, len(clients))
+	for i, c := range clients {
+		safeClients[i] = SafeClientInfo{
+			ClientID:    c.ClientID,
+			DeviceName:  c.DeviceName,
+			Created:     c.Created,
+			Expires:     c.Expires,
+			LastSeen:    c.LastSeen,
+			SessionKeys: c.SessionKeys,
+		}
+	}
+	writeJSON(w, http.StatusOK, safeClients)
+}
+
+func (n *NativeChannel) handleRemoveClient(w http.ResponseWriter, r *http.Request) {
+	clientID := r.PathValue("clientID")
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "missing clientID", "client_id_missing")
+		return
+	}
+
+	err := n.auth.RemoveClient(clientID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "remove_client_error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

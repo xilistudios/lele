@@ -202,7 +202,7 @@ export function MessageList() {
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="mx-auto max-w-3xl space-y-1 overflow-y-auto h-full"
+      className="mx-auto max-w-3xl space-y-1 overflow-y-auto h-full w-full"
     >
       {showSentinel && <div ref={sentinelRef} />}
       {isLoadingMore && (

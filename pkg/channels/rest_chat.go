@@ -130,6 +130,10 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
 			continue
 		}
+		// Skip injected context messages (e.g. from read_image tool)
+		if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+			continue
+		}
 		// Generate a stable ID from message content hash (position-independent).
 		// This ensures cursor-based pagination survives history mutations (pruning,
 		// new messages appended, etc.) because the ID only depends on the message itself.
@@ -250,6 +254,10 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 		messageCount := 0
 		for _, msg := range history {
 			if msg.Role == "user" || msg.Role == "assistant" {
+				// Skip injected context messages (e.g. from read_image tool)
+				if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+					continue
+				}
 				messageCount++
 			}
 		}

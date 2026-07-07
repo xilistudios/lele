@@ -29,6 +29,24 @@ type Props = {
 
 const ANIMATION_MS = 200
 
+function formatDisplayValue(val: string): string {
+  if (!val) return val
+  const slashParts = val.split('/')
+  let name = slashParts[slashParts.length - 1]
+
+  // Clean up common provider prefixes separated by dots (e.g. anthropic.claude...)
+  const dotParts = name.split('.')
+  if (
+    dotParts.length > 1 &&
+    ['openai', 'anthropic', 'google', 'cohere', 'mistral', 'meta'].includes(
+      dotParts[0].toLowerCase(),
+    )
+  ) {
+    name = dotParts.slice(1).join('.')
+  }
+  return name
+}
+
 export function SearchableSelect({
   ariaLabel,
   buttonLabel,
@@ -208,18 +226,20 @@ export function SearchableSelect({
     <div ref={rootRef} className="relative">
       <button
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background-primary px-3 py-2 text-sm text-text-primary transition-all duration-200 hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-200 hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}
       >
-        <span className="min-w-0 truncate text-sm text-text-secondary">{buttonLabel}</span>
-        <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-text-primary">
-          {selectedOption?.label ?? placeholder}
+        <span className="hidden sm:inline min-w-0 truncate text-xs sm:text-sm text-text-secondary">
+          {buttonLabel}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left text-xs sm:text-sm font-medium text-text-primary">
+          {formatDisplayValue(selectedOption?.label ?? placeholder)}
         </span>
         <svg
           aria-hidden="true"
-          className={`h-3.5 w-3.5 flex-none transition-transform duration-200 ${isMounted ? 'rotate-180' : ''}`}
+          className={`h-3 w-3 sm:h-3.5 sm:w-3.5 flex-none transition-transform duration-200 ${isMounted ? 'rotate-180' : ''}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
