@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	// Dracula / Terminal-based premium color palette
+	// BgColor and other Dracula / Terminal-based premium color palette colors.
 	BgColor        = lipgloss.Color("#181824") // Very dark gray-blue background
 	InputBgColor   = lipgloss.Color("#212130") // Slightly lighter input background
 	PrimaryColor   = lipgloss.Color("#FF5555") // Dracula Red
@@ -19,12 +19,12 @@ var (
 	Foreground     = lipgloss.Color("#F8F8F2") // Dracula Foreground
 	SelectionBg    = lipgloss.Color("#44475A") // Dracula Selection background
 
-	// Main container styles
+	// AppContainer is the main container style.
 	AppContainer = lipgloss.NewStyle().
 			Background(BgColor).
 			Foreground(Foreground)
 
-	// Sidebar styles (Right Column)
+	// RightSidebar styles for the right column.
 	RightSidebar = lipgloss.NewStyle().
 			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 			BorderForeground(SelectionBg).
@@ -55,39 +55,39 @@ var (
 	SidebarDisabledDot = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FF5555"))
 
-	// Left Chat Column layout
+	// LeftColumnStyle is the left chat column layout.
 	LeftColumnStyle = lipgloss.NewStyle().
 			PaddingRight(1)
 
-	// Top Header
+	// HeaderStyle is the top header style.
 	HeaderStyle = lipgloss.NewStyle().
 			Foreground(CommentColor).
 			MarginBottom(1)
 
-	// Chat history viewport
+	// ViewportStyle is the chat history viewport.
 	ViewportStyle = lipgloss.NewStyle()
 
-	// Text input box (full-width bar, no borders, highlighted background)
+	// InputBarContainer is the text input box (full-width bar, no borders, highlighted background).
 	InputBarContainer = lipgloss.NewStyle().
 				Background(InputBgColor).
 				Padding(0, 1).
 				MarginTop(1).
 				MarginBottom(1)
 
-	// Active status / duration line
+	// StatusLineStyle is the active status / duration line.
 	StatusLineStyle = lipgloss.NewStyle().
 			Foreground(CommentColor).
 			MarginTop(1).
 			MarginBottom(1)
 
-	// Bottom Bar
+	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft = lipgloss.NewStyle().
 			Foreground(CommentColor)
 
 	BottomBarRight = lipgloss.NewStyle().
 			Foreground(CommentColor)
 
-	// Message styling
+	// UserRoleStyle styles user messages.
 	UserRoleStyle = lipgloss.NewStyle().
 			Foreground(AccentColor).
 			Bold(true)
@@ -121,7 +121,7 @@ var (
 				Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 				BorderForeground(CommentColor)
 
-	// Tool call / tool result styles
+	// ToolCallLabel styles tool call labels.
 	ToolCallLabel = lipgloss.NewStyle().
 			Foreground(OrangeColor).
 			Bold(true)
@@ -148,7 +148,7 @@ var (
 			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 			BorderForeground(SecondaryColor)
 
-	// Subagent real-time progress display in parent chat
+	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel = lipgloss.NewStyle().
 				Foreground(OrangeColor).
 				Bold(true)
@@ -157,7 +157,7 @@ var (
 				Foreground(OrangeColor).
 				Italic(true)
 
-	// Welcome Page
+	// WelcomeLogo is the welcome page logo style.
 	WelcomeLogo = lipgloss.NewStyle().
 			Foreground(PrimaryColor).
 			Bold(true)
@@ -167,7 +167,7 @@ var (
 			Italic(true).
 			Align(lipgloss.Center)
 
-	// Modals / Command autocompletes
+	// ModalContainer styles modals and command autocompletes.
 	ModalContainer = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(PurpleColor).
@@ -195,7 +195,7 @@ var (
 			Foreground(PurpleColor).
 			Bold(true)
 
-	// Model selector on welcome screen
+	// ModelSelectorStyle is the model selector on the welcome screen.
 	ModelSelectorStyle = lipgloss.NewStyle().
 				Foreground(AccentColor).
 				Background(SelectionBg).
