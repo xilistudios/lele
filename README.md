@@ -118,6 +118,40 @@ lele onboard
 lele agent -m "What can you do?"
 ```
 
+## TUI (Terminal User Interface)
+
+Lele includes a terminal-based user interface for interactive agent sessions directly in your terminal.
+
+### Usage
+
+```bash
+# Start TUI with new session
+lele tui
+
+# Start TUI with existing session
+lele tui -s <session-id>
+```
+
+### Features
+
+- Interactive chat with streaming responses
+- Tool call visualization
+- Markdown rendering in terminal
+- Multi-language support (Spanish, English, Portuguese)
+- Session management
+
+### Language Configuration
+
+Set your preferred language:
+
+```bash
+# Via environment variable
+export LELE_LANG=en  # or es, pt
+
+# Or at runtime with command
+/lang en
+```
+
 ## Web UI And Native Client Flow
 
 Lele now includes a local web UI plus a native client channel.
@@ -315,6 +349,8 @@ See `docs/tools_configuration.md` and `docs/client-api.md` for operational detai
 | `lele skills list` | List installed skills |
 | `lele client pin` | Generate a pairing PIN |
 | `lele client list` | List paired native clients |
+| `lele tui` | Start terminal user interface |
+| `lele tui -s <session>` | Start TUI with existing session |
 | `lele version` | Show version information |
 
 ## Additional Docs
