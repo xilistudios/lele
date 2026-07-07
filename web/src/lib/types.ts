@@ -573,6 +573,20 @@ export type AuthStatusResponse = {
   expires: string
 }
 
+export type SafeClientInfo = {
+  client_id: string
+  device_name: string
+  created: string
+  expires: string
+  last_seen: string
+  session_keys?: string[]
+}
+
+export type AuthPINResponse = {
+  pin: string
+  expires: string
+}
+
 export type AgentsResponse = {
   agents: Agent[]
 }

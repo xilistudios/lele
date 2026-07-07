@@ -4,6 +4,7 @@ import type {
   AgentStatusResponse,
   AgentsResponse,
   ApproveResponse,
+  AuthPINResponse,
   AuthPairResponse,
   AuthRefreshResponse,
   AuthSession,
@@ -21,6 +22,7 @@ import type {
   HistoryResponse,
   ModelsResponse,
   ProviderModelsResponse,
+  SafeClientInfo,
   SendMessageRequest,
   SendMessageResponse,
   SessionAgentResponse,
@@ -364,6 +366,11 @@ export const createApiClient = (baseUrl: string) => {
         method: 'POST',
         body: JSON.stringify({ pin, device_name }),
       }),
+    getPIN: (deviceName: string) =>
+      request<AuthPINResponse>(
+        `${endpoints.auth.pin}?device_name=${encodeURIComponent(deviceName)}`,
+        { method: 'GET' },
+      ),
     refresh: (refresh_token: string) =>
       request<AuthRefreshResponse>(endpoints.auth.refresh, {
         method: 'POST',
@@ -375,6 +382,9 @@ export const createApiClient = (baseUrl: string) => {
       }
       return request<AuthStatusResponse>(endpoints.auth.status, { method: 'GET' })
     },
+    listClients: () => request<SafeClientInfo[]>(endpoints.auth.listClients, { method: 'GET' }),
+    removeClient: (clientId: string) =>
+      request<void>(endpoints.auth.removeClient(clientId), { method: 'DELETE' }),
     agents: () => request<AgentsResponse>(endpoints.agents.list, { method: 'GET' }),
     agentInfo: async (agentId: string) => {
       const [info, status] = await Promise.all([
