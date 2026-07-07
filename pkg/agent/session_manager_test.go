@@ -9,6 +9,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
+	"github.com/xilistudios/lele/pkg/session"
 )
 
 // TestSummarizeSessionWithError_InsufficientMessages tests error handling for insufficient messages
@@ -176,6 +178,10 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Create a dedicated session directory for this test to avoid loading
+	// real user sessions from ~/.lele/sessions.
+	testSessionsDir := filepath.Join(tmpDir, "sessions")
+
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -194,6 +200,11 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 
 	msgBus := bus.NewMessageBus()
 	al := NewAgentLoop(cfg, msgBus)
+
+	// Override the shared session manager with a test-local one so we don't
+	// load or persist data in the user's real ~/.lele/sessions directory.
+	testSessionMgr := session.NewSessionManager(testSessionsDir)
+	al.registry.SetSharedSessionManager(testSessionMgr)
 
 	sm := newSessionManager(al)
 	agent := al.registry.GetDefaultAgent()

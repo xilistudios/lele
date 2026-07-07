@@ -247,8 +247,8 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/stop":
-		// Stop all subagents first (delegated to toolCoordinator)
-		subagentCount := mp.al.toolCoordinator.stopAllSubagents()
+		// Stop session-specific subagents first (delegated to toolCoordinator)
+		subagentCount := mp.al.toolCoordinator.stopSessionSubagents(sessionKey)
 		// Cancel any active session processing
 		mp.al.toolCoordinator.cancelSession(sessionKey)
 		response := "Agente detenido."

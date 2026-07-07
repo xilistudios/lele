@@ -1062,6 +1062,8 @@ func (m *commandHandlerSubagentCoordinatorStub) updateToolContexts(agent *AgentI
 
 func (m *commandHandlerSubagentCoordinatorStub) stopAllSubagents() int { return 0 }
 
+func (m *commandHandlerSubagentCoordinatorStub) stopSessionSubagents(sessionKey string) int { return 0 }
+
 func (m *commandHandlerSubagentCoordinatorStub) cancelAll() int { return 0 }
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}

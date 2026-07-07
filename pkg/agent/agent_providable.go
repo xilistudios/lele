@@ -309,7 +309,7 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 
 	subagentCount := 0
 	if ap.al.toolCoordinator != nil {
-		subagentCount = ap.al.toolCoordinator.stopAllSubagents()
+		subagentCount = ap.al.toolCoordinator.stopSessionSubagents(resolvedKey)
 	}
 	cancelled := ap.al.cancelSession(resolvedKey)
 	logger.InfoCF("agent", "StopAgent completed", map[string]interface{}{

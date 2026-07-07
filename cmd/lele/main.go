@@ -89,6 +89,19 @@ func main() {
 		}
 	case "client":
 		clientCmd()
+	case "tui":
+		// Parse -s flag for session ID
+		sessionID := ""
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-s" || args[i] == "--session" {
+				if i+1 < len(args) {
+					sessionID = args[i+1]
+					break
+				}
+			}
+		}
+		tuiCmd(sessionID)
 	case "version", "--version", "-v":
 		printVersion()
 	default:

@@ -42,6 +42,7 @@ type Logger struct {
 	errorFile *os.File
 	logDate   string // Current date for rotation (format: "2006-01-02")
 	basePath  string // Base path for logs directory
+	quiet     bool   // Suppress stdout/stderr messages (for TUI mode)
 }
 
 type LogEntry struct {
@@ -58,8 +59,6 @@ func init() {
 		logger = &Logger{
 			basePath: getDefaultLogsPath(),
 		}
-		// Initialize default logging automatically (silent if fails)
-		_ = InitDefaultLogging()
 	})
 }
 
@@ -76,6 +75,14 @@ func SetLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
 	currentLevel = level
+}
+
+// SetQuiet suppresses stdout/stderr startup messages (for TUI mode).
+// Must be called before InitDefaultLogging or EnableMultiFileLogging.
+func SetQuiet(q bool) {
+	mu.Lock()
+	defer mu.Unlock()
+	logger.quiet = q
 }
 
 // GetLevel returns the current log level
@@ -151,7 +158,9 @@ func EnableMultiFileLogging(basePath string) error {
 	logger.infoFile = infoFile
 	logger.errorFile = errorFile
 
-	log.Printf("Multi-file logging enabled: info-%s.log, errors-%s.log in %s\n", currentDate, currentDate, basePath)
+	if !logger.quiet {
+		log.Printf("Multi-file logging enabled: info-%s.log, errors-%s.log in %s\n", currentDate, currentDate, basePath)
+	}
 	return nil
 }
 
@@ -265,16 +274,26 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 	}
 
 	// Write to file (for INFO and above)
-	if level >= INFO {
-		jsonData, err := json.Marshal(entry)
-		if err == nil {
-			writeToFile(level, entry, jsonData)
+	jsonData, err := json.Marshal(entry)
+	if err != nil {
+		// Log error to stderr in non-quiet mode
+		if !logger.quiet {
+			log.Printf("Failed to marshal log entry: %v", err)
 		}
+		return
+	}
+	if level >= INFO {
+		writeToFile(level, entry, jsonData)
 	}
 
 	var fieldStr string
 	if len(fields) > 0 {
 		fieldStr = " " + formatFields(fields)
+	}
+
+	// In quiet mode (TUI), only write to file, don't output to stderr
+	if logger.quiet {
+		return
 	}
 
 	logLine := fmt.Sprintf("[%s] [%s]%s %s%s",

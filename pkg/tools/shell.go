@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/utils"
 )
@@ -119,7 +120,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 			}
 		} else {
 			// If deny patterns are disabled, we won't add any patterns, allowing all commands.
-			fmt.Println("Warning: deny patterns are disabled. All commands will be allowed.")
+			logger.WarnCF("tools", "deny patterns are disabled. All commands will be allowed.", nil)
 		}
 	} else {
 		denyPatterns = append(denyPatterns, defaultDenyPatterns...)

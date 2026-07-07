@@ -21,6 +21,7 @@ import (
 type toolCoordinator interface {
 	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
+	stopSessionSubagents(sessionKey string) int
 	cancelAll() int
 	cancelSession(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
@@ -101,6 +102,27 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 		if manager != nil {
 			stopped := manager.StopAll()
 			totalStopped += stopped
+		}
+	}
+	return totalStopped
+}
+
+// stopSessionSubagents stops running subagents for a specific session.
+func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
+	resolvedKey := tc.al.ResolveSessionKey(sessionKey)
+	totalStopped := 0
+	for _, manager := range tc.subagents {
+		if manager != nil {
+			for _, task := range manager.ListTasks() {
+				resolvedOrigin := tc.al.ResolveSessionKey(task.OriginSessionKey)
+				taskSessionKey := task.OriginSessionKey + ":" + task.ID
+				resolvedTaskKey := tc.al.ResolveSessionKey(taskSessionKey)
+				if resolvedOrigin == resolvedKey || resolvedTaskKey == resolvedKey || taskSessionKey == resolvedKey {
+					if manager.StopTask(task.ID) {
+						totalStopped++
+					}
+				}
+			}
 		}
 	}
 	return totalStopped

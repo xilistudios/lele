@@ -234,6 +234,11 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		// once the user actually sends a message.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
+		// Truncate history and clear summary so the new session is truly
+		// fresh.  This is necessary because loadSessions() may have already
+		// populated the session from a previous run's on-disk files.
+		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
+		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
 	return newSessionKey
@@ -362,6 +367,19 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 // This is used by channel managers to access agent capabilities.
 func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
 	return al.providable
+}
+
+// MessageBus returns the unexported bus of the agent loop.
+func (al *AgentLoop) MessageBus() *bus.MessageBus {
+	return al.bus
+}
+
+// SessionManager returns the shared session manager used by all agents.
+func (al *AgentLoop) SessionManager() *session.SessionManager {
+	if al.registry != nil {
+		return al.registry.sharedSessionManager
+	}
+	return nil
 }
 
 // registerSessionCancel delegates to sessionManager.

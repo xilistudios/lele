@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 	storage  string
+	loadOnce sync.Once // ensures loadSessions runs exactly once, on first access
 }
 
 func NewSessionManager(storage string) *SessionManager {
@@ -48,10 +50,21 @@ func NewSessionManager(storage string) *SessionManager {
 
 	if storage != "" {
 		os.MkdirAll(storage, 0755)
-		sm.loadSessions()
+		// loadSessions is deferred to ensureLoaded() — called on first access
 	}
 
 	return sm
+}
+
+// ensureLoaded triggers loadSessions exactly once, on the first call.
+// Must be called BEFORE acquiring sm.mu to avoid deadlock, since
+// loadSessions writes to sm.sessions directly without the mutex.
+func (sm *SessionManager) ensureLoaded() {
+	sm.loadOnce.Do(func() {
+		if sm.storage != "" {
+			sm.loadSessions()
+		}
+	})
 }
 
 // MigrateFromWorkspace moves session JSON files from an old per-workspace
@@ -136,6 +149,7 @@ func (sm *SessionManager) StoragePath() string {
 }
 
 func (sm *SessionManager) GetOrCreate(key string) *Session {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -197,6 +211,7 @@ func (sm *SessionManager) AddMessage(sessionKey, role, content string) {
 // If the last message is a streaming assistant message (added by AppendAssistantChunk),
 // it updates that message in-place instead of appending a duplicate.
 func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Message) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -240,6 +255,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 }
 
 func (sm *SessionManager) GetHistory(key string) []providers.Message {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -261,6 +277,7 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 }
 
 func (sm *SessionManager) GetSummary(key string) string {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -272,6 +289,7 @@ func (sm *SessionManager) GetSummary(key string) string {
 }
 
 func (sm *SessionManager) GetName(key string) string {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -283,6 +301,7 @@ func (sm *SessionManager) GetName(key string) string {
 }
 
 func (sm *SessionManager) GetUpdated(key string) time.Time {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -294,6 +313,7 @@ func (sm *SessionManager) GetUpdated(key string) time.Time {
 }
 
 func (sm *SessionManager) GetCreated(key string) time.Time {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -305,6 +325,7 @@ func (sm *SessionManager) GetCreated(key string) time.Time {
 }
 
 func (sm *SessionManager) SetSummary(key string, summary string) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -316,6 +337,7 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 }
 
 func (sm *SessionManager) SetName(key string, name string) error {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -336,6 +358,7 @@ func (sm *SessionManager) SetName(key string, name string) error {
 }
 
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -362,6 +385,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 // as excluded from the LLM context, preserving them in storage for the web UI.
 // If keepCount <= 0, all messages are excluded.
 func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount int) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -381,6 +405,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	session.Updated = time.Now()
 }
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -403,6 +428,7 @@ func (sm *SessionManager) ShouldStartFreshSession(key string, threshold time.Dur
 		return false, 0
 	}
 
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -441,6 +467,7 @@ func sanitizeFilename(key string) string {
 }
 
 func (sm *SessionManager) Save(key string) error {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.saveUnlocked(key)
@@ -452,27 +479,57 @@ func (sm *SessionManager) loadSessions() error {
 		return err
 	}
 
+	// Filter to JSON files only
+	var jsonFiles []os.DirEntry
 	for _, file := range files {
-		if file.IsDir() {
+		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
 			continue
 		}
+		jsonFiles = append(jsonFiles, file)
+	}
 
-		if filepath.Ext(file.Name()) != ".json" {
-			continue
+	if len(jsonFiles) == 0 {
+		return nil
+	}
+
+	// Parallel load: read and parse files concurrently
+	type loadResult struct {
+		session *Session
+	}
+	results := make([]loadResult, len(jsonFiles))
+
+	// Use a semaphore to limit concurrent file operations
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+
+	for i, file := range jsonFiles {
+		wg.Add(1)
+		go func(idx int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
+
+			sessionPath := filepath.Join(sm.storage, name)
+			data, err := os.ReadFile(sessionPath)
+			if err != nil {
+				return
+			}
+
+			var session Session
+			if err := json.Unmarshal(data, &session); err != nil {
+				return
+			}
+			results[idx] = loadResult{session: &session}
+		}(i, file.Name())
+	}
+
+	wg.Wait()
+
+	// Collect results into the sessions map
+	for _, r := range results {
+		if r.session != nil {
+			sm.sessions[r.session.Key] = r.session
 		}
-
-		sessionPath := filepath.Join(sm.storage, file.Name())
-		data, err := os.ReadFile(sessionPath)
-		if err != nil {
-			continue
-		}
-
-		var session Session
-		if err := json.Unmarshal(data, &session); err != nil {
-			continue
-		}
-
-		sm.sessions[session.Key] = &session
 	}
 
 	return nil
@@ -480,6 +537,7 @@ func (sm *SessionManager) loadSessions() error {
 
 // SetHistory updates the messages of a session.
 func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -495,6 +553,7 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 }
 
 func (sm *SessionManager) HasVerbosePreference(key string) bool {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -508,6 +567,7 @@ func (sm *SessionManager) HasVerbosePreference(key string) bool {
 
 // GetVerboseMode returns the verbose mode setting for a session (legacy compatibility).
 func (sm *SessionManager) GetVerboseMode(key string) bool {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -520,6 +580,7 @@ func (sm *SessionManager) GetVerboseMode(key string) bool {
 
 // SetVerboseMode sets the verbose mode for a session and persists it (legacy compatibility).
 func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -544,6 +605,7 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 // GetVerboseLevel returns the verbose level for a session ("off", "basic", or "full").
 // Migration: if VerboseMode is true but VerboseLevel is empty, returns "full".
 func (sm *SessionManager) GetVerboseLevel(key string) string {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -564,6 +626,7 @@ func (sm *SessionManager) GetVerboseLevel(key string) string {
 
 // SetVerboseLevel sets the verbose level for a session and persists it.
 func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -587,6 +650,7 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 
 // GetModel returns the model override for a session.
 func (sm *SessionManager) GetModel(key string) string {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -599,6 +663,7 @@ func (sm *SessionManager) GetModel(key string) string {
 
 // SetModel sets the model override for a session and persists it.
 func (sm *SessionManager) SetModel(key string, model string) error {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -622,6 +687,7 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 
 // GetThinkingLevel returns the thinking level for a session.
 func (sm *SessionManager) GetThinkingLevel(key string) string {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -634,6 +700,7 @@ func (sm *SessionManager) GetThinkingLevel(key string) string {
 
 // SetThinkingLevel sets the thinking level for a session and persists it.
 func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -654,6 +721,7 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 
 // GetTokenCounts returns the input and output token counts for a session.
 func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens int) {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -666,6 +734,7 @@ func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens 
 
 // AddTokenCounts adds token counts to a session.
 func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens int) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -686,6 +755,7 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 
 // ResetTokenCounts resets the input and output token counts for a session to zero.
 func (sm *SessionManager) ResetTokenCounts(key string) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -805,6 +875,7 @@ const streamFlushInterval = 200 * time.Millisecond
 // The session is saved to disk periodically (throttled) so the partial content
 // survives restarts and allows reconnecting clients to recover the stream.
 func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -825,6 +896,7 @@ func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 // AppendReasoningChunk appends a reasoning/thinking chunk to the in-progress
 // assistant message. Creates the streaming message if it doesn't exist yet.
 func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -847,6 +919,7 @@ func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 // with the final version. This allows HasStreamedContent to detect that content
 // was already delivered via streaming chunks for deduplication.
 func (sm *SessionManager) FinalizeAssistantMessage(key string) {
+	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -867,6 +940,7 @@ func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 // delivery. It checks the in-memory flag (set by AppendAssistantChunk and
 // cleared when a new user message arrives).
 func (sm *SessionManager) HasStreamedContent(key string) bool {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -894,6 +968,7 @@ func (sm *SessionManager) HasStreamedContent(key string) bool {
 
 // GetInProgressAssistant returns the in-progress assistant message, if any.
 func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -976,6 +1051,7 @@ func (sm *SessionManager) flushStreamNow(key string) {
 // ActiveCount returns the number of sessions that have at least one message.
 // This is useful for detecting agents with active conversations.
 func (sm *SessionManager) ActiveCount() int {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	count := 0
@@ -985,6 +1061,21 @@ func (sm *SessionManager) ActiveCount() int {
 		}
 	}
 	return count
+}
+
+// ListSessions returns a slice of all sessions loaded in memory, sorted by updated time descending.
+func (sm *SessionManager) ListSessions() []*Session {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	res := make([]*Session, 0, len(sm.sessions))
+	for _, s := range sm.sessions {
+		res = append(res, s)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Updated.After(res[j].Updated)
+	})
+	return res
 }
 
 // SubagentSessionInfo contains metadata about a persisted subagent session.
@@ -1003,6 +1094,7 @@ type SubagentSessionInfo struct {
 // to surface past subagents even after a server restart when the in-memory
 // SubagentManager no longer tracks them.
 func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSessionInfo {
+	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
