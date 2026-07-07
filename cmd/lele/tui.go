@@ -4,18 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/config"
-	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func tuiCmd() {
+	logger.SetQuiet(true)
+
 	cfg, err := loadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
@@ -36,16 +36,12 @@ func tuiCmd() {
 	}()
 	defer agentLoop.Stop()
 
-	// Get shared session manager path from AgentLoop setup logic
-	unifiedSessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
-	sessionMgr := session.NewSessionManager(unifiedSessionsDir)
-
-	// Migrate sessions to unified location just in case
-	for _, agentID := range agentLoop.GetProvidable().ListAvailableAgentIDs() {
-		if agentInfo, ok := agentLoop.GetProvidable().GetAgentInfo(agentID); ok {
-			oldSessionsDir := filepath.Join(agentInfo.Workspace, "sessions")
-			session.MigrateFromWorkspace(oldSessionsDir, unifiedSessionsDir)
-		}
+	// Use the agent loop's shared session manager so the TUI and agent loop
+	// operate on the same in-memory session state.
+	sessionMgr := agentLoop.SessionManager()
+	if sessionMgr == nil {
+		fmt.Println("Error: session manager not initialized")
+		os.Exit(1)
 	}
 
 	// Initialize the TUI model

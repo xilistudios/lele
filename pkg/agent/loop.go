@@ -369,6 +369,13 @@ func (al *AgentLoop) MessageBus() *bus.MessageBus {
 	return al.bus
 }
 
+// SessionManager returns the shared session manager used by all agents.
+func (al *AgentLoop) SessionManager() *session.SessionManager {
+	if al.registry != nil {
+		return al.registry.sharedSessionManager
+	}
+	return nil
+}
 
 // registerSessionCancel delegates to sessionManager.
 func (al *AgentLoop) registerSessionCancel(sessionKey string, cancel context.CancelFunc) func() {

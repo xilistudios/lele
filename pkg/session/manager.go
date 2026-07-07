@@ -1002,7 +1002,6 @@ func (sm *SessionManager) ListSessions() []*Session {
 	return res
 }
 
-
 // SubagentSessionInfo contains metadata about a persisted subagent session.
 type SubagentSessionInfo struct {
 	Key        string

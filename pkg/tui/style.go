@@ -4,16 +4,16 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	// Dracula / Terminal-based premium color palette
-	BgColor          = lipgloss.Color("#181824") // Very dark gray-blue background
-	InputBgColor     = lipgloss.Color("#212130") // Slightly lighter input background
-	PrimaryColor     = lipgloss.Color("#FF5555") // Dracula Red
-	SecondaryColor   = lipgloss.Color("#50FA7B") // Dracula Green
-	AccentColor      = lipgloss.Color("#8BE9FD") // Dracula Cyan
-	PurpleColor      = lipgloss.Color("#BD93F9") // Dracula Purple
-	OrangeColor      = lipgloss.Color("#FFB86C") // Dracula Orange
-	CommentColor     = lipgloss.Color("#6272A4") // Dracula Comment / Muted gray
-	Foreground       = lipgloss.Color("#F8F8F2") // Dracula Foreground
-	SelectionBg      = lipgloss.Color("#44475A") // Dracula Selection background
+	BgColor        = lipgloss.Color("#181824") // Very dark gray-blue background
+	InputBgColor   = lipgloss.Color("#212130") // Slightly lighter input background
+	PrimaryColor   = lipgloss.Color("#FF5555") // Dracula Red
+	SecondaryColor = lipgloss.Color("#50FA7B") // Dracula Green
+	AccentColor    = lipgloss.Color("#8BE9FD") // Dracula Cyan
+	PurpleColor    = lipgloss.Color("#BD93F9") // Dracula Purple
+	OrangeColor    = lipgloss.Color("#FFB86C") // Dracula Orange
+	CommentColor   = lipgloss.Color("#6272A4") // Dracula Comment / Muted gray
+	Foreground     = lipgloss.Color("#F8F8F2") // Dracula Foreground
+	SelectionBg    = lipgloss.Color("#44475A") // Dracula Selection background
 
 	// Main container styles
 	AppContainer = lipgloss.NewStyle().
@@ -114,6 +114,33 @@ var (
 				Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 				BorderForeground(CommentColor)
 
+	// Tool call / tool result styles
+	ToolCallLabel = lipgloss.NewStyle().
+			Foreground(OrangeColor).
+			Bold(true)
+
+	ToolCallName = lipgloss.NewStyle().
+			Foreground(PurpleColor).
+			Bold(true)
+
+	ToolCallBox = lipgloss.NewStyle().
+			Foreground(CommentColor).
+			Background(InputBgColor).
+			Padding(0, 1).
+			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+			BorderForeground(OrangeColor)
+
+	ToolResultLabel = lipgloss.NewStyle().
+			Foreground(SecondaryColor).
+			Bold(true)
+
+	ToolResultBox = lipgloss.NewStyle().
+			Foreground(CommentColor).
+			Background(InputBgColor).
+			Padding(0, 1).
+			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+			BorderForeground(SecondaryColor)
+
 	// Welcome Page
 	WelcomeLogo = lipgloss.NewStyle().
 			Foreground(PrimaryColor).
@@ -144,7 +171,21 @@ var (
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(CommentColor)
 
+	CommentColorStyle = lipgloss.NewStyle().
+				Foreground(CommentColor).
+				Italic(true)
+
 	TitleStyle = lipgloss.NewStyle().
 			Foreground(PurpleColor).
 			Bold(true)
+
+	// Model selector on welcome screen
+	ModelSelectorStyle = lipgloss.NewStyle().
+				Foreground(AccentColor).
+				Background(SelectionBg).
+				Bold(true).
+				Padding(0, 1)
+
+	ModelSelectorLabel = lipgloss.NewStyle().
+				Foreground(CommentColor)
 )

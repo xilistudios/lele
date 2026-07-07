@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // FlexibleStringSlice is a []string that also accepts JSON numbers,
@@ -57,6 +58,7 @@ type Config struct {
 	Heartbeat HeartbeatConfig  `json:"heartbeat"`
 	Devices   DevicesConfig    `json:"devices"`
 	Logs      LogsConfig       `json:"logs"`
+	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	mu        sync.RWMutex
 }
 
@@ -1248,6 +1250,29 @@ func (c *Config) GetImageModelConfig() ModelConfig {
 		Primary:   c.Agents.Defaults.ImageModel,
 		Fallbacks: c.Agents.Defaults.ImageModelFallbacks,
 	}
+}
+
+// GetLanguage returns the configured language code.
+// Returns "es" (Spanish) as default if not set.
+func (c *Config) GetLanguage() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Language == "" {
+		return "es"
+	}
+	return c.Language
+}
+
+// SetLanguage sets the language configuration.
+func (c *Config) SetLanguage(lang string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Language = lang
+}
+
+// GetAvailableLanguages returns the list of supported language codes.
+func (c *Config) GetAvailableLanguages() []string {
+	return i18n.AvailableLanguages()
 }
 
 func expandHome(path string) string {

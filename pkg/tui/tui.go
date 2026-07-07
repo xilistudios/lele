@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,9 @@ import (
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -36,7 +39,13 @@ const (
 	ModalSessions
 	ModalAgent
 	ModalModel
+	ModalThink
+	ModalLang
+	ModalSubagents
 )
+
+// Timeout for ESC hint display (double-press to cancel)
+const escHintTimeout = 1 * time.Second
 
 type commandInfo struct {
 	name        string
@@ -49,6 +58,9 @@ var allCommands = []commandInfo{
 	{name: "/agents", description: "Switch agent"},
 	{name: "/models", description: "Switch model"},
 	{name: "/clear", description: "Clear session history"},
+	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
+	{name: "/lang", description: "Change language (es/en/pt)"},
+	{name: "/subagents", description: "Switch to subagent"},
 	{name: "/quit", description: "Exit TUI"},
 }
 
@@ -63,17 +75,18 @@ type completeMsg struct {
 type tickMsg time.Time
 
 type Model struct {
-	agentLoop          *agent.AgentLoop
-	sessionMgr         *session.SessionManager
-	cfg                *config.Config
-	ctx                context.Context
-	cancel             context.CancelFunc
+	agentLoop  *agent.AgentLoop
+	sessionMgr *session.SessionManager
+	cfg        *config.Config
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	// UI state
 	activePane         paneType
 	selectedSessionIdx int
 	visibleSessions    []*session.Session
 	currentKey         string
+	showWelcome        bool // true when showing the welcome/new-chat screen
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool
@@ -81,43 +94,62 @@ type Model struct {
 	autocompleteIdx   int
 
 	// Selection modals
-	modalMode          modalType
-	modalItems         []string
-	modalSelectedIdx   int
+	modalMode         modalType
+	modalItems        []string
+	modalSessionKeys  []string // maps modal items to session keys (for /sessions)
+	modalSubagentKeys []string // maps modal items to subagent session keys (for /subagents)
+	modalSelectedIdx  int
+	modalScrollOffset int // scroll offset for long modal lists
 
 	// Sub-components
-	viewport           viewport.Model
-	textInput          textinput.Model
+	viewport  viewport.Model
+	textInput textinput.Model
+
+	// Pending user message (shown immediately before agent responds)
+	pendingUserMessage string
 
 	// Message processing / streaming
-	processing         bool
-	currentMessageID   string
-	currentStream      string
-	currentThinking    string
-	startTime          time.Time
-	elapsedTime        time.Duration
-	lastDuration       time.Duration
-	animationTick      int
+	processing       bool
+	currentMessageID string
+	currentStream    string
+	currentThinking  string
+	startTime        time.Time
+	elapsedTime      time.Duration
+	lastDuration     time.Duration
+	animationTick    int
+
+	// Double-ESC cancel tracking
+	escPressCount int
+	escLastPress  time.Time
+	escHint       bool // true when showing "press ESC again to cancel" hint
 
 	// Workspace Git info
-	gitBranch          string
-	workspacePath      string
+	gitBranch     string
+	workspacePath string
+
+	// Pending model/agent for welcome screen (applied on session creation)
+	pendingModel string
+	pendingAgent string
+	pendingThink string
 
 	// Terminal size
-	width              int
-	height             int
+	width  int
+	height int
 }
 
 func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *session.SessionManager) *Model {
+	// Initialize i18n with configured language
+	i18n.InitWithLanguage(cfg.GetLanguage())
+
 	ti := textinput.New()
-	ti.Placeholder = "Ask anything... \"What is the tech stack of this project?\""
+	ti.Placeholder = i18n.T("tui.placeholder")
 	ti.Focus()
 	ti.CharLimit = 4096
 	ti.Width = 80
 	ti.Prompt = " "
 
 	vp := viewport.New(80, 20)
-	vp.SetContent("Selecciona o crea un chat para comenzar.")
+	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	workspacePath := cfg.WorkspacePath()
@@ -134,6 +166,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		viewport:      vp,
 		textInput:     ti,
 		activePane:    ChatViewPane,
+		showWelcome:   true,
 		workspacePath: workspacePath,
 		gitBranch:     getGitBranch(workspacePath),
 	}
@@ -203,15 +236,15 @@ func (m *Model) reloadSessions() {
 	m.visibleSessions = nil
 	all := m.sessionMgr.ListSessions()
 
-	if len(all) == 0 && m.currentKey == "" {
-		m.createNewChat()
-		all = m.sessionMgr.ListSessions()
-	}
-
 	for _, s := range all {
 		if len(s.Messages) > 0 || s.Key == m.currentKey {
 			m.visibleSessions = append(m.visibleSessions, s)
 		}
+	}
+
+	// Don't switch away from the welcome screen during reload
+	if m.showWelcome {
+		return
 	}
 
 	if m.currentKey != "" {
@@ -230,6 +263,18 @@ func (m *Model) reloadSessions() {
 	} else if len(m.visibleSessions) > 0 {
 		m.selectedSessionIdx = 0
 		m.currentKey = m.visibleSessions[0].Key
+		m.showWelcome = false
+	}
+
+	// Clear pending user message if it now appears in the session history
+	if m.pendingUserMessage != "" && m.currentKey != "" {
+		history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+		for _, msg := range history {
+			if msg.Role == "user" && msg.Content == m.pendingUserMessage {
+				m.pendingUserMessage = ""
+				break
+			}
+		}
 	}
 
 	m.updateViewport()
@@ -239,55 +284,103 @@ func (m *Model) createNewChat() {
 	newKey := fmt.Sprintf("tui:chat:%s", uuid.New().String())
 	m.sessionMgr.GetOrCreate(newKey)
 
-	defaultAgentID := m.agentLoop.GetProvidable().GetDefaultAgentID()
-	m.agentLoop.GetProvidable().SetSessionAgent(newKey, defaultAgentID)
+	agentID := m.pendingAgent
+	if agentID == "" {
+		agentID = m.agentLoop.GetProvidable().GetDefaultAgentID()
+	}
+	m.agentLoop.GetProvidable().SetSessionAgent(newKey, agentID)
+
+	if m.pendingModel != "" {
+		m.agentLoop.GetProvidable().SetSessionModel(newKey, m.pendingModel)
+	}
+
+	if m.pendingThink != "" {
+		m.agentLoop.GetProvidable().SetThinkLevel(newKey, m.pendingThink)
+	}
 
 	m.currentKey = newKey
 }
 
 func (m *Model) updateViewport() {
 	if m.currentKey == "" {
-		m.viewport.SetContent("Crea un chat para comenzar.")
+		m.viewport.SetContent("")
 		return
 	}
 
 	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
 
 	var sb strings.Builder
-	for _, msg := range history {
+	lastRole := ""
+	for i, msg := range history {
+		// Skip the last message if it's a streaming assistant message during
+		// processing — the TUI is already rendering the live stream via currentStream.
+		if m.processing && msg.Role == "assistant" && msg.Streaming && i == len(history)-1 {
+			continue
+		}
+
 		if msg.Role == "user" {
-			sb.WriteString(UserRoleStyle.Render("Tú") + "\n")
+			sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
 			sb.WriteString(UserMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
 		} else if msg.Role == "assistant" {
+			// Only show agent name when coming from user (start of a turn)
+			if lastRole == "" || lastRole == "user" || lastRole == "system" {
+				agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
+				agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID)
+				agentName := agentID
+				if ok && agentInfo.Name != "" {
+					agentName = agentInfo.Name
+				}
+				sb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
+			}
+
+			if msg.ReasoningContent != "" {
+				sb.WriteString(ThinkingContentStyle.Render(wrapText(msg.ReasoningContent, m.viewport.Width-6)) + "\n")
+			}
+
+			if msg.Content != "" {
+				sb.WriteString(AssistantMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n")
+			}
+
+			// Render tool calls from assistant message (compact: tool_name: params)
+			for _, tc := range msg.ToolCalls {
+				toolName := tc.Name
+				if toolName == "" && tc.Function != nil {
+					toolName = tc.Function.Name
+				}
+				args := formatToolCallArgsCompact(tc)
+				line := toolName
+				if args != "" {
+					line += ": " + args
+				}
+				sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
+			}
+			sb.WriteString("\n")
+		} else if msg.Role == "tool" {
+			summary := truncateToolResult(msg.Content, 150)
+			sb.WriteString(ToolResultLabel.Render("  → ") + ToolResultBox.Render(summary) + "\n")
+		}
+		// Skip system messages — they are internal prompts, not user-facing
+		lastRole = msg.Role
+	}
+
+	// Show pending user message immediately (before agent responds)
+	if m.pendingUserMessage != "" {
+		sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+		sb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
+		lastRole = "user"
+	}
+
+	if m.processing && (m.currentStream != "" || m.currentThinking != "") {
+		// Only show agent name when coming from user (start of a turn)
+		if lastRole == "" || lastRole == "user" || lastRole == "system" {
 			agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 			agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID)
 			agentName := agentID
 			if ok && agentInfo.Name != "" {
 				agentName = agentInfo.Name
 			}
-
 			sb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
-
-			if msg.ReasoningContent != "" {
-				sb.WriteString(ThinkingContentStyle.Render(wrapText(msg.ReasoningContent, m.viewport.Width-6)) + "\n")
-			}
-
-			sb.WriteString(AssistantMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
-		} else if msg.Role == "system" {
-			sb.WriteString(SystemRoleStyle.Render("System") + "\n")
-			sb.WriteString(SystemMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
 		}
-	}
-
-	if m.processing && (m.currentStream != "" || m.currentThinking != "") {
-		agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
-		agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID)
-		agentName := agentID
-		if ok && agentInfo.Name != "" {
-			agentName = agentInfo.Name
-		}
-
-		sb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
 
 		if m.currentThinking != "" {
 			sb.WriteString(ThinkingContentStyle.Render(wrapText(m.currentThinking, m.viewport.Width-6)) + "\n")
@@ -299,7 +392,138 @@ func (m *Model) updateViewport() {
 	}
 
 	m.viewport.SetContent(sb.String())
-	m.viewport.GotoBottom()
+	if sb.Len() > 0 && m.viewport.Height > 0 {
+		m.viewport.GotoBottom()
+	}
+}
+
+func formatToolCallArgs(tc providers.ToolCall) string {
+	// Try structured arguments first
+	if tc.Arguments != nil {
+		var parts []string
+		for k, v := range tc.Arguments {
+			val := fmt.Sprintf("%v", v)
+			if len(val) > 120 {
+				val = val[:120] + "…"
+			}
+			parts = append(parts, fmt.Sprintf("%s: %s", k, val))
+		}
+		sort.Strings(parts)
+		return strings.Join(parts, "  ")
+	}
+	// Try function.arguments (JSON string)
+	if tc.Function != nil && tc.Function.Arguments != "" {
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err == nil {
+			var parts []string
+			for k, v := range args {
+				val := fmt.Sprintf("%v", v)
+				if len(val) > 120 {
+					val = val[:120] + "…"
+				}
+				parts = append(parts, fmt.Sprintf("%s: %s", k, val))
+			}
+			sort.Strings(parts)
+			return strings.Join(parts, "  ")
+		}
+		// Fallback: show raw JSON
+		raw := tc.Function.Arguments
+		if len(raw) > 200 {
+			raw = raw[:200] + "…"
+		}
+		return raw
+	}
+	return ""
+}
+
+// extractToolCallArgs extracts arguments from a ToolCall, handling different formats.
+func extractToolCallArgs(tc providers.ToolCall) map[string]interface{} {
+	if tc.Arguments != nil {
+		return tc.Arguments
+	}
+	if tc.Function != nil && tc.Function.Arguments != "" {
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err == nil {
+			return args
+		}
+	}
+	return nil
+}
+
+// formatToolCallArgsCompact returns a single-line compact representation of
+// tool call arguments: key=val pairs joined by commas, values truncated to 80 chars.
+func formatToolCallArgsCompact(tc providers.ToolCall) string {
+	extract := func(args map[string]interface{}) string {
+		var parts []string
+		for k, v := range args {
+			val := fmt.Sprintf("%v", v)
+			// Flatten newlines for compact display
+			val = strings.ReplaceAll(val, "\n", " ")
+			if len(val) > 80 {
+				val = val[:80] + "…"
+			}
+			parts = append(parts, fmt.Sprintf("%s=%s", k, val))
+		}
+		sort.Strings(parts)
+		return strings.Join(parts, ", ")
+	}
+
+	args := extractToolCallArgs(tc)
+	if args != nil {
+		return extract(args)
+	}
+	// Fallback: try to extract raw string from Function.Arguments
+	if tc.Function != nil && tc.Function.Arguments != "" {
+		raw := tc.Function.Arguments
+		if len(raw) > 120 {
+			raw = raw[:120] + "…"
+		}
+		return raw
+	}
+	return ""
+}
+
+// truncateToolResult returns a collapsed single-line summary of a tool result.
+func truncateToolResult(content string, maxLen int) string {
+	if content == "" {
+		return ""
+	}
+
+	// Try to extract meaningful content from JSON if present
+	if len(content) > 0 && content[0] == '{' {
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(content), &parsed); err == nil {
+			// Try common fields that contain the main result
+			for _, key := range []string{"output", "result", "error", "message"} {
+				if val, ok := parsed[key]; ok {
+					if str, ok := val.(string); ok && str != "" {
+						content = str
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Try to extract first meaningful line
+	lines := strings.Split(content, "\n")
+	summary := ""
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" && l != "{" && l != "}" {
+			summary = l
+			break
+		}
+	}
+	if summary == "" {
+		summary = content
+	}
+	// Flatten and truncate
+	summary = strings.ReplaceAll(summary, "\n", " ")
+	if len(summary) > maxLen {
+		summary = summary[:maxLen] + "…"
+	}
+	return summary
 }
 
 func (m *Model) startOutboundListener() tea.Cmd {
@@ -331,6 +555,12 @@ func (m *Model) submitMessage() tea.Cmd {
 		return nil
 	}
 
+	// If we're on the welcome screen with no session, create one now
+	if m.currentKey == "" || m.showWelcome {
+		m.createNewChat()
+		m.showWelcome = false
+	}
+
 	m.textInput.SetValue("")
 	m.processing = true
 	m.startTime = time.Now()
@@ -339,8 +569,10 @@ func (m *Model) submitMessage() tea.Cmd {
 	m.currentStream = ""
 	m.currentThinking = ""
 
-	m.sessionMgr.AddMessage(m.currentKey, "user", content)
-	m.sessionMgr.Save(m.currentKey)
+	// Store the user message so it renders immediately in the viewport.
+	// The LLM runner will also add it to the session; we clear our copy
+	// once we see it appear in the session history (on reloadSessions).
+	m.pendingUserMessage = content
 	m.reloadSessions()
 
 	m.agentLoop.MessageBus().PublishInbound(bus.InboundMessage{
@@ -377,34 +609,75 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "k":
 				if m.modalSelectedIdx > 0 {
 					m.modalSelectedIdx--
+					if m.modalSelectedIdx < m.modalScrollOffset {
+						m.modalScrollOffset = m.modalSelectedIdx
+					}
 				}
 			case "down", "j":
 				if m.modalSelectedIdx < len(m.modalItems)-1 {
 					m.modalSelectedIdx++
-				}
-			case "enter":
-				selectedVal := m.modalItems[m.modalSelectedIdx]
-				if m.modalMode == ModalAgent {
-					m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
-				} else if m.modalMode == ModalModel {
-					m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
-				} else if m.modalMode == ModalSessions {
-					parts := strings.SplitN(selectedVal, " | ", 2)
-					if len(parts) > 0 {
-						for _, s := range m.visibleSessions {
-							name := s.Name
-							if name == "" {
-								name = "Nuevo Chat"
-							}
-							if s.Key == parts[0] || name == parts[0] {
-								m.currentKey = s.Key
-								break
-							}
-						}
+					maxVisible := m.height - 8 // title + borders + padding
+					if maxVisible < 3 {
+						maxVisible = 3
+					}
+					if m.modalSelectedIdx >= m.modalScrollOffset+maxVisible {
+						m.modalScrollOffset = m.modalSelectedIdx - maxVisible + 1
 					}
 				}
-				m.modalMode = ModalNone
-				m.reloadSessions()
+			case "enter":
+				if len(m.modalItems) > 0 {
+					selectedVal := m.modalItems[m.modalSelectedIdx]
+					if m.modalMode == ModalAgent {
+						if m.showWelcome && m.currentKey == "" {
+							m.pendingAgent = selectedVal
+						} else {
+							m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
+						}
+					} else if m.modalMode == ModalModel {
+						if m.showWelcome && m.currentKey == "" {
+							m.pendingModel = selectedVal
+						} else {
+							m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
+						}
+					} else if m.modalMode == ModalThink {
+						if m.showWelcome && m.currentKey == "" {
+							m.pendingThink = selectedVal
+						} else {
+							m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
+						}
+					} else if m.modalMode == ModalSessions {
+						if m.modalSelectedIdx < len(m.modalSessionKeys) {
+							m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
+							m.showWelcome = false
+						}
+					} else if m.modalMode == ModalSubagents {
+						if m.modalSelectedIdx < len(m.modalSubagentKeys) {
+							m.currentKey = m.modalSubagentKeys[m.modalSelectedIdx]
+							m.showWelcome = false
+						}
+					} else if m.modalMode == ModalLang {
+						// Extract language code from "Name (code)" format
+						langCode := selectedVal
+						if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
+							langCode = strings.TrimRight(selectedVal[idx+1:], ")")
+						}
+						m.cfg.SetLanguage(langCode)
+						i18n.SetLanguage(langCode)
+						m.textInput.Placeholder = i18n.T("tui.placeholder")
+					} else if m.modalMode == ModalLang {
+						// Map selection to language code
+						langCodes := []string{"es", "en", "pt"}
+						if m.modalSelectedIdx < len(langCodes) {
+							lang := langCodes[m.modalSelectedIdx]
+							i18n.SetLanguage(lang)
+							m.cfg.SetLanguage(lang)
+							// Note: Language change takes effect immediately in TUI
+							// Config persistence would need to be handled separately
+						}
+					}
+					m.modalMode = ModalNone
+					m.reloadSessions()
+				}
 			case "esc", "q":
 				m.modalMode = ModalNone
 			}
@@ -445,6 +718,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "esc":
+			if m.processing {
+				now := time.Now()
+				if now.Sub(m.escLastPress) < 1*time.Second {
+					// Double press detected - cancel the agent
+					m.escPressCount = 0
+					m.escHint = false
+					m.agentLoop.GetProvidable().StopAgent(m.currentKey)
+					m.processing = false
+					m.pendingUserMessage = ""
+					m.currentStream = ""
+					m.currentThinking = ""
+					m.currentMessageID = ""
+					m.reloadSessions()
+				} else {
+					// First press - show hint
+					m.escPressCount = 1
+					m.escHint = true
+				}
+				m.escLastPress = now
+			}
+
 		case "ctrl+c":
 			m.cancel()
 			return m, tea.Quit
@@ -452,6 +747,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+p":
 			m.showAutocomplete = true
 			m.filterAutocomplete("/")
+			return m, nil
+
+		case "ctrl+m":
+			m.executeCommand("/models")
+			return m, nil
+
+		case "ctrl+a":
+			m.executeCommand("/agents")
+			return m, nil
+
+		case "ctrl+s":
+			m.executeCommand("/sessions")
 			return m, nil
 
 		case "up", "down":
@@ -478,6 +785,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.animationTick++
 			cmds = append(cmds, tickCmd())
 		}
+		if m.escHint && time.Since(m.escLastPress) > escHintTimeout {
+			m.escHint = false
+			m.escPressCount = 0
+		}
 
 	case outboundMsg:
 		if msg.msg.ChatID == m.currentKey {
@@ -485,12 +796,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "message.stream":
 				m.currentStream += msg.msg.Content
 				m.updateViewport()
-
-				if msg.msg.Metadata != nil && msg.msg.Metadata["done"] == "true" {
-					cmds = append(cmds, func() tea.Msg {
-						return completeMsg{sessionKey: m.currentKey}
-					})
-				}
 			case "message.thinking":
 				m.currentThinking += msg.msg.Content
 				m.updateViewport()
@@ -507,6 +812,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completeMsg:
 		if msg.sessionKey == m.currentKey {
 			m.processing = false
+			m.pendingUserMessage = ""
 			m.lastDuration = time.Since(m.startTime)
 			m.currentStream = ""
 			m.currentThinking = ""
@@ -540,6 +846,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// resetModal resets the modal state for a new modal.
+func (m *Model) resetModal(mode modalType) {
+	m.modalMode = mode
+	m.modalScrollOffset = 0
+	m.modalItems = nil
+	m.modalSessionKeys = nil
+	m.modalSubagentKeys = nil
+	m.modalSelectedIdx = 0
+}
+
 func (m *Model) executeCommand(cmd string) {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
@@ -548,29 +864,33 @@ func (m *Model) executeCommand(cmd string) {
 
 	switch parts[0] {
 	case "/sessions":
-		m.modalMode = ModalSessions
-		m.modalItems = nil
-		for _, s := range m.visibleSessions {
+		m.resetModal(ModalSessions)
+		allSessions := m.sessionMgr.ListSessions()
+		for _, s := range allSessions {
 			name := s.Name
 			if name == "" {
-				name = "Nuevo Chat"
+				name = i18n.T("tui.newChatDefault")
 			}
-			m.modalItems = append(m.modalItems, fmt.Sprintf("%s | %d msgs", name, len(s.Messages)))
+			count := len(s.Messages)
+			if count == 0 {
+				m.modalItems = append(m.modalItems, name)
+			} else {
+				m.modalItems = append(m.modalItems, fmt.Sprintf("%s (%d msgs)", name, count))
+			}
+			m.modalSessionKeys = append(m.modalSessionKeys, s.Key)
 		}
-		m.modalSelectedIdx = 0
 
 	case "/new":
 		m.createNewChat()
+		m.showWelcome = true
 		m.reloadSessions()
 
 	case "/agents":
-		m.modalMode = ModalAgent
+		m.resetModal(ModalAgent)
 		m.modalItems = m.agentLoop.GetProvidable().ListAvailableAgentIDs()
-		m.modalSelectedIdx = 0
 
 	case "/models":
-		m.modalMode = ModalModel
-		m.modalItems = nil
+		m.resetModal(ModalModel)
 		cfgSnapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
 		if cfgSnapshot != nil && cfgSnapshot.Providers != nil {
 			providersMap := cfgSnapshot.Providers.ListNamed()
@@ -591,11 +911,42 @@ func (m *Model) executeCommand(cmd string) {
 				}
 			}
 		}
-		m.modalSelectedIdx = 0
 
 	case "/clear":
 		m.agentLoop.GetProvidable().ClearSession(m.currentKey)
+		if m.pendingModel != "" && m.currentKey != "" {
+			m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, m.pendingModel)
+		}
 		m.reloadSessions()
+
+	case "/think":
+		m.resetModal(ModalThink)
+		m.modalItems = []string{"off", "low", "medium", "high"}
+
+	case "/lang":
+		m.resetModal(ModalLang)
+		// Show language names with codes
+		m.modalItems = []string{
+			"Español (es)",
+			"English (en)",
+			"Português (pt)",
+		}
+
+	case "/subagents":
+		m.resetModal(ModalSubagents)
+		subagents := m.agentLoop.GetProvidable().GetSessionSubagents(m.currentKey)
+		if len(subagents) == 0 {
+			m.modalItems = append(m.modalItems, i18n.T("tui.noSubagents"))
+		} else {
+			for _, sa := range subagents {
+				label := sa.Label
+				if label == "" {
+					label = sa.TaskID
+				}
+				m.modalItems = append(m.modalItems, fmt.Sprintf("%s [%s] %s", sa.TaskID, sa.Status, label))
+				m.modalSubagentKeys = append(m.modalSubagentKeys, sa.SessionKey)
+			}
+		}
 
 	case "/quit":
 		m.cancel()
@@ -623,25 +974,22 @@ func (m *Model) getHistoryMessageCount() int {
 
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
-		return "Inicializando..."
+		return i18n.T("tui.initializing")
 	}
 
-	historyCount := m.getHistoryMessageCount()
-
 	// --------------------------------------------------------------------------
-	// WELCOME HOME SCREEN LAYOUT (If session is empty / new)
+	// WELCOME HOME SCREEN LAYOUT
 	// --------------------------------------------------------------------------
-	if historyCount == 0 && !m.processing {
-		var welcomeBuilder strings.Builder
+	if m.showWelcome {
+		var contentBuilder strings.Builder
 
-		logo := "\n\n" +
-			"  _      ______ _      ______\n" +
+		logo := "  _      ______ _      ______\n" +
 			" | |    |  ____| |    |  ____|\n" +
 			" | |    | |__  | |    | |__   \n" +
 			" | |    |  __| | |    |  __|\n" +
 			" | |____| |____| |____| |____\n" +
-			" |______|______|______|______|\n\n"
-		welcomeBuilder.WriteString(WelcomeLogo.Render(logo) + "\n\n")
+			" |______|______|______|______|"
+		contentBuilder.WriteString(WelcomeLogo.Render(logo) + "\n\n")
 
 		var autocompleteView string
 		if m.showAutocomplete && len(m.autocompleteItems) > 0 {
@@ -654,32 +1002,79 @@ func (m *Model) View() string {
 					autoSb.WriteString(ModalItemInactive.Render(line) + "\n")
 				}
 			}
-			autocompleteView = ModalContainer.Width(60).Render(autoSb.String()) + "\n"
+			autocompleteView = ModalContainer.Width(60).Render(autoSb.String())
+			contentBuilder.WriteString(autocompleteView + "\n")
 		}
 
 		inputView := InputBarContainer.Width(60).Render(m.textInput.View())
-		
-		if autocompleteView != "" {
-			welcomeBuilder.WriteString(lipgloss.Place(m.width, len(m.autocompleteItems)+2, lipgloss.Center, lipgloss.Center, autocompleteView) + "\n")
+		contentBuilder.WriteString(inputView + "\n\n")
+
+		agentID := ""
+		modelName := ""
+		thinkLevel := "off"
+		if m.currentKey != "" {
+			agentID = m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
+			modelName = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
+			tl := m.agentLoop.GetProvidable().GetThinkLevel(m.currentKey)
+			if tl != "" {
+				thinkLevel = tl
+			}
+		} else {
+			agentID = m.agentLoop.GetProvidable().GetDefaultAgentID()
+			if m.pendingModel != "" {
+				modelName = m.pendingModel
+			}
+			if m.pendingAgent != "" {
+				agentID = m.pendingAgent
+			}
+			if m.pendingThink != "" {
+				thinkLevel = m.pendingThink
+			}
 		}
-		welcomeBuilder.WriteString(lipgloss.Place(m.width, 3, lipgloss.Center, lipgloss.Center, inputView) + "\n")
-
-		agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
-		modelName := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
-		thinkLevel := m.agentLoop.GetProvidable().GetThinkLevel(m.currentKey)
-		if thinkLevel == "" {
-			thinkLevel = "off"
+		if modelName == "" {
+			if agentInfo, ok := m.agentLoop.GetProvidable().GetAgentInfo(agentID); ok {
+				modelName = agentInfo.Model
+			}
 		}
-		infoText := fmt.Sprintf("Agente: %s  ·  Modelo: %s  ·  Thinking: %s", agentID, modelName, thinkLevel)
-		welcomeBuilder.WriteString(lipgloss.Place(m.width, 1, lipgloss.Center, lipgloss.Center, HelpStyle.Render(infoText)) + "\n\n")
 
-		shortcuts := "tab switch pane  ·  ctrl+p commands"
-		welcomeBuilder.WriteString(lipgloss.Place(m.width, 1, lipgloss.Center, lipgloss.Center, HelpStyle.Render(shortcuts)) + "\n\n\n")
+		// Model selector line
+		selectorLine := fmt.Sprintf("%s %s  %s %s",
+			ModelSelectorLabel.Render(i18n.T("tui.model")),
+			ModelSelectorStyle.Render(modelName),
+			ModelSelectorLabel.Render(i18n.T("tui.agent")),
+			ModelSelectorStyle.Render(agentID),
+		)
+		contentBuilder.WriteString(selectorLine + "\n")
 
-		tip := "● Tip Press ctrl+a for agents, ctrl+m for models, type / for commands"
-		welcomeBuilder.WriteString(lipgloss.Place(m.width, 1, lipgloss.Center, lipgloss.Center, WelcomeTip.Render(tip)) + "\n")
+		infoText := fmt.Sprintf("%s %s  ·  %s  ·  %s  ·  %s", i18n.T("tui.thinking"), thinkLevel, i18n.T("tui.ctrlModel"), i18n.T("tui.ctrlAgent"), i18n.T("tui.ctrlChats"))
+		contentBuilder.WriteString(HelpStyle.Render(infoText) + "\n\n")
 
-		return AppContainer.Width(m.width).Height(m.height).Render(welcomeBuilder.String())
+		tip := i18n.T("tui.typeMessage")
+		contentBuilder.WriteString(WelcomeTip.Render(tip) + "\n")
+
+		// Render modal overlay on welcome screen if active
+		if m.modalMode != ModalNone {
+			var modalTitle string
+			switch m.modalMode {
+			case ModalAgent:
+				modalTitle = i18n.T("tui.selectAgent")
+			case ModalModel:
+				modalTitle = i18n.T("tui.selectModel")
+			case ModalSessions:
+				modalTitle = i18n.T("tui.selectChat")
+			case ModalSubagents:
+				modalTitle = i18n.T("tui.selectSubagent")
+			case ModalThink:
+				modalTitle = i18n.T("tui.selectThinkLevel")
+			case ModalLang:
+				modalTitle = i18n.T("tui.selectLanguage")
+			}
+
+			return m.renderModal(modalTitle)
+		}
+
+		// Center the entire welcome content block in the terminal
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, contentBuilder.String())
 	}
 
 	// --------------------------------------------------------------------------
@@ -698,8 +1093,6 @@ func (m *Model) View() string {
 	if thinkLevel == "" {
 		thinkLevel = "off"
 	}
-	headerText := fmt.Sprintf(" %s  ·  %s  ·  %s", agentID, modelName, thinkLevel)
-	leftBuilder.WriteString(HeaderStyle.Render(headerText) + "\n")
 
 	m.viewport.Width = leftWidth - 2
 	m.viewport.Height = contentHeight - 6
@@ -707,11 +1100,15 @@ func (m *Model) View() string {
 
 	var statusLine string
 	if m.processing {
-		statusLine = fmt.Sprintf("%s %s · %s · %.1fs", m.getBouncingDots(), agentID, modelName, m.elapsedTime.Seconds())
+		if m.escHint {
+			statusLine = fmt.Sprintf("%s %s", m.getBouncingDots(), i18n.T("tui.pressEscAgain"))
+		} else {
+			statusLine = fmt.Sprintf("%s %s", m.getBouncingDots(), i18n.T("tui.processing"))
+		}
 	} else if m.lastDuration > 0 {
-		statusLine = fmt.Sprintf("● %s · %s · %.1fs", agentID, modelName, m.lastDuration.Seconds())
+		statusLine = fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
 	} else {
-		statusLine = fmt.Sprintf("● %s · %s · idle", agentID, modelName)
+		statusLine = i18n.T("tui.ready")
 	}
 
 	var autocompleteView string
@@ -725,7 +1122,7 @@ func (m *Model) View() string {
 				autoSb.WriteString(ModalItemInactive.Render(line) + "\n")
 			}
 		}
-		autocompleteView = ModalContainer.Width(leftWidth - 4).Render(autoSb.String()) + "\n"
+		autocompleteView = ModalContainer.Width(leftWidth-4).Render(autoSb.String()) + "\n"
 	}
 
 	leftBuilder.WriteString(StatusLineStyle.Render(statusLine) + "\n")
@@ -745,7 +1142,7 @@ func (m *Model) View() string {
 	tokensText := fmt.Sprintf("%d (%.1f%%)", tokens, pct)
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)),
-		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | ctrl+p commands", tokensText)),
+		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s", tokensText, i18n.T("tui.ctrlCommands"))),
 	)
 	leftBuilder.WriteString(bottomBar)
 
@@ -756,32 +1153,32 @@ func (m *Model) View() string {
 
 	sessionName := m.sessionMgr.GetName(m.currentKey)
 	if sessionName == "" {
-		sessionName = "Nuevo Chat"
+		sessionName = i18n.T("tui.newChatDefault")
 	}
 	rightBuilder.WriteString(SidebarTitle.Render(sessionName) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render("Context") + "\n")
+	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
 	cumInput, cumOutput, limit := m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
 	cumPct := 0.0
 	if limit > 0 {
 		cumPct = float64(cumInput) / float64(limit) * 100
 	}
-	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf("%s tokens", formatNumber(cumInput+cumOutput))) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf("%.1f%% used", cumPct)) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render("$0.00 spent") + "\n\n")
+	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf("%s %s", formatNumber(cumInput+cumOutput), i18n.T("tui.tokens"))) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(fmt.Sprintf(i18n.T("tui.used"), cumPct)) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(i18n.T("tui.spent")) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render("MCP") + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" workspace Connected") + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" system Connected") + "\n\n")
+	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.mcp")) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" "+i18n.T("tui.workspaceConnected")) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" "+i18n.T("tui.systemConnected")) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render("LSP") + "\n")
-	rightBuilder.WriteString(SidebarValue.Render("LSPs are disabled") + "\n\n")
+	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.lsp")) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(i18n.T("tui.lspDisabled")) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render("Workspace") + "\n")
+	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(m.workspacePath) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(m.gitBranch) + "\n\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render("Status") + "\n")
+	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n")
 
 	rightPane := RightSidebar.Width(rightWidth).Height(contentHeight).Render(rightBuilder.String())
@@ -792,29 +1189,83 @@ func (m *Model) View() string {
 		var modalTitle string
 		switch m.modalMode {
 		case ModalAgent:
-			modalTitle = "Selecciona un Agente"
+			modalTitle = i18n.T("tui.selectAgent")
 		case ModalModel:
-			modalTitle = "Selecciona un Modelo"
+			modalTitle = i18n.T("tui.selectModel")
 		case ModalSessions:
-			modalTitle = "Selecciona un Chat"
+			modalTitle = i18n.T("tui.selectChat")
+		case ModalSubagents:
+			modalTitle = i18n.T("tui.selectSubagent")
+		case ModalThink:
+			modalTitle = i18n.T("tui.selectThinkLevel")
+		case ModalLang:
+			modalTitle = i18n.T("tui.selectLanguage")
 		}
 
-		var modalSb strings.Builder
-		modalSb.WriteString(TitleStyle.Render(modalTitle) + "\n\n")
-
-		for i, item := range m.modalItems {
-			if i == m.modalSelectedIdx {
-				modalSb.WriteString(ModalItemActive.Render("> "+item) + "\n")
-			} else {
-				modalSb.WriteString(ModalItemInactive.Render("  "+item) + "\n")
-			}
-		}
-
-		modalView := ModalContainer.Render(modalSb.String())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+		return m.renderModal(modalTitle)
 	}
 
 	return AppContainer.Width(m.width).Height(m.height).Render(mainLayout)
+}
+
+// maxModalVisible returns the maximum number of items visible in a modal given terminal height.
+func (m *Model) maxModalVisible() int {
+	maxVisible := m.height - 8 // room for title, borders, padding
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	if maxVisible > len(m.modalItems) {
+		maxVisible = len(m.modalItems)
+	}
+	return maxVisible
+}
+
+// renderModal renders a modal overlay with scroll support for long lists.
+func (m *Model) renderModal(modalTitle string) string {
+	maxVisible := m.maxModalVisible()
+
+	// Clamp scroll offset so selected item is always visible
+	if m.modalSelectedIdx < m.modalScrollOffset {
+		m.modalScrollOffset = m.modalSelectedIdx
+	}
+	if m.modalSelectedIdx >= m.modalScrollOffset+maxVisible {
+		m.modalScrollOffset = m.modalSelectedIdx - maxVisible + 1
+	}
+	if m.modalScrollOffset < 0 {
+		m.modalScrollOffset = 0
+	}
+
+	var modalSb strings.Builder
+	modalSb.WriteString(TitleStyle.Render(modalTitle) + "\n")
+
+	// Scroll indicator: show ↑ if there are items above
+	if m.modalScrollOffset > 0 {
+		modalSb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreAbove")) + "\n")
+	} else {
+		modalSb.WriteString("\n")
+	}
+
+	// Render only the visible window of items
+	endIdx := m.modalScrollOffset + maxVisible
+	if endIdx > len(m.modalItems) {
+		endIdx = len(m.modalItems)
+	}
+	for i := m.modalScrollOffset; i < endIdx; i++ {
+		item := m.modalItems[i]
+		if i == m.modalSelectedIdx {
+			modalSb.WriteString(ModalItemActive.Render("> "+item) + "\n")
+		} else {
+			modalSb.WriteString(ModalItemInactive.Render("  "+item) + "\n")
+		}
+	}
+
+	// Scroll indicator: show ↓ if there are items below
+	if endIdx < len(m.modalItems) {
+		modalSb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreBelow")) + "\n")
+	}
+
+	modalView := ModalContainer.Render(modalSb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
 }
 
 func formatNumber(n int) string {
