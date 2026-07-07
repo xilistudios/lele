@@ -364,6 +364,12 @@ func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
 	return al.providable
 }
 
+// MessageBus returns the unexported bus of the agent loop.
+func (al *AgentLoop) MessageBus() *bus.MessageBus {
+	return al.bus
+}
+
+
 // registerSessionCancel delegates to sessionManager.
 func (al *AgentLoop) registerSessionCancel(sessionKey string, cancel context.CancelFunc) func() {
 	return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)

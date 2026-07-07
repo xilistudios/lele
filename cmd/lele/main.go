@@ -89,6 +89,8 @@ func main() {
 		}
 	case "client":
 		clientCmd()
+	case "tui":
+		tuiCmd()
 	case "version", "--version", "-v":
 		printVersion()
 	default:

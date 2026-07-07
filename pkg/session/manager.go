@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -986,6 +987,21 @@ func (sm *SessionManager) ActiveCount() int {
 	}
 	return count
 }
+
+// ListSessions returns a slice of all sessions loaded in memory, sorted by updated time descending.
+func (sm *SessionManager) ListSessions() []*Session {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	res := make([]*Session, 0, len(sm.sessions))
+	for _, s := range sm.sessions {
+		res = append(res, s)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Updated.After(res[j].Updated)
+	})
+	return res
+}
+
 
 // SubagentSessionInfo contains metadata about a persisted subagent session.
 type SubagentSessionInfo struct {
