@@ -58,5 +58,6 @@
   "tui.newChatDefault": "New Chat",
   "tui.placeholder": "Ask anything... \"What is the tech stack of this project?\"",
   "tui.messagesCount": "%d messages",
-  "tui.ctrlCommands": "ctrl+p commands"
+  "tui.ctrlCommands": "ctrl+p commands",
+  "tui.backToParent": "Back to parent chat"
 }

@@ -141,6 +141,15 @@ var (
 			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
 			BorderForeground(SecondaryColor)
 
+	// Subagent real-time progress display in parent chat
+	SubagentProgressLabel = lipgloss.NewStyle().
+				Foreground(OrangeColor).
+				Bold(true)
+
+	SubagentProgressStyle = lipgloss.NewStyle().
+				Foreground(OrangeColor).
+				Italic(true)
+
 	// Welcome Page
 	WelcomeLogo = lipgloss.NewStyle().
 			Foreground(PrimaryColor).

@@ -99,7 +99,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	case "/subagents":
 		return formatSubagentsCommand(ctx, ch.al.toolCoordinator, sessionKey, args), true
 	case "/stop":
-		subagentCount := ch.al.toolCoordinator.stopAllSubagents()
+		subagentCount := ch.al.toolCoordinator.stopSessionSubagents(sessionKey)
 		ch.al.toolCoordinator.cancelSession(sessionKey)
 		if subagentCount > 0 {
 			return fmt.Sprintf("Agente detenido (incluye %d subagente(s)).", subagentCount), true

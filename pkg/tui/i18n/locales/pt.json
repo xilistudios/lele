@@ -58,5 +58,6 @@
   "tui.newChatDefault": "Novo Chat",
   "tui.placeholder": "Pergunte qualquer coisa... \"Qual é o stack tecnológico deste projeto?\"",
   "tui.messagesCount": "%d mensagens",
-  "tui.ctrlCommands": "ctrl+p comandos"
+  "tui.ctrlCommands": "ctrl+p comandos",
+  "tui.backToParent": "Voltar ao chat principal"
 }

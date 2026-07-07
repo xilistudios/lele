@@ -13,7 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func tuiCmd() {
+func tuiCmd(sessionID string) {
 	logger.SetQuiet(true)
 
 	cfg, err := loadConfig()
@@ -45,7 +45,7 @@ func tuiCmd() {
 	}
 
 	// Initialize the TUI model
-	tuiModel := tui.NewModel(cfg, agentLoop, sessionMgr)
+	tuiModel := tui.NewModel(cfg, agentLoop, sessionMgr, sessionID)
 
 	// Run bubbletea program in AltScreen mode for full terminal experience
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())

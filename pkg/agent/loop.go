@@ -234,6 +234,11 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 		// once the user actually sends a message.
 		sessionAgent.Sessions.GetOrCreate(newSessionKey)
 		sessionAgent.Sessions.ResetTokenCounts(newSessionKey)
+		// Truncate history and clear summary so the new session is truly
+		// fresh.  This is necessary because loadSessions() may have already
+		// populated the session from a previous run's on-disk files.
+		sessionAgent.Sessions.TruncateHistory(newSessionKey, 0)
+		sessionAgent.Sessions.SetSummary(newSessionKey, "")
 	}
 
 	return newSessionKey
