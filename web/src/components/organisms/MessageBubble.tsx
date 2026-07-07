@@ -259,14 +259,14 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
               return (
                 <div
                   key={`codeblock-${block.label ?? 'code'}-${i}`}
-                  className="rounded-lg border border-border bg-background-primary overflow-hidden"
+                  className="w-full max-w-full rounded-lg border border-border bg-background-primary overflow-hidden"
                 >
                   {block.label && (
                     <div className="px-4 py-1.5 text-[10px] text-text-tertiary font-mono">
                       {block.label}
                     </div>
                   )}
-                  <pre className="overflow-x-auto px-4 py-3 text-xs text-text-secondary font-mono leading-5">
+                  <pre className="w-full max-w-full overflow-x-auto px-4 py-3 text-xs text-text-secondary font-mono leading-5">
                     <code>{block.content}</code>
                   </pre>
                 </div>

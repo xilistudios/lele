@@ -107,13 +107,20 @@ export function SettingsPage() {
           onClose={() => onToggleSidebar()}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
-          <SettingsHeader configPath={settingsState.metadata?.config_path} />
+          <SettingsHeader
+            configPath={settingsState.metadata?.config_path}
+            onToggleSidebar={onToggleSidebar}
+          />
 
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
             <SettingsTabs activeTab={activeTab} onTabChange={handleTabChange} />
 
             <div className="flex flex-1 flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-6">{renderTabContent()}</div>
+              <div className="flex-1 overflow-y-auto p-4 md:p-6">
+                <div key={activeTab} className="animate-step-enter">
+                  {renderTabContent()}
+                </div>
+              </div>
 
               <SettingsFooter
                 saveState={settingsState.saveState}

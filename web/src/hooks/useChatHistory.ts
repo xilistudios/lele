@@ -362,8 +362,10 @@ export function useChatHistory(
   const invalidateHistory = useCallback(() => {
     if (!sessionKey) return
     setHasMore(true)
-    queryClient.invalidateQueries({ queryKey: buildChatHistoryQueryKey(sessionKey, parentSessionKey) })
-  }, [sessionKey, queryClient])
+    queryClient.invalidateQueries({
+      queryKey: buildChatHistoryQueryKey(sessionKey, parentSessionKey),
+    })
+  }, [sessionKey, parentSessionKey, queryClient])
 
   return {
     messages,

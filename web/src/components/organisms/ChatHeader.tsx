@@ -8,14 +8,14 @@ import { useSubagents } from '../../hooks/useSubagents'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
-import { ChevronLeftIcon } from '../atoms/Icons'
+import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
 import { SubagentsIndicator } from '../atoms/SubagentsIndicator'
 import { SubagentsSidebar } from './SubagentsSidebar'
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey } = useAppLogicContext()
+  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
@@ -37,7 +37,9 @@ export const ChatHeader = memo(function ChatHeader() {
         // Calling onSelectSession here creates a race condition: the state updates
         // (currentSessionKey → subagent) may be committed before the URL changes,
         // causing the useEffect to see mismatched state/URL and reset the session.
-        navigate(`/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`)
+        navigate(
+          `/chat/${encodeURIComponent(currentSessionKey)}/subagent/${encodeURIComponent(sessionKey)}`,
+        )
       }
     },
     [currentSessionKey, navigate],
@@ -53,8 +55,16 @@ export const ChatHeader = memo(function ChatHeader() {
 
   return (
     <>
-      <div className="flex items-center justify-between border-b border-border px-6 py-3">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="flex md:hidden items-center justify-center rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors mr-1"
+            aria-label={t('chat.toggleSidebar')}
+          >
+            <SidebarToggleIcon size={20} />
+          </button>
           <div className="min-w-0">
             {parentSession && (
               <button

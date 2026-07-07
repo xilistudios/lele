@@ -21,6 +21,7 @@ export function AgentFilesPage() {
   const [content, setContent] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showMobileFileList, setShowMobileFileList] = useState(true)
   // useRef for dirty content cache — avoids fragile dependency on React batching semantics.
   // Refs are always up-to-date, so effects and callbacks always see the latest cache.
   const dirtyFilesRef = useRef<DirtyMap>({})
@@ -93,6 +94,7 @@ export function AgentFilesPage() {
         }
       }
       setActiveFile(fileName)
+      setShowMobileFileList(false)
     },
     [activeFile, isDirty, content, originalContent],
   )
@@ -151,9 +153,13 @@ export function AgentFilesPage() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex flex-1 overflow-hidden relative">
             {/* File Tabs Sidebar */}
-            <div className="w-48 flex-shrink-0 border-r border-border-light bg-background-tertiary overflow-y-auto">
+            <div
+              className={`absolute inset-y-0 left-0 w-full md:relative md:w-48 flex-shrink-0 border-r border-border-light bg-background-tertiary overflow-y-auto transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-10 ${
+                showMobileFileList ? 'translate-x-0' : '-translate-x-full'
+              }`}
+            >
               <div className="p-3">
                 <button
                   type="button"
@@ -205,12 +211,40 @@ export function AgentFilesPage() {
             </div>
 
             {/* Editor Area */}
-            <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Editor Area */}
+            <div
+              className={`absolute inset-y-0 right-0 w-full md:relative md:flex-1 bg-background-primary flex flex-col overflow-hidden transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-20 ${
+                showMobileFileList ? 'translate-x-full' : 'translate-x-0'
+              }`}
+            >
               {/* Toolbar */}
               <div className="flex items-center justify-between px-4 py-2 border-b border-border-light bg-background-secondary">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-text-primary">{activeFile}</span>
-                  {isDirty && <span className="text-xs text-state-warning">Modified</span>}
+                <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileFileList(true)}
+                    className="flex md:hidden items-center gap-1 text-xs text-text-secondary hover:text-text-primary px-2 py-1 rounded bg-background-tertiary border border-border flex-shrink-0 mr-1"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="flex-shrink-0"
+                    >
+                      <title>Back</title>
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                    Files
+                  </button>
+                  <span className="text-sm font-medium text-text-primary truncate">
+                    {activeFile}
+                  </span>
+                  {isDirty && (
+                    <span className="text-xs text-state-warning flex-shrink-0">Modified</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {isDirty && (

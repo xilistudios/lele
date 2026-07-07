@@ -8,7 +8,8 @@ import { MessageList } from '../organisms/MessageList'
 import { Sidebar } from '../organisms/Sidebar'
 
 export function ChatPage() {
-  const { error, diagnosticsOpen, sidebarOpen, parentSessionKey, onToggleSidebar } = useAppLogicContext()
+  const { error, diagnosticsOpen, sidebarOpen, parentSessionKey, onToggleSidebar } =
+    useAppLogicContext()
 
   return (
     <ChatPageProvider>
@@ -25,12 +26,12 @@ export function ChatPage() {
           {error && <ErrorBanner message={error} />}
           {diagnosticsOpen && <DiagnosticsPanel />}
 
-          <div className="flex-1 overflow-hidden px-6 py-4">
+          <div className="flex-1 overflow-hidden px-4 py-3 md:px-6 md:py-4">
             <MessageList />
           </div>
 
           {!parentSessionKey && (
-            <div className="border-t border-border px-6 py-4">
+            <div className="border-t border-border px-4 py-3 md:px-6 md:py-4">
               <div className="mx-auto max-w-3xl">
                 <ChatComposer />
               </div>

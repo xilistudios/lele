@@ -287,7 +287,13 @@ function handleMessagesCatchup(ctx: MessageEventContext, data: Record<string, un
     ...m,
     id: m.id ?? `catchup-${i}`,
   })) as unknown as HistoryMessage
-  updateChatHistoryFromRaw(ctx.queryClient, targetSessionKey, rawMessages, undefined, ctx.parentSessionKeyRef.current ?? undefined)
+  updateChatHistoryFromRaw(
+    ctx.queryClient,
+    targetSessionKey,
+    rawMessages,
+    undefined,
+    ctx.parentSessionKeyRef.current ?? undefined,
+  )
 
   ctx.setStreamingMessages((current) =>
     current.filter((message) => {

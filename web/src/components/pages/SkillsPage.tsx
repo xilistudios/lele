@@ -56,7 +56,7 @@ export function SkillsPage() {
             <button
               type="button"
               onClick={() => onToggleSidebar()}
-              className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors"
+              className="flex md:hidden p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors"
               title={t('chat.toggleSidebar')}
             >
               {' '}

@@ -13,6 +13,9 @@ export default defineConfig({
     define: {
       "import.meta.env.PROD": process.env.NODE_ENV === "production",
       "import.meta.env.DEV": process.env.NODE_ENV !== "production",
+      "import.meta.env.VITE_LELE_API_URL": process.env.NODE_ENV === "production"
+        ? (process.env.VITE_LELE_API_URL ? JSON.stringify(process.env.VITE_LELE_API_URL) : "undefined")
+        : JSON.stringify(process.env.VITE_LELE_API_URL || "http://localhost:18793"),
     },
     sourcemap: false,
   },
