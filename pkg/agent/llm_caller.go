@@ -321,12 +321,26 @@ func (lc *llmCaller) executeWithRetry(
 				})
 			}
 
-			// Summarize session to reduce context
-			stats := lc.al.sessionManager.summarizeSession(opts.agent, opts.sessionKey)
-			if stats == nil {
-				logger.ErrorCF("agent", "Summarization failed, falling back to compression", nil)
-				if sm, ok := lc.al.sessionManager.(*sessionManagerImpl); ok {
+			// Summarize session to reduce context, under the shared guard so it
+			// never races with proactive summarization of the same session.
+			var stats *SummarizeStats
+			if sm, ok := lc.al.sessionManager.(*sessionManagerImpl); ok {
+				var ran bool
+				stats, ran = sm.summarizeSessionGuarded(opts.agent, opts.sessionKey)
+				if !ran {
+					logger.WarnCF("agent", "Summarization already in progress for session; skipping duplicate reactive compaction", map[string]interface{}{
+						"session_key": opts.sessionKey,
+					})
+				}
+				if stats == nil {
+					logger.ErrorCF("agent", "Summarization failed, falling back to compression", nil)
 					sm.forceCompression(opts.agent, opts.sessionKey)
+				}
+			} else {
+				// Fallback for non-standard sessionManager implementations (e.g. tests).
+				stats = lc.al.sessionManager.summarizeSession(opts.agent, opts.sessionKey)
+				if stats == nil {
+					logger.ErrorCF("agent", "Summarization failed (no compression fallback available)", nil)
 				}
 			}
 

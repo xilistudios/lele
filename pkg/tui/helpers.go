@@ -10,6 +10,39 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// streamThrottleMsg is sent by tea.Tick to trigger deferred updates.
+type streamThrottleMsg struct{}
+
+// throttledUpdateViewport queues a viewport refresh for streaming events.
+// Instead of rendering on every chunk, it coalesces updates so at most one
+// render happens per streamThrottleInterval.
+func (m *Model) throttledUpdateViewport() tea.Cmd {
+	if m.streamThrottleActive {
+		// A throttle is already scheduled — just mark that a new chunk arrived.
+		m.streamPendingUpdate = true
+		return nil
+	}
+
+	// Render the first chunk immediately for responsiveness!
+	m.updateViewport()
+	m.streamThrottleActive = true
+	m.streamPendingUpdate = false
+
+	return tea.Tick(m.streamThrottleInterval, func(t time.Time) tea.Msg {
+		return streamThrottleMsg{}
+	})
+}
+
+// flushStreamUpdate forces an immediate viewport render.
+// Called when streaming ends so the user always sees the complete response immediately.
+func (m *Model) flushStreamUpdate() {
+	if m.streamPendingUpdate {
+		m.streamPendingUpdate = false
+		m.updateViewport()
+	}
+	m.streamThrottleActive = false
+}
+
 func (m *Model) startOutboundListener() tea.Cmd {
 	return func() tea.Msg {
 		for {
@@ -40,10 +73,10 @@ func (m *Model) submitMessage() tea.Cmd {
 	}
 
 	// If we're on the welcome screen with no session, create one now
-	if m.currentKey == "" || m.showWelcome {
+	if m.currentKey == "" {
 		m.createNewChat()
-		m.showWelcome = false
 	}
+	m.showWelcome = false
 
 	m.textInput.SetValue("")
 	m.processing = true

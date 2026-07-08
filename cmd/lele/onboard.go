@@ -11,8 +11,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/tui"
+)
+
+var (
+	stylePrompt   = lipgloss.NewStyle().Foreground(tui.AccentColor)
+	styleHint     = lipgloss.NewStyle().Foreground(tui.CommentColor)
+	styleNumber   = lipgloss.NewStyle().Foreground(tui.PurpleColor).Bold(true)
+	styleOption   = lipgloss.NewStyle().Foreground(tui.Foreground)
+	styleTitle    = lipgloss.NewStyle().Foreground(tui.PurpleColor).Bold(true)
+	styleSubTitle = lipgloss.NewStyle().Foreground(tui.OrangeColor).Bold(true)
+	styleSuccess  = lipgloss.NewStyle().Foreground(tui.SecondaryColor)
+	styleWarning  = lipgloss.NewStyle().Foreground(tui.PrimaryColor)
+	styleInfo     = lipgloss.NewStyle().Foreground(tui.CommentColor)
 )
 
 type providerInfo struct {
@@ -53,22 +67,21 @@ func maskAPIKey(key string) string {
 }
 
 func printHelp() {
-	fmt.Printf("%s lele - Personal AI Assistant v%s\n\n", logo, version)
-	fmt.Println("Usage: lele [-c|--config-dir <path>] <command>")
-	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  onboard     Initialize lele configuration and workspace")
-	fmt.Println("  agent       Interact with the agent directly")
-	fmt.Println("  tui [-s session_id]  Interact with the agent via TUI")
-	fmt.Println("  auth        Manage authentication (login, logout, status)")
-	fmt.Println("  gateway     Start lele gateway")
-	fmt.Println("  web         Start or stop the web app server")
-	fmt.Println("  status      Show lele status")
-	fmt.Println("  cron        Manage scheduled tasks")
-	fmt.Println("  migrate     Migrate from OpenClaw to Lele")
-	fmt.Println("  skills      Manage skills (install, list, remove)")
-	fmt.Println("  client      Manage native channel clients (pair, list, remove)")
-	fmt.Println("  version     Show version information")
+	fmt.Printf("%s %s v%s\n\n", logo, tui.WelcomeLogo.Render("lele - Personal AI Assistant"), version)
+	fmt.Printf("%s: %s\n\n", styleSubTitle.Render("Usage"), styleOption.Render("lele [-c|--config-dir <path>] <command>"))
+	fmt.Println(styleTitle.Render("Commands:"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("onboard"), styleOption.Render("Initialize lele configuration and workspace"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("agent"), styleOption.Render("Interact with the agent directly"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("tui"), styleOption.Render("Interact with the agent via TUI"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("auth"), styleOption.Render("Manage authentication (login, logout, status)"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("gateway"), styleOption.Render("Start lele gateway"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("web"), styleOption.Render("Start or stop the web app server"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("status"), styleOption.Render("Show lele status"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("cron"), styleOption.Render("Manage scheduled tasks"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("migrate"), styleOption.Render("Migrate from OpenClaw to Lele"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("skills"), styleOption.Render("Manage skills (install, list, remove)"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("client"), styleOption.Render("Manage native channel clients (pair, list, remove)"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("version"), styleOption.Render("Show version information"))
 }
 
 func askYesNo(prompt string, defaultYes bool) bool {
@@ -76,7 +89,7 @@ func askYesNo(prompt string, defaultYes bool) bool {
 	if defaultYes {
 		defaultHint = "Y/n"
 	}
-	fmt.Printf("%s (%s): ", prompt, defaultHint)
+	fmt.Printf("%s %s: ", stylePrompt.Render(prompt), styleHint.Render("("+defaultHint+")"))
 
 	var response string
 	fmt.Scanln(&response)
@@ -89,7 +102,11 @@ func askYesNo(prompt string, defaultYes bool) bool {
 }
 
 func askString(prompt string, defaultVal string) string {
-	fmt.Printf("%s [%s]: ", prompt, defaultVal)
+	var hint string
+	if defaultVal != "" {
+		hint = " " + styleHint.Render("["+defaultVal+"]")
+	}
+	fmt.Printf("%s%s: ", stylePrompt.Render(prompt), hint)
 
 	var response string
 	fmt.Scanln(&response)
@@ -102,13 +119,13 @@ func askString(prompt string, defaultVal string) string {
 }
 
 func askSelect(prompt string, options []string, defaultIdx int) int {
-	fmt.Println(prompt)
+	fmt.Println(stylePrompt.Render(prompt))
 	for i, opt := range options {
-		fmt.Printf("  %d. %s\n", i+1, opt)
+		fmt.Printf("  %s %s\n", styleNumber.Render(fmt.Sprintf("%d.", i+1)), styleOption.Render(opt))
 	}
 
 	defaultChoice := defaultIdx + 1
-	fmt.Printf("Choice [%d]: ", defaultChoice)
+	fmt.Printf("Choice %s: ", styleHint.Render(fmt.Sprintf("[%d]", defaultChoice)))
 
 	var response string
 	fmt.Scanln(&response)
@@ -127,7 +144,7 @@ func askSelect(prompt string, options []string, defaultIdx int) int {
 }
 
 func askInt(prompt string, defaultVal int) int {
-	fmt.Printf("%s [%d]: ", prompt, defaultVal)
+	fmt.Printf("%s %s: ", stylePrompt.Render(prompt), styleHint.Render(fmt.Sprintf("[%d]", defaultVal)))
 
 	var response string
 	fmt.Scanln(&response)
@@ -146,7 +163,7 @@ func askInt(prompt string, defaultVal int) int {
 }
 
 func askFloat(prompt string, defaultVal float64) float64 {
-	fmt.Printf("%s [%g]: ", prompt, defaultVal)
+	fmt.Printf("%s %s: ", stylePrompt.Render(prompt), styleHint.Render(fmt.Sprintf("[%g]", defaultVal)))
 
 	var response string
 	fmt.Scanln(&response)
@@ -165,7 +182,7 @@ func askFloat(prompt string, defaultVal float64) float64 {
 }
 
 func askSecret(prompt string) string {
-	fmt.Printf("%s: ", prompt)
+	fmt.Printf("%s: ", stylePrompt.Render(prompt))
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
@@ -244,7 +261,7 @@ func configureModels(providerName string) map[string]config.ProviderModelConfig 
 }
 
 func configureProvider(cfg *config.Config, info providerInfo) {
-	fmt.Printf("\n--- Configuring %s ---\n", info.displayName)
+	fmt.Printf("\n%s\n", styleSubTitle.Render(fmt.Sprintf("--- Configuring %s ---", info.displayName)))
 
 	apiKey := ""
 	if !info.local {
@@ -259,11 +276,11 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 	}
 
 	if apiKey != "" && apiBase != "" && !info.local {
-		fmt.Print("Validating API key... ")
+		fmt.Print(styleInfo.Render("Validating API key... "))
 		if validateProvider(info.typeKey, apiKey, apiBase, info.authHeader) {
-			fmt.Println("\u2713 Valid")
+			fmt.Println(styleSuccess.Render("✓ Valid"))
 		} else {
-			fmt.Println("\u2717 Could not validate (warning)")
+			fmt.Println(styleWarning.Render("✗ Could not validate (warning)"))
 		}
 	}
 
@@ -320,11 +337,11 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 		// nanogpt is handled via the Named map (openai_compat type)
 	}
 
-	fmt.Printf("\u2713 Provider %s configured\n", info.displayName)
+	fmt.Println(styleSuccess.Render(fmt.Sprintf("✓ Provider %s configured", info.displayName)))
 }
 
 func configureProviders(cfg *config.Config) {
-	fmt.Println("\n=== Provider Configuration ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Provider Configuration ==="))
 
 	registry := providerRegistry()
 	commonCount := 8
@@ -416,7 +433,7 @@ func selectModel(cfg *config.Config, prompt string, defaultVal string) string {
 }
 
 func configureAgentDefaults(cfg *config.Config) {
-	fmt.Println("\n=== Agent Configuration ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Agent Configuration ==="))
 
 	defaultModel := "nanogpt:qwen3-5-397b-thinking"
 	configuredModels := getConfiguredModels(cfg)
@@ -438,7 +455,7 @@ func configureAgentDefaults(cfg *config.Config) {
 
 	cfg.Agents.Defaults.MaxToolIterations = askInt("Max tool iterations", 20)
 
-	fmt.Println("\u2713 Agent defaults configured")
+	fmt.Println(styleSuccess.Render("✓ Agent defaults configured"))
 }
 
 func configureAdditionalAgents(cfg *config.Config) {
@@ -448,7 +465,7 @@ func configureAdditionalAgents(cfg *config.Config) {
 
 	agentNum := 1
 	for {
-		fmt.Printf("\n--- Agent %d ---\n", agentNum)
+		fmt.Printf("\n%s\n", styleSubTitle.Render(fmt.Sprintf("--- Agent %d ---", agentNum)))
 
 		name := askString("Name", "")
 		if name == "" {
@@ -485,7 +502,7 @@ func configureAdditionalAgents(cfg *config.Config) {
 		}
 
 		cfg.Agents.List = append(cfg.Agents.List, agentCfg)
-		fmt.Printf("\u2713 Agent %s configured\n", name)
+		fmt.Println(styleSuccess.Render(fmt.Sprintf("✓ Agent %s configured", name)))
 
 		if !askYesNo("\nAdd another agent?", false) {
 			break
@@ -495,16 +512,16 @@ func configureAdditionalAgents(cfg *config.Config) {
 }
 
 func configureWebUI(cfg *config.Config, leleDir string) {
-	fmt.Println("\n=== Web UI Configuration ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Web UI Configuration ==="))
 
 	cfg.Channels.Web.Enabled = true
 	cfg.Channels.Web.Host = "0.0.0.0"
 	cfg.Server.Port = askInt("Server port", 8080)
 	cfg.Server.Host = "0.0.0.0"
 
-	fmt.Println("\n\u2713 Web UI will be served on port", cfg.Server.Port)
+	fmt.Printf("\n%s\n", styleSuccess.Render(fmt.Sprintf("✓ Web UI will be served on port %d", cfg.Server.Port)))
 
-	fmt.Println("\u2713 Native channel auto-enabled (required for Web UI)")
+	fmt.Println(styleSuccess.Render("✓ Native channel auto-enabled (required for Web UI)"))
 	cfg.Channels.Native.Enabled = true
 
 	if askYesNo("[Advanced] Configure native channel?", false) {
@@ -513,13 +530,13 @@ func configureWebUI(cfg *config.Config, leleDir string) {
 }
 
 func configureNativeAdvanced(cfg *config.Config) {
-	fmt.Println("\n=== Native Channel Configuration (Advanced) ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Native Channel Configuration (Advanced) ==="))
 
 	cfg.Channels.Native.Host = "127.0.0.1"
 	cfg.Channels.Native.MaxClients = askInt("Max paired clients", 5)
 	cfg.Channels.Native.TokenExpiryDays = askInt("Token expiry days", 30)
 
-	fmt.Println("\n\u2713 Native channel configured")
+	fmt.Printf("\n%s\n", styleSuccess.Render("✓ Native channel configured"))
 }
 
 func maybeGeneratePIN(cfg *config.Config, leleDir string) {
@@ -545,11 +562,11 @@ func maybeGeneratePIN(cfg *config.Config, leleDir string) {
 		return
 	}
 
-	fmt.Println("\n\u2713 Pairing PIN generated")
-	fmt.Printf("  PIN:     %s\n", pending.PIN)
-	fmt.Printf("  Expires: %s (%d minutes)\n",
+	fmt.Printf("\n%s\n", styleSuccess.Render("✓ Pairing PIN generated"))
+	fmt.Printf("  PIN:     %s\n", styleNumber.Render(pending.PIN))
+	fmt.Printf("  Expires: %s (%s)\n",
 		pending.Expires.Format("15:04:05"),
-		cfg.Channels.Native.PinExpiryMinutes)
+		styleHint.Render(fmt.Sprintf("%d minutes", cfg.Channels.Native.PinExpiryMinutes)))
 }
 
 func maybeStartServices(cfg *config.Config) {
@@ -560,27 +577,27 @@ func maybeStartServices(cfg *config.Config) {
 	serverPort := cfg.EffectiveServerPort()
 
 	if !askYesNo("Start services now?", true) {
-		fmt.Println("\nTo start services manually:")
+		fmt.Println(styleSubTitle.Render("\nTo start services manually:"))
 		fmt.Println("  lele gateway")
-		fmt.Printf("Then open http://127.0.0.1:%d\n", serverPort)
+		fmt.Printf("Then open %s\n", styleNumber.Render(fmt.Sprintf("http://127.0.0.1:%d", serverPort)))
 		return
 	}
 
-	fmt.Println("\n[+] Starting gateway...")
+	fmt.Printf("\n%s\n", styleInfo.Render("[+] Starting gateway..."))
 	gatewayCmd := exec.Command("lele", "gateway")
 	gatewayCmd.Start()
 
 	time.Sleep(1 * time.Second)
 
-	fmt.Println("\n\u2713 Gateway started")
-	fmt.Printf("\nOpen http://127.0.0.1:%d in your browser\n", serverPort)
-	fmt.Println("Enter the PIN to connect your device.")
+	fmt.Printf("\n%s\n", styleSuccess.Render("✓ Gateway started"))
+	fmt.Printf("\nOpen %s in your browser\n", styleNumber.Render(fmt.Sprintf("http://127.0.0.1:%d", serverPort)))
+	fmt.Println(styleInfo.Render("Enter the PIN to connect your device."))
 }
 
 func printSummary(cfg *config.Config) {
-	fmt.Println("\n=== Configuration Summary ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Configuration Summary ==="))
 
-	fmt.Println("\nProviders:")
+	fmt.Printf("\n%s\n", styleSubTitle.Render("Providers:"))
 	for provName, named := range cfg.Providers.Named {
 		if named.APIKey == "" && named.APIBase == "" {
 			continue
@@ -601,21 +618,26 @@ func printSummary(cfg *config.Config) {
 		if modelInfo == "" {
 			modelInfo = "default"
 		}
-		fmt.Printf("  %s: %s (%s)\n", provName, keyDisplay, modelInfo)
+		fmt.Printf("  %s: %s (%s)\n", styleNumber.Render(provName), styleOption.Render(keyDisplay), styleHint.Render(modelInfo))
 	}
 
-	fmt.Println("\nAgents:")
-	fmt.Printf("  default: %s, %d tokens, temp %g\n",
-		cfg.Agents.Defaults.Model,
-		cfg.Agents.Defaults.MaxTokens,
-		*cfg.Agents.Defaults.Temperature)
+	fmt.Printf("\n%s\n", styleSubTitle.Render("Agents:"))
+	fmt.Printf("  default: %s, %s, temp %s\n",
+		styleNumber.Render(cfg.Agents.Defaults.Model),
+		styleHint.Render(fmt.Sprintf("%d tokens", cfg.Agents.Defaults.MaxTokens)),
+		styleHint.Render(fmt.Sprintf("%g", *cfg.Agents.Defaults.Temperature)))
 	for _, agent := range cfg.Agents.List {
-		fmt.Printf("  %s: %s, temp %g\n", agent.Name, agent.Model.Primary, *agent.Temperature)
+		fmt.Printf("  %s: %s, temp %s\n",
+			styleNumber.Render(agent.Name),
+			styleOption.Render(agent.Model.Primary),
+			styleHint.Render(fmt.Sprintf("%g", *agent.Temperature)))
 	}
 
-	fmt.Println("\nServer:")
+	fmt.Printf("\n%s\n", styleSubTitle.Render("Server:"))
 	serverPort := cfg.EffectiveServerPort()
-	fmt.Printf("  port %d (unified API + Web UI)\n", serverPort)
+	fmt.Printf("  port %s %s\n",
+		styleNumber.Render(fmt.Sprintf("%d", serverPort)),
+		styleHint.Render("(unified API + Web UI)"))
 }
 
 func onboard() {
@@ -623,16 +645,13 @@ func onboard() {
 
 	if _, err := os.Stat(configPath); err == nil {
 		fmt.Printf("Config already exists at %s\n", configPath)
-		fmt.Print("Overwrite? (y/n): ")
-		var response string
-		fmt.Scanln(&response)
-		if response != "y" {
+		if !askYesNo("Overwrite?", false) {
 			fmt.Println("Aborted.")
 			return
 		}
 	}
 
-	fmt.Println("\n=== Lele Onboarding ===")
+	fmt.Printf("\n%s\n", styleTitle.Render("=== Lele Onboarding ==="))
 
 	cfg := config.DefaultConfig()
 
@@ -656,7 +675,7 @@ func onboard() {
 	}
 
 	if err := config.SaveConfig(configPath, cfg); err != nil {
-		fmt.Printf("Error saving config: %v\n", err)
+		fmt.Println(styleWarning.Render(fmt.Sprintf("Error saving config: %v", err)))
 		os.Exit(1)
 	}
 
@@ -665,21 +684,21 @@ func onboard() {
 
 	logsPath := cfg.LogsPath()
 	if err := os.MkdirAll(logsPath, 0755); err != nil {
-		fmt.Printf("Warning: could not create logs directory: %v\n", err)
+		fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create logs directory: %v", err)))
 	} else {
 		currentDate := time.Now().Format("2006-01-02")
 		infoLog := filepath.Join(logsPath, fmt.Sprintf("info-%s.log", currentDate))
 		errorsLog := filepath.Join(logsPath, fmt.Sprintf("errors-%s.log", currentDate))
 
 		if _, err := os.Create(infoLog); err != nil {
-			fmt.Printf("Warning: could not create info log file: %v\n", err)
+			fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create info log file: %v", err)))
 		}
 		if _, err := os.Create(errorsLog); err != nil {
-			fmt.Printf("Warning: could not create errors log file: %v\n", err)
+			fmt.Println(styleWarning.Render(fmt.Sprintf("Warning: could not create errors log file: %v", err)))
 		}
 	}
 
-	fmt.Printf("\n%s lele is ready!\n", logo)
+	fmt.Printf("\n%s %s\n", logo, tui.WelcomeLogo.Render("lele is ready!"))
 
 	maybeStartServices(cfg)
 }

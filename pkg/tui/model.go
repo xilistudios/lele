@@ -41,19 +41,20 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 
 	now := time.Now()
 	m := &Model{
-		agentLoop:        agentLoop,
-		sessionMgr:       sessionMgr,
-		cfg:              cfg,
-		ctx:              ctx,
-		cancel:           cancel,
-		viewport:         vp,
-		textInput:        ti,
-		activePane:       ChatViewPane,
-		showWelcome:      true,
-		workspacePath:    workspacePath,
-		gitBranch:        getGitBranch(workspacePath),
-		sessionStartTime: now,
-		subagentProgress: make(map[string]string),
+		agentLoop:              agentLoop,
+		sessionMgr:             sessionMgr,
+		cfg:                    cfg,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		viewport:               vp,
+		textInput:              ti,
+		activePane:             ChatViewPane,
+		showWelcome:            true,
+		workspacePath:          workspacePath,
+		gitBranch:              getGitBranch(workspacePath),
+		sessionStartTime:       now,
+		subagentProgress:       make(map[string]string),
+		streamThrottleInterval: 32 * time.Millisecond,
 	}
 
 	// If an initial session ID was provided, try to open it
@@ -203,11 +204,22 @@ func (m *Model) cleanupStreamingIfComplete() {
 	}
 }
 
+// resetStreamState clears the current streaming strings and line caches.
+func (m *Model) resetStreamState() {
+	m.currentStream = ""
+	m.currentThinking = ""
+	m.streamRenderedLines = nil
+	m.thinkingRenderedLines = nil
+}
+
 // clearStreamingState resets all streaming/processing state.
 // Called when switching sessions to avoid stale content leaking into the new session.
 // It preserves m.processing when the target session has an active LLM loop,
 // so the loading animation continues when switching to a busy session/subagent.
 func (m *Model) clearStreamingState() {
+	m.streamThrottleActive = false
+	m.streamPendingUpdate = false
+
 	// Check if the current session (already set to the target) is actively
 	// being processed by the LLM before resetting the flag.
 	isActive := false
@@ -216,8 +228,7 @@ func (m *Model) clearStreamingState() {
 	}
 	m.processing = isActive
 
-	m.currentStream = ""
-	m.currentThinking = ""
+	m.resetStreamState()
 	m.currentToolAction = ""
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""

@@ -21,6 +21,18 @@ const (
 	ChatViewPane
 )
 
+// leftColumnRatio is the fraction of the terminal width used by the left
+// (chat) column. The right sidebar takes the remaining space. Shared by
+// view.go (layout) and handlers.go (mouse hit-testing) so they stay in sync.
+const leftColumnRatio = 0.72
+
+// subagentClickTarget tracks the position of a subagent item in the sidebar for mouse click handling
+type subagentClickTarget struct {
+	yStart int    // Starting Y position in the sidebar (0-indexed from top of content area)
+	yEnd   int    // Ending Y position in the sidebar
+	key    string // Session key for this subagent
+}
+
 type modalType int
 
 const (
@@ -130,11 +142,27 @@ type Model struct {
 	pendingThink string
 
 	// Session summary tracking
+	lastEscTime      time.Time
 	sessionStartTime time.Time
+
+	// CSI escape sequence parser state — filters leaked mouse/escape
+	// fragments that bubbletea fails to parse as tea.MouseMsg.
+	escSeqActive   bool
+	escSeqLastRune time.Time
 
 	// Terminal size
 	width  int
 	height int
+
+	// Stream rendering throttle — avoids re-rendering the viewport on every
+	// single streaming chunk (which can arrive dozens of times per second).
+	// Only message.stream and message.thinking are throttled; tool events
+	// and subagent progress continue to update immediately.
+	streamThrottleActive   bool
+	streamPendingUpdate    bool
+	streamThrottleInterval time.Duration
+	streamRenderedLines    []string
+	thinkingRenderedLines  []string
 
 	// Cached glamour renderer (keyed by width)
 	cachedRenderer      *glamour.TermRenderer
@@ -142,6 +170,10 @@ type Model struct {
 
 	// Cached rendered content for completed messages (avoids re-rendering
 	// all messages through glamour on every streaming chunk).
-	renderedBase    string
-	renderedBaseKey string // session key the cache belongs to
+	renderedBase         string
+	renderedBaseKey      string // session key the cache belongs to
+	renderedBaseMsgCount int    // number of history messages when cache was built
+
+	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
+	subagentClickTargets []subagentClickTarget
 }

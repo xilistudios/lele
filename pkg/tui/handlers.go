@@ -13,6 +13,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyEsc {
+			m.lastEscTime = time.Now()
+		}
 		if m.modalMode != ModalNone {
 			switch msg.String() {
 			case "up", "k":
@@ -37,21 +40,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.modalItems) > 0 {
 					selectedVal := m.modalItems[m.modalSelectedIdx]
 					if m.modalMode == ModalAgent {
-						if m.showWelcome && m.currentKey == "" {
+						if m.showWelcome {
 							m.pendingAgent = selectedVal
-						} else {
+						}
+						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
 						}
 					} else if m.modalMode == ModalModel {
-						if m.showWelcome && m.currentKey == "" {
+						if m.showWelcome {
 							m.pendingModel = selectedVal
-						} else {
+						}
+						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
 						}
 					} else if m.modalMode == ModalThink {
-						if m.showWelcome && m.currentKey == "" {
+						if m.showWelcome {
 							m.pendingThink = selectedVal
-						} else {
+						}
+						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
 						}
 					} else if m.modalMode == ModalSessions {
@@ -63,7 +69,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if m.modalMode == ModalSubagents {
 						if m.modalSelectedIdx < len(m.modalSubagentKeys) {
 							// Remember the parent chat so the user can navigate back (ctrl+b)
-							m.parentSessionKey = m.currentKey
+							if m.parentSessionKey == "" {
+								m.parentSessionKey = m.currentKey
+							}
 							m.currentKey = m.modalSubagentKeys[m.modalSelectedIdx]
 							m.showWelcome = false
 							m.clearStreamingState()
@@ -198,6 +206,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.MouseMsg:
+		// Handle mouse scrolling on the viewport
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+
+		// Handle mouse clicks on subagent items in the sidebar (only if no modal is active)
+		if m.modalMode == ModalNone && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			// Check if click is in the right sidebar area
+			leftWidth := int(float64(m.width) * leftColumnRatio)
+			rightWidth := m.width - leftWidth - 3
+			sidebarStartX := leftWidth + 1 // +1 for separator
+
+			if msg.X >= sidebarStartX && msg.X < sidebarStartX+rightWidth {
+				// Check if click matches any subagent click target Y-coordinate in the sidebar text
+				for _, target := range m.subagentClickTargets {
+					if msg.Y >= target.yStart && msg.Y < target.yEnd {
+						// Clicked on a subagent item - switch to that subagent's chat
+						if m.parentSessionKey == "" {
+							m.parentSessionKey = m.currentKey
+						}
+						m.currentKey = target.key
+						m.showWelcome = false
+						m.clearStreamingState()
+						m.reloadSessions()
+						return m, nil
+					}
+				}
+			}
+		}
+
 	case tickMsg:
 		if m.processing || m.hasRunningSubagents() {
 			m.elapsedTime = time.Since(m.startTime)
@@ -220,34 +261,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.renderedBaseKey = "" // invalidate cache so history re-renders without duplicate
 				}
 				m.currentToolAction = "" // streaming text means tool call is done
-				// Only reset streaming state if the MessageID is truly different
-				// and we have existing content (avoids resetting on first chunk)
-				if msg.msg.MessageID != "" &&
-					msg.msg.MessageID != m.currentAssistantMsgID &&
-					m.currentAssistantMsgID != "" {
+				// Only reset streaming state if the MessageID is truly different.
+				if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
 					m.currentAssistantMsgID = msg.msg.MessageID
-					m.currentStream = ""
-					m.currentThinking = ""
+					m.resetStreamState()
 				}
 				m.currentStream += msg.msg.Content
-				m.updateViewport()
+				if cmd := m.throttledUpdateViewport(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case "message.thinking":
-				// Only reset streaming state if the MessageID is truly different
-				// and we have existing content (avoids resetting on first chunk)
-				if msg.msg.MessageID != "" &&
-					msg.msg.MessageID != m.currentAssistantMsgID &&
-					m.currentAssistantMsgID != "" {
+				// Only reset streaming state if the MessageID is truly different.
+				if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
 					m.currentAssistantMsgID = msg.msg.MessageID
-					m.currentStream = ""
-					m.currentThinking = ""
+					m.resetStreamState()
 				}
 				m.currentThinking += msg.msg.Content
-				m.updateViewport()
+				if cmd := m.throttledUpdateViewport(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case "tool.executing":
-				// Clear streaming state since we are now executing a tool
-				m.currentStream = ""
-				m.currentThinking = ""
-				m.currentAssistantMsgID = ""
+				// Only clear streaming state if it's a different message.
+				if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {
+					m.currentStream = ""
+					m.currentThinking = ""
+					m.currentAssistantMsgID = msg.msg.MessageID
+				}
 
 				// Show the currently executing tool call in the viewport.
 				// Use the compact "tool: action" format from metadata.
@@ -273,6 +312,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.updateViewport()
 			case "":
+				// Stream finished — flush any pending throttled viewport update
+				// so the final content is visible immediately.
+				m.flushStreamUpdate()
 				if m.processing && (msg.msg.MessageID == m.currentMessageID || msg.msg.ReplyTo == m.currentMessageID) {
 					cmds = append(cmds, func() tea.Msg {
 						return completeMsg{sessionKey: m.currentKey}
@@ -317,22 +359,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadSessions()
 		}
 
+	case streamThrottleMsg:
+		m.streamThrottleActive = false
+		if m.streamPendingUpdate {
+			m.updateViewport()
+			m.streamPendingUpdate = false
+			m.streamThrottleActive = true
+			cmds = append(cmds, tea.Tick(m.streamThrottleInterval, func(t time.Time) tea.Msg {
+				return streamThrottleMsg{}
+			}))
+		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = int(float64(m.width)*0.78) - 4
 		m.viewport.Height = m.height - 8
 		m.textInput.Width = int(float64(m.width)*0.78) - 4
+
+		// Invalidate stream render caches to force re-wrap to the new width
+		m.streamRenderedLines = nil
+		m.thinkingRenderedLines = nil
+
 		m.updateViewport()
 	}
-
 	if m.modalMode == ModalNone {
 		// Only forward message types the textinput knows how to handle.
-		// Custom TUI messages (outboundMsg, tickMsg, completeMsg) must be
+		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
-		switch msg.(type) {
-		case outboundMsg, completeMsg, tickMsg:
+		switch msg := msg.(type) {
+		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg:
 			// skip — not relevant to textinput
+		case tea.KeyMsg:
+			if m.isEscapeSequenceFragment(msg) {
+				break
+			}
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		default:
 			var cmd tea.Cmd
 			m.textInput, cmd = m.textInput.Update(msg)
@@ -349,6 +415,84 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// isEscapeSequenceFragment detects and consumes fragments of CSI escape
+// sequences that leak through as tea.KeyMsg (common with mouse scroll in
+// terminals like Konsole). It uses a state machine to track multi-rune
+// sequences, with a 200ms safety timeout to avoid blocking legitimate input.
+func (m *Model) isEscapeSequenceFragment(msg tea.KeyMsg) bool {
+	now := time.Now()
+
+	// Step 1: Safety timeout — if we've been in a sequence for >200ms without
+	// a new rune, the sequence is stale. Reset and let input through.
+	if m.escSeqActive && now.Sub(m.escSeqLastRune) > 200*time.Millisecond {
+		m.escSeqActive = false
+	}
+
+	// Step 2: Detect START of a new escape sequence.
+	if !m.escSeqActive {
+		// Case A: bubbletea delivers ESC as tea.KeyEscape.
+		if msg.Type == tea.KeyEscape {
+			m.escSeqActive = true
+			m.escSeqLastRune = now
+			return true
+		}
+		// Case B: The '[' or '<' that arrives immediately after an ESC
+		// (within 50ms) — bubbletea may split ESC from the rest.
+		if time.Since(m.lastEscTime) < 50*time.Millisecond && len(msg.Runes) == 1 {
+			r := msg.Runes[0]
+			if r == '[' || r == '<' {
+				m.escSeqActive = true
+				m.escSeqLastRune = now
+				return true
+			}
+		}
+		return false
+	}
+
+	// Step 3: We're inside an active escape sequence — classify the rune(s).
+	m.escSeqLastRune = now
+
+	runes := msg.Runes
+	if len(runes) == 0 {
+		// Some KeyMsg types carry no runes (e.g. special keys). These are
+		// definitely not CSI bytes. End the sequence and don't consume.
+		m.escSeqActive = false
+		return false
+	}
+
+	for _, r := range runes {
+		switch {
+		case r == '[' || r == '<':
+			// CSI introducer '[' and private-parameter marker '<' — these
+			// keep the sequence active (they must NOT be treated as final
+			// bytes even though '[' falls within the 0x40-0x7E final range).
+		case isCSIIntermediate(r):
+			// Valid intermediate byte — stay in sequence.
+		case isCSIFinal(r):
+			// Terminating byte — sequence is complete.
+			m.escSeqActive = false
+		default:
+			// Unexpected byte. End sequence to avoid getting stuck, but still
+			// consume this rune (it's likely garbage from the broken sequence).
+			m.escSeqActive = false
+		}
+	}
+	return true
+}
+
+// isCSIIntermediate reports whether r is a valid intermediate byte of a CSI
+// sequence (parameter bytes 0x30-0x3F and intermediate bytes 0x20-0x2F).
+func isCSIIntermediate(r rune) bool {
+	return (r >= '0' && r <= '9') || r == ';' || r == '?' || r == ':' ||
+		(r >= ' ' && r <= '/') // 0x20-0x2F includes '<' among others
+}
+
+// isCSIFinal reports whether r is a valid final byte of a CSI sequence
+// (0x40-0x7E).
+func isCSIFinal(r rune) bool {
+	return r >= 0x40 && r <= 0x7E
 }
 
 // resetModal resets the modal state for a new modal.

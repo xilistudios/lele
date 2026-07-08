@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -214,4 +216,32 @@ func formatTokenK(n int) string {
 		return fmt.Sprintf("%.0fK", k)
 	}
 	return fmt.Sprintf("%.1fK", k)
+}
+
+// sortSubagents sorts subagent tasks in a deterministic way:
+// 1. If both task IDs have the format "subagent-<number>", we sort by the number descending (most recent first).
+// 2. Otherwise, we fall back to Created timestamp descending.
+// 3. If Created timestamps are equal, we sort by TaskID descending.
+func sortSubagents(subagents []channels.SubagentTaskInfo) {
+	getSubagentNumber := func(taskID string) int {
+		if strings.HasPrefix(taskID, "subagent-") {
+			numStr := taskID[len("subagent-"):]
+			if val, err := strconv.Atoi(numStr); err == nil {
+				return val
+			}
+		}
+		return -1
+	}
+
+	sort.Slice(subagents, func(i, j int) bool {
+		numI := getSubagentNumber(subagents[i].TaskID)
+		numJ := getSubagentNumber(subagents[j].TaskID)
+		if numI != -1 && numJ != -1 {
+			return numI > numJ
+		}
+		if subagents[i].Created != subagents[j].Created {
+			return subagents[i].Created > subagents[j].Created
+		}
+		return subagents[i].TaskID > subagents[j].TaskID
+	})
 }

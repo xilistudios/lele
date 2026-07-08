@@ -59,6 +59,9 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Session.EphemeralThreshold == 0 {
 		doc.Session.EphemeralThreshold = defaults.Session.EphemeralThreshold
 	}
+	if doc.Session.CompactionThresholdPercent <= 0 || doc.Session.CompactionThresholdPercent > 100 {
+		doc.Session.CompactionThresholdPercent = defaults.Session.CompactionThresholdPercent
+	}
 
 	// Defaults for gateway.
 	if doc.Gateway.Host == "" {
@@ -117,8 +120,9 @@ func defaultEditableDocument() *EditableDocument {
 			List: []EditableAgentConfig{},
 		},
 		Session: EditableSessionConfig{
-			Ephemeral:          defaults.Session.Ephemeral,
-			EphemeralThreshold: defaults.Session.EphemeralThreshold,
+			Ephemeral:                  defaults.Session.Ephemeral,
+			EphemeralThreshold:         defaults.Session.EphemeralThreshold,
+			CompactionThresholdPercent: defaults.Session.CompactionThresholdPercent,
 		},
 		Bindings: []AgentBinding{},
 		Channels: EditableChannelsConfig{

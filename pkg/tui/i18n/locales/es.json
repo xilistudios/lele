@@ -19,6 +19,7 @@
   "tui.sidebar.agents": "Agentes",
   "tui.sidebar.models": "Modelos",
   "tui.sidebar.chats": "Chats",
+  "tui.sidebar.subagents": "Subagentes",
   "tui.command.help": "Mostrar ayuda",
   "tui.command.new": "Nuevo chat",
   "tui.command.clear": "Limpiar chat",
@@ -60,5 +61,6 @@
   "tui.placeholder": "Pregunta cualquier cosa... \"¿Cuál es el stack tecnológico de este proyecto?\"",
   "tui.messagesCount": "%d mensajes",
   "tui.ctrlCommands": "ctrl+p comandos",
-  "tui.backToParent": "Volver al chat principal"
+  "tui.backToParent": "Volver al chat principal",
+  "tui.loading": "cargando"
 }

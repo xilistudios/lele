@@ -156,13 +156,18 @@ type AgentBinding struct {
 }
 
 type SessionConfig struct {
-	DMScope            string              `json:"dm_scope,omitempty"`
-	IdentityLinks      map[string][]string `json:"identity_links,omitempty"`
-	Ephemeral          bool                `json:"ephemeral"`
-	EphemeralThreshold int                 `json:"ephemeral_threshold"`
+	DMScope                    string              `json:"dm_scope,omitempty"`
+	IdentityLinks              map[string][]string `json:"identity_links,omitempty"`
+	Ephemeral                  bool                `json:"ephemeral"`
+	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
+	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 }
 
 const DefaultEphemeralThresholdSeconds = 560
+
+// DefaultCompactionThresholdPercent is the default percentage of the model
+// context window at which session history is summarized/compacted.
+const DefaultCompactionThresholdPercent = 75
 
 type AgentDefaults struct {
 	Workspace              string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
@@ -828,8 +833,9 @@ func DefaultConfig() *Config {
 			},
 		},
 		Session: SessionConfig{
-			Ephemeral:          true,
-			EphemeralThreshold: DefaultEphemeralThresholdSeconds,
+			Ephemeral:                  true,
+			EphemeralThreshold:         DefaultEphemeralThresholdSeconds,
+			CompactionThresholdPercent: DefaultCompactionThresholdPercent,
 		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
@@ -1045,6 +1051,9 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Session.EphemeralThreshold <= 0 {
 		cfg.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
 	}
+	if cfg.Session.CompactionThresholdPercent <= 0 || cfg.Session.CompactionThresholdPercent > 100 {
+		cfg.Session.CompactionThresholdPercent = DefaultCompactionThresholdPercent
+	}
 
 	// If providers were not in the JSON, set to nil so it gets omitted on save
 	if !providersConfigured {
@@ -1144,6 +1153,18 @@ func (c *Config) SessionEphemeralThresholdSeconds() int {
 		return DefaultEphemeralThresholdSeconds
 	}
 	return c.Session.EphemeralThreshold
+}
+
+// SessionCompactionThresholdPercent returns the configured percentage of the
+// context window at which compaction is triggered, falling back to the default
+// if unset or out of the (0,100] range.
+func (c *Config) SessionCompactionThresholdPercent() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Session.CompactionThresholdPercent <= 0 || c.Session.CompactionThresholdPercent > 100 {
+		return DefaultCompactionThresholdPercent
+	}
+	return c.Session.CompactionThresholdPercent
 }
 
 func (c *Config) SetSessionEphemeral(enabled bool) {

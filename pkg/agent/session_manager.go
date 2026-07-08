@@ -205,18 +205,20 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 
 	systemPromptTokens := 0
 	if agent.ContextBuilder != nil {
-		systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+		systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(sessionKey, channel)
 		systemPromptTokens = sm.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 	}
 
 	tokenEstimate := systemPromptTokens + summaryTokens + historyTokens
-	threshold := agent.ContextWindow * 75 / 100
+	thresholdPercent := sm.al.cfg().SessionCompactionThresholdPercent()
+	threshold := agent.ContextWindow * thresholdPercent / 100
 
 	logger.DebugCF("agent", "maybeSummarize check", map[string]interface{}{
 		"session_key":          sessionKey,
 		"agent_id":             agent.ID,
 		"context_window":       agent.ContextWindow,
 		"threshold":            threshold,
+		"threshold_percent":    thresholdPercent,
 		"token_estimate":       tokenEstimate,
 		"system_prompt_tokens": systemPromptTokens,
 		"summary_tokens":       summaryTokens,
@@ -232,11 +234,8 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			"threshold":      threshold,
 			"context_window": agent.ContextWindow,
 		})
-		summarizeKey := agent.ID + ":" + sessionKey
-		if _, loading := sm.summarizing.LoadOrStore(summarizeKey, true); !loading {
-			stats := sm.summarizeSession(agent, sessionKey)
-			sm.summarizing.Delete(summarizeKey)
-
+		stats, ran := sm.summarizeSessionGuarded(agent, sessionKey)
+		if ran {
 			if !constants.IsInternalChannel(channel) && stats != nil {
 				sm.bus.PublishOutbound(bus.OutboundMessage{
 					Channel: channel,
@@ -252,138 +251,39 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 	return nil
 }
 
-// summarizeSession summarizes the conversation history for a session.
-// Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
-// Returns statistics about the operation.
-func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
-	if agent == nil || agent.Provider == nil {
-		return nil
+// summarizeSessionGuarded runs summarizeSession under the shared `summarizing`
+// guard so that proactive (maybeSummarize) and reactive (context-window error)
+// compaction of the same session can never run concurrently. If a summarization
+// for the same agent+session is already in progress, it returns (nil, false)
+// without doing anything. Otherwise it runs the summarization and returns
+// (stats, true).
+func (sm *sessionManagerImpl) summarizeSessionGuarded(agent *AgentInstance, sessionKey string) (*SummarizeStats, bool) {
+	if agent == nil {
+		return nil, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
-	history := agent.Sessions.GetHistory(sessionKey)
-	existingSummary := agent.Sessions.GetSummary(sessionKey)
-	historyForSummary := stripSummaryMessages(history)
-
-	// Need at least 3 messages to summarize (keep last 2 for continuity)
-	if len(historyForSummary) <= 2 {
-		return nil
+	summarizeKey := agent.ID + ":" + sessionKey
+	if _, loading := sm.summarizing.LoadOrStore(summarizeKey, true); loading {
+		// Another summarization is already running for this session.
+		return nil, false
 	}
-
-	// Calculate before stats
-	beforeMessages := len(history)
-	beforeTokens := sm.EstimateTokens(history)
-
-	// Summarize everything except the last 2 messages (kept for continuity).
-	// Note: history contains only user/assistant/tool messages — no system prompt.
-	toSummarize := historyForSummary[:len(historyForSummary)-2]
-
-	if len(toSummarize) == 0 {
-		return nil
-	}
-
-	// Build comprehensive summary prompt with ALL old messages
-	prompt := "Please provide a comprehensive summary of the following conversation. " +
-		"Capture all important context, decisions, facts, and action items so that " +
-		"someone reading just this summary would understand what happened.\n\n"
-
-	if existingSummary != "" {
-		prompt += "=== PREVIOUS SUMMARY ===\n" + existingSummary + "\n\n"
-	}
-
-	prompt += "=== CONVERSATION TO SUMMARIZE ===\n"
-	for _, m := range toSummarize {
-		role := strings.ToUpper(m.Role)
-		content := m.Content
-		// Truncate very long messages for the summary prompt
-		if len(content) > 4000 {
-			content = content[:4000] + "\n[Content truncated...]"
-		}
-		prompt += fmt.Sprintf("%s: %s\n\n", role, content)
-	}
-
-	prompt += "=== END OF CONVERSATION ===\n\n" +
-		"Now provide a detailed summary that preserves all critical context."
-
-	// Call LLM to summarize everything
-	resp, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, agent.Model, map[string]interface{}{
-		"max_tokens":  2048,
-		"temperature": 0.3,
-	})
-
-	var finalSummary string
-	if err == nil && resp != nil {
-		finalSummary = resp.Content
-	} else if existingSummary != "" {
-		// Fall back to existing summary
-		finalSummary = existingSummary + "\n[Update: Additional conversation not summarized due to error]"
-	}
-
-	if finalSummary == "" {
-		return nil
-	}
-
-	agent.Sessions.SetSummary(sessionKey, finalSummary)
-	// Mark old messages as excluded from context instead of deleting them,
-	// preserving the full history for the web UI.
-	keepCount := 2
-	if len(historyForSummary) <= 2 {
-		keepCount = 0
-	}
-	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
-
-	// Ensure summary messages are never excluded from context.
-	// Without this, after a second compaction the summary message gets
-	// pushed past the keepCount window and is excluded, breaking context.
-	historyAfter := agent.Sessions.GetHistory(sessionKey)
-	needsSave := false
-	for i := range historyAfter {
-		if isSummaryMessage(historyAfter[i]) && historyAfter[i].ExcludeFromContext {
-			historyAfter[i].ExcludeFromContext = false
-			needsSave = true
-		}
-	}
-	if needsSave {
-		agent.Sessions.SetHistory(sessionKey, historyAfter)
-	}
-
-	agent.Sessions.Save(sessionKey)
-
-	// Calculate after stats
-	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	contextAfter := countContextMessages(afterHistory)
-	afterTokens := sm.EstimateTokens(afterHistory)
-
-	return &SummarizeStats{
-		BeforeMessages:  beforeMessages,
-		AfterMessages:   contextAfter,
-		DroppedMessages: beforeMessages - contextAfter,
-		BeforeTokens:    beforeTokens,
-		AfterTokens:     afterTokens,
-		SavedTokens:     beforeTokens - afterTokens,
-	}
+	defer sm.summarizing.Delete(summarizeKey)
+	stats := sm.summarizeSession(agent, sessionKey)
+	return stats, true
 }
 
-// summarizeBatch summarizes a batch of messages.
-func (sm *sessionManagerImpl) summarizeBatch(ctx context.Context, agent *AgentInstance, batch []providers.Message, existingSummary string) (string, error) {
-	prompt := "Provide a concise summary of this conversation segment, preserving core context and key points.\n"
-	if existingSummary != "" {
-		prompt += "Existing context: " + existingSummary + "\n"
-	}
-	prompt += "\nCONVERSATION:\n"
-	for _, m := range batch {
-		prompt += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
-	}
-
-	response, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, agent.Model, map[string]interface{}{
-		"max_tokens":  1024,
-		"temperature": 0.3,
-	})
+// summarizeSession summarizes the conversation history for a session.
+// It never returns an error; on failure it logs the cause and returns nil,
+// leaving the session state untouched.
+func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
+	stats, err := sm.summarizeSessionCore(agent, sessionKey)
 	if err != nil {
-		return "", err
+		logger.DebugCF("agent", "summarizeSession: core summarization returned error, using silent fallback", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		return nil
 	}
-	return response.Content, nil
+	return stats
 }
 
 // forceCompression marks old messages as excluded from context when the limit is hit.
@@ -417,9 +317,25 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	})
 }
 
+// truncateUTF8Safe returns s truncated to at most maxBytes bytes, cutting at a
+// valid UTF-8 rune boundary so the result is always valid UTF-8.
+func truncateUTF8Safe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk backwards to find a valid start byte (not a continuation byte).
+	idx := maxBytes
+	for idx > 0 && (s[idx]&0xC0) == 0x80 {
+		idx--
+	}
+	return s[:idx]
+}
+
 // EstimateTokens estimates the number of tokens in a message list.
 // Uses a safe heuristic of 2.5 characters per token to account for CJK and other
 // overheads better than the previous 3 chars/token.
+// Counts Content, ReasoningContent, ToolCall function names and arguments,
+// and a fixed per-message structural overhead (10 chars ≈ 4 tokens).
 // Messages marked with ExcludeFromContext are skipped.
 func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 	totalChars := 0
@@ -428,6 +344,15 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 			continue
 		}
 		totalChars += utf8.RuneCountInString(m.Content)
+		totalChars += utf8.RuneCountInString(m.ReasoningContent)
+		for _, tc := range m.ToolCalls {
+			if tc.Function != nil {
+				totalChars += utf8.RuneCountInString(tc.Function.Name)
+				totalChars += utf8.RuneCountInString(tc.Function.Arguments)
+			}
+		}
+		// Per-message structural overhead (~4 tokens via 2.5 chars/token heuristic)
+		totalChars += 10
 	}
 	// 2.5 chars per token = totalChars * 2 / 5
 	return totalChars * 2 / 5
@@ -487,10 +412,18 @@ func (sm *sessionManagerImpl) AddTokenCounts(sessionKey string, inputTokens, out
 	agent.Sessions.AddTokenCounts(sessionKey, inputTokens, outputTokens)
 }
 
-// summarizeSessionWithError summarizes the conversation history for a session and returns any error.
-// Passes ALL old messages to the LLM with instructions to create a comprehensive summary.
-// Returns statistics about the operation and any error that occurred.
+// summarizeSessionWithError summarizes the conversation history for a session
+// and returns any error. Delegates to summarizeSessionCore.
 func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
+	return sm.summarizeSessionCore(agent, sessionKey)
+}
+
+// summarizeSessionCore performs the actual summarization work shared by
+// summarizeSession and summarizeSessionWithError. It returns statistics on
+// success. On any failure it returns a non-nil error describing the cause.
+// It never applies the "reuse existing summary with error note" fallback —
+// that policy decision is left to the callers.
+func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, sessionKey string) (*SummarizeStats, error) {
 	if agent == nil || agent.Provider == nil {
 		return nil, fmt.Errorf("no provider available for summarization")
 	}
@@ -531,9 +464,9 @@ func (sm *sessionManagerImpl) summarizeSessionWithError(agent *AgentInstance, se
 	for _, m := range toSummarize {
 		role := strings.ToUpper(m.Role)
 		content := m.Content
-		// Truncate very long messages for the summary prompt
+		// Truncate very long messages for the summary prompt (UTF-8 safe)
 		if len(content) > 4000 {
-			content = content[:4000] + "\n[Content truncated...]"
+			content = truncateUTF8Safe(content, 4000) + "\n[Content truncated...]"
 		}
 		prompt += fmt.Sprintf("%s: %s\n\n", role, content)
 	}

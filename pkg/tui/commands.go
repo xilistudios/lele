@@ -25,11 +25,20 @@ func (m *Model) executeCommand(cmd string) {
 				name = i18n.T("tui.newChatDefault")
 			}
 			count := len(s.Messages)
-			if count == 0 {
-				m.modalItems = append(m.modalItems, name)
-			} else {
-				m.modalItems = append(m.modalItems, fmt.Sprintf("%s (%d msgs)", name, count))
+
+			// Check if session is currently processing
+			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)
+
+			// Format session item with message count
+			item := name
+			if count > 0 {
+				item = fmt.Sprintf("%s (%d msgs)", name, count)
 			}
+			// Prefix with loading indicator if session is currently processing
+			if isProcessing {
+				item = fmt.Sprintf("[%s] %s", i18n.T("tui.loading"), item)
+			}
+			m.modalItems = append(m.modalItems, item)
 			m.modalSessionKeys = append(m.modalSessionKeys, s.Key)
 		}
 
@@ -97,6 +106,7 @@ func (m *Model) executeCommand(cmd string) {
 		if len(subagents) == 0 {
 			m.modalItems = append(m.modalItems, i18n.T("tui.noSubagents"))
 		} else {
+			sortSubagents(subagents)
 			for _, sa := range subagents {
 				label := sa.Label
 				if label == "" {

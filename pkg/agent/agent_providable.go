@@ -661,7 +661,7 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 	}
 
 	// Build system prompt and estimate its token count
-	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(resolvedSessionKey, "")
 	systemTokens := ap.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	currentTokens = systemTokens + summaryTokens + historyTokens

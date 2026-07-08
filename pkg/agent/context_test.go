@@ -282,6 +282,67 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPromptForSession tests BuildSystemPromptForSession method
+func TestBuildSystemPromptForSession(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Save original CWD
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original cwd: %v", err)
+	}
+
+	// Create temp directory for current directory and change to it
+	runDir, err := os.MkdirTemp("", "run-dir-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp run dir: %v", err)
+	}
+	defer os.RemoveAll(runDir)
+
+	if err := os.Chdir(runDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(originalCwd)
+	}()
+
+	// Write AGENTS.md in runDir
+	agentsContent := "harness-specific-agent-instructions"
+	if err := os.WriteFile(filepath.Join(runDir, "AGENTS.md"), []byte(agentsContent), 0644); err != nil {
+		t.Fatalf("Failed to write AGENTS.md: %v", err)
+	}
+
+	// 1. Check for non-native channel (should not include harness)
+	promptNonNative := cb.BuildSystemPromptForSession("some-session", "web")
+	if strings.Contains(promptNonNative, "Harness Module") || strings.Contains(promptNonNative, agentsContent) {
+		t.Error("Expected system prompt for non-native channel to exclude harness context")
+	}
+
+	// 2. Check for native channel (should include harness)
+	promptNativeChannel := cb.BuildSystemPromptForSession("some-session", "native")
+	if !strings.Contains(promptNativeChannel, "Harness Module") || !strings.Contains(promptNativeChannel, agentsContent) {
+		t.Error("Expected system prompt for native channel to include harness context")
+	}
+
+	// 3. Check for native/tui session key (should include harness even with empty channel)
+	promptNativeSessionKey := cb.BuildSystemPromptForSession("tui:chat:123", "")
+	if !strings.Contains(promptNativeSessionKey, "Harness Module") || !strings.Contains(promptNativeSessionKey, agentsContent) {
+		t.Error("Expected system prompt for tui session key to include harness context")
+	}
+
+	// 4. Negative: sessionKey contains "native" but NOT as prefix — should NOT include harness
+	promptSubstringNative := cb.BuildSystemPromptForSession("web:my-native-thing", "web")
+	if strings.Contains(promptSubstringNative, "Harness Module") || strings.Contains(promptSubstringNative, agentsContent) {
+		t.Error("Expected system prompt for sessionKey with 'native' as substring (not prefix) to exclude harness context")
+	}
+}
+
 // TestResetMemoryContext tests ResetMemoryContext method
 func TestResetMemoryContext(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
