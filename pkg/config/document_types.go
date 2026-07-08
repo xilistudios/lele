@@ -74,10 +74,11 @@ type EditableAgentConfig struct {
 
 // EditableSessionConfig represents session in editable mode.
 type EditableSessionConfig struct {
-	DMScope            string              `json:"dm_scope,omitempty"`
-	IdentityLinks      map[string][]string `json:"identity_links,omitempty"`
-	Ephemeral          bool                `json:"ephemeral"`
-	EphemeralThreshold int                 `json:"ephemeral_threshold"`
+	DMScope                    string              `json:"dm_scope,omitempty"`
+	IdentityLinks              map[string][]string `json:"identity_links,omitempty"`
+	Ephemeral                  bool                `json:"ephemeral"`
+	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
+	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 }
 
 // EditableChannelsConfig represents channels in editable mode.

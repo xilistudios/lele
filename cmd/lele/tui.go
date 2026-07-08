@@ -47,8 +47,8 @@ func tuiCmd(sessionID string) {
 	// Initialize the TUI model
 	tuiModel := tui.NewModel(cfg, agentLoop, sessionMgr, sessionID)
 
-	// Run bubbletea program in AltScreen mode for full terminal experience
-	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
+	// Run bubbletea program in AltScreen mode with mouse tracking for sidebar clicks and scrolling
+	p := tea.NewProgram(tuiModel, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running TUI: %v\n", err)
 		os.Exit(1)

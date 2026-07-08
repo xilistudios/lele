@@ -12,6 +12,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	lelecontext "github.com/xilistudios/lele/pkg/context"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -142,6 +143,19 @@ func (cb *ContextBuilder) buildToolsSection() string {
 
 func (cb *ContextBuilder) BuildSystemPrompt() string {
 	return cb.GetInitialContext()
+}
+
+// BuildSystemPromptForSession returns the system prompt, appending harness module context
+// if the session runs on the native/TUI channel.
+func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string) string {
+	prompt := cb.BuildSystemPrompt()
+	isNative := channel == "native" || strings.HasPrefix(sessionKey, "tui:") || strings.HasPrefix(sessionKey, "native:")
+	if isNative {
+		if harnessCtx, err := lelecontext.BuildHarnessContext(); err == nil && harnessCtx != "" {
+			prompt = prompt + "\n\n---\n\n" + harnessCtx
+		}
+	}
+	return prompt
 }
 
 // ResetMemoryContext clears the in-memory cache of the memory store
@@ -282,7 +296,7 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 }
 
 func (cb *ContextBuilder) buildSystemPromptForTurn(currentMessage, channel, chatID string) string {
-	systemPrompt := cb.BuildSystemPrompt()
+	systemPrompt := cb.BuildSystemPromptForSession(chatID, channel)
 	requestContext := cb.renderRequestContext(currentMessage, channel, chatID)
 	if requestContext == "" {
 		return systemPrompt

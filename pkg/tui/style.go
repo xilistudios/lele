@@ -18,16 +18,21 @@ var (
 	CommentColor   = lipgloss.Color("#6272A4") // Dracula Comment / Muted gray
 	Foreground     = lipgloss.Color("#F8F8F2") // Dracula Foreground
 	SelectionBg    = lipgloss.Color("#44475A") // Dracula Selection background
+	YellowColor    = lipgloss.Color("#F1FA8C") // Dracula Yellow
 
 	// AppContainer is the main container style.
 	AppContainer = lipgloss.NewStyle().
 			Background(BgColor).
 			Foreground(Foreground)
 
+	StatusRunning   = lipgloss.NewStyle().Foreground(YellowColor)
+	StatusCompleted = lipgloss.NewStyle().Foreground(SecondaryColor)
+	StatusFailed    = lipgloss.NewStyle().Foreground(PrimaryColor)
+
 	// RightSidebar styles for the right column.
 	RightSidebar = lipgloss.NewStyle().
 			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-			BorderForeground(SelectionBg).
+			BorderForeground(CommentColor).
 			PaddingLeft(2).
 			PaddingRight(1)
 

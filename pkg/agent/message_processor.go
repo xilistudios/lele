@@ -589,7 +589,7 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	}
 
 	// Build system prompt to get accurate token count
-	systemPrompt := agent.ContextBuilder.BuildSystemPrompt()
+	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(sessionKey, originChannel)
 	systemTokens := mp.estimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	// Total context = system prompt + summary (if any) + history

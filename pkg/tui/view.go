@@ -118,7 +118,7 @@ func (m *Model) View() string {
 	// --------------------------------------------------------------------------
 	// SPLIT COLUMN CONVERSATIONAL LAYOUT
 	// --------------------------------------------------------------------------
-	leftWidth := int(float64(m.width) * 0.78)
+	leftWidth := int(float64(m.width) * leftColumnRatio)
 	rightWidth := m.width - leftWidth - 3
 	contentHeight := m.height - 2
 
@@ -230,7 +230,82 @@ func (m *Model) View() string {
 	rightBuilder.WriteString(SidebarValue.Render(m.gitBranch) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n")
+	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n\n")
+
+	// Get session subagents
+	subagentQueryKey := m.currentKey
+	if m.parentSessionKey != "" {
+		subagentQueryKey = m.parentSessionKey
+	}
+	if !strings.HasPrefix(subagentQueryKey, "native:") {
+		subagentQueryKey = "native:" + subagentQueryKey
+	}
+	subagents := m.agentLoop.GetProvidable().GetSessionSubagents(subagentQueryKey)
+
+	// Reset subagent click targets for fresh tracking
+	m.subagentClickTargets = nil
+
+	if len(subagents) > 0 {
+		// Sort by appearance (most recent first)
+		sortSubagents(subagents)
+
+		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
+
+		contentWidth := rightWidth - 4
+		if contentWidth < 1 {
+			contentWidth = 1
+		}
+
+		for _, sa := range subagents {
+			label := sa.Label
+			if label == "" {
+				label = sa.TaskID
+			}
+
+			// Truncate label dynamically to prevent word wrapping in the sidebar.
+			// The printed line has a layout of " [statusDot] [label] ([status])\n"
+			// Status dot is 1 char. Spacing and parentheses add another 5 chars.
+			// Status text length is len(sa.Status).
+			// RightSidebar has a left border (1), padding left (2), padding right (1), so useful width is rightWidth - 4.
+			maxLabelWidth := (rightWidth - 4) - (3 + len(sa.Status) + 3)
+			if maxLabelWidth < 5 {
+				maxLabelWidth = 5 // Keep a minimum width so it doesn't disappear completely
+			}
+			// Rune-safe truncation to avoid breaking multi-byte UTF-8 characters
+			r := []rune(label)
+			if len(r) > maxLabelWidth {
+				if maxLabelWidth < 3 {
+					label = string(r[:maxLabelWidth])
+				} else {
+					label = string(r[:maxLabelWidth-3]) + "..."
+				}
+			}
+
+			var statusDot string
+			switch sa.Status {
+			case "running", "needs_context", "not_done":
+				statusDot = StatusRunning.Render("●")
+			case "completed":
+				statusDot = StatusCompleted.Render("●")
+			case "failed", "cancelled":
+				statusDot = StatusFailed.Render("●")
+			default:
+				statusDot = "○"
+			}
+
+			yStart := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(rightBuilder.String())) - 1
+			lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
+			rightBuilder.WriteString(lineStr)
+			yEnd := yStart + lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(strings.TrimRight(lineStr, "\n")))
+
+			// Track this subagent item's position for click handling
+			m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
+				yStart: yStart,
+				yEnd:   yEnd,
+				key:    sa.SessionKey,
+			})
+		}
+	}
 
 	rightPane := RightSidebar.Width(rightWidth).Height(contentHeight).Render(rightBuilder.String())
 

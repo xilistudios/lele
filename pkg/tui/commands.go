@@ -106,6 +106,7 @@ func (m *Model) executeCommand(cmd string) {
 		if len(subagents) == 0 {
 			m.modalItems = append(m.modalItems, i18n.T("tui.noSubagents"))
 		} else {
+			sortSubagents(subagents)
 			for _, sa := range subagents {
 				label := sa.Label
 				if label == "" {

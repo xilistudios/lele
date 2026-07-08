@@ -19,16 +19,18 @@ func (m *Model) updateViewport() {
 	m.cleanupStreamingIfComplete()
 
 	// Determine if the rendered base cache is still valid.
-	// Invalidated when session key or viewport width changes.
-	// During processing, always rebuild to pick up tool calls and other
-	// history changes that arrive while the stream is still active.
-	cacheKey := fmt.Sprintf("%s:%d", m.currentKey, m.viewport.Width)
-	cacheValid := m.renderedBaseKey == cacheKey && !m.processing && !m.hasRunningSubagents()
+	// Invalidated when session key, viewport width, or message count changes.
+	// During streaming the history doesn't grow (the assistant message is
+	// tracked via currentStream), so the cache can stay valid.
+	historyMsgCount := m.getHistoryMessageCount()
+	cacheKey := fmt.Sprintf("%s:%d:%d", m.currentKey, m.viewport.Width, historyMsgCount)
+	cacheValid := m.renderedBaseKey == cacheKey
 
 	if !cacheValid {
 		// Rebuild the base content from session history
 		m.renderedBase = m.buildRenderedHistory()
 		m.renderedBaseKey = cacheKey
+		m.renderedBaseMsgCount = historyMsgCount
 	}
 
 	var sb strings.Builder
@@ -73,31 +75,16 @@ func (m *Model) updateViewport() {
 		}
 
 		if m.currentThinking != "" {
-			rendered := m.renderMarkdown(m.currentThinking, m.viewport.Width-8)
+			rendered := m.getRenderedThinking(m.viewport.Width - 8)
 			sb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
 		}
 		if m.currentStream != "" {
-			rendered := m.renderMarkdown(m.currentStream, m.viewport.Width-6)
+			rendered := m.getRenderedStream(m.viewport.Width - 6)
 			sb.WriteString(rendered + "\n")
 		}
 		// Show the currently executing tool call (cleared when stream resumes or completes)
 		if m.currentToolAction != "" {
 			sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(m.currentToolAction) + "\n")
-		}
-		sb.WriteString("\n")
-	}
-
-	// Show real-time status of running subagents in the parent chat.
-	// These updates arrive while the parent agent is NOT streaming (it's waiting
-	// for the async spawn tool to return), so we display them unconditionally
-	// whenever there is at least one active subagent with a known last action.
-	if len(m.subagentProgress) > 0 {
-		for taskID, action := range m.subagentProgress {
-			if action == "" {
-				continue
-			}
-			label := taskID + ": " + action
-			sb.WriteString(SubagentProgressLabel.Render("  ⟳ ") + SubagentProgressStyle.Render(label) + "\n")
 		}
 		sb.WriteString("\n")
 	}

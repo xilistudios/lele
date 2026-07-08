@@ -41,10 +41,11 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 
 	// Copy session.
 	cfg.Session = SessionConfig{
-		DMScope:            doc.Session.DMScope,
-		IdentityLinks:      doc.Session.IdentityLinks,
-		Ephemeral:          doc.Session.Ephemeral,
-		EphemeralThreshold: doc.Session.EphemeralThreshold,
+		DMScope:                    doc.Session.DMScope,
+		IdentityLinks:              doc.Session.IdentityLinks,
+		Ephemeral:                  doc.Session.Ephemeral,
+		EphemeralThreshold:         doc.Session.EphemeralThreshold,
+		CompactionThresholdPercent: doc.Session.CompactionThresholdPercent,
 	}
 
 	// Copiar bindings
@@ -176,6 +177,9 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	if validated.Session.EphemeralThreshold <= 0 {
 		validated.Session.EphemeralThreshold = DefaultEphemeralThresholdSeconds
 	}
+	if validated.Session.CompactionThresholdPercent <= 0 || validated.Session.CompactionThresholdPercent > 100 {
+		validated.Session.CompactionThresholdPercent = DefaultCompactionThresholdPercent
+	}
 	validated.Providers.ensureNamedDefaults()
 	for providerName, providerCfg := range validated.Providers.Named {
 		for modelName, modelCfg := range providerCfg.Models {
@@ -239,8 +243,9 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	// Session.
 	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 {
 		session := map[string]interface{}{
-			"ephemeral":           doc.Session.Ephemeral,
-			"ephemeral_threshold": doc.Session.EphemeralThreshold,
+			"ephemeral":                    doc.Session.Ephemeral,
+			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
+			"compaction_threshold_percent": doc.Session.CompactionThresholdPercent,
 		}
 		if doc.Session.DMScope != "" {
 			session["dm_scope"] = doc.Session.DMScope

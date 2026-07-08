@@ -19,6 +19,7 @@
   "tui.sidebar.agents": "Agents",
   "tui.sidebar.models": "Models",
   "tui.sidebar.chats": "Chats",
+  "tui.sidebar.subagents": "Subagents",
   "tui.command.help": "Show help",
   "tui.command.new": "New chat",
   "tui.command.clear": "Clear chat",
