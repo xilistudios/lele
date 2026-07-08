@@ -217,13 +217,13 @@ func (m *Model) View() string {
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
 
 	// Current context usage (history + system prompt) — cached above
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.currentContext"), formatTokenK(currentTokens)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.contextWindow"), formatTokenK(contextWindow)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.contextWindow"), formatNumber(contextWindow)) + "\n")
 
 	// Cumulative token counts for this session — cached above
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatTokenK(cumInput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatTokenK(cumOutput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatTokenK(cumInput+cumOutput)) + "\n\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(m.workspacePath) + "\n")

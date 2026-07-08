@@ -17,12 +17,14 @@ import (
 
 // parseCLIArgs extracts the pure argument parsing logic from agentCmd for testability.
 // Returns: message, sessionKey, debugMode.
-func parseCLIArgs(args []string) (message, sessionKey string, debug bool) {
+func parseCLIArgs(args []string) (message, sessionKey string, debug bool, verbose bool) {
 	sessionKey = "cli:default"
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--debug", "-d":
 			debug = true
+		case "--verbose", "-v":
+			verbose = true
 		case "-m", "--message":
 			if i+1 < len(args) {
 				message = args[i+1]
@@ -35,15 +37,22 @@ func parseCLIArgs(args []string) (message, sessionKey string, debug bool) {
 			}
 		}
 	}
-	return message, sessionKey, debug
+	return message, sessionKey, debug, verbose
 }
 
 func agentCmd() {
-	message, sessionKey, debug := parseCLIArgs(os.Args[2:])
+	message, sessionKey, debug, verbose := parseCLIArgs(os.Args[2:])
+
+	// By default, suppress console logs (only write to file)
+	logger.SetQuiet(true)
 
 	if debug {
 		logger.SetLevel(logger.DEBUG)
+		logger.SetQuiet(false)
 		fmt.Println("🔍 Debug mode enabled")
+	} else if verbose {
+		logger.SetLevel(logger.INFO)
+		logger.SetQuiet(false)
 	}
 
 	cfg, err := loadConfig()

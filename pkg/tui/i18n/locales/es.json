@@ -60,5 +60,6 @@
   "tui.placeholder": "Pregunta cualquier cosa... \"¿Cuál es el stack tecnológico de este proyecto?\"",
   "tui.messagesCount": "%d mensajes",
   "tui.ctrlCommands": "ctrl+p comandos",
-  "tui.backToParent": "Volver al chat principal"
+  "tui.backToParent": "Volver al chat principal",
+  "tui.loading": "cargando"
 }

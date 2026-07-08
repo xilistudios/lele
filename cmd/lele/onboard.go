@@ -58,7 +58,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  onboard     Initialize lele configuration and workspace")
-	fmt.Println("  agent       Interact with the agent directly")
+	fmt.Println("  agent [-v|--verbose] [-d|--debug] [-m message] [-s session]  Interact with the agent directly")
 	fmt.Println("  tui [-s session_id]  Interact with the agent via TUI")
 	fmt.Println("  auth        Manage authentication (login, logout, status)")
 	fmt.Println("  gateway     Start lele gateway")

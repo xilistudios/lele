@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -36,8 +37,11 @@ type ToolLoopConfig struct {
 	VerboseCallback VerboseCallback
 	SessionRecorder SessionRecorder
 	SessionKey      string
-	Retry           *RetryConfig // Retry config for LLM calls. nil = no retry.
-	ContextWindow   int          // Max tokens for context. 0 = no compaction.
+	Retry           *RetryConfig    // Retry config for LLM calls. nil = no retry.
+	ContextWindow   int             // Max tokens for context. 0 = no compaction.
+	MessageBus      *bus.MessageBus // Optional: publish real-time events to TUI.
+	Channel         string          // Origin channel for events.
+	ChatID          string          // Origin chatID for events (subagent sessionKey).
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -217,9 +221,17 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
 			}
+
+			// Publish final response as stream event if bus is available
+			if config.MessageBus != nil && finalContent != "" {
+				config.MessageBus.PublishOutbound(bus.OutboundMessage{
+					Event:   "message.stream",
+					ChatID:  config.ChatID,
+					Content: finalContent,
+				})
+			}
 			break
 		}
-
 		// 5. Log tool calls
 		toolNames := make([]string, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
@@ -268,6 +280,24 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 			// Execute tool (no async callback for subagents - they run independently)
 			var toolResult *ToolResult
+
+			// Publish tool.executing event if bus is available
+			if config.MessageBus != nil {
+				action := tc.Name
+				if argsPreview != "" {
+					action = fmt.Sprintf("%s(%s)", tc.Name, argsPreview)
+				}
+				config.MessageBus.PublishOutbound(bus.OutboundMessage{
+					Event:   "tool.executing",
+					ChatID:  config.ChatID,
+					Content: "",
+					Metadata: map[string]string{
+						"tool":   tc.Name,
+						"action": action,
+					},
+				})
+			}
+
 			if config.Tools != nil {
 				toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
 			} else {
@@ -276,6 +306,18 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 			if toolResult == nil {
 				toolResult = ErrorResult(fmt.Sprintf("tool %s returned no result", tc.Name))
+			}
+
+			// Publish tool.result event if bus is available
+			if config.MessageBus != nil {
+				config.MessageBus.PublishOutbound(bus.OutboundMessage{
+					Event:   "tool.result",
+					ChatID:  config.ChatID,
+					Content: "",
+					Metadata: map[string]string{
+						"tool": tc.Name,
+					},
+				})
 			}
 
 			// Call verbose callback if provided

@@ -598,6 +598,8 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		SessionKey:      sessionKey,
 		Retry:           retryConfigPtr(),
 		ContextWindow:   agentContextWindow,
+		MessageBus:      sm.bus,
+		ChatID:          sessionKey,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)
