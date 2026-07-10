@@ -2,13 +2,12 @@ package anthropicprovider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/xilistudios/lele/pkg/providers/common"
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
@@ -254,16 +253,19 @@ func parseResponse(resp *anthropic.Message) *LLMResponse {
 			content += tb.Text
 		case "tool_use":
 			tu := block.AsToolUse()
-			var args map[string]interface{}
-			if err := json.Unmarshal(tu.Input, &args); err != nil {
-				log.Printf("anthropic: failed to decode tool call input for %q: %v", tu.Name, err)
-				args = map[string]interface{}{"raw": string(tu.Input)}
+			if tu.Input == nil {
+				toolCalls = append(toolCalls, ToolCall{
+					ID:        tu.ID,
+					Name:      tu.Name,
+					Arguments: make(map[string]interface{}),
+				})
+			} else {
+				toolCalls = append(toolCalls, ToolCall{
+					ID:        tu.ID,
+					Name:      tu.Name,
+					Arguments: common.DecodeToolCallArguments(tu.Input, tu.Name),
+				})
 			}
-			toolCalls = append(toolCalls, ToolCall{
-				ID:        tu.ID,
-				Name:      tu.Name,
-				Arguments: args,
-			})
 		}
 	}
 

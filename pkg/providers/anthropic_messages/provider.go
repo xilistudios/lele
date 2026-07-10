@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/providers/common"
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
@@ -561,14 +562,10 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 			}
 			if bs.blockType == "tool_use" {
 				argsJSON := bs.inputJSON.String()
-				var args map[string]any
-				if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-					args = map[string]any{"raw": argsJSON}
-				}
 				toolCalls = append(toolCalls, ToolCall{
 					ID:        bs.id,
 					Name:      bs.name,
-					Arguments: args,
+					Arguments: common.DecodeToolCallArguments(json.RawMessage(argsJSON), bs.name),
 					Function: &FunctionCall{
 						Name:      bs.name,
 						Arguments: argsJSON,

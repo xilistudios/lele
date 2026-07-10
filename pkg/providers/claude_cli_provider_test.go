@@ -970,7 +970,12 @@ func TestFindMatchingBrace(t *testing.T) {
 		{`{unclosed`, 0, 0},      // no match returns pos
 		{`{}`, 0, 2},             // empty object
 		{`{{{}}}`, 0, 6},         // deeply nested
-		{`{"a":"b{c}d"}`, 0, 13}, // braces in strings (simplified matcher)
+		{`{"a":"b{c}d"}`, 0, 13}, // braces in strings (ignored, string-aware)
+
+		// Regression: braces inside JSON string values must not affect brace matching
+		{`{"tool_calls":[{"id":"c1","type":"function","function":{"name":"exec","arguments":"{\"command\":\"echo }\"}"}}]}`, 0, 112}, // escaped } in arguments
+		{`{"a":"unbalanced { brace"}`, 0, 26},     // unbalanced { in string
+		{`{"a":"escaped quote \" and }"}`, 0, 30}, // escaped quote + } in string
 	}
 	for _, tt := range tests {
 		got := findMatchingBrace(tt.text, tt.pos)
