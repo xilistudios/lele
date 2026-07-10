@@ -184,4 +184,8 @@ type Model struct {
 	// mouseEnabled tracks whether mouse capture is active. When false, the
 	// terminal handles native text selection/copy. Toggled with ctrl+t.
 	mouseEnabled bool
+
+	// forceGotoBottom forces the viewport to scroll to bottom on the next
+	// render. Set when switching sessions or creating a new chat.
+	forceGotoBottom bool
 }

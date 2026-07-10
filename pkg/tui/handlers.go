@@ -197,10 +197,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeCommand("/sessions")
 			return m, nil
 
-		case "up", "down":
+		case "up", "down", "pgup", "pgdown":
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
+		case "home":
+			m.viewport.GotoTop()
+		case "end":
+			m.viewport.GotoBottom()
 
 		case "enter":
 			inputVal := m.textInput.Value()

@@ -119,6 +119,7 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -177,6 +178,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create a dedicated session directory for this test to avoid loading
 	// real user sessions from ~/.lele/sessions.
@@ -288,6 +290,7 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

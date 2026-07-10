@@ -174,6 +174,7 @@ func (m *Model) createNewChat() {
 	}
 
 	m.currentKey = newKey
+	m.forceGotoBottom = true
 }
 
 // cleanupStreamingIfComplete clears streaming/thinking state if the last assistant
@@ -239,6 +240,7 @@ func (m *Model) clearStreamingState() {
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
 	m.renderedBase = ""
 	m.renderedBaseKey = ""
+	m.forceGotoBottom = true
 }
 
 // isSubagentSessionKey returns true if the given session key belongs to a subagent.
@@ -290,15 +292,28 @@ func (m *Model) isSubagentSession(sessionKey string) bool {
 }
 
 func (m *Model) isSessionProcessing() bool {
-	if m.isSubagentSession(m.currentKey) {
-		return m.currentKey != "" && m.agentLoop != nil &&
-			m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
-	}
-	if m.processing || m.hasRunningSubagents() {
+	// If the backend has an active processing loop for the current session, we are processing.
+	backendProcessing := m.currentKey != "" && m.agentLoop != nil &&
+		m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
+	if backendProcessing {
 		return true
 	}
-	return m.currentKey != "" && m.agentLoop != nil &&
-		m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
+
+	// For parent sessions, if there are running subagents, we are also processing.
+	if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
+		return true
+	}
+
+	// Otherwise, check if we are in the brief startup phase after sending a message.
+	if m.processing && !m.startTime.IsZero() && time.Since(m.startTime) < 3*time.Second {
+		return true
+	}
+
+	// Stale/stuck local processing state
+	if m.processing {
+		m.processing = false
+	}
+	return false
 }
 
 func (m *Model) currentSessionKey() string {

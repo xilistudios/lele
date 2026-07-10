@@ -276,24 +276,25 @@ func (task *SubagentTask) statusMessage() string {
 }
 
 type SubagentManager struct {
-	tasks              map[string]*SubagentTask
-	cancels            map[string]context.CancelFunc
-	mu                 sync.RWMutex
-	provider           providers.LLMProvider
-	defaultModel       string
-	bus                *bus.MessageBus
-	workspace          string
-	tools              *ToolRegistry
-	getAgentContext    func(agentID string) AgentContextInfo
-	maxIterations      int
-	maxTokens          int
-	temperature        float64
-	hasMaxTokens       bool
-	hasTemperature     bool
-	timeout            time.Duration // 0 means no timeout
-	nextID             int
-	sessionRecorder    SessionRecorder
-	sessionKeyCallback func(sessionKey, agentID string) // called when subagent session key is created
+	tasks                 map[string]*SubagentTask
+	cancels               map[string]context.CancelFunc
+	mu                    sync.RWMutex
+	provider              providers.LLMProvider
+	defaultModel          string
+	bus                   *bus.MessageBus
+	workspace             string
+	tools                 *ToolRegistry
+	getAgentContext       func(agentID string) AgentContextInfo
+	maxIterations         int
+	maxTokens             int
+	temperature           float64
+	hasMaxTokens          bool
+	hasTemperature        bool
+	timeout               time.Duration // 0 means no timeout
+	nextID                int
+	sessionRecorder       SessionRecorder
+	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
+	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
@@ -368,6 +369,13 @@ func (sm *SubagentManager) SetSessionKeyCallback(callback func(sessionKey, agent
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionKeyCallback = callback
+}
+
+// SetRegisterSessionCancelCallback sets a callback function that registers a subagent session cancel function.
+func (sm *SubagentManager) SetRegisterSessionCancelCallback(callback func(sessionKey string, cancel context.CancelFunc) func()) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.registerSessionCancel = callback
 }
 
 // RegisterTool registers a tool for subagent execution.
@@ -572,9 +580,22 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	// Notify the session key callback so the owner can build an O(1) lookup map
 	sm.mu.RLock()
 	cb := sm.sessionKeyCallback
+	registerCancel := sm.registerSessionCancel
 	sm.mu.RUnlock()
 	if cb != nil {
 		cb(sessionKey, agentID)
+	}
+
+	if registerCancel != nil {
+		cleanup := registerCancel(sessionKey, func() {
+			sm.mu.Lock()
+			cancelFn, ok := sm.cancels[task.ID]
+			sm.mu.Unlock()
+			if ok && cancelFn != nil {
+				cancelFn()
+			}
+		})
+		defer cleanup()
 	}
 
 	var llmOptions map[string]any
