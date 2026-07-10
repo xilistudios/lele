@@ -292,8 +292,9 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					ChatID:  config.ChatID,
 					Content: "",
 					Metadata: map[string]string{
-						"tool":   tc.Name,
-						"action": action,
+						"tool":      tc.Name,
+						"action":    action,
+						"arguments": string(argsJSON),
 					},
 				})
 			}

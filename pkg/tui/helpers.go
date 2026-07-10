@@ -83,6 +83,8 @@ func (m *Model) submitMessage() tea.Cmd {
 	m.startTime = time.Now()
 	m.elapsedTime = 0
 	m.currentMessageID = uuid.New().String()
+	m.pendingSubagentCompletions = 0
+	m.parentCompletionObserved = false
 	m.currentStream = ""
 	m.currentThinking = ""
 	m.currentToolAction = ""

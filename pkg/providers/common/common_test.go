@@ -257,8 +257,8 @@ func TestDecodeToolCallArguments_NullInput(t *testing.T) {
 
 func TestDecodeToolCallArguments_InvalidJSON(t *testing.T) {
 	args := DecodeToolCallArguments(json.RawMessage(`not-json`), "test")
-	if _, ok := args["raw"]; !ok {
-		t.Error("expected 'raw' fallback key for invalid JSON")
+	if len(args) != 0 {
+		t.Errorf("expected invalid arguments to produce an empty map, got %v", args)
 	}
 }
 
@@ -266,6 +266,26 @@ func TestDecodeToolCallArguments_EmptyStringJSON(t *testing.T) {
 	args := DecodeToolCallArguments(json.RawMessage(`"  "`), "test")
 	if len(args) != 0 {
 		t.Errorf("expected empty map for whitespace string, got %v", args)
+	}
+}
+
+func TestDecodeToolCallArguments_RepairsTruncatedObject(t *testing.T) {
+	args := DecodeToolCallArguments(json.RawMessage(`{"path":"README.md","content":"hello`), "write_file")
+	if args["path"] != "README.md" {
+		t.Errorf("path = %v, want README.md", args["path"])
+	}
+	if args["content"] != "hello" {
+		t.Errorf("content = %v, want hello", args["content"])
+	}
+	if _, ok := args["raw"]; ok {
+		t.Error("truncated arguments must not be represented as a raw argument")
+	}
+}
+
+func TestDecodeToolCallArguments_InvalidStringJSONHasNoRawArgument(t *testing.T) {
+	args := DecodeToolCallArguments(json.RawMessage(`"{\"path\":\"README.md\"`), "read_file")
+	if len(args) != 0 {
+		t.Errorf("expected invalid string arguments to produce an empty map, got %v", args)
 	}
 }
 

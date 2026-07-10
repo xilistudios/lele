@@ -230,6 +230,8 @@ func (m *Model) clearStreamingState() {
 	m.currentToolAction = ""
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""
+	m.pendingSubagentCompletions = 0
+	m.parentCompletionObserved = false
 	m.pendingUserMessage = ""
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
@@ -280,6 +282,23 @@ func (m *Model) hasRunningSubagents() bool {
 		}
 	}
 	return false
+}
+
+// isSubagentSession returns true if the session key corresponds to a subagent session.
+func (m *Model) isSubagentSession(sessionKey string) bool {
+	return strings.Contains(sessionKey, ":subagent-") || strings.HasPrefix(sessionKey, "subagent:")
+}
+
+func (m *Model) isSessionProcessing() bool {
+	if m.isSubagentSession(m.currentKey) {
+		return m.currentKey != "" && m.agentLoop != nil &&
+			m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
+	}
+	if m.processing || m.hasRunningSubagents() {
+		return true
+	}
+	return m.currentKey != "" && m.agentLoop != nil &&
+		m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
 }
 
 func (m *Model) currentSessionKey() string {

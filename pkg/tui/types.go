@@ -119,13 +119,17 @@ type Model struct {
 	processing            bool
 	currentMessageID      string
 	currentAssistantMsgID string
-	currentStream         string
-	currentThinking       string
-	currentToolAction     string // active tool call shown during streaming ("tool: args")
-	startTime             time.Time
-	elapsedTime           time.Duration
-	lastDuration          time.Duration
-	animationTick         int
+	// A subagent result is queued as a follow-up message for the parent. Keep
+	// the parent turn active across its completion and the continuation turn.
+	pendingSubagentCompletions int
+	parentCompletionObserved   bool
+	currentStream              string
+	currentThinking            string
+	currentToolAction          string // active tool call shown during streaming ("tool: args")
+	startTime                  time.Time
+	elapsedTime                time.Duration
+	lastDuration               time.Duration
+	animationTick              int
 
 	// Double-ESC cancel tracking
 	escPressCount int

@@ -120,10 +120,7 @@ func (m *Model) View() string {
 	// --------------------------------------------------------------------------
 	leftWidth := int(float64(m.width) * leftColumnRatio)
 	rightWidth := m.width - leftWidth - 3
-	contentHeight := m.height - 2
-
-	// Render Left Column (Chat Contents)
-	var leftBuilder strings.Builder
+	contentHeight := m.height
 
 	agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 	modelName := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
@@ -132,12 +129,8 @@ func (m *Model) View() string {
 		thinkLevel = "off"
 	}
 
-	m.viewport.Width = leftWidth - 2
-	m.viewport.Height = contentHeight - 6
-	leftBuilder.WriteString(ViewportStyle.Render(m.viewport.View()) + "\n")
-
 	var statusLine string
-	isProcessing := m.processing || m.hasRunningSubagents()
+	isProcessing := m.isSessionProcessing()
 	if m.parentSessionKey != "" {
 		// Viewing a subagent chat — show navigation hint
 		if isProcessing {
@@ -175,14 +168,10 @@ func (m *Model) View() string {
 		autocompleteView = ModalContainer.Width(leftWidth-4).Render(autoSb.String()) + "\n"
 	}
 
-	leftBuilder.WriteString(StatusLineStyle.Render(statusLine) + "\n")
-	if autocompleteView != "" {
-		leftBuilder.WriteString(autocompleteView)
-	}
+	statusLineRendered := StatusLineStyle.Render(statusLine)
 
 	m.textInput.Width = leftWidth - 4
 	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.textInput.View())
-	leftBuilder.WriteString(inputBar + "\n")
 
 	// Cache token counts to avoid duplicate API calls
 	currentTokens, contextWindow := m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
@@ -202,6 +191,25 @@ func (m *Model) View() string {
 			return i18n.T("tui.mouseOff")
 		}())),
 	)
+
+	m.viewport.Width = leftWidth - 2
+	m.viewport.Height = calculateViewportHeight(
+		contentHeight,
+		lipgloss.Height(statusLineRendered),
+		lipgloss.Height(autocompleteView),
+		lipgloss.Height(inputBar),
+		lipgloss.Height(bottomBar),
+	)
+	m.updateViewport()
+
+	// Render Left Column (Chat Contents)
+	var leftBuilder strings.Builder
+	leftBuilder.WriteString(ViewportStyle.Render(m.viewport.View()) + "\n")
+	leftBuilder.WriteString(statusLineRendered + "\n")
+	if autocompleteView != "" {
+		leftBuilder.WriteString(autocompleteView)
+	}
+	leftBuilder.WriteString(inputBar + "\n")
 	leftBuilder.WriteString(bottomBar)
 
 	leftPane := LeftColumnStyle.Width(leftWidth).Render(leftBuilder.String())
@@ -337,6 +345,21 @@ func (m *Model) View() string {
 	}
 
 	return AppContainer.Width(m.width).Height(m.height).Render(mainLayout)
+}
+
+// calculateViewportHeight reserves every line rendered below the viewport.
+// Keeping this budget exact prevents the input and bottom bar from spilling
+// past the terminal height and being painted twice by the TUI renderer.
+func calculateViewportHeight(contentHeight, statusHeight, autocompleteHeight, inputHeight, bottomHeight int) int {
+	otherHeight := 1 + statusHeight + 1 + inputHeight + 1 + bottomHeight
+	if autocompleteHeight > 0 {
+		otherHeight += autocompleteHeight
+	}
+	viewportHeight := contentHeight - otherHeight
+	if viewportHeight < 3 {
+		return 3
+	}
+	return viewportHeight
 }
 
 // maxModalVisible returns the maximum number of items visible in a modal given terminal height.

@@ -94,7 +94,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Restart tick animation if the target session is actively processing.
 			// This keeps the loading dots when switching to a busy session/subagent.
-			if m.processing || m.hasRunningSubagents() {
+			if m.isSessionProcessing() {
 				return m, tickCmd()
 			}
 			return m, nil
@@ -135,7 +135,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc":
-			if m.processing || m.hasRunningSubagents() {
+			if m.isSessionProcessing() {
 				now := time.Now()
 				if now.Sub(m.escLastPress) < 1*time.Second {
 					// Double press detected - cancel the agent
@@ -150,6 +150,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.escHint = true
 				}
 				m.escLastPress = now
+				return m, nil
 			}
 
 		case "ctrl+c":
@@ -166,7 +167,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.reloadSessions()
 			}
 			// Restart tick animation if the parent session has active subagents.
-			if m.processing || m.hasRunningSubagents() {
+			if m.isSessionProcessing() {
 				return m, tickCmd()
 			}
 			return m, nil
@@ -251,7 +252,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		if m.processing || m.hasRunningSubagents() {
+		if m.isSessionProcessing() {
 			m.elapsedTime = time.Since(m.startTime)
 			m.animationTick++
 			cmds = append(cmds, tickCmd())
@@ -264,6 +265,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case outboundMsg:
 		if msg.msg.ChatID == m.currentKey {
 			switch msg.msg.Event {
+			case "subagent.result":
+				// The result is also queued as a system message for the parent.
+				// Keep loading active while that continuation waits for the session
+				// lock, even if the original turn has already completed.
+				if !m.processing {
+					m.parentCompletionObserved = true
+				}
+				m.pendingSubagentCompletions++
+				m.processing = true
+				if m.startTime.IsZero() {
+					m.startTime = time.Now()
+				}
+				m.lastDuration = 0
+				m.updateViewport()
+				cmds = append(cmds, tickCmd())
 			case "message.stream":
 				// Clear pending user message on first stream chunk — by the time
 				// the LLM starts streaming, the user message is already in history.
@@ -326,7 +342,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Stream finished — flush any pending throttled viewport update
 				// so the final content is visible immediately.
 				m.flushStreamUpdate()
-				if m.processing && (msg.msg.MessageID == m.currentMessageID || msg.msg.ReplyTo == m.currentMessageID) {
+				idMatches := msg.msg.MessageID == m.currentMessageID ||
+					msg.msg.ReplyTo == m.currentMessageID ||
+					(m.currentMessageID != "" && strings.HasPrefix(msg.msg.MessageID, m.currentMessageID+"-"))
+
+				if m.processing && (m.pendingSubagentCompletions > 0 || idMatches) {
 					cmds = append(cmds, func() tea.Msg {
 						return completeMsg{sessionKey: m.currentKey}
 					})
@@ -365,8 +385,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case completeMsg:
 		if msg.sessionKey == m.currentKey {
+			if m.pendingSubagentCompletions > 0 {
+				if !m.parentCompletionObserved {
+					// This is the completion of the original parent turn. The
+					// queued subagent result will start another parent turn.
+					m.parentCompletionObserved = true
+					m.reloadSessions()
+					break
+				}
+				m.pendingSubagentCompletions--
+				if m.pendingSubagentCompletions > 0 {
+					m.reloadSessions()
+					break
+				}
+			}
+			m.parentCompletionObserved = true
 			m.lastDuration = time.Since(m.startTime)
 			m.clearStreamingState()
+			// clearStreamingState preserves an active backend session when
+			// navigating between chats. This completion belongs to the current
+			// turn, so its local loading state must be cleared explicitly.
+			m.processing = false
 			m.reloadSessions()
 		}
 
