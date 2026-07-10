@@ -463,10 +463,7 @@ func buildAssistantContent(msg Message) []types.ContentBlock {
 		// Resolve arguments: prefer tc.Arguments, fallback to parsing tc.Function.Arguments
 		args := tc.Arguments
 		if args == nil && tc.Function != nil && tc.Function.Arguments != "" {
-			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-				log.Printf("bedrock: failed to parse Function.Arguments for tool %q: %v", toolName, err)
-				args = map[string]any{}
-			}
+			args = common.DecodeToolCallArguments(json.RawMessage(tc.Function.Arguments), toolName)
 		}
 		if args == nil {
 			args = map[string]any{}

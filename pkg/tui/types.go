@@ -176,4 +176,8 @@ type Model struct {
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget
+
+	// mouseEnabled tracks whether mouse capture is active. When false, the
+	// terminal handles native text selection/copy. Toggled with ctrl+t.
+	mouseEnabled bool
 }

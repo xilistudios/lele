@@ -195,7 +195,12 @@ func (m *Model) View() string {
 	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)),
-		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s", tokensText, i18n.T("tui.ctrlCommands"))),
+		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), func() string {
+			if m.mouseEnabled {
+				return i18n.T("tui.mouseOn")
+			}
+			return i18n.T("tui.mouseOff")
+		}())),
 	)
 	leftBuilder.WriteString(bottomBar)
 

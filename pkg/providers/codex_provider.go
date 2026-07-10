@@ -12,6 +12,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 const codexDefaultModel = "gpt-5.2"
@@ -341,14 +342,10 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 				}
 			}
 		case "function_call":
-			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(item.Arguments), &args); err != nil {
-				args = map[string]interface{}{"raw": item.Arguments}
-			}
 			toolCalls = append(toolCalls, ToolCall{
 				ID:        item.CallID,
 				Name:      item.Name,
-				Arguments: args,
+				Arguments: common.DecodeToolCallArguments(json.RawMessage(item.Arguments), item.Name),
 			})
 		}
 	}

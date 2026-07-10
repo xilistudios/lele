@@ -182,10 +182,31 @@ func (p *ClaudeCliProvider) stripToolCallsJSON(text string) string {
 }
 
 // findMatchingBrace finds the index after the closing brace matching the opening brace at pos.
+// It is string-aware: braces inside JSON string literals (delimited by double quotes,
+// with backslash-escaped characters) are ignored.
 func findMatchingBrace(text string, pos int) int {
 	depth := 0
+	inString := false
+	escaped := false
 	for i := pos; i < len(text); i++ {
-		if text[i] == '{' {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if text[i] == '\\' {
+				escaped = true
+				continue
+			}
+			if text[i] == '"' {
+				inString = false
+			}
+			continue
+		}
+		// not in a string
+		if text[i] == '"' {
+			inString = true
+		} else if text[i] == '{' {
 			depth++
 		} else if text[i] == '}' {
 			depth--

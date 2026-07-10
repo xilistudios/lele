@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/providers/common"
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
 
@@ -263,8 +264,8 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
 					Function *struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
+						Name      string          `json:"name"`
+						Arguments json.RawMessage `json:"arguments"`
 					} `json:"function"`
 				} `json:"tool_calls"`
 			} `json:"message"`
@@ -292,12 +293,7 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 
 		if tc.Function != nil {
 			name = tc.Function.Name
-			if tc.Function.Arguments != "" {
-				if err := json.Unmarshal([]byte(tc.Function.Arguments), &arguments); err != nil {
-					log.Printf("openai_compat: failed to decode tool call arguments for %q: %v", name, err)
-					arguments["raw"] = tc.Function.Arguments
-				}
-			}
+			arguments = common.DecodeToolCallArguments(tc.Function.Arguments, name)
 		}
 
 		toolCalls = append(toolCalls, ToolCall{
@@ -505,11 +501,7 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 	for i := range toolCalls {
 		tc := &toolCalls[i]
 		if tc.Function != nil && tc.Function.Arguments != "" {
-			arguments := make(map[string]interface{})
-			if err := json.Unmarshal([]byte(tc.Function.Arguments), &arguments); err != nil {
-				arguments = map[string]interface{}{"raw": tc.Function.Arguments}
-			}
-			tc.Arguments = arguments
+			tc.Arguments = common.DecodeToolCallArguments(json.RawMessage(tc.Function.Arguments), tc.Name)
 		}
 	}
 

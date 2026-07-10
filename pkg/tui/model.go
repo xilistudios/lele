@@ -34,10 +34,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	workspacePath := cfg.WorkspacePath()
-	if workspacePath == "" {
-		workspacePath, _ = os.Getwd()
-	}
+	workspacePath, _ := os.Getwd()
 
 	now := time.Now()
 	m := &Model{
@@ -55,6 +52,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		sessionStartTime:       now,
 		subagentProgress:       make(map[string]string),
 		streamThrottleInterval: 32 * time.Millisecond,
+		mouseEnabled:           true,
 	}
 
 	// If an initial session ID was provided, try to open it

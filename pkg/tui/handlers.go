@@ -184,6 +184,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.executeCommand("/agents")
 			return m, nil
 
+		case "ctrl+t":
+			// Toggle mouse capture so the user can select/copy text natively.
+			m.mouseEnabled = !m.mouseEnabled
+			if m.mouseEnabled {
+				return m, tea.EnableMouseCellMotion
+			}
+			return m, tea.DisableMouse
+
 		case "ctrl+s":
 			m.executeCommand("/sessions")
 			return m, nil
@@ -207,6 +215,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		if !m.mouseEnabled {
+			break
+		}
 		// Handle mouse scrolling on the viewport
 		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			var cmd tea.Cmd
