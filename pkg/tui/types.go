@@ -130,6 +130,7 @@ type Model struct {
 	elapsedTime                time.Duration
 	lastDuration               time.Duration
 	animationTick              int
+	tickPending                bool // prevents multiple tick chains from accumulating
 
 	// Double-ESC cancel tracking
 	escPressCount int

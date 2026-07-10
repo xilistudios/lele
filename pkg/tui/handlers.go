@@ -95,7 +95,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Restart tick animation if the target session is actively processing.
 			// This keeps the loading dots when switching to a busy session/subagent.
 			if m.isSessionProcessing() {
-				return m, tickCmd()
+				return m, m.tickCmd()
 			}
 			return m, nil
 		}
@@ -168,7 +168,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Restart tick animation if the parent session has active subagents.
 			if m.isSessionProcessing() {
-				return m, tickCmd()
+				return m, m.tickCmd()
 			}
 			return m, nil
 
@@ -256,10 +256,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
+		// Reset tick pending flag to allow the next tick to be scheduled
+		m.tickPending = false
 		if m.isSessionProcessing() {
 			m.elapsedTime = time.Since(m.startTime)
 			m.animationTick++
-			cmds = append(cmds, tickCmd())
+			cmds = append(cmds, m.tickCmd())
 		}
 		if m.escHint && time.Since(m.escLastPress) > escHintTimeout {
 			m.escHint = false
@@ -283,7 +285,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.lastDuration = 0
 				m.updateViewport()
-				cmds = append(cmds, tickCmd())
+				cmds = append(cmds, m.tickCmd())
 			case "message.stream":
 				// Clear pending user message on first stream chunk — by the time
 				// the LLM starts streaming, the user message is already in history.
@@ -410,6 +412,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// navigating between chats. This completion belongs to the current
 			// turn, so its local loading state must be cleared explicitly.
 			m.processing = false
+			m.tickPending = false // Reset tick chain flag when processing completes
 			m.reloadSessions()
 		}
 
@@ -491,6 +494,14 @@ func (m *Model) isEscapeSequenceFragment(msg tea.KeyMsg) bool {
 			m.escSeqActive = true
 			m.escSeqLastRune = now
 			return true
+		}
+		// Case A-2: ESC rune delivered inside msg.Runes (bubbletea grouped bytes)
+		for _, r := range msg.Runes {
+			if r == 0x1b {
+				m.escSeqActive = true
+				m.escSeqLastRune = now
+				return true
+			}
 		}
 		// Case B: The '[' or '<' that arrives immediately after an ESC
 		// (within 50ms) — bubbletea may split ESC from the rest.

@@ -60,7 +60,14 @@ func (m *Model) startOutboundListener() tea.Cmd {
 	}
 }
 
-func tickCmd() tea.Cmd {
+// tickCmd returns a tea.Cmd that schedules the next animation tick.
+// It returns nil if a tick is already pending to prevent multiple tick chains
+// from accumulating (which causes the spinner to accelerate).
+func (m *Model) tickCmd() tea.Cmd {
+	if m.tickPending {
+		return nil
+	}
+	m.tickPending = true
 	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
@@ -104,7 +111,7 @@ func (m *Model) submitMessage() tea.Cmd {
 		Metadata:   map[string]string{"message_id": m.currentMessageID},
 	})
 
-	return tickCmd()
+	return m.tickCmd()
 }
 
 func (m *Model) filterAutocomplete(val string) {

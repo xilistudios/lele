@@ -142,7 +142,7 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("service unavailable (503): %s", string(body))
 	default:
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s \n Payload; %s", resp.StatusCode, string(body), endpointURL, string(jsonBody))
+			return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
 
 		}
 	}
@@ -202,7 +202,7 @@ func (p *Provider) ChatStream(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s \n Payload; %s", resp.StatusCode, string(body), endpointURL, string(jsonBody))
+		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
 	}
 
 	return parseAnthropicSSEStream(ctx, resp.Body, onChunk, onReasoning)
