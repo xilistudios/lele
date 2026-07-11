@@ -327,8 +327,30 @@ export function useAppLogic(
     const sessionKey = await sessionsHook.createSession()
     if (sessionKey) {
       navigate(`/chat/${sessionKey}`, { replace: true })
+
+      // Set currentAgentId so the WebSocket subscription useEffect can fire.
+      // Try to get the agent assigned to the new session; fall back to the
+      // existing currentAgentId or the first available agent.
+      try {
+        const agentResult = await api.sessionAgent(sessionKey)
+        const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
+        if (validAgent) {
+          setCurrentAgentId(agentResult.agent_id)
+        } else if (currentAgentIdRef.current) {
+          setCurrentAgentId(currentAgentIdRef.current)
+        } else if (agentsRef.current.length > 0) {
+          setCurrentAgentId(agentsRef.current[0].id)
+        }
+      } catch {
+        // New session may not have an agent assigned yet — use current or first agent
+        if (currentAgentIdRef.current) {
+          setCurrentAgentId(currentAgentIdRef.current)
+        } else if (agentsRef.current.length > 0) {
+          setCurrentAgentId(agentsRef.current[0].id)
+        }
+      }
     }
-  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession])
+  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession, api])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
