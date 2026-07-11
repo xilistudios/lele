@@ -5,14 +5,16 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
-func (m *Model) executeCommand(cmd string) {
+func (m *Model) executeCommand(cmd string) tea.Cmd {
 	parts := strings.Fields(cmd)
 	if len(parts) == 0 {
-		return
+		return nil
 	}
 
 	switch parts[0] {
@@ -20,6 +22,11 @@ func (m *Model) executeCommand(cmd string) {
 		m.resetModal(ModalSessions)
 		allSessions := m.sessionMgr.ListSessions()
 		for _, s := range allSessions {
+			// Exclude subagent sessions from the session list — they have
+			// their own navigation via /subagents and are not top-level chats.
+			if isSubagentSessionKey(s.Key) {
+				continue
+			}
 			name := s.Name
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")
@@ -41,15 +48,18 @@ func (m *Model) executeCommand(cmd string) {
 			m.modalItems = append(m.modalItems, item)
 			m.modalSessionKeys = append(m.modalSessionKeys, s.Key)
 		}
+		return nil
 
 	case "/new":
 		m.createNewChat()
 		m.showWelcome = true
 		m.reloadSessions()
+		return nil
 
 	case "/agents":
 		m.resetModal(ModalAgent)
 		m.modalItems = m.agentLoop.GetProvidable().ListAvailableAgentIDs()
+		return nil
 
 	case "/models":
 		m.resetModal(ModalModel)
@@ -73,6 +83,24 @@ func (m *Model) executeCommand(cmd string) {
 				}
 			}
 		}
+		// Pre-select the current session's model so the cursor lands on it.
+		// GetSessionModel returns the resolved provider:modelID value, while
+		// modalItems are provider:alias entries, so resolve each item before
+		// comparing.
+		if m.currentKey != "" {
+			curModel := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
+			if curModel != "" && cfgSnapshot != nil && cfgSnapshot.Providers != nil {
+				for i, item := range m.modalItems {
+					if cfgSnapshot.Providers.ResolveModelAlias(item, "") == curModel {
+						m.modalSelectedIdx = i
+						// Keep scroll offset at 0; the view layer already
+						// clamps the visible window around the selection.
+						break
+					}
+				}
+			}
+		}
+		return nil
 
 	case "/clear":
 		m.agentLoop.GetProvidable().ClearSession(m.currentKey)
@@ -80,10 +108,12 @@ func (m *Model) executeCommand(cmd string) {
 			m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, m.pendingModel)
 		}
 		m.reloadSessions()
+		return nil
 
 	case "/think":
 		m.resetModal(ModalThink)
 		m.modalItems = []string{"off", "low", "medium", "high"}
+		return nil
 
 	case "/lang":
 		m.resetModal(ModalLang)
@@ -93,6 +123,7 @@ func (m *Model) executeCommand(cmd string) {
 			"English (en)",
 			"Português (pt)",
 		}
+		return nil
 
 	case "/subagents":
 		m.resetModal(ModalSubagents)
@@ -116,10 +147,31 @@ func (m *Model) executeCommand(cmd string) {
 				m.modalSubagentKeys = append(m.modalSubagentKeys, sa.SessionKey)
 			}
 		}
+		return nil
+
+	case "/compact":
+		if m.currentKey == "" {
+			return nil
+		}
+		m.textInput.SetValue("")
+		m.compactFeedback = ""
+		m.processing = true
+		m.startTime = time.Now()
+		m.elapsedTime = 0
+		m.currentStream = ""
+		m.currentThinking = ""
+		m.currentToolAction = ""
+		m.reloadSessions()
+		key := m.currentKey
+		return func() tea.Msg {
+			result := m.agentLoop.GetProvidable().CompactSession(key)
+			return compactResultMsg{result: result, sessionKey: key}
+		}
 
 	case "/quit":
 		m.printSessionSummary()
 		m.cancel()
 		os.Exit(0)
 	}
+	return nil
 }

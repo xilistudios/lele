@@ -1,12 +1,139 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
+
+// sgrMouseEscapeRe matches complete SGR mouse escape sequences:
+// ESC [ < col ; row ; button M/m
+var sgrMouseEscapeRe = regexp.MustCompile(`(?:\x1b)?\[<\d+;\d+;\d+[Mm]`)
+
+// stripMouseEscapeSequences removes all SGR mouse sequences from s.
+func stripMouseEscapeSequences(s string) string {
+	return sgrMouseEscapeRe.ReplaceAllString(s, "")
+}
+
+// filterAndBufferEscapes combines any previously buffered incomplete escape
+// fragment (m.escBuffer) with msg.Runes, strips complete SGR mouse escape
+// sequences, stores any trailing incomplete escape fragment back into
+// m.escBuffer, and returns the cleaned runes plus a boolean indicating
+// whether the message should be forwarded to the text input.
+func filterAndBufferEscapes(m *Model, msg tea.KeyMsg) ([]rune, bool) {
+	// Combine buffer with incoming runes.
+	runes := make([]rune, 0, len(m.escBuffer)+len(msg.Runes))
+	runes = append(runes, m.escBuffer...)
+	runes = append(runes, msg.Runes...)
+	m.escBuffer = m.escBuffer[:0]
+
+	s := string(runes)
+	cleaned := stripMouseEscapeSequences(s)
+
+	// Check if the cleaned string ends with an incomplete escape fragment
+	// (e.g. lone \x1b, \x1b[, \x1b[<, \x1b[<12, etc.) that might be the
+	// start of a sequence split across multiple KeyMsg events.
+	// We look for ESC at the end followed by optional incomplete CSI bytes.
+	incomplete := findTrailingIncompleteEscape(cleaned)
+	if incomplete > 0 {
+		// Buffer the incomplete tail for next time.
+		m.escBuffer = []rune(cleaned[len(cleaned)-incomplete:])
+		cleaned = cleaned[:len(cleaned)-incomplete]
+	}
+
+	if len(cleaned) == 0 {
+		return nil, false // nothing to pass through
+	}
+
+	return []rune(cleaned), true
+}
+
+// findTrailingIncompleteEscape returns the number of trailing runes that look
+// like the start of an incomplete SGR mouse escape sequence (ESC + partial
+// CSI, or a headless "[<" partial SGR mouse fragment without the leading ESC).
+// Returns 0 if the string doesn't end with such a fragment.
+func findTrailingIncompleteEscape(s string) int {
+	if len(s) == 0 {
+		return 0
+	}
+	runes := []rune(s)
+	n := len(runes)
+
+	// Walk backwards to find the last ESC character.
+	for i := n - 1; i >= 0; i-- {
+		if runes[i] == 0x1b {
+			// Everything from here to the end could be an incomplete sequence.
+			fragment := string(runes[i:])
+			tail := fragment[1:] // strip leading ESC
+
+			// If the tail is empty (just a lone ESC), it's incomplete.
+			if len(tail) == 0 {
+				return n - i
+			}
+			// If it starts with [ or [<  followed by digits/; but no final byte, it's incomplete.
+			if strings.HasPrefix(tail, "[<") {
+				rest := tail[2:]
+				if len(rest) == 0 {
+					return n - i // just "\x1b[<"
+				}
+				// All remaining chars should be digits or ';' for an in-progress sequence.
+				allParams := true
+				for _, c := range rest {
+					if !((c >= '0' && c <= '9') || c == ';') {
+						allParams = false
+						break
+					}
+				}
+				if allParams {
+					return n - i // incomplete: "\x1b[<NNN;NNN"
+				}
+			} else if tail == "[" {
+				return n - i // just "\x1b["
+			}
+			// Otherwise it's a complete or unrelated sequence — don't buffer.
+			return 0
+		}
+	}
+
+	// No ESC found. Bubbletea may have consumed the ESC byte, leaving a
+	// headless partial SGR mouse fragment like "[<", "[<65", or "[<65;57;25".
+	// Buffer it if the string ends with "[<" followed only by digits/';'.
+	// Scan backwards from the last '[' we can find.
+	for i := n - 1; i >= 0; i-- {
+		if runes[i] == '[' {
+			// Must be followed by '<' (if there's room) to be an SGR mouse fragment.
+			if i+1 >= n {
+				// Trailing "[" alone — not a mouse fragment, ignore.
+				return 0
+			}
+			if runes[i+1] != '<' {
+				return 0
+			}
+			// "[<" present — check that everything after is digits/';'.
+			rest := string(runes[i+2:])
+			if len(rest) == 0 {
+				return n - i // just "[<"
+			}
+			allParams := true
+			for _, c := range rest {
+				if !((c >= '0' && c <= '9') || c == ';') {
+					allParams = false
+					break
+				}
+			}
+			if allParams {
+				return n - i // incomplete headless SGR mouse fragment
+			}
+			// Contains non-param chars — not a mouse fragment.
+			return 0
+		}
+	}
+
+	return 0
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -65,6 +192,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
 							m.showWelcome = false
 							m.clearStreamingState()
+							// Sync pendingModel to the target session's model so
+							// that creating a new chat from here inherits it.
+							m.pendingModel = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
 						}
 					} else if m.modalMode == ModalSubagents {
 						if m.modalSelectedIdx < len(m.modalSubagentKeys) {
@@ -122,11 +252,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textInput.SetValue(completed)
 					m.showAutocomplete = false
 					if msg.String() == "enter" {
-						m.executeCommand(completed)
+						cmd := m.executeCommand(completed)
+						if cmd != nil {
+							cmds = append(cmds, cmd)
+						}
 						m.textInput.SetValue("")
 					}
 				}
-				return m, nil
+				return m, tea.Batch(cmds...)
 			case "esc":
 				m.showAutocomplete = false
 				return m, nil
@@ -178,11 +311,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+m":
-			m.executeCommand("/models")
+			cmd := m.executeCommand("/models")
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, nil
 
 		case "ctrl+a":
-			m.executeCommand("/agents")
+			cmd := m.executeCommand("/agents")
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, nil
 
 		case "ctrl+t":
@@ -194,7 +333,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.DisableMouse
 
 		case "ctrl+s":
-			m.executeCommand("/sessions")
+			cmd := m.executeCommand("/sessions")
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, nil
 
 		case "up", "down", "pgup", "pgdown":
@@ -209,7 +351,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			inputVal := m.textInput.Value()
 			if strings.HasPrefix(inputVal, "/") {
-				m.executeCommand(inputVal)
+				cmd := m.executeCommand(inputVal)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				m.textInput.SetValue("")
 			} else if !m.processing && !m.hasRunningSubagents() {
 				cmd := m.submitMessage()
@@ -416,6 +561,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadSessions()
 		}
 
+	case compactResultMsg:
+		if msg.sessionKey == m.currentKey {
+			m.lastDuration = time.Since(m.startTime)
+			m.processing = false
+			m.compactFeedback = msg.result
+			m.forceGotoBottom = true
+			m.reloadSessions()
+		}
+
 	case streamThrottleMsg:
 		m.streamThrottleActive = false
 		if m.streamPendingUpdate {
@@ -445,16 +599,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
 		switch msg := msg.(type) {
-		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg:
+		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg:
 			// skip — not relevant to textinput
 		case tea.KeyMsg:
 			if m.isEscapeSequenceFragment(msg) {
 				break
 			}
+			// For rune messages, filter out SGR mouse escape sequences
+			// that bubbletea may have failed to parse as tea.MouseMsg.
+			if msg.Type == tea.KeyRunes {
+				cleaned, consume := filterAndBufferEscapes(m, msg)
+				if !consume {
+					break
+				}
+				msg.Runes = cleaned
+			}
 			var cmd tea.Cmd
 			m.textInput, cmd = m.textInput.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
+			}
+			// Defensive: strip any mouse escape sequences that slipped through.
+			if cleaned := stripMouseEscapeSequences(m.textInput.Value()); cleaned != m.textInput.Value() {
+				m.textInput.SetValue(cleaned)
 			}
 		default:
 			var cmd tea.Cmd

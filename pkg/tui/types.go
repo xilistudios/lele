@@ -62,6 +62,7 @@ var allCommands = []commandInfo{
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
+	{name: "/compact", description: "Compact conversation history"},
 	{name: "/quit", description: "Exit TUI"},
 }
 
@@ -74,6 +75,10 @@ type completeMsg struct {
 	sessionKey string
 }
 type tickMsg time.Time
+type compactResultMsg struct {
+	result     string
+	sessionKey string
+}
 
 type Model struct {
 	agentLoop  *agent.AgentLoop
@@ -154,6 +159,7 @@ type Model struct {
 	// fragments that bubbletea fails to parse as tea.MouseMsg.
 	escSeqActive   bool
 	escSeqLastRune time.Time
+	escBuffer      []rune // accumulates incomplete SGR mouse escape fragments
 
 	// Terminal size
 	width  int
@@ -189,4 +195,8 @@ type Model struct {
 	// forceGotoBottom forces the viewport to scroll to bottom on the next
 	// render. Set when switching sessions or creating a new chat.
 	forceGotoBottom bool
+
+	// compactFeedback holds the result of /compact to display in the viewport.
+	// Cleared when the user sends the next message.
+	compactFeedback string
 }

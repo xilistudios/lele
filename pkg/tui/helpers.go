@@ -86,6 +86,7 @@ func (m *Model) submitMessage() tea.Cmd {
 	m.showWelcome = false
 
 	m.textInput.SetValue("")
+	m.compactFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
 	m.elapsedTime = 0

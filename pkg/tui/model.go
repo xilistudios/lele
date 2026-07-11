@@ -165,8 +165,12 @@ func (m *Model) createNewChat() {
 	}
 	m.agentLoop.GetProvidable().SetSessionAgent(newKey, agentID)
 
-	if m.pendingModel != "" {
-		m.agentLoop.GetProvidable().SetSessionModel(newKey, m.pendingModel)
+	modelID := m.pendingModel
+	if modelID == "" && m.currentKey != "" {
+		modelID = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
+	}
+	if modelID != "" {
+		m.agentLoop.GetProvidable().SetSessionModel(newKey, modelID)
 	}
 
 	if m.pendingThink != "" {
@@ -218,6 +222,7 @@ func (m *Model) resetStreamState() {
 func (m *Model) clearStreamingState() {
 	m.streamThrottleActive = false
 	m.streamPendingUpdate = false
+	m.compactFeedback = ""
 
 	// Check if the current session (already set to the target) is actively
 	// being processed by the LLM before resetting the flag.
