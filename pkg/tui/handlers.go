@@ -557,7 +557,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// navigating between chats. This completion belongs to the current
 			// turn, so its local loading state must be cleared explicitly.
 			m.processing = false
-			m.tickPending = false // Reset tick chain flag when processing completes
 			m.reloadSessions()
 		}
 

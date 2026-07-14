@@ -239,7 +239,6 @@ func (m *Model) clearStreamingState() {
 	m.pendingSubagentCompletions = 0
 	m.parentCompletionObserved = false
 	m.pendingUserMessage = ""
-	m.tickPending = false // Reset tick chain flag
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
 	}

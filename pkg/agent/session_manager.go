@@ -185,11 +185,17 @@ func (sm *sessionManagerImpl) IsSessionProcessing(sessionKey string) bool {
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
 
-	if agent.ContextWindow <= 0 {
-		logger.DebugCF("agent", "maybeSummarize skipped: no context window configured", map[string]interface{}{
-			"session_key":    sessionKey,
-			"agent_id":       agent.ID,
-			"context_window": agent.ContextWindow,
+	// Resolve the effective context window for this session, honoring session
+	// model overrides and provider model config (falls back to agent.ContextWindow
+	// then to 128000).
+	contextWindow := sm.al.getSessionContextWindow(sessionKey)
+
+	if contextWindow <= 0 {
+		logger.WarnCF("agent", "maybeSummarize skipped: no context window configured", map[string]interface{}{
+			"session_key":             sessionKey,
+			"agent_id":                agent.ID,
+			"context_window":          agent.ContextWindow,
+			"resolved_context_window": contextWindow,
 		})
 		return nil
 	}
@@ -211,42 +217,49 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 
 	tokenEstimate := systemPromptTokens + summaryTokens + historyTokens
 	thresholdPercent := sm.al.cfg().SessionCompactionThresholdPercent()
-	threshold := agent.ContextWindow * thresholdPercent / 100
+	threshold := contextWindow * thresholdPercent / 100
 
-	logger.DebugCF("agent", "maybeSummarize check", map[string]interface{}{
-		"session_key":          sessionKey,
-		"agent_id":             agent.ID,
-		"context_window":       agent.ContextWindow,
-		"threshold":            threshold,
-		"threshold_percent":    thresholdPercent,
-		"token_estimate":       tokenEstimate,
-		"system_prompt_tokens": systemPromptTokens,
-		"summary_tokens":       summaryTokens,
-		"history_tokens":       historyTokens,
-		"history_count":        len(newHistory),
+	logger.InfoCF("agent", "maybeSummarize check", map[string]interface{}{
+		"session_key":             sessionKey,
+		"agent_id":                agent.ID,
+		"context_window":          agent.ContextWindow,
+		"resolved_context_window": contextWindow,
+		"threshold":               threshold,
+		"threshold_percent":       thresholdPercent,
+		"token_estimate":          tokenEstimate,
+		"system_prompt_tokens":    systemPromptTokens,
+		"summary_tokens":          summaryTokens,
+		"history_tokens":          historyTokens,
+		"history_count":           len(newHistory),
 	})
 
 	if tokenEstimate > threshold {
 		logger.InfoCF("agent", "Summarization triggered", map[string]interface{}{
-			"session_key":    sessionKey,
-			"agent_id":       agent.ID,
-			"token_estimate": tokenEstimate,
-			"threshold":      threshold,
-			"context_window": agent.ContextWindow,
+			"session_key":             sessionKey,
+			"agent_id":                agent.ID,
+			"token_estimate":          tokenEstimate,
+			"threshold":               threshold,
+			"context_window":          agent.ContextWindow,
+			"resolved_context_window": contextWindow,
 		})
 		stats, ran := sm.summarizeSessionGuarded(agent, sessionKey)
-		if ran {
-			if !constants.IsInternalChannel(channel) && stats != nil {
-				sm.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: channel,
-					ChatID:  chatID,
-					Content: fmt.Sprintf("📊 Memory optimized:\n• Messages: %d → %d (dropped %d)\n• Tokens: ~%d → ~%d (saved ~%d)",
-						stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
-						stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens),
-				})
-			}
-			return stats
+		if !ran {
+			logger.WarnCF("agent", "maybeSummarize: summarization already in progress, skipping", map[string]interface{}{
+				"session_key": sessionKey,
+				"agent_id":    agent.ID,
+			})
+			return nil
 		}
+		if !constants.IsInternalChannel(channel) && stats != nil {
+			sm.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Content: fmt.Sprintf("📊 Memory optimized:\n• Messages: %d → %d (dropped %d)\n• Tokens: ~%d → ~%d (saved ~%d)",
+					stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
+					stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens),
+			})
+		}
+		return stats
 	}
 	return nil
 }
