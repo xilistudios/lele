@@ -250,7 +250,15 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			})
 			return nil
 		}
-		if !constants.IsInternalChannel(channel) && stats != nil {
+		if stats == nil {
+			logger.ErrorCF("agent", "maybeSummarize: summarization failed, falling back to forced compression", map[string]interface{}{
+				"session_key": sessionKey,
+				"agent_id":    agent.ID,
+			})
+			sm.forceCompression(agent, sessionKey)
+			return nil
+		}
+		if !constants.IsInternalChannel(channel) {
 			sm.bus.PublishOutbound(bus.OutboundMessage{
 				Channel: channel,
 				ChatID:  chatID,
@@ -290,7 +298,7 @@ func (sm *sessionManagerImpl) summarizeSessionGuarded(agent *AgentInstance, sess
 func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey string) *SummarizeStats {
 	stats, err := sm.summarizeSessionCore(agent, sessionKey)
 	if err != nil {
-		logger.DebugCF("agent", "summarizeSession: core summarization returned error, using silent fallback", map[string]interface{}{
+		logger.WarnCF("agent", "summarizeSession: core summarization returned error", map[string]interface{}{
 			"session_key": sessionKey,
 			"error":       err.Error(),
 		})
@@ -446,6 +454,9 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	history := agent.Sessions.GetHistory(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
 	historyForSummary := stripSummaryMessages(history)
+	// Filter out messages already excluded from context (from previous
+	// summarization or forceCompression). They should not be re-summarized.
+	historyForSummary = filterContextMessages(historyForSummary)
 
 	// Need at least 3 messages to summarize (keep last 2 for continuity)
 	if len(historyForSummary) <= 2 {
@@ -464,7 +475,20 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		return nil, fmt.Errorf("no messages available to summarize")
 	}
 
-	// Build comprehensive summary prompt with ALL old messages
+	// Build comprehensive summary prompt with old messages.
+	// Limit the total prompt size to avoid exceeding the context window
+	// when there are many messages (which would cause the summarization
+	// LLM call itself to fail).
+	contextWindow := sm.al.getSessionContextWindow(sessionKey)
+	if contextWindow <= 0 {
+		contextWindow = 128000
+	}
+	// Target ~40% of context window for the summarization prompt.
+	// At 2.5 chars/token, this is contextWindow * 2 / 5 * 40 / 100 chars.
+	maxPromptChars := contextWindow * 2 / 5 * 40 / 100
+	// Per-message truncation limit (reduced from 4000 to 2000 to fit more messages)
+	perMessageLimit := 2000
+
 	prompt := "Please provide a comprehensive summary of the following conversation. " +
 		"Capture all important context, decisions, facts, and action items so that " +
 		"someone reading just this summary would understand what happened.\n\n"
@@ -474,21 +498,53 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 
 	prompt += "=== CONVERSATION TO SUMMARIZE ===\n"
+	// Add messages from oldest to newest, respecting the total prompt size limit.
+	// If we can't fit all messages, include as many as possible (from the oldest)
+	// and note that some were skipped.
+	messagesIncluded := 0
+	messagesSkipped := 0
 	for _, m := range toSummarize {
 		role := strings.ToUpper(m.Role)
 		content := m.Content
-		// Truncate very long messages for the summary prompt (UTF-8 safe)
-		if len(content) > 4000 {
-			content = truncateUTF8Safe(content, 4000) + "\n[Content truncated...]"
+		if len(content) > perMessageLimit {
+			content = truncateUTF8Safe(content, perMessageLimit) + "\n[Content truncated...]"
 		}
-		prompt += fmt.Sprintf("%s: %s\n\n", role, content)
+		entry := fmt.Sprintf("%s: %s\n\n", role, content)
+		if len(prompt)+len(entry) > maxPromptChars && messagesIncluded > 0 {
+			messagesSkipped++
+			continue
+		}
+		prompt += entry
+		messagesIncluded++
+	}
+	if messagesSkipped > 0 {
+		prompt += fmt.Sprintf("[Note: %d additional messages were skipped due to size limits]\n\n", messagesSkipped)
 	}
 
 	prompt += "=== END OF CONVERSATION ===\n\n" +
 		"Now provide a detailed summary that preserves all critical context."
 
-	// Call LLM to summarize everything
-	resp, err := agent.Provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, agent.Model, map[string]interface{}{
+	// Call LLM to summarize everything.
+	// Use the session's current model (which may differ from the agent's default
+	// if the user changed it via /model command).
+	summarizeModel := sm.al.sessionManager.ModelForSession(agent, sessionKey)
+	summarizeProvider := agent.Provider
+
+	// If the session model uses a different provider prefix, resolve the
+	// correct provider (same logic as llm_caller.go).
+	if ref := providers.ParseModelRef(summarizeModel, ""); ref != nil && ref.Provider != "" {
+		agentRef := providers.ParseModelRef(agent.Model, "")
+		if agentRef == nil || agentRef.Provider != ref.Provider {
+			if newProv, err := providers.CreateProviderForCandidate(sm.al.cfg(), ref.Provider); err == nil {
+				summarizeProvider = newProv
+			}
+		}
+	}
+
+	// Strip provider prefix for the API call (same as llm_caller.go)
+	apiModel := providers.StripProviderPrefix(summarizeModel)
+
+	resp, err := summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
 		"max_tokens":  2048,
 		"temperature": 0.3,
 	})
