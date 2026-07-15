@@ -319,7 +319,18 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
 	})
 	agent.Tools.Register(spawnTool)
-	subagentManager.SetTools(agent.Tools.CloneWithout("send_file"))
+
+	// Subagent management tools: let the parent agent wait for and list
+	// subagent tasks spawned via the spawn tool above.
+	agent.Tools.Register(tools.NewWaitForSubagentTool(subagentManager))
+	agent.Tools.Register(tools.NewListSubagentsTool(subagentManager))
+
+	// Sleep tool: useful for rate limiting, polling intervals, etc.
+	agent.Tools.Register(tools.NewSleepTool())
+
+	// Subagents get all tools except send_file (user-facing) and the
+	// subagent-management tools (prevent recursive wait/list overhead).
+	subagentManager.SetTools(agent.Tools.CloneWithout("send_file", "wait_for_subagent", "list_active_subagents"))
 	subagentManager.SetSessionRecorder(agent.Sessions)
 
 	agent.ContextBuilder.SetToolsRegistry(agent.Tools)

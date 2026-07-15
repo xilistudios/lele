@@ -1411,6 +1411,12 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		if _, ok := defaultAgent.Tools.Get("send_file"); ok {
 			expectedTools--
 		}
+		if _, ok := defaultAgent.Tools.Get("wait_for_subagent"); ok {
+			expectedTools--
+		}
+		if _, ok := defaultAgent.Tools.Get("list_active_subagents"); ok {
+			expectedTools--
+		}
 	}
 
 	if len(subagentTools) != expectedTools {
@@ -1418,8 +1424,12 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 			expectedTools, len(subagentTools))
 	}
 
-	if subagentManager.HasTool("send_file") {
-		t.Error("Subagent should not have the send_file tool")
+	// Verificar que el subagente no tiene las tools excluidas
+	excludedTools := []string{"send_file", "wait_for_subagent", "list_active_subagents"}
+	for _, toolName := range excludedTools {
+		if subagentManager.HasTool(toolName) {
+			t.Errorf("Subagent should not have the %s tool", toolName)
+		}
 	}
 
 	// Verificar herramientas específicas que debe tener el subagente
