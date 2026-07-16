@@ -309,8 +309,10 @@ func DecodeToolCallArguments(raw json.RawMessage, name string) map[string]any {
 
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
+		if repaired, ok := repairTruncatedJSONObject(raw); ok {
+			return repaired
+		}
 		log.Printf("common: failed to decode tool call arguments payload for %q: %v", name, err)
-		arguments["raw"] = string(raw)
 		return arguments
 	}
 
@@ -319,18 +321,91 @@ func DecodeToolCallArguments(raw json.RawMessage, name string) map[string]any {
 		if strings.TrimSpace(v) == "" {
 			return arguments
 		}
-		if err := json.Unmarshal([]byte(v), &arguments); err != nil {
-			log.Printf("common: failed to decode tool call arguments for %q: %v", name, err)
-			arguments["raw"] = v
+		if decodedArguments, ok := decodeJSONObject([]byte(v)); ok {
+			return decodedArguments
 		}
+		log.Printf("common: failed to decode tool call arguments for %q", name)
 		return arguments
 	case map[string]any:
 		return v
 	default:
 		log.Printf("common: unsupported tool call arguments type for %q: %T", name, decoded)
-		arguments["raw"] = string(raw)
 		return arguments
 	}
+}
+
+func decodeJSONObject(raw []byte) (map[string]any, bool) {
+	var arguments map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &arguments); err == nil && arguments != nil {
+		return arguments, true
+	}
+	return repairTruncatedJSONObject(raw)
+}
+
+// repairTruncatedJSONObject recovers the fields from an object cut off by a
+// provider at the end of a response. It deliberately returns an empty map
+// when recovery is not safe instead of passing a synthetic "raw" argument to
+// the tool, since raw is not part of any tool schema.
+func repairTruncatedJSONObject(raw []byte) (map[string]any, bool) {
+	truncated := bytes.TrimSpace(raw)
+	if len(truncated) == 0 || truncated[0] != '{' {
+		return nil, false
+	}
+
+	stack := make([]byte, 0, 4)
+	inString := false
+	escaped := false
+	for _, b := range truncated {
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch b {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch b {
+		case '"':
+			inString = true
+		case '{', '[':
+			stack = append(stack, b)
+		case '}', ']':
+			if len(stack) == 0 || (b == '}' && stack[len(stack)-1] != '{') || (b == ']' && stack[len(stack)-1] != '[') {
+				return nil, false
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+
+	if !inString && len(stack) == 0 {
+		return nil, false
+	}
+
+	if escaped {
+		truncated = append(truncated, '\\')
+	}
+	if inString {
+		truncated = append(truncated, '"')
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			truncated = append(truncated, '}')
+		} else {
+			truncated = append(truncated, ']')
+		}
+	}
+
+	var repaired map[string]any
+	if err := json.Unmarshal(truncated, &repaired); err != nil || repaired == nil {
+		return nil, false
+	}
+	return repaired, true
 }
 
 // --- HTTP response helpers ---

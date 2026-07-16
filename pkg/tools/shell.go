@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -31,6 +30,8 @@ type ExecTool struct {
 	chatID              string                                // ChatID for feedback messages
 	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
 	verboseLevel        session.VerboseLevel                  // Verbose level for feedback messages
+	backgroundManager   *BackgroundProcessManager             // Manager for background processes
+	backgroundThreshold time.Duration                         // Duration threshold for auto-backgrounding
 }
 
 // SetContext implements ContextualTool interface
@@ -137,6 +138,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		denyPatterns:        denyPatterns,
 		allowPatterns:       nil,
 		restrictToWorkspace: restrict,
+		backgroundThreshold: 60 * time.Second,
 	}
 }
 
@@ -159,6 +161,10 @@ func (t *ExecTool) Parameters() map[string]interface{} {
 			"working_dir": map[string]interface{}{
 				"type":        "string",
 				"description": "Optional working directory for the command",
+			},
+			"background": map[string]interface{}{
+				"type":        "boolean",
+				"description": "If true, run the command in the background immediately. Returns a process ID that can be used with list_background_execs, get_background_exec_output, and stop_background_exec. Default: false (command auto-backgrounds after 60 seconds if still running).",
 			},
 		},
 		"required": []string{"command"},
@@ -193,6 +199,9 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
+	// Parse background mode flag
+	backgroundMode, _ := args["background"].(bool)
+
 	// Check safety guards unless bypass is enabled (for approved commands)
 	if !t.bypassGuard {
 		guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
@@ -214,7 +223,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// timeout == 0 means no timeout
+	// Context for the wait loop (timeout + agent cancellation)
 	var cmdCtx context.Context
 	var cancel context.CancelFunc
 	if t.timeout > 0 {
@@ -224,17 +233,24 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 	defer cancel()
 
+	// Detached context for the command process (survives after we return
+	// for backgrounded processes)
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+
+	// Create command with bgCtx so it can survive agent lifecycle
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
+		cmd = exec.CommandContext(bgCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", command)
 	} else {
-		cmd = exec.CommandContext(cmdCtx, "sh", "-c", command)
+		cmd = exec.CommandContext(bgCtx, "sh", "-c", command)
 	}
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
 
-	var stdout, stderr bytes.Buffer
+	// Thread-safe buffers so the background manager can read while the
+	// process is still writing.
+	var stdout, stderr threadSafeBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -244,7 +260,31 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	// Start the command
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
+		bgCancel()
 		return ErrorResult(fmt.Sprintf("failed to start command: %v", err))
+	}
+
+	// ── Explicit background mode ──────────────────────────────────────
+	if backgroundMode && t.backgroundManager != nil {
+		proc := t.backgroundManager.Register(cmd, command, cwd, &stdout, &stderr, bgCancel)
+		go func() {
+			err := cmd.Wait()
+			exitCode := 0
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					exitCode = exitErr.ExitCode()
+				} else {
+					exitCode = 1
+				}
+			}
+			t.backgroundManager.MarkCompleted(proc.ID, exitCode)
+		}()
+		msg := fmt.Sprintf("Command started in background. Process ID: %s\nUse list_background_execs to check status, get_background_exec_output to view output, stop_background_exec to stop it.", proc.ID)
+		return &ToolResult{
+			ForLLM:  msg,
+			ForUser: msg,
+			IsError: false,
+		}
 	}
 
 	// Channel to signal command completion
@@ -261,13 +301,35 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	for {
 		select {
 		case execErr = <-done:
-			// Command completed
-			break
+			bgCancel() // clean up background context
 		case <-cmdCtx.Done():
-			// Context cancelled (e.g., /stop command) - command process will be killed by CommandContext
+			bgCancel() // kill the command
 			execErr = cmdCtx.Err()
-			break
 		case <-time.After(heartbeatInterval):
+			// Auto-background: if the process has been running longer than
+			// the threshold, move it to the background.
+			if t.backgroundManager != nil && t.backgroundThreshold > 0 && time.Since(startTime) >= t.backgroundThreshold {
+				proc := t.backgroundManager.Register(cmd, command, cwd, &stdout, &stderr, bgCancel)
+				go func() {
+					err := cmd.Wait()
+					exitCode := 0
+					if err != nil {
+						if exitErr, ok := err.(*exec.ExitError); ok {
+							exitCode = exitErr.ExitCode()
+						} else {
+							exitCode = 1
+						}
+					}
+					t.backgroundManager.MarkCompleted(proc.ID, exitCode)
+				}()
+				msg := fmt.Sprintf("Command is still running after %v. Moved to background.\nProcess ID: %s\nUse list_background_execs to check status, get_background_exec_output to view output, stop_background_exec to stop it.", t.backgroundThreshold.Round(time.Second), proc.ID)
+				return &ToolResult{
+					ForLLM:  msg,
+					ForUser: msg,
+					IsError: false,
+				}
+			}
+			// Existing feedback for long-running commands
 			if verboseLevel == session.VerboseFull && feedbackCallback != nil && channel != "" && chatID != "" {
 				elapsedSoFar := time.Since(startTime).Round(time.Second)
 				feedbackMsg := fmt.Sprintf("🧰 Process: %s (running for %v)", processName, elapsedSoFar)
@@ -484,4 +546,15 @@ func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) 
 // SetBypassGuard activa/desactiva el bypass de seguridad para comandos aprobados
 func (t *ExecTool) SetBypassGuard(enabled bool) {
 	t.bypassGuard = enabled
+}
+
+// SetBackgroundManager sets the background process manager for long-running commands.
+func (t *ExecTool) SetBackgroundManager(m *BackgroundProcessManager) {
+	t.backgroundManager = m
+}
+
+// SetBackgroundThreshold sets the duration threshold after which a command is
+// automatically moved to the background.
+func (t *ExecTool) SetBackgroundThreshold(d time.Duration) {
+	t.backgroundThreshold = d
 }

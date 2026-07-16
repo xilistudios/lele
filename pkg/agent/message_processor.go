@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
-	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -361,30 +360,21 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 
 	}
 
+	// Check if subagent result was already consumed via wait_for_subagent.
 	isSubagent := msg.SenderID == "subagent"
-
-	subagentSessionKey := ""
 	if isSubagent {
 		if msg.Metadata != nil {
 			if taskID := msg.Metadata["task_id"]; taskID != "" {
-				subagentSessionKey = "subagent:" + taskID
+				if task, ok := mp.al.toolCoordinator.getSubagentTask(taskID); ok && task != nil && task.Delivered() {
+					logger.DebugCF("agent", "Skipping subagent system message - already delivered via wait_for_subagent",
+						map[string]interface{}{
+							"task_id":     taskID,
+							"session_key": sessionKey,
+						})
+					return "", nil
+				}
 			}
 		}
-	}
-
-	if isSubagent && originChannel == channels.ChannelName {
-		resultPreview := msg.Content
-		resultPreview = utils.Truncate(resultPreview, 300)
-		mp.al.bus.PublishOutbound(bus.OutboundMessage{
-			Channel: originChannel,
-			ChatID:  sessionKey,
-			Event:   "subagent.result",
-			Metadata: map[string]string{
-				"tool":                 "spawn",
-				"result":               resultPreview,
-				"subagent_session_key": subagentSessionKey,
-			},
-		})
 	}
 
 	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{

@@ -62,6 +62,7 @@ var allCommands = []commandInfo{
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
+	{name: "/compact", description: "Compact conversation history"},
 	{name: "/quit", description: "Exit TUI"},
 }
 
@@ -74,6 +75,10 @@ type completeMsg struct {
 	sessionKey string
 }
 type tickMsg time.Time
+type compactResultMsg struct {
+	result     string
+	sessionKey string
+}
 
 type Model struct {
 	agentLoop  *agent.AgentLoop
@@ -119,13 +124,18 @@ type Model struct {
 	processing            bool
 	currentMessageID      string
 	currentAssistantMsgID string
-	currentStream         string
-	currentThinking       string
-	currentToolAction     string // active tool call shown during streaming ("tool: args")
-	startTime             time.Time
-	elapsedTime           time.Duration
-	lastDuration          time.Duration
-	animationTick         int
+	// A subagent result is queued as a follow-up message for the parent. Keep
+	// the parent turn active across its completion and the continuation turn.
+	pendingSubagentCompletions int
+	parentCompletionObserved   bool
+	currentStream              string
+	currentThinking            string
+	currentToolAction          string // active tool call shown during streaming ("tool: args")
+	startTime                  time.Time
+	elapsedTime                time.Duration
+	lastDuration               time.Duration
+	animationTick              int
+	tickPending                bool // prevents multiple tick chains from accumulating
 
 	// Double-ESC cancel tracking
 	escPressCount int
@@ -149,6 +159,7 @@ type Model struct {
 	// fragments that bubbletea fails to parse as tea.MouseMsg.
 	escSeqActive   bool
 	escSeqLastRune time.Time
+	escBuffer      []rune // accumulates incomplete SGR mouse escape fragments
 
 	// Terminal size
 	width  int
@@ -180,4 +191,12 @@ type Model struct {
 	// mouseEnabled tracks whether mouse capture is active. When false, the
 	// terminal handles native text selection/copy. Toggled with ctrl+t.
 	mouseEnabled bool
+
+	// forceGotoBottom forces the viewport to scroll to bottom on the next
+	// render. Set when switching sessions or creating a new chat.
+	forceGotoBottom bool
+
+	// compactFeedback holds the result of /compact to display in the viewport.
+	// Cleared when the user sends the next message.
+	compactFeedback string
 }

@@ -22,6 +22,7 @@ func TestRecordLastChannel(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create test config
 	cfg := &config.Config{
@@ -66,6 +67,7 @@ func TestRecordLastChatID(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create test config
 	cfg := &config.Config{
@@ -110,6 +112,7 @@ func TestNewAgentLoop_StateInitialized(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create test config
 	cfg := &config.Config{
@@ -181,6 +184,7 @@ func TestAgentLoop_GetVerboseLevel_UsesTelegramConfigDefault(t *testing.T) {
 
 func TestProcessMessage_StartsFreshEphemeralSessionAfterInactivity(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -278,6 +282,7 @@ func TestToolRegistry_ToolRegistration(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -323,6 +328,7 @@ func TestToolContext_Updates(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -353,6 +359,7 @@ func TestToolRegistry_GetDefinitions(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -396,6 +403,7 @@ func TestAgentLoop_GetStartupInfo(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -442,6 +450,7 @@ func TestAgentLoop_Stop(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -603,6 +612,7 @@ func TestToolResult_SilentToolDoesNotSendUserMessage(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -658,6 +668,7 @@ func TestToolResult_UserFacingToolDoesSendMessage(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -866,6 +877,7 @@ func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -942,6 +954,7 @@ func TestHandleCommand_NewClearsSession(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1003,6 +1016,7 @@ func TestHandleCommand_NewResetsTokenCounts(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1070,6 +1084,7 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1194,6 +1209,7 @@ func TestHandleCommand_ModelAndStatus(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1267,6 +1283,7 @@ func TestHandleCommand_NewStartsFreshSessionWithoutClearingPreviousHistory(t *te
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1351,6 +1368,7 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1393,6 +1411,21 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		if _, ok := defaultAgent.Tools.Get("send_file"); ok {
 			expectedTools--
 		}
+		if _, ok := defaultAgent.Tools.Get("wait_for_subagent"); ok {
+			expectedTools--
+		}
+		if _, ok := defaultAgent.Tools.Get("list_active_subagents"); ok {
+			expectedTools--
+		}
+		if _, ok := defaultAgent.Tools.Get("list_background_execs"); ok {
+			expectedTools--
+		}
+		if _, ok := defaultAgent.Tools.Get("get_background_exec_output"); ok {
+			expectedTools--
+		}
+		if _, ok := defaultAgent.Tools.Get("stop_background_exec"); ok {
+			expectedTools--
+		}
 	}
 
 	if len(subagentTools) != expectedTools {
@@ -1400,8 +1433,12 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 			expectedTools, len(subagentTools))
 	}
 
-	if subagentManager.HasTool("send_file") {
-		t.Error("Subagent should not have the send_file tool")
+	// Verificar que el subagente no tiene las tools excluidas
+	excludedTools := []string{"send_file", "wait_for_subagent", "list_active_subagents", "list_background_execs", "get_background_exec_output", "stop_background_exec"}
+	for _, toolName := range excludedTools {
+		if subagentManager.HasTool(toolName) {
+			t.Errorf("Subagent should not have the %s tool", toolName)
+		}
 	}
 
 	// Verificar herramientas específicas que debe tener el subagente
@@ -1429,6 +1466,7 @@ func TestSubagentManager_ToolExecution(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1494,6 +1532,7 @@ func TestSubagentManager_WebTools(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1537,6 +1576,7 @@ func TestSubagentManager_HardwareTools(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1576,6 +1616,7 @@ func TestSubagentManager_EditingTools(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1622,6 +1663,7 @@ func TestSubagentManager_NestedSpawn(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1658,6 +1700,7 @@ func TestSubagentManager_WorkspaceSecurity(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1710,6 +1753,7 @@ func TestSubagentManager_SetLLMOptions(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1751,6 +1795,7 @@ func TestAgentLoop_ReloadRegistry_PreservesSpawnTool(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

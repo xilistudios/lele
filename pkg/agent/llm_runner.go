@@ -116,6 +116,9 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 
 	// 4. Run LLM iteration loop
 	finalContent, iteration, err := lr.runLLMIteration(runCtx, agent, messages, opts)
+	if lr.al.toolCoordinator != nil {
+		lr.al.toolCoordinator.markSessionSubagentsDelivered(opts.SessionKey)
+	}
 	if err != nil {
 		if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
 			logger.WarnCF("agent", "Failed to save session after LLM error", map[string]interface{}{

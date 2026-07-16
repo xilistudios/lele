@@ -165,8 +165,12 @@ func (m *Model) createNewChat() {
 	}
 	m.agentLoop.GetProvidable().SetSessionAgent(newKey, agentID)
 
-	if m.pendingModel != "" {
-		m.agentLoop.GetProvidable().SetSessionModel(newKey, m.pendingModel)
+	modelID := m.pendingModel
+	if modelID == "" && m.currentKey != "" {
+		modelID = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
+	}
+	if modelID != "" {
+		m.agentLoop.GetProvidable().SetSessionModel(newKey, modelID)
 	}
 
 	if m.pendingThink != "" {
@@ -174,6 +178,7 @@ func (m *Model) createNewChat() {
 	}
 
 	m.currentKey = newKey
+	m.forceGotoBottom = true
 }
 
 // cleanupStreamingIfComplete clears streaming/thinking state if the last assistant
@@ -217,6 +222,7 @@ func (m *Model) resetStreamState() {
 func (m *Model) clearStreamingState() {
 	m.streamThrottleActive = false
 	m.streamPendingUpdate = false
+	m.compactFeedback = ""
 
 	// Check if the current session (already set to the target) is actively
 	// being processed by the LLM before resetting the flag.
@@ -230,6 +236,8 @@ func (m *Model) clearStreamingState() {
 	m.currentToolAction = ""
 	m.currentMessageID = ""
 	m.currentAssistantMsgID = ""
+	m.pendingSubagentCompletions = 0
+	m.parentCompletionObserved = false
 	m.pendingUserMessage = ""
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
@@ -237,6 +245,7 @@ func (m *Model) clearStreamingState() {
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
 	m.renderedBase = ""
 	m.renderedBaseKey = ""
+	m.forceGotoBottom = true
 }
 
 // isSubagentSessionKey returns true if the given session key belongs to a subagent.
@@ -278,6 +287,36 @@ func (m *Model) hasRunningSubagents() bool {
 		if sa.Status == "running" {
 			return true
 		}
+	}
+	return false
+}
+
+// isSubagentSession returns true if the session key corresponds to a subagent session.
+func (m *Model) isSubagentSession(sessionKey string) bool {
+	return strings.Contains(sessionKey, ":subagent-") || strings.HasPrefix(sessionKey, "subagent:")
+}
+
+func (m *Model) isSessionProcessing() bool {
+	// If the backend has an active processing loop for the current session, we are processing.
+	backendProcessing := m.currentKey != "" && m.agentLoop != nil &&
+		m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
+	if backendProcessing {
+		return true
+	}
+
+	// For parent sessions, if there are running subagents, we are also processing.
+	if !m.isSubagentSession(m.currentKey) && m.hasRunningSubagents() {
+		return true
+	}
+
+	// Otherwise, check if we are in the brief startup phase after sending a message.
+	if m.processing && !m.startTime.IsZero() && time.Since(m.startTime) < 3*time.Second {
+		return true
+	}
+
+	// Stale/stuck local processing state
+	if m.processing {
+		m.processing = false
 	}
 	return false
 }

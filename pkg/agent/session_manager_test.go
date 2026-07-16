@@ -119,6 +119,7 @@ func TestSummarizeSessionWithError_EmptyResult(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -177,6 +178,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create a dedicated session directory for this test to avoid loading
 	// real user sessions from ~/.lele/sessions.
@@ -288,6 +290,7 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -343,5 +346,135 @@ func TestAddTokenCounts_SessionKeyWithoutAgentPrefix(t *testing.T) {
 	if inputTokensActual2 != inputTokens2 || outputTokensActual2 != outputTokens2 {
 		t.Errorf("Expected input=%d, output=%d, got input=%d, output=%d",
 			inputTokens2, outputTokens2, inputTokensActual2, outputTokensActual2)
+	}
+}
+
+// TestMaybeSummarize_TriggersWhenThresholdExceeded proves that maybeSummarize
+// actually triggers compaction when the token estimate exceeds the configured
+// threshold (ContextWindow * thresholdPercent / 100).
+func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "session-manager-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	// The agent model must be registered in the provider's Models map so that
+	// getSessionContextWindow (which resolves via getContextWindow) returns the
+	// small context window instead of the 128000 default.
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				Provider:          "anthropic",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+		Providers: &config.ProvidersConfig{
+			Anthropic: config.ProviderConfig{
+				APIKey: "test-key",
+			},
+			Named: map[string]config.NamedProviderConfig{
+				"anthropic": {
+					Type:           "anthropic",
+					ProviderConfig: config.ProviderConfig{APIKey: "test-key"},
+					Models: map[string]config.ProviderModelConfig{
+						"test-model": {ContextWindow: 1000},
+					},
+				},
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
+
+	// Use a test-local session manager so we don't touch real sessions.
+	testSessionsDir := filepath.Join(tmpDir, "sessions")
+	testSessionMgr := session.NewSessionManager(testSessionsDir)
+	al.registry.SetSharedSessionManager(testSessionMgr)
+
+	sm := newSessionManager(al)
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+
+	// Also set agent.ContextWindow as a safety net.
+	agent.ContextWindow = 1000
+
+	// Mock provider returns a non-empty summary string.
+	agent.Provider = &mockProvider{
+		mockResponse: "Summary of the conversation about testing compaction behavior.",
+	}
+
+	sessionKey := "test:maybe-summarize-triggers-threshold-exceeded"
+
+	// Seed session with enough messages so EstimateTokens exceeds threshold.
+	// With ContextWindow=1000 and default 75% threshold, the threshold is 750
+	// tokens. Each message is 200 chars + 10 structural overhead = 210 chars;
+	// EstimateTokens uses chars*2/5, so ~84 tokens per message.
+	// 20 messages × 84 = ~1680 tokens, plus system prompt — comfortably > 750.
+	longContent := strings.Repeat("x", 200)
+	for i := 0; i < 10; i++ {
+		agent.Sessions.AddMessage(sessionKey, "user", fmt.Sprintf("Question %d: %s", i, longContent))
+		agent.Sessions.AddMessage(sessionKey, "assistant", fmt.Sprintf("Answer %d: %s", i, longContent))
+	}
+
+	beforeHistory := agent.Sessions.GetHistory(sessionKey)
+	beforeCount := len(beforeHistory)
+	t.Logf("Before maybeSummarize: %d messages", beforeCount)
+	if beforeCount != 20 {
+		t.Fatalf("Expected 20 seeded messages, got %d", beforeCount)
+	}
+
+	// Act: call maybeSummarize. With a 1000-token context window the threshold
+	// (750) should already be exceeded by history alone.
+	stats := sm.maybeSummarize(agent, sessionKey, "test", "test-chat")
+	if stats == nil {
+		t.Fatal("Expected non-nil SummarizeStats; compaction should have been triggered")
+	}
+
+	// Assert: at least one message was dropped.
+	if stats.DroppedMessages <= 0 {
+		t.Errorf("Expected DroppedMessages > 0, got %d", stats.DroppedMessages)
+	}
+	t.Logf("Compaction stats: before=%d after=%d dropped=%d (tokens %d→%d, saved %d)",
+		stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
+		stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
+
+	// Assert: old messages are excluded from context; last 2 continuity
+	// messages remain included.
+	afterHistory := agent.Sessions.GetHistory(sessionKey)
+	if len(afterHistory) != beforeCount {
+		t.Fatalf("Expected all %d messages preserved (not deleted), got %d", beforeCount, len(afterHistory))
+	}
+
+	// Exactly 2 messages should still be in context (the last 2).
+	contextCount := 0
+	for _, m := range afterHistory {
+		if !m.ExcludeFromContext {
+			contextCount++
+		}
+	}
+	if contextCount != 2 {
+		t.Errorf("Expected 2 messages in context after compaction, got %d", contextCount)
+	}
+
+	// The last 2 messages (continuity window) must NOT be excluded.
+	for i := beforeCount - 2; i < beforeCount; i++ {
+		if afterHistory[i].ExcludeFromContext {
+			t.Errorf("Expected last-2 message [%d] to be included in context, but ExcludeFromContext=true", i)
+		}
+	}
+
+	// Summary messages (if any) should never be excluded from context.
+	for i, m := range afterHistory {
+		if isSummaryMessage(m) && m.ExcludeFromContext {
+			t.Errorf("Summary message [%d] should not be excluded from context", i)
+		}
 	}
 }

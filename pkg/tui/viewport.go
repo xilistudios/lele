@@ -89,8 +89,19 @@ func (m *Model) updateViewport() {
 		sb.WriteString("\n")
 	}
 
+	// Show compaction result feedback
+	if m.compactFeedback != "" {
+		sb.WriteString(m.compactFeedback + "\n\n")
+	}
+
+	// Check if viewport is at bottom BEFORE updating content.
+	// This preserves the user's scroll position when they've scrolled up.
+	// forceGotoBottom overrides this when switching sessions or creating a new chat.
+	wasAtBottom := m.viewport.AtBottom() || m.forceGotoBottom
+	m.forceGotoBottom = false
+
 	m.viewport.SetContent(sb.String())
-	if sb.Len() > 0 && m.viewport.Height > 0 {
+	if wasAtBottom && sb.Len() > 0 && m.viewport.Height > 0 {
 		m.viewport.GotoBottom()
 	}
 }

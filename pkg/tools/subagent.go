@@ -37,6 +37,7 @@ type SubagentTask struct {
 	Created          int64
 	Updated          int64
 	Iterations       int
+	delivered        bool // tracks whether result was already consumed via wait_for_subagent
 }
 
 // AgentContextInfo holds the context and workspace info for a subagent
@@ -108,6 +109,20 @@ func normalizeSubagentStatus(value string) string {
 		return SubagentStatusCancelled
 	default:
 		return SubagentStatusCompleted
+	}
+}
+
+// isSubagentTerminalStatus returns true for all statuses where the subagent
+// is no longer actively executing and will not transition again.
+func isSubagentTerminalStatus(status string) bool {
+	switch status {
+	case SubagentStatusCompleted,
+		SubagentStatusFailed,
+		SubagentStatusNotDone,
+		SubagentStatusCancelled:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -193,6 +208,11 @@ func (task *SubagentTask) displayLabel() string {
 	return task.Label
 }
 
+// Delivered returns whether this task's result has been marked as delivered.
+func (task *SubagentTask) Delivered() bool {
+	return task.delivered
+}
+
 func (task *SubagentTask) buildMessages(systemPrompt string) []providers.Message {
 	messages := []providers.Message{
 		{
@@ -276,24 +296,26 @@ func (task *SubagentTask) statusMessage() string {
 }
 
 type SubagentManager struct {
-	tasks              map[string]*SubagentTask
-	cancels            map[string]context.CancelFunc
-	mu                 sync.RWMutex
-	provider           providers.LLMProvider
-	defaultModel       string
-	bus                *bus.MessageBus
-	workspace          string
-	tools              *ToolRegistry
-	getAgentContext    func(agentID string) AgentContextInfo
-	maxIterations      int
-	maxTokens          int
-	temperature        float64
-	hasMaxTokens       bool
-	hasTemperature     bool
-	timeout            time.Duration // 0 means no timeout
-	nextID             int
-	sessionRecorder    SessionRecorder
-	sessionKeyCallback func(sessionKey, agentID string) // called when subagent session key is created
+	tasks                 map[string]*SubagentTask
+	cancels               map[string]context.CancelFunc
+	mu                    sync.RWMutex
+	provider              providers.LLMProvider
+	defaultModel          string
+	bus                   *bus.MessageBus
+	workspace             string
+	tools                 *ToolRegistry
+	getAgentContext       func(agentID string) AgentContextInfo
+	maxIterations         int
+	maxTokens             int
+	temperature           float64
+	hasMaxTokens          bool
+	hasTemperature        bool
+	timeout               time.Duration // 0 means no timeout
+	retentionPeriod       time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
+	nextID                int
+	sessionRecorder       SessionRecorder
+	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
+	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
@@ -301,15 +323,16 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		maxIterations = 100 // Sensible fallback, but callers should always provide a real value
 	}
 	return &SubagentManager{
-		tasks:         make(map[string]*SubagentTask),
-		cancels:       make(map[string]context.CancelFunc),
-		provider:      provider,
-		defaultModel:  defaultModel,
-		bus:           bus,
-		workspace:     workspace,
-		tools:         NewToolRegistry(),
-		maxIterations: maxIterations,
-		nextID:        1,
+		tasks:           make(map[string]*SubagentTask),
+		cancels:         make(map[string]context.CancelFunc),
+		provider:        provider,
+		defaultModel:    defaultModel,
+		bus:             bus,
+		workspace:       workspace,
+		tools:           NewToolRegistry(),
+		maxIterations:   maxIterations,
+		nextID:          1,
+		retentionPeriod: 5 * time.Minute,
 	}
 }
 
@@ -336,6 +359,14 @@ func (sm *SubagentManager) SetTimeout(timeout time.Duration) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.timeout = timeout
+}
+
+// SetRetentionPeriod sets how long terminal tasks are kept before cleanup.
+// A value of 0 disables automatic cleanup.
+func (sm *SubagentManager) SetRetentionPeriod(period time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.retentionPeriod = period
 }
 
 // SetTools sets the tool registry for subagent execution.
@@ -370,6 +401,13 @@ func (sm *SubagentManager) SetSessionKeyCallback(callback func(sessionKey, agent
 	sm.sessionKeyCallback = callback
 }
 
+// SetRegisterSessionCancelCallback sets a callback function that registers a subagent session cancel function.
+func (sm *SubagentManager) SetRegisterSessionCancelCallback(callback func(sessionKey string, cancel context.CancelFunc) func()) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.registerSessionCancel = callback
+}
+
 // RegisterTool registers a tool for subagent execution.
 func (sm *SubagentManager) RegisterTool(tool Tool) {
 	sm.mu.Lock()
@@ -378,6 +416,7 @@ func (sm *SubagentManager) RegisterTool(tool Tool) {
 }
 
 func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback) (string, error) {
+	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -421,6 +460,7 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 		return "", fmt.Errorf("guidance is required")
 	}
 
+	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
 	sm.mu.Lock()
 	task, ok := sm.tasks[taskID]
 	if !ok {
@@ -572,9 +612,22 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	// Notify the session key callback so the owner can build an O(1) lookup map
 	sm.mu.RLock()
 	cb := sm.sessionKeyCallback
+	registerCancel := sm.registerSessionCancel
 	sm.mu.RUnlock()
 	if cb != nil {
 		cb(sessionKey, agentID)
+	}
+
+	if registerCancel != nil {
+		cleanup := registerCancel(sessionKey, func() {
+			sm.mu.Lock()
+			cancelFn, ok := sm.cancels[task.ID]
+			sm.mu.Unlock()
+			if ok && cancelFn != nil {
+				cancelFn()
+			}
+		})
+		defer cleanup()
 	}
 
 	var llmOptions map[string]any
@@ -752,6 +805,53 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 	defer sm.mu.RUnlock()
 	task, ok := sm.tasks[taskID]
 	return task, ok
+}
+
+// MarkDelivered atomically marks a task's result as delivered.
+// Returns true if the task was already delivered (i.e., this call lost the race).
+// Returns false if this is the first delivery.
+func (sm *SubagentManager) MarkDelivered(taskID string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	task, ok := sm.tasks[taskID]
+	if !ok || task == nil {
+		return false // Task not found, allow delivery (edge case)
+	}
+	if task.delivered {
+		return true // Already delivered
+	}
+	task.delivered = true
+	return false // First delivery
+}
+
+// CleanupTerminalTasks removes tasks that have been in a terminal state
+// (completed, failed, cancelled, not_done) for longer than the retention
+// period. This prevents the tasks map from growing indefinitely.
+// Returns the number of tasks removed.
+func (sm *SubagentManager) CleanupTerminalTasks() int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if sm.retentionPeriod <= 0 {
+		return 0
+	}
+
+	now := time.Now().UnixMilli()
+	thresholdMs := int64(sm.retentionPeriod / time.Millisecond)
+	removed := 0
+
+	for taskID, task := range sm.tasks {
+		if !isSubagentTerminalStatus(task.Status) {
+			continue
+		}
+		// Use Updated timestamp — it's set when the task reaches terminal state
+		if now-task.Updated > thresholdMs {
+			delete(sm.tasks, taskID)
+			removed++
+		}
+	}
+
+	return removed
 }
 
 func (sm *SubagentManager) ListTasks() []*SubagentTask {

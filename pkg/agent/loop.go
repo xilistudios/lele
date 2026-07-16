@@ -83,6 +83,17 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	existingSubagents := al.toolCoordinator.GetSubagents()
 	updatedSubagents := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents)
 
+	// Wire up session key and cancel callbacks for all subagents
+	for agentID, sm := range updatedSubagents {
+		id := agentID // capture loop variable
+		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
+			al.subagentSessionAgent.Store(sessionKey, id)
+		})
+		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
+			return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
+		})
+	}
+
 	// Update tool coordinator with new subagents
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents)
 }
@@ -348,12 +359,15 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// Register shared tools and create tool coordinator with subagents
 	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
 
-	// Wire up session key callbacks so the agent layer can build an O(1)
+	// Wire up session key and cancel callbacks so the agent layer can build an O(1)
 	// subagent session-to-agent mapping for GetSessionHistory.
 	for agentID, sm := range subagents {
 		id := agentID // capture loop variable
 		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
 			loop.subagentSessionAgent.Store(sessionKey, id)
+		})
+		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
+			return loop.sessionManager.RegisterSessionCancel(sessionKey, cancel)
 		})
 	}
 

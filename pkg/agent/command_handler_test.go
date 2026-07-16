@@ -26,6 +26,7 @@ func TestHandleCommand_NotACommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -66,6 +67,7 @@ func TestHandleCommand_EmptyCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -106,6 +108,7 @@ func TestHandleCommand_UnknownCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -146,6 +149,7 @@ func TestHandleNewCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -184,6 +188,7 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -217,6 +222,7 @@ func TestHandleClearCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -295,6 +301,7 @@ func TestHandleStatusCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -336,6 +343,7 @@ func TestHandleModelCommand_NoArgs(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -393,6 +401,7 @@ func TestHandleModelCommand_WithArgs(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -447,6 +456,7 @@ func TestHandleModelCommand_NoSession(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -488,6 +498,7 @@ func TestHandleVerboseCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -542,6 +553,7 @@ func TestHandleVerboseCommand_NoSession(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -594,6 +606,7 @@ func TestHandleToggleEphemeralCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	t.Setenv("HOME", tmpDir)
 
 	cfg := &config.Config{
@@ -661,6 +674,7 @@ func TestHandleAgentCommand_NoArgs(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -702,6 +716,7 @@ func TestHandleAgentCommand_WithAgent(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -742,6 +757,7 @@ func TestHandleAgentCommand_WithAgent(t *testing.T) {
 // TestHandleNewCommand_RefreshesBootstrapFiles verifies /new picks up current workspace bootstrap files.
 func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte("agent context v1"), 0644); err != nil {
 		t.Fatalf("Failed to write AGENT.md: %v", err)
 	}
@@ -786,6 +802,7 @@ func TestHandleNewCommand_RefreshesBootstrapFiles(t *testing.T) {
 func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 	mainDir := t.TempDir()
 	supportDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", mainDir)
 
 	if err := os.WriteFile(filepath.Join(mainDir, "AGENT.md"), []byte("main agent context"), 0644); err != nil {
 		t.Fatalf("Failed to write main AGENT.md: %v", err)
@@ -875,6 +892,7 @@ func TestHandleAgentCommand_UsesSelectedAgentWorkspaceContext(t *testing.T) {
 func TestHandleNewCommand_PreservesSelectedAgentOnFreshSession(t *testing.T) {
 	mainDir := t.TempDir()
 	supportDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", mainDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -935,6 +953,7 @@ func TestHandleAgentCommand_UnknownAgent(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -976,6 +995,7 @@ func TestHandleAgentCommand_NoSession(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1017,6 +1037,7 @@ func TestHandleSubagentsCommand_NoRunning(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1068,6 +1089,8 @@ func (m *commandHandlerSubagentCoordinatorStub) cancelAll() int { return 0 }
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
+func (m *commandHandlerSubagentCoordinatorStub) markSessionSubagentsDelivered(sessionKey string) {}
+
 func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*tools.SubagentTask {
 	return nil
 }
@@ -1101,6 +1124,7 @@ func TestHandleSubagentsCommand_Continue(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1150,6 +1174,7 @@ func TestHandleSubagentsCommand_ContinueUsage(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1190,6 +1215,7 @@ func TestHandleStopCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1229,6 +1255,7 @@ func TestHandleShowCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1432,6 +1459,7 @@ func TestHandleSwitchCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1519,6 +1547,7 @@ func TestHandleCompactCommand(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1687,6 +1716,7 @@ func TestFormatSubagentsResponse_Info(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1726,6 +1756,7 @@ func TestFormatSubagentsResponse_Stop(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1765,6 +1796,7 @@ func TestSessionKeyOverride(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1821,6 +1853,7 @@ func TestHandleCommand_SessionAgentOverride(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1865,6 +1898,7 @@ func TestHandleStatusCommand_WithTokens(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1925,6 +1959,7 @@ func TestHandleStatusCommand_TokenAccumulation(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -1976,6 +2011,7 @@ func TestHandleStatusCommand_ZeroTokens(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -2025,6 +2061,7 @@ func TestHandleStatusCommand_ContextIncludesSystemPrompt(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	// Create bootstrap files to have non-empty system prompt
 	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte("# SOUL\nTest soul content with enough text"), 0644)
@@ -2102,6 +2139,7 @@ func TestHandleCompactCommand_WithError(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -2165,6 +2203,7 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -2202,6 +2241,7 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 // TestNewCommand_CleanSession verifies that /new properly cleans session context
 func TestNewCommand_CleanSession(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
