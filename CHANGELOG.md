@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-07-15
+
+### Added
+
+#### Harness Module
+- New `pkg/context/harness.go` for building harness context from workspace files
+- Comprehensive test suite (`harness_test.go`, `parse_skill_test.go`)
+- Automatic AGENT.md, SOUL.md, USER.md, IDENTITY.md, MEMORY.md, and skills context assembly
+
+#### TUI Enhancements
+- Mouse click support for subagent items in sidebar navigation
+- Enhanced markdown rendering with syntax highlighting
+- New i18n strings for subagent interaction
+
+#### Context & Session Management
+- `EstimateTokens` now counts Content + ReasoningContent + ToolCalls + overhead
+- Configurable `CompactionThresholdPercent` (default 75%)
+- Race condition guard for `summarizeSession` (sync.Map)
+- UTF-8-safe truncation in session manager summary prompts
+
+### Fixed
+
+- `findMatchingBrace()` is now string-aware to avoid counting braces inside JSON strings
+- TUI viewport rendering issues
+- Deduplicated `summarizeSession`/`summarizeSessionWithError` into `summarizeSessionCore`
+- Removed dead code (`summarizeBatch`)
+
+### Changed
+
+- Centralized `DecodeToolCallArguments()` to handle nil/empty/double-encoded JSON
+- Replaced 6 duplicated JSON decode patterns across providers
+- Improved onboard configuration flow
+
 ## [0.2.0] - 2026-07-07
 
 ### Added
