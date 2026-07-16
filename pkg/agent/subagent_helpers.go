@@ -47,6 +47,18 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	if result.Metadata != nil {
 		metadata["subagent_session_key"] = result.Metadata["subagent_session_key"]
 	}
+	// Mark the task as delivered before queueing the inbound message. This
+	// ensures that when the parent agent processes the inbound message, the
+	// existing Delivered() check in processSystemMessage will skip it,
+	// preventing the double-report of subagent results.
+	if task, ok := al.toolCoordinator.getSubagentTask(taskID); ok && task != nil {
+		for _, manager := range al.toolCoordinator.GetSubagents() {
+			if !manager.MarkDelivered(taskID) {
+				break // Successfully marked (MarkDelivered returns false on first delivery)
+			}
+		}
+	}
+
 	// Notify interactive clients before queueing the system message that will
 	// make the parent agent process the result. The parent may finish its
 	// current turn before that queued continuation acquires the session lock.
