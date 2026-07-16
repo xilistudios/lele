@@ -24,6 +24,7 @@ type toolCoordinator interface {
 	stopSessionSubagents(sessionKey string) int
 	cancelAll() int
 	cancelSession(sessionKey string)
+	markSessionSubagentsDelivered(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
 	stopSubagentTask(taskID string) bool
@@ -140,6 +141,26 @@ func (tc *toolCoordinatorImpl) cancelAll() int {
 // cancelSession cancels any active processing for a specific session
 func (tc *toolCoordinatorImpl) cancelSession(sessionKey string) {
 	tc.al.cancelSession(sessionKey)
+}
+
+// markSessionSubagentsDelivered marks all finished/terminal subagents for a specific session as delivered.
+func (tc *toolCoordinatorImpl) markSessionSubagentsDelivered(sessionKey string) {
+	resolvedKey := tc.al.ResolveSessionKey(sessionKey)
+	for _, manager := range tc.subagents {
+		if manager != nil {
+			for _, task := range manager.ListTasks() {
+				resolvedOrigin := tc.al.ResolveSessionKey(task.OriginSessionKey)
+				taskSessionKey := task.OriginSessionKey + ":" + task.ID
+				resolvedTaskKey := tc.al.ResolveSessionKey(taskSessionKey)
+				if resolvedOrigin == resolvedKey || resolvedTaskKey == resolvedKey || taskSessionKey == resolvedKey {
+					// Check if task status is terminal/finished (not running)
+					if task.Status != tools.SubagentStatusRunning {
+						manager.MarkDelivered(task.ID)
+					}
+				}
+			}
+		}
+	}
 }
 
 // listRunningSubagentTasks lists all running subagent tasks.
@@ -270,12 +291,20 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	})
 	agent.Tools.Register(sendFileTool)
 
-	// Shell/Exec tool with approval support
+	// Shell/Exec tool with approval support and background process management
+	bgManager := tools.NewBackgroundProcessManager()
+
 	execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
+	execTool.SetBackgroundManager(bgManager)
 	if approvalManager != nil {
 		execTool.SetApprovalMode(true)
 	}
 	agent.Tools.Register(execTool)
+
+	// Background exec management tools
+	agent.Tools.Register(tools.NewListBackgroundExecsTool(bgManager))
+	agent.Tools.Register(tools.NewGetBackgroundExecOutputTool(bgManager))
+	agent.Tools.Register(tools.NewStopBackgroundExecTool(bgManager))
 
 	// Spawn tool with allowlist checker - use agent's own provider
 	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus, agent.MaxIterations)
@@ -329,8 +358,16 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	agent.Tools.Register(tools.NewSleepTool())
 
 	// Subagents get all tools except send_file (user-facing) and the
-	// subagent-management tools (prevent recursive wait/list overhead).
-	subagentManager.SetTools(agent.Tools.CloneWithout("send_file", "wait_for_subagent", "list_active_subagents"))
+	// subagent-management tools (prevent recursive wait/list overhead),
+	// and background exec management tools (each subagent gets its own).
+	subagentManager.SetTools(agent.Tools.CloneWithout(
+		"send_file",
+		"wait_for_subagent",
+		"list_active_subagents",
+		"list_background_execs",
+		"get_background_exec_output",
+		"stop_background_exec",
+	))
 	subagentManager.SetSessionRecorder(agent.Sessions)
 
 	agent.ContextBuilder.SetToolsRegistry(agent.Tools)

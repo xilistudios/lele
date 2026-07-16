@@ -79,7 +79,7 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 
 	// If already in a terminal/paused state, return immediately.
 	if isSubagentTerminal(task.Status) {
-		t.manager.markDelivered(taskID)
+		t.manager.MarkDelivered(taskID)
 		return SilentResult(formatSubagentTaskResult(task))
 	}
 
@@ -102,7 +102,7 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 				return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
 			}
 			if isSubagentTerminal(task.Status) {
-				t.manager.markDelivered(taskID)
+				t.manager.MarkDelivered(taskID)
 				return SilentResult(formatSubagentTaskResult(task))
 			}
 			return ErrorResult(fmt.Sprintf(
@@ -115,7 +115,7 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 				return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
 			}
 			if isSubagentTerminal(task.Status) {
-				t.manager.markDelivered(taskID)
+				t.manager.MarkDelivered(taskID)
 				return SilentResult(formatSubagentTaskResult(task))
 			}
 		}

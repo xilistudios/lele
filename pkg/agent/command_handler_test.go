@@ -1089,6 +1089,8 @@ func (m *commandHandlerSubagentCoordinatorStub) cancelAll() int { return 0 }
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
+func (m *commandHandlerSubagentCoordinatorStub) markSessionSubagentsDelivered(sessionKey string) {}
+
 func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*tools.SubagentTask {
 	return nil
 }

@@ -583,13 +583,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = int(float64(m.width)*0.78) - 4
-		m.viewport.Height = m.height - 8
-		m.textInput.Width = int(float64(m.width)*0.78) - 4
 
-		// Invalidate stream render caches to force re-wrap to the new width
+		// Invalidate ALL render caches so content is re-wrapped to the new width.
+		// View() recalculates viewport dimensions on every render, so we don't
+		// need to set them here — we just need to ensure caches are cleared.
 		m.streamRenderedLines = nil
 		m.thinkingRenderedLines = nil
+		m.renderedBase = ""
+		m.renderedBaseKey = ""
+		m.cachedRenderer = nil
+		m.cachedRendererWidth = 0
 
 		m.updateViewport()
 	}

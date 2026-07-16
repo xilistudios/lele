@@ -807,10 +807,10 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 	return task, ok
 }
 
-// markDelivered atomically marks a task's result as delivered.
+// MarkDelivered atomically marks a task's result as delivered.
 // Returns true if the task was already delivered (i.e., this call lost the race).
 // Returns false if this is the first delivery.
-func (sm *SubagentManager) markDelivered(taskID string) bool {
+func (sm *SubagentManager) MarkDelivered(taskID string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	task, ok := sm.tasks[taskID]
