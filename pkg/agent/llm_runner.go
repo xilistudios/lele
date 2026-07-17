@@ -409,8 +409,17 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			err error
 		}
 		var execResults []toolExecResult
+		var execErr error // tracks the first execution error encountered
 		for _, tc := range response.ToolCalls {
-			toolResult, execErr := executor.Execute(toolExecOptions{
+			if execErr != nil || ctx.Err() != nil {
+				// Already errored or cancelled — add placeholder for remaining tools
+				execResults = append(execResults, toolExecResult{
+					tc:  tc,
+					res: &tools.ToolResult{ForLLM: "[Tool execution was cancelled]"},
+				})
+				continue
+			}
+			toolResult, err := executor.Execute(toolExecOptions{
 				ctx:          ctx,
 				agent:        agent,
 				tc:           tc,
@@ -420,22 +429,19 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				iteration:    iteration,
 				sendResponse: opts.SendResponse,
 			})
-
-			if execErr != nil {
-				return "", iteration, execErr
+			if err != nil {
+				execErr = err
+				execResults = append(execResults, toolExecResult{
+					tc:  tc,
+					res: &tools.ToolResult{ForLLM: "[Tool execution failed]"},
+				})
+				continue
 			}
-
 			execResults = append(execResults, toolExecResult{tc: tc, res: toolResult})
-
-			// Check context after each tool execution to allow prompt cancellation.
-			// Without this, the agent would continue executing remaining tools
-			// even after the user requested cancellation.
-			if err := ctx.Err(); err != nil {
-				return "", iteration, err
-			}
 		}
 
 		// Phase 2: Append all tool result messages (role: "tool") in order
+		// This includes placeholder results for cancelled/failed tools to keep the session consistent.
 		var allContextMsgs []providers.Message
 		for _, er := range execResults {
 			contentForLLM := buildToolResultContent(er.res)
@@ -459,6 +465,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		for _, ctxMsg := range allContextMsgs {
 			messages = append(messages, ctxMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
+		}
+
+		// Return error if one occurred, now that placeholder results have been saved
+		if execErr != nil {
+			return "", iteration, execErr
 		}
 
 		// Check context after all tool results are processed to allow prompt cancellation

@@ -381,6 +381,12 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Updated = time.Now()
 }
 
+// isToolResultMessage returns true if the message is a tool result
+// (role "tool" with a non-empty ToolCallID, or role "user" with ToolCallID).
+func isToolResultMessage(msg providers.Message) bool {
+	return (msg.Role == "tool" || msg.Role == "user") && msg.ToolCallID != ""
+}
+
 // ExcludeOldMessagesFromContext marks the first len(messages)-keepCount messages
 // as excluded from the LLM context, preserving them in storage for the web UI.
 // If keepCount <= 0, all messages are excluded.
@@ -399,6 +405,38 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	}
 
 	excludeUpTo := len(session.Messages) - keepCount
+
+	// Adjust boundary to avoid splitting tool_use/tool_result groups.
+	// If the first kept message (at excludeUpTo) is a tool result whose
+	// corresponding assistant tool_use is in the excluded range, move the
+	// boundary forward to exclude the tool_result too. Repeat for any
+	// consecutive tool results in the same group.
+	for excludeUpTo < len(session.Messages) && isToolResultMessage(session.Messages[excludeUpTo]) {
+		excludeUpTo++
+	}
+
+	// Also check: if the last excluded message is an assistant with tool_use
+	// but the first kept message is NOT a tool_result, the tool_use blocks
+	// are orphaned (no results). Move the boundary back to also exclude
+	// this assistant message.
+	if excludeUpTo > 0 {
+		lastExcluded := session.Messages[excludeUpTo-1]
+		if lastExcluded.Role == "assistant" && len(lastExcluded.ToolCalls) > 0 {
+			// The assistant has tool_use blocks. Check if the next message
+			// (first kept) is a tool_result for those.
+			if excludeUpTo >= len(session.Messages) || !isToolResultMessage(session.Messages[excludeUpTo]) {
+				// No tool_results follow — the tool_use is orphaned.
+				// Move boundary back to also exclude this assistant message.
+				excludeUpTo--
+			}
+		}
+	}
+
+	// Ensure we don't exclude everything
+	if excludeUpTo <= 0 {
+		return
+	}
+
 	for i := 0; i < excludeUpTo; i++ {
 		session.Messages[i].ExcludeFromContext = true
 	}

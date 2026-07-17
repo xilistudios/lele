@@ -279,6 +279,7 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	}
 
 	contextMessages := filterContextMessages(history)
+	contextMessages = sanitizeToolMessages(contextMessages)
 	messages = append(messages, contextMessages...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
@@ -348,6 +349,119 @@ func filterContextMessages(history []providers.Message) []providers.Message {
 		filtered = append(filtered, msg)
 	}
 	return filtered
+}
+
+// sanitizeToolMessages repairs tool_use/tool_result pairing in message history.
+// It removes orphaned tool_results (without matching tool_use) and adds placeholder
+// tool_results for missing ones. This prevents 400 errors from Anthropic/AWS Bedrock
+// when tool execution is cancelled mid-way or when summarization breaks pairing.
+func sanitizeToolMessages(history []providers.Message) []providers.Message {
+	if len(history) == 0 {
+		return history
+	}
+
+	// First pass: collect ALL tool_use IDs from ALL assistant messages.
+	allToolUseIDs := make(map[string]bool)
+	for _, msg := range history {
+		if msg.Role == "assistant" {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					allToolUseIDs[tc.ID] = true
+				}
+			}
+		}
+	}
+
+	output := make([]providers.Message, 0, len(history))
+	i := 0
+	for i < len(history) {
+		msg := history[i]
+
+		if msg.Role == "tool" {
+			// Remove orphaned tool_results whose ToolCallID has no matching tool_use.
+			if msg.ToolCallID != "" && !allToolUseIDs[msg.ToolCallID] {
+				logger.DebugCF("agent", "Removing orphaned tool_result message",
+					map[string]interface{}{"tool_call_id": msg.ToolCallID})
+				i++
+				continue
+			}
+			output = append(output, msg)
+			i++
+			continue
+		}
+
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			// Collect tool_call IDs from this assistant message.
+			assistantToolCallIDs := make(map[string]bool)
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					assistantToolCallIDs[tc.ID] = true
+				}
+			}
+
+			// Collect tool_result IDs from consecutive following tool messages.
+			resultIDs := make(map[string]bool)
+			j := i + 1
+			for j < len(history) && history[j].Role == "tool" {
+				if history[j].ToolCallID != "" {
+					resultIDs[history[j].ToolCallID] = true
+				}
+				j++
+			}
+
+			// Determine which tool_use IDs are missing results.
+			missingIDs := []string{}
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" && !resultIDs[tc.ID] {
+					missingIDs = append(missingIDs, tc.ID)
+				}
+			}
+
+			if len(missingIDs) == len(msg.ToolCalls) {
+				// ALL tool_use blocks are missing results — strip them.
+				logger.DebugCF("agent", "All tool results missing, stripping tool_use blocks from assistant message",
+					map[string]interface{}{"missing_count": len(missingIDs)})
+				msg.ToolCalls = nil
+				if msg.Content == "" && msg.ReasoningContent == "" {
+					// Nothing left in this message, skip it entirely.
+					i = j
+					continue
+				}
+				output = append(output, msg)
+			} else if len(missingIDs) > 0 {
+				// SOME tool results are missing — keep assistant message and add placeholders.
+				logger.DebugCF("agent", "Some tool results missing, adding placeholder tool_result messages",
+					map[string]interface{}{"missing_count": len(missingIDs)})
+				output = append(output, msg)
+				// Append existing tool_result messages.
+				for k := i + 1; k < j; k++ {
+					output = append(output, history[k])
+				}
+				// Add placeholders for missing IDs.
+				for _, id := range missingIDs {
+					output = append(output, providers.Message{
+						Role:       "tool",
+						Content:    "[Tool execution was cancelled]",
+						ToolCallID: id,
+					})
+				}
+			} else {
+				// All results present — keep as-is.
+				output = append(output, msg)
+				for k := i + 1; k < j; k++ {
+					output = append(output, history[k])
+				}
+			}
+			i = j
+			continue
+		}
+
+		// Regular message — keep as-is.
+		output = append(output, msg)
+		i++
+	}
+
+	return output
 }
 
 // ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
