@@ -62,12 +62,19 @@ func publishSubagentAsyncResult(al *AgentLoop, sessionKey, channel, chatID, task
 	// Notify interactive clients before queueing the system message that will
 	// make the parent agent process the result. The parent may finish its
 	// current turn before that queued continuation acquires the session lock.
-	al.bus.PublishOutbound(bus.OutboundMessage{
-		Channel:  channel,
-		ChatID:   sessionKey,
-		Event:    "subagent.result",
-		Metadata: metadata,
-	})
+	//
+	// Only send the subagent.result event if the parent is NOT currently
+	// processing the session. If the parent is processing, wait_for_subagent
+	// will handle the result and the subagent.result event would cause a
+	// double notification.
+	if !al.isSessionProcessing(sessionKey) {
+		al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:  channel,
+			ChatID:   sessionKey,
+			Event:    "subagent.result",
+			Metadata: metadata,
+		})
+	}
 
 	al.bus.PublishInbound(bus.InboundMessage{
 		Channel:    "system",

@@ -406,6 +406,27 @@ func (al *AgentLoop) cancelSession(sessionKey string) int {
 	return al.sessionManager.CancelSession(sessionKey)
 }
 
+// isSessionProcessing returns true if the session is currently being processed
+// (the processing semaphore is held). This is used to avoid sending redundant
+// subagent.result events when the parent will handle the result via wait_for_subagent.
+func (al *AgentLoop) isSessionProcessing(sessionKey string) bool {
+	resolvedKey := al.ResolveSessionKey(sessionKey)
+	val, ok := al.sessionProcessing.Load(resolvedKey)
+	if !ok {
+		return false
+	}
+	ch := val.(chan struct{})
+	select {
+	case ch <- struct{}{}:
+		// Nobody was processing — release immediately
+		<-ch
+		return false
+	default:
+		// Channel is full — someone is processing
+		return true
+	}
+}
+
 // Run starts the main agent loop.
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
