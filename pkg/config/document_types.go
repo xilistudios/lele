@@ -58,6 +58,8 @@ type EditableAgentDefaults struct {
 	MaxToolIterations      int      `json:"max_tool_iterations"`
 	MaxReadLines           int      `json:"max_read_lines"`
 	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes,omitempty"`
+	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent,omitempty"`
+	SubagentMaxRetries     int      `json:"subagent_max_retries,omitempty"`
 }
 
 // EditableAgentConfig represents an agent in editable mode.

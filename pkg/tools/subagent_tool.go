@@ -44,6 +44,10 @@ func (t *SubagentTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "Optional short label for the task (for display)",
 			},
+			"agent_id": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional target agent ID to delegate the task to",
+			},
 		},
 		"required": []string{"task"},
 	}
@@ -61,16 +65,22 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 
 	label, _ := args["label"].(string)
+	agentID, _ := args["agent_id"].(string)
 
 	if t.manager == nil {
 		return ErrorResult("Subagent manager not configured").WithError(fmt.Errorf("manager is nil"))
 	}
 
-	// Build messages for subagent
+	sm := t.manager
+
+	// Resolve agent config using shared method (same as runTask)
+	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, _ := sm.resolveAgentConfig(agentID)
+
+	// Build messages the same way as runTask: system prompt + user task
 	messages := []providers.Message{
 		{
 			Role:    "system",
-			Content: "You are a subagent. Complete the given task independently and provide a clear, concise result.",
+			Content: systemPrompt,
 		},
 		{
 			Role:    "user",
@@ -78,57 +88,12 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		},
 	}
 
-	// Use RunToolLoop to execute with tools (same as async SpawnTool)
-	sm := t.manager
+	// Get tools from manager
 	sm.mu.RLock()
 	tools := sm.tools
-	maxIter := sm.maxIterations
-	maxTokens := sm.maxTokens
-	temperature := sm.temperature
-	hasMaxTokens := sm.hasMaxTokens
-	hasTemperature := sm.hasTemperature
-	getContextInfo := sm.getAgentContext
 	sm.mu.RUnlock()
 
-	// Resolve provider and model from the agent's config via callback.
-	// This ensures the subagent uses the same model/provider as the parent agent,
-	// not the manager's defaults.
-	agentProvider := sm.provider
-	agentModel := sm.defaultModel
-	if getContextInfo != nil {
-		// Pass empty agentID to use the parent agent's config (fallback behavior)
-		ctxInfo := getContextInfo("")
-		if ctxInfo.Model != "" {
-			agentModel = ctxInfo.Model
-		}
-		if ctxInfo.Provider != nil {
-			agentProvider = ctxInfo.Provider
-		}
-		// Use target agent's settings when available
-		if ctxInfo.MaxIterations > 0 {
-			maxIter = ctxInfo.MaxIterations
-		}
-		if ctxInfo.MaxTokens > 0 {
-			maxTokens = ctxInfo.MaxTokens
-			hasMaxTokens = true
-		}
-		if ctxInfo.Temperature > 0 {
-			temperature = ctxInfo.Temperature
-			hasTemperature = true
-		}
-	}
-
-	var llmOptions map[string]any
-	if hasMaxTokens || hasTemperature {
-		llmOptions = map[string]any{}
-		if hasMaxTokens {
-			llmOptions["max_tokens"] = maxTokens
-		}
-		if hasTemperature {
-			llmOptions["temperature"] = temperature
-		}
-	}
-
+	// Resolve origin channel/chatID from context if available
 	originChannel := t.originChannel
 	originChatID := t.originChatID
 	if ch, cid := ToolContextFromCtx(ctx); ch != "" {
@@ -142,6 +107,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	// independently like its async counterpart (SpawnTool).
 	taskCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	// Apply timeout if configured
 	sm.mu.RLock()
 	timeout := sm.timeout
@@ -151,6 +117,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		taskCtx, timeoutCancel = context.WithTimeout(taskCtx, timeout)
 		defer timeoutCancel()
 	}
+
 	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
 		Provider:      agentProvider,
 		Model:         agentModel,
@@ -163,13 +130,21 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
 	}
 
-	// ForLLM: Full execution details
+	// Parse the outcome using the same parser as runTask
+	outcome := parseSubagentOutcome(loopResult.Content)
+
+	// Build the label string for display
 	labelStr := label
 	if labelStr == "" {
-		labelStr = "(unnamed)"
+		if agentID != "" {
+			labelStr = agentID
+		} else {
+			labelStr = "(unnamed)"
+		}
 	}
-	llmContent := fmt.Sprintf("Subagent task completed:\nLabel: %s\nIterations: %d\nResult: %s",
-		labelStr, loopResult.Iterations, loopResult.Content)
+
+	llmContent := fmt.Sprintf("Subagent task completed:\nLabel: %s\nAgent: %s\nIterations: %d\nStatus: %s\nSummary: %s\nDetails:\n%s",
+		labelStr, agentID, loopResult.Iterations, outcome.Status, outcome.Summary, outcome.Details)
 
 	return &ToolResult{
 		ForLLM:  llmContent,

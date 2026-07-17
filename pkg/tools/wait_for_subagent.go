@@ -88,6 +88,40 @@ func (t *WaitForSubagentTool) Execute(ctx context.Context, args map[string]inter
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	// Try event-driven waiting via DoneChannel first
+	doneCh := task.DoneChannel()
+	if doneCh != nil {
+		for {
+			select {
+			case <-ctx.Done():
+				return ErrorResult(fmt.Sprintf("Wait for subagent %s interrupted", taskID))
+			case <-timer.C:
+				// Final check in case the task completed between signals.
+				task, ok := t.manager.GetTask(taskID)
+				if !ok {
+					return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
+				}
+				if isSubagentTerminal(task.Status) {
+					t.manager.MarkDelivered(taskID)
+					return SilentResult(formatSubagentTaskResult(task))
+				}
+				return ErrorResult(fmt.Sprintf(
+					"Timed out waiting for subagent %s after %d seconds (current status: %s)",
+					taskID, timeoutSeconds, task.Status,
+				))
+			case <-doneCh:
+				// Task reached terminal state, fetch final state
+				task, ok := t.manager.GetTask(taskID)
+				if !ok {
+					return ErrorResult(fmt.Sprintf("Subagent task disappeared: %s", taskID))
+				}
+				t.manager.MarkDelivered(taskID)
+				return SilentResult(formatSubagentTaskResult(task))
+			}
+		}
+	}
+
+	// Fallback to polling if DoneChannel not initialized (backward compat)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 

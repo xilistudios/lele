@@ -57,7 +57,7 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 			filtered = append(filtered, task)
 			continue
 		}
-		if task.Status == SubagentStatusRunning || task.Status == SubagentStatusNeedsContext {
+		if task.Status == SubagentStatusRunning || task.Status == SubagentStatusNeedsContext || task.Status == SubagentStatusPending {
 			filtered = append(filtered, task)
 		}
 	}
@@ -89,6 +89,12 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 		}
 		if task.ContextRequest != "" {
 			line += fmt.Sprintf(" [needs: %s]", task.ContextRequest)
+		}
+		if task.Progress != "" {
+			line += fmt.Sprintf(" [progress: %s]", task.Progress)
+		}
+		if task.RetryCount > 0 {
+			line += fmt.Sprintf(" (retry %d/%d)", task.RetryCount, task.MaxRetries)
 		}
 		// Show elapsed time for running tasks.
 		if task.Status == SubagentStatusRunning && task.Created > 0 {

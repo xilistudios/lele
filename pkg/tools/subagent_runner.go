@@ -10,7 +10,170 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
+// resolveAgentConfig resolves the agent's provider, model, system prompt, max iterations,
+// LLM options, and context window from the SubagentManager's configuration and the
+// target agent's context callback. Both runTask and SubagentTool use this method
+// to ensure consistent provider/model/system-prompt resolution.
+func (sm *SubagentManager) resolveAgentConfig(agentID string) (
+	provider providers.LLMProvider,
+	model string,
+	systemPrompt string,
+	maxIter int,
+	llmOptions map[string]any,
+	contextWindow int,
+) {
+	sm.mu.RLock()
+	getContextInfo := sm.getAgentContext
+	defaultModel := sm.defaultModel
+	defaultManagerProvider := sm.provider
+	defaultMaxIter := sm.maxIterations
+	defaultMaxTokens := sm.maxTokens
+	defaultTemperature := sm.temperature
+	defaultHasMaxTokens := sm.hasMaxTokens
+	defaultHasTemperature := sm.hasTemperature
+	sm.mu.RUnlock()
+
+	// Start with manager defaults
+	maxIter = defaultMaxIter
+	maxTokens := defaultMaxTokens
+	temperature := defaultTemperature
+	hasMaxTokens := defaultHasMaxTokens
+	hasTemperature := defaultHasTemperature
+
+	var agentWorkspace string
+	var agentName string
+
+	if getContextInfo != nil {
+		ctxInfo := getContextInfo(agentID)
+		// Always use the agent's model and provider from its config, even if context is empty.
+		model = ctxInfo.Model
+		provider = ctxInfo.Provider
+		contextWindow = ctxInfo.ContextWindow
+
+		// Agent overrides take precedence over SubagentManager defaults
+		if ctxInfo.MaxIterations > 0 {
+			maxIter = ctxInfo.MaxIterations
+		}
+		if ctxInfo.MaxTokens > 0 {
+			maxTokens = ctxInfo.MaxTokens
+			hasMaxTokens = true
+		}
+		if ctxInfo.Temperature > 0 {
+			temperature = ctxInfo.Temperature
+			hasTemperature = true
+		}
+
+		if ctxInfo.Context != "" {
+			agentWorkspace = ctxInfo.Workspace
+			agentName = ctxInfo.Name
+			if agentName == "" {
+				agentName = agentID
+			}
+			systemPrompt = buildSubagentSystemPrompt(ctxInfo.Context, agentID, agentName, agentWorkspace)
+		}
+	}
+
+	if systemPrompt == "" {
+		systemPrompt = buildSubagentSystemPrompt("", agentID, agentID, "")
+	}
+
+	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
+	if model == "" {
+		model = defaultModel
+	}
+	if provider == nil {
+		provider = defaultManagerProvider
+	}
+
+	// Build LLM options
+	if hasMaxTokens || hasTemperature {
+		llmOptions = map[string]any{}
+		if hasMaxTokens {
+			llmOptions["max_tokens"] = maxTokens
+		}
+		if hasTemperature {
+			llmOptions["temperature"] = temperature
+		}
+	}
+
+	return provider, model, systemPrompt, maxIter, llmOptions, contextWindow
+}
+
+// extractProgress extracts a "PROGRESS:" line from raw subagent output.
+// Subagents can include a "PROGRESS: <message>" line in their response to report
+// intermediate status updates before the final STATUS/SUMMARY/DETAILS block.
+func extractProgress(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "progress:") {
+			return strings.TrimSpace(trimmed[len("progress:"):])
+		}
+	}
+	return ""
+}
+
+// isTransientFailure checks if a task's result string indicates a transient failure
+// that may be worth retrying.
+func isTransientFailure(result string) bool {
+	lower := strings.ToLower(result)
+	return strings.Contains(lower, "rate_limited") ||
+		strings.Contains(lower, "connection_error") ||
+		strings.Contains(lower, "http_timeout") ||
+		strings.Contains(lower, "server_error")
+}
+
+// runTask is the public entry point for running a subagent task.
+// It wraps runTaskImpl with retry logic for transient failures.
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
+	sm.runTaskImpl(ctx, task, callback)
+
+	// After runTaskImpl completes, check if we should retry
+	sm.mu.Lock()
+	if task.Status == SubagentStatusFailed && task.MaxRetries > 0 && task.RetryCount < task.MaxRetries && isTransientFailure(task.Result) {
+		task.RetryCount++
+		backoff := time.Duration(task.RetryCount) * 5 * time.Second
+		if backoff > 60*time.Second {
+			backoff = 60 * time.Second
+		}
+
+		logger.InfoCF("subagent", "Retrying subagent task after transient failure",
+			map[string]interface{}{
+				"task_id":     task.ID,
+				"retry_count": task.RetryCount,
+				"max_retries": task.MaxRetries,
+				"backoff":     backoff.String(),
+				"result":      task.Result,
+			})
+
+		task.Status = SubagentStatusRunning
+		task.Updated = time.Now().UnixMilli()
+		sm.mu.Unlock()
+
+		// Wait for backoff, but respect context cancellation
+		select {
+		case <-ctx.Done():
+			sm.mu.Lock()
+			task.Status = SubagentStatusCancelled
+			task.Summary = "Task cancelled during retry backoff"
+			task.Result = "Task cancelled during retry backoff"
+			task.Updated = time.Now().UnixMilli()
+			sm.mu.Unlock()
+			task.SignalDone()
+			return
+		case <-time.After(backoff):
+		}
+
+		// Recursive retry
+		sm.runTask(ctx, task, callback)
+		return
+	}
+	sm.mu.Unlock()
+}
+
+// runTaskImpl contains the actual subagent execution logic.
+// It runs the tool loop, parses the outcome, and updates task state.
+// Retry logic is handled by the runTask wrapper.
+func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
 	startTime := time.Now()
 
 	sm.mu.Lock()
@@ -40,53 +203,8 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		defer cancel()
 	}
 
-	// Get the specific agent's context info (AGENT.md, SOUL.md, workspace, name, model, provider from its workspace)
-	sm.mu.RLock()
-	getContextInfo := sm.getAgentContext
-	agentID := task.AgentID
-	sm.mu.RUnlock()
-
-	// Build system prompt for subagent using its own context
-	var systemPrompt string
-	var agentWorkspace string
-	var agentName string
-	var agentModel string
-	var agentProvider providers.LLMProvider
-	var agentMaxIterations int
-	var agentMaxTokens int
-	var agentTemperature float64
-	var agentContextWindow int
-
-	if getContextInfo != nil {
-		ctxInfo := getContextInfo(agentID)
-		// Always use the agent's model and provider from its config, even if context is empty.
-		agentModel = ctxInfo.Model
-		agentProvider = ctxInfo.Provider
-		agentMaxIterations = ctxInfo.MaxIterations
-		agentMaxTokens = ctxInfo.MaxTokens
-		agentTemperature = ctxInfo.Temperature
-		agentContextWindow = ctxInfo.ContextWindow
-		if ctxInfo.Context != "" {
-			agentWorkspace = ctxInfo.Workspace
-			agentName = ctxInfo.Name
-			if agentName == "" {
-				agentName = agentID
-			}
-			systemPrompt = buildSubagentSystemPrompt(ctxInfo.Context, agentID, agentName, agentWorkspace)
-		}
-	}
-
-	if systemPrompt == "" {
-		systemPrompt = buildSubagentSystemPrompt("", agentID, agentID, "")
-	}
-
-	// Use the agent's model and provider if available, otherwise fall back to manager's defaults
-	if agentModel == "" {
-		agentModel = sm.defaultModel
-	}
-	if agentProvider == nil {
-		agentProvider = sm.provider
-	}
+	// Resolve agent config using shared method
+	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(task.AgentID)
 
 	messages := previousTask.buildMessages(systemPrompt)
 
@@ -103,31 +221,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	default:
 	}
 
-	// Run tool loop with access to tools.
-	// Use target agent's MaxIterations/MaxTokens/Temperature if available,
-	// otherwise fall back to the SubagentManager's defaults.
+	// Get tools and session recorder
 	sm.mu.RLock()
 	tools := sm.tools
-	maxIter := sm.maxIterations
-	maxTokens := sm.maxTokens
-	temperature := sm.temperature
-	hasMaxTokens := sm.hasMaxTokens
-	hasTemperature := sm.hasTemperature
 	recorder := sm.sessionRecorder
 	sm.mu.RUnlock()
-
-	// Target agent overrides take precedence over SubagentManager defaults
-	if agentMaxIterations > 0 {
-		maxIter = agentMaxIterations
-	}
-	if agentMaxTokens > 0 {
-		maxTokens = agentMaxTokens
-		hasMaxTokens = true
-	}
-	if agentTemperature > 0 {
-		temperature = agentTemperature
-		hasTemperature = true
-	}
 
 	// Build subagent session key: {origin_session_key}:{task_id}
 	// This ensures subagent history is saved alongside the parent session
@@ -139,7 +237,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 	registerCancel := sm.registerSessionCancel
 	sm.mu.RUnlock()
 	if cb != nil {
-		cb(sessionKey, agentID)
+		cb(sessionKey, task.AgentID)
 	}
 
 	if registerCancel != nil {
@@ -152,17 +250,6 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			}
 		})
 		defer cleanup()
-	}
-
-	var llmOptions map[string]any
-	if hasMaxTokens || hasTemperature {
-		llmOptions = map[string]any{}
-		if hasMaxTokens {
-			llmOptions["max_tokens"] = maxTokens
-		}
-		if hasTemperature {
-			llmOptions["temperature"] = temperature
-		}
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
@@ -297,6 +384,11 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		task.ContextRequest = outcome.ContextRequest
 		task.Iterations = loopResult.Iterations
 		task.Updated = time.Now().UnixMilli()
+
+		// Extract intermediate progress from the subagent output
+		if progress := extractProgress(loopResult.Content); progress != "" {
+			task.Progress = progress
+		}
 
 		logger.InfoCF("subagent", "Subagent task completed",
 			map[string]interface{}{

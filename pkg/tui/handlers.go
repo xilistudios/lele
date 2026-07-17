@@ -140,9 +140,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyEsc {
-			m.lastEscTime = time.Now()
-		}
 		if m.modalMode != ModalNone {
 			switch msg.String() {
 			case "up", "k":
@@ -266,9 +263,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if msg.Type == tea.KeyEsc {
+			m.lastEscTime = time.Now()
+		}
 		switch msg.String() {
 		case "esc":
-			if m.isSessionProcessing() {
+			if m.isSessionProcessing() || m.processing {
 				now := time.Now()
 				if now.Sub(m.escLastPress) < 1*time.Second {
 					// Double press detected - cancel the agent
@@ -425,9 +425,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.pendingSubagentCompletions++
 				m.processing = true
-				if m.startTime.IsZero() {
-					m.startTime = time.Now()
-				}
+				m.startTime = time.Now()
 				m.lastDuration = 0
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())

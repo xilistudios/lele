@@ -59,6 +59,16 @@ func (t *SpawnTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "Optional target agent ID to delegate the task to",
 			},
+			"dependencies": map[string]interface{}{
+				"type":        "array",
+				"items":       map[string]interface{}{"type": "string"},
+				"description": "Optional list of subagent task IDs that must complete before this task starts",
+			},
+			"max_retries": map[string]interface{}{
+				"type":        "integer",
+				"description": "Maximum automatic retry attempts for transient failures (default: 0)",
+				"default":     0,
+			},
 		},
 	}
 }
@@ -78,6 +88,22 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	taskID, _ := args["task_id"].(string)
 	guidance, _ := args["guidance"].(string)
 	agentID, _ := args["agent_id"].(string)
+
+	// Extract dependencies
+	var dependencies []string
+	if depsRaw, ok := args["dependencies"].([]interface{}); ok {
+		for _, d := range depsRaw {
+			if depStr, ok := d.(string); ok && strings.TrimSpace(depStr) != "" {
+				dependencies = append(dependencies, strings.TrimSpace(depStr))
+			}
+		}
+	}
+
+	// Extract max_retries
+	maxRetries := 0
+	if mr, ok := args["max_retries"].(float64); ok {
+		maxRetries = int(mr)
+	}
 
 	if strings.TrimSpace(taskID) == "" && strings.TrimSpace(task) == "" {
 		return ErrorResult("task is required when task_id is not provided")
@@ -109,7 +135,7 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	if strings.TrimSpace(taskID) != "" {
 		result, err = t.manager.ContinueTask(ctx, taskID, guidance, t.callback)
 	} else {
-		result, err = t.manager.Spawn(ctx, task, label, agentID, originChannel, originChatID, t.callback)
+		result, err = t.manager.SpawnWithDeps(ctx, task, label, agentID, originChannel, originChatID, t.callback, dependencies, maxRetries)
 	}
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to manage subagent: %v", err))

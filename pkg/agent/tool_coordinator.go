@@ -315,6 +315,16 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	} else if cfg.Agents.Defaults.SubagentTimeoutMinutes > 0 {
 		subagentManager.SetTimeout(time.Duration(cfg.Agents.Defaults.SubagentTimeoutMinutes) * time.Minute)
 	}
+	// Set max concurrent subagents from agent config or global default
+	if agent.Subagents != nil && agent.Subagents.MaxConcurrent > 0 {
+		subagentManager.SetMaxConcurrent(agent.Subagents.MaxConcurrent)
+	} else if cfg.Agents.Defaults.SubagentMaxConcurrent > 0 {
+		subagentManager.SetMaxConcurrent(cfg.Agents.Defaults.SubagentMaxConcurrent)
+	}
+	// Set default max retries from global config
+	if cfg.Agents.Defaults.SubagentMaxRetries > 0 {
+		subagentManager.SetDefaultMaxRetries(cfg.Agents.Defaults.SubagentMaxRetries)
+	}
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
 			return tools.AgentContextInfo{
