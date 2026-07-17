@@ -3,7 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
-	"log"
+	"github.com/xilistudios/lele/pkg/logger"
 	"strings"
 	"time"
 )
@@ -246,8 +246,15 @@ func (fc *FallbackChain) executeWithRetry(
 				backoff = fc.maxBackoff
 			}
 
-			log.Printf("[INFO] backoff: retry attempt for provider=%s/model=%s, attempt=%d, waiting=%s, reason=%s, error=%v",
-				provider, model, attempt+1, backoff.Round(time.Second), failErr.Reason, lastErr)
+			logger.InfoCF("fallback", "backoff: retry attempt",
+				map[string]interface{}{
+					"provider": provider,
+					"model":    model,
+					"attempt":  attempt + 1,
+					"waiting":  backoff.Round(time.Second).String(),
+					"reason":   string(failErr.Reason),
+					"error":    lastErr.Error(),
+				})
 
 			select {
 			case <-time.After(backoff):
@@ -256,17 +263,34 @@ func (fc *FallbackChain) executeWithRetry(
 			}
 		} else {
 			if attempt >= immediateRetryAttempts {
-				log.Printf("[WARN] immediate retries exhausted for provider=%s/model=%s after %d attempts, reason=%s, last_error=%v",
-					provider, model, attempt+1, failErr.Reason, lastErr)
+				logger.WarnCF("fallback", "immediate retries exhausted",
+					map[string]interface{}{
+						"provider":   provider,
+						"model":      model,
+						"attempts":   attempt + 1,
+						"reason":     string(failErr.Reason),
+						"last_error": lastErr.Error(),
+					})
 				return nil, lastErr
 			}
-			log.Printf("[INFO] immediate retry for provider=%s/model=%s, attempt=%d, reason=%s, error=%v",
-				provider, model, attempt+1, failErr.Reason, lastErr)
+			logger.InfoCF("fallback", "immediate retry",
+				map[string]interface{}{
+					"provider": provider,
+					"model":    model,
+					"attempt":  attempt + 1,
+					"reason":   string(failErr.Reason),
+					"error":    lastErr.Error(),
+				})
 		}
 	}
 
-	log.Printf("[WARN] backoff: retries exhausted for provider=%s/model=%s after %d attempts, last_error=%v",
-		provider, model, fc.maxRetries, lastErr)
+	logger.WarnCF("fallback", "backoff: retries exhausted",
+		map[string]interface{}{
+			"provider":   provider,
+			"model":      model,
+			"attempts":   fc.maxRetries,
+			"last_error": lastErr.Error(),
+		})
 
 	return nil, lastErr
 }
