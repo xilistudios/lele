@@ -27,6 +27,7 @@ type toolCoordinator interface {
 	markSessionSubagentsDelivered(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
+	markSubagentDelivered(taskID string) bool
 	stopSubagentTask(taskID string) bool
 	continueSubagentTask(ctx context.Context, sessionKey, taskID, guidance string) (string, error)
 	GetStartupInfo() map[string]interface{}
@@ -184,6 +185,17 @@ func (tc *toolCoordinatorImpl) getSubagentTask(taskID string) (*tools.SubagentTa
 		}
 	}
 	return nil, false
+}
+
+// markSubagentDelivered marks a task as delivered in the manager that owns it.
+// Returns true if the task was already delivered (race lost), false if first delivery.
+func (tc *toolCoordinatorImpl) markSubagentDelivered(taskID string) bool {
+	for _, manager := range tc.subagents {
+		if _, ok := manager.GetTask(taskID); ok {
+			return manager.MarkDelivered(taskID)
+		}
+	}
+	return false // Task not found in any manager
 }
 
 // stopSubagentTask stops a specific subagent task.
