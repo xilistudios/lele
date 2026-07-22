@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Eliminated redundant subagent notifications
 - TUI cancel action no longer causes panics
 - Replaced stray `fmt.Println` calls with context-aware logger
+- WebUI: chat route sync no longer interferes with non-chat pages (settings, agents)
+- WebUI: agent files page route accepts optional fileName parameter
 
 ### Changed
 
