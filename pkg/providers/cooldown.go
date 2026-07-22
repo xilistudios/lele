@@ -1,10 +1,11 @@
 package providers
 
 import (
-	"log"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 const (
@@ -64,13 +65,21 @@ func (ct *CooldownTracker) MarkFailure(provider string, reason FailoverReason) {
 		cooldownDuration := calculateBillingCooldown(billingCount)
 		entry.DisabledUntil = now.Add(cooldownDuration)
 		entry.DisabledReason = FailoverBilling
-		log.Printf("[INFO] cooldown: applied billing cooldown for provider=%s, duration=%s (billingErrorCount=%d)",
-			provider, cooldownDuration.Round(time.Hour), billingCount)
+		logger.InfoCF("cooldown", "applied billing cooldown",
+			map[string]interface{}{
+				"provider":         provider,
+				"duration":         cooldownDuration.Round(time.Hour).String(),
+				"billingErrorCount": billingCount,
+			})
 	} else {
 		cooldownDuration := calculateStandardCooldown(entry.ErrorCount)
 		entry.CooldownEnd = now.Add(cooldownDuration)
-		log.Printf("[INFO] cooldown: applied standard cooldown for provider=%s, duration=%s (errorCount=%d)",
-			provider, cooldownDuration.Round(time.Second), entry.ErrorCount)
+		logger.InfoCF("cooldown", "applied standard cooldown",
+			map[string]interface{}{
+				"provider":  provider,
+				"duration":  cooldownDuration.Round(time.Second).String(),
+				"errorCount": entry.ErrorCount,
+			})
 	}
 }
 
@@ -90,7 +99,11 @@ func (ct *CooldownTracker) MarkSuccess(provider string) {
 	entry.DisabledUntil = time.Time{}
 	entry.DisabledReason = ""
 
-	log.Printf("[INFO] cooldown: cleared for provider=%s (success)", provider)
+	logger.InfoCF("cooldown", "cleared",
+		map[string]interface{}{
+			"provider": provider,
+			"status":   "success",
+		})
 }
 
 // IsAvailable returns true if the provider is not in cooldown or disabled.
