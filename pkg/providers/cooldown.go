@@ -67,8 +67,8 @@ func (ct *CooldownTracker) MarkFailure(provider string, reason FailoverReason) {
 		entry.DisabledReason = FailoverBilling
 		logger.InfoCF("cooldown", "applied billing cooldown",
 			map[string]interface{}{
-				"provider":         provider,
-				"duration":         cooldownDuration.Round(time.Hour).String(),
+				"provider":          provider,
+				"duration":          cooldownDuration.Round(time.Hour).String(),
 				"billingErrorCount": billingCount,
 			})
 	} else {
@@ -76,8 +76,8 @@ func (ct *CooldownTracker) MarkFailure(provider string, reason FailoverReason) {
 		entry.CooldownEnd = now.Add(cooldownDuration)
 		logger.InfoCF("cooldown", "applied standard cooldown",
 			map[string]interface{}{
-				"provider":  provider,
-				"duration":  cooldownDuration.Round(time.Second).String(),
+				"provider":   provider,
+				"duration":   cooldownDuration.Round(time.Second).String(),
 				"errorCount": entry.ErrorCount,
 			})
 	}
