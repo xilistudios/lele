@@ -544,10 +544,54 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	// Strip provider prefix for the API call (same as llm_caller.go)
 	apiModel := providers.StripProviderPrefix(summarizeModel)
 
-	resp, err := summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
-		"max_tokens":  2048,
-		"temperature": 0.3,
-	})
+	// Build summarization options using the session's model configuration.
+	// This mirrors buildLLMOptions in llm_caller.go so the summarization call
+	// uses the same max_tokens, temperature, and reasoning settings as normal
+	// LLM calls for this session's model.
+	summarizeOpts := map[string]interface{}{}
+
+	cfg := sm.al.cfg()
+	providerName := extractProviderFromModel(summarizeModel, cfg.Agents.Defaults.Provider)
+	if mc, ok := getProviderModelConfig(cfg, summarizeModel, providerName); ok {
+		// Use the model's configured max_tokens (fallback to 2048 for summarization).
+		maxTokens := 2048
+		if mc.MaxTokens > 0 {
+			maxTokens = mc.MaxTokens
+		}
+		summarizeOpts["max_tokens"] = maxTokens
+
+		// Reasoning models deprecate temperature — don't send it.
+		// Also pass reasoning config so the model handles the request properly.
+		if mc.Reasoning != nil && mc.Reasoning.Enable {
+			reasoningMap := map[string]interface{}{
+				"enabled": true,
+			}
+			if mc.Reasoning.Effort != nil {
+				reasoningMap["effort"] = *mc.Reasoning.Effort
+			}
+			if mc.Reasoning.MaxTokens != nil {
+				reasoningMap["max_tokens"] = *mc.Reasoning.MaxTokens
+			}
+			summarizeOpts["reasoning"] = reasoningMap
+		} else if mc.Temperature != nil {
+			summarizeOpts["temperature"] = *mc.Temperature
+		} else {
+			summarizeOpts["temperature"] = 0.3
+		}
+	} else {
+		// No model config found, use safe defaults.
+		summarizeOpts["max_tokens"] = 2048
+		summarizeOpts["temperature"] = 0.3
+	}
+
+	resp, err := summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
+
+	// Retry without temperature if the model rejects it (safety net for
+	// models that deprecate temperature but aren't flagged as reasoning).
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "temperature") {
+		delete(summarizeOpts, "temperature")
+		resp, err = summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
+	}
 
 	var finalSummary string
 	if err != nil {
