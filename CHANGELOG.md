@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-22
+
+### Added
+
+#### Subagent Architecture
+- Split monolithic `subagent.go` into modular files: `subagent_types.go`, `subagent_manager.go`, `subagent_runner.go`, `subagent_task.go`, `subagent_tool.go`, `subagent_prompt.go`, `subagent_utils.go`
+- Context sanitization for subagent LLM calls to prevent sensitive data leakage
+- Session exclusion management in session manager (`manager_exclude_test.go`)
+- Subagent-aware context handling in `llm_runner.go`
+
+### Fixed
+
+- Subagent notification subsystem now delivers events correctly
+- Eliminated redundant subagent notifications
+- TUI cancel action no longer causes panics
+- Replaced stray `fmt.Println` calls with context-aware logger
+
+### Changed
+
+- Improved `tool_coordinator.go` with subagent context awareness
+- Document config types extracted into `document_types.go`, `document_convert.go`, `document_defaults.go`
+- Fallback provider logic refined for better error handling
+
 ## [0.2.1] - 2026-07-15
 
 ### Added
