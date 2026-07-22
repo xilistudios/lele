@@ -135,7 +135,7 @@ function ChatRoute() {
         navigate(`/chat/${sessionKey}`, { replace: true })
         return
       }
-      navigate('/', { replace: true })
+      navigate('/')
       return
     }
     creatingRef.current = false
@@ -159,7 +159,7 @@ function ChatRoute() {
     if (hasValidParent && hasValidTarget) {
       void onSelectSession(targetSessionKey, { parentSessionKey: derivedParentSessionKey })
     } else if (sessions.length > 0) {
-      navigate('/', { replace: true })
+      navigate('/')
     }
   }, [
     targetSessionKey,
@@ -178,6 +178,10 @@ function ChatRoute() {
   useEffect(() => {
     // Skip when creating new session — first useEffect handles this
     if (chat_id === 'new') return
+
+    // Only sync URL→state on chat paths; don't interfere with other pages
+    const isChatPath = location.pathname === '/' || location.pathname.startsWith('/chat')
+    if (!isChatPath) return
 
     if (!currentSessionKey) return
 
@@ -254,7 +258,7 @@ function AppContent() {
         <Route path="skills" element={<SkillsPage />} />
         <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
-        <Route path="settings/agent/:agentId" element={<AgentFilesPage />} />
+        <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
         <Route path="settings/agents" element={<Navigate to="/agents" replace />} />
         <Route path="settings/providers" element={<Navigate to="/providers" replace />} />
       </Route>
