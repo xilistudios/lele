@@ -314,11 +314,23 @@ func (lc *llmCaller) executeWithRetry(
 			})
 
 			if retry == 0 && !constants.IsInternalChannel(opts.channel) {
-				lc.al.bus.PublishOutbound(bus.OutboundMessage{
-					Channel: opts.channel,
-					ChatID:  opts.chatID,
-					Content: "Context window exceeded. Summarizing history and retrying...",
-				})
+				if opts.channel == "native" {
+					lc.al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel: opts.channel,
+						ChatID:  opts.chatID,
+						Event:   "tool.executing",
+						Metadata: map[string]string{
+							"tool":   "compact",
+							"action": "Context window exceeded. Compacting...",
+						},
+					})
+				} else {
+					lc.al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel: opts.channel,
+						ChatID:  opts.chatID,
+						Content: "Context window exceeded. Summarizing history and retrying...",
+					})
+				}
 			}
 
 			// Summarize session to reduce context, under the shared guard so it

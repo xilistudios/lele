@@ -242,6 +242,17 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			"context_window":          agent.ContextWindow,
 			"resolved_context_window": contextWindow,
 		})
+		if channel == "native" {
+			sm.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Event:   "tool.executing",
+				Metadata: map[string]string{
+					"tool":   "compact",
+					"action": "Compacting context...",
+				},
+			})
+		}
 		stats, ran := sm.summarizeSessionGuarded(agent, sessionKey)
 		if !ran {
 			logger.WarnCF("agent", "maybeSummarize: summarization already in progress, skipping", map[string]interface{}{
@@ -258,7 +269,20 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 			sm.forceCompression(agent, sessionKey)
 			return nil
 		}
-		if !constants.IsInternalChannel(channel) {
+		if channel == "native" {
+			resultText := fmt.Sprintf("Messages: %d → %d (dropped %d), Tokens: ~%d → ~%d (saved ~%d)",
+				stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
+				stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
+			sm.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: channel,
+				ChatID:  chatID,
+				Event:   "tool.result",
+				Metadata: map[string]string{
+					"tool":   "compact",
+					"result": resultText,
+				},
+			})
+		} else if !constants.IsInternalChannel(channel) {
 			sm.bus.PublishOutbound(bus.OutboundMessage{
 				Channel: channel,
 				ChatID:  chatID,

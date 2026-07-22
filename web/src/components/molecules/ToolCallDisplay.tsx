@@ -80,6 +80,10 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
     color: 'text-interaction-primary',
   },
+  compact: {
+    icon: 'M4 7h16 M4 12h16 M4 17h16 M6 7v10 M18 7v10',
+    color: 'text-state-info',
+  },
 }
 
 const GENERIC_ICON =
@@ -119,6 +123,7 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     i2c: t('toolCalls.i2c'),
     spi: t('toolCalls.spi'),
     read_image: t('toolCalls.readImage'),
+    compact: t('toolCalls.compactContext'),
   }
 
   const key = toolName.toLowerCase()
