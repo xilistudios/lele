@@ -1,3 +1,5 @@
+// Package tools provides agent tool implementations including subagent management.
+//
 // This file has been split into:
 // - subagent_types.go    — structs and constants
 // - subagent_prompt.go   — prompt building and outcome parsing

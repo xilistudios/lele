@@ -1118,6 +1118,10 @@ func (m *commandHandlerSubagentCoordinatorStub) GetSubagents() map[string]*tools
 	return nil
 }
 
+func (m *commandHandlerSubagentCoordinatorStub) markSubagentDelivered(taskID string) bool {
+	return false
+}
+
 func TestHandleSubagentsCommand_Continue(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
 	if err != nil {

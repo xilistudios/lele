@@ -3,9 +3,10 @@ package providers
 import (
 	"context"
 	"fmt"
-	"github.com/xilistudios/lele/pkg/logger"
 	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 // Default retry configuration (can be overridden via WithRetryConfig for testing)
