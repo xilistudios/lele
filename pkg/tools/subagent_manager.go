@@ -51,7 +51,6 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 		maxIterations:   maxIterations,
 		nextID:          1,
 		retentionPeriod: 5 * time.Minute,
-		
 	}
 }
 
