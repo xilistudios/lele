@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,14 +145,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modalMode != ModalNone {
 			switch msg.String() {
 			case "up", "k":
-				if m.modalSelectedIdx > 0 {
+				if isListModal(m.modalMode) && m.modalSelectedIdx > 0 {
 					m.modalSelectedIdx--
 					if m.modalSelectedIdx < m.modalScrollOffset {
 						m.modalScrollOffset = m.modalSelectedIdx
 					}
 				}
 			case "down", "j":
-				if m.modalSelectedIdx < len(m.modalItems)-1 {
+				if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
 					m.modalSelectedIdx++
 					maxVisible := m.height - 8 // title + borders + padding
 					if maxVisible < 3 {
@@ -212,6 +214,173 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.cfg.SetLanguage(langCode)
 						i18n.SetLanguage(langCode)
 						m.textInput.Placeholder = i18n.T("tui.placeholder")
+					} else if m.modalMode == ModalProviders {
+						if m.modalSelectedIdx < len(m.providerModalKeys) {
+							providerName := m.providerModalKeys[m.modalSelectedIdx]
+							m.providerSelectedName = providerName
+							m.modalMode = ModalProviderDetail
+							// Build detail view items
+							m.modalItems = nil
+							m.modalSelectedIdx = 0
+							m.modalScrollOffset = 0
+							// Show provider info
+							snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
+							if snapshot != nil && snapshot.Providers != nil {
+								if p, ok := snapshot.Providers.GetNamed(providerName); ok {
+									m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
+									m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
+									keyDisplay := p.APIKey
+									if len(keyDisplay) > 8 {
+										keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+									}
+									m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
+								}
+							}
+							m.modalItems = append(m.modalItems, "---")
+							// List models
+							models := m.listProviderModels(providerName)
+							for _, alias := range models {
+								m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
+							}
+							if len(models) == 0 {
+								m.modalItems = append(m.modalItems, "  (no models)")
+							}
+							m.modalItems = append(m.modalItems, "---")
+							m.modalItems = append(m.modalItems, "+ Add model")
+							m.modalItems = append(m.modalItems, "- Delete provider")
+						}
+						return m, nil
+					} else if m.modalMode == ModalProviderDetail {
+						if m.modalSelectedIdx < len(m.modalItems) {
+							selectedItem := m.modalItems[m.modalSelectedIdx]
+							if selectedItem == "+ Add model" {
+								m.modalMode = ModalAddModel
+								m.formStepIndex = 0
+								m.formValues = make([]string, 5)
+								m.formError = ""
+								m.formConfirmMode = false
+								m.textInput.SetValue("")
+								m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+								return m, nil
+							} else if selectedItem == "- Delete provider" {
+								if err := m.deleteProvider(m.providerSelectedName); err != nil {
+									m.formError = err.Error()
+									return m, nil
+								}
+								m.modalMode = ModalNone
+								return m, nil
+							} else if strings.HasPrefix(selectedItem, "  ") && !strings.HasPrefix(selectedItem, "  (") {
+								// Model entry — delete it
+								modelAlias := strings.TrimSpace(selectedItem)
+								if err := m.deleteModelFromProvider(m.providerSelectedName, modelAlias); err != nil {
+									m.formError = err.Error()
+									return m, nil
+								}
+								// Refresh detail view
+								providerName := m.providerSelectedName
+								m.modalItems = nil
+								m.modalSelectedIdx = 0
+								m.modalScrollOffset = 0
+								snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
+								if snapshot != nil && snapshot.Providers != nil {
+									if p, ok := snapshot.Providers.GetNamed(providerName); ok {
+										m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
+										m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
+										keyDisplay := p.APIKey
+										if len(keyDisplay) > 8 {
+											keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+										}
+										m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
+									}
+								}
+								m.modalItems = append(m.modalItems, "---")
+								models := m.listProviderModels(providerName)
+								for _, alias := range models {
+									m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
+								}
+								if len(models) == 0 {
+									m.modalItems = append(m.modalItems, "  (no models)")
+								}
+								m.modalItems = append(m.modalItems, "---")
+								m.modalItems = append(m.modalItems, "+ Add model")
+								m.modalItems = append(m.modalItems, "- Delete provider")
+								return m, nil
+							}
+						}
+						return m, nil
+					} else if m.modalMode == ModalAddProvider {
+						// Form-based modal: validate and advance steps
+						val := strings.TrimSpace(m.textInput.Value())
+						if val == "" {
+							m.formError = "This field is required"
+							return m, nil
+						}
+						m.formError = ""
+						m.formValues[m.formStepIndex] = val
+						if m.formStepIndex >= 3 {
+							// Last step — save provider
+							if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
+								m.formError = err.Error()
+								return m, nil
+							}
+							m.modalMode = ModalNone
+							return m, nil
+						}
+						// Advance to next step
+						m.formStepIndex++
+						m.textInput.SetValue("")
+						switch m.formStepIndex {
+						case 1:
+							m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+						case 2:
+							m.textInput.Placeholder = "API Key"
+						case 3:
+							m.textInput.Placeholder = "API Base URL (e.g. https://api.openai.com/v1)"
+						}
+						return m, nil
+					} else if m.modalMode == ModalAddModel {
+						// Form-based modal: validate and advance steps
+						val := strings.TrimSpace(m.textInput.Value())
+						if val == "" {
+							m.formError = "This field is required"
+							return m, nil
+						}
+						m.formError = ""
+						m.formValues[m.formStepIndex] = val
+						if m.formStepIndex >= 4 {
+							// Last step — save model
+							ctxWin, err := strconv.Atoi(m.formValues[2])
+							if err != nil {
+								m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
+								return m, nil
+							}
+							maxTok, err := strconv.Atoi(m.formValues[3])
+							if err != nil {
+								m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
+								return m, nil
+							}
+							vision := m.formValues[4] == "yes"
+							if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
+								m.formError = err.Error()
+								return m, nil
+							}
+							m.modalMode = ModalNone
+							return m, nil
+						}
+						// Advance to next step
+						m.formStepIndex++
+						m.textInput.SetValue("")
+						switch m.formStepIndex {
+						case 1:
+							m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
+						case 2:
+							m.textInput.Placeholder = "Context window (e.g. 128000)"
+						case 3:
+							m.textInput.Placeholder = "Max tokens (e.g. 4096)"
+						case 4:
+							m.textInput.Placeholder = "Vision support? (yes/no)"
+						}
+						return m, nil
 					} else if m.modalMode == ModalBackgroundExecs {
 						if m.bgExecViewMode {
 							// We're in output view mode - go back to list
@@ -378,6 +547,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			return m, nil
+
+		case "ctrl+y":
+			m.copyLastAssistantMessage()
 
 		case "up", "down", "pgup", "pgdown":
 			var cmd tea.Cmd
@@ -645,7 +817,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.updateViewport()
 	}
-	if m.modalMode == ModalNone {
+	if m.modalMode == ModalNone || m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
 		// Only forward message types the textinput knows how to handle.
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
@@ -791,4 +963,22 @@ func (m *Model) resetModal(mode modalType) {
 	m.bgExecViewID = ""
 	m.bgExecViewOutput = ""
 	m.bgExecViewStatus = ""
+	m.formStepIndex = 0
+	m.formValues = nil
+	m.formError = ""
+	m.formConfirmMode = false
+	m.providerModalKeys = nil
+	m.providerSelectedName = ""
+	m.providerEditMode = false
+}
+
+// isListModal returns true if the modal type is a list-selection modal
+// (navigable with up/down keys), as opposed to form-based modals.
+func isListModal(mode modalType) bool {
+	switch mode {
+	case ModalNone, ModalAddProvider, ModalAddModel:
+		return false
+	default:
+		return true
+	}
 }

@@ -52,7 +52,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		sessionStartTime:       now,
 		subagentProgress:       make(map[string]string),
 		streamThrottleInterval: 32 * time.Millisecond,
-		mouseEnabled:           true,
+		mouseEnabled:           false,
 	}
 
 	// If an initial session ID was provided, try to open it

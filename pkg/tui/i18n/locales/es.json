@@ -63,9 +63,23 @@
   "tui.ctrlCommands": "ctrl+p comandos",
   "tui.mouseOn": "ctrl+t: ratón activo",
   "tui.mouseOff": "ctrl+t: modo selección",
+  "tui.copyHint": "ctrl+y copiar",
   "tui.backToParent": "Volver al chat principal",
   "tui.loading": "cargando",
   "tui.backgroundProcesses": "Procesos en segundo plano",
   "tui.noBgProcesses": "No hay procesos en segundo plano",
-  "tui.bgOutputHints": "ENTER: lista | S: detener | ESC: cerrar"
+  "tui.bgOutputHints": "ENTER: lista | S: detener | ESC: cerrar",
+
+  "tui.selectProvider": "Selecciona un Provider",
+  "tui.providerDetail": "Detalles del Provider",
+  "tui.addProvider": "Agregar Provider",
+  "tui.addModel": "Agregar Modelo",
+  "tui.noProviders": "No hay providers configurados",
+  "tui.providerAdded": "Provider agregado correctamente",
+  "tui.providerDeleted": "Provider eliminado",
+  "tui.modelAdded": "Modelo agregado correctamente",
+  "tui.modelDeleted": "Modelo eliminado",
+  "tui.formEnter": "ENTER: siguiente | ESC: cancelar",
+  "tui.addModelAction": "+ Agregar modelo",
+  "tui.deleteProviderAction": "- Eliminar provider"
 }

@@ -111,8 +111,19 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.selectLanguage")
 			case ModalBackgroundExecs:
 				modalTitle = i18n.T("tui.backgroundProcesses")
+			case ModalProviders:
+				modalTitle = i18n.T("tui.selectProvider")
+			case ModalProviderDetail:
+				modalTitle = i18n.T("tui.providerDetail")
+			case ModalAddProvider:
+				modalTitle = i18n.T("tui.addProvider")
+			case ModalAddModel:
+				modalTitle = i18n.T("tui.addModel")
 			}
 
+			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+				return m.renderFormModal(modalTitle, m.formStepNames())
+			}
 			return m.renderModal(modalTitle)
 		}
 
@@ -189,7 +200,7 @@ func (m *Model) View() string {
 	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)),
-		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), func() string {
+		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), i18n.T("tui.copyHint"), func() string {
 			if m.mouseEnabled {
 				return i18n.T("tui.mouseOn")
 			}
@@ -349,8 +360,19 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.selectLanguage")
 		case ModalBackgroundExecs:
 			modalTitle = i18n.T("tui.backgroundProcesses")
+		case ModalProviders:
+			modalTitle = i18n.T("tui.selectProvider")
+		case ModalProviderDetail:
+			modalTitle = i18n.T("tui.providerDetail")
+		case ModalAddProvider:
+			modalTitle = i18n.T("tui.addProvider")
+		case ModalAddModel:
+			modalTitle = i18n.T("tui.addModel")
 		}
 
+		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+			return m.renderFormModal(modalTitle, m.formStepNames())
+		}
 		return m.renderModal(modalTitle)
 	}
 
@@ -430,6 +452,63 @@ func (m *Model) renderModal(modalTitle string) string {
 
 	modalView := ModalContainer.Render(modalSb.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+// renderFormModal renders a multi-step form modal with step indicators,
+// an input field for the current step, and optional error display.
+func (m *Model) renderFormModal(title string, steps []string) string {
+	var sb strings.Builder
+	sb.WriteString(TitleStyle.Render(title) + "\n\n")
+
+	for i, step := range steps {
+		if i < m.formStepIndex {
+			// Completed step: show checkmark and value
+			val := ""
+			if i < len(m.formValues) {
+				val = m.formValues[i]
+			}
+			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  ✓ %s: %s", step, val)) + "\n")
+		} else if i == m.formStepIndex {
+			// Current step: highlighted with input indicator
+			val := m.textInput.Value()
+			if val == "" {
+				val = "…"
+			}
+			sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  ▶ %s: [%s]", step, val)) + "\n")
+		} else {
+			// Future step: muted
+			sb.WriteString(CommentColorStyle.Render(fmt.Sprintf("  ○ %s", step)) + "\n")
+		}
+	}
+
+	sb.WriteString("\n")
+
+	// Error display
+	if m.formError != "" {
+		sb.WriteString(lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n\n")
+	}
+
+	// Text input field
+	m.textInput.Width = 40
+	sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
+
+	// Hints
+	sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: cancel"))
+
+	modalView := ModalContainer.Render(sb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+// formStepNames returns the step names for the current form modal mode.
+func (m *Model) formStepNames() []string {
+	switch m.modalMode {
+	case ModalAddProvider:
+		return []string{"Provider name", "Provider type", "API Key", "API Base URL"}
+	case ModalAddModel:
+		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
+	default:
+		return nil
+	}
 }
 
 // renderBgExecOutput renders the output view for a background process.

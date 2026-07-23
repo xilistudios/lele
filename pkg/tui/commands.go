@@ -164,6 +164,50 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 		return nil
 
+	case "/providers":
+		m.resetModal(ModalProviders)
+		m.providerModalKeys = nil
+		m.providerSelectedName = ""
+		m.providerEditMode = false
+		m.formStepIndex = 0
+		m.formValues = nil
+		m.formError = ""
+		m.formConfirmMode = false
+		providers := m.listProviders()
+		if len(providers) == 0 {
+			m.modalItems = append(m.modalItems, "No providers configured")
+		} else {
+			for _, name := range providers {
+				models := m.listProviderModels(name)
+				item := fmt.Sprintf("%s (%d models)", name, len(models))
+				m.modalItems = append(m.modalItems, item)
+				m.providerModalKeys = append(m.providerModalKeys, name)
+			}
+		}
+		return nil
+
+	case "/connect":
+		m.resetModal(ModalAddProvider)
+		m.providerEditMode = false
+		m.providerSelectedName = ""
+		m.formStepIndex = 0
+		m.formValues = make([]string, 4) // name, type, api_key, api_base
+		m.formError = ""
+		m.formConfirmMode = false
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Provider name (e.g. openai)"
+		return nil
+
+	case "/add-model":
+		m.resetModal(ModalAddModel)
+		m.formStepIndex = 0
+		m.formValues = make([]string, 5) // alias, model_name, context_window, max_tokens, vision
+		m.formError = ""
+		m.formConfirmMode = false
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+		return nil
+
 	case "/compact":
 		if m.currentKey == "" {
 			return nil
