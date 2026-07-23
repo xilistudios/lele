@@ -332,6 +332,14 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				contentForLLM = toolResult.Err.Error()
 			}
 
+			// Truncate tool results to prevent unbounded memory growth
+			// when many tool calls accumulate in the message history.
+			const maxToolResultChars = 50000
+			if len(contentForLLM) > maxToolResultChars {
+				truncated := contentForLLM[:maxToolResultChars]
+				contentForLLM = truncated + fmt.Sprintf("\n... (truncated, %d more chars)", len(contentForLLM)-maxToolResultChars)
+			}
+
 			// Add tool result message
 			toolResultMsg := providers.Message{
 				Role:       "tool",

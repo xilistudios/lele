@@ -435,3 +435,87 @@ func TestBackgroundProcessManager_SequentialIDs(t *testing.T) {
 		t.Fatalf("expected Count() == 5, got %d", mgr.Count())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestThreadSafeBuffer_MaxSize
+// ---------------------------------------------------------------------------
+
+func TestThreadSafeBuffer_MaxSize(t *testing.T) {
+	t.Run("ring buffer trims to maxSize", func(t *testing.T) {
+		buf := newThreadSafeBuffer(100)
+
+		// Write 200 bytes
+		data := make([]byte, 200)
+		for i := range data {
+			data[i] = byte('A' + i%26)
+		}
+		n, err := buf.Write(data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 200 {
+			t.Fatalf("expected 200 bytes written, got %d", n)
+		}
+
+		// Should only keep the last 100 bytes
+		if buf.Len() != 100 {
+			t.Fatalf("expected Len() == 100, got %d", buf.Len())
+		}
+
+		// Verify the content is the LAST 100 bytes
+		expected := string(data[100:])
+		got := buf.String()
+		if got != expected {
+			t.Fatalf("expected last 100 bytes, got %q (len=%d)", got, len(got))
+		}
+	})
+
+	t.Run("zero maxSize means unlimited", func(t *testing.T) {
+		var buf threadSafeBuffer // maxSize=0 (zero value)
+		data := strings.Repeat("x", 5000)
+		buf.Write([]byte(data))
+		if buf.Len() != 5000 {
+			t.Fatalf("expected Len() == 5000 with unlimited, got %d", buf.Len())
+		}
+	})
+
+	t.Run("exact maxSize does not trim", func(t *testing.T) {
+		buf := newThreadSafeBuffer(50)
+		data := make([]byte, 50)
+		for i := range data {
+			data[i] = byte(i)
+		}
+		buf.Write(data)
+		if buf.Len() != 50 {
+			t.Fatalf("expected Len() == 50, got %d", buf.Len())
+		}
+		if buf.String() != string(data) {
+			t.Fatal("content should be unchanged when exactly at maxSize")
+		}
+	})
+
+	t.Run("multiple small writes accumulate then trim", func(t *testing.T) {
+		buf := newThreadSafeBuffer(10)
+		for i := 0; i < 20; i++ {
+			buf.Write([]byte{byte('0' + i%10)})
+		}
+		if buf.Len() != 10 {
+			t.Fatalf("expected Len() == 10, got %d", buf.Len())
+		}
+		// Last 10 writes: bytes '0'+10%10='0', '0'+11%10='1', ... '0'+19%10='9'
+		expected := "0123456789"
+		if buf.String() != expected {
+			t.Fatalf("expected %q, got %q", expected, buf.String())
+		}
+	})
+
+	t.Run("constructor returns pointer", func(t *testing.T) {
+		buf := newThreadSafeBuffer(256)
+		if buf == nil {
+			t.Fatal("newThreadSafeBuffer should not return nil")
+		}
+		if buf.maxSize != 256 {
+			t.Fatalf("expected maxSize=256, got %d", buf.maxSize)
+		}
+	})
+}

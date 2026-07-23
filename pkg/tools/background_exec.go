@@ -16,14 +16,27 @@ import (
 // ---------------------------------------------------------------------------
 
 type threadSafeBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	maxSize int // 0 = unlimited
+}
+
+func newThreadSafeBuffer(maxSize int) *threadSafeBuffer {
+	return &threadSafeBuffer{maxSize: maxSize}
 }
 
 func (b *threadSafeBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	n, err := b.buf.Write(p)
+	if b.maxSize > 0 && b.buf.Len() > b.maxSize {
+		// Keep only the last maxSize bytes
+		data := b.buf.Bytes()
+		excess := b.buf.Len() - b.maxSize
+		b.buf.Reset()
+		b.buf.Write(data[excess:])
+	}
+	return n, err
 }
 
 func (b *threadSafeBuffer) String() string {
@@ -119,6 +132,7 @@ type BackgroundProcessManager struct {
 	processes       map[string]*BackgroundProcess
 	nextID          int
 	retentionPeriod time.Duration
+	maxProcesses    int // 0 = unlimited
 }
 
 func NewBackgroundProcessManager() *BackgroundProcessManager {
@@ -126,6 +140,7 @@ func NewBackgroundProcessManager() *BackgroundProcessManager {
 		processes:       make(map[string]*BackgroundProcess),
 		nextID:          1,
 		retentionPeriod: 10 * time.Minute,
+		maxProcesses:    20,
 	}
 }
 
@@ -136,6 +151,14 @@ func (m *BackgroundProcessManager) SetRetentionPeriod(d time.Duration) {
 	m.retentionPeriod = d
 }
 
+// SetMaxProcesses sets the maximum number of tracked processes.
+// 0 means unlimited.
+func (m *BackgroundProcessManager) SetMaxProcesses(max int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.maxProcesses = max
+}
+
 // Register creates a new BackgroundProcess with an auto-incremented ID
 // (format "bg-{N}"), stores it, and returns it.
 // IMPORTANT: cmd.Stdout / cmd.Stderr are assumed to already be set by the
@@ -143,6 +166,11 @@ func (m *BackgroundProcessManager) SetRetentionPeriod(d time.Duration) {
 func (m *BackgroundProcessManager) Register(cmd *exec.Cmd, command, workingDir string, stdout, stderr *threadSafeBuffer, cancel context.CancelFunc) *BackgroundProcess {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Enforce max processes limit by cleaning up terminal processes first
+	if m.maxProcesses > 0 && len(m.processes) >= m.maxProcesses {
+		m.cleanupTerminalLocked()
+	}
 
 	id := fmt.Sprintf("bg-%d", m.nextID)
 	m.nextID++
@@ -292,11 +320,14 @@ func (m *BackgroundProcessManager) MarkCompleted(id string, exitCode int) {
 func (m *BackgroundProcessManager) CleanupTerminal() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.cleanupTerminalLocked()
+}
 
+// cleanupTerminalLocked removes terminal processes. Caller must hold the lock.
+func (m *BackgroundProcessManager) cleanupTerminalLocked() {
 	if m.retentionPeriod <= 0 {
 		return
 	}
-
 	cutoff := time.Now().Add(-m.retentionPeriod)
 	for id, p := range m.processes {
 		if p.Status == BgExecStatusRunning {

@@ -250,9 +250,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	// Thread-safe buffers so the background manager can read while the
 	// process is still writing.
-	var stdout, stderr threadSafeBuffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newThreadSafeBuffer(1024 * 1024) // 1MB cap
+	stderr := newThreadSafeBuffer(1024 * 1024) // 1MB cap
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	// Generate process name for feedback
 	processName := utils.RandomProcessName()
@@ -266,7 +267,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	// ── Explicit background mode ──────────────────────────────────────
 	if backgroundMode && t.backgroundManager != nil {
-		proc := t.backgroundManager.Register(cmd, command, cwd, &stdout, &stderr, bgCancel)
+		proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel)
 		go func() {
 			err := cmd.Wait()
 			exitCode := 0
@@ -309,7 +310,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			// Auto-background: if the process has been running longer than
 			// the threshold, move it to the background.
 			if t.backgroundManager != nil && t.backgroundThreshold > 0 && time.Since(startTime) >= t.backgroundThreshold {
-				proc := t.backgroundManager.Register(cmd, command, cwd, &stdout, &stderr, bgCancel)
+				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel)
 				go func() {
 					err := cmd.Wait()
 					exitCode := 0
