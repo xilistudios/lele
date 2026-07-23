@@ -64,5 +64,8 @@
   "tui.mouseOn": "ctrl+t: mouse ativo",
   "tui.mouseOff": "ctrl+t: modo seleção",
   "tui.backToParent": "Voltar ao chat principal",
-  "tui.loading": "carregando"
+  "tui.loading": "carregando",
+  "tui.backgroundProcesses": "Processos em segundo plano",
+  "tui.noBgProcesses": "Nenhum processo em segundo plano",
+  "tui.bgOutputHints": "ENTER: lista | S: parar | ESC: fechar"
 }

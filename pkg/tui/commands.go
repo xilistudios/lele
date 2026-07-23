@@ -149,6 +149,21 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 		return nil
 
+	case "/bg":
+		m.resetModal(ModalBackgroundExecs)
+		procs := m.agentLoop.GetProvidable().GetBackgroundExecs(true)
+		if len(procs) == 0 {
+			m.modalItems = append(m.modalItems, i18n.T("tui.noBgProcesses"))
+		} else {
+			for _, p := range procs {
+				elapsed := time.Duration(p.Elapsed) * time.Millisecond
+				item := fmt.Sprintf("%s [%s] %s (%s)", p.ID, p.Status, p.Command, elapsed.Round(time.Second))
+				m.modalItems = append(m.modalItems, item)
+				m.bgExecModalKeys = append(m.bgExecModalKeys, p.ID)
+			}
+		}
+		return nil
+
 	case "/compact":
 		if m.currentKey == "" {
 			return nil

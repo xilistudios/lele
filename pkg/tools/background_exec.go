@@ -80,6 +80,16 @@ func (p *BackgroundProcess) Output() string {
 	return out
 }
 
+// OutputTail returns the last N characters of combined stdout+stderr.
+// If tail <= 0 or the output is shorter than tail, it returns the full output.
+func (p *BackgroundProcess) OutputTail(tail int) string {
+	out := p.Output()
+	if tail > 0 && len(out) > tail {
+		return out[len(out)-tail:]
+	}
+	return out
+}
+
 // Elapsed returns the duration the process has been (or was) running.
 func (p *BackgroundProcess) Elapsed() time.Duration {
 	p.mu.RLock()

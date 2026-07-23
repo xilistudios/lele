@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -269,6 +270,18 @@ func (m *nativeTestAgentLoop) HasStreamedContent(sessionKey string) bool {
 
 func (m *nativeTestAgentLoop) GetInProgressAssistant(sessionKey string) *providers.Message {
 	return nil
+}
+
+func (m *nativeTestAgentLoop) GetBackgroundExecs(includeCompleted bool) []BackgroundExecInfo {
+	return nil
+}
+
+func (m *nativeTestAgentLoop) GetBackgroundExecOutput(id string, tail int) (string, string, int64, error) {
+	return "", "", 0, fmt.Errorf("not implemented")
+}
+
+func (m *nativeTestAgentLoop) StopBackgroundExec(id string) error {
+	return fmt.Errorf("not implemented")
 }
 
 type nativeTestServer struct {

@@ -10,6 +10,9 @@ import type {
   AuthSession,
   AuthStatusResponse,
   AvailableSkillsResponse,
+  BackgroundExecOutputResponse,
+  BackgroundExecsResponse,
+  BackgroundExecStopResponse,
   ChannelsResponse,
   ChatSessionsResponse,
   ClientEvent,
@@ -526,6 +529,22 @@ export const createApiClient = (baseUrl: string) => {
       request<ProviderModelsResponse>(endpoints.providers.models(providerName), {
         method: 'GET',
       }),
+    backgroundExecs: {
+      list: (includeCompleted?: boolean) =>
+        request<BackgroundExecsResponse>(
+          `${endpoints.backgroundExec.list}${includeCompleted ? '?include_completed=true' : ''}`,
+          { method: 'GET' },
+        ),
+      output: (id: string, tail?: number) =>
+        request<BackgroundExecOutputResponse>(
+          `${endpoints.backgroundExec.output(id)}${tail ? `?tail=${tail}` : ''}`,
+          { method: 'GET' },
+        ),
+      stop: (id: string) =>
+        request<BackgroundExecStopResponse>(endpoints.backgroundExec.stop(id), {
+          method: 'POST',
+        }),
+    },
     uploadFiles: async (files: File[]) => {
       const formData = new FormData()
       for (const file of files) {

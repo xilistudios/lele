@@ -43,6 +43,7 @@ const (
 	ModalThink
 	ModalLang
 	ModalSubagents
+	ModalBackgroundExecs
 )
 
 // Timeout for ESC hint display (double-press to cancel)
@@ -62,6 +63,7 @@ var allCommands = []commandInfo{
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
+	{name: "/bg", description: "View background processes"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/quit", description: "Exit TUI"},
 }
@@ -106,6 +108,13 @@ type Model struct {
 	modalSubagentKeys []string // maps modal items to subagent session keys (for /subagents)
 	modalSelectedIdx  int
 	modalScrollOffset int // scroll offset for long modal lists
+
+	// Background exec view state
+	bgExecViewMode   bool     // true when showing output of a selected process
+	bgExecViewID     string   // ID of the process being viewed
+	bgExecViewOutput string   // current output text
+	bgExecViewStatus string   // current status
+	bgExecModalKeys  []string // maps modal items to process IDs
 
 	// Sub-components
 	viewport  viewport.Model

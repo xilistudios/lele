@@ -64,5 +64,8 @@
   "tui.mouseOn": "ctrl+t: mouse on",
   "tui.mouseOff": "ctrl+t: select mode",
   "tui.backToParent": "Back to parent chat",
-  "tui.loading": "loading"
+  "tui.loading": "loading",
+  "tui.backgroundProcesses": "Background Processes",
+  "tui.noBgProcesses": "No background processes",
+  "tui.bgOutputHints": "ENTER: back to list | S: stop | ESC: close"
 }

@@ -741,3 +741,47 @@ func (ap *agentProvidableImpl) GetInProgressAssistant(sessionKey string) *provid
 	}
 	return agent.Sessions.GetInProgressAssistant(resolvedKey)
 }
+
+// ============================================================================
+// AgentProvidable Interface - Background Exec Management
+// ============================================================================
+
+// GetBackgroundExecs returns all background processes across all agents.
+func (ap *agentProvidableImpl) GetBackgroundExecs(includeCompleted bool) []channels.BackgroundExecInfo {
+	if ap.al.toolCoordinator == nil {
+		return nil
+	}
+	infos := ap.al.toolCoordinator.getBackgroundExecs(includeCompleted)
+	result := make([]channels.BackgroundExecInfo, len(infos))
+	for i, info := range infos {
+		result[i] = channels.BackgroundExecInfo{
+			ID:         info.ID,
+			AgentID:    info.AgentID,
+			Command:    info.Command,
+			WorkingDir: info.WorkingDir,
+			Status:     info.Status,
+			StartTime:  info.StartTime,
+			EndTime:    info.EndTime,
+			ExitCode:   info.ExitCode,
+			Elapsed:    info.Elapsed.Milliseconds(),
+		}
+	}
+	return result
+}
+
+// GetBackgroundExecOutput returns the output of a background process.
+func (ap *agentProvidableImpl) GetBackgroundExecOutput(id string, tail int) (output string, status string, elapsedMs int64, err error) {
+	if ap.al.toolCoordinator == nil {
+		return "", "", 0, fmt.Errorf("tool coordinator not available")
+	}
+	output, status, elapsed, err := ap.al.toolCoordinator.getBackgroundExecOutput(id, tail)
+	return output, status, elapsed.Milliseconds(), err
+}
+
+// StopBackgroundExec stops a running background process.
+func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
+	if ap.al.toolCoordinator == nil {
+		return fmt.Errorf("tool coordinator not available")
+	}
+	return ap.al.toolCoordinator.stopBackgroundExec(id)
+}

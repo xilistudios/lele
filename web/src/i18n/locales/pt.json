@@ -522,9 +522,22 @@
     "agents": "Agentes",
     "providers": "Provedores",
     "skills": "Habilidades",
+    "backgroundExecs": "Processos em Segundo Plano",
     "navigation": "Navegação",
     "collapse": "Minimizar",
     "expand": "Expandir"
+  },
+  "backgroundExecs": {
+    "title": "Processos em Segundo Plano",
+    "empty": "Nenhum processo em segundo plano",
+    "stop": "Parar",
+    "output": "Saída",
+    "elapsed": "Tempo",
+    "status": "Estado",
+    "command": "Comando",
+    "agent": "Agente",
+    "viewOutput": "Ver Saída",
+    "hideOutput": "Ocultar Saída"
   },
   "skills": {
     "title": "Habilidades",
