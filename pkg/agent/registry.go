@@ -263,6 +263,20 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if (existing.Subagents == nil) != (ac.Subagents == nil) {
 		return true
 	}
+	// Check subagents model override
+	if existing.Subagents != nil && ac.Subagents != nil {
+		existingModel := ""
+		newModel := ""
+		if existing.Subagents.Model != nil {
+			existingModel = existing.Subagents.Model.Primary
+		}
+		if ac.Subagents.Model != nil {
+			newModel = ac.Subagents.Model.Primary
+		}
+		if existingModel != newModel {
+			return true
+		}
+	}
 	// Check skills filter
 	if len(existing.SkillsFilter) != len(ac.Skills) {
 		return true

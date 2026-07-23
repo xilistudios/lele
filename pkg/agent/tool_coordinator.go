@@ -9,11 +9,14 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -403,8 +406,34 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	agent.Tools.Register(tools.NewGetBackgroundExecOutputTool(bgManager))
 	agent.Tools.Register(tools.NewStopBackgroundExecTool(bgManager))
 
-	// Spawn tool with allowlist checker - use agent's own provider
-	subagentManager := tools.NewSubagentManager(agent.Provider, agent.Model, agent.Workspace, msgBus, agent.MaxIterations)
+	// Spawn tool with allowlist checker - resolve subagent model override from SubagentsConfig.Model
+	subagentDefaultModel := agent.Model
+	subagentDefaultProvider := agent.Provider
+	subagentDefaultContextWindow := agent.ContextWindow
+
+	if agent.Subagents != nil && agent.Subagents.Model != nil && strings.TrimSpace(agent.Subagents.Model.Primary) != "" {
+		resolvedModel := cfg.Providers.ResolveModelAlias(strings.TrimSpace(agent.Subagents.Model.Primary), cfg.Agents.Defaults.Provider)
+		providerName := extractProviderFromModel(resolvedModel, cfg.Agents.Defaults.Provider)
+		overrideProvider, err := providers.CreateProviderForCandidate(cfg, providerName)
+		if err == nil && overrideProvider != nil {
+			subagentDefaultModel = resolvedModel
+			subagentDefaultProvider = overrideProvider
+			subagentDefaultContextWindow = getContextWindow(cfg, resolvedModel, providerName)
+		} else {
+			errMsg := "provider is nil"
+			if err != nil {
+				errMsg = err.Error()
+			}
+			logger.WarnCF("agent", "Failed to create provider for subagent model override, using parent agent's provider",
+				map[string]interface{}{
+					"model":    resolvedModel,
+					"provider": providerName,
+					"error":    errMsg,
+				})
+		}
+	}
+
+	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, agent.MaxIterations)
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 	// Set subagent timeout from agent config (per-agent override or global default)
 	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
@@ -436,16 +465,17 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 				ContextWindow: targetAgent.ContextWindow,
 			}
 		}
+		// Fallback: use subagent model override if configured, otherwise parent agent's config
 		return tools.AgentContextInfo{
 			Context:       agent.ContextBuilder.GetInitialContext(),
 			Workspace:     agent.Workspace,
 			Name:          agent.Name,
-			Model:         agent.Model,
-			Provider:      agent.Provider,
+			Model:         subagentDefaultModel,
+			Provider:      subagentDefaultProvider,
 			MaxIterations: agent.MaxIterations,
 			MaxTokens:     agent.MaxTokens,
 			Temperature:   agent.Temperature,
-			ContextWindow: agent.ContextWindow,
+			ContextWindow: subagentDefaultContextWindow,
 		}
 	})
 	spawnTool := tools.NewSpawnTool(subagentManager)

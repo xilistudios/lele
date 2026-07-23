@@ -50,6 +50,14 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 		provider = ctxInfo.Provider
 		contextWindow = ctxInfo.ContextWindow
 
+		logger.DebugCF("subagent", "resolveAgentConfig: agent context resolved",
+			map[string]interface{}{
+				"agent_id":       agentID,
+				"model":          model,
+				"provider_type":  fmt.Sprintf("%T", provider),
+				"context_window": contextWindow,
+			})
+
 		// Agent overrides take precedence over SubagentManager defaults
 		if ctxInfo.MaxIterations > 0 {
 			maxIter = ctxInfo.MaxIterations
