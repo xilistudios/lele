@@ -140,7 +140,7 @@ func NewBackgroundProcessManager() *BackgroundProcessManager {
 		processes:       make(map[string]*BackgroundProcess),
 		nextID:          1,
 		retentionPeriod: 10 * time.Minute,
-		maxProcesses:    20,
+		
 	}
 }
 
