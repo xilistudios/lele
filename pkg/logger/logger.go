@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type LogLevel int
@@ -63,11 +65,7 @@ func init() {
 }
 
 func getDefaultLogsPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".lele", "logs")
-	}
-	return filepath.Join(home, ".lele", "logs")
+	return filepath.Join(config.GetLeleDir(), "logs")
 }
 
 // SetLevel sets the minimum log level to output

@@ -25,7 +25,11 @@ func TestLoadEditableDocument_FileNotExist(t *testing.T) {
 	}
 
 	// Verify defaults.
-	if doc.Agents.Defaults.Workspace == "" {
+	cfg, err := doc.ToConfig()
+	if err != nil {
+		t.Fatalf("ToConfig failed: %v", err)
+	}
+	if cfg.WorkspacePath() == "" {
 		t.Error("expected default workspace")
 	}
 	if doc.Agents.Defaults.Provider == "" {

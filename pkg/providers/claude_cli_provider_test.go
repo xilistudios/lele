@@ -473,8 +473,8 @@ func TestCreateProvider_ClaudeCliDefaultWorkspace(t *testing.T) {
 	if !ok {
 		t.Fatalf("returned %T, want *ClaudeCliProvider", provider)
 	}
-	if cliProvider.workspace != "." {
-		t.Errorf("workspace = %q, want %q (default)", cliProvider.workspace, ".")
+	if cliProvider.workspace != cfg.WorkspacePath() {
+		t.Errorf("workspace = %q, want %q (default from WorkspacePath)", cliProvider.workspace, cfg.WorkspacePath())
 	}
 }
 

@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/config"
 )
 
 type AuthCredential struct {
@@ -38,11 +39,7 @@ func (c *AuthCredential) NeedsRefresh() bool {
 }
 
 func authFilePath() string {
-	if home, ok := os.LookupEnv("HOME"); ok && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".lele", "auth.json")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".lele", "auth.json")
+	return filepath.Join(config.GetLeleDir(), "auth.json")
 }
 
 func LoadStore() (*AuthStore, error) {
