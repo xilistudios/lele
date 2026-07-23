@@ -92,6 +92,9 @@ func (m *Model) View() string {
 
 		// Render modal overlay on welcome screen if active
 		if m.modalMode != ModalNone {
+			if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
+				return m.renderBgExecOutput()
+			}
 			var modalTitle string
 			switch m.modalMode {
 			case ModalAgent:
@@ -106,6 +109,8 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.selectThinkLevel")
 			case ModalLang:
 				modalTitle = i18n.T("tui.selectLanguage")
+			case ModalBackgroundExecs:
+				modalTitle = i18n.T("tui.backgroundProcesses")
 			}
 
 			return m.renderModal(modalTitle)
@@ -325,6 +330,9 @@ func (m *Model) View() string {
 	mainLayout := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
 	if m.modalMode != ModalNone {
+		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
+			return m.renderBgExecOutput()
+		}
 		var modalTitle string
 		switch m.modalMode {
 		case ModalAgent:
@@ -339,6 +347,8 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.selectThinkLevel")
 		case ModalLang:
 			modalTitle = i18n.T("tui.selectLanguage")
+		case ModalBackgroundExecs:
+			modalTitle = i18n.T("tui.backgroundProcesses")
 		}
 
 		return m.renderModal(modalTitle)
@@ -420,6 +430,60 @@ func (m *Model) renderModal(modalTitle string) string {
 
 	modalView := ModalContainer.Render(modalSb.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+}
+
+// renderBgExecOutput renders the output view for a background process.
+func (m *Model) renderBgExecOutput() string {
+	// Title with process ID and status
+	statusColor := CommentColor
+	switch m.bgExecViewStatus {
+	case "running":
+		statusColor = YellowColor
+	case "completed":
+		statusColor = SecondaryColor
+	case "failed":
+		statusColor = PrimaryColor
+	}
+
+	titleText := fmt.Sprintf("Background Process: %s", m.bgExecViewID)
+	statusText := lipgloss.NewStyle().Foreground(statusColor).Render(fmt.Sprintf("[%s]", m.bgExecViewStatus))
+
+	titleLine := lipgloss.JoinHorizontal(lipgloss.Center,
+		TitleStyle.Render(titleText),
+		"  ",
+		statusText,
+	)
+
+	// Output content
+	outputContent := m.bgExecViewOutput
+	if outputContent == "" {
+		outputContent = CommentColorStyle.Render("(no output)")
+	}
+
+	// Calculate available height for output
+	availableHeight := m.height - 8 // title + borders + hints + padding
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+
+	// Truncate output to fit available height (show last N lines)
+	outputLines := strings.Split(outputContent, "\n")
+	if len(outputLines) > availableHeight {
+		outputLines = outputLines[len(outputLines)-availableHeight:]
+	}
+	outputContent = strings.Join(outputLines, "\n")
+
+	// Hints at the bottom
+	hintsText := CommentColorStyle.Render(i18n.T("tui.bgOutputHints"))
+
+	// Build the view
+	var sb strings.Builder
+	sb.WriteString(titleLine + "\n\n")
+	sb.WriteString(outputContent + "\n\n")
+	sb.WriteString(hintsText)
+
+	outputBox := ModalContainer.Width(m.width - 10).Render(sb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, outputBox)
 }
 
 func (m *Model) getBouncingDots() string {

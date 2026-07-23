@@ -17,6 +17,7 @@ import {
   SettingsIcon,
   SidebarToggleIcon,
   SkillsIcon,
+  TerminalIcon,
   TrashIcon,
   UserIcon,
 } from '../atoms/Icons'
@@ -112,6 +113,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
       path: '/skills',
       label: t('sidebar.skills'),
       icon: SkillsIcon,
+    },
+    {
+      path: '/background-exec',
+      label: t('sidebar.backgroundExecs'),
+      icon: TerminalIcon,
     },
   ]
 

@@ -69,4 +69,10 @@ export const endpoints = {
     install: '/api/v1/skills',
     remove: (name: string) => `/api/v1/skills/${encodeURIComponent(name)}`,
   },
+  backgroundExec: {
+    list: '/api/v1/background-exec',
+    output: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/output`,
+    stop: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stop`,
+    stream: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stream`,
+  },
 } as const

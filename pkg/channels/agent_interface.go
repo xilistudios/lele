@@ -101,6 +101,17 @@ type AgentProvidable interface {
 	HasStreamedContent(sessionKey string) bool
 	// GetInProgressAssistant returns the in-progress assistant message, if any.
 	GetInProgressAssistant(sessionKey string) *providers.Message
+
+	// ========================================================================
+	// Background exec management
+	// ========================================================================
+
+	// GetBackgroundExecs returns all background processes across all agents
+	GetBackgroundExecs(includeCompleted bool) []BackgroundExecInfo
+	// GetBackgroundExecOutput returns the output of a background process
+	GetBackgroundExecOutput(id string, tail int) (output string, status string, elapsedMs int64, err error)
+	// StopBackgroundExec stops a running background process
+	StopBackgroundExec(id string) error
 }
 
 // AgentBasicInfo contiene información pública de un agente
@@ -129,4 +140,17 @@ type SubagentTaskInfo struct {
 	Created    int64
 	Updated    int64
 	Iterations int
+}
+
+// BackgroundExecInfo contains information about a background execution.
+type BackgroundExecInfo struct {
+	ID         string     `json:"id"`
+	AgentID    string     `json:"agent_id"`
+	Command    string     `json:"command"`
+	WorkingDir string     `json:"working_dir"`
+	Status     string     `json:"status"`
+	StartTime  time.Time  `json:"start_time"`
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	ExitCode   int        `json:"exit_code"`
+	Elapsed    int64      `json:"elapsed_ms"` // milliseconds
 }

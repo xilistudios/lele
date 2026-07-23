@@ -305,6 +305,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/status", withAuth(n.handleStatus))
 	mux.HandleFunc("GET /api/v1/channels", withAuth(n.handleChannels))
 
+	// Background execs
+	mux.HandleFunc("GET /api/v1/background-exec", withAuth(n.handleBackgroundExecs))
+	mux.HandleFunc("GET /api/v1/background-exec/{id}/output", withAuth(n.handleBackgroundExecOutput))
+	mux.HandleFunc("POST /api/v1/background-exec/{id}/stop", withAuth(n.handleBackgroundExecStop))
+	mux.HandleFunc("GET /api/v1/background-exec/{id}/stream", withAuth(n.handleBackgroundExecStream))
+
 	// Files
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
@@ -961,4 +967,132 @@ func getClientID(r *http.Request) string {
 
 func getQueryParam(r *http.Request, key string) string {
 	return r.URL.Query().Get(key)
+}
+
+// handleBackgroundExecs returns all background processes.
+// GET /api/v1/background-exec?include_completed=true
+func (n *NativeChannel) handleBackgroundExecs(w http.ResponseWriter, r *http.Request) {
+	includeCompleted := r.URL.Query().Get("include_completed") == "true"
+	processes := n.agentLoop.GetBackgroundExecs(includeCompleted)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"processes": processes,
+	})
+}
+
+// handleBackgroundExecOutput returns the output of a specific background process.
+// GET /api/v1/background-exec/{id}/output?tail=N
+func (n *NativeChannel) handleBackgroundExecOutput(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required", "missing_id")
+		return
+	}
+
+	tail := 0
+	if tailStr := r.URL.Query().Get("tail"); tailStr != "" {
+		fmt.Sscanf(tailStr, "%d", &tail)
+	}
+
+	output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, tail)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "exec_not_found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":         id,
+		"output":     output,
+		"status":     status,
+		"elapsed_ms": elapsedMs,
+	})
+}
+
+// handleBackgroundExecStop stops a running background process.
+// POST /api/v1/background-exec/{id}/stop
+func (n *NativeChannel) handleBackgroundExecStop(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required", "missing_id")
+		return
+	}
+
+	if err := n.agentLoop.StopBackgroundExec(id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "exec_not_found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":      id,
+		"stopped": true,
+	})
+}
+
+// handleBackgroundExecStream provides real-time SSE streaming of background process output.
+// GET /api/v1/background-exec/{id}/stream
+func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "id is required", "missing_id")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Verify the process exists before starting the stream
+	_, _, _, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
+	if err != nil {
+		fmt.Fprintf(w, "data: %s\n\n", mustMarshal(map[string]interface{}{"error": err.Error()}))
+		flusher.Flush()
+		return
+	}
+
+	lastLen := 0
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
+			if err != nil {
+				fmt.Fprintf(w, "data: %s\n\n", mustMarshal(map[string]interface{}{"error": err.Error()}))
+				flusher.Flush()
+				return
+			}
+
+			if len(output) > lastLen {
+				newOutput := output[lastLen:]
+				data := mustMarshal(map[string]interface{}{
+					"output":     newOutput,
+					"status":     status,
+					"elapsed_ms": elapsedMs,
+				})
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				lastLen = len(output)
+			}
+
+			if status != "running" && lastLen > 0 {
+				data := mustMarshal(map[string]interface{}{
+					"output":     "",
+					"status":     status,
+					"elapsed_ms": elapsedMs,
+					"done":       true,
+				})
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				return
+			}
+		}
+	}
 }

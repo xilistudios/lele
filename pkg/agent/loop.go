@@ -81,7 +81,8 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 
 	// Re-register shared tools for new/recreated agents
 	existingSubagents := al.toolCoordinator.GetSubagents()
-	updatedSubagents := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents)
+	existingBgManagers := al.toolCoordinator.(*toolCoordinatorImpl).bgManagers
+	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers)
 
 	// Wire up session key and cancel callbacks for all subagents
 	for agentID, sm := range updatedSubagents {
@@ -95,7 +96,7 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	}
 
 	// Update tool coordinator with new subagents
-	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents)
+	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers)
 }
 
 // ResolveSessionKey resolves the session key alias if one exists.
@@ -357,7 +358,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	loop.sessionManager = newSessionManager(loop)
 
 	// Register shared tools and create tool coordinator with subagents
-	subagents := registerSharedTools(cfg, msgBus, registry, approvalManager)
+	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager)
 
 	// Wire up session key and cancel callbacks so the agent layer can build an O(1)
 	// subagent session-to-agent mapping for GetSessionHistory.
@@ -371,7 +372,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		})
 	}
 
-	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents)
+	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers)
 	loop.providable = newAgentProvidable(loop)
 
 	return loop

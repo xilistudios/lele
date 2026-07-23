@@ -33,13 +33,17 @@ type toolCoordinator interface {
 	GetStartupInfo() map[string]interface{}
 	RegisterTool(tool tools.Tool)
 	GetSubagents() map[string]*tools.SubagentManager
+	getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo
+	getBackgroundExecOutput(id string, tail int) (output string, status string, elapsed time.Duration, err error)
+	stopBackgroundExec(id string) error
 }
 
 // toolCoordinatorImpl implements the toolCoordinator interface for handling
 // tool context updates, subagent lifecycle management, and tool registration.
 type toolCoordinatorImpl struct {
 	al          *AgentLoop
-	subagents   map[string]*tools.SubagentManager // Owned by coordinator
+	subagents   map[string]*tools.SubagentManager          // Owned by coordinator
+	bgManagers  map[string]*tools.BackgroundProcessManager // Keyed by agentID
 	registry    *AgentRegistry
 	bus         *bus.MessageBus
 	approvalMgr *channels.ApprovalManager
@@ -50,6 +54,7 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 	return &toolCoordinatorImpl{
 		al:          al,
 		subagents:   make(map[string]*tools.SubagentManager),
+		bgManagers:  make(map[string]*tools.BackgroundProcessManager),
 		registry:    al.registry,
 		bus:         al.bus,
 		approvalMgr: al.approvalManager,
@@ -57,10 +62,11 @@ func newToolCoordinator(al *AgentLoop) *toolCoordinatorImpl {
 }
 
 // newToolCoordinatorWithSubagents creates a tool coordinator with existing subagents.
-func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.SubagentManager) *toolCoordinatorImpl {
+func newToolCoordinatorWithSubagents(al *AgentLoop, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *toolCoordinatorImpl {
 	return &toolCoordinatorImpl{
 		al:          al,
 		subagents:   subagents,
+		bgManagers:  bgManagers,
 		registry:    al.registry,
 		bus:         al.bus,
 		approvalMgr: al.approvalManager,
@@ -268,9 +274,87 @@ func (tc *toolCoordinatorImpl) GetSubagents() map[string]*tools.SubagentManager 
 	return tc.subagents
 }
 
+// GetBgManagers returns the background process managers map.
+func (tc *toolCoordinatorImpl) GetBgManagers() map[string]*tools.BackgroundProcessManager {
+	return tc.bgManagers
+}
+
+// BackgroundExecInfo contains information about a background execution.
+type BackgroundExecInfo struct {
+	ID         string
+	AgentID    string
+	Command    string
+	WorkingDir string
+	Status     string
+	StartTime  time.Time
+	EndTime    *time.Time
+	ExitCode   int
+	Elapsed    time.Duration
+}
+
+// getBackgroundExecs returns all background processes across all agents.
+func (tc *toolCoordinatorImpl) getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo {
+	var result []BackgroundExecInfo
+	for agentID, mgr := range tc.bgManagers {
+		var procs []*tools.BackgroundProcess
+		if includeCompleted {
+			procs = mgr.List()
+		} else {
+			procs = mgr.ListRunning()
+		}
+		for _, p := range procs {
+			result = append(result, BackgroundExecInfo{
+				ID:         p.ID,
+				AgentID:    agentID,
+				Command:    p.Command,
+				WorkingDir: p.WorkingDir,
+				Status:     p.Status,
+				StartTime:  p.StartTime,
+				EndTime:    p.EndTime,
+				ExitCode:   p.ExitCode,
+				Elapsed:    p.Elapsed(),
+			})
+		}
+	}
+	return result
+}
+
+// getBackgroundExecOutput returns the output of a background process by ID.
+// It searches across all agents' background managers.
+func (tc *toolCoordinatorImpl) getBackgroundExecOutput(id string, tail int) (output string, status string, elapsed time.Duration, err error) {
+	for _, mgr := range tc.bgManagers {
+		if p, ok := mgr.Get(id); ok {
+			if tail > 0 {
+				output = p.OutputTail(tail)
+			} else {
+				output = p.Output()
+			}
+			return output, p.Status, p.Elapsed(), nil
+		}
+	}
+	return "", "", 0, fmt.Errorf("background process not found: %s", id)
+}
+
+// stopBackgroundExec stops a background process by ID.
+// It searches across all agents' background managers.
+func (tc *toolCoordinatorImpl) stopBackgroundExec(id string) error {
+	for _, mgr := range tc.bgManagers {
+		if p, ok := mgr.Get(id); ok {
+			if p.Status != tools.BgExecStatusRunning {
+				return fmt.Errorf("process %s is not running (status: %s)", id, p.Status)
+			}
+			if !mgr.Stop(id) {
+				return fmt.Errorf("failed to stop process %s", id)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("background process not found: %s", id)
+}
+
 // registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn)
 // for a single agent. Returns the created SubagentManager.
-func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager) *tools.SubagentManager {
+func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *tools.SubagentManager {
 	// Web tools
 	if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
 		BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
@@ -305,6 +389,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 	// Shell/Exec tool with approval support and background process management
 	bgManager := tools.NewBackgroundProcessManager()
+	bgManagers[agentID] = bgManager
 
 	execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
 	execTool.SetBackgroundManager(bgManager)
@@ -399,22 +484,23 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
 // Each agent uses its own provider for subagent spawning.
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) map[string]*tools.SubagentManager {
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	subagents := make(map[string]*tools.SubagentManager)
+	bgManagers := make(map[string]*tools.BackgroundProcessManager)
 	for _, agentID := range registry.ListAgentIDs() {
 		agent, ok := registry.GetAgent(agentID)
 		if !ok {
 			continue
 		}
-		registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, subagents)
+		registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, subagents, bgManagers)
 	}
-	return subagents
+	return subagents, bgManagers
 }
 
 // updateSharedToolsForAgent registers shared tools for a specific agent.
 // It returns the SubagentManager for that agent.
 // This is used during reload to update tools for new or recreated agents.
-func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager) *tools.SubagentManager {
+func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *tools.SubagentManager {
 	agent, ok := registry.GetAgent(agentID)
 	if !ok {
 		return nil
@@ -429,26 +515,32 @@ func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, regis
 		return nil
 	}
 
-	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents)
+	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers)
 }
 
 // updateSharedTools updates shared tools for all agents after a reload.
 // It preserves existing subagent managers and only updates recreated agents.
-func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager) map[string]*tools.SubagentManager {
+func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager, existingBgManagers map[string]*tools.BackgroundProcessManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	updated := make(map[string]*tools.SubagentManager)
+	bgManagers := make(map[string]*tools.BackgroundProcessManager)
 
 	// Preserve existing subagent managers
 	for id, sm := range existingSubagents {
 		updated[id] = sm
 	}
 
+	// Preserve existing background managers
+	for id, bm := range existingBgManagers {
+		bgManagers[id] = bm
+	}
+
 	// Update each agent
 	for _, agentID := range registry.ListAgentIDs() {
-		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents)
+		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers)
 		if sm != nil {
 			updated[agentID] = sm
 		}
 	}
 
-	return updated
+	return updated, bgManagers
 }

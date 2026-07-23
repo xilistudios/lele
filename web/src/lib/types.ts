@@ -765,3 +765,31 @@ export type ApproveResponse = {
   approved: boolean
   message?: string
 }
+
+export type BackgroundExecInfo = {
+  id: string
+  agent_id: string
+  command: string
+  working_dir: string
+  status: 'running' | 'completed' | 'stopped' | 'failed'
+  start_time: string
+  end_time: string | null
+  exit_code: number
+  elapsed_ms: number
+}
+
+export type BackgroundExecsResponse = {
+  processes: BackgroundExecInfo[]
+}
+
+export type BackgroundExecOutputResponse = {
+  id: string
+  output: string
+  status: string
+  elapsed_ms: number
+}
+
+export type BackgroundExecStopResponse = {
+  id: string
+  stopped: boolean
+}

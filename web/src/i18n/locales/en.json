@@ -536,9 +536,22 @@
     "agents": "Agents",
     "providers": "Providers",
     "skills": "Skills",
+    "backgroundExecs": "Background Processes",
     "navigation": "Navigation",
     "collapse": "Minimize",
     "expand": "Expand"
+  },
+  "backgroundExecs": {
+    "title": "Background Processes",
+    "empty": "No background processes",
+    "stop": "Stop",
+    "output": "Output",
+    "elapsed": "Elapsed",
+    "status": "Status",
+    "command": "Command",
+    "agent": "Agent",
+    "viewOutput": "View Output",
+    "hideOutput": "Hide Output"
   },
   "skills": {
     "title": "Skills",

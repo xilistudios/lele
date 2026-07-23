@@ -212,12 +212,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.cfg.SetLanguage(langCode)
 						i18n.SetLanguage(langCode)
 						m.textInput.Placeholder = i18n.T("tui.placeholder")
+					} else if m.modalMode == ModalBackgroundExecs {
+						if m.bgExecViewMode {
+							// We're in output view mode - go back to list
+							m.bgExecViewMode = false
+							m.bgExecViewOutput = ""
+							m.bgExecViewStatus = ""
+							return m, m.tickCmd()
+						}
+						if m.modalSelectedIdx < len(m.bgExecModalKeys) {
+							procID := m.bgExecModalKeys[m.modalSelectedIdx]
+							m.bgExecViewMode = true
+							m.bgExecViewID = procID
+							// Fetch initial output
+							output, status, _, err := m.agentLoop.GetProvidable().GetBackgroundExecOutput(procID, 5000)
+							if err == nil {
+								m.bgExecViewOutput = output
+								m.bgExecViewStatus = status
+							}
+							return m, m.tickCmd()
+						}
 					}
-					m.modalMode = ModalNone
+					if !m.bgExecViewMode {
+						m.modalMode = ModalNone
+					}
 					m.reloadSessions()
 				}
 			case "esc", "q":
+				if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
+					// In output view mode: go back to list
+					if msg.String() == "q" || msg.String() == "esc" {
+						m.bgExecViewMode = false
+						m.bgExecViewOutput = ""
+						m.bgExecViewStatus = ""
+						return m, m.tickCmd()
+					}
+				}
 				m.modalMode = ModalNone
+			case "s":
+				if m.modalMode == ModalBackgroundExecs && !m.bgExecViewMode {
+					if m.modalSelectedIdx < len(m.bgExecModalKeys) {
+						procID := m.bgExecModalKeys[m.modalSelectedIdx]
+						_ = m.agentLoop.GetProvidable().StopBackgroundExec(procID)
+						// Refresh the list
+						return m, m.executeCommand("/bg")
+					}
+				}
 			}
 			// Restart tick animation if the target session is actively processing.
 			// This keeps the loading dots when switching to a busy session/subagent.
@@ -403,6 +443,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Reset tick pending flag to allow the next tick to be scheduled
 		m.tickPending = false
+		// Refresh background exec output if viewing a process
+		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode && m.bgExecViewID != "" {
+			output, status, _, _ := m.agentLoop.GetProvidable().GetBackgroundExecOutput(m.bgExecViewID, 5000)
+			m.bgExecViewOutput = output
+			m.bgExecViewStatus = status
+			if status == "running" {
+				cmds = append(cmds, m.tickCmd())
+			}
+			// Don't fall through to the session processing tick
+			break
+		}
 		if m.isSessionProcessing() {
 			m.elapsedTime = time.Since(m.startTime)
 			m.animationTick++
@@ -735,4 +786,9 @@ func (m *Model) resetModal(mode modalType) {
 	m.modalSessionKeys = nil
 	m.modalSubagentKeys = nil
 	m.modalSelectedIdx = 0
+	m.bgExecModalKeys = nil
+	m.bgExecViewMode = false
+	m.bgExecViewID = ""
+	m.bgExecViewOutput = ""
+	m.bgExecViewStatus = ""
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
@@ -1121,6 +1122,16 @@ func (m *commandHandlerSubagentCoordinatorStub) GetSubagents() map[string]*tools
 func (m *commandHandlerSubagentCoordinatorStub) markSubagentDelivered(taskID string) bool {
 	return false
 }
+
+func (m *commandHandlerSubagentCoordinatorStub) getBackgroundExecs(includeCompleted bool) []BackgroundExecInfo {
+	return nil
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) getBackgroundExecOutput(id string, tail int) (string, string, time.Duration, error) {
+	return "", "", 0, nil
+}
+
+func (m *commandHandlerSubagentCoordinatorStub) stopBackgroundExec(id string) error { return nil }
 
 func TestHandleSubagentsCommand_Continue(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "command-handler-test-*")
