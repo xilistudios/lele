@@ -44,6 +44,17 @@ const (
 	ModalLang
 	ModalSubagents
 	ModalBackgroundExecs
+	ModalProviders      // list of providers
+	ModalProviderDetail // provider detail (edit/delete/add model)
+	ModalAddProvider    // form to add a new provider
+	ModalAddModel       // form to add a new model to a provider
+)
+
+type formStep int
+
+const (
+	formStepInput formStep = iota
+	formStepConfirm
 )
 
 // Timeout for ESC hint display (double-press to cancel)
@@ -64,6 +75,8 @@ var allCommands = []commandInfo{
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
 	{name: "/bg", description: "View background processes"},
+	{name: "/providers", description: "Manage providers"},
+	{name: "/connect", description: "Connect a new provider"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/quit", description: "Exit TUI"},
 }
@@ -115,6 +128,17 @@ type Model struct {
 	bgExecViewOutput string   // current output text
 	bgExecViewStatus string   // current status
 	bgExecModalKeys  []string // maps modal items to process IDs
+
+	// Provider management state
+	providerModalKeys    []string // maps modal items to provider names (for /providers)
+	providerSelectedName string   // currently selected provider name in detail view
+	providerEditMode     bool     // true when editing an existing provider
+
+	// Form state for add-provider / add-model flows
+	formStepIndex   int      // current step in the form
+	formValues      []string // collected values per step
+	formError       string   // validation error to display
+	formConfirmMode bool     // true when showing confirmation step
 
 	// Sub-components
 	viewport  viewport.Model
