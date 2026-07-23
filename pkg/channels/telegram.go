@@ -122,8 +122,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 	base := NewBaseChannel("telegram", telegramCfg, bus, telegramCfg.AllowFrom)
 
 	// Determine offset file path for persisting last UpdateID
-	homeDir, _ := os.UserHomeDir()
-	offsetFilePath := filepath.Join(homeDir, ".lele", "telegram_offset.txt")
+	offsetFilePath := filepath.Join(config.GetLeleDir(), "telegram_offset.txt")
 
 	// Load persisted last UpdateID
 	lastUpdateID := loadLastUpdateID(offsetFilePath)

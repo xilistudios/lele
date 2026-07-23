@@ -226,8 +226,8 @@ func TestDefaultConfig_HeartbeatEnabled(t *testing.T) {
 func TestDefaultConfig_WorkspacePath(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Agents.Defaults.Workspace == "" {
-		t.Error("Workspace should not be empty")
+	if cfg.WorkspacePath() == "" {
+		t.Error("WorkspacePath should not be empty")
 	}
 }
 
@@ -392,8 +392,8 @@ func TestConfig_PersistSessionEphemeral(t *testing.T) {
 func TestConfig_Complete(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Agents.Defaults.Workspace == "" {
-		t.Error("Workspace should not be empty")
+	if cfg.WorkspacePath() == "" {
+		t.Error("WorkspacePath should not be empty")
 	}
 	if cfg.Agents.Defaults.Model == "" {
 		t.Error("Model should not be empty")

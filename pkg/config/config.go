@@ -825,7 +825,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Workspace:              "~/.lele/workspace",
+				Workspace:              "",
 				RestrictToWorkspace:    true,
 				Provider:               "nanogpt",
 				Model:                  "nanogpt/qwen3-5-397b-a17b-thinking",
@@ -985,7 +985,7 @@ func DefaultConfig() *Config {
 		},
 		Logs: LogsConfig{
 			Enabled:  true,
-			Path:     "~/.lele/logs",
+			Path:     "",
 			MaxDays:  7,
 			Rotation: "daily",
 		},
@@ -1190,6 +1190,9 @@ func (c *Config) PersistSessionEphemeral(path string, enabled bool) error {
 func (c *Config) WorkspacePath() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.Agents.Defaults.Workspace == "" {
+		return filepath.Join(GetLeleDir(), "workspace")
+	}
 	return expandHome(c.Agents.Defaults.Workspace)
 }
 
