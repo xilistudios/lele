@@ -528,6 +528,7 @@
     "i2c": "I2C",
     "spi": "SPI",
     "readImage": "Reading image",
+    "compactContext": "Compacting context",
     "genericAction": "Action"
   },
   "sidebar": {
