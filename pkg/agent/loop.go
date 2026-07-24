@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
@@ -48,12 +49,13 @@ type AgentLoop struct {
 	wg                   sync.WaitGroup            // tracks in-flight message goroutines
 
 	// Internal components (delegated operations)
-	messageProcessor messageProcessor
-	llmRunner        llmRunner
-	commandHandler   commandHandler
-	sessionManager   sessionManager
-	toolCoordinator  toolCoordinator
-	providable       *agentProvidableImpl // AgentProvidable interface implementation
+	messageProcessor   messageProcessor
+	llmRunner          llmRunner
+	commandHandler     commandHandler
+	sessionManager     sessionManager
+	toolCoordinator    toolCoordinator
+	providable         *agentProvidableImpl // AgentProvidable interface implementation
+	stopSessionCleanup func()               // stops the background session cleanup goroutine
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -310,6 +312,10 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// Replace per-agent session managers with the shared one.
 	registry.SetSharedSessionManager(sharedSessionManager)
 
+	// Start background goroutine to periodically evict idle sessions
+	// and clean up orphaned metadata. Runs every 5 minutes.
+	stopCleanup := sharedSessionManager.StartCleanupGoroutine(5 * time.Minute)
+
 	// Create state manager using default agent's workspace for channel recording
 	defaultAgent := registry.GetDefaultAgent()
 	var stateManager *state.Manager
@@ -374,6 +380,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers)
 	loop.providable = newAgentProvidable(loop)
+	loop.stopSessionCleanup = stopCleanup
 
 	return loop
 }
@@ -482,6 +489,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 // Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	if al.stopSessionCleanup != nil {
+		al.stopSessionCleanup()
+	}
 	al.wg.Wait()
 }
 
