@@ -301,13 +301,16 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	unifiedSessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
 	sharedSessionManager := session.NewSessionManager(unifiedSessionsDir)
 
-	// Migrate sessions from all per-workspace locations to the unified directory.
-	for _, agentID := range registry.ListAgentIDs() {
-		if agent, ok := registry.GetAgent(agentID); ok && agent != nil {
-			oldSessionsDir := filepath.Join(agent.Workspace, "sessions")
-			session.MigrateFromWorkspace(oldSessionsDir, unifiedSessionsDir)
+	// Migrate sessions from old per-workspace locations to the unified directory.
+	// Run in background — migration is best-effort and should not block startup.
+	go func() {
+		for _, agentID := range registry.ListAgentIDs() {
+			if agent, ok := registry.GetAgent(agentID); ok && agent != nil {
+				oldSessionsDir := filepath.Join(agent.Workspace, "sessions")
+				session.MigrateFromWorkspace(oldSessionsDir, unifiedSessionsDir)
+			}
 		}
-	}
+	}()
 
 	// Replace per-agent session managers with the shared one.
 	registry.SetSharedSessionManager(sharedSessionManager)
