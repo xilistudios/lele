@@ -90,7 +90,16 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	// explicitly changed model with /model.
 	resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
 	if _, hasSessionModel := mp.al.sessionModels.Load(resolvedSessionKey); !hasSessionModel && agent != nil {
-		if agent.Model != "" {
+		// Check persisted session model before falling back to agent default.
+		// This prevents the model from silently changing when continuing an
+		// existing session whose in-memory entry was lost (e.g. after restart).
+		persistedModel := ""
+		if agent.Sessions != nil {
+			persistedModel = agent.Sessions.GetModel(resolvedSessionKey)
+		}
+		if persistedModel != "" {
+			mp.al.sessionModels.Store(resolvedSessionKey, persistedModel)
+		} else if agent.Model != "" {
 			mp.al.sessionModels.Store(resolvedSessionKey, agent.Model)
 		} else {
 			mp.al.sessionModels.Store(resolvedSessionKey, mp.al.cfg().Agents.Defaults.Model)
