@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/common"
@@ -36,6 +37,14 @@ const (
 	defaultBaseURL        = "https://api.anthropic.com/v1"
 	defaultRequestTimeout = 120 * time.Second
 )
+
+// builderPool provides reusable strings.Builder instances to reduce
+// allocations during SSE stream parsing.
+var builderPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
 
 // Provider implements Anthropic Messages API via HTTP (without SDK).
 // It supports custom endpoints that use Anthropic's native message format.
@@ -451,8 +460,14 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 // parseAnthropicSSEStream parses the Anthropic SSE streaming response.
 // Events: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop, ping
 func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
-	var contentBuf strings.Builder
-	var reasoningBuf strings.Builder
+	contentBuf := builderPool.Get().(*strings.Builder)
+	contentBuf.Reset()
+	defer builderPool.Put(contentBuf)
+
+	reasoningBuf := builderPool.Get().(*strings.Builder)
+	reasoningBuf.Reset()
+	defer builderPool.Put(reasoningBuf)
+
 	var toolCalls []ToolCall
 	var finishReason string
 	var usage *UsageInfo

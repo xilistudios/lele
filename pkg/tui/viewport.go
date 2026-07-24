@@ -106,17 +106,37 @@ func (m *Model) updateViewport() {
 	}
 }
 
-// buildRenderedHistory renders all completed messages from session history.
-// The result is cached in renderedBase to avoid re-rendering on every streaming chunk.
+// buildRenderedHistory renders completed messages from session history.
+// For long conversations, it only renders the most recent maxRenderedMessages
+// messages to bound memory usage. The result is cached in renderedBase.
 func (m *Model) buildRenderedHistory() string {
 	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
 
+	totalMsgs := len(history)
+
+	// Virtualized rendering: only render the most recent N messages
+	// when the conversation is very long. This prevents the renderedBase
+	// string from growing unbounded with ANSI-heavy content.
+	startIdx := 0
+	if m.maxRenderedMessages > 0 && totalMsgs > m.maxRenderedMessages {
+		startIdx = totalMsgs - m.maxRenderedMessages
+	}
+
+	m.renderedMsgStartIdx = startIdx
+	m.renderedMsgEndIdx = totalMsgs
+
 	var sb strings.Builder
+	if startIdx > 0 {
+		sb.WriteString(CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)\n\n", startIdx)))
+	}
+
 	lastRole := ""
-	for i, msg := range history {
+	for i := startIdx; i < totalMsgs; i++ {
+		msg := history[i]
+
 		// Skip the last message if it's a streaming assistant message during
 		// processing — the TUI is already rendering the live stream via currentStream.
-		if m.processing && msg.Role == "assistant" && msg.Streaming && i == len(history)-1 {
+		if m.processing && msg.Role == "assistant" && msg.Streaming && i == totalMsgs-1 {
 			continue
 		}
 

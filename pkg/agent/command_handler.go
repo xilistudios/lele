@@ -179,7 +179,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		if ch.al.sessionManager == nil {
 			return "Session manager not available for compaction", true
 		}
-		history := agent.Sessions.GetHistory(sessionKey)
+		history := agent.Sessions.GetHistoryView(sessionKey)
 		if len(history) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
@@ -384,7 +384,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	totalTokens := inputTokens + outputTokens
 
 	// Calculate context tokens including system prompt (initial context)
-	history := agent.Sessions.GetHistory(sessionKey)
+	history := agent.Sessions.GetHistoryView(sessionKey)
 	historyTokens := ch.al.sessionManager.EstimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
 	summaryTokens := 0

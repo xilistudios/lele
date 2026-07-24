@@ -284,7 +284,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			MessageID: replyToMessageID,
 		})
 
-		history := agent.Sessions.GetHistory(sessionKey)
+		history := agent.Sessions.GetHistoryView(sessionKey)
 		if len(history) <= 4 {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel:   originChannel,
@@ -570,7 +570,7 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	totalTokens := inputTokens + outputTokens
 
 	// Calculate context tokens including system prompt (initial context)
-	history := agent.Sessions.GetHistory(sessionKey)
+	history := agent.Sessions.GetHistoryView(sessionKey)
 	historyTokens := mp.estimateTokens(history)
 	summary := agent.Sessions.GetSummary(sessionKey)
 	summaryTokens := 0

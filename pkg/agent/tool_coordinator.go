@@ -507,6 +507,12 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	))
 	subagentManager.SetSessionRecorder(agent.Sessions)
 
+	// Evict subagent sessions from memory when their terminal tasks are cleaned up,
+	// freeing RAM. The session data remains on disk.
+	subagentManager.SetSessionEvictCallback(func(sessionKey string) {
+		agent.Sessions.EvictSession(sessionKey)
+	})
+
 	agent.ContextBuilder.SetToolsRegistry(agent.Tools)
 
 	return subagentManager
