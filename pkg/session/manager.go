@@ -35,34 +35,55 @@ type Session struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 }
 
+// sessionMetadata holds lightweight session info for sessions not yet
+// fully loaded into memory. This allows listing sessions without
+// deserializing their entire message history.
+type sessionMetadata struct {
+	Key     string
+	Name    string
+	Created time.Time
+	Updated time.Time
+}
+
 type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 	storage  string
 	loadOnce sync.Once // ensures loadSessions runs exactly once, on first access
+
+	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
+	// Populated by loadSessionMetadata() instead of loading full message history.
+	sessionMeta map[string]*sessionMetadata // keyed by session key
+
+	// LRU eviction
+	maxInMemory int                  // max sessions to keep in memory (0 = unlimited). Default: 50.
+	evictionTTL time.Duration        // idle time before a session is eligible for eviction. Default: 30m.
+	accessTimes map[string]time.Time // last access time per session key (for LRU)
 }
 
 func NewSessionManager(storage string) *SessionManager {
 	sm := &SessionManager{
-		sessions: make(map[string]*Session),
-		storage:  storage,
+		sessions:    make(map[string]*Session),
+		storage:     storage,
+		sessionMeta: make(map[string]*sessionMetadata),
+		maxInMemory: 50,
+		evictionTTL: 30 * time.Minute,
+		accessTimes: make(map[string]time.Time),
 	}
 
 	if storage != "" {
 		os.MkdirAll(storage, 0755)
-		// loadSessions is deferred to ensureLoaded() — called on first access
 	}
 
 	return sm
 }
 
-// ensureLoaded triggers loadSessions exactly once, on the first call.
-// Must be called BEFORE acquiring sm.mu to avoid deadlock, since
-// loadSessions writes to sm.sessions directly without the mutex.
+// ensureLoaded triggers loadSessionMetadata exactly once, on the first call.
+// Must be called BEFORE acquiring sm.mu to avoid deadlock.
 func (sm *SessionManager) ensureLoaded() {
 	sm.loadOnce.Do(func() {
 		if sm.storage != "" {
-			sm.loadSessions()
+			sm.loadSessionMetadata()
 		}
 	})
 }
@@ -148,24 +169,154 @@ func (sm *SessionManager) StoragePath() string {
 	return sm.storage
 }
 
+// loadSessionFromDisk loads a full session (including messages) from disk
+// into the sessions map. Called when a session is accessed that exists in
+// metadata but not in the in-memory map.
+// Caller must hold sm.mu (write lock).
+func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
+	// Check if already loaded
+	if s, ok := sm.sessions[key]; ok {
+		return s, true
+	}
+
+	// Check if we have metadata for this session
+	_, ok := sm.sessionMeta[key]
+	if !ok {
+		return nil, false
+	}
+
+	// Load from disk
+	filename := sanitizeFilename(key)
+	sessionPath := filepath.Join(sm.storage, filename+".json")
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		// Session file may have been deleted; clean up metadata
+		delete(sm.sessionMeta, key)
+		return nil, false
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, false
+	}
+
+	// Enforce memory limit before adding a new session
+	sm.evictIfNeeded()
+
+	sm.sessions[key] = &session
+	sm.accessTimes[key] = time.Now()
+	return &session, true
+}
+
+// touchSession updates the last access time for a session.
+// Caller must hold at least sm.mu (read lock is fine for map write
+// since accessTimes is only used under the write path of evictIfNeeded).
+func (sm *SessionManager) touchSession(key string) {
+	sm.accessTimes[key] = time.Now()
+}
+
+// evictIfNeeded evicts idle sessions when the in-memory session count
+// exceeds maxInMemory. Caller must hold sm.mu (write lock).
+func (sm *SessionManager) evictIfNeeded() {
+	if sm.maxInMemory <= 0 {
+		return
+	}
+
+	// First pass: evict sessions that have been idle longer than evictionTTL
+	if sm.evictionTTL > 0 {
+		cutoff := time.Now().Add(-sm.evictionTTL)
+		for key, lastAccess := range sm.accessTimes {
+			if lastAccess.Before(cutoff) {
+				if _, ok := sm.sessions[key]; ok {
+					_ = sm.saveUnlocked(key)
+				}
+				delete(sm.sessions, key)
+				delete(sm.accessTimes, key)
+			}
+		}
+	}
+
+	// Second pass: if still over limit, evict least recently used
+	if len(sm.sessions) <= sm.maxInMemory {
+		return
+	}
+
+	// Find LRU sessions to evict
+	type sessionAccess struct {
+		key  string
+		time time.Time
+	}
+	accesses := make([]sessionAccess, 0, len(sm.accessTimes))
+	for key, t := range sm.accessTimes {
+		if _, ok := sm.sessions[key]; ok {
+			accesses = append(accesses, sessionAccess{key, t})
+		}
+	}
+	sort.Slice(accesses, func(i, j int) bool {
+		return accesses[i].time.Before(accesses[j].time)
+	})
+
+	toEvict := len(sm.sessions) - sm.maxInMemory
+	for i := 0; i < toEvict && i < len(accesses); i++ {
+		key := accesses[i].key
+		_ = sm.saveUnlocked(key)
+		delete(sm.sessions, key)
+		delete(sm.accessTimes, key)
+		logger.InfoCF("session", "LRU evicted session", map[string]interface{}{
+			"session_key": key,
+		})
+	}
+}
+
+// SetMaxInMemory sets the maximum number of sessions to keep in memory.
+// 0 means unlimited (no LRU eviction).
+func (sm *SessionManager) SetMaxInMemory(max int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.maxInMemory = max
+}
+
+// SetEvictionTTL sets how long a session must be idle before it's eligible
+// for eviction. 0 means no TTL-based eviction.
+func (sm *SessionManager) SetEvictionTTL(ttl time.Duration) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.evictionTTL = ttl
+}
+
 func (sm *SessionManager) GetOrCreate(key string) *Session {
 	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if ok {
+	// Try in-memory first
+	if session, ok := sm.sessions[key]; ok {
+		sm.touchSession(key)
 		return session
 	}
 
-	session = &Session{
+	// Try loading from disk
+	if session, ok := sm.loadSessionFromDisk(key); ok {
+		sm.touchSession(key)
+		return session
+	}
+
+	// Create new session
+	session := &Session{
 		Key:      key,
 		Messages: []providers.Message{},
 		Created:  time.Now(),
 		Updated:  time.Now(),
 	}
+	sm.evictIfNeeded()
 	sm.sessions[key] = session
-
+	sm.accessTimes[key] = time.Now()
+	// Register in metadata
+	sm.sessionMeta[key] = &sessionMetadata{
+		Key:     key,
+		Created: session.Created,
+		Updated: session.Updated,
+	}
 	return session
 }
 
@@ -217,13 +368,18 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 	session, ok := sm.sessions[sessionKey]
 	if !ok {
-		session = &Session{
-			Key:      sessionKey,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(sessionKey)
+		if !ok {
+			session = &Session{
+				Key:      sessionKey,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[sessionKey] = session
 		}
-		sm.sessions[sessionKey] = session
 	}
+	sm.touchSession(sessionKey)
 
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
 		session.Name = generateSessionName(msg.Content)
@@ -256,10 +412,15 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
+	// Try in-memory first
 	session, ok := sm.sessions[key]
+	if !ok {
+		// Try loading from disk (needs write lock, which we already hold)
+		session, ok = sm.loadSessionFromDisk(key)
+	}
 	if !ok {
 		logger.DebugCF("session", "GetHistory: session not found", map[string]interface{}{
 			"session_key": key,
@@ -267,6 +428,7 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 		return []providers.Message{}
 	}
 
+	sm.touchSession(key)
 	history := make([]providers.Message, len(session.Messages))
 	copy(history, session.Messages)
 	logger.DebugCF("session", "GetHistory: returning history", map[string]interface{}{
@@ -274,6 +436,29 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 		"messages_count": len(history),
 	})
 	return history
+}
+
+// GetHistoryView returns a read-only reference to the session's message slice.
+// The caller MUST NOT modify the returned slice or any messages in it.
+// This avoids a copy when the caller only needs to read the messages
+// (e.g., token estimation, status display).
+// For external use where the caller may modify, use GetHistory instead.
+func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Try in-memory first
+	if session, ok := sm.sessions[key]; ok {
+		sm.touchSession(key)
+		return session.Messages
+	}
+	// Try loading from disk
+	if session, ok := sm.loadSessionFromDisk(key); ok {
+		sm.touchSession(key)
+		return session.Messages
+	}
+	return []providers.Message{}
 }
 
 func (sm *SessionManager) GetSummary(key string) string {
@@ -293,11 +478,15 @@ func (sm *SessionManager) GetName(key string) string {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		return ""
+	// Try in-memory first
+	if session, ok := sm.sessions[key]; ok {
+		return session.Name
 	}
-	return session.Name
+	// Try metadata
+	if meta, ok := sm.sessionMeta[key]; ok {
+		return meta.Name
+	}
+	return ""
 }
 
 func (sm *SessionManager) GetUpdated(key string) time.Time {
@@ -305,11 +494,13 @@ func (sm *SessionManager) GetUpdated(key string) time.Time {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		return time.Time{}
+	if session, ok := sm.sessions[key]; ok {
+		return session.Updated
 	}
-	return session.Updated
+	if meta, ok := sm.sessionMeta[key]; ok {
+		return meta.Updated
+	}
+	return time.Time{}
 }
 
 func (sm *SessionManager) GetCreated(key string) time.Time {
@@ -317,11 +508,13 @@ func (sm *SessionManager) GetCreated(key string) time.Time {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		return time.Time{}
+	if session, ok := sm.sessions[key]; ok {
+		return session.Created
 	}
-	return session.Created
+	if meta, ok := sm.sessionMeta[key]; ok {
+		return meta.Created
+	}
+	return time.Time{}
 }
 
 func (sm *SessionManager) SetSummary(key string, summary string) {
@@ -330,10 +523,16 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
-	if ok {
-		session.Summary = summary
-		session.Updated = time.Now()
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
 	}
+
+	session.Summary = summary
+	session.Updated = time.Now()
+	sm.touchSession(key)
 }
 
 func (sm *SessionManager) SetName(key string, name string) error {
@@ -343,16 +542,21 @@ func (sm *SessionManager) SetName(key string, name string) error {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.Name = strings.TrimSpace(name)
 	session.Updated = time.Now()
+	sm.touchSession(key)
 
 	return sm.saveUnlocked(key)
 }
@@ -364,12 +568,16 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
 	}
 
 	if keepLast <= 0 {
 		session.Messages = []providers.Message{}
 		session.Updated = time.Now()
+		sm.touchSession(key)
 		return
 	}
 
@@ -379,6 +587,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
+	sm.touchSession(key)
 }
 
 // isToolResultMessage returns true if the message is a tool result
@@ -397,7 +606,10 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
 	}
 
 	if len(session.Messages) <= keepCount {
@@ -449,7 +661,10 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return false
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return false
+		}
 	}
 
 	if len(session.Messages) == 0 {
@@ -458,6 +673,7 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 
 	session.Messages = session.Messages[:len(session.Messages)-1]
 	session.Updated = time.Now()
+	sm.touchSession(key)
 	return true
 }
 
@@ -467,10 +683,13 @@ func (sm *SessionManager) ShouldStartFreshSession(key string, threshold time.Dur
 	}
 
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock() // write lock for loadSessionFromDisk
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+	}
 	if !ok || session == nil {
 		return false, 0
 	}
@@ -511,62 +730,49 @@ func (sm *SessionManager) Save(key string) error {
 	return sm.saveUnlocked(key)
 }
 
-func (sm *SessionManager) loadSessions() error {
+// loadSessionMetadata reads all session files but only parses lightweight
+// metadata (key, name, created, updated) — NOT the full message history.
+// This dramatically reduces startup memory for deployments with many sessions.
+// Full sessions are loaded on-demand via loadSessionFromDisk().
+func (sm *SessionManager) loadSessionMetadata() error {
 	files, err := os.ReadDir(sm.storage)
 	if err != nil {
 		return err
 	}
 
-	// Filter to JSON files only
-	var jsonFiles []os.DirEntry
 	for _, file := range files {
 		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
 			continue
 		}
-		jsonFiles = append(jsonFiles, file)
-	}
 
-	if len(jsonFiles) == 0 {
-		return nil
-	}
+		sessionPath := filepath.Join(sm.storage, file.Name())
+		data, err := os.ReadFile(sessionPath)
+		if err != nil {
+			continue
+		}
 
-	// Parallel load: read and parse files concurrently
-	type loadResult struct {
-		session *Session
-	}
-	results := make([]loadResult, len(jsonFiles))
+		// Parse only the top-level fields we need — skip the messages array.
+		var meta struct {
+			Key     string    `json:"key"`
+			Name    string    `json:"name"`
+			Created time.Time `json:"created"`
+			Updated time.Time `json:"updated"`
+		}
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
 
-	// Use a semaphore to limit concurrent file operations
-	sem := make(chan struct{}, 16)
-	var wg sync.WaitGroup
+		key := meta.Key
+		if key == "" {
+			// Fallback: derive key from filename
+			key = strings.ReplaceAll(file.Name()[:len(file.Name())-5], "_", ":")
+		}
 
-	for i, file := range jsonFiles {
-		wg.Add(1)
-		go func(idx int, name string) {
-			defer wg.Done()
-			sem <- struct{}{}        // acquire
-			defer func() { <-sem }() // release
-
-			sessionPath := filepath.Join(sm.storage, name)
-			data, err := os.ReadFile(sessionPath)
-			if err != nil {
-				return
-			}
-
-			var session Session
-			if err := json.Unmarshal(data, &session); err != nil {
-				return
-			}
-			results[idx] = loadResult{session: &session}
-		}(i, file.Name())
-	}
-
-	wg.Wait()
-
-	// Collect results into the sessions map
-	for _, r := range results {
-		if r.session != nil {
-			sm.sessions[r.session.Key] = r.session
+		sm.sessionMeta[key] = &sessionMetadata{
+			Key:     key,
+			Name:    meta.Name,
+			Created: meta.Created,
+			Updated: meta.Updated,
 		}
 	}
 
@@ -580,14 +786,20 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
-	if ok {
-		// Create a deep copy to strictly isolate internal state
-		// from the caller's slice.
-		msgs := make([]providers.Message, len(history))
-		copy(msgs, history)
-		session.Messages = msgs
-		session.Updated = time.Now()
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
 	}
+
+	// Create a deep copy to strictly isolate internal state
+	// from the caller's slice.
+	msgs := make([]providers.Message, len(history))
+	copy(msgs, history)
+	session.Messages = msgs
+	session.Updated = time.Now()
+	sm.touchSession(key)
 }
 
 func (sm *SessionManager) HasVerbosePreference(key string) bool {
@@ -624,17 +836,22 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		// Create session if it doesn't exist
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			// Create session if it doesn't exist
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.VerboseMode = enabled
 	session.Updated = time.Now()
+	sm.touchSession(key)
 
 	// Persist immediately
 	return sm.saveUnlocked(key)
@@ -670,17 +887,22 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		// Create session if it doesn't exist
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			// Create session if it doesn't exist
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.VerboseLevel = level
 	session.Updated = time.Now()
+	sm.touchSession(key)
 
 	// Persist immediately
 	return sm.saveUnlocked(key)
@@ -707,17 +929,22 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		// Create session if it doesn't exist
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			// Create session if it doesn't exist
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.Model = model
 	session.Updated = time.Now()
+	sm.touchSession(key)
 
 	// Persist immediately
 	return sm.saveUnlocked(key)
@@ -744,15 +971,20 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		session = &Session{
-			Key:     key,
-			Created: time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			session = &Session{
+				Key:     key,
+				Created: time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.ThinkingLevel = level
 	session.Updated = time.Now()
+	sm.touchSession(key)
 
 	return sm.saveUnlocked(key)
 }
@@ -760,12 +992,16 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 // GetTokenCounts returns the input and output token counts for a session.
 func (sm *SessionManager) GetTokenCounts(key string) (inputTokens, outputTokens int) {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return 0, 0
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return 0, 0
+		}
+		sm.touchSession(key)
 	}
 	return session.InputTokens, session.OutputTokens
 }
@@ -778,17 +1014,22 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
 		}
-		sm.sessions[key] = session
 	}
 
 	session.InputTokens += inputTokens
 	session.OutputTokens += outputTokens
 	session.Updated = time.Now()
+	sm.touchSession(key)
 }
 
 // ResetTokenCounts resets the input and output token counts for a session to zero.
@@ -799,12 +1040,16 @@ func (sm *SessionManager) ResetTokenCounts(key string) {
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
 	}
 
 	session.InputTokens = 0
 	session.OutputTokens = 0
 	session.Updated = time.Now()
+	sm.touchSession(key)
 }
 
 // saveUnlocked saves a session without acquiring the lock (caller must hold lock).
@@ -858,11 +1103,6 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 		snapshot.Messages = []providers.Message{}
 	}
 
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return err
-	}
-
 	sessionPath := filepath.Join(sm.storage, filename+".json")
 	tmpFile, err := os.CreateTemp(sm.storage, "session-*.tmp")
 	if err != nil {
@@ -877,7 +1117,12 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 		}
 	}()
 
-	if _, err := tmpFile.Write(data); err != nil {
+	// Stream JSON directly to the temp file instead of buffering in memory.
+	// json.Encoder writes to the file as it serializes, avoiding a full
+	// in-memory copy of the JSON representation.
+	encoder := json.NewEncoder(tmpFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(&snapshot); err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
@@ -897,6 +1142,15 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 		return err
 	}
 	cleanup = false
+
+	// Update metadata to reflect the saved state
+	sm.sessionMeta[key] = &sessionMetadata{
+		Key:     stored.Key,
+		Name:    stored.Name,
+		Created: stored.Created,
+		Updated: stored.Updated,
+	}
+
 	return nil
 }
 
@@ -962,13 +1216,20 @@ func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
-	if !ok || len(session.Messages) == 0 {
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok || len(session.Messages) == 0 {
+			return
+		}
+	}
+	if len(session.Messages) == 0 {
 		return
 	}
 
 	lastMsg := &session.Messages[len(session.Messages)-1]
 	if lastMsg.Role == "assistant" && lastMsg.Streaming {
 		session.Updated = time.Now()
+		sm.touchSession(key)
 		sm.flushStreamNow(key)
 	}
 }
@@ -977,6 +1238,8 @@ func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 // via streaming chunks this turn. Used to prevent duplicate message.stream
 // delivery. It checks the in-memory flag (set by AppendAssistantChunk and
 // cleared when a new user message arrives).
+// Note: If the session is not in memory (evicted), returns false. The session
+// will be loaded on-demand by the streaming methods.
 func (sm *SessionManager) HasStreamedContent(key string) bool {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -1005,6 +1268,8 @@ func (sm *SessionManager) HasStreamedContent(key string) bool {
 }
 
 // GetInProgressAssistant returns the in-progress assistant message, if any.
+// Note: If the session is not in memory (evicted), returns nil. The session
+// will be loaded on-demand by the streaming methods.
 func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message {
 	sm.ensureLoaded()
 	sm.mu.RLock()
@@ -1024,16 +1289,27 @@ func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message 
 }
 
 // getOrCreateUnlocked returns or creates a session (caller must hold mu).
+// Uses lazy loading to load sessions from disk on demand.
 func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 	session, ok := sm.sessions[key]
 	if !ok {
-		session = &Session{
-			Key:      key,
-			Messages: []providers.Message{},
-			Created:  time.Now(),
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
+			sm.sessionMeta[key] = &sessionMetadata{
+				Key:     key,
+				Created: session.Created,
+				Updated: session.Updated,
+			}
 		}
-		sm.sessions[key] = session
 	}
+	sm.touchSession(key)
 	return session
 }
 
@@ -1086,29 +1362,104 @@ func (sm *SessionManager) flushStreamNow(key string) {
 	sm.saveUnlocked(key)
 }
 
-// ActiveCount returns the number of sessions that have at least one message.
+// PruneExcludedMessages removes all messages marked ExcludeFromContext from
+// the in-memory slice. These messages are already persisted to disk (via Save)
+// and are stripped before sending to the LLM, so keeping them in RAM is wasteful.
+// This should be called after summarization/compaction has completed and the
+// session has been saved.
+func (sm *SessionManager) PruneExcludedMessages(key string) {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
+	}
+
+	pruned := 0
+	kept := make([]providers.Message, 0, len(session.Messages))
+	for _, msg := range session.Messages {
+		if msg.ExcludeFromContext {
+			pruned++
+			continue
+		}
+		kept = append(kept, msg)
+	}
+
+	if pruned > 0 {
+		session.Messages = kept
+		logger.InfoCF("session", "Pruned excluded messages from memory", map[string]interface{}{
+			"session_key": key,
+			"pruned":      pruned,
+			"remaining":   len(kept),
+		})
+	}
+}
+
+// EvictSession removes a session from the in-memory map.
+// The session data remains on disk and can be reloaded on demand.
+// Returns true if the session was found and evicted.
+func (sm *SessionManager) EvictSession(key string) bool {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	_, ok := sm.sessions[key]
+	if ok {
+		// Save before evicting to ensure latest state is persisted
+		_ = sm.saveUnlocked(key)
+		delete(sm.sessions, key)
+		delete(sm.accessTimes, key)
+		logger.InfoCF("session", "Session evicted from memory", map[string]interface{}{
+			"session_key": key,
+		})
+	}
+	return ok
+}
+
+// ActiveCount returns the number of sessions that exist (have metadata on disk).
 // This is useful for detecting agents with active conversations.
 func (sm *SessionManager) ActiveCount() int {
 	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	count := 0
-	for _, s := range sm.sessions {
-		if len(s.Messages) > 0 {
-			count++
-		}
-	}
-	return count
+	// Count sessions that have metadata (exist on disk)
+	return len(sm.sessionMeta)
 }
 
-// ListSessions returns a slice of all sessions loaded in memory, sorted by updated time descending.
+// ListSessions returns a slice of all sessions (including metadata-only sessions
+// not yet fully loaded into memory), sorted by updated time descending.
+// Sessions only in metadata have nil Messages — they are loaded on-demand
+// when accessed via GetOrCreate or GetHistory.
 func (sm *SessionManager) ListSessions() []*Session {
 	sm.ensureLoaded()
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	res := make([]*Session, 0, len(sm.sessions))
-	for _, s := range sm.sessions {
-		res = append(res, s)
+
+	// For sessions in memory, return the full session
+	// For sessions only in metadata, create a lightweight Session with no messages
+	res := make([]*Session, 0, len(sm.sessionMeta))
+
+	// Collect all keys from both maps
+	seen := make(map[string]bool)
+	for key := range sm.sessions {
+		seen[key] = true
+		res = append(res, sm.sessions[key])
+	}
+	for key, meta := range sm.sessionMeta {
+		if !seen[key] {
+			res = append(res, &Session{
+				Key:     meta.Key,
+				Name:    meta.Name,
+				Created: meta.Created,
+				Updated: meta.Updated,
+				// Messages is nil — not loaded
+			})
+		}
 	}
 	sort.Slice(res, func(i, j int) bool {
 		return res[i].Updated.After(res[j].Updated)
@@ -1133,15 +1484,33 @@ type SubagentSessionInfo struct {
 // SubagentManager no longer tracks them.
 func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSessionInfo {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock() // need write lock for potential loadSessionFromDisk
+	defer sm.mu.Unlock()
 
 	prefix := parentPrefix + ":subagent-"
 	var results []SubagentSessionInfo
 
-	for key, session := range sm.sessions {
-		if !strings.HasPrefix(key, prefix) {
-			continue
+	// Collect subagent keys from both metadata and in-memory sessions
+	subagentKeys := make(map[string]bool)
+	for key := range sm.sessionMeta {
+		if strings.HasPrefix(key, prefix) {
+			subagentKeys[key] = true
+		}
+	}
+	for key := range sm.sessions {
+		if strings.HasPrefix(key, prefix) {
+			subagentKeys[key] = true
+		}
+	}
+
+	// Load each matching session from disk on-demand (if not already in memory)
+	for key := range subagentKeys {
+		session, ok := sm.sessions[key]
+		if !ok {
+			session, ok = sm.loadSessionFromDisk(key)
+			if !ok {
+				continue
+			}
 		}
 
 		taskID := key[len(parentPrefix)+1:] // everything after "{parent}:"

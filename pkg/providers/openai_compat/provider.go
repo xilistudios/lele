@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/common"
@@ -25,6 +26,14 @@ type UsageInfo = protocoltypes.UsageInfo
 type Message = protocoltypes.Message
 type ToolDefinition = protocoltypes.ToolDefinition
 type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
+
+// builderPool provides reusable strings.Builder instances to reduce
+// allocations during SSE stream parsing.
+var builderPool = sync.Pool{
+	New: func() interface{} {
+		return &strings.Builder{}
+	},
+}
 
 type Provider struct {
 	apiKey     string
@@ -381,8 +390,14 @@ func asFloat(v interface{}) (float64, bool) {
 }
 
 func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk string, done bool), onReasoning func(reasoningChunk string)) (*LLMResponse, error) {
-	var contentBuf strings.Builder
-	var reasoningBuf strings.Builder
+	contentBuf := builderPool.Get().(*strings.Builder)
+	contentBuf.Reset()
+	defer builderPool.Put(contentBuf)
+
+	reasoningBuf := builderPool.Get().(*strings.Builder)
+	reasoningBuf.Reset()
+	defer builderPool.Put(reasoningBuf)
+
 	var toolCalls []protocoltypes.ToolCall
 	var finishReason string
 	var usage *protocoltypes.UsageInfo

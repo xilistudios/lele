@@ -432,7 +432,14 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit the body read to prevent unbounded memory consumption on huge pages.
+	// The raw HTML can be ~10x larger than the extracted text, so we cap at
+	// maxChars * 10 (with a minimum of 1MB).
+	readLimit := int64(maxChars) * 10
+	if readLimit < 1024*1024 {
+		readLimit = 1024 * 1024
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, readLimit))
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read response: %v", err))
 	}

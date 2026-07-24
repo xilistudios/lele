@@ -258,27 +258,18 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected summary to contain 'Summary', got: %s", summary)
 	}
 
-	// Verify messages are preserved (not deleted) — old messages are excluded from context
+	// Verify messages are preserved on disk but excluded messages are pruned
+	// from the in-memory slice (they waste RAM since they're already saved
+	// to disk and stripped before sending to the LLM).
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	if len(afterHistory) != beforeCount {
-		t.Errorf("Expected all %d messages preserved after compaction, got %d", beforeCount, len(afterHistory))
+	// After pruning, only the 2 context-included messages remain in memory.
+	if len(afterHistory) != 2 {
+		t.Errorf("Expected 2 messages remaining in memory after pruning excluded, got %d", len(afterHistory))
 	}
 
-	contextCount := 0
 	for _, m := range afterHistory {
-		if !m.ExcludeFromContext {
-			contextCount++
-		}
-	}
-	if contextCount != 2 {
-		t.Errorf("Expected 2 context-included messages after compaction, got %d", contextCount)
-	}
-	for i, m := range afterHistory {
-		if i < beforeCount-2 && !m.ExcludeFromContext {
-			t.Errorf("Expected message %d to be excluded from context", i)
-		}
-		if i >= beforeCount-2 && m.ExcludeFromContext {
-			t.Errorf("Expected message %d to be included in context", i)
+		if m.ExcludeFromContext {
+			t.Errorf("Expected all remaining messages to be included in context")
 		}
 	}
 }
@@ -446,28 +437,17 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 		stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
 
-	// Assert: old messages are excluded from context; last 2 continuity
-	// messages remain included.
+	// Assert: old excluded messages are pruned from the in-memory slice;
+	// only the last 2 continuity messages remain.
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	if len(afterHistory) != beforeCount {
-		t.Fatalf("Expected all %d messages preserved (not deleted), got %d", beforeCount, len(afterHistory))
+	if len(afterHistory) != 2 {
+		t.Fatalf("Expected 2 messages remaining in memory after pruning excluded, got %d", len(afterHistory))
 	}
 
-	// Exactly 2 messages should still be in context (the last 2).
-	contextCount := 0
+	// All remaining messages should be in context (none excluded).
 	for _, m := range afterHistory {
-		if !m.ExcludeFromContext {
-			contextCount++
-		}
-	}
-	if contextCount != 2 {
-		t.Errorf("Expected 2 messages in context after compaction, got %d", contextCount)
-	}
-
-	// The last 2 messages (continuity window) must NOT be excluded.
-	for i := beforeCount - 2; i < beforeCount; i++ {
-		if afterHistory[i].ExcludeFromContext {
-			t.Errorf("Expected last-2 message [%d] to be included in context, but ExcludeFromContext=true", i)
+		if m.ExcludeFromContext {
+			t.Errorf("Expected all remaining messages to be included in context")
 		}
 	}
 

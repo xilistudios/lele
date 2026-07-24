@@ -332,7 +332,7 @@ func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 		return "No default agent configured."
 	}
 
-	history := agent.Sessions.GetHistory(sessionKey)
+	history := agent.Sessions.GetHistoryView(sessionKey)
 	if len(history) <= 4 {
 		return "📭 Not enough messages to compact (need 5+)."
 	}
@@ -650,7 +650,7 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 	}
 
 	// Get history and estimate its token count
-	history := agent.Sessions.GetHistory(resolvedSessionKey)
+	history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 	historyTokens := ap.al.sessionManager.EstimateTokens(history)
 
 	// Get summary and estimate its token count

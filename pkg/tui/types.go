@@ -218,6 +218,12 @@ type Model struct {
 	renderedBaseKey      string // session key the cache belongs to
 	renderedBaseMsgCount int    // number of history messages when cache was built
 
+	// Virtualized rendering: only render messages visible in the viewport
+	// plus a small buffer above/below for smooth scrolling.
+	renderedMsgStartIdx int // first message index included in renderedBase
+	renderedMsgEndIdx   int // last message index included in renderedBase (exclusive)
+	maxRenderedMessages int // max messages to render at once (0 = unlimited, backward compat)
+
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget
 

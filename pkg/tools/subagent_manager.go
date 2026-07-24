@@ -32,6 +32,7 @@ type SubagentManager struct {
 	sessionRecorder       SessionRecorder
 	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
 	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
+	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
 	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
 }
@@ -140,6 +141,16 @@ func (sm *SubagentManager) SetRegisterSessionCancelCallback(callback func(sessio
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.registerSessionCancel = callback
+}
+
+// SetSessionEvictCallback sets a callback that is called when a terminal
+// subagent task is cleaned up. The callback receives the subagent's session
+// key so the owner can evict the session from the in-memory SessionManager,
+// freeing RAM. The session data remains on disk.
+func (sm *SubagentManager) SetSessionEvictCallback(callback func(sessionKey string)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionEvictCallback = callback
 }
 
 // RegisterTool registers a tool for subagent execution.
@@ -353,12 +364,18 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	thresholdMs := int64(sm.retentionPeriod / time.Millisecond)
 	removed := 0
 
+	evictCallback := sm.sessionEvictCallback
 	for taskID, task := range sm.tasks {
 		if !isSubagentTerminalStatus(task.Status) {
 			continue
 		}
 		// Use Updated timestamp — it's set when the task reaches terminal state
 		if now-task.Updated > thresholdMs {
+			// Evict the subagent's session from memory before deleting the task
+			if evictCallback != nil {
+				sessionKey := task.OriginSessionKey + ":" + taskID
+				evictCallback(sessionKey)
+			}
 			delete(sm.tasks, taskID)
 			removed++
 		}

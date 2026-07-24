@@ -123,6 +123,33 @@ func (p *BackgroundProcess) ExitInfo() string {
 	return ""
 }
 
+// releaseBuffers truncates the stdout/stderr buffers to a small snapshot
+// (64KB each) to free memory after the process has terminated.
+// This must be called while holding the process mutex.
+func (p *BackgroundProcess) releaseBuffers() {
+	const maxRetainedOutput = 64 * 1024 // 64KB
+
+	// Truncate stdout
+	if p.stdout != nil {
+		out := p.stdout.String()
+		if len(out) > maxRetainedOutput {
+			out = out[len(out)-maxRetainedOutput:]
+		}
+		p.stdout = newThreadSafeBuffer(0)
+		p.stdout.buf.WriteString(out)
+	}
+
+	// Truncate stderr
+	if p.stderr != nil {
+		errOut := p.stderr.String()
+		if len(errOut) > maxRetainedOutput {
+			errOut = errOut[len(errOut)-maxRetainedOutput:]
+		}
+		p.stderr = newThreadSafeBuffer(0)
+		p.stderr.buf.WriteString(errOut)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // BackgroundProcessManager – manages background processes (thread-safe)
 // ---------------------------------------------------------------------------
@@ -139,7 +166,7 @@ func NewBackgroundProcessManager() *BackgroundProcessManager {
 	return &BackgroundProcessManager{
 		processes:       make(map[string]*BackgroundProcess),
 		nextID:          1,
-		retentionPeriod: 10 * time.Minute,
+		retentionPeriod: 5 * time.Minute,
 	}
 }
 
@@ -258,6 +285,7 @@ func (m *BackgroundProcessManager) Stop(id string) bool {
 	p.mu.Lock()
 	p.Status = BgExecStatusStopped
 	p.EndTime = &now
+	p.releaseBuffers()
 	p.mu.Unlock()
 
 	return true
@@ -282,6 +310,7 @@ func (m *BackgroundProcessManager) StopAll() int {
 			p.mu.Lock()
 			p.Status = BgExecStatusStopped
 			p.EndTime = &now
+			p.releaseBuffers()
 			p.mu.Unlock()
 
 			count++
@@ -312,6 +341,7 @@ func (m *BackgroundProcessManager) MarkCompleted(id string, exitCode int) {
 	}
 	p.ExitCode = exitCode
 	p.EndTime = &now
+	p.releaseBuffers()
 }
 
 // CleanupTerminal removes terminal (non-running) processes older than the

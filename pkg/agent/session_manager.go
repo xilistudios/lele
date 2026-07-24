@@ -183,7 +183,7 @@ func (sm *sessionManagerImpl) IsSessionProcessing(sessionKey string) bool {
 // the compaction would only trigger based on history tokens, ignoring the
 // potentially large system prompt.
 func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) *SummarizeStats {
-	newHistory := agent.Sessions.GetHistory(sessionKey)
+	newHistory := agent.Sessions.GetHistoryView(sessionKey)
 
 	// Resolve the effective context window for this session, honoring session
 	// model overrides and provider model config (falls back to agent.ContextWindow
@@ -334,7 +334,7 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 // forceCompression marks old messages as excluded from context when the limit is hit.
 // It marks the oldest 50% of messages (keeping the last user message included).
 func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey string) {
-	history := agent.Sessions.GetHistory(sessionKey)
+	history := agent.Sessions.GetHistoryView(sessionKey)
 	if len(history) <= 4 {
 		return
 	}
@@ -354,6 +354,8 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	// (they remain in storage for the web UI)
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
 	agent.Sessions.Save(sessionKey)
+	// Prune excluded messages from RAM — they're already saved to disk.
+	agent.Sessions.PruneExcludedMessages(sessionKey)
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]interface{}{
 		"session_key":  sessionKey,
@@ -475,7 +477,7 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	history := agent.Sessions.GetHistory(sessionKey)
+	history := agent.Sessions.GetHistoryView(sessionKey)
 	existingSummary := agent.Sessions.GetSummary(sessionKey)
 	historyForSummary := stripSummaryMessages(history)
 	// Filter out messages already excluded from context (from previous
@@ -655,9 +657,12 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 
 	agent.Sessions.Save(sessionKey)
+	// Prune excluded messages from RAM — they're already saved to disk
+	// and only waste memory keeping them in the in-memory slice.
+	agent.Sessions.PruneExcludedMessages(sessionKey)
 
 	// Calculate after stats
-	afterHistory := agent.Sessions.GetHistory(sessionKey)
+	afterHistory := agent.Sessions.GetHistoryView(sessionKey)
 	contextAfter := countContextMessages(afterHistory)
 	afterTokens := sm.EstimateTokens(afterHistory)
 
