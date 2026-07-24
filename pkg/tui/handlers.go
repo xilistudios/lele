@@ -426,15 +426,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// Refresh the list
 						return m, m.executeCommand("/bg")
 					}
-				}
-			}
-			// Restart tick animation if the target session is actively processing.
-			// This keeps the loading dots when switching to a busy session/subagent.
+				}		}
+		// Forward keystrokes to textInput for form-based modals
+		// so users can type in the input fields.
+		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+			var cmd tea.Cmd
+			m.textInput, cmd = m.textInput.Update(msg)
 			if m.isSessionProcessing() {
-				return m, m.tickCmd()
+				return m, tea.Batch(cmd, m.tickCmd())
 			}
-			return m, nil
+			return m, cmd
 		}
+		// Restart tick animation if the target session is actively processing.
+		// This keeps the loading dots when switching to a busy session/subagent.
+		if m.isSessionProcessing() {
+			return m, m.tickCmd()
+		}
+		return m, nil
+	}
 
 		if m.showAutocomplete {
 			switch msg.String() {
