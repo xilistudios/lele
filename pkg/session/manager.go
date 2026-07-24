@@ -232,6 +232,11 @@ func (sm *SessionManager) evictIfNeeded() {
 				}
 				delete(sm.sessions, key)
 				delete(sm.accessTimes, key)
+				// Also clean up sessionMeta for evicted sessions whose
+				// underlying file no longer exists or is stale.
+				// Keep metadata for sessions that still exist on disk
+				// (needed for ListSessions), but only if the session
+				// might be reloaded. We keep it — metadata is tiny.
 			}
 		}
 	}
@@ -266,6 +271,70 @@ func (sm *SessionManager) evictIfNeeded() {
 			"session_key": key,
 		})
 	}
+}
+
+// CleanupIdleSessions evicts sessions that have been idle longer than evictionTTL.
+// Unlike evictIfNeeded, this runs unconditionally (not just when adding new sessions).
+// Should be called periodically (e.g., via a background goroutine) to ensure
+// idle sessions are evicted even when no new sessions are being created.
+func (sm *SessionManager) CleanupIdleSessions() int {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	evicted := 0
+	if sm.evictionTTL > 0 {
+		cutoff := time.Now().Add(-sm.evictionTTL)
+		for key, lastAccess := range sm.accessTimes {
+			if lastAccess.Before(cutoff) {
+				if _, ok := sm.sessions[key]; ok {
+					_ = sm.saveUnlocked(key)
+				}
+				delete(sm.sessions, key)
+				delete(sm.accessTimes, key)
+				evicted++
+			}
+		}
+	}
+
+	// Also clean up orphaned sessionMeta entries: metadata for sessions
+	// whose files no longer exist on disk.
+	if sm.storage != "" {
+		for key := range sm.sessionMeta {
+			filename := sanitizeFilename(key)
+			sessionPath := filepath.Join(sm.storage, filename+".json")
+			if _, err := os.Stat(sessionPath); err != nil {
+				delete(sm.sessionMeta, key)
+			}
+		}
+	}
+
+	if evicted > 0 {
+		logger.InfoCF("session", "Idle sessions cleaned up", map[string]interface{}{
+			"evicted": evicted,
+		})
+	}
+	return evicted
+}
+
+// StartCleanupGoroutine launches a background goroutine that periodically
+// calls CleanupIdleSessions. Returns a stop function that terminates the
+// goroutine. The interval should be shorter than evictionTTL for timely cleanup.
+func (sm *SessionManager) StartCleanupGoroutine(interval time.Duration) func() {
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				sm.CleanupIdleSessions()
+			}
+		}
+	}()
+	return func() { close(stop) }
 }
 
 // SetMaxInMemory sets the maximum number of sessions to keep in memory.
@@ -1418,6 +1487,14 @@ func (sm *SessionManager) EvictSession(key string) bool {
 			"session_key": key,
 		})
 	}
+
+	// For subagent sessions (key contains ":subagent-"), also remove
+	// sessionMeta to prevent unbounded metadata growth. Subagent sessions
+	// are transient — once evicted, they should not be reloaded.
+	if strings.Contains(key, ":subagent-") {
+		delete(sm.sessionMeta, key)
+	}
+
 	return ok
 }
 
