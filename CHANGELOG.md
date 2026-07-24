@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-23
+
+### Added
+
+#### TUI
+- Provider management: `/providers`, `/connect`, `/add-model` commands with multi-step forms to list, add, and delete providers/models; all changes persist to config
+- Background process viewer (`/bg`): list, inspect real-time output, and stop background exec processes
+- Command approval system: inline prompt for dangerous shell commands matched by `denyPatterns`; user can approve (y) or reject (n/ESC) with 5-minute timeout
+- Clipboard copy (Ctrl+Y): copies last assistant message via OSC 52 with xclip/xsel/wl-copy/pbcopy fallback
+- Mouse capture starts OFF by default so native terminal text selection works out of the box (toggle with Ctrl+T)
+- i18n strings for all new features (en, es, pt)
+
+#### WebUI
+- Background process page with expandable cards, color-coded status badges, terminal-style output viewer, stop button, and SSE real-time streaming
+- Compaction events rendered as tool cards instead of plain text (tool.executing + tool.result)
+
+#### Backend
+- Better provider cooldown logging
+
+### Fixed
+
+#### TUI
+- Forward keystrokes to textInput in form modals so text input works inside multi-step forms
+- Correct indentation and brace placement for textInput forwarding
+- Restore persisted session model before falling back to agent default, preventing model drift on session reload
+
+#### Subagents
+- Use configured `subagents.model` override instead of always inheriting the parent agent's model
+
+#### Performance & Stability
+- Cap RAM usage for subagents with background execs: 1MB ring buffer per process, max 3 concurrent subagents, 20 process limit, 50K char tool result truncation
+- Compaction no longer fails on reasoning models that have deprecated the temperature parameter; options are now built from the session's model config
+
+#### Configuration
+- Respect `-c`/`--config-dir` flag in logger, auth store, Telegram offset file, and config defaults (5 locations previously hardcoded `~/.lele`)
+
+### Changed
+
+#### Performance
+- TUI startup is 386x faster on subsequent launches via `_index.json` metadata cache (~3ms vs ~1.2s); first startup is 10x faster via parallel loading (min(NumCPU, 16) workers)
+- Background session cleanup goroutine evicts idle sessions every 5 min and sweeps orphaned subagent metadata
+- Lazy session loading: only metadata loads on startup, full messages load on-demand
+- LRU session eviction: max 50 sessions in memory with 30-min idle TTL
+- Prune excluded messages from RAM after summarization/compaction (kept on disk)
+- Reduce background exec retention from 10 min to 5 min; truncate stdout/stderr to 64 KB on completion
+- Pool strings.Builder in SSE stream parsers (Anthropic + OpenAI compat)
+- Virtualized TUI rendering: only last 200 messages rendered
+
 ## [0.2.2] - 2026-07-22
 
 ### Added
