@@ -505,6 +505,11 @@ func (al *AgentLoop) SetApprovalManager(am *channels.ApprovalManager) {
 	al.approvalManager = am
 }
 
+// GetApprovalManager returns the approval manager for command approvals.
+func (al *AgentLoop) GetApprovalManager() *channels.ApprovalManager {
+	return al.approvalManager
+}
+
 // RecordLastChannel records the last active channel for this workspace.
 // This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChannel(channel string) error {

@@ -81,5 +81,11 @@
   "tui.modelDeleted": "Model deleted",
   "tui.formEnter": "ENTER: next | ESC: cancel",
   "tui.addModelAction": "+ Add model",
-  "tui.deleteProviderAction": "- Delete provider"
+  "tui.deleteProviderAction": "- Delete provider",
+  "tui.approvalRequired": "Command approval required",
+  "tui.approvalReason": "Reason",
+  "tui.approvalApprove": "Approve",
+  "tui.approvalReject": "Reject",
+  "tui.approvalApproved": "Command approved — executing...",
+  "tui.approvalRejected": "Command rejected"
 }

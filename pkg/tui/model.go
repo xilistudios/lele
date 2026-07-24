@@ -243,6 +243,12 @@ func (m *Model) clearStreamingState() {
 	m.escHint = false
 	m.escPressCount = 0
 	m.escLastPress = time.Time{}
+
+	// Clear pending approval state when switching sessions
+	m.pendingApprovalID = ""
+	m.pendingApprovalCmd = ""
+	m.pendingApprovalReason = ""
+	m.approvalResult = ""
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
 	}
