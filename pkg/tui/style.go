@@ -209,6 +209,24 @@ var (
 
 	ModelSelectorLabel = lipgloss.NewStyle().
 				Foreground(CommentColor)
+
+	// ApprovalBox styles the pending command approval prompt in the viewport.
+	ApprovalBox = lipgloss.NewStyle().
+			Foreground(YellowColor).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(YellowColor).
+			Background(InputBgColor).
+			Padding(1, 2)
+
+	// ApprovalApproved styles the "approved" result message.
+	ApprovalApproved = lipgloss.NewStyle().
+				Foreground(SecondaryColor).
+				Bold(true)
+
+	// ApprovalRejected styles the "rejected" result message.
+	ApprovalRejected = lipgloss.NewStyle().
+				Foreground(PrimaryColor).
+				Bold(true)
 )
 
 func SidebarLabelValue(label, value string) string {

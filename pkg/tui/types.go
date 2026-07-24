@@ -238,4 +238,12 @@ type Model struct {
 	// compactFeedback holds the result of /compact to display in the viewport.
 	// Cleared when the user sends the next message.
 	compactFeedback string
+
+	// Pending command approval state — set when the agent requests approval
+	// for a potentially dangerous exec command. The user must approve (y) or
+	// reject (n) before the agent can continue.
+	pendingApprovalID     string
+	pendingApprovalCmd    string
+	pendingApprovalReason string
+	approvalResult        string // brief feedback after user decision ("✅ ..." or "❌ ...")
 }

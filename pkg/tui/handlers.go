@@ -446,6 +446,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle command approval when pending — intercept keys before normal input.
+		// The agent is blocked waiting for the user's decision, so this takes priority
+		// over typing new messages. Scrolling is still allowed to review context.
+		if m.pendingApprovalID != "" && m.modalMode == ModalNone {
+			switch msg.String() {
+			case "y", "Y":
+				m.handleApproval(true)
+				return m, nil
+			case "n", "N", "esc":
+				m.handleApproval(false)
+				return m, nil
+			case "up", "down", "pgup", "pgdown":
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd
+			}
+			// Block all other input while approval is pending
+			return m, nil
+		}
+
 		if m.showAutocomplete {
 			switch msg.String() {
 			case "up", "ctrl+k":
@@ -662,6 +682,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastDuration = 0
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())
+			case "approval.request":
+				// Command approval requested by the agent — store the pending
+				// approval and update the viewport to show the prompt.
+				m.pendingApprovalID = msg.msg.Metadata["id"]
+				m.pendingApprovalCmd = msg.msg.Metadata["command"]
+				m.pendingApprovalReason = msg.msg.Metadata["reason"]
+				m.approvalResult = ""
+				m.updateViewport()
 			case "message.stream":
 				// Clear pending user message on first stream chunk — by the time
 				// the LLM starts streaming, the user message is already in history.
@@ -710,6 +738,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tool.result":
 				// Tool completed; clear the active tool action display.
 				m.currentToolAction = ""
+				// Clear any approval result feedback when the tool completes.
+				m.approvalResult = ""
 				// When a spawn tool completes, clear its subagent progress entry.
 				if msg.msg.Metadata["tool"] == "spawn" {
 					if saKey := msg.msg.Metadata["subagent_session_key"]; saKey != "" {
@@ -991,4 +1021,26 @@ func isListModal(mode modalType) bool {
 	default:
 		return true
 	}
+}
+
+// handleApproval processes the user's approval/rejection decision for a
+// pending command approval. It calls the approval manager to unblock the
+// agent goroutine and clears the pending state.
+func (m *Model) handleApproval(approved bool) {
+	if m.pendingApprovalID == "" {
+		return
+	}
+	am := m.agentLoop.GetApprovalManager()
+	if am != nil {
+		am.HandleApproval(m.pendingApprovalID, approved)
+	}
+	if approved {
+		m.approvalResult = ApprovalApproved.Render("✅ " + i18n.T("tui.approvalApproved"))
+	} else {
+		m.approvalResult = ApprovalRejected.Render("❌ " + i18n.T("tui.approvalRejected"))
+	}
+	m.pendingApprovalID = ""
+	m.pendingApprovalCmd = ""
+	m.pendingApprovalReason = ""
+	m.updateViewport()
 }

@@ -81,5 +81,11 @@
   "tui.modelDeleted": "Modelo eliminado",
   "tui.formEnter": "ENTER: siguiente | ESC: cancelar",
   "tui.addModelAction": "+ Agregar modelo",
-  "tui.deleteProviderAction": "- Eliminar provider"
+  "tui.deleteProviderAction": "- Eliminar provider",
+  "tui.approvalRequired": "Aprobación de comando requerida",
+  "tui.approvalReason": "Razón",
+  "tui.approvalApprove": "Aprobar",
+  "tui.approvalReject": "Rechazar",
+  "tui.approvalApproved": "Comando aprobado — ejecutando...",
+  "tui.approvalRejected": "Comando rechazado"
 }

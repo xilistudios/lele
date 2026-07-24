@@ -89,6 +89,16 @@ func (m *Model) updateViewport() {
 		sb.WriteString("\n")
 	}
 
+	// Show pending command approval prompt
+	if m.pendingApprovalID != "" {
+		sb.WriteString(m.renderApprovalPrompt())
+	}
+
+	// Show brief approval result feedback (after user decision, before tool result)
+	if m.approvalResult != "" {
+		sb.WriteString(m.approvalResult + "\n\n")
+	}
+
 	// Show compaction result feedback
 	if m.compactFeedback != "" {
 		sb.WriteString(m.compactFeedback + "\n\n")
@@ -188,6 +198,19 @@ func (m *Model) buildRenderedHistory() string {
 	}
 
 	return sb.String()
+}
+
+// renderApprovalPrompt builds the inline approval prompt shown in the viewport
+// when a command requires user approval.
+func (m *Model) renderApprovalPrompt() string {
+	var sb strings.Builder
+	sb.WriteString("⚠️  " + i18n.T("tui.approvalRequired") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%s\n", m.pendingApprovalCmd))
+	if m.pendingApprovalReason != "" {
+		sb.WriteString(fmt.Sprintf("\n%s: %s\n", i18n.T("tui.approvalReason"), m.pendingApprovalReason))
+	}
+	sb.WriteString(fmt.Sprintf("\n[y] %s  [n] %s", i18n.T("tui.approvalApprove"), i18n.T("tui.approvalReject")))
+	return ApprovalBox.Render(sb.String()) + "\n\n"
 }
 
 // lastHistoryRole returns the role of the last non-system message in history.
