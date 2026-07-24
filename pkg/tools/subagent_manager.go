@@ -328,7 +328,10 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	task, ok := sm.tasks[taskID]
-	return task, ok
+	if !ok {
+		return nil, false
+	}
+	return task.Snapshot(), true
 }
 
 // MarkDelivered atomically marks a task's result as delivered.
@@ -390,7 +393,7 @@ func (sm *SubagentManager) ListTasks() []*SubagentTask {
 
 	tasks := make([]*SubagentTask, 0, len(sm.tasks))
 	for _, task := range sm.tasks {
-		tasks = append(tasks, task)
+		tasks = append(tasks, task.Snapshot())
 	}
 	return tasks
 }

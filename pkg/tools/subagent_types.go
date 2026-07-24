@@ -44,6 +44,28 @@ func (task *SubagentTask) DoneChannel() <-chan struct{} {
 	return task.doneCh
 }
 
+// Snapshot returns a deep copy of the task safe for reading without holding
+// the manager's lock.  Value fields (strings, ints, bools) are copied by
+// the struct assignment.  Slice fields (Guidance, Dependencies) get fresh
+// backing arrays so the snapshot cannot alias the live task's storage.
+// The doneCh channel reference is preserved — the snapshot shares the same
+// channel the runner will close, so event-driven waiting keeps working.
+func (task *SubagentTask) Snapshot() *SubagentTask {
+	cp := *task // shallow copy (values + channel ref)
+	if task.Guidance != nil {
+		cp.Guidance = make([]string, len(task.Guidance))
+		copy(cp.Guidance, task.Guidance)
+	}
+	if task.Dependencies != nil {
+		cp.Dependencies = make([]string, len(task.Dependencies))
+		copy(cp.Dependencies, task.Dependencies)
+	}
+	// doneCh is a channel reference — keep the same underlying channel so
+	// that select { case <-doneCh } in waiters still works when the runner
+	// closes it.
+	return &cp
+}
+
 // IsPending returns true if the task has unmet dependencies and hasn't started yet.
 func (task *SubagentTask) IsPending() bool {
 	return task.Status == SubagentStatusPending
