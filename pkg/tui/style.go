@@ -228,8 +228,7 @@ var (
 				Foreground(PrimaryColor).
 				Bold(true)
 
-	// Group turn styles for Mixture of Agents rendering.
-	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
+		// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
 	GroupTurnHeader = lipgloss.NewStyle().
 			Foreground(PurpleColor).
 			Bold(true)

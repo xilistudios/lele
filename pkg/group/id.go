@@ -1,5 +1,3 @@
-// Package group implements multi-agent collaboration ("Mixture of Agents").
-// id.go provides collision-resistant group ID generation.
 package group
 
 import (

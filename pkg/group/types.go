@@ -1,6 +1,3 @@
-// Package group implements multi-agent collaboration ("Mixture of Agents").
-// It defines the shared types and state for group conversations where
-// multiple agents collaborate in a shared transcript.
 package group
 
 import (
@@ -26,44 +23,44 @@ const (
 
 // Participant represents an agent with a role within a group.
 type Participant struct {
-	AgentID string // resolved against AgentRegistry
-	Role    string // proposer | aggregator | moderator | critic | ""
-	Label   string // display name shown in the transcript
+	AgentID string `json:"agent_id"`        // resolved against AgentRegistry
+	Role    string `json:"role,omitempty"`  // proposer | aggregator | moderator | critic | ""
+	Label   string `json:"label,omitempty"` // display name shown in the transcript
 }
 
 // Turn represents a single intervention in the shared transcript.
 type Turn struct {
-	Index     int       // sequential turn number within the group
-	Layer     int       // MoA layer (0..L); 0 for round_robin/pipeline
-	Speaker   string    // AgentID of the participant who spoke
-	Label     string    // display label of the speaker
-	Content   string    // the actual text produced
-	CreatedAt time.Time // when this turn was created
-	Tokens    int       // token count for this turn
+	Index     int       `json:"index"`           // sequential turn number within the group
+	Layer     int       `json:"layer"`           // MoA layer (0..L); 0 for round_robin/pipeline
+	Speaker   string    `json:"speaker"`         // AgentID of the participant who spoke
+	Label     string    `json:"label,omitempty"` // display label of the speaker
+	Content   string    `json:"content"`         // the actual text produced
+	CreatedAt time.Time `json:"created_at"`      // when this turn was created
+	Tokens    int       `json:"tokens"`          // token count for this turn
 }
 
 // GroupState holds the live and persistable state of a group conversation.
 type GroupState struct {
-	ID           string        // unique group identifier (e.g. "group:<id>")
-	ProfileID    string        // GroupProfile that started this group
-	Task         string        // the objective/prompt for the group
-	Participants []Participant // agents participating in this group
-	Strategy     string        // name of the strategy driving the group
-	Transcript   []Turn        // ordered shared transcript
-	Status       string        // running | done | stopped | error
-	CreatedAt    time.Time     // when the group was created
-	UpdatedAt    time.Time     // last modification time
-	TotalTokens  int           // cumulative token count across all turns
+	ID           string        `json:"id"`           // unique group identifier (e.g. "group:<id>")
+	ProfileID    string        `json:"profile_id"`   // GroupProfile that started this group
+	Task         string        `json:"task"`         // the objective/prompt for the group
+	Participants []Participant `json:"participants"` // agents participating in this group
+	Strategy     string        `json:"strategy"`     // name of the strategy driving the group
+	Transcript   []Turn        `json:"transcript"`   // ordered shared transcript
+	Status       string        `json:"status"`       // running | done | stopped | error
+	CreatedAt    time.Time     `json:"created_at"`   // when the group was created
+	UpdatedAt    time.Time     `json:"updated_at"`   // last modification time
+	TotalTokens  int           `json:"total_tokens"` // cumulative token count across all turns
 
 	// Runtime configuration (populated from GroupProfile at group start).
 	// Strategies read these from GroupState since StrategyFactory receives no params.
-	Rounds           int      // MoA layers / round_robin cycles; 0 = unlimited (capped by MaxTurns)
-	MaxTurns         int      // hard cap on total turns; 0 = unlimited
-	Parallel         bool     // whether proposers within a layer speak in parallel
-	Moderator        string   // agent ID of the aggregator/moderator
-	StopKeywords     []string // keywords that trigger convergence
-	MaxTokensPerTurn int      // per-turn token cap (informational for the runner)
-	TotalTokenBudget int      // hard cap on TotalTokens; 0 = unlimited
+	Rounds           int      `json:"rounds"`                        // MoA layers / round_robin cycles; 0 = unlimited (capped by MaxTurns)
+	MaxTurns         int      `json:"max_turns"`                     // hard cap on total turns; 0 = unlimited
+	Parallel         bool     `json:"parallel"`                      // whether proposers within a layer speak in parallel
+	Moderator        string   `json:"moderator,omitempty"`           // agent ID of the aggregator/moderator
+	StopKeywords     []string `json:"stop_keywords,omitempty"`       // keywords that trigger convergence
+	MaxTokensPerTurn int      `json:"max_tokens_per_turn,omitempty"` // per-turn token cap (informational for the runner)
+	TotalTokenBudget int      `json:"total_token_budget,omitempty"`  // hard cap on TotalTokens; 0 = unlimited
 }
 
 // AddTurn appends a turn to the transcript, updates UpdatedAt, and

@@ -199,7 +199,6 @@ func (gm *GroupManager) executeParallel(ctx context.Context, mg *managedGroup, s
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, speaker := range speakers {
-		speaker := speaker // capture
 		g.Go(func() error {
 			return gm.executeSpeaker(gctx, mg, speaker, layer)
 		})

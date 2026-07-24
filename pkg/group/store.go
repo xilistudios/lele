@@ -1,5 +1,3 @@
-// Package group implements multi-agent collaboration ("Mixture of Agents").
-// store.go provides JSON-based persistence for GroupState.
 package group
 
 import (
