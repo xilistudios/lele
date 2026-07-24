@@ -53,6 +53,9 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	// Copiar bindings
 	cfg.Bindings = doc.Bindings
 
+	// Copiar groups
+	cfg.Groups = doc.Groups
+
 	// Copiar channels
 	cfg.Channels.WhatsApp = WhatsAppConfig(doc.Channels.WhatsApp)
 	cfg.Channels.Telegram = TelegramConfig{
@@ -263,6 +266,11 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	// Bindings
 	if len(doc.Bindings) > 0 {
 		result["bindings"] = doc.Bindings
+	}
+
+	// Groups
+	if len(doc.Groups.List) > 0 {
+		result["groups"] = doc.Groups
 	}
 
 	// Channels
@@ -553,6 +561,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	}
 	doc.Session = EditableSessionConfig(cfg.Session)
 	doc.Bindings = append([]AgentBinding(nil), cfg.Bindings...)
+	doc.Groups = cfg.Groups
 	doc.Channels = EditableChannelsConfig{
 		WhatsApp: EditableWhatsAppConfig(cfg.Channels.WhatsApp),
 		Telegram: EditableTelegramConfig{Enabled: cfg.Channels.Telegram.Enabled, Token: literalOrEmptySecret(cfg.Channels.Telegram.Token), Proxy: cfg.Channels.Telegram.Proxy, AllowFrom: cfg.Channels.Telegram.AllowFrom, Verbose: cfg.Channels.Telegram.Verbose},

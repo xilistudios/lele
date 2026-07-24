@@ -252,6 +252,8 @@ func (m *Model) clearStreamingState() {
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
 	}
+	// Clear active group display when switching sessions (group maps persist)
+	m.activeGroupID = ""
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
 	m.renderedBase = ""
 	m.renderedBaseKey = ""

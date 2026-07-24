@@ -4,23 +4,29 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
+import { useGroups } from '../../hooks/useGroups'
 import { useSubagents } from '../../hooks/useSubagents'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
+import { GroupsIndicator } from '../atoms/GroupsIndicator'
 import { ChevronLeftIcon, SidebarToggleIcon } from '../atoms/Icons'
 import { SubagentsIndicator } from '../atoms/SubagentsIndicator'
+import { GroupChatPanel } from './GroupChatPanel'
 import { SubagentsSidebar } from './SubagentsSidebar'
 
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar } = useAppLogicContext()
+  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar, groups } =
+    useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
+  const [groupsPanelOpen, setGroupsPanelOpen] = useState(false)
 
   const { subagents, loading } = useSubagents(currentSessionKey)
+  const { groups: sessionGroups } = useGroups(groups, currentSessionKey)
 
   const handleToggleSubagents = useCallback(() => {
     setSubagentsSidebarOpen((prev) => !prev)
@@ -28,6 +34,14 @@ export const ChatHeader = memo(function ChatHeader() {
 
   const handleCloseSubagents = useCallback(() => {
     setSubagentsSidebarOpen(false)
+  }, [])
+
+  const handleToggleGroups = useCallback(() => {
+    setGroupsPanelOpen((prev) => !prev)
+  }, [])
+
+  const handleCloseGroups = useCallback(() => {
+    setGroupsPanelOpen(false)
   }, [])
 
   const handleSelectSubagent = useCallback(
@@ -84,6 +98,9 @@ export const ChatHeader = memo(function ChatHeader() {
         </div>
 
         <div className="flex items-center gap-1">
+          {sessionGroups.length > 0 && (
+            <GroupsIndicator count={sessionGroups.length} onClick={handleToggleGroups} />
+          )}
           <SubagentsIndicator count={subagents.length} onClick={handleToggleSubagents} />
           <ContextIndicator />
           <ConnectionIndicator status={wsStatus} apiUrl={apiUrl} />
@@ -97,6 +114,8 @@ export const ChatHeader = memo(function ChatHeader() {
         onClose={handleCloseSubagents}
         onSelectSubagent={handleSelectSubagent}
       />
+
+      <GroupChatPanel groups={sessionGroups} isOpen={groupsPanelOpen} onClose={handleCloseGroups} />
     </>
   )
 })

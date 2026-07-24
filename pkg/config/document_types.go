@@ -29,6 +29,7 @@ type EditableDocument struct {
 	Agents    EditableAgentsConfig    `json:"agents"`
 	Session   EditableSessionConfig   `json:"session,omitempty"`
 	Bindings  []AgentBinding          `json:"bindings,omitempty"`
+	Groups    GroupsConfig            `json:"groups,omitempty"`
 	Channels  EditableChannelsConfig  `json:"channels"`
 	Providers EditableProvidersConfig `json:"providers"`
 	Gateway   GatewayConfig           `json:"gateway"`

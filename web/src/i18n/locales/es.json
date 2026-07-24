@@ -480,6 +480,28 @@
     "disabled": "Deshabilitado",
     "status": "Estado"
   },
+  "groups": {
+    "title": "Chat grupal",
+    "noGroups": "No hay grupos activos en esta sesión",
+    "layer": "Capa {{number}}",
+    "finalSynthesis": "Síntesis final",
+    "participants": "Participantes",
+    "strategy": "Estrategia",
+    "tokens": "tokens",
+    "backToList": "Volver a grupos",
+    "status": {
+      "started": "En curso",
+      "done": "Completado",
+      "stopped": "Detenido",
+      "error": "Error"
+    },
+    "role": {
+      "proposer": "Proponente",
+      "aggregator": "Agregador",
+      "moderator": "Moderador",
+      "critic": "Crítico"
+    }
+  },
   "canvas": {
     "code": "Código",
     "preview": "Preview",

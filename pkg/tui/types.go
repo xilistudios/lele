@@ -26,6 +26,25 @@ const (
 // view.go (layout) and handlers.go (mouse hit-testing) so they stay in sync.
 const leftColumnRatio = 0.72
 
+// groupTurn represents a single turn in a group chat (Mixture of Agents).
+type groupTurn struct {
+	index   int
+	layer   int
+	speaker string
+	label   string
+	role    string
+	content string
+}
+
+// groupMeta stores accumulated metadata for a completed group session.
+type groupMeta struct {
+	strategy     string
+	layers       int
+	totalTokens  int
+	participants string // comma-separated participant list
+	synthesis    string // final synthesis content from group.complete
+}
+
 // subagentClickTarget tracks the position of a subagent item in the sidebar for mouse click handling
 type subagentClickTarget struct {
 	yStart int    // Starting Y position in the sidebar (0-indexed from top of content area)
@@ -152,6 +171,12 @@ type Model struct {
 
 	// Subagent progress: taskID -> last action string (for real-time display in parent)
 	subagentProgress map[string]string
+
+	// Group chat (Mixture of Agents) state
+	groupTranscripts map[string][]groupTurn // groupID -> ordered turns
+	groupStatus      map[string]string      // groupID -> status (started/done/stopped/error)
+	activeGroupID    string                 // group currently being displayed
+	groupMeta        map[string]groupMeta   // groupID -> accumulated metadata
 
 	// Message processing / streaming
 	processing            bool

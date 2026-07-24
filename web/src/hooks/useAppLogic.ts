@@ -485,6 +485,7 @@ export function useAppLogic(
     approvalResult: messagesHook.approvalResult,
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,
+    groups: messagesHook.groups,
     setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
     onSend: handleSend,

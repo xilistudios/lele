@@ -320,6 +320,43 @@ Lele supports delegated async work through subagents. This is useful for long-ru
 
 See `docs/SKILL_SUBAGENTS.md` for details.
 
+### Multi-Agent Group Chat (Mixture of Agents)
+
+Lele includes a multi-agent group chat system where 2 or more agents collaborate in a shared conversation. Each agent sees the full transcript of what others have said and builds on their contributions. This is useful when you want different agents (e.g. an architect, a coder, and a security auditor) to collectively solve a problem, review code, or brainstorm ideas.
+
+Four collaboration strategies are available: `round_robin` (turn-based debate), `moa` (parallel proposals followed by aggregation, repeated in layers — based on the [Mixture of Agents paper](https://arxiv.org/abs/2406.04692)), `moderator` (a coordinator agent decides who speaks next), and `pipeline` (sequential relay through specialized agents). Groups can be started from pre-configured profiles in `config.json` or launched ad-hoc with the `/group` command.
+
+Quick example — start an ad-hoc MoA panel:
+
+```
+/group start --agents architect,coder,security-auditor --strategy moa --rounds 2 --moderator architect --parallel Review this PR for security issues
+```
+
+Or define a reusable profile in `config.json`:
+
+```json
+{
+  "groups": {
+    "list": [
+      {
+        "id": "review-panel",
+        "participants": ["architect", "coder", "security-auditor"],
+        "strategy": "moa",
+        "rounds": 2,
+        "moderator": "architect",
+        "max_turns": 12,
+        "parallel": true,
+        "stop_keywords": ["CONSENSUS"]
+      }
+    ]
+  }
+}
+```
+
+Then start it with: `/group start review-panel Analyze auth.go for vulnerabilities`
+
+Agent orchestration tools can also use the `group_chat` tool to delegate problems to a panel and receive the final synthesis synchronously. See `docs/moa-group-chat.md` for the full documentation including all configuration options, strategies, limits, cost guidance, and the TUI/WebUI visualization details.
+
 ## Security Model
 
 Lele can restrict agent file and command access to the configured workspace.
@@ -366,6 +403,7 @@ See `docs/tools_configuration.md` and `docs/client-api.md` for operational detai
 - `docs/installation-and-onboarding.md`
 - `docs/logging-and-observability.md`
 - `docs/model-routing.md`
+- `docs/moa-group-chat.md`
 - `docs/security-and-sandbox.md`
 - `docs/session-and-workspace.md`
 - `docs/skills-authoring.md`

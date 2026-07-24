@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
@@ -54,6 +55,7 @@ type AgentLoop struct {
 	commandHandler     commandHandler
 	sessionManager     sessionManager
 	toolCoordinator    toolCoordinator
+	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
 }
@@ -78,13 +80,18 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 		al.toolCoordinator.cancelAll()
 	}
 
+	// Cancel all running groups before reloading to avoid goroutine leaks.
+	if al.groupManager != nil {
+		al.groupManager.StopAll()
+	}
+
 	al.registry.ReloadAgents(cfg)
 	al.cfgPtr.Store(cfg)
 
 	// Re-register shared tools for new/recreated agents
 	existingSubagents := al.toolCoordinator.GetSubagents()
 	existingBgManagers := al.toolCoordinator.(*toolCoordinatorImpl).bgManagers
-	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers)
+	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers, al.groupManager)
 
 	// Wire up session key and cancel callbacks for all subagents
 	for agentID, sm := range updatedSubagents {
@@ -366,8 +373,43 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	loop.commandHandler = newCommandHandler(loop)
 	loop.sessionManager = newSessionManager(loop)
 
+	// Group collaboration manager (Mixture of Agents). Created before tool
+	// registration so that group_chat is available from the start. The closures
+	// capture `loop` (a pointer already set above) so they will resolve fields
+	// lazily at call time — safe because they are only invoked during turn
+	// execution, well after the loop is fully initialised.
+	groupLLMRunner := newLLMRunner(loop)
+	resolveAgent := func(agentID string) (group.AgentContext, bool) {
+		agent, ok := loop.registry.GetAgent(agentID)
+		if !ok || agent == nil {
+			return group.AgentContext{}, false
+		}
+		persona := ""
+		if agent.ContextBuilder != nil {
+			persona = agent.ContextBuilder.GetInitialContext()
+		}
+		name := agent.Name
+		if name == "" {
+			name = agent.ID
+		}
+		return group.AgentContext{
+			AgentID:       agent.ID,
+			Name:          name,
+			Workspace:     agent.Workspace,
+			SystemPrompt:  persona,
+			ContextWindow: agent.ContextWindow,
+			MaxTokens:     agent.MaxTokens,
+		}, true
+	}
+	turnExecutor := func(ctx context.Context, req group.TurnRequest) (string, int, error) {
+		return groupLLMRunner.runGroupTurn(ctx, req)
+	}
+	gm := group.NewGroupManager(resolveAgent, turnExecutor, loop.bus.PublishOutbound)
+	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
+	loop.groupManager = gm
+
 	// Register shared tools and create tool coordinator with subagents
-	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager)
+	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager, loop.groupManager)
 
 	// Wire up session key and cancel callbacks so the agent layer can build an O(1)
 	// subagent session-to-agent mapping for GetSessionHistory.
@@ -397,6 +439,11 @@ func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
 // MessageBus returns the unexported bus of the agent loop.
 func (al *AgentLoop) MessageBus() *bus.MessageBus {
 	return al.bus
+}
+
+// GroupManager returns the group collaboration manager (Mixture of Agents).
+func (al *AgentLoop) GroupManager() *group.GroupManager {
+	return al.groupManager
 }
 
 // SessionManager returns the shared session manager used by all agents.

@@ -7,7 +7,7 @@ import {
   parseSubagentSessionKey,
   toChatMessages,
 } from '../lib/chatMessageBuilder'
-import type { ChatMessage, ToolStatus } from '../lib/types'
+import type { ChatMessage, GroupInfo, ToolStatus } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
 import { useApprovals } from './useApprovals'
@@ -30,6 +30,7 @@ export function useMessages(
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
+  const [groups, setGroups] = useState<Map<string, GroupInfo>>(new Map())
   const streamingRef = useRef(streamingMessages)
   const lastSessionRefreshRef = useRef<number>(0)
 
@@ -57,6 +58,17 @@ export function useMessages(
     lastSessionRefreshRef.current = now
     onSessionUpdated?.()
   }, [onSessionUpdated])
+
+  const upsertGroup = useCallback(
+    (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => {
+      setGroups((prev) => {
+        const next = new Map(prev)
+        next.set(groupId, updater(prev.get(groupId)))
+        return next
+      })
+    },
+    [],
+  )
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
@@ -92,6 +104,7 @@ export function useMessages(
     removeProcessingSession: processing.removeSession,
     syncProcessingSession: processing.syncSession,
     processingSessionKeyRef: processing.processingSessionKeyRef,
+    upsertGroup,
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {
@@ -159,6 +172,7 @@ export function useMessages(
     setToolStatus(null)
     approvals.clear()
     setPendingAttachments([])
+    setGroups(new Map())
     processing.processingSessionKeyRef.current = null
   }, [streamQueues.clearAllQueues, approvals, processing.processingSessionKeyRef])
 
@@ -168,6 +182,7 @@ export function useMessages(
     setToolStatus(null)
     approvals.clear()
     setPendingAttachments([])
+    setGroups(new Map())
     processing.clearAll()
   }, [streamQueues.clearAllQueues, approvals, processing])
 
@@ -183,6 +198,7 @@ export function useMessages(
     approvalRequest: approvals.approvalRequest,
     approvalResult: approvals.approvalResult,
     pendingAttachments,
+    groups,
     processingSessions: processing.processingSessions,
     setProcessingSessions: processing.setProcessingSessions,
     processingSessionKeyRef: processing.processingSessionKeyRef,

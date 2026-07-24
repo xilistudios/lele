@@ -87,5 +87,17 @@
   "tui.approvalApprove": "Aprobar",
   "tui.approvalReject": "Rechazar",
   "tui.approvalApproved": "Comando aprobado — ejecutando...",
-  "tui.approvalRejected": "Comando rechazado"
+  "tui.approvalRejected": "Comando rechazado",
+
+  "tui.group.layer": "Capa %d",
+  "tui.group.synthesis": "Síntesis final",
+  "tui.group.participants": "Participantes",
+  "tui.group.started": "iniciado",
+  "tui.group.done": "completado",
+  "tui.group.stopped": "detenido",
+  "tui.group.error": "error",
+  "tui.group.role.proposer": "proponente",
+  "tui.group.role.aggregator": "agregador",
+  "tui.group.role.moderator": "moderador",
+  "tui.group.role.critic": "crítico"
 }

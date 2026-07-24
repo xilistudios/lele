@@ -485,6 +485,58 @@ export type SessionSubagentsResponse = {
   subagents: SubagentTaskInfo[]
 }
 
+// ── Group chat (MoA) types ──────────────────────────────────────────────────
+
+export type GroupStatusEvent = {
+  session_key?: string
+  group_id: string
+  status: 'started' | 'done' | 'stopped' | 'error'
+  participants: string
+}
+
+export type GroupTurnEvent = {
+  session_key?: string
+  group_id: string
+  speaker: string
+  label: string
+  role: 'proposer' | 'aggregator' | 'moderator' | 'critic'
+  layer: number
+  turn_index: number
+  content: string
+}
+
+export type GroupCompleteEvent = {
+  session_key?: string
+  group_id: string
+  strategy: string
+  layers: number
+  total_tokens: number
+  content: string
+}
+
+/** A single turn in the group transcript (internal state). */
+export type GroupTurn = {
+  groupID: string
+  speaker: string
+  label: string
+  role: 'proposer' | 'aggregator' | 'moderator' | 'critic'
+  layer: number
+  turnIndex: number
+  content: string
+}
+
+/** Full state of a group conversation (internal state). */
+export type GroupInfo = {
+  groupID: string
+  status: 'started' | 'done' | 'stopped' | 'error'
+  strategy: string
+  participants: string
+  layers: number
+  totalTokens: number
+  turns: GroupTurn[]
+  synthesis?: string
+}
+
 export type ChannelsResponse = {
   channels: ChannelInfo[]
 }
@@ -754,6 +806,9 @@ export type ClientEvent =
   | { event: 'error'; data: { code: string; message: string } }
   | { event: 'stream.error'; data: { error: string } }
   | { event: 'history.updated'; data: { session_key: string; name?: string } }
+  | { event: 'group.status'; data: GroupStatusEvent }
+  | { event: 'group.turn'; data: GroupTurnEvent }
+  | { event: 'group.complete'; data: GroupCompleteEvent }
 
 export type ApprovalDecision = {
   request_id: string

@@ -227,6 +227,37 @@ var (
 	ApprovalRejected = lipgloss.NewStyle().
 				Foreground(PrimaryColor).
 				Bold(true)
+
+	// Group turn styles for Mixture of Agents rendering.
+	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
+	GroupTurnHeader = lipgloss.NewStyle().
+			Foreground(PurpleColor).
+			Bold(true)
+
+	// GroupTurnBorder renders the left border for group turn content.
+	GroupTurnBorder = lipgloss.NewStyle().
+			Foreground(PurpleColor).
+			PaddingLeft(1).
+			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+			BorderForeground(PurpleColor)
+
+	// GroupLayerSeparator renders layer separator lines.
+	GroupLayerSeparator = lipgloss.NewStyle().
+				Foreground(PurpleColor).
+				Bold(true).
+				Align(lipgloss.Center)
+
+	// GroupSynthesisLabel renders the synthesis section label.
+	GroupSynthesisLabel = lipgloss.NewStyle().
+				Foreground(SecondaryColor).
+				Bold(true)
+
+	// GroupSynthesisBorder renders the border around the final synthesis.
+	GroupSynthesisBorder = lipgloss.NewStyle().
+				Foreground(SecondaryColor).
+				PaddingLeft(1).
+				Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+				BorderForeground(SecondaryColor)
 )
 
 func SidebarLabelValue(label, value string) string {

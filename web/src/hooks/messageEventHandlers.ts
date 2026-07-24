@@ -7,7 +7,7 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import { wsDebug } from '../lib/debug'
-import type { ChatMessage, HistoryToolCall, ToolStatus } from '../lib/types'
+import type { ChatMessage, GroupInfo, GroupTurn, HistoryToolCall, ToolStatus } from '../lib/types'
 import {
   type HistoryMessage,
   chatHistoryQueryKey,
@@ -41,6 +41,7 @@ export type MessageEventContext = {
   removeProcessingSession: (sessionKey: string) => void
   syncProcessingSession: (sessionKey: string, processing: boolean) => void
   processingSessionKeyRef: React.MutableRefObject<string | null>
+  upsertGroup: (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => void
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -513,6 +514,84 @@ function handleStreamError(ctx: MessageEventContext, data: Record<string, unknow
   ctx.processingSessionKeyRef.current = null
 }
 
+// ── Group Chat (MoA) Handlers ───────────────────────────────────────────────
+
+function handleGroupStatus(ctx: MessageEventContext, data: Record<string, unknown>) {
+  const eventSessionKey = getSessionKey(data)
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.status')) return
+
+  const groupId = data.group_id as string
+  const status = data.status as GroupInfo['status']
+  const participants = (data.participants as string) ?? ''
+
+  ctx.upsertGroup(groupId, (existing) => ({
+    groupID: groupId,
+    status,
+    strategy: existing?.strategy ?? '',
+    participants,
+    layers: existing?.layers ?? 0,
+    totalTokens: existing?.totalTokens ?? 0,
+    turns: existing?.turns ?? [],
+    synthesis: existing?.synthesis,
+  }))
+}
+
+function handleGroupTurn(ctx: MessageEventContext, data: Record<string, unknown>) {
+  const eventSessionKey = getSessionKey(data)
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.turn')) return
+
+  const groupId = data.group_id as string
+  const turn: GroupTurn = {
+    groupID: groupId,
+    speaker: data.speaker as string,
+    label: data.label as string,
+    role: data.role as GroupTurn['role'],
+    layer: data.layer as number,
+    turnIndex: data.turn_index as number,
+    content: data.content as string,
+  }
+
+  ctx.upsertGroup(groupId, (existing) => {
+    const turns = existing?.turns ? [...existing.turns] : []
+    // Deduplicate by turn_index — replace if same index exists
+    const existingIdx = turns.findIndex((t) => t.turnIndex === turn.turnIndex)
+    if (existingIdx >= 0) {
+      turns[existingIdx] = turn
+    } else {
+      turns.push(turn)
+    }
+    return {
+      groupID: groupId,
+      status: existing?.status ?? 'started',
+      strategy: existing?.strategy ?? '',
+      participants: existing?.participants ?? '',
+      layers: Math.max(existing?.layers ?? 0, turn.layer + 1),
+      totalTokens: existing?.totalTokens ?? 0,
+      turns,
+      synthesis: existing?.synthesis,
+    }
+  })
+}
+
+function handleGroupComplete(ctx: MessageEventContext, data: Record<string, unknown>) {
+  const eventSessionKey = getSessionKey(data)
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.complete')) return
+
+  const groupId = data.group_id as string
+  const content = data.content as string
+
+  ctx.upsertGroup(groupId, (existing) => ({
+    groupID: groupId,
+    status: 'done',
+    strategy: (data.strategy as string) ?? existing?.strategy ?? '',
+    participants: existing?.participants ?? '',
+    layers: (data.layers as number) ?? existing?.layers ?? 0,
+    totalTokens: (data.total_tokens as number) ?? existing?.totalTokens ?? 0,
+    turns: existing?.turns ?? [],
+    synthesis: content,
+  }))
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) => void> = {
@@ -534,6 +613,9 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'subscribe.ack': (ctx, e) => handleSubscribeAck(ctx, e.data as Record<string, unknown>),
   'message.error': (ctx, e) => handleMessageError(ctx, e.data as Record<string, unknown>),
   'stream.error': (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
+  'group.status': (ctx, e) => handleGroupStatus(ctx, e.data as Record<string, unknown>),
+  'group.turn': (ctx, e) => handleGroupTurn(ctx, e.data as Record<string, unknown>),
+  'group.complete': (ctx, e) => handleGroupComplete(ctx, e.data as Record<string, unknown>),
 }
 
 /**

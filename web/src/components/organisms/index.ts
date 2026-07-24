@@ -1,5 +1,6 @@
 export { DiagnosticsPanel } from './DiagnosticsPanel'
 export { ChatHeader } from './ChatHeader'
+export { GroupChatPanel } from './GroupChatPanel'
 export { MessageBubble } from './MessageBubble'
 export { MessageList } from './MessageList'
 export { Sidebar } from './Sidebar'

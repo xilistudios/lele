@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -487,6 +488,40 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Result:             msg.Metadata["result"],
 			SubagentSessionKey: msg.Metadata["subagent_session_key"],
 			ToolCallID:         msg.Metadata["tool_call_id"],
+		}, "")
+		return
+	case "group.status":
+		n.emitNativeEvent(sessionKey, "group.status", WSGroupStatusPayload{
+			SessionKey:   sessionKey,
+			GroupID:      msg.Metadata["group_id"],
+			Status:       msg.Metadata["status"],
+			Participants: msg.Metadata["participants"],
+		}, "")
+		return
+	case "group.turn":
+		layer, _ := strconv.Atoi(msg.Metadata["layer"])
+		turnIndex, _ := strconv.Atoi(msg.Metadata["turn_index"])
+		n.emitNativeEvent(sessionKey, "group.turn", WSGroupTurnPayload{
+			SessionKey: sessionKey,
+			GroupID:    msg.Metadata["group_id"],
+			Speaker:    msg.Metadata["speaker"],
+			Label:      msg.Metadata["label"],
+			Role:       msg.Metadata["role"],
+			Layer:      layer,
+			TurnIndex:  turnIndex,
+			Content:    msg.Content,
+		}, "")
+		return
+	case "group.complete":
+		layers, _ := strconv.Atoi(msg.Metadata["layers"])
+		totalTokens, _ := strconv.Atoi(msg.Metadata["total_tokens"])
+		n.emitNativeEvent(sessionKey, "group.complete", WSGroupCompletePayload{
+			SessionKey:  sessionKey,
+			GroupID:     msg.Metadata["group_id"],
+			Strategy:    msg.Metadata["strategy"],
+			Layers:      layers,
+			TotalTokens: totalTokens,
+			Content:     msg.Content,
 		}, "")
 		return
 	case "approval.request":

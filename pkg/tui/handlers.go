@@ -750,6 +750,88 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				m.updateViewport()
+			case "group.status":
+				// Group status event: started/done/stopped/error
+				groupID := msg.msg.Metadata["group_id"]
+				if groupID == "" {
+					break
+				}
+				status := msg.msg.Metadata["status"]
+				if m.groupStatus == nil {
+					m.groupStatus = make(map[string]string)
+				}
+				m.groupStatus[groupID] = status
+				// Track active group and store participants metadata
+				if status == "started" {
+					if m.activeGroupID == "" {
+						m.activeGroupID = groupID
+					}
+					m.processing = true
+					if participants := msg.msg.Metadata["participants"]; participants != "" {
+						if m.groupMeta == nil {
+							m.groupMeta = make(map[string]groupMeta)
+						}
+						if gm, ok := m.groupMeta[groupID]; ok {
+							gm.participants = participants
+							m.groupMeta[groupID] = gm
+						} else {
+							m.groupMeta[groupID] = groupMeta{participants: participants}
+						}
+					}
+				}
+				// Stop processing when the group finishes
+				if status == "done" || status == "stopped" || status == "error" {
+					m.processing = false
+				}
+				m.updateViewport()
+			case "group.turn":
+				// Group turn: an agent produced a response within the group
+				groupID := msg.msg.Metadata["group_id"]
+				if groupID == "" {
+					break
+				}
+				if m.groupTranscripts == nil {
+					m.groupTranscripts = make(map[string][]groupTurn)
+				}
+				layer, _ := strconv.Atoi(msg.msg.Metadata["layer"])
+				turnIndex, _ := strconv.Atoi(msg.msg.Metadata["turn_index"])
+				turn := groupTurn{
+					index:   turnIndex,
+					layer:   layer,
+					speaker: msg.msg.Metadata["speaker"],
+					label:   msg.msg.Metadata["label"],
+					role:    msg.msg.Metadata["role"],
+					content: msg.msg.Content,
+				}
+				m.groupTranscripts[groupID] = append(m.groupTranscripts[groupID], turn)
+				m.processing = true
+				if m.activeGroupID == "" {
+					m.activeGroupID = groupID
+				}
+				m.updateViewport()
+			case "group.complete":
+				// Group complete: final synthesis available
+				groupID := msg.msg.Metadata["group_id"]
+				if groupID == "" {
+					break
+				}
+				if m.groupMeta == nil {
+					m.groupMeta = make(map[string]groupMeta)
+				}
+				layers, _ := strconv.Atoi(msg.msg.Metadata["layers"])
+				totalTokens, _ := strconv.Atoi(msg.msg.Metadata["total_tokens"])
+				gm := m.groupMeta[groupID]
+				gm.strategy = msg.msg.Metadata["strategy"]
+				gm.layers = layers
+				gm.totalTokens = totalTokens
+				gm.synthesis = msg.msg.Content
+				m.groupMeta[groupID] = gm
+				m.processing = false
+				if m.groupStatus == nil {
+					m.groupStatus = make(map[string]string)
+				}
+				m.groupStatus[groupID] = "done"
+				m.updateViewport()
 			case "":
 				// Stream finished — flush any pending throttled viewport update
 				// so the final content is visible immediately.

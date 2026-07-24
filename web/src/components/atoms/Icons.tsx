@@ -48,6 +48,31 @@ export function SubagentsIcon({
   )
 }
 
+export function GroupsIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="9" cy="7" r="3" />
+      <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+      <circle cx="17" cy="8" r="2.5" />
+      <path d="M21 21v-1.5a3 3 0 0 0-2-2.83" />
+    </svg>
+  )
+}
+
 export function ServerIcon({
   size = DEFAULT_ICON_SIZE,
   className,
