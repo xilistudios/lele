@@ -206,7 +206,9 @@ func TestHandleNewCommand_NoAgent(t *testing.T) {
 	al := NewAgentLoop(cfg, msgBus)
 
 	// Remove default agent for this test
+	al.registry.mu.Lock()
 	al.registry.agents = make(map[string]*AgentInstance)
+	al.registry.mu.Unlock()
 
 	ch := newCommandHandler(al)
 	result := ch.handleNewCommand(nil, "test")
@@ -2235,7 +2237,9 @@ func TestHandleClearCommand_NoAgent(t *testing.T) {
 	al := NewAgentLoop(cfg, msgBus)
 
 	// Remove default agent for this test
+	al.registry.mu.Lock()
 	al.registry.agents = make(map[string]*AgentInstance)
+	al.registry.mu.Unlock()
 
 	ch := newCommandHandler(al)
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{

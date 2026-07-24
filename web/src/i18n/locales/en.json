@@ -493,6 +493,28 @@
     "expand": "Expand",
     "collapse": "Collapse"
   },
+  "groups": {
+    "title": "Group Chat",
+    "noGroups": "No active groups in this session",
+    "layer": "Layer {{number}}",
+    "finalSynthesis": "Final Synthesis",
+    "participants": "Participants",
+    "strategy": "Strategy",
+    "tokens": "tokens",
+    "backToList": "Back to groups",
+    "status": {
+      "started": "Running",
+      "done": "Completed",
+      "stopped": "Stopped",
+      "error": "Error"
+    },
+    "role": {
+      "proposer": "Proposer",
+      "aggregator": "Aggregator",
+      "moderator": "Moderator",
+      "critic": "Critic"
+    }
+  },
   "canvas": {
     "code": "Code",
     "preview": "Preview",

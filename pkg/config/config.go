@@ -46,9 +46,91 @@ func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Valid strategy constants for GroupProfile.Strategy.
+const (
+	StrategyRoundRobin = "round_robin"
+	StrategyMoA        = "moa"
+	StrategyModerator  = "moderator"
+	StrategyPipeline   = "pipeline"
+)
+
+// validStrategies is the set of accepted GroupProfile.Strategy values.
+var validStrategies = map[string]bool{
+	StrategyRoundRobin: true,
+	StrategyMoA:        true,
+	StrategyModerator:  true,
+	StrategyPipeline:   true,
+}
+
+// ValidStrategy reports whether s is a valid group strategy name.
+func ValidStrategy(s string) bool {
+	return validStrategies[s]
+}
+
+// GroupsConfig holds the list of multi-agent group profiles.
+type GroupsConfig struct {
+	List []GroupProfile `json:"list,omitempty"`
+}
+
+// GroupProfile describes a collaborative multi-agent group (MoA, round-robin,
+// moderator, or pipeline). Each profile declares participants, a strategy, and
+// optional resource/stop constraints.
+type GroupProfile struct {
+	ID               string   `json:"id"`
+	Participants     []string `json:"participants"`        // agent IDs
+	Strategy         string   `json:"strategy"`            // round_robin|moa|moderator|pipeline
+	Rounds           int      `json:"rounds,omitempty"`    // capas MoA / vueltas round_robin
+	Moderator        string   `json:"moderator,omitempty"` // agente moderador/agregador
+	MaxTurns         int      `json:"max_turns,omitempty"`
+	MaxTokensPerTurn int      `json:"max_tokens_per_turn,omitempty"`
+	TotalTokenBudget int      `json:"total_token_budget,omitempty"`
+	StopKeywords     []string `json:"stop_keywords,omitempty"` // ej. ["CONSENSUS","FINAL"]
+	Parallel         bool     `json:"parallel,omitempty"`      // turnos paralelos dentro de una capa
+}
+
+// Validate checks the GroupProfile for basic consistency. It returns an error
+// that includes the group ID for easier debugging.
+func (g *GroupProfile) Validate() error {
+	if g.ID == "" {
+		return fmt.Errorf("groups: group ID is required")
+	}
+	if len(g.Participants) == 0 {
+		return fmt.Errorf("groups[%q]: participants list is empty", g.ID)
+	}
+	if !validStrategies[g.Strategy] {
+		return fmt.Errorf("groups[%q]: invalid strategy %q (must be one of: %s, %s, %s, %s)",
+			g.ID, g.Strategy, StrategyRoundRobin, StrategyMoA, StrategyModerator, StrategyPipeline)
+	}
+	if g.Moderator != "" {
+		found := false
+		for _, p := range g.Participants {
+			if p == g.Moderator {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("groups[%q]: moderator %q is not in participants list", g.ID, g.Moderator)
+		}
+	}
+	return nil
+}
+
+// ValidateGroups checks every GroupProfile in the list and returns the first
+// validation error encountered, or nil if all profiles are valid.
+func (gc *GroupsConfig) ValidateGroups() error {
+	for i := range gc.List {
+		if err := gc.List[i].Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type Config struct {
 	Agents    AgentsConfig     `json:"agents"`
 	Bindings  []AgentBinding   `json:"bindings,omitempty"`
+	Groups    GroupsConfig     `json:"groups,omitempty"`
 	Session   SessionConfig    `json:"session,omitempty"`
 	Channels  ChannelsConfig   `json:"channels"`
 	Providers *ProvidersConfig `json:"providers,omitempty"`

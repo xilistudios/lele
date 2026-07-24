@@ -480,6 +480,28 @@
     "disabled": "Desabilitado",
     "status": "Estado"
   },
+  "groups": {
+    "title": "Chat em grupo",
+    "noGroups": "Nenhum grupo ativo nesta sessão",
+    "layer": "Camada {{number}}",
+    "finalSynthesis": "Síntese final",
+    "participants": "Participantes",
+    "strategy": "Estratégia",
+    "tokens": "tokens",
+    "backToList": "Voltar aos grupos",
+    "status": {
+      "started": "Em andamento",
+      "done": "Concluído",
+      "stopped": "Parado",
+      "error": "Erro"
+    },
+    "role": {
+      "proposer": "Proponente",
+      "aggregator": "Agregador",
+      "moderator": "Moderador",
+      "critic": "Crítico"
+    }
+  },
   "canvas": {
     "code": "Código",
     "preview": "Pré-visualização",

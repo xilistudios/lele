@@ -15,6 +15,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -355,9 +356,9 @@ func (tc *toolCoordinatorImpl) stopBackgroundExec(id string) error {
 	return fmt.Errorf("background process not found: %s", id)
 }
 
-// registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn)
+// registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn, group_chat)
 // for a single agent. Returns the created SubagentManager.
-func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *tools.SubagentManager {
+func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager) *tools.SubagentManager {
 	// Web tools
 	if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
 		BraveAPIKey:          cfg.Tools.Web.Brave.APIKey,
@@ -494,6 +495,16 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// Sleep tool: useful for rate limiting, polling intervals, etc.
 	agent.Tools.Register(tools.NewSleepTool())
 
+	// Group collaboration tool (Mixture of Agents): lets this agent delegate a
+	// problem to a multi-agent panel. Uses the shared GroupManager.
+	if groupManager != nil {
+		groupChatTool := tools.NewGroupChatTool(groupManager)
+		groupChatTool.SetAllowlistChecker(func(targetAgentID string) bool {
+			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
+		})
+		agent.Tools.Register(groupChatTool)
+	}
+
 	// Subagents get all tools except send_file (user-facing) and the
 	// subagent-management tools (prevent recursive wait/list overhead),
 	// and background exec management tools (each subagent gets its own).
@@ -518,9 +529,9 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	return subagentManager
 }
 
-// registerSharedTools registers tools that are shared across all agents (web, message, spawn).
+// registerSharedTools registers tools that are shared across all agents (web, message, spawn, group_chat).
 // Each agent uses its own provider for subagent spawning.
-func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
+func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, groupManager *group.GroupManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	subagents := make(map[string]*tools.SubagentManager)
 	bgManagers := make(map[string]*tools.BackgroundProcessManager)
 	for _, agentID := range registry.ListAgentIDs() {
@@ -528,7 +539,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 		if !ok {
 			continue
 		}
-		registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, subagents, bgManagers)
+		registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, subagents, bgManagers, groupManager)
 	}
 	return subagents, bgManagers
 }
@@ -536,7 +547,7 @@ func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *A
 // updateSharedToolsForAgent registers shared tools for a specific agent.
 // It returns the SubagentManager for that agent.
 // This is used during reload to update tools for new or recreated agents.
-func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager) *tools.SubagentManager {
+func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, existingSubagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager) *tools.SubagentManager {
 	agent, ok := registry.GetAgent(agentID)
 	if !ok {
 		return nil
@@ -551,12 +562,12 @@ func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, regis
 		return nil
 	}
 
-	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers)
+	return registerSharedToolsForAgent(agent, cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers, groupManager)
 }
 
 // updateSharedTools updates shared tools for all agents after a reload.
 // It preserves existing subagent managers and only updates recreated agents.
-func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager, existingBgManagers map[string]*tools.BackgroundProcessManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
+func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, existingSubagents map[string]*tools.SubagentManager, existingBgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
 	updated := make(map[string]*tools.SubagentManager)
 	bgManagers := make(map[string]*tools.BackgroundProcessManager)
 
@@ -572,7 +583,7 @@ func updateSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *Age
 
 	// Update each agent
 	for _, agentID := range registry.ListAgentIDs() {
-		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers)
+		sm := updateSharedToolsForAgent(cfg, msgBus, registry, approvalManager, agentID, existingSubagents, bgManagers, groupManager)
 		if sm != nil {
 			updated[agentID] = sm
 		}

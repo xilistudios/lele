@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
@@ -196,6 +198,8 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		return fmt.Sprintf("📊 Memory compacted:\n• Messages: %d → %d (dropped %d)\n• Tokens: ~%d → ~%d (saved ~%d)",
 			stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 			stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens), true
+	case "/group":
+		return ch.handleGroupCommand(ctx, msg, route.AgentID, strings.Join(args, " ")), true
 	}
 
 	return "", false
@@ -456,4 +460,308 @@ func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 		return nil
 	}
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
+}
+
+// handleGroupCommand dispatches /group subcommands.
+// callerAgentID is the resolved agent ID of the user issuing the command (used for spawn permission checks).
+func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.InboundMessage, callerAgentID, args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return "Uso: /group [list|status|stop|start] [opciones]\n" +
+			"  /group list - Lista grupos activos\n" +
+			"  /group status [id] - Estado de un grupo\n" +
+			"  /group stop [id] - Detener un grupo\n" +
+			"  /group start <profileID> <task> - Iniciar desde perfil\n" +
+			"  /group start --agents a,b --strategy moa <task> - Modo ad-hoc"
+	}
+
+	parts := strings.Fields(args)
+	subcmd := parts[0]
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.Join(parts[1:], " ")
+	}
+
+	switch subcmd {
+	case "help":
+		return ch.handleGroupCommand(ctx, msg, callerAgentID, "")
+	case "list":
+		return ch.handleGroupListCommand()
+	case "status":
+		return ch.handleGroupStatusCommand(strings.TrimSpace(rest))
+	case "stop":
+		return ch.handleGroupStopCommand(strings.TrimSpace(rest))
+	case "start":
+		return ch.handleGroupStartCommand(ctx, msg, callerAgentID, rest)
+	default:
+		return fmt.Sprintf("Subcomando desconocido: %s\nUsa /group help para ver los comandos disponibles.", subcmd)
+	}
+}
+
+// handleGroupListCommand lists all active groups.
+func (ch *commandHandlerImpl) handleGroupListCommand() string {
+	states := ch.al.GroupManager().List()
+	if len(states) == 0 {
+		return "📭 No hay grupos activos."
+	}
+	var lines []string
+	lines = append(lines, "👥 Grupos activos:")
+	for _, gs := range states {
+		lines = append(lines, fmt.Sprintf("  • %s | strategy=%s | status=%s | participantes=%d | turnos=%d | tokens=%d",
+			gs.ID, gs.Strategy, gs.Status, len(gs.Participants), len(gs.Transcript), gs.TotalTokens))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// handleGroupStatusCommand shows status of a specific group or lists active groups.
+func (ch *commandHandlerImpl) handleGroupStatusCommand(id string) string {
+	if id == "" {
+		return ch.handleGroupListCommand()
+	}
+	gs, ok := ch.al.GroupManager().Status(id)
+	if !ok {
+		return fmt.Sprintf("❌ Grupo no encontrado: %s", id)
+	}
+	var lines []string
+	lines = append(lines, fmt.Sprintf("👥 Grupo: %s", gs.ID))
+	lines = append(lines, fmt.Sprintf("  Estrategia: %s", gs.Strategy))
+	lines = append(lines, fmt.Sprintf("  Estado: %s", gs.Status))
+	lines = append(lines, fmt.Sprintf("  Tarea: %s", gs.Task))
+	lines = append(lines, "  Participantes:")
+	for _, p := range gs.Participants {
+		role := p.Role
+		if role == "" {
+			role = "(sin rol)"
+		}
+		lines = append(lines, fmt.Sprintf("    - %s [%s]", p.AgentID, role))
+	}
+	lines = append(lines, fmt.Sprintf("  Turnos: %d", len(gs.Transcript)))
+	lines = append(lines, fmt.Sprintf("  Tokens totales: %d", gs.TotalTokens))
+	if t, ok := gs.LastTurn(); ok {
+		lastContent := t.Content
+		if len(lastContent) > 200 {
+			lastContent = lastContent[:200] + "..."
+		}
+		lines = append(lines, fmt.Sprintf("  Último turno (%s): %s", t.Label, lastContent))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// handleGroupStopCommand stops a group by ID.
+func (ch *commandHandlerImpl) handleGroupStopCommand(id string) string {
+	if id == "" {
+		return "Uso: /group stop <grupo_id>"
+	}
+	if ch.al.GroupManager().Stop(id) {
+		return fmt.Sprintf("⏹ Grupo detenido: %s", id)
+	}
+	return fmt.Sprintf("❌ Grupo no encontrado: %s", id)
+}
+
+// handleGroupStartCommand starts a group from a profile or ad-hoc flags.
+func (ch *commandHandlerImpl) handleGroupStartCommand(ctx context.Context, msg bus.InboundMessage, callerAgentID, args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return "Uso: /group start <profileID> <task>\n" +
+			"  o: /group start --agents a,b --strategy moa <task>"
+	}
+
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return "Uso: /group start <profileID> <task>"
+	}
+
+	// Check if ad-hoc mode (--agents flag present)
+	isAdHoc := false
+	for _, p := range parts {
+		if p == "--agents" {
+			isAdHoc = true
+			break
+		}
+	}
+
+	if isAdHoc {
+		return ch.handleGroupStartAdHoc(ctx, msg, callerAgentID, parts)
+	}
+	return ch.handleGroupStartProfile(ctx, msg, callerAgentID, parts)
+}
+
+// handleGroupStartAdHoc starts a group from ad-hoc flags.
+func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus.InboundMessage, callerAgentID string, parts []string) string {
+	agentsFlag := ""
+	strategy := config.StrategyRoundRobin
+	rounds := 0
+	moderator := ""
+	parallel := false
+	var taskParts []string
+
+	i := 0
+	for i < len(parts) {
+		switch parts[i] {
+		case "--agents":
+			if i+1 < len(parts) {
+				i++
+				agentsFlag = parts[i]
+			}
+		case "--strategy":
+			if i+1 < len(parts) {
+				i++
+				strategy = parts[i]
+			}
+		case "--rounds":
+			if i+1 < len(parts) {
+				i++
+				fmt.Sscanf(parts[i], "%d", &rounds)
+			}
+		case "--moderator":
+			if i+1 < len(parts) {
+				i++
+				moderator = parts[i]
+			}
+		case "--parallel":
+			parallel = true
+		default:
+			taskParts = append(taskParts, parts[i])
+		}
+		i++
+	}
+
+	if agentsFlag == "" {
+		return "❌ --agents es requerido. Ejemplo: /group start --agents agent1,agent2 --strategy moa <task>"
+	}
+
+	agentIDs := strings.Split(agentsFlag, ",")
+	for i := range agentIDs {
+		agentIDs[i] = strings.TrimSpace(agentIDs[i])
+	}
+	if len(agentIDs) == 0 {
+		return "❌ Se requiere al menos un agente."
+	}
+
+	if !config.ValidStrategy(strategy) {
+		return fmt.Sprintf("❌ Estrategia inválida: %s. Usa: round_robin, moa, moderator, pipeline", strategy)
+	}
+
+	task := strings.TrimSpace(strings.Join(taskParts, " "))
+	if task == "" {
+		return "❌ Se requiere una tarea. Ejemplo: /group start --agents a,b --strategy moa <task>"
+	}
+
+	// Permission check
+	var denied []string
+	for _, aid := range agentIDs {
+		if !ch.al.registry.CanSpawnSubagent(callerAgentID, aid) {
+			denied = append(denied, aid)
+		}
+	}
+	if len(denied) > 0 {
+		return fmt.Sprintf("❌ Sin permiso para participar con: %s", strings.Join(denied, ", "))
+	}
+
+	// Build participants
+	participants := make([]group.Participant, 0, len(agentIDs))
+	for _, aid := range agentIDs {
+		role := ""
+		if aid == moderator {
+			if strategy == config.StrategyMoA {
+				role = group.RoleAggregator
+			} else if strategy == config.StrategyModerator {
+				role = group.RoleModerator
+			}
+		} else {
+			role = group.RoleProposer
+		}
+		participants = append(participants, group.Participant{
+			AgentID: aid,
+			Role:    role,
+			Label:   aid,
+		})
+	}
+
+	opts := group.GroupOptions{
+		Rounds:    rounds,
+		Parallel:  parallel,
+		Moderator: moderator,
+	}
+
+	groupID := group.NewGroupID("adhoc")
+	_, err := ch.al.GroupManager().Start(ctx, groupID, "", task, strategy, participants, opts, msg.Channel, msg.ChatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
+	}
+	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
+		groupID, strategy, len(participants), groupID)
+}
+
+// handleGroupStartProfile starts a group from a config GroupProfile.
+func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg bus.InboundMessage, callerAgentID string, parts []string) string {
+	profileID := parts[0]
+	task := ""
+	if len(parts) > 1 {
+		task = strings.TrimSpace(strings.Join(parts[1:], " "))
+	}
+	if task == "" {
+		return fmt.Sprintf("❌ Se requiere una tarea. Uso: /group start %s <task>", profileID)
+	}
+
+	// Find the profile in config
+	var profile *config.GroupProfile
+	for i := range ch.al.cfg().Groups.List {
+		if ch.al.cfg().Groups.List[i].ID == profileID {
+			profile = &ch.al.cfg().Groups.List[i]
+			break
+		}
+	}
+	if profile == nil {
+		return fmt.Sprintf("❌ Perfil de grupo no encontrado: %s\nUsa /group start --agents a,b --strategy moa <task> para ad-hoc.", profileID)
+	}
+
+	// Permission check
+	var denied []string
+	for _, aid := range profile.Participants {
+		if !ch.al.registry.CanSpawnSubagent(callerAgentID, aid) {
+			denied = append(denied, aid)
+		}
+	}
+	if len(denied) > 0 {
+		return fmt.Sprintf("❌ Sin permiso para participar con: %s", strings.Join(denied, ", "))
+	}
+
+	// Build participants with roles
+	participants := make([]group.Participant, 0, len(profile.Participants))
+	for _, aid := range profile.Participants {
+		role := ""
+		if aid == profile.Moderator {
+			if profile.Strategy == config.StrategyMoA {
+				role = group.RoleAggregator
+			} else if profile.Strategy == config.StrategyModerator {
+				role = group.RoleModerator
+			}
+		} else {
+			role = group.RoleProposer
+		}
+		participants = append(participants, group.Participant{
+			AgentID: aid,
+			Role:    role,
+			Label:   aid,
+		})
+	}
+
+	opts := group.GroupOptions{
+		Rounds:           profile.Rounds,
+		MaxTurns:         profile.MaxTurns,
+		Parallel:         profile.Parallel,
+		Moderator:        profile.Moderator,
+		StopKeywords:     profile.StopKeywords,
+		MaxTokensPerTurn: profile.MaxTokensPerTurn,
+		TotalTokenBudget: profile.TotalTokenBudget,
+	}
+
+	groupID := group.NewGroupID(profile.ID)
+	_, err := ch.al.GroupManager().Start(ctx, groupID, profile.ID, task, profile.Strategy, participants, opts, msg.Channel, msg.ChatID)
+	if err != nil {
+		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
+	}
+	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
+		groupID, profile.Strategy, len(participants), groupID)
 }

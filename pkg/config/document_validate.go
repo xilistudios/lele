@@ -140,5 +140,14 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		agentIDs[agent.ID] = true
 	}
 
+	// Validate groups.
+	if err := doc.Groups.ValidateGroups(); err != nil {
+		errors = append(errors, ValidationError{
+			Path:    "groups",
+			Message: err.Error(),
+			Code:    "invalid",
+		})
+	}
+
 	return errors
 }

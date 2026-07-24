@@ -34,6 +34,7 @@ export type AppLogicContextValue = {
   approvalResult: ReturnType<typeof useAppLogicHook>['approvalResult']
   pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
   toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
+  groups: ReturnType<typeof useAppLogicHook>['groups']
 
   // Handlers from useAppLogic
   handleEvent: ReturnType<typeof useAppLogicHook>['handleEvent']
@@ -112,6 +113,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     approvalResult: app.approvalResult,
     pendingAttachments: app.pendingAttachments,
     toolStatus: app.toolStatus,
+    groups: app.groups,
 
     // Handlers from useAppLogic
     handleEvent: app.handleEvent,

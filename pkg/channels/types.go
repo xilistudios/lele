@@ -106,6 +106,36 @@ type WSToolResultPayload struct {
 	ToolCallID         string `json:"tool_call_id,omitempty"`
 }
 
+// WSGroupStatusPayload reports group lifecycle changes (started/done/stopped/error).
+type WSGroupStatusPayload struct {
+	SessionKey   string `json:"session_key,omitempty"`
+	GroupID      string `json:"group_id"`
+	Status       string `json:"status"`       // started|done|stopped|error
+	Participants string `json:"participants"` // comma-joined agent IDs
+}
+
+// WSGroupTurnPayload carries a single group turn (one agent's intervention).
+type WSGroupTurnPayload struct {
+	SessionKey string `json:"session_key,omitempty"`
+	GroupID    string `json:"group_id"`
+	Speaker    string `json:"speaker"` // agent ID
+	Label      string `json:"label"`   // display name
+	Role       string `json:"role"`    // proposer|aggregator|moderator|critic
+	Layer      int    `json:"layer"`
+	TurnIndex  int    `json:"turn_index"`
+	Content    string `json:"content"`
+}
+
+// WSGroupCompletePayload carries the final aggregated synthesis of a group.
+type WSGroupCompletePayload struct {
+	SessionKey  string `json:"session_key,omitempty"`
+	GroupID     string `json:"group_id"`
+	Strategy    string `json:"strategy"`
+	Layers      int    `json:"layers"`
+	TotalTokens int    `json:"total_tokens"`
+	Content     string `json:"content"` // final synthesis
+}
+
 type WSErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

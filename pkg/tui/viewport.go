@@ -99,6 +99,14 @@ func (m *Model) updateViewport() {
 		sb.WriteString(m.approvalResult + "\n\n")
 	}
 
+	// Show group chat turns (Mixture of Agents) when a group is active
+	if m.activeGroupID != "" {
+		if turns, ok := m.groupTranscripts[m.activeGroupID]; ok && len(turns) > 0 {
+			sb.WriteString(m.renderGroupTurns(turns, m.viewport.Width))
+			sb.WriteString("\n")
+		}
+	}
+
 	// Show compaction result feedback
 	if m.compactFeedback != "" {
 		sb.WriteString(m.compactFeedback + "\n\n")
@@ -222,4 +230,56 @@ func (m *Model) lastHistoryRole() string {
 		}
 	}
 	return ""
+}
+
+// renderGroupTurns renders all turns of a group chat, organized by layer with
+// layer separators. Each turn is rendered as a labeled block with a distinct
+// style that differentiates it from normal assistant messages.
+func (m *Model) renderGroupTurns(turns []groupTurn, viewportWidth int) string {
+	var sb strings.Builder
+	prevLayer := -1
+
+	for _, turn := range turns {
+		// Insert layer separator when the layer changes
+		if turn.layer != prevLayer {
+			if prevLayer >= 0 {
+				sb.WriteString("\n")
+			}
+			layerLabel := fmt.Sprintf(i18n.T("tui.group.layer"), turn.layer)
+			sepText := fmt.Sprintf("── %s ──", layerLabel)
+			sb.WriteString(GroupLayerSeparator.Width(viewportWidth-4).Render(sepText) + "\n")
+			prevLayer = turn.layer
+		}
+
+		// Turn header: ┌ [label · Layer N · role]
+		headerLabel := turn.label
+		if headerLabel == "" {
+			headerLabel = turn.speaker
+		}
+		roleDisplay := turn.role
+		if roleDisplay == "" {
+			roleDisplay = "participant"
+		}
+		layerLabel := fmt.Sprintf(i18n.T("tui.group.layer"), turn.layer)
+		headerText := fmt.Sprintf("┌ [%s · %s · %s]", headerLabel, layerLabel, roleDisplay)
+		sb.WriteString(GroupTurnHeader.Render(headerText) + "\n")
+
+		// Turn content with left border
+		content := turn.content
+		if content != "" {
+			rendered := m.renderMarkdown(content, viewportWidth-8)
+			sb.WriteString(GroupTurnBorder.Render(rendered) + "\n")
+		}
+	}
+
+	// Render final synthesis if available
+	if meta, ok := m.groupMeta[m.activeGroupID]; ok && meta.synthesis != "" {
+		sb.WriteString("\n")
+		synthLabel := i18n.T("tui.group.synthesis")
+		sb.WriteString(GroupSynthesisLabel.Render("┌ "+synthLabel) + "\n")
+		rendered := m.renderMarkdown(meta.synthesis, viewportWidth-8)
+		sb.WriteString(GroupSynthesisBorder.Render(rendered) + "\n")
+	}
+
+	return sb.String()
 }
