@@ -523,6 +523,7 @@
     "participants": "Participantes",
     "strategy": "Estratégia",
     "tokens": "tokens",
+    "layers": "Camadas",
     "backToList": "Voltar aos grupos",
     "status": {
       "started": "Em andamento",
@@ -535,7 +536,11 @@
       "aggregator": "Agregador",
       "moderator": "Moderador",
       "critic": "Crítico"
-    }
+    },
+    "followUp": "Acompanhamento",
+    "newGroup": "Novo grupo",
+    "followUpPlaceholder": "Enviar uma mensagem de acompanhamento...",
+    "send": "Enviar"
   },
   "canvas": {
     "code": "Código",

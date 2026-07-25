@@ -68,6 +68,13 @@ function createMockContext(
       state.groups = new Map(state.groups)
       state.groups.set(groupId, updater(state.groups.get(groupId)))
     },
+    hydrateGroups: (infos: GroupInfo[]) => {
+      const next = new Map(state.groups)
+      for (const info of infos) {
+        next.set(info.groupID, info)
+      }
+      state.groups = next
+    },
     markActiveGroupsStopped: () => {
       let found = false
       for (const g of state.groups.values()) {
@@ -450,6 +457,7 @@ describe('cancel.ack stops active groups', () => {
       participants: existing?.participants ?? '',
       layers: existing?.layers ?? 0,
       totalTokens: existing?.totalTokens ?? 0,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       turns: existing?.turns ?? [],
       synthesis: existing?.synthesis,
     }))
@@ -480,5 +488,377 @@ describe('cancel.ack stops active groups', () => {
     })
 
     expect(state.processingSessionKey).toBeNull()
+  })
+})
+
+// ── handleGroupTool tests ────────────────────────────────────────────────────
+
+describe('handleGroupTool', () => {
+  const sessionKey = 'test-session'
+
+  test('creates placeholder turn and upserts tool call on executing status', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        label: 'Agent A',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'read_file',
+        status: 'executing',
+        arguments: '{"path":"/test.txt"}',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group).toBeDefined()
+    expect(group.status).toBe('started')
+    expect(group.turns).toHaveLength(1)
+    expect(group.turns[0].content).toBe('')
+    expect(group.turns[0].speaker).toBe('agent-a')
+    expect(group.turns[0].label).toBe('Agent A')
+    expect(group.turns[0].toolCalls).toHaveLength(1)
+    expect(group.turns[0].toolCalls?.[0]).toEqual({
+      tool_call_id: 'tc-1',
+      tool: 'read_file',
+      status: 'executing',
+      arguments: '{"path":"/test.txt"}',
+      result: undefined,
+    })
+  })
+
+  test('upserts tool call status to completed and preserves arguments', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // First: executing
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'read_file',
+        status: 'executing',
+        arguments: '{"path":"/test.txt"}',
+        session_key: sessionKey,
+      },
+    })
+
+    // Then: completed (no arguments field)
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'read_file',
+        status: 'completed',
+        result: 'file contents here',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns[0].toolCalls).toHaveLength(1)
+    expect(group.turns[0].toolCalls?.[0].status).toBe('completed')
+    // Arguments preserved from executing event
+    expect(group.turns[0].toolCalls?.[0].arguments).toBe('{"path":"/test.txt"}')
+    expect(group.turns[0].toolCalls?.[0].result).toBe('file contents here')
+  })
+
+  test('upserts tool call status to error', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'exec',
+        status: 'executing',
+        arguments: '{"command":"rm -rf /"}',
+        session_key: sessionKey,
+      },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'exec',
+        status: 'error',
+        result: 'permission denied',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns[0].toolCalls?.[0].status).toBe('error')
+    expect(group.turns[0].toolCalls?.[0].result).toBe('permission denied')
+  })
+
+  test('uses label fallback to speaker when label is missing', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-b',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'web_search',
+        status: 'executing',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns[0].label).toBe('agent-b')
+  })
+
+  test('multiple tool calls on same turn', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'read_file',
+        status: 'executing',
+        session_key: sessionKey,
+      },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-2',
+        tool: 'web_search',
+        status: 'executing',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns[0].toolCalls).toHaveLength(2)
+    expect(group.turns[0].toolCalls?.[0].tool_call_id).toBe('tc-1')
+    expect(group.turns[0].toolCalls?.[1].tool_call_id).toBe('tc-2')
+  })
+})
+
+// ── handleGroupTurn preserving toolCalls ─────────────────────────────────────
+
+describe('handleGroupTurn preserves existing toolCalls', () => {
+  const sessionKey = 'test-session'
+
+  test('incoming turn merge preserves existing toolCalls', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // Create a group with a tool call
+    dispatchMessageEvent(ctx, {
+      event: 'group.tool',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        layer: 0,
+        turn_index: 0,
+        tool_call_id: 'tc-1',
+        tool: 'read_file',
+        status: 'completed',
+        result: 'content',
+        session_key: sessionKey,
+      },
+    })
+
+    expect(state.groups.get('g1')?.turns[0].toolCalls).toHaveLength(1)
+
+    // Now send a group.turn for the same turn_index — should preserve toolCalls
+    dispatchMessageEvent(ctx, {
+      event: 'group.turn',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        label: 'Agent A',
+        role: 'proposer',
+        layer: 0,
+        turn_index: 0,
+        content: 'Here is my proposal after reading the file',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns).toHaveLength(1)
+    expect(group.turns[0].content).toBe('Here is my proposal after reading the file')
+    // Tool calls preserved!
+    expect(group.turns[0].toolCalls).toHaveLength(1)
+    expect(group.turns[0].toolCalls?.[0].tool_call_id).toBe('tc-1')
+  })
+
+  test('new turn without existing toolCalls has undefined toolCalls', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.turn',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        label: 'Agent A',
+        role: 'proposer',
+        layer: 0,
+        turn_index: 0,
+        content: 'My proposal',
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.turns[0].toolCalls).toBeUndefined()
+  })
+})
+
+// ── welcome-driven hydrateGroups ─────────────────────────────────────────────
+
+describe('welcome-driven hydrateGroups', () => {
+  const sessionKey = 'test-session'
+
+  test('welcome event with groups array hydrates groups', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'welcome',
+      data: {
+        session_key: sessionKey,
+        groups: [
+          {
+            group_id: 'g1',
+            status: 'done',
+            strategy: 'moa',
+            participants: 'agent-a,agent-b',
+            layers: 2,
+            total_tokens: 1500,
+            synthesis: 'Final answer',
+            turns: [
+              {
+                turn_index: 0,
+                speaker: 'agent-a',
+                label: 'Agent A',
+                role: 'proposer',
+                layer: 0,
+                content: 'Proposal A',
+              },
+              {
+                turn_index: 1,
+                speaker: 'agent-b',
+                label: 'Agent B',
+                role: 'proposer',
+                layer: 0,
+                content: 'Proposal B',
+                tool_calls: [
+                  {
+                    tool_call_id: 'tc-1',
+                    tool: 'web_search',
+                    status: 'completed',
+                    result: 'search results',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group).toBeDefined()
+    expect(group.status).toBe('done')
+    expect(group.strategy).toBe('moa')
+    expect(group.participants).toBe('agent-a,agent-b')
+    expect(group.layers).toBe(2)
+    expect(group.totalTokens).toBe(1500)
+    expect(group.synthesis).toBe('Final answer')
+    expect(group.turns).toHaveLength(2)
+    expect(group.turns[0].content).toBe('Proposal A')
+    expect(group.turns[0].groupID).toBe('g1')
+    expect(group.turns[1].toolCalls).toHaveLength(1)
+    expect(group.turns[1].toolCalls?.[0].tool_call_id).toBe('tc-1')
+  })
+
+  test('reconnected event with groups also hydrates', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'reconnected',
+      data: {
+        session_key: sessionKey,
+        groups: [
+          {
+            group_id: 'g-reconnect',
+            status: 'started',
+            strategy: 'round_robin',
+            participants: 'agent-x',
+            layers: 1,
+            total_tokens: 100,
+            synthesis: '',
+            turns: [],
+          },
+        ],
+      },
+    })
+
+    const group = state.groups.get('g-reconnect') as GroupInfo
+    expect(group).toBeDefined()
+    expect(group.status).toBe('started')
+    expect(group.strategy).toBe('round_robin')
+  })
+
+  test('welcome without groups does not affect existing groups', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // First add a group manually
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'existing',
+        status: 'started',
+        participants: 'a',
+        session_key: sessionKey,
+      },
+    })
+
+    // Welcome without groups
+    dispatchMessageEvent(ctx, {
+      event: 'welcome',
+      data: { session_key: sessionKey },
+    })
+
+    // Existing group untouched
+    expect(state.groups.get('existing')?.status).toBe('started')
   })
 })

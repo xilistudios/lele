@@ -4,12 +4,30 @@ import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { getModeTheme } from '../../lib/modeTheme'
-import type { GroupTurn } from '../../lib/types'
+import type { ChatMessage, GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
 import { MarkdownText } from '../molecules/MarkdownText'
+import { ToolCallDisplay } from '../molecules/ToolCallDisplay'
 import { MessageBubble } from './MessageBubble'
 
 const SCROLL_THRESHOLD = 300
 const DEBOUNCE_MS = 350
+
+/** Collapsible tool-call item rendered under a group turn. */
+function GroupToolCallItem({ tc }: { tc: GroupToolCall }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="mt-1">
+      <ToolCallDisplay
+        toolName={tc.tool}
+        toolArgs={tc.arguments}
+        toolResult={tc.result}
+        toolStatus={tc.status}
+        expanded={expanded}
+        onToggleExpand={() => setExpanded((e) => !e)}
+      />
+    </div>
+  )
+}
 
 export function MessageList() {
   const { t } = useTranslation()
@@ -191,21 +209,7 @@ export function MessageList() {
     }
   }, [])
 
-  // Flatten all group turns sorted by turnIndex for inline rendering
-  const allGroupTurns: GroupTurn[] = []
-  const groupSyntheses: { groupID: string; synthesis: string; status: string }[] = []
-  for (const group of groups.values()) {
-    allGroupTurns.push(...group.turns)
-    if (group.synthesis) {
-      groupSyntheses.push({
-        groupID: group.groupID,
-        synthesis: group.synthesis,
-        status: group.status,
-      })
-    }
-  }
-  allGroupTurns.sort((a, b) => a.turnIndex - b.turnIndex)
-  const hasGroupContent = allGroupTurns.length > 0 || groupSyntheses.length > 0
+  const hasGroupContent = groups.size > 0
   const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
 
   if (messages.length === 0 && !hasGroupContent) {
@@ -230,6 +234,26 @@ export function MessageList() {
     (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
   )
 
+  // ── Build a merged timeline of messages and group blocks ──
+  type RenderItem =
+    | { type: 'message'; message: ChatMessage; index: number }
+    | { type: 'group'; group: GroupInfo }
+
+  const renderItems: RenderItem[] = []
+
+  for (let i = 0; i < visibleMessages.length; i++) {
+    renderItems.push({ type: 'message', message: visibleMessages[i], index: i })
+  }
+  for (const group of groups.values()) {
+    renderItems.push({ type: 'group', group })
+  }
+
+  renderItems.sort((a, b) => {
+    const timeA = a.type === 'message' ? a.message.createdAt : a.group.createdAt
+    const timeB = b.type === 'message' ? b.message.createdAt : b.group.createdAt
+    return new Date(timeA).getTime() - new Date(timeB).getTime()
+  })
+
   return (
     <div
       ref={containerRef}
@@ -245,40 +269,107 @@ export function MessageList() {
       {!isLoadingMore && hasMore && (
         <p className="text-center py-2 text-xs text-text-tertiary">{t('chat.scrollUpForMore')}</p>
       )}
-      {visibleMessages.map((message, index) => (
-        <MessageBubble
-          key={message.id}
-          message={message}
-          isLast={index === visibleMessages.length - 1}
-          onNavigateToSession={handleNavigateToSession}
-          apiUrl={apiUrl}
-        />
-      ))}
-      {/* Group turns rendered inline */}
-      {allGroupTurns.map((turn) => (
-        <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="text-sm font-semibold text-text-primary">{turn.label}</span>
-            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-surface-hover text-text-tertiary">
-              {turn.role}
-            </span>
+      {renderItems.map((item) => {
+        if (item.type === 'message') {
+          return (
+            <MessageBubble
+              key={item.message.id}
+              message={item.message}
+              isLast={item.index === visibleMessages.length - 1}
+              onNavigateToSession={handleNavigateToSession}
+              apiUrl={apiUrl}
+            />
+          )
+        }
+
+        // ── Group block: header + turns + synthesis ──
+        const group = item.group
+        const groupTheme = getModeTheme('group')
+        const highestTurn = group.turns.reduce(
+          (max, t) => (t.turnIndex > (max?.turnIndex ?? -1) ? t : max),
+          undefined as GroupTurn | undefined,
+        )
+        const speakingSpeaker =
+          group.status === 'started' && highestTurn && highestTurn.content === ''
+            ? highestTurn.speaker
+            : null
+
+        return (
+          <div key={`group-block-${group.groupID}`}>
+            {/* Group header */}
+            <div className="py-2">
+              <div
+                className={`rounded-lg border ${groupTheme.border} ${groupTheme.softBg} px-3 py-2`}
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span
+                    className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${groupTheme.chip}`}
+                  >
+                    {group.strategy || t('groups.strategy')}
+                  </span>
+                  <span className="text-xs text-text-tertiary">
+                    {t('groups.participants')}: {group.participants}
+                  </span>
+                  <span className="text-xs text-text-tertiary">
+                    {t('groups.layers')}: {group.layers}
+                  </span>
+                  <span className="text-xs text-text-tertiary">
+                    {group.totalTokens} {t('groups.tokens')}
+                  </span>
+                  <span
+                    className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                      group.status === 'done'
+                        ? 'bg-state-success-light text-state-success'
+                        : group.status === 'error'
+                          ? 'bg-state-error-light text-state-error'
+                          : group.status === 'stopped'
+                            ? 'bg-surface-hover text-text-tertiary'
+                            : `${groupTheme.softBg} ${groupTheme.text}`
+                    }`}
+                  >
+                    {t(`groups.status.${group.status}`)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Group turns */}
+            {group.turns.map((turn) => (
+              <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
+                <div className="mb-1 flex items-center gap-2">
+                  {speakingSpeaker === turn.speaker && (
+                    <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
+                  )}
+                  <span className="text-sm font-semibold text-text-primary">{turn.label}</span>
+                  <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-surface-hover text-text-tertiary">
+                    {turn.role}
+                  </span>
+                </div>
+                <div className="text-sm text-text-secondary">
+                  <MarkdownText content={turn.content} />
+                </div>
+                {turn.toolCalls?.map((tc) => (
+                  <GroupToolCallItem key={tc.tool_call_id} tc={tc} />
+                ))}
+              </div>
+            ))}
+
+            {/* Group synthesis */}
+            {group.synthesis && (
+              <div className="py-2">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-text-primary">
+                    ✨ {t('groups.finalSynthesis')}
+                  </span>
+                </div>
+                <div className="text-sm text-text-secondary">
+                  <MarkdownText content={group.synthesis} />
+                </div>
+              </div>
+            )}
           </div>
-          <div className="text-sm text-text-secondary">
-            <MarkdownText content={turn.content} />
-          </div>
-        </div>
-      ))}
-      {/* Group synthesis */}
-      {groupSyntheses.map((g) => (
-        <div key={`group-synthesis-${g.groupID}`} className="py-2">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="text-sm font-semibold text-text-primary">✨ Síntesis</span>
-          </div>
-          <div className="text-sm text-text-secondary">
-            <MarkdownText content={g.synthesis} />
-          </div>
-        </div>
-      ))}
+        )
+      })}
       {approvalRequest && !approvalResult && (
         <div className="py-2">
           <div className="rounded-lg border border-border bg-background-primary p-4">

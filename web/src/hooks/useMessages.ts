@@ -70,6 +70,16 @@ export function useMessages(
     [],
   )
 
+  const hydrateGroups = useCallback((infos: GroupInfo[]) => {
+    setGroups((prev) => {
+      const next = new Map(prev)
+      for (const info of infos) {
+        next.set(info.groupID, info)
+      }
+      return next
+    })
+  }, [])
+
   const markActiveGroupsStopped = useCallback(() => {
     setGroups((prev) => {
       let found = false
@@ -126,6 +136,7 @@ export function useMessages(
     syncProcessingSession: processing.syncSession,
     processingSessionKeyRef: processing.processingSessionKeyRef,
     upsertGroup,
+    hydrateGroups,
     markActiveGroupsStopped,
   }
 
@@ -221,6 +232,7 @@ export function useMessages(
     approvalResult: approvals.approvalResult,
     pendingAttachments,
     groups,
+    hydrateGroups,
     processingSessions: processing.processingSessions,
     setProcessingSessions: processing.setProcessingSessions,
     processingSessionKeyRef: processing.processingSessionKeyRef,

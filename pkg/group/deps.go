@@ -33,6 +33,12 @@ type TurnRequest struct {
 	EnableTools   bool   // whether the speaker may use tools this turn
 	OriginChannel string // channel to publish tool events to
 	OriginChatID  string // chat ID to publish tool events to
+
+	// OnToolCall is called before and after each tool execution within a group
+	// turn. It is nil for turns where tool events are not needed. The callback
+	// receives: toolCallID, toolName, args (JSON string), status ("executing",
+	// "completed", or "error"), and result (empty for executing).
+	OnToolCall func(toolCallID, toolName, args, status, result string)
 }
 
 // TurnExecutor executes a group turn and returns the produced content and

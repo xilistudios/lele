@@ -15,6 +15,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -819,4 +820,9 @@ func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
 		return fmt.Errorf("tool coordinator not available")
 	}
 	return ap.al.toolCoordinator.stopBackgroundExec(id)
+}
+
+// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
+func (ap *agentProvidableImpl) AllGroupSnapshots() []group.GroupSnapshot {
+	return ap.al.AllGroupSnapshots()
 }

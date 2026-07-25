@@ -153,6 +153,8 @@ func (gm *GroupManager) Start(
 		StopKeywords:     opts.StopKeywords,
 		MaxTokensPerTurn: opts.MaxTokensPerTurn,
 		TotalTokenBudget: opts.TotalTokenBudget,
+		OriginChannel:    originChannel,
+		OriginChatID:     originChatID,
 	}
 
 	gctx, cancel := context.WithCancel(ctx)
@@ -237,6 +239,19 @@ func (gm *GroupManager) List() []*GroupState {
 	out := make([]*GroupState, 0, len(gm.groups))
 	for _, mg := range gm.groups {
 		out = append(out, mg.state.Snapshot())
+	}
+	return out
+}
+
+// AllSnapshots returns a GroupSnapshot for every tracked group (active and
+// finished). The caller gets a snapshot-safe copy; it does not share backing
+// arrays with the live state.
+func (gm *GroupManager) AllSnapshots() []GroupSnapshot {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+	out := make([]GroupSnapshot, 0, len(gm.groups))
+	for _, mg := range gm.groups {
+		out = append(out, BuildSnapshot(mg.state, mg.result))
 	}
 	return out
 }

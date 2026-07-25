@@ -524,6 +524,23 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Content:     msg.Content,
 		}, "")
 		return
+	case "group.tool":
+		layer, _ := strconv.Atoi(msg.Metadata["layer"])
+		turnIndex, _ := strconv.Atoi(msg.Metadata["turn_index"])
+		n.emitNativeEvent(sessionKey, "group.tool", WSGroupToolPayload{
+			SessionKey: sessionKey,
+			GroupID:    msg.Metadata["group_id"],
+			Speaker:    msg.Metadata["speaker"],
+			Label:      msg.Metadata["label"],
+			Layer:      layer,
+			TurnIndex:  turnIndex,
+			ToolCallID: msg.Metadata["tool_call_id"],
+			Tool:       msg.Metadata["tool"],
+			Status:     msg.Metadata["status"],
+			Arguments:  msg.Metadata["arguments"],
+			Result:     msg.Metadata["result"],
+		}, "")
+		return
 	case "approval.request":
 		n.emitNativeEvent(sessionKey, "approval.request", WSApprovalRequestPayload{
 			ID:      msg.Metadata["id"],

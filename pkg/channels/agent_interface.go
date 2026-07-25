@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -116,6 +117,13 @@ type AgentProvidable interface {
 	GetBackgroundExecOutput(id string, tail int) (output string, status string, elapsedMs int64, err error)
 	// StopBackgroundExec stops a running background process
 	StopBackgroundExec(id string) error
+
+	// ========================================================================
+	// Group snapshot support
+	// ========================================================================
+
+	// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
+	AllGroupSnapshots() []group.GroupSnapshot
 }
 
 // AgentBasicInfo contiene información pública de un agente

@@ -446,6 +446,14 @@ func (al *AgentLoop) GroupManager() *group.GroupManager {
 	return al.groupManager
 }
 
+// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
+func (al *AgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
+	if al.groupManager == nil {
+		return nil
+	}
+	return al.groupManager.AllSnapshots()
+}
+
 // SessionManager returns the shared session manager used by all agents.
 func (al *AgentLoop) SessionManager() *session.SessionManager {
 	if al.registry != nil {

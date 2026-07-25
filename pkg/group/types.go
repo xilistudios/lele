@@ -28,15 +28,25 @@ type Participant struct {
 	Label   string `json:"label,omitempty"` // display name shown in the transcript
 }
 
+// GroupToolCall represents a tool call made during a group turn.
+type GroupToolCall struct {
+	ToolCallID string `json:"tool_call_id"`
+	Tool       string `json:"tool"`
+	Status     string `json:"status"`
+	Arguments  string `json:"arguments,omitempty"`
+	Result     string `json:"result,omitempty"`
+}
+
 // Turn represents a single intervention in the shared transcript.
 type Turn struct {
-	Index     int       `json:"index"`           // sequential turn number within the group
-	Layer     int       `json:"layer"`           // MoA layer (0..L); 0 for round_robin/pipeline
-	Speaker   string    `json:"speaker"`         // AgentID of the participant who spoke
-	Label     string    `json:"label,omitempty"` // display label of the speaker
-	Content   string    `json:"content"`         // the actual text produced
-	CreatedAt time.Time `json:"created_at"`      // when this turn was created
-	Tokens    int       `json:"tokens"`          // token count for this turn
+	Index     int             `json:"index"`                // sequential turn number within the group
+	Layer     int             `json:"layer"`                // MoA layer (0..L); 0 for round_robin/pipeline
+	Speaker   string          `json:"speaker"`              // AgentID of the participant who spoke
+	Label     string          `json:"label,omitempty"`      // display label of the speaker
+	Content   string          `json:"content"`              // the actual text produced
+	CreatedAt time.Time       `json:"created_at"`           // when this turn was created
+	Tokens    int             `json:"tokens"`               // token count for this turn
+	ToolCalls []GroupToolCall `json:"tool_calls,omitempty"` // tool calls made during this turn
 }
 
 // GroupState holds the live and persistable state of a group conversation.
@@ -61,6 +71,11 @@ type GroupState struct {
 	StopKeywords     []string `json:"stop_keywords,omitempty"`       // keywords that trigger convergence
 	MaxTokensPerTurn int      `json:"max_tokens_per_turn,omitempty"` // per-turn token cap (informational for the runner)
 	TotalTokenBudget int      `json:"total_token_budget,omitempty"`  // hard cap on TotalTokens; 0 = unlimited
+
+	// Origin identifies the chat session that started this group, so the group
+	// can be looked up by session for history rehydration.
+	OriginChannel string `json:"origin_channel,omitempty"`
+	OriginChatID  string `json:"origin_chat_id,omitempty"`
 }
 
 // AddTurn appends a turn to the transcript, updates UpdatedAt, and

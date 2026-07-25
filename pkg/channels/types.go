@@ -136,6 +136,21 @@ type WSGroupCompletePayload struct {
 	Content     string `json:"content"` // final synthesis
 }
 
+// WSGroupToolPayload carries a group tool-call event (one agent's tool invocation).
+type WSGroupToolPayload struct {
+	SessionKey string `json:"session_key"`
+	GroupID    string `json:"group_id"`
+	Speaker    string `json:"speaker"`
+	Label      string `json:"label"`
+	Layer      int    `json:"layer"`
+	TurnIndex  int    `json:"turn_index"`
+	ToolCallID string `json:"tool_call_id"`
+	Tool       string `json:"tool"`
+	Status     string `json:"status"`
+	Arguments  string `json:"arguments,omitempty"`
+	Result     string `json:"result,omitempty"`
+}
+
 type WSErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

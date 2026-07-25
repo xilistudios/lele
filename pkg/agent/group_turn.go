@@ -162,6 +162,19 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 				return "", totalTokens, err
 			}
 
+			// Serialize tool call arguments for the OnToolCall callback.
+			argsJSON := ""
+			if tc.Arguments != nil {
+				if b, mErr := json.Marshal(tc.Arguments); mErr == nil {
+					argsJSON = string(b)
+				}
+			}
+
+			// Emit "executing" event before running the tool.
+			if req.OnToolCall != nil {
+				req.OnToolCall(tc.ID, tc.Name, argsJSON, "executing", "")
+			}
+
 			toolResult, err := executor.Execute(toolExecOptions{
 				ctx:     ctx,
 				agent:   agent,
@@ -176,6 +189,20 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 				sessionKey: sessionKey,
 				iteration:  iteration,
 			})
+
+			// Emit "completed" or "error" event after the tool finishes.
+			if req.OnToolCall != nil {
+				status := "completed"
+				resultStr := ""
+				if err != nil {
+					status = "error"
+					resultStr = err.Error()
+				} else if toolResult != nil {
+					resultStr = buildToolResultContent(toolResult)
+				}
+				req.OnToolCall(tc.ID, tc.Name, argsJSON, status, resultStr)
+			}
+
 			if err != nil {
 				return "", totalTokens, fmt.Errorf("group turn tool execution failed: %w", err)
 			}
