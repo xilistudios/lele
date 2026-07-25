@@ -186,7 +186,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             <>
               <div className="group relative flex items-center justify-center">
                 <IconButton
-                  onClick={onCreateSession}
+                  onClick={() => onCreateSession()}
                   ariaLabel={t('chat.newChat')}
                   variant="nav"
                   className="flex items-center justify-center h-8 w-8"
@@ -215,7 +215,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             <>
               <button
                 type="button"
-                onClick={onCreateSession}
+                onClick={() => onCreateSession()}
                 aria-label={t('chat.newChat')}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >

@@ -42,6 +42,7 @@ export type MessageEventContext = {
   syncProcessingSession: (sessionKey: string, processing: boolean) => void
   processingSessionKeyRef: React.MutableRefObject<string | null>
   upsertGroup: (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => void
+  markActiveGroupsStopped: () => void
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -465,6 +466,10 @@ function handleCancelAck(ctx: MessageEventContext, data: Record<string, unknown>
   }
 
   ctx.setStreamingMessages((current) => current.map((m) => ({ ...m, streaming: false })))
+
+  // Mark any active groups as stopped — without this, groups with status 'started'
+  // would remain 'started' forever and the processing indicator would never clear.
+  ctx.markActiveGroupsStopped()
 }
 
 function handleSubscribeAck(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -524,6 +529,14 @@ function handleGroupStatus(ctx: MessageEventContext, data: Record<string, unknow
   const status = data.status as GroupInfo['status']
   const participants = (data.participants as string) ?? ''
 
+  if (eventSessionKey) {
+    if (status === 'started') {
+      ctx.addProcessingSession(eventSessionKey)
+    } else if (status === 'done' || status === 'error' || status === 'stopped') {
+      ctx.removeProcessingSession(eventSessionKey)
+    }
+  }
+
   ctx.upsertGroup(groupId, (existing) => ({
     groupID: groupId,
     status,
@@ -576,6 +589,10 @@ function handleGroupTurn(ctx: MessageEventContext, data: Record<string, unknown>
 function handleGroupComplete(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.complete')) return
+
+  if (eventSessionKey) {
+    ctx.removeProcessingSession(eventSessionKey)
+  }
 
   const groupId = data.group_id as string
   const content = data.content as string

@@ -1,6 +1,105 @@
 import { describe, expect, test } from 'bun:test'
 import { toChatMessages } from '../lib/chatMessageBuilder'
-import type { HistoryToolCall } from '../lib/types'
+import type { ChatMessage, GroupInfo, HistoryToolCall, ToolStatus } from '../lib/types'
+import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
+
+// ── Test helpers for messageEventHandlers ────────────────────────────────────
+
+function createMockContext(
+  overrides?: Partial<MessageEventContext> & { currentSessionKey?: string },
+): { ctx: MessageEventContext; state: MockState } {
+  const state: MockState = {
+    streamingMessages: [],
+    toolStatus: null,
+    pendingAttachments: [],
+    processingSessions: new Set<string>(),
+    processingSessionKey: null as string | null,
+    groups: new Map<string, GroupInfo>(),
+  }
+
+  const currentSessionKeyRef = {
+    current: overrides?.currentSessionKey ?? 'test-session',
+  }
+
+  const ctx: MessageEventContext = {
+    currentSessionKeyRef,
+    parentSessionKeyRef: { current: null },
+    queryClient: {
+      invalidateQueries: () => {},
+      getQueryData: () => undefined,
+      setQueryData: () => {},
+    } as unknown as MessageEventContext['queryClient'],
+    debouncedSessionRefresh: () => {},
+    setStreamingMessages: (updater) => {
+      if (typeof updater === 'function') {
+        state.streamingMessages = updater(state.streamingMessages)
+      } else {
+        state.streamingMessages = updater
+      }
+    },
+    setToolStatus: (updater) => {
+      state.toolStatus = typeof updater === 'function' ? updater(state.toolStatus) : updater
+    },
+    setPendingAttachments: (updater) => {
+      if (typeof updater === 'function') {
+        state.pendingAttachments = updater(state.pendingAttachments)
+      } else {
+        state.pendingAttachments = updater
+      }
+    },
+    setApprovalRequest: () => {},
+    showApprovalResult: () => {},
+    enqueueChunk: () => {},
+    clearQueue: () => {},
+    clearAllQueues: () => {},
+    ensureAssistantPlaceholder: () => {},
+    addProcessingSession: (key: string) => state.processingSessions.add(key),
+    removeProcessingSession: (key: string) => state.processingSessions.delete(key),
+    syncProcessingSession: () => {},
+    processingSessionKeyRef: {
+      get current() {
+        return state.processingSessionKey
+      },
+      set current(v: string | null) {
+        state.processingSessionKey = v
+      },
+    },
+    upsertGroup: (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => {
+      state.groups = new Map(state.groups)
+      state.groups.set(groupId, updater(state.groups.get(groupId)))
+    },
+    markActiveGroupsStopped: () => {
+      let found = false
+      for (const g of state.groups.values()) {
+        if (g.status === 'started') {
+          found = true
+          break
+        }
+      }
+      if (!found) return
+
+      const next = new Map(state.groups)
+      for (const [id, g] of state.groups) {
+        if (g.status === 'started') {
+          next.set(id, { ...g, status: 'stopped' })
+        }
+      }
+      state.groups = next
+    },
+    ...overrides,
+  }
+
+  return { ctx, state }
+}
+
+type MockState = {
+  streamingMessages: ChatMessage[]
+  toolStatus: ToolStatus | null
+  pendingAttachments: string[]
+  processingSessions: Set<string>
+  processingSessionKey: string | null
+  groups: Map<string, GroupInfo>
+}
 
 describe('toChatMessages', () => {
   const sessionKey = 'test-session'
@@ -174,5 +273,212 @@ describe('toChatMessages', () => {
     expect(result[0].role).toBe('user')
     expect(result[1].role).toBe('assistant')
     expect(result[1].content).toBe('Voy a ejecutar')
+  })
+})
+
+// ── cancel.ack + group lifecycle tests ───────────────────────────────────────
+
+describe('cancel.ack stops active groups', () => {
+  const sessionKey = 'test-session'
+
+  test('group in started transitions to stopped on cancel.ack', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // Start a group via group.status event
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g1',
+        status: 'started',
+        participants: 'agent-a,agent-b',
+        session_key: sessionKey,
+      },
+    })
+
+    expect(state.groups.get('g1')?.status).toBe('started')
+
+    // Fire cancel.ack
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey },
+    })
+
+    expect(state.groups.get('g1')?.status).toBe('stopped')
+  })
+
+  test('group fields (turns, synthesis, strategy, participants, layers, totalTokens) are preserved after cancel', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // Start a group
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g1',
+        status: 'started',
+        participants: 'agent-a,agent-b',
+        session_key: sessionKey,
+      },
+    })
+
+    // Simulate a turn
+    dispatchMessageEvent(ctx, {
+      event: 'group.turn',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        label: 'Agent A',
+        role: 'proposer',
+        layer: 0,
+        turn_index: 0,
+        content: 'My proposal',
+        session_key: sessionKey,
+      },
+    })
+
+    const beforeCancel = state.groups.get('g1') as GroupInfo
+    expect(beforeCancel.status).toBe('started')
+    expect(beforeCancel.turns).toHaveLength(1)
+    expect(beforeCancel.turns[0].content).toBe('My proposal')
+
+    // Fire cancel.ack
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey },
+    })
+
+    const afterCancel = state.groups.get('g1') as GroupInfo
+    expect(afterCancel.status).toBe('stopped')
+    expect(afterCancel.turns).toHaveLength(1)
+    expect(afterCancel.turns[0].content).toBe('My proposal')
+    expect(afterCancel.strategy).toBe('')
+    expect(afterCancel.participants).toBe('agent-a,agent-b')
+    expect(afterCancel.layers).toBe(1)
+    expect(afterCancel.totalTokens).toBe(0)
+  })
+
+  test('group already in done is NOT modified by cancel.ack', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // Start a group
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g1',
+        status: 'started',
+        participants: 'agent-a',
+        session_key: sessionKey,
+      },
+    })
+
+    // Complete the group
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: {
+        group_id: 'g1',
+        content: 'Final synthesis',
+        strategy: 'moa',
+        layers: 2,
+        total_tokens: 1500,
+        session_key: sessionKey,
+      },
+    })
+
+    expect(state.groups.get('g1')?.status).toBe('done')
+
+    // Fire cancel.ack — should not touch the done group
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey },
+    })
+
+    const afterCancel = state.groups.get('g1') as GroupInfo
+    expect(afterCancel.status).toBe('done')
+    expect(afterCancel.synthesis).toBe('Final synthesis')
+    expect(afterCancel.strategy).toBe('moa')
+    expect(afterCancel.totalTokens).toBe(1500)
+  })
+
+  test('only started groups are stopped; done and error groups are untouched', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    // Create multiple groups in different states
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g-started',
+        status: 'started',
+        participants: 'a,b',
+        session_key: sessionKey,
+      },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g-done',
+        status: 'started',
+        participants: 'c',
+        session_key: sessionKey,
+      },
+    })
+
+    // Complete one of them
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: {
+        group_id: 'g-done',
+        content: 'done content',
+        session_key: sessionKey,
+      },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: {
+        group_id: 'g-error',
+        status: 'started',
+        participants: 'd',
+        session_key: sessionKey,
+      },
+    })
+
+    // Manually set g-error to error via upsert (simulating a server error event)
+    ctx.upsertGroup('g-error', (existing) => ({
+      groupID: 'g-error',
+      status: 'error' as const,
+      strategy: existing?.strategy ?? '',
+      participants: existing?.participants ?? '',
+      layers: existing?.layers ?? 0,
+      totalTokens: existing?.totalTokens ?? 0,
+      turns: existing?.turns ?? [],
+      synthesis: existing?.synthesis,
+    }))
+
+    expect(state.groups.get('g-started')?.status).toBe('started')
+    expect(state.groups.get('g-done')?.status).toBe('done')
+    expect(state.groups.get('g-error')?.status).toBe('error')
+
+    // Cancel
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey },
+    })
+
+    expect(state.groups.get('g-started')?.status).toBe('stopped')
+    expect(state.groups.get('g-done')?.status).toBe('done')
+    expect(state.groups.get('g-error')?.status).toBe('error')
+  })
+
+  test('cancel.ack clears processingSessionKeyRef', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    state.processingSessionKey = sessionKey
+
+    dispatchMessageEvent(ctx, {
+      event: 'cancel.ack',
+      data: { session_key: sessionKey },
+    })
+
+    expect(state.processingSessionKey).toBeNull()
   })
 })

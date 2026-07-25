@@ -206,6 +206,7 @@ export function MessageList() {
   }
   allGroupTurns.sort((a, b) => a.turnIndex - b.turnIndex)
   const hasGroupContent = allGroupTurns.length > 0 || groupSyntheses.length > 0
+  const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
 
   if (messages.length === 0 && !hasGroupContent) {
     const modeTheme = getModeTheme(chatMode)
@@ -333,7 +334,17 @@ export function MessageList() {
           </div>
         </div>
       )}
-      {isProcessing && !messages.some((m) => m.streaming) && (
+      {/* Group execution loading indicator — shown when a group is actively running */}
+      {hasActiveGroup && !messages.some((m) => m.streaming) && (
+        <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
+          <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
+          <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.2s]" />
+          <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.4s]" />
+          <span className="ml-1 text-xs">{t('groups.executing')}</span>
+        </div>
+      )}
+      {/* Regular loading dots — hidden when a group is active to avoid duplication */}
+      {isProcessing && !hasActiveGroup && !messages.some((m) => m.streaming) && (
         <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
           <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
           <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />

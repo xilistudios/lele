@@ -439,6 +439,12 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 	}
 
 	ch, al := newTestGroupHandler(cfg)
+	defer func() {
+		for _, g := range al.GroupManager().List() {
+			al.GroupManager().Stop(g.ID)
+			_, _ = al.GroupManager().Wait(g.ID)
+		}
+	}()
 
 	// Ensure the default agent ("main") exists in registry
 	defaultAgent := al.registry.GetDefaultAgent()
@@ -497,6 +503,12 @@ func TestGroupCommand_Start_Profile_Success(t *testing.T) {
 	}
 
 	ch, al := newTestGroupHandler(cfg)
+	defer func() {
+		for _, g := range al.GroupManager().List() {
+			al.GroupManager().Stop(g.ID)
+			_, _ = al.GroupManager().Wait(g.ID)
+		}
+	}()
 
 	result, handled := ch.handleCommand(context.Background(), bus.InboundMessage{
 		Channel:  "test",

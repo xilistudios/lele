@@ -234,13 +234,15 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 	gm.mu.Unlock()
 
 	req := TurnRequest{
-		GroupID:      state.ID,
-		Speaker:      speaker,
-		SystemPrompt: sysPrompt,
-		Transcript:   transcript,
-		Instruction:  instruction,
-		MaxTokens:    state.MaxTokensPerTurn,
-		EnableTools:  false,
+		GroupID:       state.ID,
+		Speaker:       speaker,
+		SystemPrompt:  sysPrompt,
+		Transcript:    transcript,
+		Instruction:   instruction,
+		MaxTokens:     state.MaxTokensPerTurn,
+		EnableTools:   true,
+		OriginChannel: mg.originCh,
+		OriginChatID:  mg.originChat,
 	}
 
 	content, tokens, err := gm.executor(ctx, req)

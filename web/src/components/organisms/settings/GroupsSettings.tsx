@@ -45,9 +45,7 @@ export function GroupsSettings() {
       <SettingsSection title={t('settings.sections.groupsList')}>
         {/* Header with Add button */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-text-secondary">
-            {t('settings.descriptions.groupsList')}
-          </p>
+          <p className="text-sm text-text-secondary">{t('settings.descriptions.groupsList')}</p>
           <button
             type="button"
             onClick={addProfile}
@@ -140,9 +138,7 @@ export function GroupsSettings() {
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                     {/* Group avatar */}
                     <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
-                      {group.id
-                        ? group.id.charAt(0).toUpperCase()
-                        : '#'}
+                      {group.id ? group.id.charAt(0).toUpperCase() : '#'}
                     </div>
 
                     <div className="flex flex-col min-w-0 flex-1">
@@ -157,7 +153,8 @@ export function GroupsSettings() {
                         )}
                       </div>
                       <span className="text-text-tertiary text-xs sm:text-sm truncate">
-                        {group.strategy} · {group.participants.length} {t('groups.participants').toLowerCase()}
+                        {group.strategy} · {group.participants.length}{' '}
+                        {t('groups.participants').toLowerCase()}
                       </span>
                     </div>
                   </div>
@@ -223,7 +220,9 @@ export function GroupsSettings() {
                     <SelectInput
                       id={`groups.list.${index}.moderator`}
                       value={group.moderator || ''}
-                      onChange={(v) => updateField(`groups.list.${index}.moderator`, v || undefined)}
+                      onChange={(v) =>
+                        updateField(`groups.list.${index}.moderator`, v || undefined)
+                      }
                       options={[
                         { value: '', label: t('settings.none') },
                         ...(group.participants || []).map((p: string) => ({
@@ -343,10 +342,7 @@ export function GroupsSettings() {
                       id={`groups.list.${index}.stop_keywords`}
                       value={group.stop_keywords || []}
                       onChange={(v) =>
-                        updateField(
-                          `groups.list.${index}.stop_keywords`,
-                          v.length ? v : undefined,
-                        )
+                        updateField(`groups.list.${index}.stop_keywords`, v.length ? v : undefined)
                       }
                     />
                   </SettingsField>

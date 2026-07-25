@@ -333,12 +333,26 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 		subagentCount = ap.al.toolCoordinator.stopSessionSubagents(resolvedKey)
 	}
 	cancelled := ap.al.cancelSession(resolvedKey)
+	groupCount := 0
+	if gm := ap.al.GroupManager(); gm != nil {
+		groupCount = gm.StopByOrigin("", resolvedKey)
+		if sessionKey != "" && sessionKey != resolvedKey {
+			groupCount += gm.StopByOrigin("", sessionKey)
+		}
+	}
 	logger.InfoCF("agent", "StopAgent completed", map[string]interface{}{
 		"session_key":    resolvedKey,
 		"cancelled":      cancelled,
 		"subagent_count": subagentCount,
+		"group_count":    groupCount,
 	})
 
+	if groupCount > 0 && subagentCount > 0 {
+		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s) y %d grupo(s)).", subagentCount, groupCount)
+	}
+	if groupCount > 0 {
+		return fmt.Sprintf("⏹️ Agente detenido (incluye %d grupo(s)).", groupCount)
+	}
 	if subagentCount > 0 {
 		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
 	}

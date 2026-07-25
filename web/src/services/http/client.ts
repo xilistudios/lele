@@ -11,8 +11,8 @@ import type {
   AuthStatusResponse,
   AvailableSkillsResponse,
   BackgroundExecOutputResponse,
-  BackgroundExecsResponse,
   BackgroundExecStopResponse,
+  BackgroundExecsResponse,
   ChannelsResponse,
   ChatSessionsResponse,
   ClientEvent,
@@ -422,7 +422,9 @@ export const createApiClient = (baseUrl: string) => {
       })
     },
     sessions: (mode?: string) => {
-      const url = mode ? `${endpoints.chat.sessions}?mode=${encodeURIComponent(mode)}` : endpoints.chat.sessions
+      const url = mode
+        ? `${endpoints.chat.sessions}?mode=${encodeURIComponent(mode)}`
+        : endpoints.chat.sessions
       return request<ChatSessionsResponse>(url, { method: 'GET' })
     },
     createSession: (sessionKey: string, mode?: string) =>

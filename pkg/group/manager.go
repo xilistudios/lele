@@ -13,6 +13,15 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
+// DefaultGroupRounds is the number of rounds (MoA layers / round_robin
+// cycles) applied when the caller specifies neither Rounds nor MaxTurns.
+const DefaultGroupRounds = 2
+
+// MaxGroupTurnsCeiling is the absolute hard ceiling on total turns for any
+// group session. Even if Rounds*participants exceeds this value, the actual
+// MaxTurns is capped to this ceiling.
+const MaxGroupTurnsCeiling = 50
+
 // GroupOptions holds runtime limits for a group session.
 type GroupOptions struct {
 	Rounds           int      // MoA layers / round_robin cycles; 0 = unlimited
@@ -102,10 +111,30 @@ func (gm *GroupManager) Start(
 
 	now := time.Now()
 
-	// Derive MaxTurns: if not explicitly set, derive from Rounds * participants.
+	// Derive limits: apply defaults and enforce the hard ceiling.
+	rounds := opts.Rounds
 	maxTurns := opts.MaxTurns
-	if maxTurns == 0 && opts.Rounds > 0 {
-		maxTurns = opts.Rounds * len(participants)
+	appliedDefault := false
+
+	// If neither Rounds nor MaxTurns was specified, apply sensible defaults.
+	if maxTurns == 0 && rounds == 0 {
+		rounds = DefaultGroupRounds
+		appliedDefault = true
+	}
+
+	// Derive MaxTurns from Rounds if not explicitly set.
+	if maxTurns == 0 && rounds > 0 {
+		maxTurns = rounds * len(participants)
+	}
+
+	// Always enforce the hard ceiling.
+	if maxTurns <= 0 || maxTurns > MaxGroupTurnsCeiling {
+		maxTurns = MaxGroupTurnsCeiling
+		appliedDefault = true
+	}
+
+	if appliedDefault {
+		log.Printf("group %s: applied default limits (rounds=%d, max_turns=%d)", groupID, rounds, maxTurns)
 	}
 
 	state := &GroupState{
@@ -117,7 +146,7 @@ func (gm *GroupManager) Start(
 		Status:           StatusRunning,
 		CreatedAt:        now,
 		UpdatedAt:        now,
-		Rounds:           opts.Rounds,
+		Rounds:           rounds,
 		MaxTurns:         maxTurns,
 		Parallel:         opts.Parallel,
 		Moderator:        opts.Moderator,
@@ -241,6 +270,34 @@ func (gm *GroupManager) StopAll() int {
 		gm.Stop(mg.state.ID)
 	}
 	return len(toStop)
+}
+
+// StopByOrigin cancels every running group whose origin chat matches
+// chatID. When channel is non-empty it must also match the group's origin
+// channel; an empty channel matches any. Returns the number of groups stopped.
+func (gm *GroupManager) StopByOrigin(channel, chatID string) int {
+	if chatID == "" {
+		return 0
+	}
+
+	gm.mu.Lock()
+	var toStop []string
+	for _, mg := range gm.groups {
+		if mg.state.Status == StatusRunning &&
+			mg.originChat == chatID &&
+			(channel == "" || mg.originCh == channel) {
+			toStop = append(toStop, mg.state.ID)
+		}
+	}
+	gm.mu.Unlock()
+
+	var stopped int
+	for _, id := range toStop {
+		if gm.Stop(id) {
+			stopped++
+		}
+	}
+	return stopped
 }
 
 // publishGroupStatus publishes a group.status event.

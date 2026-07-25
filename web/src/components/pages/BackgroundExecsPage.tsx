@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
-import { useBackgroundExecs } from '../../hooks/useBackgroundExecs'
 import { useBackgroundExecStream } from '../../hooks/useBackgroundExecStream'
+import { useBackgroundExecs } from '../../hooks/useBackgroundExecs'
 import type { BackgroundExecInfo } from '../../lib/types'
 import { Sidebar } from '../organisms/Sidebar'
 
@@ -54,7 +54,8 @@ function ProcessOutput({ processId }: { processId: string }) {
     <div className="mt-3 space-y-2">
       <div className="flex items-center gap-4 text-xs text-text-secondary">
         <span>
-          {t('backgroundExecs.status')}: <StatusBadge status={status as BackgroundExecInfo['status']} />
+          {t('backgroundExecs.status')}:{' '}
+          <StatusBadge status={status as BackgroundExecInfo['status']} />
         </span>
         <span>
           {t('backgroundExecs.elapsed')}: {formatElapsed(elapsedMs)}
@@ -66,9 +67,7 @@ function ProcessOutput({ processId }: { processId: string }) {
         className="max-h-80 overflow-y-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-all"
       >
         {output || (
-          <span className="text-text-tertiary italic">
-            {t('common.loading', 'Loading...')}
-          </span>
+          <span className="text-text-tertiary italic">{t('common.loading', 'Loading...')}</span>
         )}
       </div>
     </div>
@@ -104,18 +103,14 @@ function ProcessCard({
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate font-mono text-sm text-text-primary">
-                {proc.command}
-              </span>
+              <span className="truncate font-mono text-sm text-text-primary">{proc.command}</span>
               <StatusBadge status={proc.status} />
             </div>
             <div className="mt-1 flex items-center gap-3 text-xs text-text-tertiary">
               <span>
                 {t('backgroundExecs.agent')}: {proc.agent_id}
               </span>
-              {proc.working_dir && (
-                <span className="truncate">📁 {proc.working_dir}</span>
-              )}
+              {proc.working_dir && <span className="truncate">📁 {proc.working_dir}</span>}
               <span>{formatElapsed(proc.elapsed_ms)}</span>
               <span className="font-mono text-text-tertiary/60">{proc.id.slice(0, 8)}</span>
             </div>
@@ -143,7 +138,9 @@ function ProcessCard({
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <title>{expanded ? t('backgroundExecs.hideOutput') : t('backgroundExecs.viewOutput')}</title>
+            <title>
+              {expanded ? t('backgroundExecs.hideOutput') : t('backgroundExecs.viewOutput')}
+            </title>
             <polyline points="6 9 12 15 18 9" />
           </svg>
         </div>
@@ -163,12 +160,9 @@ export function BackgroundExecsPage() {
   const { processes, loading, refresh, stopProcess } = useBackgroundExecs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const handleToggle = useCallback(
-    (id: string) => {
-      setExpandedId((prev) => (prev === id ? null : id))
-    },
-    [],
-  )
+  const handleToggle = useCallback((id: string) => {
+    setExpandedId((prev) => (prev === id ? null : id))
+  }, [])
 
   const handleStop = useCallback(
     (id: string) => {

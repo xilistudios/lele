@@ -70,6 +70,27 @@ export function useMessages(
     [],
   )
 
+  const markActiveGroupsStopped = useCallback(() => {
+    setGroups((prev) => {
+      let found = false
+      for (const g of prev.values()) {
+        if (g.status === 'started') {
+          found = true
+          break
+        }
+      }
+      if (!found) return prev
+
+      const next = new Map(prev)
+      for (const [id, g] of prev) {
+        if (g.status === 'started') {
+          next.set(id, { ...g, status: 'stopped' })
+        }
+      }
+      return next
+    })
+  }, [])
+
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
       const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
@@ -105,6 +126,7 @@ export function useMessages(
     syncProcessingSession: processing.syncSession,
     processingSessionKeyRef: processing.processingSessionKeyRef,
     upsertGroup,
+    markActiveGroupsStopped,
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {

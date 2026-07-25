@@ -54,10 +54,6 @@ export function useAppLogic(
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
     return (localStorage.getItem('lele_chat_mode') as ChatMode) || 'agent'
   })
-  const selectMode = useCallback((mode: ChatMode) => {
-    setChatMode(mode)
-    localStorage.setItem('lele_chat_mode', mode)
-  }, [])
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
   const navigate = useNavigate()
@@ -328,39 +324,48 @@ export function useAppLogic(
     ],
   )
 
-  const handleCreateSession = useCallback(async () => {
-    subscribedSessionRef.current = null
-    setParentSessionKey(null)
-    messagesHook.clearStreaming()
-    // Await backend session registration before navigating, so the subsequent
-    // WebSocket subscribe passes ownership validation on the first attempt.
-    const sessionKey = await sessionsHook.createSession(chatMode)
-    if (sessionKey) {
-      navigate(`/chat/${sessionKey}`, { replace: true })
+  const handleCreateSession = useCallback(
+    async (modeOverride?: ChatMode) => {
+      subscribedSessionRef.current = null
+      setParentSessionKey(null)
+      messagesHook.clearStreaming()
+      const targetMode = modeOverride ?? chatMode
+      // Await backend session registration before navigating, so the subsequent
+      // WebSocket subscribe passes ownership validation on the first attempt.
+      const sessionKey = await sessionsHook.createSession(targetMode)
+      if (sessionKey) {
+        navigate(`/chat/${sessionKey}`, { replace: true })
 
-      // Set currentAgentId so the WebSocket subscription useEffect can fire.
-      // Try to get the agent assigned to the new session; fall back to the
-      // existing currentAgentId or the first available agent.
-      try {
-        const agentResult = await api.sessionAgent(sessionKey)
-        const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
-        if (validAgent) {
-          setCurrentAgentId(agentResult.agent_id)
-        } else if (currentAgentIdRef.current) {
-          setCurrentAgentId(currentAgentIdRef.current)
-        } else if (agentsRef.current.length > 0) {
-          setCurrentAgentId(agentsRef.current[0].id)
-        }
-      } catch {
-        // New session may not have an agent assigned yet — use current or first agent
-        if (currentAgentIdRef.current) {
-          setCurrentAgentId(currentAgentIdRef.current)
-        } else if (agentsRef.current.length > 0) {
-          setCurrentAgentId(agentsRef.current[0].id)
+        // Set currentAgentId so the WebSocket subscription useEffect can fire.
+        // Try to get the agent assigned to the new session; fall back to the
+        // existing currentAgentId or the first available agent.
+        try {
+          const agentResult = await api.sessionAgent(sessionKey)
+          const validAgent = agentsRef.current.find((a) => a.id === agentResult.agent_id)
+          if (validAgent) {
+            setCurrentAgentId(agentResult.agent_id)
+          } else if (currentAgentIdRef.current) {
+            setCurrentAgentId(currentAgentIdRef.current)
+          } else if (agentsRef.current.length > 0) {
+            setCurrentAgentId(agentsRef.current[0].id)
+          }
+        } catch {
+          // New session may not have an agent assigned yet — use current or first agent
+          if (currentAgentIdRef.current) {
+            setCurrentAgentId(currentAgentIdRef.current)
+          } else if (agentsRef.current.length > 0) {
+            setCurrentAgentId(agentsRef.current[0].id)
+          }
         }
       }
-    }
-  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession, api, chatMode])
+    },
+    [messagesHook.clearStreaming, navigate, sessionsHook.createSession, api, chatMode],
+  )
+
+  const selectMode = useCallback((mode: ChatMode) => {
+    setChatMode(mode)
+    localStorage.setItem('lele_chat_mode', mode)
+  }, [])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -470,11 +475,20 @@ export function useAppLogic(
   // Uses processingSessions (WebSocket-driven) instead of chatHistory.processing
   // (HTTP poll) because the HTTP poll can transiently report false during active
   // SSE streams, causing the loading dots and cancel button to disappear prematurely.
+  // hasActiveGroup ensures the loading indicator stays visible during group
+  // execution, even after message.complete removes the session from
+  // processingSessions (race condition between message.complete and
+  // group.status events).
+  const hasActiveGroup = Array.from(messagesHook.groups.values()).some(
+    (g) => g.status === 'started',
+  )
+
   const isProcessing =
     messagesHook.streamingMessages.some((m) => m.streaming) ||
     (sessionsHook.currentSessionKey
       ? processingSessions.has(sessionsHook.currentSessionKey)
-      : false)
+      : false) ||
+    hasActiveGroup
 
   return {
     error,

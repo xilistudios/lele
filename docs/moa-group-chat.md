@@ -75,9 +75,9 @@ Group profiles are defined in the `groups` block of `~/.lele/config.json`:
 | `id` | string | yes | Unique identifier for the group profile |
 | `participants` | string[] | yes | Agent IDs that must exist in `agents.list` |
 | `strategy` | string | yes | One of: `round_robin`, `moa`, `moderator`, `pipeline` |
-| `rounds` | int | no | Number of layers (MoA) or cycles (round_robin). 0 = unlimited (capped by `max_turns`) |
+| `rounds` | int | no | Number of layers (MoA) or cycles (round_robin). If omitted along with `max_turns`, defaults to 2 (`DefaultGroupRounds`). The hard ceiling of 50 total turns always applies regardless |
 | `moderator` | string | no | Agent ID to serve as aggregator/moderator. Must be in `participants` |
-| `max_turns` | int | no | Hard cap on total turns. If 0 and `rounds` is set, derived as `rounds × participants` |
+| `max_turns` | int | no | Hard cap on total turns. If 0 and `rounds` is set, derived as `rounds × participants`. In all cases, capped to a hard ceiling of 50 (`MaxGroupTurnsCeiling`) |
 | `max_tokens_per_turn` | int | no | Maximum tokens per individual turn |
 | `total_token_budget` | int | no | Hard cap on cumulative tokens across all turns. 0 = unlimited |
 | `stop_keywords` | string[] | no | Keywords (case-insensitive) in any turn that trigger early stop (e.g. `["CONSENSUS", "FINAL"]`) |
@@ -227,10 +227,12 @@ In the web interface, group chat turns appear in the chat panel organized by lay
 
 The group runner enforces these limits in priority order:
 
-1. **MaxTurns**: If the total number of turns reaches this cap, the group stops.
+1. **MaxTurns**: If the total number of turns reaches this cap, the group stops. When neither `rounds` nor `max_turns` is specified, the system defaults to `rounds = 2` (`DefaultGroupRounds`). An absolute hard ceiling of 50 total turns (`MaxGroupTurnsCeiling`) is always enforced, even if the profile requests a higher value.
 2. **TotalTokenBudget**: If cumulative token usage reaches this cap, the group stops.
 3. **StopKeywords**: If any turn contains a stop keyword (case-insensitive), the group stops with reason `stop_keyword:<keyword>`.
-4. **Converged repetition**: If the last 3 turns have identical normalized content (lowercased, trimmed), the group stops with reason `converged_repetition`. This prevents infinite loops where agents keep repeating themselves.
+4. **Converged repetition**: If the last 3 turns have identical normalized content (lowercased, trimmed), the group stops with reason `converged_repetition`.
+
+> **⚠️ Warning about converged repetition**: This check requires the last 3 turns to be *byte-identical* after normalization (lowercase + trim). In practice this almost never happens with LLMs, which tend to vary phrasing between turns. Do **not** rely on converged repetition as a safeguard against infinite loops — the hard limits (`max_turns` / `MaxGroupTurnsCeiling`) are the real protection.
 
 ### Permissions
 
@@ -242,7 +244,12 @@ Group chat respects the subagent allowlist:
 
 ### Context cancellation
 
-Groups can be stopped at any time with `/group stop <id>`. The stop is cooperative — the current turn finishes, and the group transitions to `stopped` status. The transcript up to that point is preserved.
+Groups can be stopped at any time in two ways:
+
+- **`/group stop <id>`** — stops a specific group by ID.
+- **Chat cancel button** (WebUI/TUI) or the WebSocket `cancel` event — stops **all** active groups originating from that session, via `GroupManager.StopByOrigin(channel, chatID)` (the underlying mechanism). No need to know the group ID.
+
+The stop is cooperative — the current turn finishes, and the group transitions to `stopped` status. The transcript up to that point is preserved.
 
 ## Cost And Latency
 
@@ -258,7 +265,7 @@ Group chat, especially the `moa` strategy, multiplies LLM calls:
 - **Use cheaper/faster models for proposers**, and a stronger model for the aggregator. Configure this via per-agent model settings in `agents.list`.
 - **Set `parallel: true`** for MoA to reduce wall-clock time (proposers run concurrently).
 - **Set `total_token_budget`** as a hard spending cap.
-- **Set `max_turns`** to prevent runaway groups.
+- **Set `max_turns`** to prevent runaway groups. If omitted, the system defaults to `rounds = 2` and enforces a hard ceiling of 50 total turns (`MaxGroupTurnsCeiling`). However, explicitly setting `max_turns` is still recommended for predictable cost and latency.
 - **Keep rounds low** — 2 rounds is usually enough for MoA to converge.
 - **Use `round_robin` or `pipeline`** when you don't need the full MoA overhead — they use fewer calls.
 

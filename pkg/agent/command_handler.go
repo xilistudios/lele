@@ -508,7 +508,7 @@ func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.In
 // tagGroupSession creates a SessionManager session for the group so it shows
 // up in the Group mode history (filtered by mode=group). The task is stored as
 // the first user message. Best-effort: errors are logged, not fatal.
-func (ch *commandHandlerImpl) tagGroupSession(groupID, task string) {
+func (ch *commandHandlerImpl) tagGroupSession(groupID, task, targetChatID string) {
 	sessionKey := "group:" + groupID
 	p := ch.al.GetProvidable()
 	if p == nil {
@@ -518,6 +518,10 @@ func (ch *commandHandlerImpl) tagGroupSession(groupID, task string) {
 		logger.WarnCF("agent", "Failed to set group session mode", map[string]interface{}{"session_key": sessionKey, "error": err.Error()})
 	}
 	_ = p.AddSessionMessage(sessionKey, providers.Message{Role: "user", Content: task})
+	if targetChatID != "" {
+		_ = p.SetSessionMode(targetChatID, "group")
+		_ = p.AddSessionMessage(targetChatID, providers.Message{Role: "user", Content: task})
+	}
 }
 
 // handleGroupListCommand lists all active groups.
@@ -711,7 +715,7 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 	if err != nil {
 		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
 	}
-	ch.tagGroupSession(groupID, task)
+	ch.tagGroupSession(groupID, task, msg.ChatID)
 	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
 		groupID, strategy, len(participants), groupID)
 }
@@ -785,7 +789,7 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 	if err != nil {
 		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
 	}
-	ch.tagGroupSession(groupID, task)
+	ch.tagGroupSession(groupID, task, msg.ChatID)
 	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
 		groupID, profile.Strategy, len(participants), groupID)
 }
