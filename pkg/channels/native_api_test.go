@@ -110,6 +110,14 @@ func (m *nativeTestAgentLoop) SetSessionModel(sessionKey, model string) string {
 	return model
 }
 
+func (m *nativeTestAgentLoop) GetSessionMode(sessionKey string) string {
+	return ""
+}
+
+func (m *nativeTestAgentLoop) SetSessionMode(sessionKey, mode string) error {
+	return nil
+}
+
 func (m *nativeTestAgentLoop) GetSessionModelSupportsImages(sessionKey string) bool {
 	model := m.GetSessionModel(sessionKey)
 	if model == "" {

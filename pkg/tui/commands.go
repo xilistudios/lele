@@ -27,6 +27,14 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if isSubagentSessionKey(s.Key) {
 				continue
 			}
+			// Filter by current mode (empty mode = "agent" for backward compat).
+			sessionMode := s.Mode
+			if sessionMode == "" {
+				sessionMode = "agent"
+			}
+			if sessionMode != m.currentMode.String() {
+				continue
+			}
 			name := s.Name
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")

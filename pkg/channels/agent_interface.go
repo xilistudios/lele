@@ -28,6 +28,10 @@ type AgentProvidable interface {
 	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión
 	GetSessionModel(sessionKey string) string
+	// GetSessionMode devuelve el modo de una sesión ("chat", "agent", "group", o "")
+	GetSessionMode(sessionKey string) string
+	// SetSessionMode establece el modo de una sesión
+	SetSessionMode(sessionKey, mode string) error
 	// GetSessionModelSupportsImages returns true if the session's current model supports vision
 	GetSessionModelSupportsImages(sessionKey string) bool
 	// SetSessionModel establece el modelo de una sesión

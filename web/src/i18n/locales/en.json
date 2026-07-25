@@ -136,7 +136,8 @@
       "tools": "Tools",
       "system": "System",
       "advanced": "Advanced",
-      "diagnostics": "Diagnostics"
+      "diagnostics": "Diagnostics",
+      "groups": "Groups"
     },
     "sections": {
       "gateway": "Gateway",
@@ -170,7 +171,9 @@
       "behavior": "Behavior",
       "features": "Features",
       "skills": "Skills",
-      "subagents": "Subagents"
+      "subagents": "Subagents",
+      "groupsList": "Group Profiles",
+      "limits": "Limits"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -300,7 +303,17 @@
       "agentContextWindow": "Context Window",
       "agentSupportsImages": "Supports Images",
       "agentSubagentsEnabled": "Enable subagents",
-      "agentSubagentsAllowed": "Allowed agents"
+      "agentSubagentsAllowed": "Allowed agents",
+      "groupId": "Group ID",
+      "groupStrategy": "Strategy",
+      "groupParticipants": "Participants",
+      "groupModerator": "Moderator",
+      "groupRounds": "Rounds",
+      "groupMaxTurns": "Max turns",
+      "groupMaxTokensPerTurn": "Max tokens per turn",
+      "groupTotalTokenBudget": "Total token budget",
+      "groupStopKeywords": "Stop keywords",
+      "groupParallel": "Parallel"
     },
     "descriptions": {
       "ephemeralThreshold": "Time in seconds before messages are removed",
@@ -327,7 +340,18 @@
       "agentSkills": "Active skills available for this agent",
       "agentsList": "Create and manage AI agents with custom configurations",
       "agentSubagentsEnabled": "Allow this agent to spawn subagents for delegated tasks",
-      "agentSubagentsAllowed": "Agents that this agent can spawn. Use '*' to allow all."
+      "agentSubagentsAllowed": "Agents that this agent can spawn. Use '*' to allow all.",
+      "groupsList": "Configure multi-agent group profiles (participants, strategy, limits).",
+      "groupId": "Unique identifier for the profile",
+      "groupStrategy": "Collaboration strategy",
+      "groupParticipants": "Agent IDs that participate in this group",
+      "groupModerator": "Agent that moderates/aggregates (must be a participant)",
+      "groupRounds": "MoA layers / round-robin rounds",
+      "groupMaxTurns": "Maximum total turns",
+      "groupMaxTokensPerTurn": "Token cap per turn",
+      "groupTotalTokenBudget": "Cumulative token budget",
+      "groupStopKeywords": "Keywords that trigger convergence",
+      "groupParallel": "Run turns in parallel within a layer"
     },
     "theme": {
       "dark": "Dark",
@@ -477,7 +501,11 @@
       "generatePin": "Generate PIN",
       "pinGeneratedInstruction": "Enter this PIN on your new client device \"{{device}}\" to pair it:",
       "expiresAt": "Expires at {{time}}"
-    }
+    },
+    "addGroupProfile": "Add profile",
+    "removeGroupProfile": "Remove profile",
+    "noGroupProfiles": "No group profiles configured yet.",
+    "none": "None"
   },
   "common": {
     "loading": "Loading...",
@@ -498,6 +526,10 @@
     "noGroups": "No active groups in this session",
     "layer": "Layer {{number}}",
     "finalSynthesis": "Final Synthesis",
+    "selectProfile": "Select group profile",
+    "taskPlaceholder": "Describe the task for the group...",
+    "start": "Start Group",
+    "noProfiles": "No group profiles configured",
     "participants": "Participants",
     "strategy": "Strategy",
     "tokens": "tokens",
@@ -599,5 +631,13 @@
       "global": "Global",
       "builtin": "Built-in"
     }
+  },
+  "mode": {
+    "chat": "Chat",
+    "agent": "Agent",
+    "group": "Group",
+    "chatDescription": "Simple chat with web search",
+    "agentDescription": "Full agent with all tools",
+    "groupDescription": "Multi-agent group chat"
   }
 }

@@ -136,7 +136,8 @@
       "tools": "Herramientas",
       "system": "Sistema",
       "advanced": "Avanzado",
-      "diagnostics": "Diagnósticos"
+      "diagnostics": "Diagnósticos",
+      "groups": "Grupos"
     },
     "sections": {
       "gateway": "Gateway",
@@ -165,7 +166,9 @@
       "bindings": "Bindings",
       "identityLinks": "Links de identidad",
       "rawJson": "Configuración JSON raw",
-      "subagents": "Subagentes"
+      "subagents": "Subagentes",
+      "groupsList": "Perfiles de grupo",
+      "limits": "Límites"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -289,7 +292,17 @@
       "bindingPeerKind": "Tipo de peer",
       "bindingPeerId": "ID de peer",
       "bindingGuildId": "ID de guild",
-      "bindingTeamId": "ID de team"
+      "bindingTeamId": "ID de team",
+      "groupId": "ID del grupo",
+      "groupStrategy": "Estrategia",
+      "groupParticipants": "Participantes",
+      "groupModerator": "Moderador",
+      "groupRounds": "Rondas",
+      "groupMaxTurns": "Turnos máximos",
+      "groupMaxTokensPerTurn": "Tokens máximos por turno",
+      "groupTotalTokenBudget": "Presupuesto total de tokens",
+      "groupStopKeywords": "Palabras clave de convergencia",
+      "groupParallel": "Paralelo"
     },
     "descriptions": {
       "ephemeralThreshold": "Tiempo en segundos antes de eliminar mensajes",
@@ -316,7 +329,18 @@
       "agentSkills": "Skills activos disponibles para este agente",
       "agentsList": "Crea y gestiona agentes IA con configuraciones personalizadas",
       "agentSubagentsEnabled": "Permitir que este agente cree subagentes para tareas delegadas",
-      "agentSubagentsAllowed": "Agentes que este agente puede crear. Use '*' para permitir todos."
+      "agentSubagentsAllowed": "Agentes que este agente puede crear. Use '*' para permitir todos.",
+      "groupsList": "Configurá perfiles de grupo multi-agente (participantes, estrategia, límites).",
+      "groupId": "Identificador único del perfil",
+      "groupStrategy": "Estrategia de colaboración",
+      "groupParticipants": "IDs de agentes que participan en este grupo",
+      "groupModerator": "Agente que modera/agrega (debe ser participante)",
+      "groupRounds": "Capas MoA / rondas round-robin",
+      "groupMaxTurns": "Máximo de turnos totales",
+      "groupMaxTokensPerTurn": "Tope de tokens por turno",
+      "groupTotalTokenBudget": "Presupuesto acumulado de tokens",
+      "groupStopKeywords": "Palabras clave que disparan la convergencia",
+      "groupParallel": "Ejecutar turnos en paralelo dentro de una capa"
     },
     "theme": {
       "dark": "Oscuro",
@@ -466,7 +490,11 @@
       "generatePin": "Generar PIN",
       "pinGeneratedInstruction": "Ingresa este PIN en tu nuevo dispositivo cliente \"{{device}}\" para vincularlo:",
       "expiresAt": "Expira a las {{time}}"
-    }
+    },
+    "addGroupProfile": "Agregar perfil",
+    "removeGroupProfile": "Eliminar perfil",
+    "noGroupProfiles": "Aún no hay perfiles de grupo configurados.",
+    "none": "Ninguno"
   },
   "common": {
     "loading": "Cargando...",
@@ -485,6 +513,10 @@
     "noGroups": "No hay grupos activos en esta sesión",
     "layer": "Capa {{number}}",
     "finalSynthesis": "Síntesis final",
+    "selectProfile": "Seleccionar perfil de grupo",
+    "taskPlaceholder": "Describí la tarea para el grupo...",
+    "start": "Iniciar grupo",
+    "noProfiles": "No hay perfiles de grupo configurados",
     "participants": "Participantes",
     "strategy": "Estrategia",
     "tokens": "tokens",
@@ -586,5 +618,13 @@
       "global": "Global",
       "builtin": "Integrado"
     }
+  },
+  "mode": {
+    "chat": "Chat",
+    "agent": "Agente",
+    "group": "Grupo",
+    "chatDescription": "Chat simple con búsqueda web",
+    "agentDescription": "Agente completo con todas las herramientas",
+    "groupDescription": "Chat grupal multi-agente"
   }
 }

@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ const indexFileName = "_index.json"
 type Session struct {
 	Key                string              `json:"key"`
 	Name               string              `json:"name,omitempty"`
+	Mode               string              `json:"mode,omitempty"` // "chat", "agent", "group" (default empty = "agent")
 	Messages           []providers.Message `json:"messages"`
 	Summary            string              `json:"summary,omitempty"`
 	VerboseMode        bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
@@ -43,6 +45,7 @@ type Session struct {
 type sessionMetadata struct {
 	Key     string    `json:"key"`
 	Name    string    `json:"name"`
+	Mode    string    `json:"mode,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }
@@ -391,6 +394,7 @@ func (sm *SessionManager) GetOrCreate(key string) *Session {
 	// Register in metadata
 	sm.sessionMeta[key] = &sessionMetadata{
 		Key:     key,
+		Mode:    session.Mode,
 		Created: session.Created,
 		Updated: session.Updated,
 	}
@@ -928,6 +932,7 @@ func (sm *SessionManager) loadSessionMetadataParallel(files []os.DirEntry) {
 				var meta struct {
 					Key     string    `json:"key"`
 					Name    string    `json:"name"`
+					Mode    string    `json:"mode,omitempty"`
 					Created time.Time `json:"created"`
 					Updated time.Time `json:"updated"`
 				}
@@ -943,6 +948,7 @@ func (sm *SessionManager) loadSessionMetadataParallel(files []os.DirEntry) {
 					meta: &sessionMetadata{
 						Key:     key,
 						Name:    meta.Name,
+						Mode:    meta.Mode,
 						Created: meta.Created,
 						Updated: meta.Updated,
 					},
@@ -1140,6 +1146,119 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	return sm.saveUnlocked(key)
 }
 
+// GetMode returns the mode override for a session.
+// Returns "" if not set. Callers should normalize "" to "agent" (backward compat).
+func (sm *SessionManager) GetMode(key string) string {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	session, ok := sm.sessions[key]
+	if ok {
+		return session.Mode
+	}
+	// Try metadata
+	if meta, ok := sm.sessionMeta[key]; ok {
+		return meta.Mode
+	}
+	return ""
+}
+
+// SetMode sets the mode for a session and persists it.
+// Valid values: "", "chat", "agent", "group".
+func (sm *SessionManager) SetMode(key string, mode string) error {
+	// Validate mode
+	validModes := map[string]bool{"": true, "chat": true, "agent": true, "group": true}
+	if !validModes[mode] {
+		return fmt.Errorf("invalid mode %q: must be one of \"\", \"chat\", \"agent\", \"group\"", mode)
+	}
+
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			// Create session if it doesn't exist
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
+		}
+	}
+
+	session.Mode = mode
+	session.Updated = time.Now()
+	sm.touchSession(key)
+
+	// Update metadata
+	sm.sessionMeta[key] = &sessionMetadata{
+		Key:     session.Key,
+		Name:    session.Name,
+		Mode:    session.Mode,
+		Created: session.Created,
+		Updated: session.Updated,
+	}
+
+	return sm.saveUnlocked(key)
+}
+
+// ListSessionsByMode returns sessions whose effective mode matches the given mode.
+// The parameter mode is normalized: "" is treated as "agent".
+// For each session, its effective mode is session.Mode; if "" it is treated as "agent".
+func (sm *SessionManager) ListSessionsByMode(mode string) []*Session {
+	// Normalize requested mode: "" -> "agent"
+	normalizedMode := mode
+	if normalizedMode == "" {
+		normalizedMode = "agent"
+	}
+
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	res := make([]*Session, 0)
+
+	seen := make(map[string]bool)
+	for key := range sm.sessions {
+		seen[key] = true
+		session := sm.sessions[key]
+		effectiveMode := session.Mode
+		if effectiveMode == "" {
+			effectiveMode = "agent"
+		}
+		if effectiveMode == normalizedMode {
+			res = append(res, session)
+		}
+	}
+	for key, meta := range sm.sessionMeta {
+		if !seen[key] {
+			effectiveMode := meta.Mode
+			if effectiveMode == "" {
+				effectiveMode = "agent"
+			}
+			if effectiveMode == normalizedMode {
+				res = append(res, &Session{
+					Key:     meta.Key,
+					Name:    meta.Name,
+					Mode:    meta.Mode,
+					Created: meta.Created,
+					Updated: meta.Updated,
+				})
+			}
+		}
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Updated.After(res[j].Updated)
+	})
+	return res
+}
+
 // GetThinkingLevel returns the thinking level for a session.
 func (sm *SessionManager) GetThinkingLevel(key string) string {
 	sm.ensureLoaded()
@@ -1277,6 +1396,7 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	snapshot := Session{
 		Key:          stored.Key,
 		Name:         stored.Name,
+		Mode:         stored.Mode,
 		Summary:      stored.Summary,
 		VerboseMode:  stored.VerboseMode,
 		VerboseLevel: stored.VerboseLevel,
@@ -1337,6 +1457,7 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	sm.sessionMeta[key] = &sessionMetadata{
 		Key:     stored.Key,
 		Name:    stored.Name,
+		Mode:    stored.Mode,
 		Created: stored.Created,
 		Updated: stored.Updated,
 	}
@@ -1495,6 +1616,7 @@ func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 			sm.sessions[key] = session
 			sm.sessionMeta[key] = &sessionMetadata{
 				Key:     key,
+				Mode:    session.Mode,
 				Created: session.Created,
 				Updated: session.Updated,
 			}
@@ -1654,6 +1776,7 @@ func (sm *SessionManager) ListSessions() []*Session {
 			res = append(res, &Session{
 				Key:     meta.Key,
 				Name:    meta.Name,
+				Mode:    meta.Mode,
 				Created: meta.Created,
 				Updated: meta.Updated,
 				// Messages is nil — not loaded

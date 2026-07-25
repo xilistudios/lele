@@ -21,6 +21,26 @@ const (
 	ChatViewPane
 )
 
+// chatMode represents the active TUI mode (Agent, Chat, or Group).
+type chatMode int
+
+const (
+	ModeAgent chatMode = iota // default
+	ModeChat
+	ModeGroup
+)
+
+func (m chatMode) String() string {
+	switch m {
+	case ModeChat:
+		return "chat"
+	case ModeGroup:
+		return "group"
+	default:
+		return "agent"
+	}
+}
+
 // leftColumnRatio is the fraction of the terminal width used by the left
 // (chat) column. The right sidebar takes the remaining space. Shared by
 // view.go (layout) and handlers.go (mouse hit-testing) so they stay in sync.
@@ -126,7 +146,9 @@ type Model struct {
 	selectedSessionIdx int
 	visibleSessions    []*session.Session
 	currentKey         string
-	showWelcome        bool // true when showing the welcome/new-chat screen
+	currentMode        chatMode // current mode filter: Agent (default), Chat, or Group
+	groupProfileIdx    int      // selected profile index in Group mode welcome screen
+	showWelcome        bool     // true when showing the welcome/new-chat screen
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool

@@ -459,3 +459,223 @@ func TestFindSubagentSessions_Persistence(t *testing.T) {
 		t.Errorf("summary = %q, want %q", byTaskID["subagent-1"].Summary, "Completed task 1")
 	}
 }
+
+// --- Mode Tests (3-mode feature) ---
+
+func TestSetModeGetMode(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:mode-test"
+
+	sm.GetOrCreate(key)
+	if err := sm.SetMode(key, "chat"); err != nil {
+		t.Fatalf("SetMode(%q, %q) failed: %v", key, "chat", err)
+	}
+	if got := sm.GetMode(key); got != "chat" {
+		t.Errorf("GetMode(%q) = %q, want %q", key, got, "chat")
+	}
+}
+
+func TestSetModeInvalid(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:invalid-mode"
+
+	sm.GetOrCreate(key)
+
+	// Set a valid mode first
+	if err := sm.SetMode(key, "chat"); err != nil {
+		t.Fatalf("SetMode(%q, %q) failed: %v", key, "chat", err)
+	}
+
+	// Try setting an invalid mode
+	if err := sm.SetMode(key, "invalid"); err == nil {
+		t.Errorf("SetMode(%q, %q) should have returned error", key, "invalid")
+	}
+
+	// GetMode should still return the previous valid value
+	if got := sm.GetMode(key); got != "chat" {
+		t.Errorf("GetMode(%q) after invalid SetMode = %q, want %q (unchanged)", key, got, "chat")
+	}
+}
+
+func TestSetModePersists(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+	key := "telegram:persist-mode"
+
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "hello")
+	if err := sm.SetMode(key, "group"); err != nil {
+		t.Fatalf("SetMode(%q, %q) failed: %v", key, "group", err)
+	}
+
+	// Verify persisted on disk by creating a new SessionManager
+	sm2 := NewSessionManager(tmpDir)
+	if got := sm2.GetMode(key); got != "group" {
+		t.Errorf("GetMode(%q) after reload = %q, want %q", key, got, "group")
+	}
+}
+
+func TestGetModeDefault(t *testing.T) {
+	sm := NewSessionManager("")
+	key := "telegram:default-mode"
+
+	sm.GetOrCreate(key)
+	// No mode set — should return "" (callers normalize to "agent")
+	if got := sm.GetMode(key); got != "" {
+		t.Errorf("GetMode(%q) for unset mode = %q, want %q", key, got, "")
+	}
+}
+
+func TestGetModeNonExistent(t *testing.T) {
+	sm := NewSessionManager("")
+	// Non-existent session
+	if got := sm.GetMode("nonexistent"); got != "" {
+		t.Errorf("GetMode(nonexistent) = %q, want %q", got, "")
+	}
+}
+
+func TestListSessionsByMode(t *testing.T) {
+	sm := NewSessionManager("")
+
+	// Create sessions with different modes
+	keys := map[string]string{
+		"telegram:chat-1":   "chat",
+		"telegram:chat-2":   "chat",
+		"telegram:agent-1":  "agent",
+		"telegram:agent-2":  "agent",
+		"telegram:group-1":  "group",
+		"telegram:nomode-1": "", // no mode set (backward compat: treated as agent)
+		"telegram:nomode-2": "", // no mode set
+	}
+
+	for key, mode := range keys {
+		sm.GetOrCreate(key)
+		sm.AddMessage(key, "user", "hello from "+key)
+		if mode != "" {
+			if err := sm.SetMode(key, mode); err != nil {
+				t.Fatalf("SetMode(%q, %q) failed: %v", key, mode, err)
+			}
+		}
+	}
+
+	// Test: ListSessionsByMode("chat") returns only chat sessions
+	chatSessions := sm.ListSessionsByMode("chat")
+	if len(chatSessions) != 2 {
+		t.Errorf("ListSessionsByMode(\"chat\") returned %d sessions, want 2", len(chatSessions))
+	}
+	chatKeys := make(map[string]bool)
+	for _, s := range chatSessions {
+		chatKeys[s.Key] = true
+	}
+	if !chatKeys["telegram:chat-1"] || !chatKeys["telegram:chat-2"] {
+		t.Errorf("chat sessions missing expected keys, got: %v", chatKeys)
+	}
+
+	// Test: ListSessionsByMode("agent") returns agent + empty-mode sessions (backward compat)
+	agentSessions := sm.ListSessionsByMode("agent")
+	// agent-1, agent-2, nomode-1, nomode-2 = 4
+	if len(agentSessions) != 4 {
+		t.Errorf("ListSessionsByMode(\"agent\") returned %d sessions, want 4", len(agentSessions))
+	}
+	agentKeys := make(map[string]bool)
+	for _, s := range agentSessions {
+		agentKeys[s.Key] = true
+	}
+	for _, expected := range []string{"telegram:agent-1", "telegram:agent-2", "telegram:nomode-1", "telegram:nomode-2"} {
+		if !agentKeys[expected] {
+			t.Errorf("agent sessions missing expected key %q", expected)
+		}
+	}
+
+	// Test: ListSessionsByMode("") is treated as "agent" (same result)
+	defaultSessions := sm.ListSessionsByMode("")
+	if len(defaultSessions) != len(agentSessions) {
+		t.Errorf("ListSessionsByMode(\"\") returned %d sessions, want %d (same as agent)", len(defaultSessions), len(agentSessions))
+	}
+
+	// Test: ListSessionsByMode("group") returns only group sessions
+	groupSessions := sm.ListSessionsByMode("group")
+	if len(groupSessions) != 1 {
+		t.Errorf("ListSessionsByMode(\"group\") returned %d sessions, want 1", len(groupSessions))
+	}
+	if len(groupSessions) > 0 && groupSessions[0].Key != "telegram:group-1" {
+		t.Errorf("group session key = %q, want %q", groupSessions[0].Key, "telegram:group-1")
+	}
+}
+
+func TestListSessionsByMode_Persistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+
+	// Create and persist sessions with different modes
+	for _, setup := range []struct {
+		key  string
+		mode string
+	}{
+		{"telegram:p-chat", "chat"},
+		{"telegram:p-agent", "agent"},
+		{"telegram:p-group", "group"},
+		{"telegram:p-nomode", ""},
+	} {
+		sm.GetOrCreate(setup.key)
+		sm.AddMessage(setup.key, "user", "test")
+		if setup.mode != "" {
+			sm.SetMode(setup.key, setup.mode)
+		}
+		sm.Save(setup.key)
+	}
+
+	// Load into fresh manager
+	sm2 := NewSessionManager(tmpDir)
+
+	chatSessions := sm2.ListSessionsByMode("chat")
+	if len(chatSessions) != 1 || chatSessions[0].Key != "telegram:p-chat" {
+		t.Errorf("persisted chat sessions: got %d, want 1 (p-chat)", len(chatSessions))
+	}
+
+	agentSessions := sm2.ListSessionsByMode("agent")
+	// agent + nomode = 2
+	if len(agentSessions) != 2 {
+		t.Errorf("persisted agent sessions: got %d, want 2", len(agentSessions))
+	}
+
+	groupSessions := sm2.ListSessionsByMode("group")
+	if len(groupSessions) != 1 || groupSessions[0].Key != "telegram:p-group" {
+		t.Errorf("persisted group sessions: got %d, want 1 (p-group)", len(groupSessions))
+	}
+}
+
+func TestSetMode_AllValidValues(t *testing.T) {
+	sm := NewSessionManager("")
+	validModes := []string{"", "chat", "agent", "group"}
+
+	for _, mode := range validModes {
+		key := "telegram:mode-" + mode
+		sm.GetOrCreate(key)
+		if err := sm.SetMode(key, mode); err != nil {
+			t.Errorf("SetMode(%q, %q) should succeed, got error: %v", key, mode, err)
+		}
+		if got := sm.GetMode(key); got != mode {
+			t.Errorf("GetMode(%q) = %q, want %q", key, got, mode)
+		}
+	}
+}
+
+func TestSetMode_PersistsImmediately(t *testing.T) {
+	// SetMode calls saveUnlocked internally, so it should persist to disk
+	// without needing an explicit Save() call.
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+	key := "telegram:immediate-persist"
+
+	sm.GetOrCreate(key)
+	if err := sm.SetMode(key, "group"); err != nil {
+		t.Fatalf("SetMode failed: %v", err)
+	}
+
+	// Reload from disk — should see the mode
+	sm2 := NewSessionManager(tmpDir)
+	if got := sm2.GetMode(key); got != "group" {
+		t.Errorf("GetMode after SetMode reload = %q, want %q", got, "group")
+	}
+}

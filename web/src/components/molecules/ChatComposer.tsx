@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
+import { getModeTheme } from '../../lib/modeTheme'
 import { CloseIcon } from '../atoms/Icons'
 import { AttachmentInput } from './AttachmentInput'
 import { SearchableSelect } from './SearchableSelect'
@@ -41,6 +42,7 @@ export function ChatComposer() {
     onSelectAgent,
     onSelectModel,
     onSelectThinkLevel,
+    chatMode,
   } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
 
@@ -77,6 +79,8 @@ export function ChatComposer() {
     label: agent.name,
   }))
   const selectedAgentId = currentAgent?.id ?? ''
+
+  const composerTheme = getModeTheme(chatMode)
 
   // Check if the currently selected model has reasoning enabled
   const thinkingEnabled = useMemo(() => {
@@ -201,6 +205,7 @@ export function ChatComposer() {
         </div>
       )}
       <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border-light">
+        <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
         <textarea
           ref={textareaRef}
           className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary"

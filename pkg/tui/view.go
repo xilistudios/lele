@@ -84,7 +84,55 @@ func (m *Model) View() string {
 		)
 		contentBuilder.WriteString(selectorLine + "\n")
 
-		infoText := fmt.Sprintf("%s %s  ·  %s  ·  %s  ·  %s", i18n.T("tui.thinking"), thinkLevel, i18n.T("tui.ctrlModel"), i18n.T("tui.ctrlAgent"), i18n.T("tui.ctrlChats"))
+		// Mode tabs: show the 3 modes, highlighting the active one
+		modeTabChat := i18n.T("tui.modeChat")
+		modeTabAgent := i18n.T("tui.modeAgent")
+		modeTabGroup := i18n.T("tui.modeGroup")
+		var modeTabs string
+		switch m.currentMode {
+		case ModeChat:
+			modeTabs = fmt.Sprintf("%s   %s   %s",
+				ModelSelectorStyle.Render(modeTabChat),
+				ModelSelectorLabel.Render(modeTabAgent),
+				ModelSelectorLabel.Render(modeTabGroup),
+			)
+		case ModeGroup:
+			modeTabs = fmt.Sprintf("%s   %s   %s",
+				ModelSelectorLabel.Render(modeTabChat),
+				ModelSelectorLabel.Render(modeTabAgent),
+				ModelSelectorStyle.Render(modeTabGroup),
+			)
+		default: // ModeAgent
+			modeTabs = fmt.Sprintf("%s   %s   %s",
+				ModelSelectorLabel.Render(modeTabChat),
+				ModelSelectorStyle.Render(modeTabAgent),
+				ModelSelectorLabel.Render(modeTabGroup),
+			)
+		}
+		contentBuilder.WriteString(modeTabs + "\n")
+
+		// Group mode: show group profile selector
+		if m.currentMode == ModeGroup {
+			profiles := m.getGroupProfiles()
+			if len(profiles) > 0 {
+				contentBuilder.WriteString("\n")
+				contentBuilder.WriteString(ModelSelectorLabel.Render(i18n.T("tui.groupSelectProfile")) + "\n")
+				for i, p := range profiles {
+					line := fmt.Sprintf("%s (%s, %d agents)", p.ID, p.Strategy, len(p.Participants))
+					if i == m.groupProfileIdx {
+						contentBuilder.WriteString(ModelSelectorStyle.Render("> "+line) + "\n")
+					} else {
+						contentBuilder.WriteString(ModelSelectorLabel.Render("  "+line) + "\n")
+					}
+				}
+				contentBuilder.WriteString(HelpStyle.Render(i18n.T("tui.groupTaskPlaceholder")) + "\n")
+			} else {
+				contentBuilder.WriteString("\n")
+				contentBuilder.WriteString(CommentColorStyle.Render(i18n.T("tui.noGroupProfiles")) + "\n")
+			}
+		}
+
+		infoText := fmt.Sprintf("%s %s  ·  %s  ·  %s  ·  %s  ·  %s", i18n.T("tui.thinking"), thinkLevel, i18n.T("tui.ctrlModel"), i18n.T("tui.ctrlAgent"), i18n.T("tui.ctrlChats"), i18n.T("tui.tabHint"))
 		contentBuilder.WriteString(HelpStyle.Render(infoText) + "\n\n")
 
 		tip := i18n.T("tui.typeMessage")
@@ -198,8 +246,9 @@ func (m *Model) View() string {
 		pct = float64(currentTokens) / float64(contextWindow) * 100
 	}
 	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
+	modeBadge := fmt.Sprintf("[%s]", strings.ToUpper(m.currentMode.String()))
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
-		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)),
+		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s %s · %s · %s · %s", ModelSelectorStyle.Render(modeBadge), agentID, modelName, thinkLevel, i18n.T("tui.tabHint"))),
 		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), i18n.T("tui.copyHint"), func() string {
 			if m.mouseEnabled {
 				return i18n.T("tui.mouseOn")

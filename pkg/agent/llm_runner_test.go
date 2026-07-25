@@ -176,7 +176,7 @@ type llmRunnerMockContextBuilder struct {
 	messages []providers.Message
 }
 
-func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
+func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string, mode string) []providers.Message {
 	if m.messages != nil {
 		return m.messages
 	}

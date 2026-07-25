@@ -1,4 +1,6 @@
 import { useTranslation } from 'react-i18next'
+import { getModeTheme } from '../../lib/modeTheme'
+import type { ChatMode } from '../../lib/types'
 import { formatSessionTitle } from '../../lib/utils'
 import { TrashIcon } from '../atoms/Icons'
 import { Spinner } from '../atoms/Spinner'
@@ -12,6 +14,7 @@ type Props = {
   onSelect: () => void
   onDelete: () => void
   collapsed?: boolean
+  mode?: ChatMode
 }
 
 export function SessionItem({
@@ -23,6 +26,7 @@ export function SessionItem({
   onSelect,
   onDelete,
   collapsed = false,
+  mode,
 }: Props) {
   const { t } = useTranslation()
 
@@ -34,7 +38,7 @@ export function SessionItem({
         title={formatSessionTitle(sessionKey, sessionName, messageCount)}
         className={`relative flex w-full items-center justify-center rounded-md p-2 transition-colors ${
           selected
-            ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+            ? getModeTheme(mode).selectedItem
             : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
         }`}
       >
@@ -62,7 +66,7 @@ export function SessionItem({
       tabIndex={0}
       className={`group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors cursor-pointer ${
         selected
-          ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+          ? getModeTheme(mode).selectedItem
           : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
       }`}
     >

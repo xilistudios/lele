@@ -221,6 +221,7 @@ type HistoryToolCall struct {
 type ChatSession struct {
 	Key          string    `json:"key"`
 	Name         string    `json:"name,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
 	Created      time.Time `json:"created"`
 	Updated      time.Time `json:"updated"`
 	MessageCount int       `json:"message_count"`
@@ -234,6 +235,7 @@ type ChatSessionsResponse struct {
 
 type CreateSessionRequest struct {
 	SessionKey string `json:"session_key"`
+	Mode       string `json:"mode,omitempty"` // "chat", "agent", "group"
 }
 
 type CreateSessionResponse struct {

@@ -7,6 +7,7 @@ import type {
   Agent,
   AgentDetails,
   ChannelInfo,
+  ChatMode,
   ConfigResponse,
   SystemStatus,
   ToolInfo,
@@ -50,6 +51,13 @@ export function useAppLogic(
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => loadSidebarOpen())
+  const [chatMode, setChatMode] = useState<ChatMode>(() => {
+    return (localStorage.getItem('lele_chat_mode') as ChatMode) || 'agent'
+  })
+  const selectMode = useCallback((mode: ChatMode) => {
+    setChatMode(mode)
+    localStorage.setItem('lele_chat_mode', mode)
+  }, [])
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
   const navigate = useNavigate()
@@ -217,14 +225,14 @@ export function useAppLogic(
 
   const handleSend = useCallback(
     async (content: string, attachments: string[]) => {
-      if (!sessionsHook.currentSessionKey || !currentAgentId) return
+      let sessionKey = sessionsHook.currentSessionKey
+      if (!sessionKey) {
+        sessionKey = await sessionsHook.createSession(chatMode)
+        if (!sessionKey) return
+      }
+      if (!currentAgentId) return
 
-      await messagesHook.sendMessage(
-        content,
-        attachments,
-        sessionsHook.currentSessionKey,
-        currentAgentId,
-      )
+      await messagesHook.sendMessage(content, attachments, sessionKey, currentAgentId)
       messagesHook.setPendingAttachments([])
       // Optimistic update: bump message_count immediately so sidebar
       // shows the session activity instead of "New Chat"
@@ -234,7 +242,7 @@ export function useAppLogic(
         .replace(/[.,!?;:'"`]+/g, '')
         .trim()
         .slice(0, 50)
-      touchSession(sessionsHook.currentSessionKey, title || undefined)
+      touchSession(sessionKey, title || undefined, chatMode)
     },
     [
       sessionsHook.currentSessionKey,
@@ -242,6 +250,8 @@ export function useAppLogic(
       messagesHook.sendMessage,
       messagesHook.setPendingAttachments,
       touchSession,
+      sessionsHook.createSession,
+      chatMode,
     ],
   )
 
@@ -324,7 +334,7 @@ export function useAppLogic(
     messagesHook.clearStreaming()
     // Await backend session registration before navigating, so the subsequent
     // WebSocket subscribe passes ownership validation on the first attempt.
-    const sessionKey = await sessionsHook.createSession()
+    const sessionKey = await sessionsHook.createSession(chatMode)
     if (sessionKey) {
       navigate(`/chat/${sessionKey}`, { replace: true })
 
@@ -350,7 +360,7 @@ export function useAppLogic(
         }
       }
     }
-  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession, api])
+  }, [messagesHook.clearStreaming, navigate, sessionsHook.createSession, api, chatMode])
 
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
@@ -473,6 +483,7 @@ export function useAppLogic(
     diagnostics,
     diagnosticsOpen,
     sidebarOpen,
+    chatMode,
     modelState,
     thinkLevel,
     isProcessing,
@@ -504,6 +515,7 @@ export function useAppLogic(
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
     onToggleSidebar: handleToggleSidebar,
+    onSelectMode: selectMode,
     loadMore: chatHistory.loadMore,
     hasMore: chatHistory.hasMore,
     isLoadingMore: chatHistory.isLoadingMore,

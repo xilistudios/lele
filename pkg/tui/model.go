@@ -98,6 +98,14 @@ func (m *Model) reloadSessions() {
 		if isSubagentSessionKey(s.Key) {
 			continue
 		}
+		// Filter by current mode (empty mode = "agent" for backward compat).
+		sessionMode := s.Mode
+		if sessionMode == "" {
+			sessionMode = "agent"
+		}
+		if sessionMode != m.currentMode.String() {
+			continue
+		}
 		if len(s.Messages) > 0 || s.Key == m.currentKey {
 			m.visibleSessions = append(m.visibleSessions, s)
 		}
@@ -159,6 +167,7 @@ func (m *Model) reloadSessions() {
 func (m *Model) createNewChat() {
 	newKey := fmt.Sprintf("tui:chat:%s", uuid.New().String())
 	m.sessionMgr.GetOrCreate(newKey)
+	_ = m.sessionMgr.SetMode(newKey, m.currentMode.String())
 
 	agentID := m.pendingAgent
 	if agentID == "" {

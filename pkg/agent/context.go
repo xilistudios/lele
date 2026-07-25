@@ -216,13 +216,26 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 	return result
 }
 
+// BuildMinimalSystemPrompt returns a lightweight system prompt for "chat" mode
+// sessions, where only web_search and web_fetch tools are available.
+func (cb *ContextBuilder) BuildMinimalSystemPrompt() string {
+	return "You are a helpful AI assistant. You can search the web and fetch web pages to answer questions.\n\n" +
+		"## Available Tools\n\n" +
+		"- `web_search` - Search the web for current information\n" +
+		"- `web_fetch` - Fetch a URL and extract readable content\n\n" +
+		"## Rules\n\n" +
+		"1. Use tools when you need current information or to read a specific URL.\n" +
+		"2. Be helpful, accurate, and concise.\n" +
+		"3. Cite sources when using web search results."
+}
+
 // BuildMessages constructs the full message list for the LLM.
 //
 // To keep prompt caching effective on providers like Anthropic, the system prompt
 // MUST be byte-for-byte identical across turns inside the same session.  We therefore
 // cache the computed system prompt per session key and reuse it on subsequent calls
 // (e.g. tool-turns).
-func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
+func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string, mode string) []providers.Message {
 	messages := []providers.Message{}
 	renderedUserMessage := cb.BuildCurrentUserMessage(currentMessage, attachments, channel, chatID)
 
@@ -239,7 +252,11 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 					"length":      len(systemPrompt),
 				})
 		} else {
-			systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
+			if mode == "chat" {
+				systemPrompt = cb.BuildMinimalSystemPrompt()
+			} else {
+				systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
+			}
 			cb.storeCachedSystemPrompt(sessionKey, systemPrompt)
 			logger.DebugCF("agent", "Built and cached new system prompt",
 				map[string]interface{}{
@@ -249,7 +266,11 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		}
 	} else {
 		// No session tracking — build fresh every time (safe fallback)
-		systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
+		if mode == "chat" {
+			systemPrompt = cb.BuildMinimalSystemPrompt()
+		} else {
+			systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
+		}
 	}
 
 	// Debug logging

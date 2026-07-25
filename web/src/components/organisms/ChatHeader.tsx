@@ -6,6 +6,7 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { useGroups } from '../../hooks/useGroups'
 import { useSubagents } from '../../hooks/useSubagents'
+import { getModeTheme } from '../../lib/modeTheme'
 import { formatSessionTitle } from '../../lib/utils'
 import { ConnectionIndicator } from '../atoms/ConnectionIndicator'
 import { ContextIndicator } from '../atoms/ContextIndicator'
@@ -18,7 +19,7 @@ import { SubagentsSidebar } from './SubagentsSidebar'
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar, groups } =
+  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar, groups, chatMode } =
     useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
@@ -27,6 +28,9 @@ export const ChatHeader = memo(function ChatHeader() {
 
   const { subagents, loading } = useSubagents(currentSessionKey)
   const { groups: sessionGroups } = useGroups(groups, currentSessionKey)
+
+  const modeTheme = getModeTheme(chatMode)
+  const ModeIcon = modeTheme.Icon
 
   const handleToggleSubagents = useCallback(() => {
     setSubagentsSidebarOpen((prev) => !prev)
@@ -91,9 +95,17 @@ export const ChatHeader = memo(function ChatHeader() {
               </button>
             )}
             <h2 className="truncate text-sm font-medium text-text-primary">{currentTitle}</h2>
-            <p className="truncate text-[11px] text-text-tertiary">
-              {currentAgent?.name ?? t('chat.default')}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="truncate text-[11px] text-text-tertiary">
+                {currentAgent?.name ?? t('chat.default')}
+              </p>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${modeTheme.chip}`}
+              >
+                <ModeIcon size={11} />
+                {t(modeTheme.labelKey)}
+              </span>
+            </div>
           </div>
         </div>
 

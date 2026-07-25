@@ -90,6 +90,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		logger.WarnCF("agent", "Failed to persist attachments to workspace", map[string]interface{}{"error": err.Error()})
 		persistedAttachments = opts.Attachments
 	}
+	sessionMode := agent.Sessions.GetMode(opts.SessionKey)
 	renderedUserMessage := agent.ContextBuilder.BuildCurrentUserMessage(opts.UserMessage, persistedAttachments, opts.Channel, opts.ChatID)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
@@ -99,6 +100,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		opts.Channel,
 		opts.ChatID,
 		opts.SessionKey,
+		sessionMode,
 	)
 
 	// 3. Save user message to session and persist immediately
@@ -228,6 +230,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
 				if def.Function.Name != "read_image" {
+					filtered = append(filtered, def)
+				}
+			}
+			providerToolDefs = filtered
+		}
+
+		// In chat mode, only expose web_search and web_fetch tools.
+		if agent.Sessions.GetMode(opts.SessionKey) == "chat" {
+			chatTools := map[string]bool{"web_search": true, "web_fetch": true}
+			filtered := make([]providers.ToolDefinition, 0, 2)
+			for _, def := range providerToolDefs {
+				if chatTools[def.Function.Name] {
 					filtered = append(filtered, def)
 				}
 			}

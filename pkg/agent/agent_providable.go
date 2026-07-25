@@ -218,6 +218,27 @@ func (ap *agentProvidableImpl) GetSessionModel(sessionKey string) string {
 	return agent.Model
 }
 
+// GetSessionMode returns the mode for a session ("chat", "agent", "group").
+// Returns "" if not set (callers should normalize "" to "agent").
+func (ap *agentProvidableImpl) GetSessionMode(sessionKey string) string {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil || agent.Sessions == nil {
+		return ""
+	}
+	return agent.Sessions.GetMode(resolvedSessionKey)
+}
+
+// SetSessionMode sets the mode for a session and persists it.
+func (ap *agentProvidableImpl) SetSessionMode(sessionKey, mode string) error {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil || agent.Sessions == nil {
+		return fmt.Errorf("no agent available for session")
+	}
+	return agent.Sessions.SetMode(resolvedSessionKey, mode)
+}
+
 // GetSessionModelSupportsImages returns true if the session's current model supports vision.
 func (ap *agentProvidableImpl) GetSessionModelSupportsImages(sessionKey string) bool {
 	model := ap.GetSessionModel(sessionKey)

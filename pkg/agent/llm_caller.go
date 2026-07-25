@@ -363,6 +363,7 @@ func (lc *llmCaller) executeWithRetry(
 			currentMessages = opts.agent.ContextBuilder.BuildMessages(
 				newHistory, newSummary, "",
 				nil, opts.channel, opts.chatID, opts.sessionKey,
+				opts.agent.Sessions.GetMode(opts.sessionKey),
 			)
 			continue
 		}

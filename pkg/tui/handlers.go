@@ -525,6 +525,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case "tab":
+			// Cycle mode: agent -> chat -> group -> agent.
+			// Only when no autocomplete and no modal is active.
+			if m.showAutocomplete || m.modalMode != ModalNone {
+				return m, nil
+			}
+			switch m.currentMode {
+			case ModeAgent:
+				m.currentMode = ModeChat
+			case ModeChat:
+				m.currentMode = ModeGroup
+			case ModeGroup:
+				m.currentMode = ModeAgent
+			}
+			m.reloadSessions()
+			m.updateViewport()
+			return m, nil
+
 		case "ctrl+c":
 			m.printSessionSummary()
 			m.cancel()
@@ -582,6 +600,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.copyLastAssistantMessage()
 
 		case "up", "down", "pgup", "pgdown":
+			// Group mode welcome: cycle profile selection with up/down arrows
+			if (msg.String() == "up" || msg.String() == "down") &&
+				m.currentMode == ModeGroup && m.showWelcome &&
+				!m.showAutocomplete && m.modalMode == ModalNone {
+				profiles := m.getGroupProfiles()
+				if len(profiles) > 0 {
+					if msg.String() == "up" {
+						m.groupProfileIdx--
+						if m.groupProfileIdx < 0 {
+							m.groupProfileIdx = len(profiles) - 1
+						}
+					} else {
+						m.groupProfileIdx++
+						if m.groupProfileIdx >= len(profiles) {
+							m.groupProfileIdx = 0
+						}
+					}
+					return m, nil
+				}
+			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			cmds = append(cmds, cmd)
@@ -592,6 +630,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			inputVal := m.textInput.Value()
+
+			// Group mode: wrap non-command input as /group start <profileID> <task>
+			if m.currentMode == ModeGroup && !strings.HasPrefix(inputVal, "/") &&
+				strings.TrimSpace(inputVal) != "" {
+				profiles := m.getGroupProfiles()
+				if len(profiles) > 0 && m.groupProfileIdx >= 0 && m.groupProfileIdx < len(profiles) {
+					cmd := m.submitGroupStart(profiles[m.groupProfileIdx].ID, inputVal)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return m, tea.Batch(cmds...)
+				}
+				// No valid profiles — fall through to normal submitMessage
+			}
+
 			if strings.HasPrefix(inputVal, "/") {
 				cmd := m.executeCommand(inputVal)
 				if cmd != nil {

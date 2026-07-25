@@ -1,3 +1,20 @@
+export type GroupProfile = {
+  id: string
+  participants: string[]
+  strategy: string
+  moderator?: string
+  rounds?: number
+  max_turns?: number
+  max_tokens_per_turn?: number
+  total_token_budget?: number
+  stop_keywords?: string[]
+  parallel?: boolean
+}
+
+export type GroupsConfig = {
+  list?: GroupProfile[]
+}
+
 export type Agent = {
   id: string
   name: string
@@ -15,9 +32,12 @@ export type Attachment = {
   caption?: string
 }
 
+export type ChatMode = 'chat' | 'agent' | 'group'
+
 export type ChatSession = {
   key: string
   name?: string
+  mode?: ChatMode
   created: string
   updated: string
   message_count: number
@@ -351,6 +371,7 @@ export type EditableConfig = {
   agents: EditableAgentsConfig
   session?: EditableSessionConfig
   bindings?: AgentBinding[]
+  groups?: GroupsConfig
   channels: EditableChannelsConfig
   providers: EditableProvidersConfig
   gateway: GatewayConfig

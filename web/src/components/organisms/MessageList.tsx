@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { getModeTheme } from '../../lib/modeTheme'
+import type { GroupTurn } from '../../lib/types'
+import { MarkdownText } from '../molecules/MarkdownText'
 import { MessageBubble } from './MessageBubble'
 
 const SCROLL_THRESHOLD = 300
@@ -22,6 +25,8 @@ export function MessageList() {
     loadMore,
     hasMore,
     isLoadingMore,
+    chatMode,
+    groups,
   } = useAppLogicContext()
   const containerRef = useRef<HTMLDivElement>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
@@ -186,10 +191,36 @@ export function MessageList() {
     }
   }, [])
 
-  if (messages.length === 0) {
+  // Flatten all group turns sorted by turnIndex for inline rendering
+  const allGroupTurns: GroupTurn[] = []
+  const groupSyntheses: { groupID: string; synthesis: string; status: string }[] = []
+  for (const group of groups.values()) {
+    allGroupTurns.push(...group.turns)
+    if (group.synthesis) {
+      groupSyntheses.push({
+        groupID: group.groupID,
+        synthesis: group.synthesis,
+        status: group.status,
+      })
+    }
+  }
+  allGroupTurns.sort((a, b) => a.turnIndex - b.turnIndex)
+  const hasGroupContent = allGroupTurns.length > 0 || groupSyntheses.length > 0
+
+  if (messages.length === 0 && !hasGroupContent) {
+    const modeTheme = getModeTheme(chatMode)
+    const EmptyIcon = modeTheme.Icon
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-text-tertiary">{t('chat.emptyState')}</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+        <div
+          className={`flex h-14 w-14 items-center justify-center rounded-2xl ${modeTheme.iconCircle}`}
+        >
+          <EmptyIcon size={26} />
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-text-primary">{t(modeTheme.labelKey)}</p>
+          <p className="max-w-xs text-xs text-text-tertiary">{t(modeTheme.descKey)}</p>
+        </div>
       </div>
     )
   }
@@ -221,6 +252,31 @@ export function MessageList() {
           onNavigateToSession={handleNavigateToSession}
           apiUrl={apiUrl}
         />
+      ))}
+      {/* Group turns rendered inline */}
+      {allGroupTurns.map((turn) => (
+        <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-sm font-semibold text-text-primary">{turn.label}</span>
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-surface-hover text-text-tertiary">
+              {turn.role}
+            </span>
+          </div>
+          <div className="text-sm text-text-secondary">
+            <MarkdownText content={turn.content} />
+          </div>
+        </div>
+      ))}
+      {/* Group synthesis */}
+      {groupSyntheses.map((g) => (
+        <div key={`group-synthesis-${g.groupID}`} className="py-2">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-sm font-semibold text-text-primary">✨ Síntesis</span>
+          </div>
+          <div className="text-sm text-text-secondary">
+            <MarkdownText content={g.synthesis} />
+          </div>
+        </div>
       ))}
       {approvalRequest && !approvalResult && (
         <div className="py-2">
