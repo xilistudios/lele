@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 )
 
 type ClientInfo struct {
@@ -208,10 +209,11 @@ type ChatSendResponse struct {
 }
 
 type ChatHistoryResponse struct {
-	SessionKey string               `json:"session_key"`
-	Messages   []ChatHistoryMessage `json:"messages"`
-	Processing bool                 `json:"processing"`
-	HasMore    bool                 `json:"has_more"`
+	SessionKey string                `json:"session_key"`
+	Messages   []ChatHistoryMessage  `json:"messages"`
+	Processing bool                  `json:"processing"`
+	HasMore    bool                  `json:"has_more"`
+	Groups     []group.GroupSnapshot `json:"groups,omitempty"`
 }
 
 type ChatHistoryMessage struct {

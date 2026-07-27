@@ -762,36 +762,22 @@ func (p *ProvidersConfig) ResolveModelAlias(rawModel, defaultProvider string) st
 		return rawModel
 	}
 
-	// Normalize model name for comparison (lowercase, replace . with -)
-	normalizedModel := strings.ToLower(strings.ReplaceAll(model, ".", "-"))
-
 	// Try to find model in the specified provider first.
 	if resolved, found := p.resolveModelAliasInProvider(provider, model, false); found {
 		return provider + ":" + resolved
 	}
 
 	// If not found in specified provider (or provider doesn't exist),
-	// search across all providers for the model alias
+	// search across all providers for the model alias.
+	// Reuse resolveModelAliasInProvider which handles exact match (original
+	// name with dots), normalized match (dots→hyphens), and entries where
+	// the "model" field is empty (the map key IS the model name).
 	p.ensureNamedDefaults()
-	for provName, provCfg := range p.Named {
-		if provCfg.Models == nil {
-			continue
+	for provName := range p.Named {
+		if provName == provider {
+			continue // Already searched above
 		}
-		// Try exact match first
-		aliasCfg, found := provCfg.Models[normalizedModel]
-		if !found || strings.TrimSpace(aliasCfg.Model) == "" {
-			// Try matching against the resolved model values
-			for _, aliasVal := range provCfg.Models {
-				resolvedVal := strings.ToLower(strings.TrimSpace(aliasVal.Model))
-				if resolvedVal == normalizedModel || strings.HasSuffix(resolvedVal, "/"+normalizedModel) {
-					aliasCfg = aliasVal
-					found = true
-					break
-				}
-			}
-		}
-		if found && strings.TrimSpace(aliasCfg.Model) != "" {
-			resolved := strings.TrimSpace(aliasCfg.Model)
+		if resolved, found := p.resolveModelAliasInProvider(provName, model, false); found {
 			return provName + ":" + resolved
 		}
 	}

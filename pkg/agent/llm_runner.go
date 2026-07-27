@@ -190,6 +190,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	var finalContent string
 	loopDetector := newLoopDetector()
 	model := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
+	// Resolve model alias to ensure a provider prefix is present for routing.
+	// Persisted session models may lack the prefix (e.g., stored before alias
+	// resolution was fixed), which causes ParseModelRef to fall back to the
+	// default provider and route requests to the wrong endpoint.
+	model = lr.al.cfg().Providers.ResolveModelAlias(model, lr.al.cfg().Agents.Defaults.Provider)
 	candidates := agent.Candidates
 	if model != agent.Model {
 		if ref := providers.ParseModelRef(model, lr.al.cfg().Agents.Defaults.Provider); ref != nil {

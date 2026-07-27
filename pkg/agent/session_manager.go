@@ -419,7 +419,7 @@ func (sm *sessionManagerImpl) ModelForSession(agent *AgentInstance, sessionKey s
 		if agent.Sessions != nil {
 			persistedModel := agent.Sessions.GetModel(resolvedSessionKey)
 			if persistedModel != "" {
-				return persistedModel
+				return sm.al.cfg().Providers.ResolveModelAlias(persistedModel, sm.al.cfg().Agents.Defaults.Provider)
 			}
 		}
 	}

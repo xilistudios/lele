@@ -220,12 +220,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		processing = n.agentLoop.IsSessionProcessing(sessionKey)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"session_key": sessionKey,
-		"messages":    messages,
-		"processing":  processing,
-		"has_more":    hasMore,
-		"groups":      n.sessionGroupSnapshots(sessionKey),
+	writeJSON(w, http.StatusOK, ChatHistoryResponse{
+		SessionKey: sessionKey,
+		Messages:   messages,
+		Processing: processing,
+		HasMore:    hasMore,
+		Groups:     n.sessionGroupSnapshots(sessionKey),
 	})
 }
 

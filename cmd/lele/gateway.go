@@ -193,6 +193,14 @@ func gatewayCmd() {
 	}
 	fmt.Println("Press Ctrl+C to stop")
 
+	// Start unified server immediately so the Web UI and WebSocket endpoint
+	// are available while channels initialize (some channels block in Start).
+	go func() {
+		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+			logger.ErrorCF("server", "Unified server error", map[string]interface{}{"error": err.Error()})
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -235,13 +243,6 @@ func gatewayCmd() {
 			return nil
 		}); err != nil {
 			logger.ErrorCF("config", "Config watcher error", map[string]interface{}{"error": err.Error()})
-		}
-	}()
-
-	// Start unified server in goroutine
-	go func() {
-		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
-			logger.ErrorCF("server", "Unified server error", map[string]interface{}{"error": err.Error()})
 		}
 	}()
 
