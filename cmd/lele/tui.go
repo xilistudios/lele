@@ -22,6 +22,8 @@ func tuiCmd(sessionID string) {
 		os.Exit(1)
 	}
 
+	setupFileLogging(cfg)
+
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
