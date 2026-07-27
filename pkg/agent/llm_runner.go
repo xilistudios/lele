@@ -491,6 +491,49 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			return "", iteration, execErr
 		}
 
+		// Proactive intra-loop context compaction. Mirrors the subagent
+		// RunToolLoop behavior (pkg/tools/toolloop.go step 8): when the
+		// accumulated context exceeds the configured threshold, summarize old
+		// messages so the loop can keep running instead of only compacting
+		// reactively (on LLM context error) or at the very end (maybeSummarize).
+		if contextWindow := lr.al.getSessionContextWindow(opts.SessionKey); contextWindow > 0 {
+			tokens := tools.EstimateLoopTokens(messages)
+			thresholdPercent := lr.al.cfg().SessionCompactionThresholdPercent()
+			threshold := contextWindow * thresholdPercent / 100
+			if tokens > threshold {
+				logger.InfoCF("agent", "Intra-loop context compaction triggered", map[string]interface{}{
+					"agent_id":       agent.ID,
+					"session_key":    opts.SessionKey,
+					"iteration":      iteration,
+					"tokens":         tokens,
+					"threshold":      threshold,
+					"context_window": contextWindow,
+				})
+				if opts.Channel == "native" {
+					lr.al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel:  opts.Channel,
+						ChatID:   opts.ChatID,
+						Event:    "tool.executing",
+						Metadata: map[string]string{"tool": "compact", "action": "Compacting context..."},
+					})
+				}
+				if compacted, ok := tools.CompactLoopMessages(ctx, agent.Provider, model, messages, 6); ok {
+					messages = compacted
+					if opts.Channel == "native" {
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel: opts.Channel,
+							ChatID:  opts.ChatID,
+							Event:   "tool.result",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, tools.EstimateLoopTokens(messages)),
+							},
+						})
+					}
+				}
+			}
+		}
+
 		// Check context after all tool results are processed to allow prompt cancellation
 		// before starting the next LLM iteration.
 		if err := ctx.Err(); err != nil {

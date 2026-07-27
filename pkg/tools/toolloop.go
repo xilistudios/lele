@@ -50,9 +50,9 @@ type ToolLoopResult struct {
 	Iterations int
 }
 
-// estimateLoopTokens estimates the number of tokens in a message list.
+// EstimateLoopTokens estimates the number of tokens in a message list.
 // Uses 2.5 chars per token heuristic (same as session manager).
-func estimateLoopTokens(messages []providers.Message) int {
+func EstimateLoopTokens(messages []providers.Message) int {
 	totalChars := 0
 	for _, m := range messages {
 		totalChars += utf8.RuneCountInString(m.Content)
@@ -66,10 +66,10 @@ func estimateLoopTokens(messages []providers.Message) int {
 	return totalChars * 2 / 5
 }
 
-// compactLoopMessages reduces context size by summarizing old tool interactions.
+// CompactLoopMessages reduces context size by summarizing old tool interactions.
 // Keeps the system prompt (first message) and the last keepLast messages.
 // Everything in between is summarized via LLM and replaced with a single message.
-func compactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int) ([]providers.Message, bool) {
+func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int) ([]providers.Message, bool) {
 	if len(messages) <= keepLast+2 {
 		return messages, false
 	}
@@ -141,8 +141,8 @@ func compactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	logger.InfoCF("toolloop", "Context compacted", map[string]any{
 		"before_messages": len(messages),
 		"after_messages":  len(compacted),
-		"before_tokens":   estimateLoopTokens(messages),
-		"after_tokens":    estimateLoopTokens(compacted),
+		"before_tokens":   EstimateLoopTokens(messages),
+		"after_tokens":    EstimateLoopTokens(compacted),
 	})
 	return compacted, true
 }
@@ -356,7 +356,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		// 8. Context compaction — if context window is configured and we exceed 75%,
 		// summarize old messages to prevent hitting the model's token limit.
 		if config.ContextWindow > 0 {
-			tokens := estimateLoopTokens(messages)
+			tokens := EstimateLoopTokens(messages)
 			threshold := config.ContextWindow * 75 / 100
 			if tokens > threshold {
 				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
@@ -366,7 +366,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"iteration":      iteration,
 				})
 				// Keep last 6 messages (3 tool call/result pairs) for continuity
-				if compacted, ok := compactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {
 					messages = compacted
 				}
 			}
