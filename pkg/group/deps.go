@@ -24,13 +24,21 @@ type ResolveAgentFunc func(agentID string) (AgentContext, bool)
 
 // TurnRequest is the input for executing a group turn (one LLM call).
 type TurnRequest struct {
-	GroupID      string // group id, used as the session semaphore key
-	Speaker      string // agent ID of the speaker
-	SystemPrompt string // persona + group role annex (built by render.go)
-	Transcript   string // rendered shared transcript (built by render.go)
-	Instruction  string // strategy instruction for this turn
-	MaxTokens    int    // max tokens per turn (0 = agent default)
-	EnableTools  bool   // whether the speaker may use tools this turn
+	GroupID       string // group id, used as the session semaphore key
+	Speaker       string // agent ID of the speaker
+	SystemPrompt  string // persona + group role annex (built by render.go)
+	Transcript    string // rendered shared transcript (built by render.go)
+	Instruction   string // strategy instruction for this turn
+	MaxTokens     int    // max tokens per turn (0 = agent default)
+	EnableTools   bool   // whether the speaker may use tools this turn
+	OriginChannel string // channel to publish tool events to
+	OriginChatID  string // chat ID to publish tool events to
+
+	// OnToolCall is called before and after each tool execution within a group
+	// turn. It is nil for turns where tool events are not needed. The callback
+	// receives: toolCallID, toolName, args (JSON string), status ("executing",
+	// "completed", or "error"), and result (empty for executing).
+	OnToolCall func(toolCallID, toolName, args, status, result string)
 }
 
 // TurnExecutor executes a group turn and returns the produced content and

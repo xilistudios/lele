@@ -7,7 +7,15 @@ import {
   parseSubagentSessionKey,
 } from '../lib/chatMessageBuilder'
 import { wsDebug } from '../lib/debug'
-import type { ChatMessage, GroupInfo, GroupTurn, HistoryToolCall, ToolStatus } from '../lib/types'
+import type {
+  ChatMessage,
+  GroupInfo,
+  GroupSnapshot,
+  GroupToolCall,
+  GroupTurn,
+  HistoryToolCall,
+  ToolStatus,
+} from '../lib/types'
 import {
   type HistoryMessage,
   chatHistoryQueryKey,
@@ -42,9 +50,35 @@ export type MessageEventContext = {
   syncProcessingSession: (sessionKey: string, processing: boolean) => void
   processingSessionKeyRef: React.MutableRefObject<string | null>
   upsertGroup: (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => void
+  hydrateGroups: (infos: GroupInfo[]) => void
+  markActiveGroupsStopped: () => void
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Convert a GroupSnapshot (from WS/HTTP) into the internal GroupInfo shape. */
+export function snapshotToGroupInfo(s: GroupSnapshot): GroupInfo {
+  return {
+    groupID: s.group_id,
+    status: s.status,
+    strategy: s.strategy,
+    participants: s.participants,
+    layers: s.layers,
+    totalTokens: s.total_tokens,
+    createdAt: s.created_at || new Date().toISOString(),
+    synthesis: s.synthesis || undefined,
+    turns: s.turns.map((t) => ({
+      groupID: s.group_id,
+      speaker: t.speaker,
+      label: t.label,
+      role: t.role,
+      layer: t.layer,
+      turnIndex: t.turn_index,
+      content: t.content,
+      toolCalls: t.tool_calls,
+    })),
+  }
+}
 
 function getSessionKey(data: Record<string, unknown>): string | undefined {
   return data.session_key as string | undefined
@@ -130,6 +164,12 @@ function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) 
       }
       return updated
     })
+  }
+
+  // Rehydrate group snapshots from welcome/reconnected data
+  const groups = data.groups as GroupSnapshot[] | undefined
+  if (Array.isArray(groups) && groups.length > 0) {
+    ctx.hydrateGroups(groups.map(snapshotToGroupInfo))
   }
 }
 
@@ -465,6 +505,10 @@ function handleCancelAck(ctx: MessageEventContext, data: Record<string, unknown>
   }
 
   ctx.setStreamingMessages((current) => current.map((m) => ({ ...m, streaming: false })))
+
+  // Mark any active groups as stopped — without this, groups with status 'started'
+  // would remain 'started' forever and the processing indicator would never clear.
+  ctx.markActiveGroupsStopped()
 }
 
 function handleSubscribeAck(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -524,6 +568,14 @@ function handleGroupStatus(ctx: MessageEventContext, data: Record<string, unknow
   const status = data.status as GroupInfo['status']
   const participants = (data.participants as string) ?? ''
 
+  if (eventSessionKey) {
+    if (status === 'started') {
+      ctx.addProcessingSession(eventSessionKey)
+    } else if (status === 'done' || status === 'error' || status === 'stopped') {
+      ctx.removeProcessingSession(eventSessionKey)
+    }
+  }
+
   ctx.upsertGroup(groupId, (existing) => ({
     groupID: groupId,
     status,
@@ -531,6 +583,7 @@ function handleGroupStatus(ctx: MessageEventContext, data: Record<string, unknow
     participants,
     layers: existing?.layers ?? 0,
     totalTokens: existing?.totalTokens ?? 0,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
     turns: existing?.turns ?? [],
     synthesis: existing?.synthesis,
   }))
@@ -541,7 +594,7 @@ function handleGroupTurn(ctx: MessageEventContext, data: Record<string, unknown>
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.turn')) return
 
   const groupId = data.group_id as string
-  const turn: GroupTurn = {
+  const incomingTurn: GroupTurn = {
     groupID: groupId,
     speaker: data.speaker as string,
     label: data.label as string,
@@ -553,20 +606,90 @@ function handleGroupTurn(ctx: MessageEventContext, data: Record<string, unknown>
 
   ctx.upsertGroup(groupId, (existing) => {
     const turns = existing?.turns ? [...existing.turns] : []
-    // Deduplicate by turn_index — replace if same index exists
-    const existingIdx = turns.findIndex((t) => t.turnIndex === turn.turnIndex)
+    // Deduplicate by turn_index — replace if same index exists, preserving existing toolCalls
+    const existingIdx = turns.findIndex((t) => t.turnIndex === incomingTurn.turnIndex)
     if (existingIdx >= 0) {
-      turns[existingIdx] = turn
+      turns[existingIdx] = {
+        ...incomingTurn,
+        toolCalls: turns[existingIdx].toolCalls ?? incomingTurn.toolCalls,
+      }
     } else {
-      turns.push(turn)
+      turns.push(incomingTurn)
     }
     return {
       groupID: groupId,
       status: existing?.status ?? 'started',
       strategy: existing?.strategy ?? '',
       participants: existing?.participants ?? '',
-      layers: Math.max(existing?.layers ?? 0, turn.layer + 1),
+      layers: Math.max(existing?.layers ?? 0, incomingTurn.layer + 1),
       totalTokens: existing?.totalTokens ?? 0,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      turns,
+      synthesis: existing?.synthesis,
+    }
+  })
+}
+
+function handleGroupTool(ctx: MessageEventContext, data: Record<string, unknown>) {
+  const eventSessionKey = getSessionKey(data)
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.tool')) return
+
+  const groupId = data.group_id as string
+  const turnIndex = data.turn_index as number
+  const toolCallId = data.tool_call_id as string
+  const toolName = data.tool as string
+  const status = data.status as GroupToolCall['status']
+  const args = data.arguments as string | undefined
+  const result = data.result as string | undefined
+
+  ctx.upsertGroup(groupId, (existing) => {
+    const turns = existing?.turns ? [...existing.turns] : []
+    let targetIdx = turns.findIndex((t) => t.turnIndex === turnIndex)
+
+    // If turn not found, push a placeholder
+    if (targetIdx < 0) {
+      turns.push({
+        groupID: groupId,
+        speaker: data.speaker as string,
+        label: (data.label as string) || (data.speaker as string),
+        role: 'proposer',
+        layer: data.layer as number,
+        turnIndex,
+        content: '',
+        toolCalls: [],
+      })
+      targetIdx = turns.length - 1
+    }
+
+    const turn = turns[targetIdx]
+    const toolCalls = turn.toolCalls ? [...turn.toolCalls] : []
+    const existingTcIdx = toolCalls.findIndex((tc) => tc.tool_call_id === toolCallId)
+
+    const updatedTc: GroupToolCall = {
+      tool_call_id: toolCallId,
+      tool: toolName,
+      status,
+      // Preserve prior arguments if incoming event has none
+      arguments: args ?? (existingTcIdx >= 0 ? toolCalls[existingTcIdx].arguments : undefined),
+      result,
+    }
+
+    if (existingTcIdx >= 0) {
+      toolCalls[existingTcIdx] = updatedTc
+    } else {
+      toolCalls.push(updatedTc)
+    }
+
+    turns[targetIdx] = { ...turn, toolCalls }
+
+    return {
+      groupID: groupId,
+      status: existing?.status ?? 'started',
+      strategy: existing?.strategy ?? '',
+      participants: existing?.participants ?? '',
+      layers: existing?.layers ?? 0,
+      totalTokens: existing?.totalTokens ?? 0,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       turns,
       synthesis: existing?.synthesis,
     }
@@ -576,6 +699,10 @@ function handleGroupTurn(ctx: MessageEventContext, data: Record<string, unknown>
 function handleGroupComplete(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.complete')) return
+
+  if (eventSessionKey) {
+    ctx.removeProcessingSession(eventSessionKey)
+  }
 
   const groupId = data.group_id as string
   const content = data.content as string
@@ -587,6 +714,7 @@ function handleGroupComplete(ctx: MessageEventContext, data: Record<string, unkn
     participants: existing?.participants ?? '',
     layers: (data.layers as number) ?? existing?.layers ?? 0,
     totalTokens: (data.total_tokens as number) ?? existing?.totalTokens ?? 0,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
     turns: existing?.turns ?? [],
     synthesis: content,
   }))
@@ -615,6 +743,7 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'stream.error': (ctx, e) => handleStreamError(ctx, e.data as Record<string, unknown>),
   'group.status': (ctx, e) => handleGroupStatus(ctx, e.data as Record<string, unknown>),
   'group.turn': (ctx, e) => handleGroupTurn(ctx, e.data as Record<string, unknown>),
+  'group.tool': (ctx, e) => handleGroupTool(ctx, e.data as Record<string, unknown>),
   'group.complete': (ctx, e) => handleGroupComplete(ctx, e.data as Record<string, unknown>),
 }
 

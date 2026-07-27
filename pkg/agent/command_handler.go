@@ -15,6 +15,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
@@ -199,7 +200,13 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 			stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 			stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens), true
 	case "/group":
-		return ch.handleGroupCommand(ctx, msg, route.AgentID, strings.Join(args, " ")), true
+		// Use the resolved agent's ID (not route.AgentID which may be "main"
+		// and not exist in the registry) so permission checks work correctly.
+		callerID := route.AgentID
+		if agent != nil {
+			callerID = agent.ID
+		}
+		return ch.handleGroupCommand(ctx, msg, callerID, strings.Join(args, " ")), true
 	}
 
 	return "", false
@@ -498,6 +505,25 @@ func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.In
 	}
 }
 
+// tagGroupSession creates a SessionManager session for the group so it shows
+// up in the Group mode history (filtered by mode=group). The task is stored as
+// the first user message. Best-effort: errors are logged, not fatal.
+func (ch *commandHandlerImpl) tagGroupSession(groupID, task, targetChatID string) {
+	sessionKey := "group:" + groupID
+	p := ch.al.GetProvidable()
+	if p == nil {
+		return
+	}
+	if err := p.SetSessionMode(sessionKey, "group"); err != nil {
+		logger.WarnCF("agent", "Failed to set group session mode", map[string]interface{}{"session_key": sessionKey, "error": err.Error()})
+	}
+	_ = p.AddSessionMessage(sessionKey, providers.Message{Role: "user", Content: task})
+	if targetChatID != "" {
+		_ = p.SetSessionMode(targetChatID, "group")
+		_ = p.AddSessionMessage(targetChatID, providers.Message{Role: "user", Content: task})
+	}
+}
+
 // handleGroupListCommand lists all active groups.
 func (ch *commandHandlerImpl) handleGroupListCommand() string {
 	states := ch.al.GroupManager().List()
@@ -689,6 +715,7 @@ func (ch *commandHandlerImpl) handleGroupStartAdHoc(ctx context.Context, msg bus
 	if err != nil {
 		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
 	}
+	ch.tagGroupSession(groupID, task, msg.ChatID)
 	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
 		groupID, strategy, len(participants), groupID)
 }
@@ -762,6 +789,7 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 	if err != nil {
 		return fmt.Sprintf("❌ Error al iniciar grupo: %s", err.Error())
 	}
+	ch.tagGroupSession(groupID, task, msg.ChatID)
 	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
 		groupID, profile.Strategy, len(participants), groupID)
 }

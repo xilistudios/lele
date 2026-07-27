@@ -49,6 +49,16 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		return nil, err
 	}
 
+	// Chat mode: only web_search and web_fetch are allowed (defense-in-depth;
+	// the LLM normally never sees other tool defs in chat mode).
+	if opts.agent != nil && opts.agent.Sessions != nil {
+		if opts.agent.Sessions.GetMode(opts.sessionKey) == "chat" {
+			if opts.tc.Name != "web_search" && opts.tc.Name != "web_fetch" {
+				return tools.ErrorResult("Tool not available in chat mode"), nil
+			}
+		}
+	}
+
 	// Publish tool execution notification
 	te.publishExecuting(opts)
 

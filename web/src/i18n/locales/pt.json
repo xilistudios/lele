@@ -136,7 +136,8 @@
       "tools": "Ferramentas",
       "system": "Sistema",
       "advanced": "Avançado",
-      "diagnostics": "Diagnósticos"
+      "diagnostics": "Diagnósticos",
+      "groups": "Grupos"
     },
     "sections": {
       "gateway": "Gateway",
@@ -165,7 +166,9 @@
       "bindings": "Bindings",
       "identityLinks": "Links de identidade",
       "rawJson": "Configuração JSON raw",
-      "subagents": "Subagentes"
+      "subagents": "Subagentes",
+      "groupsList": "Perfis de grupo",
+      "limits": "Limites"
     },
     "fields": {
       "gatewayHost": "Host",
@@ -289,7 +292,17 @@
       "bindingPeerKind": "Tipo de peer",
       "bindingPeerId": "ID do peer",
       "bindingGuildId": "ID do guild",
-      "bindingTeamId": "ID do team"
+      "bindingTeamId": "ID do team",
+      "groupId": "ID do grupo",
+      "groupStrategy": "Estratégia",
+      "groupParticipants": "Participantes",
+      "groupModerator": "Moderador",
+      "groupRounds": "Rodadas",
+      "groupMaxTurns": "Turnos máximos",
+      "groupMaxTokensPerTurn": "Tokens máximos por turno",
+      "groupTotalTokenBudget": "Orçamento total de tokens",
+      "groupStopKeywords": "Palavras-chave de convergência",
+      "groupParallel": "Paralelo"
     },
     "descriptions": {
       "ephemeralThreshold": "Tempo em segundos antes de remover mensagens",
@@ -316,7 +329,18 @@
       "agentSkills": "Skills ativos disponíveis para este agente",
       "agentsList": "Crie e gerencie agentes IA com configurações personalizadas",
       "agentSubagentsEnabled": "Permitir que este agente crie subagentes para tarefas delegadas",
-      "agentSubagentsAllowed": "Agentes que este agente pode criar. Use '*' para permitir todos."
+      "agentSubagentsAllowed": "Agentes que este agente pode criar. Use '*' para permitir todos.",
+      "groupsList": "Configure perfis de grupo multi-agente (participantes, estratégia, limites).",
+      "groupId": "Identificador único do perfil",
+      "groupStrategy": "Estratégia de colaboração",
+      "groupParticipants": "IDs de agentes que participam neste grupo",
+      "groupModerator": "Agente que modera/agrega (deve ser participante)",
+      "groupRounds": "Camadas MoA / rodadas round-robin",
+      "groupMaxTurns": "Máximo de turnos totais",
+      "groupMaxTokensPerTurn": "Limite de tokens por turno",
+      "groupTotalTokenBudget": "Orçamento acumulado de tokens",
+      "groupStopKeywords": "Palavras-chave que disparam a convergência",
+      "groupParallel": "Executar turnos em paralelo dentro de uma camada"
     },
     "theme": {
       "dark": "Escuro",
@@ -466,7 +490,11 @@
       "generatePin": "Gerar PIN",
       "pinGeneratedInstruction": "Insira este PIN no seu novo dispositivo cliente \"{{device}}\" para emparelhá-lo:",
       "expiresAt": "Expira às {{time}}"
-    }
+    },
+    "addGroupProfile": "Adicionar perfil",
+    "removeGroupProfile": "Remover perfil",
+    "noGroupProfiles": "Nenhum perfil de grupo configurado ainda.",
+    "none": "Nenhum"
   },
   "common": {
     "loading": "Carregando...",
@@ -485,9 +513,17 @@
     "noGroups": "Nenhum grupo ativo nesta sessão",
     "layer": "Camada {{number}}",
     "finalSynthesis": "Síntese final",
+    "selectProfile": "Selecionar perfil de grupo",
+    "taskPlaceholder": "Descreva a tarefa para o grupo...",
+    "taskPlaceholderWhileRunning": "O grupo está em execução — você pode redigir a próxima tarefa, mas o envio fica desabilitado até terminar",
+    "start": "Iniciar grupo",
+    "executing": "Executando grupo...",
+    "cancel": "Cancelar grupo",
+    "noProfiles": "Nenhum perfil de grupo configurado",
     "participants": "Participantes",
     "strategy": "Estratégia",
     "tokens": "tokens",
+    "layers": "Camadas",
     "backToList": "Voltar aos grupos",
     "status": {
       "started": "Em andamento",
@@ -500,7 +536,11 @@
       "aggregator": "Agregador",
       "moderator": "Moderador",
       "critic": "Crítico"
-    }
+    },
+    "followUp": "Acompanhamento",
+    "newGroup": "Novo grupo",
+    "followUpPlaceholder": "Enviar uma mensagem de acompanhamento...",
+    "send": "Enviar"
   },
   "canvas": {
     "code": "Código",
@@ -586,5 +626,13 @@
       "global": "Global",
       "builtin": "Integrado"
     }
+  },
+  "mode": {
+    "chat": "Chat",
+    "agent": "Agente",
+    "group": "Grupo",
+    "chatDescription": "Chat simples com busca na web",
+    "agentDescription": "Agente completo com todas as ferramentas",
+    "groupDescription": "Chat em grupo multi-agente"
   }
 }

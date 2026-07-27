@@ -105,20 +105,30 @@ func TestInitializeWorkspaceDoesNotOverwrite(t *testing.T) {
 }
 
 func TestInitializeWorkspaceNoTemplate(t *testing.T) {
-	// Create a workspace without template
 	workspace := t.TempDir()
-
-	// Clear template env var
 	os.Unsetenv("LELE_TEMPLATE_WORKSPACE")
 
-	// Initialize workspace - should succeed without errors
 	if err := InitializeWorkspace(workspace); err != nil {
 		t.Fatalf("InitializeWorkspace should not fail when template is missing: %v", err)
 	}
 
-	// Workspace directory should still be created
+	// Workspace directory should exist
 	if _, err := os.Stat(workspace); os.IsNotExist(err) {
 		t.Errorf("Workspace directory was not created")
+	}
+
+	// Embedded templates should have been used as fallback
+	for _, filename := range ContextFiles {
+		dst := filepath.Join(workspace, filename)
+		if _, err := os.Stat(dst); os.IsNotExist(err) {
+			t.Errorf("Context file %s was not created from embedded template", filename)
+		}
+	}
+
+	// Memory directory should be created
+	memoryDir := filepath.Join(workspace, "memory")
+	if _, err := os.Stat(memoryDir); os.IsNotExist(err) {
+		t.Errorf("Memory directory was not created")
 	}
 }
 

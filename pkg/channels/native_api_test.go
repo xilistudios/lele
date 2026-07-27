@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
 )
@@ -108,6 +109,14 @@ func (m *nativeTestAgentLoop) GetSessionModel(sessionKey string) string {
 func (m *nativeTestAgentLoop) SetSessionModel(sessionKey, model string) string {
 	m.sessionModels[sessionKey] = model
 	return model
+}
+
+func (m *nativeTestAgentLoop) GetSessionMode(sessionKey string) string {
+	return ""
+}
+
+func (m *nativeTestAgentLoop) SetSessionMode(sessionKey, mode string) error {
+	return nil
 }
 
 func (m *nativeTestAgentLoop) GetSessionModelSupportsImages(sessionKey string) bool {
@@ -282,6 +291,10 @@ func (m *nativeTestAgentLoop) GetBackgroundExecOutput(id string, tail int) (stri
 
 func (m *nativeTestAgentLoop) StopBackgroundExec(id string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func (m *nativeTestAgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
+	return nil
 }
 
 type nativeTestServer struct {

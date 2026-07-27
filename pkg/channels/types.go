@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 )
 
 type ClientInfo struct {
@@ -136,6 +137,21 @@ type WSGroupCompletePayload struct {
 	Content     string `json:"content"` // final synthesis
 }
 
+// WSGroupToolPayload carries a group tool-call event (one agent's tool invocation).
+type WSGroupToolPayload struct {
+	SessionKey string `json:"session_key"`
+	GroupID    string `json:"group_id"`
+	Speaker    string `json:"speaker"`
+	Label      string `json:"label"`
+	Layer      int    `json:"layer"`
+	TurnIndex  int    `json:"turn_index"`
+	ToolCallID string `json:"tool_call_id"`
+	Tool       string `json:"tool"`
+	Status     string `json:"status"`
+	Arguments  string `json:"arguments,omitempty"`
+	Result     string `json:"result,omitempty"`
+}
+
 type WSErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -193,10 +209,11 @@ type ChatSendResponse struct {
 }
 
 type ChatHistoryResponse struct {
-	SessionKey string               `json:"session_key"`
-	Messages   []ChatHistoryMessage `json:"messages"`
-	Processing bool                 `json:"processing"`
-	HasMore    bool                 `json:"has_more"`
+	SessionKey string                `json:"session_key"`
+	Messages   []ChatHistoryMessage  `json:"messages"`
+	Processing bool                  `json:"processing"`
+	HasMore    bool                  `json:"has_more"`
+	Groups     []group.GroupSnapshot `json:"groups,omitempty"`
 }
 
 type ChatHistoryMessage struct {
@@ -221,6 +238,7 @@ type HistoryToolCall struct {
 type ChatSession struct {
 	Key          string    `json:"key"`
 	Name         string    `json:"name,omitempty"`
+	Mode         string    `json:"mode,omitempty"`
 	Created      time.Time `json:"created"`
 	Updated      time.Time `json:"updated"`
 	MessageCount int       `json:"message_count"`
@@ -234,6 +252,7 @@ type ChatSessionsResponse struct {
 
 type CreateSessionRequest struct {
 	SessionKey string `json:"session_key"`
+	Mode       string `json:"mode,omitempty"` // "chat", "agent", "group"
 }
 
 type CreateSessionResponse struct {

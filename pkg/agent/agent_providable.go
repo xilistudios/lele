@@ -15,6 +15,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
@@ -218,6 +219,27 @@ func (ap *agentProvidableImpl) GetSessionModel(sessionKey string) string {
 	return agent.Model
 }
 
+// GetSessionMode returns the mode for a session ("chat", "agent", "group").
+// Returns "" if not set (callers should normalize "" to "agent").
+func (ap *agentProvidableImpl) GetSessionMode(sessionKey string) string {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil || agent.Sessions == nil {
+		return ""
+	}
+	return agent.Sessions.GetMode(resolvedSessionKey)
+}
+
+// SetSessionMode sets the mode for a session and persists it.
+func (ap *agentProvidableImpl) SetSessionMode(sessionKey, mode string) error {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil || agent.Sessions == nil {
+		return fmt.Errorf("no agent available for session")
+	}
+	return agent.Sessions.SetMode(resolvedSessionKey, mode)
+}
+
 // GetSessionModelSupportsImages returns true if the session's current model supports vision.
 func (ap *agentProvidableImpl) GetSessionModelSupportsImages(sessionKey string) bool {
 	model := ap.GetSessionModel(sessionKey)
@@ -312,12 +334,26 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 		subagentCount = ap.al.toolCoordinator.stopSessionSubagents(resolvedKey)
 	}
 	cancelled := ap.al.cancelSession(resolvedKey)
+	groupCount := 0
+	if gm := ap.al.GroupManager(); gm != nil {
+		groupCount = gm.StopByOrigin("", resolvedKey)
+		if sessionKey != "" && sessionKey != resolvedKey {
+			groupCount += gm.StopByOrigin("", sessionKey)
+		}
+	}
 	logger.InfoCF("agent", "StopAgent completed", map[string]interface{}{
 		"session_key":    resolvedKey,
 		"cancelled":      cancelled,
 		"subagent_count": subagentCount,
+		"group_count":    groupCount,
 	})
 
+	if groupCount > 0 && subagentCount > 0 {
+		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s) y %d grupo(s)).", subagentCount, groupCount)
+	}
+	if groupCount > 0 {
+		return fmt.Sprintf("⏹️ Agente detenido (incluye %d grupo(s)).", groupCount)
+	}
 	if subagentCount > 0 {
 		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
 	}
@@ -784,4 +820,9 @@ func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
 		return fmt.Errorf("tool coordinator not available")
 	}
 	return ap.al.toolCoordinator.stopBackgroundExec(id)
+}
+
+// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
+func (ap *agentProvidableImpl) AllGroupSnapshots() []group.GroupSnapshot {
+	return ap.al.AllGroupSnapshots()
 }

@@ -6,12 +6,16 @@
 package context
 
 import (
+	"embed"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/xilistudios/lele/pkg/logger"
 )
+
+//go:embed templates/*.md
+var embeddedTemplates embed.FS
 
 // templateWorkspaceDir is the default directory containing workspace template files.
 // This is relative to the working directory where lele is run.
@@ -42,18 +46,33 @@ func IsContextFile(name string) bool {
 // This ensures every agent has the essential context files on first creation.
 // Files are only copied if they don't already exist in the destination.
 func InitializeWorkspace(workspace string) error {
-	// Find the template workspace directory
-	templateDir := findTemplateWorkspaceDir()
-	if templateDir == "" {
-		logger.DebugCF("agent", "Template workspace directory not found, skipping initialization", nil)
-		return nil // Not an error - template might not be available in some deployments
-	}
-
-	// Ensure workspace directory exists
+	// Always ensure workspace directory exists
 	if err := os.MkdirAll(workspace, 0755); err != nil {
 		return err
 	}
 
+	// Always create memory directory
+	memoryDir := filepath.Join(workspace, "memory")
+	if err := os.MkdirAll(memoryDir, 0755); err != nil {
+		logger.WarnCF("agent", "Failed to create memory directory",
+			map[string]interface{}{"error": err.Error()})
+	}
+
+	// Try disk-based templates first (allows customization)
+	templateDir := findTemplateWorkspaceDir()
+	if templateDir != "" {
+		initializeFromDisk(workspace, templateDir)
+		return nil
+	}
+
+	// Fallback: use embedded templates
+	logger.DebugCF("agent", "Template workspace directory not found, using embedded templates", nil)
+	initializeFromEmbedded(workspace)
+	return nil
+}
+
+// initializeFromDisk copies context files and skills from a disk-based template directory.
+func initializeFromDisk(workspace, templateDir string) {
 	// Copy context files
 	for _, filename := range ContextFiles {
 		src := filepath.Join(templateDir, filename)
@@ -87,15 +106,6 @@ func InitializeWorkspace(workspace string) error {
 		}
 	}
 
-	// Create memory directory
-	memoryDir := filepath.Join(workspace, "memory")
-	if err := os.MkdirAll(memoryDir, 0755); err != nil {
-		logger.WarnCF("agent", "Failed to create memory directory",
-			map[string]interface{}{
-				"error": err.Error(),
-			})
-	}
-
 	// Copy skills directory if template has it
 	templateSkillsDir := filepath.Join(templateDir, "skills")
 	if _, err := os.Stat(templateSkillsDir); err == nil {
@@ -112,8 +122,28 @@ func InitializeWorkspace(workspace string) error {
 				})
 		}
 	}
+}
 
-	return nil
+// initializeFromEmbedded writes embedded template files to the workspace.
+func initializeFromEmbedded(workspace string) {
+	for _, filename := range ContextFiles {
+		dst := filepath.Join(workspace, filename)
+		// Skip if destination already exists
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		// Read from embedded FS
+		data, err := embeddedTemplates.ReadFile("templates/" + filename)
+		if err != nil {
+			logger.WarnCF("agent", "Embedded template not found",
+				map[string]interface{}{"file": filename, "error": err.Error()})
+			continue
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			logger.WarnCF("agent", "Failed to write embedded template",
+				map[string]interface{}{"file": filename, "error": err.Error()})
+		}
+	}
 }
 
 // findTemplateWorkspaceDir locates the template workspace directory.

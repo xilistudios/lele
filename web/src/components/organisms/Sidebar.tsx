@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { getModeTheme } from '../../lib/modeTheme'
 import { IconButton } from '../atoms/IconButton'
 import {
   AgentsIcon,
@@ -23,6 +24,7 @@ import {
 } from '../atoms/Icons'
 import { Logo } from '../atoms/Logo'
 import { Popover } from '../atoms/Popover'
+import { ModeSelector } from '../molecules/ModeSelector'
 import { SessionItem } from '../molecules/SessionItem'
 import { QuickChatPanel } from './QuickChatPanel'
 
@@ -44,6 +46,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     currentSessionKey,
     parentSessionKey,
     processingSessions,
+    chatMode,
     onCreateSession,
     onDeleteSession,
     onToggleSidebar,
@@ -61,12 +64,15 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const sortedSessions = useMemo(() => {
     const visible = sessions.filter(
-      (s) => !s.key.startsWith('subagent:') && (s.message_count > 0 || s.key === selectedKey),
+      (s) =>
+        !s.key.startsWith('subagent:') &&
+        (s.message_count > 0 || s.key === selectedKey) &&
+        (s.mode || 'agent') === chatMode,
     )
     return [...visible].sort(
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
     )
-  }, [sessions, selectedKey])
+  }, [sessions, selectedKey, chatMode])
 
   // Only show current session on chat pages
   const currentSession = isOnChatPage
@@ -180,7 +186,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             <>
               <div className="group relative flex items-center justify-center">
                 <IconButton
-                  onClick={onCreateSession}
+                  onClick={() => onCreateSession()}
                   ariaLabel={t('chat.newChat')}
                   variant="nav"
                   className="flex items-center justify-center h-8 w-8"
@@ -209,7 +215,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             <>
               <button
                 type="button"
-                onClick={onCreateSession}
+                onClick={() => onCreateSession()}
                 aria-label={t('chat.newChat')}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
@@ -232,6 +238,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             </>
           )}
         </div>
+
+        {!collapsed && (
+          <div className="px-3 pt-1 pb-1">
+            <ModeSelector />
+          </div>
+        )}
 
         <div className={`${collapsed ? 'px-2' : 'px-3 py-3'}`}>
           {collapsed ? (
@@ -272,7 +284,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         onClick={() => handleSessionSelect(s.key)}
                         className={`flex items-center rounded-md px-3 py-2 text-sm transition-colors ${
                           s.key === currentSession?.key
-                            ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                            ? getModeTheme(s.mode).selectedItem
                             : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                         }`}
                       >
@@ -342,6 +354,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         onSelect={() => handleSessionSelect(s.key)}
                         onDelete={() => onDeleteSession(s.key)}
                         collapsed={false}
+                        mode={s.mode}
                       />
                     ))}
                   </nav>

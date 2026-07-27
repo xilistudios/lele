@@ -547,3 +547,344 @@ func TestStatusList_ConcurrentAccessNoRace(t *testing.T) {
 		t.Errorf("final status = %s, want done", gs.Status)
 	}
 }
+
+func TestStart_AppliesDefaultRoundsWhenUnset(t *testing.T) {
+	exec := &mockExecutor{}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
+
+	participants := []Participant{
+		plainParticipant("a"),
+		plainParticipant("b"),
+		plainParticipant("c"),
+		plainParticipant("a"), // 4th participant (duplicate agentID is fine for this test)
+	}
+
+	ctx := context.Background()
+	groupID, err := gm.Start(ctx, "default-1", "p1", "task", "round_robin",
+		participants, GroupOptions{}, "test-ch", "test-chat")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer gm.Stop(groupID)
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+
+	if st.Rounds != DefaultGroupRounds {
+		t.Errorf("Rounds = %d, want %d (DefaultGroupRounds)", st.Rounds, DefaultGroupRounds)
+	}
+	// Rounds=2, 4 participants → MaxTurns = 8
+	if st.MaxTurns != 8 {
+		t.Errorf("MaxTurns = %d, want 8", st.MaxTurns)
+	}
+}
+
+func TestStart_DerivesMaxTurnsFromRounds(t *testing.T) {
+	exec := &mockExecutor{}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
+
+	participants := []Participant{
+		plainParticipant("a"),
+		plainParticipant("b"),
+	}
+
+	ctx := context.Background()
+	groupID, err := gm.Start(ctx, "derive-1", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 3}, "test-ch", "test-chat")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer gm.Stop(groupID)
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+
+	if st.Rounds != 3 {
+		t.Errorf("Rounds = %d, want 3", st.Rounds)
+	}
+	// Rounds=3, 2 participants → MaxTurns = 6
+	if st.MaxTurns != 6 {
+		t.Errorf("MaxTurns = %d, want 6", st.MaxTurns)
+	}
+}
+
+func TestStart_RespectsExplicitMaxTurns(t *testing.T) {
+	exec := &mockExecutor{}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
+
+	participants := []Participant{
+		plainParticipant("a"),
+		plainParticipant("b"),
+	}
+
+	ctx := context.Background()
+	groupID, err := gm.Start(ctx, "explicit-1", "p1", "task", "round_robin",
+		participants, GroupOptions{MaxTurns: 5}, "test-ch", "test-chat")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer gm.Stop(groupID)
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+
+	// MaxTurns was explicitly set to 5, Rounds was 0 → no default should apply.
+	if st.MaxTurns != 5 {
+		t.Errorf("MaxTurns = %d, want 5", st.MaxTurns)
+	}
+	if st.Rounds != 0 {
+		t.Errorf("Rounds = %d, want 0 (no default applied because MaxTurns was explicit)", st.Rounds)
+	}
+}
+
+func TestStart_ClampsToCeiling(t *testing.T) {
+	exec := &mockExecutor{}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, exec.execute, pub.publish)
+
+	participants := []Participant{
+		plainParticipant("a"),
+		plainParticipant("b"),
+		plainParticipant("c"),
+		plainParticipant("a"),
+		plainParticipant("b"),
+		plainParticipant("c"),
+		plainParticipant("a"),
+		plainParticipant("b"),
+		plainParticipant("c"),
+		plainParticipant("a"), // 10 participants
+	}
+
+	ctx := context.Background()
+	groupID, err := gm.Start(ctx, "clamp-1", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "test-ch", "test-chat")
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer gm.Stop(groupID)
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+
+	// Rounds=100, 10 participants → derived MaxTurns=1000 → clamped to ceiling.
+	if st.MaxTurns != MaxGroupTurnsCeiling {
+		t.Errorf("MaxTurns = %d, want %d (MaxGroupTurnsCeiling)", st.MaxTurns, MaxGroupTurnsCeiling)
+	}
+	// Rounds should remain 100 (we only clamp MaxTurns, not Rounds).
+	if st.Rounds != 100 {
+		t.Errorf("Rounds = %d, want 100", st.Rounds)
+	}
+}
+
+// --- StopByOrigin tests ---
+
+func TestStopByOrigin_StopsMatchingGroup(t *testing.T) {
+	be := &blockingExecutor{unblockCh: make(chan struct{})}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, be.execute, pub.publish)
+
+	participants := []Participant{plainParticipant("a"), plainParticipant("b")}
+	ctx := context.Background()
+
+	groupID, err := gm.Start(ctx, "sbo-match", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "native", "tui:chat:abc")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	count := gm.StopByOrigin("native", "tui:chat:abc")
+	if count != 1 {
+		t.Errorf("StopByOrigin returned %d, want 1", count)
+	}
+
+	// Wait for goroutine to drain.
+	done := make(chan struct{})
+	go func() { gm.Wait(groupID); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		close(be.unblockCh)
+		t.Fatal("Wait did not return after StopByOrigin")
+	}
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+	if st.Status != StatusStopped {
+		t.Errorf("status = %s, want stopped", st.Status)
+	}
+}
+
+func TestStopByOrigin_IgnoresOtherChat(t *testing.T) {
+	be := &blockingExecutor{unblockCh: make(chan struct{})}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, be.execute, pub.publish)
+
+	participants := []Participant{plainParticipant("a")}
+	ctx := context.Background()
+
+	groupID, err := gm.Start(ctx, "sbo-ignore", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "native", "chat-A")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	count := gm.StopByOrigin("native", "chat-B")
+	if count != 0 {
+		t.Errorf("StopByOrigin returned %d, want 0", count)
+	}
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+	if st.Status == StatusStopped {
+		t.Error("group should NOT have been stopped for a different chatID")
+	}
+
+	// Cleanup.
+	gm.StopAll()
+	close(be.unblockCh)
+	gm.Wait(groupID)
+}
+
+func TestStopByOrigin_EmptyChannelMatchesAny(t *testing.T) {
+	be := &blockingExecutor{unblockCh: make(chan struct{})}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, be.execute, pub.publish)
+
+	participants := []Participant{plainParticipant("a")}
+	ctx := context.Background()
+
+	groupID, err := gm.Start(ctx, "sbo-any-ch", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "telegram", "chat-X")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Empty channel should match any origin channel.
+	count := gm.StopByOrigin("", "chat-X")
+	if count != 1 {
+		t.Errorf("StopByOrigin returned %d, want 1", count)
+	}
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+	if st.Status != StatusStopped {
+		t.Errorf("status = %s, want stopped", st.Status)
+	}
+
+	// Drain.
+	done := make(chan struct{})
+	go func() { gm.Wait(groupID); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		close(be.unblockCh)
+		t.Fatal("Wait did not return")
+	}
+}
+
+func TestStopByOrigin_EmptyChatIDReturnsZero(t *testing.T) {
+	be := &blockingExecutor{unblockCh: make(chan struct{})}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, be.execute, pub.publish)
+
+	participants := []Participant{plainParticipant("a")}
+	ctx := context.Background()
+
+	groupID, err := gm.Start(ctx, "sbo-empty", "p1", "task", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "native", "chat-Z")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	count := gm.StopByOrigin("native", "")
+	if count != 0 {
+		t.Errorf("StopByOrigin returned %d, want 0", count)
+	}
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+	if st.Status == StatusStopped {
+		t.Error("group should NOT have been stopped by empty chatID")
+	}
+
+	// Cleanup.
+	gm.StopAll()
+	close(be.unblockCh)
+	gm.Wait(groupID)
+}
+
+func TestStopByOrigin_StopsMultipleGroups(t *testing.T) {
+	be := &blockingExecutor{unblockCh: make(chan struct{})}
+	pub := &mockPublisher{}
+	gm := NewGroupManager(mockResolve, be.execute, pub.publish)
+
+	participants := []Participant{plainParticipant("a")}
+	ctx := context.Background()
+
+	_, err := gm.Start(ctx, "sbo-multi-1", "p1", "task1", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "native", "chat-multi")
+	if err != nil {
+		t.Fatalf("Start g1: %v", err)
+	}
+	_, err = gm.Start(ctx, "sbo-multi-2", "p1", "task2", "round_robin",
+		participants, GroupOptions{Rounds: 100}, "native", "chat-multi")
+	if err != nil {
+		t.Fatalf("Start g2: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	count := gm.StopByOrigin("native", "chat-multi")
+	if count != 2 {
+		t.Errorf("StopByOrigin returned %d, want 2", count)
+	}
+
+	// Drain both.
+	for _, id := range []string{"sbo-multi-1", "sbo-multi-2"} {
+		done := make(chan struct{})
+		go func(gid string) { gm.Wait(gid); close(done) }(id)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			close(be.unblockCh)
+			t.Fatalf("Wait for %s did not return", id)
+		}
+	}
+
+	for _, id := range []string{"sbo-multi-1", "sbo-multi-2"} {
+		st, ok := gm.Status(id)
+		if !ok {
+			t.Fatalf("group %s not found", id)
+		}
+		if st.Status != StatusStopped {
+			t.Errorf("group %s status = %s, want stopped", id, st.Status)
+		}
+	}
+}

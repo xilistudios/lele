@@ -225,6 +225,7 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		Messages:   messages,
 		Processing: processing,
 		HasMore:    hasMore,
+		Groups:     n.sessionGroupSnapshots(sessionKey),
 	})
 }
 
@@ -237,6 +238,9 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 	}
 
 	offset, limit := parsePagination(r)
+
+	// Read optional mode filter
+	modeFilter := r.URL.Query().Get("mode")
 
 	// Collect session keys from ALL native clients (unified view).
 	// Native sessions are shared across all clients on the same machine.
@@ -267,9 +271,24 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 
+		// Get session mode
+		sessionMode := n.agentLoop.GetSessionMode(sk)
+
+		// Apply mode filter if specified
+		if modeFilter != "" {
+			effectiveMode := sessionMode
+			if effectiveMode == "" {
+				effectiveMode = "agent"
+			}
+			if effectiveMode != modeFilter {
+				continue
+			}
+		}
+
 		sessions = append(sessions, ChatSession{
 			Key:          sk,
 			Name:         n.agentLoop.GetName(sk),
+			Mode:         sessionMode,
 			Created:      n.agentLoop.GetCreated(sk),
 			Updated:      n.agentLoop.GetUpdated(sk),
 			MessageCount: messageCount,
@@ -313,7 +332,13 @@ func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Reque
 
 	n.auth.TrackSessionKey(clientID, req.SessionKey)
 
-	writeJSON(w, http.StatusCreated, CreateSessionResponse(req))
+	if req.Mode != "" {
+		n.agentLoop.SetSessionMode(req.SessionKey, req.Mode)
+	}
+
+	writeJSON(w, http.StatusCreated, CreateSessionResponse{
+		SessionKey: req.SessionKey,
+	})
 }
 
 func (n *NativeChannel) handleChatSessionGet(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ type SettingsTab =
   | 'session'
   | 'channels'
   | 'native'
+  | 'groups'
   | 'tools'
   | 'system'
   | 'advanced'
@@ -23,6 +24,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     { id: 'session', label: t('settings.tabs.session') },
     { id: 'channels', label: t('settings.tabs.channels') },
     { id: 'native', label: t('settings.tabs.native') },
+    { id: 'groups', label: t('settings.tabs.groups') },
     { id: 'tools', label: t('settings.tabs.tools') },
     { id: 'system', label: t('settings.tabs.system') },
     { id: 'advanced', label: t('settings.tabs.advanced') },

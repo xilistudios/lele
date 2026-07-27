@@ -1178,13 +1178,13 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 	// Add old conversation with token counts
 	agent.Sessions.AddMessage(sessionKey, "user", "old question")
 	agent.Sessions.AddMessage(sessionKey, "assistant", "old answer")
-	agent.Sessions.AddTokenCounts(sessionKey, 2000, 1000)
+	agent.Sessions.AddTokenCounts(sessionKey, 20000, 10000)
 	agent.Sessions.GetOrCreate(sessionKey).Updated = time.Now().Add(-2 * time.Minute)
 
 	// Verify tokens exist before ephemeral reset
 	inputTokens, outputTokens := agent.Sessions.GetTokenCounts(sessionKey)
-	if inputTokens != 2000 || outputTokens != 1000 {
-		t.Fatalf("Expected tokens (2000, 1000) before ephemeral reset, got (%d, %d)", inputTokens, outputTokens)
+	if inputTokens != 20000 || outputTokens != 10000 {
+		t.Fatalf("Expected tokens (20000, 10000) before ephemeral reset, got (%d, %d)", inputTokens, outputTokens)
 	}
 
 	response, err := al.providable.ProcessDirectWithChannel(context.Background(), "new question", sessionKey, "telegram", "123")
@@ -1196,10 +1196,10 @@ func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 	}
 
 	// Verify token counts were reset after ephemeral session creation
-	// Note: New tokens are added from the fresh LLM response, so we verify they are much less than original (2000, 1000)
+	// Note: New tokens are added from the fresh LLM response, so we verify they are much less than original (20000, 10000)
 	inputTokens, outputTokens = agent.Sessions.GetTokenCounts(sessionKey)
-	if inputTokens >= 2000 || outputTokens >= 1000 {
-		t.Fatalf("Expected token counts to be reset and lower than original (2000, 1000), got (%d, %d)", inputTokens, outputTokens)
+	if inputTokens >= 20000 || outputTokens >= 10000 {
+		t.Fatalf("Expected token counts to be reset and lower than original (20000, 10000), got (%d, %d)", inputTokens, outputTokens)
 	}
 }
 

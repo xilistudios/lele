@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -28,6 +29,10 @@ type AgentProvidable interface {
 	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión
 	GetSessionModel(sessionKey string) string
+	// GetSessionMode devuelve el modo de una sesión ("chat", "agent", "group", o "")
+	GetSessionMode(sessionKey string) string
+	// SetSessionMode establece el modo de una sesión
+	SetSessionMode(sessionKey, mode string) error
 	// GetSessionModelSupportsImages returns true if the session's current model supports vision
 	GetSessionModelSupportsImages(sessionKey string) bool
 	// SetSessionModel establece el modelo de una sesión
@@ -112,6 +117,13 @@ type AgentProvidable interface {
 	GetBackgroundExecOutput(id string, tail int) (output string, status string, elapsedMs int64, err error)
 	// StopBackgroundExec stops a running background process
 	StopBackgroundExec(id string) error
+
+	// ========================================================================
+	// Group snapshot support
+	// ========================================================================
+
+	// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
+	AllGroupSnapshots() []group.GroupSnapshot
 }
 
 // AgentBasicInfo contiene información pública de un agente

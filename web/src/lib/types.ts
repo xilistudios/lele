@@ -1,3 +1,20 @@
+export type GroupProfile = {
+  id: string
+  participants: string[]
+  strategy: string
+  moderator?: string
+  rounds?: number
+  max_turns?: number
+  max_tokens_per_turn?: number
+  total_token_budget?: number
+  stop_keywords?: string[]
+  parallel?: boolean
+}
+
+export type GroupsConfig = {
+  list?: GroupProfile[]
+}
+
 export type Agent = {
   id: string
   name: string
@@ -15,9 +32,12 @@ export type Attachment = {
   caption?: string
 }
 
+export type ChatMode = 'chat' | 'agent' | 'group'
+
 export type ChatSession = {
   key: string
   name?: string
+  mode?: ChatMode
   created: string
   updated: string
   message_count: number
@@ -351,6 +371,7 @@ export type EditableConfig = {
   agents: EditableAgentsConfig
   session?: EditableSessionConfig
   bindings?: AgentBinding[]
+  groups?: GroupsConfig
   channels: EditableChannelsConfig
   providers: EditableProvidersConfig
   gateway: GatewayConfig
@@ -514,6 +535,15 @@ export type GroupCompleteEvent = {
   content: string
 }
 
+/** A tool call within a group turn. */
+export type GroupToolCall = {
+  tool_call_id: string
+  tool: string
+  status: 'executing' | 'completed' | 'error'
+  arguments?: string
+  result?: string
+}
+
 /** A single turn in the group transcript (internal state). */
 export type GroupTurn = {
   groupID: string
@@ -523,6 +553,7 @@ export type GroupTurn = {
   layer: number
   turnIndex: number
   content: string
+  toolCalls?: GroupToolCall[]
 }
 
 /** Full state of a group conversation (internal state). */
@@ -533,8 +564,48 @@ export type GroupInfo = {
   participants: string
   layers: number
   totalTokens: number
+  createdAt: string
   turns: GroupTurn[]
   synthesis?: string
+}
+
+/** WS event payload for group.tool. */
+export type GroupToolEvent = {
+  session_key?: string
+  group_id: string
+  speaker: string
+  label?: string
+  layer: number
+  turn_index: number
+  tool_call_id: string
+  tool: string
+  status: 'executing' | 'completed' | 'error'
+  arguments?: string
+  result?: string
+}
+
+/** A single turn from the rehydration snapshot. */
+export type GroupSnapshotTurn = {
+  turn_index: number
+  speaker: string
+  label: string
+  role: 'proposer' | 'aggregator' | 'moderator' | 'critic'
+  layer: number
+  content: string
+  tool_calls?: GroupToolCall[]
+}
+
+/** Rehydration snapshot for a group, included in welcome/reconnected/history. */
+export type GroupSnapshot = {
+  group_id: string
+  status: 'started' | 'done' | 'stopped' | 'error'
+  strategy: string
+  participants: string
+  layers: number
+  total_tokens: number
+  created_at: string
+  synthesis: string
+  turns: GroupSnapshotTurn[]
 }
 
 export type ChannelsResponse = {
@@ -684,6 +755,7 @@ export type HistoryResponse = {
     tool_call_id?: string
   }>
   has_more: boolean
+  groups?: GroupSnapshot[]
 }
 
 export type ApiErrorResponse = {

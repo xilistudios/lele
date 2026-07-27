@@ -90,6 +90,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		logger.WarnCF("agent", "Failed to persist attachments to workspace", map[string]interface{}{"error": err.Error()})
 		persistedAttachments = opts.Attachments
 	}
+	sessionMode := agent.Sessions.GetMode(opts.SessionKey)
 	renderedUserMessage := agent.ContextBuilder.BuildCurrentUserMessage(opts.UserMessage, persistedAttachments, opts.Channel, opts.ChatID)
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
@@ -99,6 +100,7 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		opts.Channel,
 		opts.ChatID,
 		opts.SessionKey,
+		sessionMode,
 	)
 
 	// 3. Save user message to session and persist immediately
@@ -188,6 +190,11 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 	var finalContent string
 	loopDetector := newLoopDetector()
 	model := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
+	// Resolve model alias to ensure a provider prefix is present for routing.
+	// Persisted session models may lack the prefix (e.g., stored before alias
+	// resolution was fixed), which causes ParseModelRef to fall back to the
+	// default provider and route requests to the wrong endpoint.
+	model = lr.al.cfg().Providers.ResolveModelAlias(model, lr.al.cfg().Agents.Defaults.Provider)
 	candidates := agent.Candidates
 	if model != agent.Model {
 		if ref := providers.ParseModelRef(model, lr.al.cfg().Agents.Defaults.Provider); ref != nil {
@@ -228,6 +235,18 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
 				if def.Function.Name != "read_image" {
+					filtered = append(filtered, def)
+				}
+			}
+			providerToolDefs = filtered
+		}
+
+		// In chat mode, only expose web_search and web_fetch tools.
+		if agent.Sessions.GetMode(opts.SessionKey) == "chat" {
+			chatTools := map[string]bool{"web_search": true, "web_fetch": true}
+			filtered := make([]providers.ToolDefinition, 0, 2)
+			for _, def := range providerToolDefs {
+				if chatTools[def.Function.Name] {
 					filtered = append(filtered, def)
 				}
 			}
@@ -470,6 +489,49 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Return error if one occurred, now that placeholder results have been saved
 		if execErr != nil {
 			return "", iteration, execErr
+		}
+
+		// Proactive intra-loop context compaction. Mirrors the subagent
+		// RunToolLoop behavior (pkg/tools/toolloop.go step 8): when the
+		// accumulated context exceeds the configured threshold, summarize old
+		// messages so the loop can keep running instead of only compacting
+		// reactively (on LLM context error) or at the very end (maybeSummarize).
+		if contextWindow := lr.al.getSessionContextWindow(opts.SessionKey); contextWindow > 0 {
+			tokens := tools.EstimateLoopTokens(messages)
+			thresholdPercent := lr.al.cfg().SessionCompactionThresholdPercent()
+			threshold := contextWindow * thresholdPercent / 100
+			if tokens > threshold {
+				logger.InfoCF("agent", "Intra-loop context compaction triggered", map[string]interface{}{
+					"agent_id":       agent.ID,
+					"session_key":    opts.SessionKey,
+					"iteration":      iteration,
+					"tokens":         tokens,
+					"threshold":      threshold,
+					"context_window": contextWindow,
+				})
+				if opts.Channel == "native" {
+					lr.al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel:  opts.Channel,
+						ChatID:   opts.ChatID,
+						Event:    "tool.executing",
+						Metadata: map[string]string{"tool": "compact", "action": "Compacting context..."},
+					})
+				}
+				if compacted, ok := tools.CompactLoopMessages(ctx, agent.Provider, model, messages, 6); ok {
+					messages = compacted
+					if opts.Channel == "native" {
+						lr.al.bus.PublishOutbound(bus.OutboundMessage{
+							Channel: opts.Channel,
+							ChatID:  opts.ChatID,
+							Event:   "tool.result",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, tools.EstimateLoopTokens(messages)),
+							},
+						})
+					}
+				}
+			}
 		}
 
 		// Check context after all tool results are processed to allow prompt cancellation

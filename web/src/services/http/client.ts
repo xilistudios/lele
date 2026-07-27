@@ -11,8 +11,8 @@ import type {
   AuthStatusResponse,
   AvailableSkillsResponse,
   BackgroundExecOutputResponse,
-  BackgroundExecsResponse,
   BackgroundExecStopResponse,
+  BackgroundExecsResponse,
   ChannelsResponse,
   ChatSessionsResponse,
   ClientEvent,
@@ -22,6 +22,7 @@ import type {
   CreateSessionResponse,
   EditableConfig,
   FileUploadResponse,
+  GroupsConfig,
   HistoryResponse,
   ModelsResponse,
   ProviderModelsResponse,
@@ -420,11 +421,16 @@ export const createApiClient = (baseUrl: string) => {
         method: 'GET',
       })
     },
-    sessions: () => request<ChatSessionsResponse>(endpoints.chat.sessions, { method: 'GET' }),
-    createSession: (sessionKey: string) =>
+    sessions: (mode?: string) => {
+      const url = mode
+        ? `${endpoints.chat.sessions}?mode=${encodeURIComponent(mode)}`
+        : endpoints.chat.sessions
+      return request<ChatSessionsResponse>(url, { method: 'GET' })
+    },
+    createSession: (sessionKey: string, mode?: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {
         method: 'POST',
-        body: JSON.stringify({ session_key: sessionKey }),
+        body: JSON.stringify({ session_key: sessionKey, mode }),
       }),
     models: (agentId: string, sessionKey: string | null) => {
       const params = new URLSearchParams()
@@ -496,6 +502,10 @@ export const createApiClient = (baseUrl: string) => {
       await request<unknown>(endpoints.chat.session(sessionKey), { method: 'DELETE' })
     },
     config: () => request<ConfigResponse>(endpoints.system.config, { method: 'GET' }),
+    getConfig: async (): Promise<{ groups?: GroupsConfig } & Record<string, unknown>> => {
+      const resp = await request<ConfigResponse>(endpoints.system.config, { method: 'GET' })
+      return resp.config as { groups?: GroupsConfig } & Record<string, unknown>
+    },
     saveConfig: (config: EditableConfig) =>
       request<ConfigUpdateResponse>(endpoints.system.config, {
         method: 'PUT',

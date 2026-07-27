@@ -33,16 +33,24 @@ export function SubagentsSidebar({
       setVisible(true)
       // Use double-rAF via useLayoutEffect timing to ensure the browser has
       // painted the initial off-screen state before we trigger the transition.
-      rafRef.current = requestAnimationFrame(() => {
-        rafRef.current = requestAnimationFrame(() => setAnimate(true))
-      })
-      return () => cancelAnimationFrame(rafRef.current)
+      rafRef.current =
+        typeof requestAnimationFrame !== 'undefined'
+          ? requestAnimationFrame(() => {
+              rafRef.current =
+                typeof requestAnimationFrame !== 'undefined'
+                  ? requestAnimationFrame(() => setAnimate(true))
+                  : 0
+            })
+          : 0
+      return () => {
+        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(rafRef.current)
+      }
     }
     setAnimate(false)
     const timer = setTimeout(() => setVisible(false), ANIMATION_DURATION_MS)
     return () => {
       clearTimeout(timer)
-      cancelAnimationFrame(rafRef.current)
+      if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(rafRef.current)
     }
   }, [isOpen])
 

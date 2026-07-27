@@ -70,6 +70,37 @@ export function useMessages(
     [],
   )
 
+  const hydrateGroups = useCallback((infos: GroupInfo[]) => {
+    setGroups((prev) => {
+      const next = new Map(prev)
+      for (const info of infos) {
+        next.set(info.groupID, info)
+      }
+      return next
+    })
+  }, [])
+
+  const markActiveGroupsStopped = useCallback(() => {
+    setGroups((prev) => {
+      let found = false
+      for (const g of prev.values()) {
+        if (g.status === 'started') {
+          found = true
+          break
+        }
+      }
+      if (!found) return prev
+
+      const next = new Map(prev)
+      for (const [id, g] of prev) {
+        if (g.status === 'started') {
+          next.set(id, { ...g, status: 'stopped' })
+        }
+      }
+      return next
+    })
+  }, [])
+
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
       const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
@@ -105,6 +136,8 @@ export function useMessages(
     syncProcessingSession: processing.syncSession,
     processingSessionKeyRef: processing.processingSessionKeyRef,
     upsertGroup,
+    hydrateGroups,
+    markActiveGroupsStopped,
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {
@@ -199,6 +232,7 @@ export function useMessages(
     approvalResult: approvals.approvalResult,
     pendingAttachments,
     groups,
+    hydrateGroups,
     processingSessions: processing.processingSessions,
     setProcessingSessions: processing.setProcessingSessions,
     processingSessionKeyRef: processing.processingSessionKeyRef,

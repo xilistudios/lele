@@ -2,13 +2,14 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { ChatPageProvider } from '../../contexts/ChatPageContext'
 import { ErrorBanner } from '../atoms/ErrorBanner'
 import { ChatComposer } from '../molecules/ChatComposer'
+import { GroupComposer } from '../molecules/GroupComposer'
 import { ChatHeader } from '../organisms/ChatHeader'
 import { DiagnosticsPanel } from '../organisms/DiagnosticsPanel'
 import { MessageList } from '../organisms/MessageList'
 import { Sidebar } from '../organisms/Sidebar'
 
 export function ChatPage() {
-  const { error, diagnosticsOpen, sidebarOpen, parentSessionKey, onToggleSidebar } =
+  const { error, diagnosticsOpen, sidebarOpen, chatMode, parentSessionKey, onToggleSidebar } =
     useAppLogicContext()
 
   return (
@@ -33,7 +34,7 @@ export function ChatPage() {
           {!parentSessionKey && (
             <div className="border-t border-border px-4 py-3 md:px-6 md:py-4">
               <div className="mx-auto max-w-3xl">
-                <ChatComposer />
+                {chatMode === 'group' ? <GroupComposer /> : <ChatComposer />}
               </div>
             </div>
           )}

@@ -12,6 +12,7 @@ import {
   AdvancedSettings,
   ChannelSettings,
   GeneralSettings,
+  GroupsSettings,
   NativeClientsSettings,
   SessionSettings,
   SystemSettings,
@@ -23,6 +24,7 @@ type SettingsTab =
   | 'session'
   | 'channels'
   | 'native'
+  | 'groups'
   | 'tools'
   | 'system'
   | 'advanced'
@@ -33,6 +35,7 @@ const VALID_TABS: SettingsTab[] = [
   'session',
   'channels',
   'native',
+  'groups',
   'tools',
   'system',
   'advanced',
@@ -90,6 +93,8 @@ export function SettingsPage() {
         return <ChannelSettings />
       case 'native':
         return <NativeClientsSettings />
+      case 'groups':
+        return <GroupsSettings />
       case 'tools':
         return <ToolsSettings />
       case 'system':

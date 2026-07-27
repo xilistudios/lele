@@ -1,7 +1,7 @@
 import { type MutableRefObject, type ReactNode, createContext, useContext, useRef } from 'react'
 import { useAppLogic as useAppLogicHook } from '../hooks/useAppLogic'
 import { type SocketStatus, useSocket } from '../hooks/useSocket'
-import type { AuthSession, ClientEvent } from '../lib/types'
+import type { AuthSession, ChatMode, ClientEvent } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { useAuthContext } from './AuthContext'
 
@@ -22,6 +22,8 @@ export type AppLogicContextValue = {
   diagnostics: ReturnType<typeof useAppLogicHook>['diagnostics']
   diagnosticsOpen: ReturnType<typeof useAppLogicHook>['diagnosticsOpen']
   sidebarOpen: ReturnType<typeof useAppLogicHook>['sidebarOpen']
+  chatMode: ChatMode
+  onSelectMode: (mode: ChatMode) => void
   modelState: ReturnType<typeof useAppLogicHook>['modelState']
   thinkLevel: ReturnType<typeof useAppLogicHook>['thinkLevel']
   isProcessing: ReturnType<typeof useAppLogicHook>['isProcessing']
@@ -101,6 +103,8 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     diagnostics: app.diagnostics,
     diagnosticsOpen: app.diagnosticsOpen,
     sidebarOpen: app.sidebarOpen,
+    chatMode: app.chatMode,
+    onSelectMode: app.onSelectMode,
     modelState: app.modelState,
     thinkLevel: app.thinkLevel,
     isProcessing: app.isProcessing,

@@ -99,5 +99,15 @@
   "tui.group.role.proposer": "proponente",
   "tui.group.role.aggregator": "agregador",
   "tui.group.role.moderator": "moderador",
-  "tui.group.role.critic": "crítico"
+  "tui.group.role.critic": "crítico",
+
+  "tui.modeChat": "Chat",
+  "tui.modeAgent": "Agente",
+  "tui.modeGroup": "Grupo",
+  "tui.modeIndicator": "Modo: %s",
+  "tui.tabHint": "TAB: cambiar modo",
+
+  "tui.groupSelectProfile": "Seleccioná un perfil de grupo:",
+  "tui.groupTaskPlaceholder": "Escribí la tarea y presioná Enter para iniciar el grupo",
+  "tui.noGroupProfiles": "No hay perfiles de grupo configurados. Usá: /group start --agents a,b --strategy moa <task>"
 }

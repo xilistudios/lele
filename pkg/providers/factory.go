@@ -172,11 +172,15 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 	}
 
 	if sel.providerType == providerTypeHTTPCompat {
-		if sel.apiKey == "" && !strings.HasPrefix(sel.model, "bedrock/") {
-			return providerSelection{}, fmt.Errorf("no API key configured for provider (model: %s)", model)
-		}
 		if sel.apiBase == "" {
 			return providerSelection{}, fmt.Errorf("no API base configured for provider (model: %s)", model)
+		}
+		// Only require an API key when no explicit api_base was provided by the
+		// user (i.e., we would fall back to a default cloud endpoint that needs
+		// auth).  Named providers with an explicit api_base are often local
+		// proxies or self-hosted servers that do not require authentication.
+		if sel.apiKey == "" && !strings.HasPrefix(sel.model, "bedrock/") && named.APIBase == "" {
+			return providerSelection{}, fmt.Errorf("no API key configured for provider (model: %s)", model)
 		}
 	}
 	return sel, nil

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
@@ -482,6 +483,19 @@ func (n *NativeChannel) collectCatchupMessages(sessionKey string, processing boo
 	}}
 }
 
+// sessionGroupSnapshots returns GroupSnapshots whose OriginChatID matches
+// the given sessionKey (after resolving session aliases).
+func (n *NativeChannel) sessionGroupSnapshots(sessionKey string) []group.GroupSnapshot {
+	all := n.agentLoop.AllGroupSnapshots()
+	out := make([]group.GroupSnapshot, 0, len(all))
+	for _, g := range all {
+		if g.OriginChatID == sessionKey || n.agentLoop.ResolveSessionKey(g.OriginChatID) == sessionKey {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 func (n *NativeChannel) sendWelcome(client *WSClient) {
 	status := n.agentLoop.GetStatus(client.SessionKey)
 	agents := make([]map[string]interface{}, 0)
@@ -506,6 +520,8 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 
 	catchupMessages := n.collectCatchupMessages(client.SessionKey, processing)
 
+	groups := n.sessionGroupSnapshots(client.SessionKey)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "welcome",
@@ -518,6 +534,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"server_time":          time.Now().Format(time.RFC3339),
 			"processing":           processing,
 			"in_progress_messages": catchupMessages,
+			"groups":               groups,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
@@ -555,6 +572,8 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	catchupMessages := n.collectCatchupMessages(client.SessionKey, processing)
 
+	groups := n.sessionGroupSnapshots(client.SessionKey)
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "reconnected",
@@ -570,6 +589,7 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 			"disconnected_secs":    disconnectedSecs,
 			"subscriptions":        client.Subscriptions,
 			"in_progress_messages": catchupMessages,
+			"groups":               groups,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send reconnected event", map[string]interface{}{

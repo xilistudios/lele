@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/config"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -125,4 +127,49 @@ func (m *Model) filterAutocomplete(val string) {
 	if m.autocompleteIdx >= len(m.autocompleteItems) {
 		m.autocompleteIdx = 0
 	}
+}
+
+// getGroupProfiles returns the list of configured group profiles from the
+// config snapshot. Returns nil if the snapshot or groups are unavailable.
+func (m *Model) getGroupProfiles() []config.GroupProfile {
+	snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
+	if snapshot == nil {
+		return nil
+	}
+	return snapshot.Groups.List
+}
+
+// submitGroupStart constructs a /group start command and publishes it to the
+// message bus so the backend command handler processes it. It handles session
+// creation, UI state cleanup, and returns a tick command for the loading animation.
+func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
+	groupCmd := fmt.Sprintf("/group start %s %s", profileID, task)
+
+	if m.currentKey == "" {
+		m.createNewChat()
+	}
+	m.showWelcome = false
+	m.textInput.SetValue("")
+	m.compactFeedback = ""
+	m.processing = true
+	m.startTime = time.Now()
+	m.elapsedTime = 0
+	m.currentMessageID = uuid.New().String()
+	m.pendingSubagentCompletions = 0
+	m.parentCompletionObserved = false
+	m.currentStream = ""
+	m.currentThinking = ""
+	m.currentToolAction = ""
+	m.reloadSessions()
+
+	m.agentLoop.MessageBus().PublishInbound(bus.InboundMessage{
+		Channel:    "native",
+		SenderID:   "tui",
+		ChatID:     m.currentKey,
+		Content:    groupCmd,
+		SessionKey: m.currentKey,
+		Metadata:   map[string]string{"message_id": m.currentMessageID},
+	})
+
+	return m.tickCmd()
 }

@@ -98,6 +98,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 			persistedModel = agent.Sessions.GetModel(resolvedSessionKey)
 		}
 		if persistedModel != "" {
+			persistedModel = mp.al.cfg().Providers.ResolveModelAlias(persistedModel, mp.al.cfg().Agents.Defaults.Provider)
 			mp.al.sessionModels.Store(resolvedSessionKey, persistedModel)
 		} else if agent.Model != "" {
 			mp.al.sessionModels.Store(resolvedSessionKey, agent.Model)

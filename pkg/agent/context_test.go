@@ -533,7 +533,7 @@ func TestBuildMessages_Basic(t *testing.T) {
 		{Role: "assistant", Content: "Previous response"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current message", nil, "", "", "")
+	messages := cb.BuildMessages(history, "", "Current message", nil, "", "", "", "")
 
 	// Should have system + history + current message
 	if len(messages) != 4 {
@@ -572,7 +572,7 @@ func TestBuildMessages_WithSummary(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	summary := "This is a conversation summary"
-	messages := cb.BuildMessages([]providers.Message{}, summary, "Hello", nil, "", "", "")
+	messages := cb.BuildMessages([]providers.Message{}, summary, "Hello", nil, "", "", "", "")
 
 	if len(messages) != 3 {
 		t.Fatalf("Expected 3 messages, got %d", len(messages))
@@ -607,7 +607,7 @@ func TestBuildMessages_DoesNotDuplicatePersistedSummary(t *testing.T) {
 	summary := "This is a conversation summary"
 	history := []providers.Message{buildSummaryMessage(summary)}
 
-	messages := cb.BuildMessages(history, summary, "Hello", nil, "", "", "")
+	messages := cb.BuildMessages(history, summary, "Hello", nil, "", "", "", "")
 
 	count := 0
 	for _, msg := range messages {
@@ -630,7 +630,7 @@ func TestBuildMessages_WithSessionInfo(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "test-channel", "chat-123", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "test-channel", "chat-123", "", "")
 
 	if len(messages) != 2 {
 		t.Fatalf("Expected 2 messages, got %d", len(messages))
@@ -663,7 +663,7 @@ func TestBuildMessages_WithNativeSessionInfoUsesStableChatID(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:uuid-abc-123", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:uuid-abc-123", "", "")
 
 	if len(messages) != 2 {
 		t.Fatalf("Expected 2 messages, got %d", len(messages))
@@ -674,7 +674,7 @@ func TestBuildMessages_WithNativeSessionInfoUsesStableChatID(t *testing.T) {
 		t.Error("Expected native session prompt to use the full UUID-based chat ID")
 	}
 
-	messages = cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:chat:7", "")
+	messages = cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "native", "native:client-123:chat:7", "", "")
 	systemMsg = messages[0]
 	if !strings.Contains(systemMsg.Content, "Chat ID: native:client-123") {
 		t.Error("Expected native chat alias to collapse to stable base chat ID")
@@ -694,9 +694,9 @@ func TestBuildMessages_ReusesCachedSystemPromptAcrossTurns(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 	sessionKey := "native:test-client"
 
-	first := cb.BuildMessages([]providers.Message{}, "", "first message", nil, "native", "native:test-client:111", sessionKey)
+	first := cb.BuildMessages([]providers.Message{}, "", "first message", nil, "native", "native:test-client:111", sessionKey, "")
 	secondHistory := []providers.Message{{Role: "user", Content: "first message"}}
-	second := cb.BuildMessages(secondHistory, "", "second message", nil, "native", "native:test-client:222", sessionKey)
+	second := cb.BuildMessages(secondHistory, "", "second message", nil, "native", "native:test-client:222", sessionKey, "")
 
 	if len(first) == 0 || len(second) == 0 {
 		t.Fatal("expected system prompt messages to be present")
@@ -721,8 +721,8 @@ func TestBuildMessages_ChangingSessionKeyRebuildsSystemPrompt(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	first := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "native", "native:test-client:111", "native:test-client:111")
-	second := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "test-channel", "chat-222", "test-channel:chat-222")
+	first := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "native", "native:test-client:111", "native:test-client:111", "")
+	second := cb.BuildMessages([]providers.Message{}, "", "same message", nil, "test-channel", "chat-222", "test-channel:chat-222", "")
 
 	if first[0].Content == second[0].Content {
 		t.Fatalf("expected different session keys to rebuild system prompt when request context changes")
@@ -746,7 +746,7 @@ func TestBuildMessages_WithOrphanedToolMessages(t *testing.T) {
 		{Role: "assistant", Content: "Assistant response"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "", "")
 
 	// Should have system + 2 history (orphaned tool removed) + current = 4
 	if len(messages) != 4 {
@@ -769,7 +769,7 @@ func TestBuildMessages_EmptyHistory(t *testing.T) {
 
 	cb := NewContextBuilder(tmpDir)
 
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "", "")
 
 	// Should have system + current message = 2
 	if len(messages) != 2 {
@@ -1102,7 +1102,7 @@ func TestBuildMessages_MultipleOrphanedTools(t *testing.T) {
 		{Role: "user", Content: "User message"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "", "")
 
 	// Should have system + 1 history (both tools removed) + current = 3
 	if len(messages) != 3 {
@@ -1132,7 +1132,7 @@ func TestBuildMessages_ToolNotAtStart(t *testing.T) {
 		{Role: "tool", Content: "Tool result", ToolCallID: "call-1"},
 	}
 
-	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "")
+	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "", "")
 
 	// Should have system + 3 history + current = 5
 	if len(messages) != 5 {
@@ -1243,7 +1243,7 @@ func TestBuildMessages_NilMedia(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	// Should not panic with nil attachments
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", nil, "", "", "", "")
 
 	if len(messages) != 2 {
 		t.Errorf("Expected 2 messages, got %d", len(messages))
@@ -1261,7 +1261,7 @@ func TestBuildMessages_EmptyMedia(t *testing.T) {
 	cb := NewContextBuilder(tmpDir)
 
 	// Should work with empty attachment slice
-	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []bus.FileAttachment{}, "", "", "")
+	messages := cb.BuildMessages([]providers.Message{}, "", "Hello", []bus.FileAttachment{}, "", "", "", "")
 
 	if len(messages) != 2 {
 		t.Errorf("Expected 2 messages, got %d", len(messages))
@@ -1424,5 +1424,220 @@ description: Description for %s
 		if !found {
 			t.Errorf("Expected names to contain '%s', got %v", expected, names)
 		}
+	}
+}
+
+// --- Mode-aware BuildMessages tests (3-mode feature) ---
+
+// TestBuildMinimalSystemPrompt verifies the minimal system prompt
+// contains web_search/web_fetch and the "helpful AI assistant" phrase,
+// but does NOT contain full-prompt markers like AGENT.md or SOUL.md.
+func TestBuildMinimalSystemPrompt(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "minimal-prompt-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	prompt := cb.BuildMinimalSystemPrompt()
+
+	// Must contain these
+	required := []string{"web_search", "web_fetch", "helpful AI assistant"}
+	for _, r := range required {
+		if !strings.Contains(prompt, r) {
+			t.Errorf("BuildMinimalSystemPrompt() missing %q", r)
+		}
+	}
+
+	// Must NOT contain full-prompt markers
+	excluded := []string{"AGENT.md", "SOUL.md", "## Skills", "IDENTITY.md", "MEMORY.md"}
+	for _, e := range excluded {
+		if strings.Contains(prompt, e) {
+			t.Errorf("BuildMinimalSystemPrompt() should not contain %q, but does", e)
+		}
+	}
+}
+
+// TestBuildMessagesChatMode verifies that BuildMessages in chat mode uses
+// the minimal system prompt (not the full prompt with AGENT.md, SOUL.md, etc.).
+func TestBuildMessagesChatMode(t *testing.T) {
+	// Create a workspace with AGENT.md and SOUL.md so the full prompt
+	// would normally include them.
+	tmpDir, err := os.MkdirTemp("", "chat-mode-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	agentContent := "# AGENT.md\nThis is the agent instructions for testing."
+	soulContent := "# SOUL.md\nThis is the soul content for testing."
+	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentContent), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte(soulContent), 0644)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Build messages in chat mode with a unique session key
+	messages := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "chat-session-test", "chat",
+	)
+
+	if len(messages) < 2 {
+		t.Fatalf("Expected at least 2 messages, got %d", len(messages))
+	}
+
+	systemMsg := messages[0]
+	if systemMsg.Role != "system" {
+		t.Fatalf("Expected first message to be system, got %q", systemMsg.Role)
+	}
+
+	// Chat mode should use the minimal prompt
+	if !strings.Contains(systemMsg.Content, "web_search") {
+		t.Error("Chat mode system prompt should contain 'web_search'")
+	}
+	if !strings.Contains(systemMsg.Content, "web_fetch") {
+		t.Error("Chat mode system prompt should contain 'web_fetch'")
+	}
+
+	// Should NOT contain full-prompt markers
+	if strings.Contains(systemMsg.Content, "AGENT.md") {
+		t.Error("Chat mode system prompt should NOT contain 'AGENT.md'")
+	}
+	if strings.Contains(systemMsg.Content, "SOUL.md") {
+		t.Error("Chat mode system prompt should NOT contain 'SOUL.md'")
+	}
+	if strings.Contains(systemMsg.Content, agentContent) {
+		t.Error("Chat mode system prompt should NOT contain AGENT.md content")
+	}
+	if strings.Contains(systemMsg.Content, soulContent) {
+		t.Error("Chat mode system prompt should NOT contain SOUL.md content")
+	}
+
+	// Compare with agent mode to confirm they're different
+	agentMessages := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "agent-session-test", "agent",
+	)
+
+	if agentMessages[0].Content == systemMsg.Content {
+		t.Error("Chat mode and agent mode should produce different system prompts")
+	}
+
+	// Agent mode SHOULD contain the full prompt markers
+	if !strings.Contains(agentMessages[0].Content, agentContent) {
+		t.Error("Agent mode system prompt should contain AGENT.md content")
+	}
+}
+
+// TestBuildMessagesAgentMode verifies that BuildMessages in agent mode (or
+// empty mode) produces the full system prompt.
+func TestBuildMessagesAgentMode(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-mode-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	agentContent := "# AGENT.md\nTest agent content for mode verification."
+	soulContent := "# SOUL.md\nTest soul content for mode verification."
+	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentContent), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "SOUL.md"), []byte(soulContent), 0644)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Test with explicit "agent" mode
+	messagesAgent := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "agent-mode-session", "agent",
+	)
+
+	if len(messagesAgent) < 2 {
+		t.Fatalf("Expected at least 2 messages, got %d", len(messagesAgent))
+	}
+
+	agentSystemPrompt := messagesAgent[0].Content
+	if !strings.Contains(agentSystemPrompt, agentContent) {
+		t.Error("Agent mode system prompt should contain AGENT.md content")
+	}
+	if !strings.Contains(agentSystemPrompt, soulContent) {
+		t.Error("Agent mode system prompt should contain SOUL.md content")
+	}
+
+	// Test with empty mode (should default to agent/full prompt)
+	messagesDefault := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "default-mode-session", "",
+	)
+
+	defaultSystemPrompt := messagesDefault[0].Content
+	if !strings.Contains(defaultSystemPrompt, agentContent) {
+		t.Error("Empty mode (default) system prompt should contain AGENT.md content")
+	}
+	if !strings.Contains(defaultSystemPrompt, soulContent) {
+		t.Error("Empty mode (default) system prompt should contain SOUL.md content")
+	}
+
+	// Both agent and empty mode should produce identical prompts
+	// (since they use the same buildSystemPromptForTurn path)
+	if agentSystemPrompt != defaultSystemPrompt {
+		t.Error("Agent mode and empty mode should produce identical system prompts")
+	}
+
+	// Should NOT be the minimal prompt
+	if strings.Contains(agentSystemPrompt, "You can search the web and fetch web pages") {
+		t.Error("Agent mode should NOT use the minimal chat prompt")
+	}
+}
+
+// TestBuildMessagesChatModeCacheIsolation verifies that the system prompt
+// cache correctly isolates chat-mode and agent-mode sessions.
+func TestBuildMessagesChatModeCacheIsolation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "cache-isolation-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	agentContent := "# AGENT.md\nCache isolation test content."
+	os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentContent), 0644)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Build chat mode messages — caches for "chat-isolation-session"
+	chatMsgs := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "chat-isolation-session", "chat",
+	)
+
+	// Build agent mode messages — caches for "agent-isolation-session"
+	agentMsgs := cb.BuildMessages(
+		[]providers.Message{}, "", "Hello", nil,
+		"", "", "agent-isolation-session", "agent",
+	)
+
+	chatPrompt := chatMsgs[0].Content
+	agentPrompt := agentMsgs[0].Content
+
+	// They should be different (minimal vs full)
+	if chatPrompt == agentPrompt {
+		t.Fatal("Chat and agent session prompts should be different")
+	}
+
+	// Re-build for same session keys — should reuse cache (byte-identical)
+	chatMsgs2 := cb.BuildMessages(
+		[]providers.Message{{Role: "user", Content: "Hello"}}, "", "Follow up", nil,
+		"", "", "chat-isolation-session", "chat",
+	)
+	agentMsgs2 := cb.BuildMessages(
+		[]providers.Message{{Role: "user", Content: "Hello"}}, "", "Follow up", nil,
+		"", "", "agent-isolation-session", "agent",
+	)
+
+	if chatMsgs2[0].Content != chatPrompt {
+		t.Error("Chat session cached prompt should be byte-identical across turns")
+	}
+	if agentMsgs2[0].Content != agentPrompt {
+		t.Error("Agent session cached prompt should be byte-identical across turns")
 	}
 }

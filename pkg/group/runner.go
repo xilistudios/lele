@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -231,16 +232,78 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 	sysPrompt := BuildTurnSystemPrompt(agCtx.SystemPrompt, self, state.Participants, state.Task)
 	transcript := RenderTranscript(state.Transcript)
 	instruction := instructionFor(state, self, layer)
+	turnIndex := len(state.Transcript)
+	label := self.Label
+	currentLayer := layer
 	gm.mu.Unlock()
 
+	// Accumulate tool calls from OnToolCall callbacks during this turn.
+	var tcMu sync.Mutex
+	var toolCalls []GroupToolCall
+
 	req := TurnRequest{
-		GroupID:      state.ID,
-		Speaker:      speaker,
-		SystemPrompt: sysPrompt,
-		Transcript:   transcript,
-		Instruction:  instruction,
-		MaxTokens:    state.MaxTokensPerTurn,
-		EnableTools:  false,
+		GroupID:       state.ID,
+		Speaker:       speaker,
+		SystemPrompt:  sysPrompt,
+		Transcript:    transcript,
+		Instruction:   instruction,
+		MaxTokens:     state.MaxTokensPerTurn,
+		EnableTools:   true,
+		OriginChannel: mg.originCh,
+		OriginChatID:  mg.originChat,
+		OnToolCall: func(toolCallID, toolName, args, status, result string) {
+			gm.publish(bus.OutboundMessage{
+				Channel:        mg.originCh,
+				ChatID:         mg.originChat,
+				Event:          "group.tool",
+				IsIntermediate: true,
+				Metadata: map[string]string{
+					"group_id":     mg.state.ID,
+					"speaker":      speaker,
+					"label":        label,
+					"layer":        strconv.Itoa(currentLayer),
+					"turn_index":   strconv.Itoa(turnIndex),
+					"tool_call_id": toolCallID,
+					"tool":         toolName,
+					"status":       status,
+					"arguments":    args,
+					"result":       result,
+				},
+			})
+
+			// Upsert the tool call into the accumulator.
+			tcMu.Lock()
+			found := false
+			for i := range toolCalls {
+				if toolCalls[i].ToolCallID == toolCallID {
+					switch status {
+					case "executing":
+						if args != "" {
+							toolCalls[i].Arguments = args
+						}
+					case "completed", "error":
+						toolCalls[i].Status = status
+						toolCalls[i].Result = result
+						if toolCalls[i].Arguments == "" && args != "" {
+							toolCalls[i].Arguments = args
+						}
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				tc := GroupToolCall{
+					ToolCallID: toolCallID,
+					Tool:       toolName,
+					Status:     status,
+					Arguments:  args,
+					Result:     result,
+				}
+				toolCalls = append(toolCalls, tc)
+			}
+			tcMu.Unlock()
+		},
 	}
 
 	content, tokens, err := gm.executor(ctx, req)
@@ -258,6 +321,11 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 		CreatedAt: time.Now(),
 		Tokens:    tokens,
 	}
+	tcMu.Lock()
+	if len(toolCalls) > 0 {
+		turn.ToolCalls = toolCalls
+	}
+	tcMu.Unlock()
 	state.AddTurn(turn)
 	role := self.Role
 	gm.mu.Unlock()

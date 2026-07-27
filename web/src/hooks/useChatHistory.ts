@@ -2,7 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
-import type { ChatMessage, HistoryToolCall } from '../lib/types'
+import type { ChatMessage, GroupInfo, GroupSnapshot, HistoryToolCall } from '../lib/types'
+import { snapshotToGroupInfo } from './messageEventHandlers'
 
 const DEFAULT_LIMIT = 50
 
@@ -219,6 +220,7 @@ export function useChatHistory(
   token: string | null,
   streamingMessages: ChatMessage[],
   parentSessionKey?: string,
+  hydrateGroups?: (infos: GroupInfo[]) => void,
 ) {
   const queryClient = useQueryClient()
   const [isLoadingMore, setIsLoadingMore] = useState(false)
@@ -241,6 +243,12 @@ export function useChatHistory(
         }
       }
       setHasMore(history.has_more)
+
+      // Hydrate groups from history response if present
+      const groups = history.groups as GroupSnapshot[] | undefined
+      if (groups?.length && hydrateGroups) {
+        hydrateGroups(groups.map(snapshotToGroupInfo))
+      }
 
       const newMessages = toChatMessages(history.messages, history.session_key)
 

@@ -38,7 +38,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     clearCurrentSessionKey()
   }, [])
 
-  const touchSession = useCallback((sessionKey: string, name?: string) => {
+  const touchSession = useCallback((sessionKey: string, name?: string, mode?: string) => {
     setSessions((current) =>
       current.map((s) =>
         s.key === sessionKey
@@ -47,6 +47,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
               updated: new Date().toISOString(),
               message_count: s.message_count + 1,
               ...(name ? { name } : {}),
+              ...(mode ? { mode: mode as ChatSession['mode'] } : {}),
             }
           : s,
       ),
@@ -118,32 +119,36 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     [persistCurrentSessionKey],
   )
 
-  const createSession = useCallback(async (): Promise<string | null> => {
-    if (!clientId) return null
+  const createSession = useCallback(
+    async (mode?: string): Promise<string | null> => {
+      if (!clientId) return null
 
-    const sessionKey = generateUUID()
-    const newSession: ChatSession = {
-      key: sessionKey,
-      created: new Date().toISOString(),
-      updated: new Date().toISOString(),
-      message_count: 0,
-    }
+      const sessionKey = generateUUID()
+      const newSession: ChatSession = {
+        key: sessionKey,
+        created: new Date().toISOString(),
+        updated: new Date().toISOString(),
+        message_count: 0,
+        ...(mode ? { mode: mode as ChatSession['mode'] } : {}),
+      }
 
-    setSessions((current) =>
-      [newSession, ...current.filter((s) => s.key !== sessionKey)].sort(
-        (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
-      ),
-    )
-    persistCurrentSessionKey(sessionKey)
+      setSessions((current) =>
+        [newSession, ...current.filter((s) => s.key !== sessionKey)].sort(
+          (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
+        ),
+      )
+      persistCurrentSessionKey(sessionKey)
 
-    // Await the API call to ensure backend confirms session creation before navigation
-    await api.createSession(sessionKey).catch((err) => {
-      console.error('[useChatSessions] Failed to create session on backend:', err)
-      return null
-    })
+      // Await the API call to ensure backend confirms session creation before navigation
+      await api.createSession(sessionKey, mode).catch((err) => {
+        console.error('[useChatSessions] Failed to create session on backend:', err)
+        return null
+      })
 
-    return sessionKey
-  }, [clientId, persistCurrentSessionKey, api])
+      return sessionKey
+    },
+    [clientId, persistCurrentSessionKey, api],
+  )
 
   const deleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {

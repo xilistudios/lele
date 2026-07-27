@@ -176,7 +176,7 @@ type llmRunnerMockContextBuilder struct {
 	messages []providers.Message
 }
 
-func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string) []providers.Message {
+func (m *llmRunnerMockContextBuilder) BuildMessages(history []providers.Message, summary, userMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string, mode string) []providers.Message {
 	if m.messages != nil {
 		return m.messages
 	}
@@ -2235,5 +2235,181 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 	model = al.sessionManager.ModelForSession(agent, "user-session-2")
 	if model != "default-model" {
 		t.Errorf("Expected 'default-model' for different session, got: %s", model)
+	}
+}
+
+// TestRunLLMIteration_IntraLoopCompaction verifies that proactive context
+// compaction triggers INSIDE the tool loop (between turns) and that the loop
+// CONTINUES running afterwards, instead of only compacting at loop exit
+// (maybeSummarize) or reactively on an LLM context-window error.
+//
+// Setup notes:
+//   - getSessionContextWindow resolves through getContextWindow, which falls
+//     back to 128000 when the model has no explicit provider config (the case
+//     for the test model). So the effective threshold is 128000*75/100 = 96000.
+//   - The mock tool returns 100K chars (~40K tokens) per invocation, so after
+//     ~3 tool-call iterations the accumulated context exceeds 96000 and the
+//     intra-loop compaction fires.
+//   - CompactLoopMessages needs len(messages) > keepLast+2 (=8) to compact and
+//     keeps system + summary + last 6 messages, so the message count stays
+//     bounded even as we keep adding 100K-char tool results.
+//   - The compaction summary call is detected by its distinctive prompt (a
+//     single user message containing "Summarize this conversation segment").
+//
+// The test asserts that:
+//  1. a compaction summary call happened (compaction ran),
+//  2. the loop kept running for several more iterations AFTER the first
+//     compaction and still produced a final answer (it did not abort),
+//  3. the message count seen by the LLM stayed bounded (compaction prevented
+//     unbounded growth), and
+//  4. the native "compact" bus events were published.
+func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	// Large tool result content (~100K chars ≈ 40K tokens) so that a few
+	// tool-call iterations exceed the 96000-token compaction threshold.
+	largeContent := strings.Repeat("X", 100000)
+
+	// Counters to distinguish regular LLM calls from the compaction summary
+	// call (which sends a single user message starting with "Summarize this
+	// conversation segment"). regularCallsAtFirstSummary records how many
+	// regular iterations had run when compaction first fired, proving it
+	// happened mid-loop rather than at loop exit.
+	summaryCallDetected := false
+	summaryCalls := 0
+	regularCalls := 0
+	regularCallsAtFirstSummary := 0
+	var peakMsgCount int
+
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			// Detect the compaction summary call made by CompactLoopMessages.
+			if len(messages) == 1 && messages[0].Role == "user" &&
+				strings.Contains(messages[0].Content, "Summarize this conversation segment") {
+				summaryCalls++
+				summaryCallDetected = true
+				if summaryCalls == 1 {
+					regularCallsAtFirstSummary = regularCalls
+				}
+				return &providers.LLMResponse{
+					Content:   "Summary of prior tool interactions",
+					ToolCalls: []providers.ToolCall{},
+				}, nil
+			}
+
+			// Regular LLM call.
+			regularCalls++
+			if len(messages) > peakMsgCount {
+				peakMsgCount = len(messages)
+			}
+
+			// Keep requesting tool calls for the first several iterations so the
+			// context keeps growing and compaction fires; then return a final
+			// answer to end the loop cleanly.
+			if regularCalls <= 5 {
+				return &providers.LLMResponse{
+					Content: "",
+					ToolCalls: []providers.ToolCall{
+						{
+							ID:        fmt.Sprintf("call_%d", regularCalls),
+							Type:      "function",
+							Name:      "large_tool",
+							Arguments: map[string]interface{}{},
+						},
+					},
+				}, nil
+			}
+			return &providers.LLMResponse{
+				Content:   "Final response",
+				ToolCalls: []providers.ToolCall{},
+			}, nil
+		},
+	}
+
+	// Register a tool that returns very large content.
+	agent.Tools.Register(&llmRunnerMockCustomTool{
+		name: "large_tool",
+		executeFunc: func(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
+			return tools.SilentResult(largeContent)
+		},
+	})
+
+	messages := []providers.Message{
+		{Role: "system", Content: "System prompt"},
+		{Role: "user", Content: "Do work"},
+	}
+
+	opts := processOptions{
+		SessionKey:   "test-session",
+		Channel:      "native", // native channel publishes compact bus events
+		ChatID:       "test-chat-id",
+		SendResponse: false,
+	}
+
+	content, iterations, err := runner.runLLMIteration(context.Background(), agent, messages, opts)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// 1. Compaction must have run (a summary call was issued).
+	if !summaryCallDetected {
+		t.Fatal("Expected intra-loop compaction to fire (summary call detected), but it never did")
+	}
+
+	// 2. The loop must have CONTINUED after the first compaction and still
+	// produced a final answer (it did not abort because of compaction).
+	if content != "Final response" {
+		t.Errorf("Expected 'Final response', got: %q", content)
+	}
+	if regularCallsAtFirstSummary < 1 {
+		t.Errorf("Expected compaction to fire after at least 1 regular iteration (mid-loop), got regularCallsAtFirstSummary=%d", regularCallsAtFirstSummary)
+	}
+	if regularCalls <= regularCallsAtFirstSummary {
+		t.Errorf("Expected the loop to keep running after the first compaction (regularCalls=%d should exceed regularCallsAtFirstSummary=%d)", regularCalls, regularCallsAtFirstSummary)
+	}
+	if regularCalls < regularCallsAtFirstSummary+2 {
+		t.Errorf("Expected at least 2 regular iterations after the first compaction, got regularCalls=%d regularCallsAtFirstSummary=%d", regularCalls, regularCallsAtFirstSummary)
+	}
+
+	// 3. Message count seen by the LLM must stay bounded despite repeatedly
+	// adding 100K-char tool results (compaction prevents unbounded growth).
+	// keepLast=6 → compacted size is system+summary+6 = 8; allow small margin.
+	if peakMsgCount > 9 {
+		t.Errorf("Expected compaction to keep message count bounded (<=9), got peak=%d", peakMsgCount)
+	}
+	if peakMsgCount < 6 {
+		t.Errorf("Expected a multi-iteration loop (peak message count >=6), got peak=%d", peakMsgCount)
+	}
+
+	if iterations < 4 {
+		t.Errorf("Expected at least 4 iterations (multiple tool-call turns + final), got: %d", iterations)
+	}
+
+	// 4. Native "compact" bus events must have been published.
+	compactExecuting := false
+	compactResult := false
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer drainCancel()
+	for {
+		msg, ok := al.bus.SubscribeOutbound(drainCtx)
+		if !ok {
+			break
+		}
+		if msg.Metadata["tool"] == "compact" && msg.Event == "tool.executing" {
+			compactExecuting = true
+		}
+		if msg.Metadata["tool"] == "compact" && msg.Event == "tool.result" {
+			compactResult = true
+		}
+	}
+	if !compactExecuting {
+		t.Error("Expected tool.executing event for compact, not found")
+	}
+	if !compactResult {
+		t.Error("Expected tool.result event for compact, not found")
 	}
 }
