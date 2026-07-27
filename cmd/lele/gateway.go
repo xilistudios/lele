@@ -40,18 +40,7 @@ func gatewayCmd() {
 		os.Exit(1)
 	}
 
-	if cfg.Logs.Enabled {
-		logsPath := cfg.LogsPath()
-		if err := logger.EnableMultiFileLogging(logsPath); err != nil {
-			fmt.Printf("Warning: could not enable file logging: %v\n", err)
-		} else {
-			if cfg.Logs.MaxDays > 0 {
-				if err := logger.CleanupOldLogs(cfg.Logs.MaxDays); err != nil {
-					fmt.Printf("Warning: could not cleanup old logs: %v\n", err)
-				}
-			}
-		}
-	}
+	setupFileLogging(cfg)
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus)
