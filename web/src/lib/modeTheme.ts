@@ -79,4 +79,11 @@ export function getModeTheme(mode: ChatMode | undefined | null): ModeTheme {
   return THEMES[mode ?? 'agent']
 }
 
-export const MODE_LIST: ChatMode[] = ['chat', 'agent', 'group']
+export const ALL_MODES: ChatMode[] = ['chat', 'agent', 'group']
+
+/** @deprecated Use getModeList() instead for feature-flag-aware filtering */
+export const MODE_LIST: ChatMode[] = ALL_MODES
+
+export function getModeList(groupsEnabled: boolean): ChatMode[] {
+  return groupsEnabled ? ALL_MODES : ALL_MODES.filter((m) => m !== 'group')
+}

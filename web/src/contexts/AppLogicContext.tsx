@@ -37,6 +37,7 @@ export type AppLogicContextValue = {
   pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
   toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
   groups: ReturnType<typeof useAppLogicHook>['groups']
+  groupsEnabled: boolean
 
   // Handlers from useAppLogic
   handleEvent: ReturnType<typeof useAppLogicHook>['handleEvent']
@@ -118,6 +119,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     pendingAttachments: app.pendingAttachments,
     toolStatus: app.toolStatus,
     groups: app.groups,
+    groupsEnabled: app.groupsEnabled,
 
     // Handlers from useAppLogic
     handleEvent: app.handleEvent,

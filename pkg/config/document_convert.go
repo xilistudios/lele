@@ -269,7 +269,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	}
 
 	// Groups
-	if len(doc.Groups.List) > 0 {
+	if doc.Groups.Enabled || len(doc.Groups.List) > 0 {
 		result["groups"] = doc.Groups
 	}
 

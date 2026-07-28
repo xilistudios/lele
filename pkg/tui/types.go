@@ -9,6 +9,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/session"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
@@ -183,7 +184,8 @@ type Model struct {
 
 	// Sub-components
 	viewport  viewport.Model
-	textInput textinput.Model
+	textInput textinput.Model // single-line input for modal forms (AddProvider, AddModel)
+	chatInput textarea.Model  // multi-line input for chat messages
 
 	// Pending user message (shown immediately before agent responds)
 	pendingUserMessage string

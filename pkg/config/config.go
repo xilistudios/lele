@@ -69,7 +69,8 @@ func ValidStrategy(s string) bool {
 
 // GroupsConfig holds the list of multi-agent group profiles.
 type GroupsConfig struct {
-	List []GroupProfile `json:"list,omitempty"`
+	Enabled bool           `json:"enabled"`
+	List    []GroupProfile `json:"list,omitempty"`
 }
 
 // GroupProfile describes a collaborative multi-agent group (MoA, round-robin,

@@ -213,7 +213,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.cfg.SetLanguage(langCode)
 						i18n.SetLanguage(langCode)
-						m.textInput.Placeholder = i18n.T("tui.placeholder")
+						m.chatInput.Placeholder = i18n.T("tui.placeholder")
 					} else if m.modalMode == ModalProviders {
 						if m.modalSelectedIdx < len(m.providerModalKeys) {
 							providerName := m.providerModalKeys[m.modalSelectedIdx]
@@ -485,14 +485,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab", "enter":
 				if len(m.autocompleteItems) > 0 {
 					completed := m.autocompleteItems[m.autocompleteIdx].name
-					m.textInput.SetValue(completed)
+					m.chatInput.SetValue(completed)
 					m.showAutocomplete = false
 					if msg.String() == "enter" {
 						cmd := m.executeCommand(completed)
 						if cmd != nil {
 							cmds = append(cmds, cmd)
 						}
-						m.textInput.SetValue("")
+						m.chatInput.SetValue("")
 					}
 				}
 				return m, tea.Batch(cmds...)
@@ -526,18 +526,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "tab":
-			// Cycle mode: agent -> chat -> group -> agent.
+			// Cycle mode: agent -> chat -> [group ->] agent.
 			// Only when no autocomplete and no modal is active.
 			if m.showAutocomplete || m.modalMode != ModalNone {
 				return m, nil
 			}
-			switch m.currentMode {
-			case ModeAgent:
-				m.currentMode = ModeChat
-			case ModeChat:
-				m.currentMode = ModeGroup
-			case ModeGroup:
-				m.currentMode = ModeAgent
+			if m.cfg.Groups.Enabled {
+				switch m.currentMode {
+				case ModeAgent:
+					m.currentMode = ModeChat
+				case ModeChat:
+					m.currentMode = ModeGroup
+				case ModeGroup:
+					m.currentMode = ModeAgent
+				}
+			} else {
+				// Groups disabled: toggle between agent and chat only
+				switch m.currentMode {
+				case ModeAgent:
+					m.currentMode = ModeChat
+				default:
+					m.currentMode = ModeAgent
+				}
 			}
 			m.reloadSessions()
 			m.updateViewport()
@@ -629,7 +639,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 
 		case "enter":
-			inputVal := m.textInput.Value()
+			inputVal := m.chatInput.Value()
 
 			// Group mode: wrap non-command input as /group start <profileID> <task>
 			if m.currentMode == ModeGroup && !strings.HasPrefix(inputVal, "/") &&
@@ -650,7 +660,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-				m.textInput.SetValue("")
+				m.chatInput.SetValue("")
 			} else if !m.processing && !m.hasRunningSubagents() {
 				cmd := m.submitMessage()
 				if cmd != nil {
@@ -992,13 +1002,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.updateViewport()
 	}
-	if m.modalMode == ModalNone || m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
-		// Only forward message types the textinput knows how to handle.
+	if m.modalMode == ModalNone {
+		// Only forward message types the textarea knows how to handle.
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
 		switch msg := msg.(type) {
 		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg:
-			// skip — not relevant to textinput
+			// skip — not relevant to textarea
 		case tea.KeyMsg:
 			if m.isEscapeSequenceFragment(msg) {
 				break
@@ -1012,22 +1022,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				msg.Runes = cleaned
 			}
+			// Do NOT forward "enter" to textarea — it's handled above for sending.
+			// Do NOT forward "ctrl+m" — it's used for /models.
+			if msg.String() == "enter" || msg.String() == "ctrl+m" {
+				break
+			}
 			var cmd tea.Cmd
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.chatInput, cmd = m.chatInput.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			// Defensive: strip any mouse escape sequences that slipped through.
-			if cleaned := stripMouseEscapeSequences(m.textInput.Value()); cleaned != m.textInput.Value() {
-				m.textInput.SetValue(cleaned)
+			if cleaned := stripMouseEscapeSequences(m.chatInput.Value()); cleaned != m.chatInput.Value() {
+				m.chatInput.SetValue(cleaned)
 			}
 		default:
 			var cmd tea.Cmd
-			m.textInput, cmd = m.textInput.Update(msg)
+			m.chatInput, cmd = m.chatInput.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 
-		val := m.textInput.Value()
+		val := m.chatInput.Value()
 		if strings.HasPrefix(val, "/") {
 			m.showAutocomplete = true
 			m.filterAutocomplete(val)

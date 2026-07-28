@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useAppLogicContext } from '../../contexts/AppLogicContext'
 
 type SettingsTab =
   | 'general'
@@ -18,13 +19,14 @@ type Props = {
 
 export function SettingsTabs({ activeTab, onTabChange }: Props) {
   const { t } = useTranslation()
+  const { groupsEnabled } = useAppLogicContext()
 
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: 'general', label: t('settings.tabs.general') },
     { id: 'session', label: t('settings.tabs.session') },
     { id: 'channels', label: t('settings.tabs.channels') },
     { id: 'native', label: t('settings.tabs.native') },
-    { id: 'groups', label: t('settings.tabs.groups') },
+    ...(groupsEnabled ? [{ id: 'groups' as const, label: t('settings.tabs.groups') }] : []),
     { id: 'tools', label: t('settings.tabs.tools') },
     { id: 'system', label: t('settings.tabs.system') },
     { id: 'advanced', label: t('settings.tabs.advanced') },

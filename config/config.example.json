@@ -13,6 +13,9 @@
     "ephemeral": true,
     "ephemeral_threshold": 560
   },
+  "groups": {
+    "enabled": false
+  },
   "channels": {
     "telegram": {
       "enabled": false,

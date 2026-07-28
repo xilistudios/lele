@@ -44,7 +44,7 @@ func (m *Model) View() string {
 			contentBuilder.WriteString(autocompleteView + "\n")
 		}
 
-		inputView := InputBarContainer.Width(60).Render(m.textInput.View())
+		inputView := InputBarContainer.Width(60).Render(m.chatInput.View())
 		contentBuilder.WriteString(inputView + "\n\n")
 
 		agentID := ""
@@ -84,30 +84,46 @@ func (m *Model) View() string {
 		)
 		contentBuilder.WriteString(selectorLine + "\n")
 
-		// Mode tabs: show the 3 modes, highlighting the active one
+		// Mode tabs: show available modes, highlighting the active one
 		modeTabChat := i18n.T("tui.modeChat")
 		modeTabAgent := i18n.T("tui.modeAgent")
 		modeTabGroup := i18n.T("tui.modeGroup")
 		var modeTabs string
-		switch m.currentMode {
-		case ModeChat:
-			modeTabs = fmt.Sprintf("%s   %s   %s",
-				ModelSelectorStyle.Render(modeTabChat),
-				ModelSelectorLabel.Render(modeTabAgent),
-				ModelSelectorLabel.Render(modeTabGroup),
-			)
-		case ModeGroup:
-			modeTabs = fmt.Sprintf("%s   %s   %s",
-				ModelSelectorLabel.Render(modeTabChat),
-				ModelSelectorLabel.Render(modeTabAgent),
-				ModelSelectorStyle.Render(modeTabGroup),
-			)
-		default: // ModeAgent
-			modeTabs = fmt.Sprintf("%s   %s   %s",
-				ModelSelectorLabel.Render(modeTabChat),
-				ModelSelectorStyle.Render(modeTabAgent),
-				ModelSelectorLabel.Render(modeTabGroup),
-			)
+		if m.cfg.Groups.Enabled {
+			switch m.currentMode {
+			case ModeChat:
+				modeTabs = fmt.Sprintf("%s   %s   %s",
+					ModelSelectorStyle.Render(modeTabChat),
+					ModelSelectorLabel.Render(modeTabAgent),
+					ModelSelectorLabel.Render(modeTabGroup),
+				)
+			case ModeGroup:
+				modeTabs = fmt.Sprintf("%s   %s   %s",
+					ModelSelectorLabel.Render(modeTabChat),
+					ModelSelectorLabel.Render(modeTabAgent),
+					ModelSelectorStyle.Render(modeTabGroup),
+				)
+			default: // ModeAgent
+				modeTabs = fmt.Sprintf("%s   %s   %s",
+					ModelSelectorLabel.Render(modeTabChat),
+					ModelSelectorStyle.Render(modeTabAgent),
+					ModelSelectorLabel.Render(modeTabGroup),
+				)
+			}
+		} else {
+			// Groups disabled: only show Chat and Agent tabs
+			switch m.currentMode {
+			case ModeChat:
+				modeTabs = fmt.Sprintf("%s   %s",
+					ModelSelectorStyle.Render(modeTabChat),
+					ModelSelectorLabel.Render(modeTabAgent),
+				)
+			default: // ModeAgent
+				modeTabs = fmt.Sprintf("%s   %s",
+					ModelSelectorLabel.Render(modeTabChat),
+					ModelSelectorStyle.Render(modeTabAgent),
+				)
+			}
 		}
 		contentBuilder.WriteString(modeTabs + "\n")
 
@@ -234,8 +250,8 @@ func (m *Model) View() string {
 
 	statusLineRendered := StatusLineStyle.Render(statusLine)
 
-	m.textInput.Width = leftWidth - 4
-	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.textInput.View())
+	m.chatInput.SetWidth(leftWidth - 4)
+	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.chatInput.View())
 
 	// Cache token counts to avoid duplicate API calls
 	currentTokens, contextWindow := m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)

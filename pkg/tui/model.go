@@ -14,20 +14,68 @@ import (
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *session.SessionManager, initialSessionID ...string) *Model {
 	// Initialize i18n with configured language
 	i18n.InitWithLanguage(cfg.GetLanguage())
 
+	// Multi-line chat input
+	ta := textarea.New()
+	ta.Placeholder = i18n.T("tui.placeholder")
+	ta.Focus()
+	ta.CharLimit = 0 // unlimited
+	ta.SetWidth(80)
+	ta.SetHeight(3)
+	ta.Prompt = " "
+	ta.ShowLineNumbers = false
+	ta.EndOfBufferCharacter = ' '
+	// Custom KeyMap: remove bindings that conflict with TUI shortcuts.
+	// Enter sends the message (handled in handlers.go), Alt+Enter inserts newline.
+	ta.KeyMap = textarea.KeyMap{
+		CharacterForward:        key.NewBinding(key.WithKeys("right"), key.WithHelp("right", "character forward")),
+		CharacterBackward:       key.NewBinding(key.WithKeys("left"), key.WithHelp("left", "character backward")),
+		WordForward:             key.NewBinding(key.WithKeys("alt+right", "alt+f"), key.WithHelp("alt+right", "word forward")),
+		WordBackward:            key.NewBinding(key.WithKeys("alt+left", "alt+b"), key.WithHelp("alt+left", "word backward")),
+		InsertNewline:           key.NewBinding(key.WithKeys("alt+enter"), key.WithHelp("alt+enter", "insert newline")),
+		DeleteCharacterBackward: key.NewBinding(key.WithKeys("backspace"), key.WithHelp("backspace", "delete character backward")),
+		DeleteCharacterForward:  key.NewBinding(key.WithKeys("delete"), key.WithHelp("delete", "delete character forward")),
+		DeleteWordBackward:      key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w"), key.WithHelp("alt+backspace", "delete word backward")),
+		DeleteWordForward:       key.NewBinding(key.WithKeys("alt+delete", "alt+d"), key.WithHelp("alt+delete", "delete word forward")),
+		DeleteAfterCursor:       key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "delete after cursor")),
+		DeleteBeforeCursor:      key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "delete before cursor")),
+		Paste:                   key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste")),
+		// Intentionally omitted (conflict with TUI shortcuts):
+		// LineNext/LinePrevious (up/down → viewport scroll)
+		// LineStart/LineEnd (home/end → viewport scroll)
+		// InputBegin/InputEnd (ctrl+home/ctrl+end)
+		// CharacterForward ctrl+f, CharacterBackward ctrl+b (ctrl+b → go back to parent)
+		// LineNext ctrl+n, LinePrevious ctrl+p (ctrl+p → autocomplete)
+		// LineStart ctrl+a (ctrl+a → /agents)
+		// LineEnd ctrl+e
+		// DeleteCharacterBackward ctrl+h, DeleteCharacterForward ctrl+d
+		// TransposeCharacterBackward ctrl+t (ctrl+t → mouse toggle)
+		// UppercaseWordForward, LowercaseWordForward, CapitalizeWordForward
+	}
+	// Minimal styling — blend with the TUI theme.
+	ta.FocusedStyle.Base = lipgloss.NewStyle()
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
+	ta.BlurredStyle = ta.FocusedStyle // same style when not focused (always focused anyway)
+
+	// Single-line input for modal forms (AddProvider, AddModel)
 	ti := textinput.New()
-	ti.Placeholder = i18n.T("tui.placeholder")
+	ti.Placeholder = ""
 	ti.Focus()
-	ti.CharLimit = 4096
-	ti.Width = 80
+	ti.CharLimit = 0
+	ti.Width = 40
 	ti.Prompt = " "
 
 	vp := viewport.New(80, 20)
@@ -44,6 +92,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		ctx:                    ctx,
 		cancel:                 cancel,
 		viewport:               vp,
+		chatInput:              ta,
 		textInput:              ti,
 		activePane:             ChatViewPane,
 		showWelcome:            true,
@@ -80,7 +129,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 func (m *Model) Init() tea.Cmd {
 	m.reloadSessions()
 	return tea.Batch(
-		textinput.Blink,
+		textarea.Blink,
 		m.startOutboundListener(),
 	)
 }

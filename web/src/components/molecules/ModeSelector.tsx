@@ -1,14 +1,15 @@
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
-import { MODE_LIST, getModeTheme } from '../../lib/modeTheme'
+import { getModeList, getModeTheme } from '../../lib/modeTheme'
 
 export function ModeSelector() {
-  const { chatMode, onSelectMode } = useAppLogicContext()
+  const { chatMode, onSelectMode, groupsEnabled } = useAppLogicContext()
   const { t } = useTranslation()
+  const modes = getModeList(groupsEnabled)
 
   return (
     <div className="flex rounded-lg bg-surface-hover p-0.5 gap-0.5">
-      {MODE_LIST.map((id) => {
+      {modes.map((id) => {
         const theme = getModeTheme(id)
         const active = chatMode === id
         const Icon = theme.Icon

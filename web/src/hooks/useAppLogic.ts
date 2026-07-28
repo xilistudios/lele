@@ -368,6 +368,15 @@ export function useAppLogic(
     localStorage.setItem('lele_chat_mode', mode)
   }, [])
 
+  // Reset chatMode to 'agent' if group mode is selected but groups are disabled
+  const groupsEnabled = messagesHook.groupsEnabled
+  useEffect(() => {
+    if (chatMode === 'group' && !groupsEnabled) {
+      setChatMode('agent')
+      localStorage.setItem('lele_chat_mode', 'agent')
+    }
+  }, [chatMode, groupsEnabled])
+
   const handleDeleteSession = useCallback(
     async (sessionKey: string): Promise<string | null> => {
       return await sessionsHook.deleteSession(sessionKey)
@@ -512,6 +521,7 @@ export function useAppLogic(
     pendingAttachments: messagesHook.pendingAttachments,
     toolStatus: messagesHook.toolStatus,
     groups: messagesHook.groups,
+    groupsEnabled,
     setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
     onSend: handleSend,

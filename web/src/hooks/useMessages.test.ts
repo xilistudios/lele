@@ -93,6 +93,7 @@ function createMockContext(
       }
       state.groups = next
     },
+    setGroupsEnabled: () => {},
     ...overrides,
   }
 

@@ -52,6 +52,7 @@ export type MessageEventContext = {
   upsertGroup: (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => void
   hydrateGroups: (infos: GroupInfo[]) => void
   markActiveGroupsStopped: () => void
+  setGroupsEnabled: (enabled: boolean) => void
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,6 +122,10 @@ function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) 
   if (processing && sessionKey) {
     ctx.addProcessingSession(sessionKey)
   }
+
+  // Capture groups feature flag
+  const groupsEnabled = data.groups_enabled as boolean | undefined
+  ctx.setGroupsEnabled(groupsEnabled ?? false)
 
   // Restore in-progress streaming messages after page reload or reconnection.
   // The backend includes accumulated content and reasoning so the frontend

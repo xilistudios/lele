@@ -76,7 +76,7 @@ func (m *Model) tickCmd() tea.Cmd {
 }
 
 func (m *Model) submitMessage() tea.Cmd {
-	content := strings.TrimSpace(m.textInput.Value())
+	content := strings.TrimSpace(m.chatInput.Value())
 	if content == "" {
 		return nil
 	}
@@ -87,7 +87,7 @@ func (m *Model) submitMessage() tea.Cmd {
 	}
 	m.showWelcome = false
 
-	m.textInput.SetValue("")
+	m.chatInput.SetValue("")
 	m.compactFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
@@ -149,7 +149,7 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 		m.createNewChat()
 	}
 	m.showWelcome = false
-	m.textInput.SetValue("")
+	m.chatInput.SetValue("")
 	m.compactFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()

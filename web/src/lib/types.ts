@@ -811,7 +811,7 @@ export type FileUploadResponse = {
 
 export type ClientEvent =
   | {
-      event: 'welcome'
+      event: 'welcome' | 'reconnected'
       data: {
         client_id: string
         device_name: string
@@ -820,6 +820,7 @@ export type ClientEvent =
         agents: Agent[]
         server_time: string
         processing?: boolean
+        groups_enabled?: boolean
       }
     }
   | { event: 'message.ack'; data: { message_id: string; session_key: string } }

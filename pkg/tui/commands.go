@@ -220,7 +220,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		if m.currentKey == "" {
 			return nil
 		}
-		m.textInput.SetValue("")
+		m.chatInput.SetValue("")
 		m.compactFeedback = ""
 		m.processing = true
 		m.startTime = time.Now()

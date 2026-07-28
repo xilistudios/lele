@@ -31,6 +31,7 @@ export function useMessages(
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
   const [groups, setGroups] = useState<Map<string, GroupInfo>>(new Map())
+  const [groupsEnabled, setGroupsEnabled] = useState(false)
   const streamingRef = useRef(streamingMessages)
   const lastSessionRefreshRef = useRef<number>(0)
 
@@ -138,6 +139,7 @@ export function useMessages(
     upsertGroup,
     hydrateGroups,
     markActiveGroupsStopped,
+    setGroupsEnabled,
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {
@@ -232,6 +234,7 @@ export function useMessages(
     approvalResult: approvals.approvalResult,
     pendingAttachments,
     groups,
+    groupsEnabled,
     hydrateGroups,
     processingSessions: processing.processingSessions,
     setProcessingSessions: processing.setProcessingSessions,

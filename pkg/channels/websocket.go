@@ -522,6 +522,11 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 
 	groups := n.sessionGroupSnapshots(client.SessionKey)
 
+	groupsEnabled := false
+	if cfg := n.cfgSnapshot(); cfg != nil {
+		groupsEnabled = cfg.Groups.Enabled
+	}
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "welcome",
@@ -535,6 +540,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 			"processing":           processing,
 			"in_progress_messages": catchupMessages,
 			"groups":               groups,
+			"groups_enabled":       groupsEnabled,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send welcome", map[string]interface{}{
@@ -574,6 +580,11 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	groups := n.sessionGroupSnapshots(client.SessionKey)
 
+	groupsEnabled := false
+	if cfg := n.cfgSnapshot(); cfg != nil {
+		groupsEnabled = cfg.Groups.Enabled
+	}
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "reconnected",
@@ -590,6 +601,7 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 			"subscriptions":        client.Subscriptions,
 			"in_progress_messages": catchupMessages,
 			"groups":               groups,
+			"groups_enabled":       groupsEnabled,
 		}),
 	})); err != nil {
 		logger.WarnCF("native", "Failed to send reconnected event", map[string]interface{}{
