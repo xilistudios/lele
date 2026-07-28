@@ -333,6 +333,7 @@ func (sm *sessionManagerImpl) summarizeSession(agent *AgentInstance, sessionKey 
 
 // forceCompression marks old messages as excluded from context when the limit is hit.
 // It marks the oldest 50% of messages (keeping the last user message included).
+// If no summary exists, builds a basic local summary from excluded messages.
 func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	if len(history) <= 4 {
@@ -349,6 +350,59 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	mid := len(conversation) / 2
 
 	droppedCount := mid
+
+	// Build a basic local summary from messages being excluded if no summary exists.
+	// This preserves context that would otherwise be lost when LLM summarization fails.
+	if agent.Sessions.GetSummary(sessionKey) == "" {
+		localSummary := "## Conversation Summary (auto-compressed)\n\n"
+		localSummary += fmt.Sprintf("Messages compressed: %d of %d\n\n", mid, len(history))
+
+		toolNames := make(map[string]struct{})
+		maxSummaryMsgs := 20
+		count := 0
+		for i := 0; i < mid && count < maxSummaryMsgs; i++ {
+			msg := conversation[i]
+			if msg.Content == "" {
+				continue
+			}
+			switch msg.Role {
+			case "user":
+				content := msg.Content
+				if len(content) > 150 {
+					content = content[:150] + "..."
+				}
+				localSummary += fmt.Sprintf("User: %s\n", content)
+			case "assistant":
+				content := msg.Content
+				if len(content) > 150 {
+					content = content[:150] + "..."
+				}
+				localSummary += fmt.Sprintf("Assistant: %s\n", content)
+				for _, tc := range msg.ToolCalls {
+					if tc.Function != nil && tc.Function.Name != "" {
+						toolNames[tc.Function.Name] = struct{}{}
+					}
+				}
+			case "tool":
+				content := msg.Content
+				if len(content) > 100 {
+					content = content[:100] + "..."
+				}
+				localSummary += fmt.Sprintf("Tool result (%s): %s\n", msg.ToolCallID, content)
+			}
+			count++
+		}
+
+		if len(toolNames) > 0 {
+			tools := make([]string, 0, len(toolNames))
+			for name := range toolNames {
+				tools = append(tools, name)
+			}
+			localSummary += fmt.Sprintf("\nTools used: %s\n", strings.Join(tools, ", "))
+		}
+
+		agent.Sessions.SetSummary(sessionKey, localSummary)
+	}
 
 	// Mark the oldest 'mid' messages as excluded from context
 	// (they remain in storage for the web UI)
@@ -396,6 +450,21 @@ func (sm *sessionManagerImpl) EstimateTokens(messages []providers.Message) int {
 			if tc.Function != nil {
 				totalChars += utf8.RuneCountInString(tc.Function.Name)
 				totalChars += utf8.RuneCountInString(tc.Function.Arguments)
+			}
+		}
+		// Count media attachments (images). Each image costs ~1000 tokens
+		// regardless of content, so estimate 2500 chars at 2.5 chars/token.
+		totalChars += len(m.Media) * 2500
+		// Count multimodal content parts if Content is empty (avoid double-counting
+		// since UnmarshalJSON populates Content from text parts).
+		if m.Content == "" {
+			for _, part := range m.ContentParts {
+				if part.Text != "" {
+					totalChars += utf8.RuneCountInString(part.Text)
+				}
+				if part.ImageURL != nil {
+					totalChars += 2500
+				}
 			}
 		}
 		// Per-message structural overhead (~4 tokens via 2.5 chars/token heuristic)
@@ -643,14 +712,20 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, keepCount)
 
-	// Ensure summary messages are never excluded from context.
+	// Ensure the most recent summary message is never excluded from context.
+	// Only un-exclude the last summary message to prevent stale summaries
+	// from accumulating across multiple compaction rounds.
 	historyAfter := agent.Sessions.GetHistory(sessionKey)
 	needsSave := false
+	lastSummaryIdx := -1
 	for i := range historyAfter {
-		if isSummaryMessage(historyAfter[i]) && historyAfter[i].ExcludeFromContext {
-			historyAfter[i].ExcludeFromContext = false
-			needsSave = true
+		if isSummaryMessage(historyAfter[i]) {
+			lastSummaryIdx = i
 		}
+	}
+	if lastSummaryIdx >= 0 && historyAfter[lastSummaryIdx].ExcludeFromContext {
+		historyAfter[lastSummaryIdx].ExcludeFromContext = false
+		needsSave = true
 	}
 	if needsSave {
 		agent.Sessions.SetHistory(sessionKey, historyAfter)

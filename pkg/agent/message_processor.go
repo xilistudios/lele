@@ -393,7 +393,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		ChatID:          originChatID,
 		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		DefaultResponse: "Background task completed.",
-		EnableSummary:   false,
+		EnableSummary:   true,
 		SendResponse:    true,
 		MessageID:       msg.Metadata["message_id"],
 		SkipUserMessage: isSubagent,
