@@ -592,7 +592,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+t":
-			// Toggle mouse capture so the user can select/copy text natively.
+			// Toggle mouse capture as fallback for terminals without Shift bypass.
 			m.mouseEnabled = !m.mouseEnabled
 			if m.mouseEnabled {
 				return m, tea.EnableMouseCellMotion
@@ -680,6 +680,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle text selection via click+drag in the viewport area
+		if msg.Button == tea.MouseButtonLeft {
+			leftWidth := int(float64(m.width) * leftColumnRatio)
+			inViewportArea := msg.X < leftWidth-1 && msg.Y < m.viewport.Height
+
+			switch msg.Action {
+			case tea.MouseActionPress:
+				if inViewportArea && m.modalMode == ModalNone {
+					m.startSelection(msg.X, msg.Y)
+					return m, nil
+				}
+			case tea.MouseActionMotion:
+				if m.selecting {
+					m.updateSelection(msg.X, msg.Y)
+					return m, nil
+				}
+			case tea.MouseActionRelease:
+				if m.selecting {
+					m.finishSelection()
+					return m, nil
+				}
+			}
+		}
+
 		// Handle mouse clicks on subagent items in the sidebar (only if no modal is active)
 		if m.modalMode == ModalNone && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			// Check if click is in the right sidebar area
@@ -708,6 +732,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Reset tick pending flag to allow the next tick to be scheduled
 		m.tickPending = false
+		// Clear selection feedback after timeout
+		m.clearSelectionFeedback()
 		// Refresh background exec output if viewing a process
 		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode && m.bgExecViewID != "" {
 			output, status, _, _ := m.agentLoop.GetProvidable().GetBackgroundExecOutput(m.bgExecViewID, 5000)

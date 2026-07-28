@@ -101,7 +101,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		sessionStartTime:       now,
 		subagentProgress:       make(map[string]string),
 		streamThrottleInterval: 32 * time.Millisecond,
-		mouseEnabled:           false,
+		mouseEnabled:           true,
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
 	}
 
@@ -131,6 +131,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		textarea.Blink,
 		m.startOutboundListener(),
+		tea.EnableMouseCellMotion,
 	)
 }
 
