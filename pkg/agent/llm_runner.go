@@ -530,6 +530,24 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 							},
 						})
 					}
+					// Sync compaction state to the session so post-turn
+					// maybeSummarize sees the reduced history and the
+					// excluded messages don't bloat the next turn's context.
+					if len(compacted) > 1 && strings.HasPrefix(compacted[1].Content, "[Context compacted") {
+						agent.Sessions.SetSummary(opts.SessionKey, compacted[1].Content)
+						agent.Sessions.ExcludeOldMessagesFromContext(opts.SessionKey, 6)
+						if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+							logger.WarnCF("agent", "Failed to save session after intra-loop compaction", map[string]interface{}{
+								"session_key": opts.SessionKey,
+								"error":       saveErr.Error(),
+							})
+						}
+						logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{
+							"session_key":   opts.SessionKey,
+							"summary_chars": len(compacted[1].Content),
+							"kept_messages": 6,
+						})
+					}
 				}
 			}
 		}
