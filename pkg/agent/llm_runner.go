@@ -26,6 +26,20 @@ type llmRunner interface {
 	runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error)
 }
 
+// transientLLMRetries is the number of times a transient LLM error is retried
+// within the same execution before giving up and terminating the run.
+const transientLLMRetries = 3
+
+// transientLLMBackoff returns the wait duration before the given transient
+// retry attempt (5s, 15s, 30s, capped at 30s).
+func transientLLMBackoff(attempt int) time.Duration {
+	backoffs := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+	if attempt >= len(backoffs) {
+		return backoffs[len(backoffs)-1]
+	}
+	return backoffs[attempt]
+}
+
 // llmRunnerImpl implements the llmRunner interface
 type llmRunnerImpl struct {
 	al *AgentLoop
@@ -309,7 +323,35 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		var response *providers.LLMResponse
 		var err error
-		response, messages, err = llmCallerInstance.executeWithRetry(callOpts, messages)
+
+		for transientAttempt := 0; ; transientAttempt++ {
+			response, messages, err = llmCallerInstance.executeWithRetry(callOpts, messages)
+			if err == nil {
+				break
+			}
+			// User abort or non-retriable error: stop the execution immediately.
+			if ctx.Err() != nil || !providers.IsRetriableError(err) {
+				break
+			}
+			if transientAttempt >= transientLLMRetries {
+				break
+			}
+			backoff := transientLLMBackoff(transientAttempt)
+			logger.WarnCF("agent", "Transient LLM error; retrying within execution",
+				map[string]interface{}{
+					"agent_id":  agent.ID,
+					"iteration": iteration,
+					"attempt":   transientAttempt + 1,
+					"max":       transientLLMRetries,
+					"waiting":   backoff.String(),
+					"error":     err.Error(),
+				})
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "", iteration, ctx.Err()
+			}
+		}
 
 		if err != nil {
 			logger.ErrorCF("agent", "LLM call failed",

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -605,5 +606,146 @@ func TestFallbackExhaustedError_Message(t *testing.T) {
 	msg := e.Error()
 	if msg == "" {
 		t.Error("expected non-empty error message")
+	}
+}
+
+// ============================================================================
+// Tests for IsRetriableError
+// ============================================================================
+
+func TestIsRetriableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"context.Canceled", context.Canceled, false},
+		{"wrapped context.Canceled", fmt.Errorf("wrapper: %w", context.Canceled), false},
+		{
+			"FallbackExhaustedError with retriable reason (timeout)",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverTimeout}}},
+			true,
+		},
+		{
+			"FallbackExhaustedError with retriable reason (rate_limit)",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverRateLimit}}},
+			true,
+		},
+		{
+			"FallbackExhaustedError with non-retriable reason (format)",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverFormat}}},
+			false,
+		},
+		{
+			"FallbackExhaustedError with only skipped attempts",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Skipped: true, Reason: FailoverRateLimit}}},
+			false,
+		},
+		{
+			"FallbackExhaustedError mixed: skipped + retriable",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{
+				{Skipped: true, Reason: FailoverRateLimit},
+				{Reason: FailoverTimeout},
+			}},
+			true,
+		},
+		{
+			"FailoverError retriable (rate_limit)",
+			&FailoverError{Reason: FailoverRateLimit},
+			true,
+		},
+		{
+			"FailoverError retriable (timeout)",
+			&FailoverError{Reason: FailoverTimeout},
+			true,
+		},
+		{
+			"FailoverError non-retriable (format)",
+			&FailoverError{Reason: FailoverFormat},
+			false,
+		},
+		{
+			"generic error",
+			errors.New("boom"),
+			false,
+		},
+		{
+			"wrapped FallbackExhaustedError (errors.As)",
+			fmt.Errorf("outer: %w", &FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverRateLimit}}}),
+			true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsRetriableError(tt.err)
+			if got != tt.want {
+				t.Errorf("IsRetriableError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// Tests for single-candidate retry reduction
+// ============================================================================
+
+func TestFallback_SingleCandidateReducedRetries(t *testing.T) {
+	// With a single candidate and a large retry budget (10), the internal
+	// retry loop should be capped at singleCandidateMaxRetries (3).
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(10, time.Millisecond)
+
+	candidates := []FallbackCandidate{makeCandidate("openai", "gpt-4")}
+
+	callCount := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		callCount++
+		return nil, errors.New("rate limit exceeded") // retriable
+	}
+
+	_, err := fc.Execute(context.Background(), candidates, run)
+	if err == nil {
+		t.Fatal("expected error when single candidate fails")
+	}
+
+	// Should have been called exactly singleCandidateMaxRetries times, not 10.
+	if callCount != singleCandidateMaxRetries {
+		t.Errorf("callCount = %d, want %d (singleCandidateMaxRetries)", callCount, singleCandidateMaxRetries)
+	}
+}
+
+func TestFallback_MultipleCandidatesNoReduction(t *testing.T) {
+	// With two candidates, the first should use the full retry budget (10)
+	// before falling back to the second.
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(10, time.Millisecond)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	openaiCalls := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		if provider == "openai" {
+			openaiCalls++
+			return nil, errors.New("rate limit exceeded")
+		}
+		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic", result.Provider)
+	}
+
+	// With 2 candidates the full retry budget is used.
+	if openaiCalls != 10 {
+		t.Errorf("openaiCalls = %d, want 10 (full retry budget with fallback)", openaiCalls)
 	}
 }

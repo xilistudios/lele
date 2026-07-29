@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,12 @@ const (
 	defaultMaxRetryAttempts   = 10
 	defaultMaxBackoffDuration = 60 * time.Second
 	immediateRetryAttempts    = 5
+	// singleCandidateMaxRetries is the maximum number of retries within
+	// executeWithRetry when there is only one fallback candidate. With a
+	// single provider there are no alternatives to fall back to, so
+	// excessive internal retries just waste time; the outer transient
+	// retry loop in the agent layer handles higher-level reattempts.
+	singleCandidateMaxRetries = 3
 )
 
 // FallbackChain orchestrates model fallback across multiple candidates.
@@ -142,7 +149,7 @@ func (fc *FallbackChain) Execute(
 
 		// Execute the run function with retry logic.
 		start := time.Now()
-		resp, err := fc.executeWithRetry(ctx, candidate.Provider, candidate.Model, run)
+		resp, err := fc.executeWithRetry(ctx, candidate.Provider, candidate.Model, run, len(candidates))
 		elapsed := time.Since(start)
 
 		if err == nil {
@@ -221,15 +228,24 @@ func (fc *FallbackChain) Execute(
 // - Rate limit errors: exponential backoff retry (up to maxRetries).
 // - Other retriable errors: immediate retry (up to immediateRetryAttempts, no backoff).
 // After all retries are exhausted, returns the last error.
+// numCandidates is passed so that the retry budget can be reduced when
+// there is only one fallback candidate (no point retrying exhaustively
+// internally when there's no alternative provider to switch to).
 func (fc *FallbackChain) executeWithRetry(
 	ctx context.Context,
 	provider string,
 	model string,
 	run func(ctx context.Context, provider, model string) (*LLMResponse, error),
+	numCandidates int,
 ) (*LLMResponse, error) {
 	var lastErr error
 
-	for attempt := 0; attempt < fc.maxRetries; attempt++ {
+	maxRetries := fc.maxRetries
+	if numCandidates <= 1 && maxRetries > singleCandidateMaxRetries {
+		maxRetries = singleCandidateMaxRetries
+	}
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -294,7 +310,7 @@ func (fc *FallbackChain) executeWithRetry(
 		map[string]interface{}{
 			"provider":   provider,
 			"model":      model,
-			"attempts":   fc.maxRetries,
+			"attempts":   maxRetries,
 			"last_error": lastErr.Error(),
 		})
 
@@ -394,4 +410,30 @@ func (e *FallbackExhaustedError) Error() string {
 		}
 	}
 	return sb.String()
+}
+
+// IsRetriableError reports whether a (possibly wrapped) error returned by the
+// fallback chain represents a transient failure worth retrying. Context
+// cancellation and non-retriable reasons (e.g. format) return false.
+func IsRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var exhausted *FallbackExhaustedError
+	if errors.As(err, &exhausted) {
+		for _, a := range exhausted.Attempts {
+			if !a.Skipped && a.Reason != "" && a.Reason != FailoverFormat {
+				return true
+			}
+		}
+		return false
+	}
+	var fe *FailoverError
+	if errors.As(err, &fe) {
+		return fe.IsRetriable()
+	}
+	return false
 }
