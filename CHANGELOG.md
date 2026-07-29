@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-07-29
+
+### Fixed
+
+#### Providers
+- Agent no longer gets stuck in cooldown when no fallback models are configured — a transient provider error (rate limit, timeout, 5xx) was applying a cooldown (1m → 5m → 25m → 1h) even with a single candidate, blocking the agent on subsequent turns since there was no alternative candidate to fail over to. Cooldown is now only applied when fallback candidates exist; a single-provider agent keeps retrying the same provider on the next turn. Multi-fallback behavior is unchanged.
+
 ## [0.3.2] - 2026-07-28
 
 ### Added
