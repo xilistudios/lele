@@ -211,7 +211,11 @@ func (m *Model) View() string {
 
 	var statusLine string
 	isProcessing := m.isSessionProcessing()
-	if m.parentSessionKey != "" {
+	if m.selectionFeedback {
+		statusLine = i18n.T("tui.selectionCopied")
+	} else if m.selecting {
+		statusLine = i18n.T("tui.selecting")
+	} else if m.parentSessionKey != "" {
 		// Viewing a subagent chat — show navigation hint
 		if isProcessing {
 			if m.escHint {
@@ -267,7 +271,7 @@ func (m *Model) View() string {
 		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s %s · %s · %s · %s", ModelSelectorStyle.Render(modeBadge), agentID, modelName, thinkLevel, i18n.T("tui.tabHint"))),
 		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), i18n.T("tui.copyHint"), func() string {
 			if m.mouseEnabled {
-				return i18n.T("tui.mouseOn")
+				return i18n.T("tui.mouseHint")
 			}
 			return i18n.T("tui.mouseOff")
 		}())),
@@ -285,7 +289,11 @@ func (m *Model) View() string {
 
 	// Render Left Column (Chat Contents)
 	var leftBuilder strings.Builder
-	leftBuilder.WriteString(ViewportStyle.Render(m.viewport.View()) + "\n")
+	viewportContent := m.viewport.View()
+	if m.selecting {
+		viewportContent = m.applySelectionHighlight(viewportContent)
+	}
+	leftBuilder.WriteString(ViewportStyle.Render(viewportContent) + "\n")
 	leftBuilder.WriteString(statusLineRendered + "\n")
 	if autocompleteView != "" {
 		leftBuilder.WriteString(autocompleteView)

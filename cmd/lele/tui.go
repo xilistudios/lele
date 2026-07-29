@@ -50,9 +50,10 @@ func tuiCmd(sessionID string) {
 	tuiModel := tui.NewModel(cfg, agentLoop, sessionMgr, sessionID)
 
 	// Run bubbletea program in AltScreen mode.
-	// Mouse capture starts OFF so the terminal's native text selection/copy
-	// works by default. The user can toggle mouse on with ctrl+t for
-	// scroll-wheel and sidebar click support.
+	// Mouse capture starts ON for scroll-wheel and sidebar click support.
+	// Users can hold Shift while clicking/dragging to bypass mouse capture
+	// and use native terminal text selection. ctrl+t toggles mouse off as
+	// a fallback for terminals that don't support Shift bypass.
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running TUI: %v\n", err)

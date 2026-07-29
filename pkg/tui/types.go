@@ -224,6 +224,13 @@ type Model struct {
 	escLastPress  time.Time
 	escHint       bool // true when showing "press ESC again to cancel" hint
 
+	// Text selection state (in-app click+drag selection in the viewport)
+	selecting           bool      // whether a selection drag is in progress
+	selStartY           int       // screen Y where selection started
+	selEndY             int       // screen Y where selection currently ends
+	selectionFeedback   bool      // show brief "Copied!" feedback
+	selectionFeedbackAt time.Time // when the feedback was triggered
+
 	// Workspace Git info
 	gitBranch     string
 	workspacePath string
@@ -276,8 +283,9 @@ type Model struct {
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget
 
-	// mouseEnabled tracks whether mouse capture is active. When false, the
-	// terminal handles native text selection/copy. Toggled with ctrl+t.
+	// mouseEnabled tracks whether mouse capture is active (default: true).
+	// When enabled, scroll-wheel and sidebar clicks work; users hold Shift
+	// to bypass capture for native text selection. ctrl+t toggles as fallback.
 	mouseEnabled bool
 
 	// forceGotoBottom forces the viewport to scroll to bottom on the next
