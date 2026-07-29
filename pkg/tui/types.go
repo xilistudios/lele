@@ -225,10 +225,10 @@ type Model struct {
 	escHint       bool // true when showing "press ESC again to cancel" hint
 
 	// Text selection state (in-app click+drag selection in the viewport)
-	selecting          bool      // whether a selection drag is in progress
-	selStartY          int       // screen Y where selection started
-	selEndY            int       // screen Y where selection currently ends
-	selectionFeedback  bool      // show brief "Copied!" feedback
+	selecting           bool      // whether a selection drag is in progress
+	selStartY           int       // screen Y where selection started
+	selEndY             int       // screen Y where selection currently ends
+	selectionFeedback   bool      // show brief "Copied!" feedback
 	selectionFeedbackAt time.Time // when the feedback was triggered
 
 	// Workspace Git info
