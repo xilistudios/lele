@@ -153,10 +153,6 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 		params.System = system
 	}
 
-	if temp, ok := options["temperature"].(float64); ok {
-		params.Temperature = anthropic.Float(temp)
-	}
-
 	if len(tools) > 0 {
 		params.Tools = translateTools(tools)
 	}
