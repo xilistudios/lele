@@ -96,7 +96,7 @@ func TestBuildRequestBody(t *testing.T) {
 			},
 		},
 		{
-			name: "with custom max_tokens and temperature",
+			name: "with custom max_tokens",
 			messages: []Message{
 				{Role: "user", Content: "Test"},
 			},
@@ -106,9 +106,8 @@ func TestBuildRequestBody(t *testing.T) {
 				"temperature": 0.5,
 			},
 			want: map[string]any{
-				"model":       "test-model",
-				"max_tokens":  int64(2048),
-				"temperature": 0.5,
+				"model":      "test-model",
+				"max_tokens": int64(2048),
 				"messages": []any{
 					map[string]any{
 						"role":    "user",

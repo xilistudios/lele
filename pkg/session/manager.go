@@ -806,8 +806,8 @@ func sanitizeFilename(key string) string {
 
 func (sm *SessionManager) Save(key string) error {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	return sm.saveUnlocked(key)
 }
 

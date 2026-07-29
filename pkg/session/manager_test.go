@@ -1,8 +1,10 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -677,5 +679,44 @@ func TestSetMode_PersistsImmediately(t *testing.T) {
 	sm2 := NewSessionManager(tmpDir)
 	if got := sm2.GetMode(key); got != "group" {
 		t.Errorf("GetMode after SetMode reload = %q, want %q", got, "group")
+	}
+}
+
+func TestSave_Concurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	sm := NewSessionManager(tmpDir)
+
+	// Create 20 distinct sessions, each with at least one message.
+	const numSessions = 20
+	keys := make([]string, numSessions)
+	for i := 0; i < numSessions; i++ {
+		key := fmt.Sprintf("sess-%d", i)
+		keys[i] = key
+		sm.GetOrCreate(key)
+		sm.AddMessage(key, "user", "hello from "+key)
+	}
+
+	// Launch 50 goroutines that call Save concurrently on various keys
+	// (some distinct, some overlapping).
+	const numGoroutines = 50
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	errCh := make(chan error, numGoroutines)
+	for g := 0; g < numGoroutines; g++ {
+		go func(id int) {
+			defer wg.Done()
+			key := keys[id%numSessions]
+			if err := sm.Save(key); err != nil {
+				errCh <- fmt.Errorf("goroutine %d Save(%q): %w", id, key, err)
+			}
+		}(g)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Error(err)
 	}
 }

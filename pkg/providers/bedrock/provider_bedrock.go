@@ -183,13 +183,6 @@ func (p *Provider) Chat(
 		inferenceConfig.MaxTokens = aws.Int32(int32(maxTokens))
 	}
 
-	if temp, ok := common.AsFloat(options["temperature"]); ok {
-		if inferenceConfig == nil {
-			inferenceConfig = &types.InferenceConfiguration{}
-		}
-		inferenceConfig.Temperature = aws.Float32(float32(temp))
-	}
-
 	if inferenceConfig != nil {
 		input.InferenceConfig = inferenceConfig
 	}
