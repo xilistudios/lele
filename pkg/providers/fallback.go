@@ -193,7 +193,12 @@ func (fc *FallbackChain) Execute(
 		}
 
 		// Retriable error: mark failure and continue to next candidate.
-		fc.cooldown.MarkFailure(candidate.Provider, failErr.Reason)
+		// Only apply cooldown when there are fallback candidates to switch to.
+		// With a single candidate (no fallbacks) a cooldown would just block
+		// the agent from retrying the same provider on the next turn.
+		if len(candidates) > 1 {
+			fc.cooldown.MarkFailure(candidate.Provider, failErr.Reason)
+		}
 		result.Attempts = append(result.Attempts, FallbackAttempt{
 			Provider: candidate.Provider,
 			Model:    candidate.Model,

@@ -528,6 +528,73 @@ func TestResolveCandidates_EmptyPrimary(t *testing.T) {
 	}
 }
 
+func TestFallback_SingleCandidate_RetriableError_NoCooldown(t *testing.T) {
+	// Bug fix: with a single candidate (no fallbacks), a retriable error
+	// should NOT apply cooldown because there's no alternative to switch to.
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(1, 50*time.Millisecond)
+
+	candidates := []FallbackCandidate{makeCandidate("openai", "gpt-4")}
+
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		return nil, errors.New("rate limit exceeded") // retriable
+	}
+
+	_, err := fc.Execute(context.Background(), candidates, run)
+	if err == nil {
+		t.Fatal("expected error when single candidate fails")
+	}
+	var exhausted *FallbackExhaustedError
+	if !errors.As(err, &exhausted) {
+		t.Fatalf("expected FallbackExhaustedError, got %T: %v", err, err)
+	}
+
+	// CRITICAL: provider should still be available (no cooldown applied)
+	if !ct.IsAvailable("openai") {
+		t.Error("single candidate should NOT be put in cooldown on retriable error (no fallbacks to switch to)")
+	}
+	if ct.ErrorCount("openai") != 0 {
+		t.Errorf("error count = %d, want 0 (no cooldown tracking for single candidate)", ct.ErrorCount("openai"))
+	}
+}
+
+func TestFallback_TwoCandidates_RetriableError_AppliesCooldown(t *testing.T) {
+	// Control: with two candidates, a retriable error on the first SHOULD apply
+	// cooldown because there is a fallback to switch to.
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(1, 50*time.Millisecond)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	openaiCalls := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		if provider == "openai" {
+			openaiCalls++
+			return nil, errors.New("rate limit exceeded") // retriable
+		}
+		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic", result.Provider)
+	}
+
+	// CRITICAL: openai SHOULD be in cooldown (there's a fallback candidate)
+	if ct.IsAvailable("openai") {
+		t.Error("first provider should be in cooldown when fallback candidates exist")
+	}
+	if ct.ErrorCount("openai") == 0 {
+		t.Error("error count should be > 0 for first provider with fallbacks")
+	}
+}
+
 func TestFallbackExhaustedError_Message(t *testing.T) {
 	e := &FallbackExhaustedError{
 		Attempts: []FallbackAttempt{
