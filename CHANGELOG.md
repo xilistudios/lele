@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-07-28
+
+### Added
+
+#### TUI
+- In-app text selection with click+drag in the viewport: drag to select lines (blue highlight), text is copied to clipboard on release; status bar shows "Selecting..." during drag and "Copied!" confirmation for 2 seconds
+- Mouse capture now starts ON by default so scroll-wheel and sidebar work out of the box; selection only activates in the viewport area (not sidebar/input)
+- i18n strings for selection states (en, es, pt)
+
+### Fixed
+
+#### Context & Session Management
+- Context compaction not working between turns — five root causes fixed:
+  - **Critical**: `forceCompression` now builds a basic local summary from excluded messages when LLM summarization fails, preventing total context loss
+  - **High**: `processSystemMessage` now uses `EnableSummary=true` so subagent results (50K+ chars) trigger post-turn compaction when the session exceeds 75% of the context window
+  - **Medium**: Intra-loop compaction (`CompactLoopMessages`) now syncs state to session storage, ensuring post-turn summarization sees the reduced history
+  - **Low**: `summarizeSessionCore` only un-excludes the most recent summary message instead of all historical ones, preventing stale summaries from accumulating
+  - **Low**: `EstimateTokens` now counts Media attachments (images) and ContentParts for multimodal messages, fixing token undercounting
+
+#### Code Quality
+- Aligned struct fields in `types.go` for goimports compliance
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
