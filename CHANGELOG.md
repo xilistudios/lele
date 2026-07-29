@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-07-29
+
+### Fixed
+
+#### Agent & Providers
+- Agent execution no longer terminates on transient LLM errors (500/502/503, overloaded, timeout) — `runLLMIteration` now retries up to 3 attempts with 5s/15s/30s backoff within the same execution instead of returning the error and forcing the user to resend. Non-retriable errors (auth, billing, format) and context cancellation still stop the run immediately.
+- Single-provider agents no longer block for ~5 minutes per attempt — `executeWithRetry` caps internal retries to 3 when no fallback candidates exist, letting the temporal layer (agent loop) handle persistence. Multi-fallback behavior is unchanged.
+- Added `IsRetriableError` helper to classify (possibly wrapped) fallback errors as transient or not.
+
+#### Session Management
+- Fixed `concurrent map writes` panic in `SessionManager.Save()` — the method was acquiring a read lock (`RLock`) but calling `saveUnlocked()`, which writes to the `sessionMeta` map and `indexDirty`. Two concurrent saves (e.g. parallel session processing) could crash the process. Now correctly uses write lock.
+
+### Changed
+
+#### Providers
+- Removed explicit `temperature` parameter from Anthropic provider requests (`anthropic`, `anthropic_messages`, and Bedrock) — Anthropic reasoning models have deprecated the temperature parameter; omitting it avoids API errors and lets the provider use its defaults.
+
 ## [0.3.3] - 2026-07-29
 
 ### Fixed
