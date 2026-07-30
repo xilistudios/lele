@@ -291,6 +291,10 @@ func (m *Model) clearStreamingState() {
 		isActive = m.agentLoop.GetProvidable().IsSessionProcessing(m.currentKey)
 	}
 	m.processing = isActive
+	if isActive {
+		m.startTime = time.Now()
+		m.elapsedTime = 0
+	}
 
 	m.resetStreamState()
 	m.currentToolAction = ""
