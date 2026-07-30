@@ -116,8 +116,15 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	}
 
 	summaryInput := strings.Join(parts, "\n")
-	prompt := "Summarize this conversation segment concisely, preserving all key facts, " +
-		"decisions, file paths, and action items:\n\n" + summaryInput
+	prompt := "You are summarizing the conversation history of an AI agent that is in the MIDDLE of executing a multi-step task using tools.\n\n" +
+		"Summarize concisely but MUST preserve:\n" +
+		"- The original task/goal the agent is working on\n" +
+		"- What steps have been completed so far\n" +
+		"- What steps remain to be done\n" +
+		"- All key facts: file paths, function names, decisions, errors encountered\n" +
+		"- The current state of work (what was the agent doing right before this summary)\n\n" +
+		"Format as a structured summary. Do NOT conclude or wrap up — the task is still in progress.\n\n" +
+		summaryInput
 
 	apiModel := providers.StripProviderPrefix(model)
 	resp, err := provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
@@ -137,7 +144,13 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		Content: "[Context compacted — summary of previous " + fmt.Sprintf("%d", len(middle)) + " messages]\n" + resp.Content,
 	}
 
-	compacted := append([]providers.Message{systemMsg, summaryMsg}, tail...)
+	// Nudge the LLM to continue the in-progress task after compaction.
+	continueMsg := providers.Message{
+		Role:    "user",
+		Content: "[The context was compacted to save space. You were in the middle of a multi-step task. Review the summary above and the recent tool results below, then CONTINUE executing the task using the available tools. Do not stop or ask for confirmation — resume where you left off.]",
+	}
+
+	compacted := append([]providers.Message{systemMsg, summaryMsg, continueMsg}, tail...)
 	logger.InfoCF("toolloop", "Context compacted", map[string]any{
 		"before_messages": len(messages),
 		"after_messages":  len(compacted),

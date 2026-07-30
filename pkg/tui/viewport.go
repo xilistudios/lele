@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
+
+// isCompactionSummary reports whether msg is an internal context-compaction
+// summary that should not be rendered in the TUI chat history.
+func isCompactionSummary(msg providers.Message) bool {
+	return msg.Role == "user" &&
+		(strings.HasPrefix(msg.Content, "## Summary of Previous Conversation\n\n") ||
+			strings.HasPrefix(msg.Content, "[Context compacted"))
+}
 
 func (m *Model) updateViewport() {
 	if m.currentKey == "" {
@@ -151,6 +160,11 @@ func (m *Model) buildRenderedHistory() string {
 	lastRole := ""
 	for i := startIdx; i < totalMsgs; i++ {
 		msg := history[i]
+
+		// Skip internal context-compaction summaries
+		if isCompactionSummary(msg) {
+			continue
+		}
 
 		// Skip the last message if it's a streaming assistant message during
 		// processing — the TUI is already rendering the live stream via currentStream.
