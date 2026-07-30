@@ -381,6 +381,17 @@ func (n *NativeChannel) checkOrigin(r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
+
+	// Allow same-origin connections: the Origin the page was loaded from
+	// matches the host the request was sent to. This lets the WebUI open the
+	// WebSocket via any IP/hostname it was served from (e.g. a LAN IP such as
+	// http://192.168.0.171:18790) without explicit CORS configuration, while
+	// still rejecting cross-origin requests. Mirrors gorilla/websocket's
+	// default same-origin check.
+	if parsedOrigin, err := url.Parse(origin); err == nil && parsedOrigin.Host == r.Host {
+		return true
+	}
+
 	return n.isOriginAllowed(origin)
 }
 

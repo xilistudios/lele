@@ -1736,3 +1736,90 @@ func readBody(resp *http.Response) string {
 	data, _ := io.ReadAll(resp.Body)
 	return string(data)
 }
+
+func TestCheckOrigin(t *testing.T) {
+	// Build a minimal NativeChannel for unit-level checkOrigin tests.
+	cfg := config.DefaultConfig()
+	cfg.Channels.Native.Enabled = true
+	cfg.Channels.Native.Host = "127.0.0.1"
+
+	msgBus := bus.NewMessageBus()
+	loop := newNativeTestAgentLoop(cfg)
+	auth, err := NewAuthManager(&cfg.Channels.Native, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewAuthManager() error = %v", err)
+	}
+
+	channel := &NativeChannel{
+		cfg:              &cfg.Channels.Native,
+		auth:             auth,
+		bus:              msgBus,
+		agentLoop:        loop,
+		wsClients:        make(map[string]*WSClient),
+		pinLimiter:       newRateLimiter(10, time.Minute),
+		pairLimiter:      newRateLimiter(5, time.Minute),
+		apiLimiter:       newRateLimiter(120, time.Minute),
+		wsMessageLimiter: newRateLimiter(30, time.Minute),
+		skillsLoader:     &skills.SkillsLoader{},
+	}
+
+	tests := []struct {
+		name   string
+		origin string
+		host   string
+		want   bool
+	}{
+		{
+			name:   "empty origin is allowed",
+			origin: "",
+			host:   "192.168.0.171:18790",
+			want:   true,
+		},
+		{
+			name:   "same-origin via LAN IP",
+			origin: "http://192.168.0.171:18790",
+			host:   "192.168.0.171:18790",
+			want:   true,
+		},
+		{
+			name:   "same-origin via hostname",
+			origin: "http://mipc:18790",
+			host:   "mipc:18790",
+			want:   true,
+		},
+		{
+			name:   "cross-origin not allowed",
+			origin: "http://evil.example.com",
+			host:   "192.168.0.171:18790",
+			want:   false,
+		},
+		{
+			name:   "cross-origin allowed via CORSOrigins config",
+			origin: "http://custom.example.com",
+			host:   "192.168.0.171:18790",
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// For the CORSOrigins test, set the config value.
+			if tt.name == "cross-origin allowed via CORSOrigins config" {
+				channel.cfg.CORSOrigins = []string{"http://custom.example.com"}
+			} else {
+				channel.cfg.CORSOrigins = nil
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil)
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			req.Host = tt.host
+
+			got := channel.checkOrigin(req)
+			if got != tt.want {
+				t.Errorf("checkOrigin() = %v, want %v (origin=%q, host=%q)", got, tt.want, tt.origin, tt.host)
+			}
+		})
+	}
+}
