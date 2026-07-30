@@ -49,14 +49,9 @@ func (m *Model) View() string {
 
 		agentID := ""
 		modelName := ""
-		thinkLevel := "off"
 		if m.currentKey != "" {
 			agentID = m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 			modelName = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
-			tl := m.agentLoop.GetProvidable().GetThinkLevel(m.currentKey)
-			if tl != "" {
-				thinkLevel = tl
-			}
 		} else {
 			agentID = m.agentLoop.GetProvidable().GetDefaultAgentID()
 			if m.pendingModel != "" {
@@ -64,9 +59,6 @@ func (m *Model) View() string {
 			}
 			if m.pendingAgent != "" {
 				agentID = m.pendingAgent
-			}
-			if m.pendingThink != "" {
-				thinkLevel = m.pendingThink
 			}
 		}
 		if modelName == "" {
@@ -148,9 +140,6 @@ func (m *Model) View() string {
 			}
 		}
 
-		infoText := fmt.Sprintf("%s %s  ·  %s  ·  %s  ·  %s  ·  %s", i18n.T("tui.thinking"), thinkLevel, i18n.T("tui.ctrlModel"), i18n.T("tui.ctrlAgent"), i18n.T("tui.ctrlChats"), i18n.T("tui.tabHint"))
-		contentBuilder.WriteString(HelpStyle.Render(infoText) + "\n\n")
-
 		tip := i18n.T("tui.typeMessage")
 		contentBuilder.WriteString(WelcomeTip.Render(tip) + "\n")
 
@@ -224,7 +213,7 @@ func (m *Model) View() string {
 				statusLine = fmt.Sprintf("%s %s  ◀ %s", m.getBouncingDots(), i18n.T("tui.processing"), i18n.T("tui.backToParent"))
 			}
 		} else {
-			statusLine = fmt.Sprintf("◄ %s  (ctrl+b)", i18n.T("tui.backToParent"))
+			statusLine = fmt.Sprintf("◄ %s", i18n.T("tui.backToParent"))
 		}
 	} else if isProcessing {
 		if m.escHint {
@@ -268,13 +257,8 @@ func (m *Model) View() string {
 	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
 	modeBadge := fmt.Sprintf("[%s]", strings.ToUpper(m.currentMode.String()))
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
-		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s %s · %s · %s · %s", ModelSelectorStyle.Render(modeBadge), agentID, modelName, thinkLevel, i18n.T("tui.tabHint"))),
-		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(fmt.Sprintf("%s | %s | %s | %s", tokensText, i18n.T("tui.ctrlCommands"), i18n.T("tui.copyHint"), func() string {
-			if m.mouseEnabled {
-				return i18n.T("tui.mouseHint")
-			}
-			return i18n.T("tui.mouseOff")
-		}())),
+		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s %s · %s · %s", ModelSelectorStyle.Render(modeBadge), agentID, modelName, thinkLevel)),
+		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(tokensText),
 	)
 
 	m.viewport.Width = leftWidth - 2
