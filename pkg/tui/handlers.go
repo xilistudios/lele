@@ -723,6 +723,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.showWelcome = false
 						m.clearStreamingState()
 						m.reloadSessions()
+						// Restart tick animation if the target subagent is actively processing.
+						if m.isSessionProcessing() {
+							return m, m.tickCmd()
+						}
 						return m, nil
 					}
 				}
