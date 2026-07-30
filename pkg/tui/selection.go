@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 // ansiEscapeRe matches ANSI escape sequences for stripping.
@@ -16,7 +17,7 @@ func stripANSI(s string) string {
 	return ansiEscapeRe.ReplaceAllString(s, "")
 }
 
-// SelectionStyle is the highlight applied to selected lines in the viewport.
+// SelectionStyle is the highlight applied to selected text in the viewport.
 var SelectionStyle = lipgloss.NewStyle().Background(lipgloss.Color("#264f78"))
 
 // startSelection begins a text selection at the given screen coordinates.
@@ -28,7 +29,9 @@ func (m *Model) startSelection(x, y int) {
 		return
 	}
 	m.selecting = true
+	m.selStartX = x
 	m.selStartY = y
+	m.selEndX = x
 	m.selEndY = y
 }
 
@@ -44,7 +47,37 @@ func (m *Model) updateSelection(x, y int) {
 	if y >= m.viewport.Height {
 		y = m.viewport.Height - 1
 	}
+	if x < 0 {
+		x = 0
+	}
+	if x >= m.viewport.Width {
+		x = m.viewport.Width
+	}
+	m.selEndX = x
 	m.selEndY = y
+}
+
+// normalizeSelection returns the selection coordinates in top-left to
+// bottom-right order: (startY, startX, endY, endX).
+func (m *Model) normalizeSelection() (startY, startX, endY, endX int) {
+	startY = m.selStartY
+	startX = m.selStartX
+	endY = m.selEndY
+	endX = m.selEndX
+
+	if startY > endY {
+		startY, endY = endY, startY
+		startX, endX = endX, startX
+	} else if startY == endY && startX > endX {
+		startX, endX = endX, startX
+	}
+	return
+}
+
+// isPointSelection returns true if the selection is a single point (click
+// without meaningful drag). Used for backward-compatible full-line copy.
+func (m *Model) isPointSelection() bool {
+	return m.selStartX == m.selEndX && m.selStartY == m.selEndY
 }
 
 // finishSelection completes the selection, extracts text, copies to clipboard.
@@ -54,15 +87,10 @@ func (m *Model) finishSelection() {
 	}
 	m.selecting = false
 
-	// Determine line range (normalize start/end)
-	startLine := m.selStartY
-	endLine := m.selEndY
-	if startLine > endLine {
-		startLine, endLine = endLine, startLine
-	}
+	startY, startX, endY, endX := m.normalizeSelection()
 
 	// Extract text from viewport content
-	text := m.extractSelectionText(startLine, endLine)
+	text := m.extractSelectionText(startY, startX, endY, endX)
 	if text == "" {
 		return
 	}
@@ -73,28 +101,51 @@ func (m *Model) finishSelection() {
 }
 
 // extractSelectionText gets the plain text (ANSI-stripped) for the selected
-// line range. Lines are relative to the viewport's current scroll position.
-func (m *Model) extractSelectionText(startLine, endLine int) string {
-	// Get the full viewport content and split into lines
+// range. Coordinates are normalized (startY <= endY). If the selection is a
+// single point (click without drag), the full clicked line is returned for
+// backward compatibility.
+func (m *Model) extractSelectionText(startY, startX, endY, endX int) string {
 	content := m.viewport.View()
 	visibleLines := strings.Split(content, "\n")
 
-	if startLine >= len(visibleLines) {
+	if startY >= len(visibleLines) {
 		return ""
 	}
-	if endLine >= len(visibleLines) {
-		endLine = len(visibleLines) - 1
+	if endY >= len(visibleLines) {
+		endY = len(visibleLines) - 1
+	}
+
+	// Backward compat: single click copies the full line
+	if m.isPointSelection() {
+		plain := stripANSI(visibleLines[startY])
+		return strings.TrimRight(plain, " ")
 	}
 
 	var sb strings.Builder
-	for i := startLine; i <= endLine; i++ {
-		plain := stripANSI(visibleLines[i])
-		// Trim trailing whitespace but preserve leading (indentation matters)
-		plain = strings.TrimRight(plain, " ")
-		sb.WriteString(plain)
-		if i < endLine {
+
+	if startY == endY {
+		// Single line: extract column range
+		plain := stripANSI(visibleLines[startY])
+		_, selected, _ := splitByColumns(plain, startX, endX)
+		sb.WriteString(strings.TrimRight(selected, " "))
+	} else {
+		// First line: from startX to end of line
+		firstPlain := stripANSI(visibleLines[startY])
+		_, firstSelected, _ := splitByColumns(firstPlain, startX, len(firstPlain)+1)
+		sb.WriteString(strings.TrimRight(firstSelected, " "))
+		sb.WriteString("\n")
+
+		// Middle lines: full content
+		for i := startY + 1; i < endY; i++ {
+			plain := stripANSI(visibleLines[i])
+			sb.WriteString(strings.TrimRight(plain, " "))
 			sb.WriteString("\n")
 		}
+
+		// Last line: from beginning to endX
+		lastPlain := stripANSI(visibleLines[endY])
+		lastSelected, _, _ := splitByColumns(lastPlain, 0, endX)
+		sb.WriteString(strings.TrimRight(lastSelected, " "))
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
@@ -109,28 +160,121 @@ func (m *Model) clearSelectionFeedback() {
 }
 
 // applySelectionHighlight takes the viewport's rendered view string and applies
-// a background highlight to the selected lines. Returns the modified string.
+// a background highlight to the selected character range. Returns the modified string.
 func (m *Model) applySelectionHighlight(view string) string {
 	if !m.selecting {
 		return view
 	}
 
-	startLine := m.selStartY
-	endLine := m.selEndY
-	if startLine > endLine {
-		startLine, endLine = endLine, startLine
-	}
+	startY, startX, endY, endX := m.normalizeSelection()
 
 	lines := strings.Split(view, "\n")
-	for i := startLine; i <= endLine && i < len(lines); i++ {
-		// Apply selection background to the full line width
-		plain := stripANSI(lines[i])
-		// Pad to viewport width for consistent highlight
-		if len(plain) < m.viewport.Width {
-			plain += strings.Repeat(" ", m.viewport.Width-len(plain))
+
+	// Backward compat: single click highlights the full line
+	if m.isPointSelection() {
+		if startY < len(lines) {
+			plain := stripANSI(lines[startY])
+			if len(plain) < m.viewport.Width {
+				plain += strings.Repeat(" ", m.viewport.Width-len(plain))
+			}
+			lines[startY] = SelectionStyle.Render(plain)
 		}
-		lines[i] = SelectionStyle.Render(plain)
+		return strings.Join(lines, "\n")
+	}
+
+	for i := startY; i <= endY && i < len(lines); i++ {
+		plain := stripANSI(lines[i])
+
+		if startY == endY {
+			// Single line: highlight only [startX, endX)
+			before, selected, after := splitByColumns(plain, startX, endX)
+			lines[i] = before + SelectionStyle.Render(selected) + after
+		} else if i == startY {
+			// First line: highlight from startX to end
+			before, selected, _ := splitByColumns(plain, startX, len(plain)+1)
+			lines[i] = before + SelectionStyle.Render(selected)
+		} else if i == endY {
+			// Last line: highlight from beginning to endX
+			selected, _, after := splitByColumns(plain, 0, endX)
+			lines[i] = SelectionStyle.Render(selected) + after
+		} else {
+			// Middle line: highlight full line
+			if len(plain) < m.viewport.Width {
+				plain += strings.Repeat(" ", m.viewport.Width-len(plain))
+			}
+			lines[i] = SelectionStyle.Render(plain)
+		}
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// splitByColumns splits a plain-text string s into three parts at terminal
+// column boundaries: [0, startCol), [startCol, endCol), [endCol, ...).
+// It correctly handles wide characters (CJK, emoji) that occupy 2 columns.
+// Column values are clamped to the string's actual width.
+func splitByColumns(s string, startCol, endCol int) (before, selected, after string) {
+	if startCol < 0 {
+		startCol = 0
+	}
+	if endCol < startCol {
+		endCol = startCol
+	}
+
+	runes := []rune(s)
+	widths := make([]int, len(runes))
+	totalWidth := 0
+	for i, r := range runes {
+		w := runewidth.RuneWidth(r)
+		widths[i] = w
+		totalWidth += w
+	}
+
+	// Clamp to actual width
+	if startCol > totalWidth {
+		startCol = totalWidth
+	}
+	if endCol > totalWidth {
+		endCol = totalWidth
+	}
+
+	// Find byte indices for column boundaries
+	startByteIdx := len(s) // default: past end
+	endByteIdx := len(s)
+
+	col := 0
+	byteIdx := 0
+	startFound := startCol == 0
+	endFound := endCol == 0
+
+	if startFound {
+		startByteIdx = 0
+	}
+
+	for i, r := range runes {
+		if !startFound && col >= startCol {
+			startByteIdx = byteIdx
+			startFound = true
+		}
+		if !endFound && col >= endCol {
+			endByteIdx = byteIdx
+			endFound = true
+		}
+		if startFound && endFound {
+			break
+		}
+		col += widths[i]
+		byteIdx += len(string(r))
+		_ = i
+	}
+
+	// Handle boundaries at exact end
+	if !startFound {
+		startByteIdx = len(s)
+	}
+	if !endFound {
+		endByteIdx = len(s)
+	}
+
+	return s[:startByteIdx], s[startByteIdx:endByteIdx], s[endByteIdx:]
 }

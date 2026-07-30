@@ -226,7 +226,9 @@ type Model struct {
 
 	// Text selection state (in-app click+drag selection in the viewport)
 	selecting           bool      // whether a selection drag is in progress
+	selStartX           int       // screen X (column) where selection started
 	selStartY           int       // screen Y where selection started
+	selEndX             int       // screen X (column) where selection currently ends
 	selEndY             int       // screen Y where selection currently ends
 	selectionFeedback   bool      // show brief "Copied!" feedback
 	selectionFeedbackAt time.Time // when the feedback was triggered
