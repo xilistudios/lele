@@ -2254,7 +2254,7 @@ func TestLLMRunner_SessionModelPersistence(t *testing.T) {
 //     keeps system + summary + last 6 messages, so the message count stays
 //     bounded even as we keep adding 100K-char tool results.
 //   - The compaction summary call is detected by its distinctive prompt (a
-//     single user message containing "Summarize this conversation segment").
+//     single user message containing "summarizing the conversation history of an AI agent").
 //
 // The test asserts that:
 //  1. a compaction summary call happened (compaction ran),
@@ -2275,8 +2275,8 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 	largeContent := strings.Repeat("X", 100000)
 
 	// Counters to distinguish regular LLM calls from the compaction summary
-	// call (which sends a single user message starting with "Summarize this
-	// conversation segment"). regularCallsAtFirstSummary records how many
+	// call (which sends a single user message starting with "summarizing the
+	// conversation history of an AI agent"). regularCallsAtFirstSummary records how many
 	// regular iterations had run when compaction first fired, proving it
 	// happened mid-loop rather than at loop exit.
 	summaryCallDetected := false
@@ -2289,7 +2289,7 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
 			// Detect the compaction summary call made by CompactLoopMessages.
 			if len(messages) == 1 && messages[0].Role == "user" &&
-				strings.Contains(messages[0].Content, "Summarize this conversation segment") {
+				strings.Contains(messages[0].Content, "summarizing the conversation history of an AI agent") {
 				summaryCalls++
 				summaryCallDetected = true
 				if summaryCalls == 1 {
@@ -2377,7 +2377,7 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 
 	// 3. Message count seen by the LLM must stay bounded despite repeatedly
 	// adding 100K-char tool results (compaction prevents unbounded growth).
-	// keepLast=6 → compacted size is system+summary+6 = 8; allow small margin.
+	// keepLast=6 → compacted size is system+summary+continue+6 = 9; allow small margin.
 	if peakMsgCount > 9 {
 		t.Errorf("Expected compaction to keep message count bounded (<=9), got peak=%d", peakMsgCount)
 	}
