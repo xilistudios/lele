@@ -163,7 +163,81 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case "enter":
-				if len(m.modalItems) > 0 {
+				// Handle form-based modals first — they don't use m.modalItems.
+				if m.modalMode == ModalAddProvider {
+					// Form-based modal: validate and advance steps
+					val := strings.TrimSpace(m.textInput.Value())
+					if val == "" {
+						m.formError = "This field is required"
+						return m, nil
+					}
+					m.formError = ""
+					m.formValues[m.formStepIndex] = val
+					if m.formStepIndex >= 3 {
+						// Last step — save provider
+						if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
+							m.formError = err.Error()
+							return m, nil
+						}
+						m.modalMode = ModalNone
+						return m, nil
+					}
+					// Advance to next step
+					m.formStepIndex++
+					m.textInput.SetValue("")
+					switch m.formStepIndex {
+					case 1:
+						m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+					case 2:
+						m.textInput.Placeholder = "API Key"
+					case 3:
+						m.textInput.Placeholder = "API Base URL (e.g. https://api.openai.com/v1)"
+					}
+					return m, nil
+				} else if m.modalMode == ModalAddModel {
+					// Form-based modal: validate and advance steps
+					val := strings.TrimSpace(m.textInput.Value())
+					if val == "" {
+						m.formError = "This field is required"
+						return m, nil
+					}
+					m.formError = ""
+					m.formValues[m.formStepIndex] = val
+					if m.formStepIndex >= 4 {
+						// Last step — save model
+						ctxWin, err := strconv.Atoi(m.formValues[2])
+						if err != nil {
+							m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
+							return m, nil
+						}
+						maxTok, err := strconv.Atoi(m.formValues[3])
+						if err != nil {
+							m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
+							return m, nil
+						}
+						vision := m.formValues[4] == "yes"
+						if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
+							m.formError = err.Error()
+							return m, nil
+						}
+						m.modalMode = ModalNone
+						return m, nil
+					}
+					// Advance to next step
+					m.formStepIndex++
+					m.textInput.SetValue("")
+					switch m.formStepIndex {
+					case 1:
+						m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
+					case 2:
+						m.textInput.Placeholder = "Context window (e.g. 128000)"
+					case 3:
+						m.textInput.Placeholder = "Max tokens (e.g. 4096)"
+					case 4:
+						m.textInput.Placeholder = "Vision support? (yes/no)"
+					}
+					return m, nil
+				} else if len(m.modalItems) > 0 {
 					selectedVal := m.modalItems[m.modalSelectedIdx]
 					if m.modalMode == ModalAgent {
 						if m.showWelcome {
@@ -306,79 +380,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.modalItems = append(m.modalItems, "- Delete provider")
 								return m, nil
 							}
-						}
-						return m, nil
-					} else if m.modalMode == ModalAddProvider {
-						// Form-based modal: validate and advance steps
-						val := strings.TrimSpace(m.textInput.Value())
-						if val == "" {
-							m.formError = "This field is required"
-							return m, nil
-						}
-						m.formError = ""
-						m.formValues[m.formStepIndex] = val
-						if m.formStepIndex >= 3 {
-							// Last step — save provider
-							if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
-								m.formError = err.Error()
-								return m, nil
-							}
-							m.modalMode = ModalNone
-							return m, nil
-						}
-						// Advance to next step
-						m.formStepIndex++
-						m.textInput.SetValue("")
-						switch m.formStepIndex {
-						case 1:
-							m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
-						case 2:
-							m.textInput.Placeholder = "API Key"
-						case 3:
-							m.textInput.Placeholder = "API Base URL (e.g. https://api.openai.com/v1)"
-						}
-						return m, nil
-					} else if m.modalMode == ModalAddModel {
-						// Form-based modal: validate and advance steps
-						val := strings.TrimSpace(m.textInput.Value())
-						if val == "" {
-							m.formError = "This field is required"
-							return m, nil
-						}
-						m.formError = ""
-						m.formValues[m.formStepIndex] = val
-						if m.formStepIndex >= 4 {
-							// Last step — save model
-							ctxWin, err := strconv.Atoi(m.formValues[2])
-							if err != nil {
-								m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
-								return m, nil
-							}
-							maxTok, err := strconv.Atoi(m.formValues[3])
-							if err != nil {
-								m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
-								return m, nil
-							}
-							vision := m.formValues[4] == "yes"
-							if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
-								m.formError = err.Error()
-								return m, nil
-							}
-							m.modalMode = ModalNone
-							return m, nil
-						}
-						// Advance to next step
-						m.formStepIndex++
-						m.textInput.SetValue("")
-						switch m.formStepIndex {
-						case 1:
-							m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
-						case 2:
-							m.textInput.Placeholder = "Context window (e.g. 128000)"
-						case 3:
-							m.textInput.Placeholder = "Max tokens (e.g. 4096)"
-						case 4:
-							m.textInput.Placeholder = "Vision support? (yes/no)"
 						}
 						return m, nil
 					} else if m.modalMode == ModalBackgroundExecs {
