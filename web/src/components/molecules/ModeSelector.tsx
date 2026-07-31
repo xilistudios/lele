@@ -8,7 +8,7 @@ export function ModeSelector() {
   const modes = getModeList(groupsEnabled)
 
   return (
-    <div className="flex rounded-lg bg-surface-hover p-0.5 gap-0.5">
+    <div className="flex rounded-lg bg-surface-tertiary p-0.5 gap-0.5">
       {modes.map((id) => {
         const theme = getModeTheme(id)
         const active = chatMode === id
