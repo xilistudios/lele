@@ -410,6 +410,16 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		"session_key": sessionKey,
 		"processing":  processing,
 	}
+
+	// Include in-progress messages so the frontend can restore streaming
+	// content when the user switches back to a chat that is still processing.
+	if processing {
+		catchup := n.collectCatchupMessages(sessionKey, processing)
+		if len(catchup) > 0 {
+			ackData["in_progress_messages"] = catchup
+		}
+	}
+
 	if err := client.Send(marshalWithID("subscribe.ack", ackData, eventID)); err != nil {
 		logger.WarnCF("native", "Failed to send subscribe.ack", map[string]interface{}{
 			"client_id":   client.ID,
