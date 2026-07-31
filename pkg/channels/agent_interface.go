@@ -81,6 +81,8 @@ type AgentProvidable interface {
 	IsSessionProcessing(sessionKey string) bool
 	// GetTokenCounts returns the cumulative input/output token counts and context window for a session
 	GetTokenCounts(sessionKey string) (inputTokens, outputTokens int, contextWindow int)
+	// GetCompactionCount returns the number of context compactions performed on a session
+	GetCompactionCount(sessionKey string) int
 	// GetCurrentContextUsage returns the actual current context size (history + summary + system prompt)
 	// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
 	// this reflects what would actually be sent to the LLM on the next turn.

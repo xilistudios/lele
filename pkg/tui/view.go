@@ -309,7 +309,8 @@ func (m *Model) View() string {
 	// Cumulative token counts for this session — cached above
 	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)) + "\n")
 	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n")
+	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.compactions"), fmt.Sprintf("%d", m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey))) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 	rightBuilder.WriteString(SidebarValue.Render(m.workspacePath) + "\n")
