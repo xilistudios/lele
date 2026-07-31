@@ -105,7 +105,7 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 		case "user":
 			if msg.ToolCallID != "" {
 				anthropicMessages = append(anthropicMessages,
-					anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.TextContent(), false)),
+					anthropic.NewUserMessage(anthropic.NewToolResultBlock(common.SanitizeToolCallID(msg.ToolCallID), msg.TextContent(), false)),
 				)
 			} else {
 				blocks := buildAnthropicContentBlocks(msg)
@@ -120,7 +120,7 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 					blocks = append(blocks, anthropic.NewTextBlock(text))
 				}
 				for _, tc := range msg.ToolCalls {
-					blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, tc.Arguments, tc.Name))
+					blocks = append(blocks, anthropic.NewToolUseBlock(common.SanitizeToolCallID(tc.ID), tc.Arguments, tc.Name))
 				}
 				anthropicMessages = append(anthropicMessages, anthropic.NewAssistantMessage(blocks...))
 			} else {
@@ -133,7 +133,7 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 			}
 		case "tool":
 			anthropicMessages = append(anthropicMessages,
-				anthropic.NewUserMessage(anthropic.NewToolResultBlock(msg.ToolCallID, msg.TextContent(), false)),
+				anthropic.NewUserMessage(anthropic.NewToolResultBlock(common.SanitizeToolCallID(msg.ToolCallID), msg.TextContent(), false)),
 			)
 		}
 	}
