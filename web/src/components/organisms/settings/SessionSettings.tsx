@@ -4,13 +4,14 @@ import {
   BooleanInput,
   KeyValueEditor,
   NumberInput,
+  SearchableSelect,
   SettingsField,
   SettingsSection,
   TextInput,
 } from '../../molecules'
 
 export function SessionSettings() {
-  const { draftConfig, dirtyPaths, updateField, t } = useSettings()
+  const { draftConfig, dirtyPaths, updateField, t, modelGroups, isLoadingModels } = useSettings()
 
   if (!draftConfig?.session) return null
   const session = draftConfig.session
@@ -40,6 +41,28 @@ export function SessionSettings() {
             value={session.ephemeral_threshold}
             onChange={(v) => updateField('session.ephemeral_threshold', v)}
             min={60}
+          />
+        </SettingsField>
+        <SettingsField
+          label={t('settings.fields.compactionModel')}
+          path="session.compaction_model"
+          description={t('settings.descriptions.compactionModel')}
+          isDirty={isDirtyPath(dirtyPaths, 'session.compaction_model')}
+        >
+          <SearchableSelect
+            ariaLabel={t('settings.fields.compactionModel')}
+            buttonLabel={t('settings.fields.compactionModel')}
+            direction="down"
+            emptyLabel={isLoadingModels ? t('settings.loading') : t('settings.noModels')}
+            groups={[
+              { label: '', options: [{ value: '', label: t('settings.compactionModelDefault') }] },
+              ...modelGroups,
+            ]}
+            onChange={(v) => updateField('session.compaction_model', v || undefined)}
+            placeholder={session.compaction_model || t('settings.compactionModelDefault')}
+            searchAriaLabel={`${t('settings.fields.compactionModel')} search`}
+            searchPlaceholder={t('settings.fields.compactionModel')}
+            value={session.compaction_model || ''}
           />
         </SettingsField>
         <SettingsField

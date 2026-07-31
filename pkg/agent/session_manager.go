@@ -624,6 +624,9 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	// Use the session's current model (which may differ from the agent's default
 	// if the user changed it via /model command).
 	summarizeModel := sm.al.sessionManager.ModelForSession(agent, sessionKey)
+	if cm := sm.al.cfg().CompactionModel(); cm != "" {
+		summarizeModel = cm
+	}
 	summarizeProvider := agent.Provider
 
 	// If the session model uses a different provider prefix, resolve the

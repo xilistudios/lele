@@ -245,6 +245,7 @@ type SessionConfig struct {
 	Ephemeral                  bool                `json:"ephemeral"`
 	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
+	CompactionModel            string              `json:"compaction_model,omitempty"`
 }
 
 const DefaultEphemeralThresholdSeconds = 560
@@ -1237,6 +1238,14 @@ func (c *Config) SessionCompactionThresholdPercent() int {
 		return DefaultCompactionThresholdPercent
 	}
 	return c.Session.CompactionThresholdPercent
+}
+
+// CompactionModel returns the configured model for context compaction.
+// Empty string means "use the session's current model" (default behavior).
+func (c *Config) CompactionModel() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Session.CompactionModel
 }
 
 func (c *Config) SetSessionEphemeral(enabled bool) {

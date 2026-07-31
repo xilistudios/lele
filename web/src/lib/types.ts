@@ -152,6 +152,7 @@ export type EditableSessionConfig = {
   identity_links?: Record<string, string[]>
   ephemeral: boolean
   ephemeral_threshold: number
+  compaction_model?: string
 }
 
 export type BindingMatch = {

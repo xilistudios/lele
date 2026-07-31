@@ -48,6 +48,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		Ephemeral:                  doc.Session.Ephemeral,
 		EphemeralThreshold:         doc.Session.EphemeralThreshold,
 		CompactionThresholdPercent: doc.Session.CompactionThresholdPercent,
+		CompactionModel:            doc.Session.CompactionModel,
 	}
 
 	// Copiar bindings
@@ -253,6 +254,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 			"ephemeral":                    doc.Session.Ephemeral,
 			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
 			"compaction_threshold_percent": doc.Session.CompactionThresholdPercent,
+			"compaction_model":             doc.Session.CompactionModel,
 		}
 		if doc.Session.DMScope != "" {
 			session["dm_scope"] = doc.Session.DMScope
