@@ -79,26 +79,7 @@ export function MessageList() {
     }
   }, [hasMore, isLoadingMore, loadMore])
 
-  const hasGroupContent = groups.size > 0
   const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
-
-  if (messages.length === 0 && !hasGroupContent) {
-    const modeTheme = getModeTheme(chatMode)
-    const EmptyIcon = modeTheme.Icon
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-        <div
-          className={`flex h-14 w-14 items-center justify-center rounded-2xl ${modeTheme.iconCircle}`}
-        >
-          <EmptyIcon size={26} />
-        </div>
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-text-primary">{t(modeTheme.labelKey)}</p>
-          <p className="max-w-xs text-xs text-text-tertiary">{t(modeTheme.descKey)}</p>
-        </div>
-      </div>
-    )
-  }
 
   const visibleMessages = messages.filter(
     (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
@@ -107,18 +88,10 @@ export function MessageList() {
   // ── Build a merged timeline of messages and group blocks ──
   const renderItems: RenderItem[] = []
 
-  // Messages maintain their canonical array order (from mergeMessages).
-  // They are NEVER reordered — the previous global sort by createdAt
-  // was broken because message createdAt is fabricated by the frontend
-  // and gets reset on HTTP refetch, causing incorrect reordering.
   for (let i = 0; i < visibleMessages.length; i++) {
     renderItems.push({ type: 'message', message: visibleMessages[i], index: i })
   }
 
-  // Groups are appended after all messages. Since message createdAt is
-  // fabricated by the frontend and not reliable for cross-type comparison,
-  // we avoid timestamp-based interleaving to guarantee message order is
-  // never disrupted. Groups render at the end of the message list.
   for (const group of groups.values()) {
     renderItems.push({ type: 'group', group })
   }
@@ -236,6 +209,25 @@ export function MessageList() {
     },
     [],
   )
+
+  // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
+  if (renderItems.length === 0) {
+    const modeTheme = getModeTheme(chatMode)
+    const EmptyIcon = modeTheme.Icon
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+        <div
+          className={`flex h-14 w-14 items-center justify-center rounded-2xl ${modeTheme.iconCircle}`}
+        >
+          <EmptyIcon size={26} />
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-text-primary">{t(modeTheme.labelKey)}</p>
+          <p className="max-w-xs text-xs text-text-tertiary">{t(modeTheme.descKey)}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Virtuoso
