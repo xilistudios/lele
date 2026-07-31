@@ -75,4 +75,8 @@ export const endpoints = {
     stop: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stop`,
     stream: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stream`,
   },
+  logs: {
+    list: '/api/v1/logs',
+    dates: '/api/v1/logs/dates',
+  },
 } as const

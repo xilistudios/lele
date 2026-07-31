@@ -305,6 +305,8 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/skills/{name}", withAuth(n.handleSkillRemove))
 	mux.HandleFunc("GET /api/v1/status", withAuth(n.handleStatus))
 	mux.HandleFunc("GET /api/v1/channels", withAuth(n.handleChannels))
+	mux.HandleFunc("GET /api/v1/logs", withAuth(n.handleLogs))
+	mux.HandleFunc("GET /api/v1/logs/dates", withAuth(n.handleLogsDates))
 
 	// Background execs
 	mux.HandleFunc("GET /api/v1/background-exec", withAuth(n.handleBackgroundExecs))

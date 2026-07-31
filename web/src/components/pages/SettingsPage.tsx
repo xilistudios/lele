@@ -13,6 +13,7 @@ import {
   ChannelSettings,
   GeneralSettings,
   GroupsSettings,
+  LogsViewer,
   NativeClientsSettings,
   SessionSettings,
   SystemSettings,
@@ -29,6 +30,7 @@ type SettingsTab =
   | 'system'
   | 'advanced'
   | 'diagnostics'
+  | 'logs'
 
 const VALID_TABS: SettingsTab[] = [
   'general',
@@ -40,6 +42,7 @@ const VALID_TABS: SettingsTab[] = [
   'system',
   'advanced',
   'diagnostics',
+  'logs',
 ]
 
 export function SettingsPage() {
@@ -103,6 +106,8 @@ export function SettingsPage() {
         return <AdvancedSettings />
       case 'diagnostics':
         return <DiagnosticsPanel />
+      case 'logs':
+        return <LogsViewer />
       default:
         return null
     }

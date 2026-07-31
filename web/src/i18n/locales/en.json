@@ -137,7 +137,8 @@
       "system": "System",
       "advanced": "Advanced",
       "diagnostics": "Diagnostics",
-      "groups": "Groups"
+      "groups": "Groups",
+      "logs": "Logs"
     },
     "sections": {
       "gateway": "Gateway",
@@ -508,7 +509,14 @@
     "addGroupProfile": "Add profile",
     "removeGroupProfile": "Remove profile",
     "noGroupProfiles": "No group profiles configured yet.",
-    "none": "None"
+    "none": "None",
+    "logs": {
+      "levelInfo": "Info",
+      "levelError": "Errors",
+      "refresh": "Refresh",
+      "empty": "No log entries found for this date.",
+      "showing": "Showing {{returned}} of {{total}} lines"
+    }
   },
   "common": {
     "loading": "Loading...",
