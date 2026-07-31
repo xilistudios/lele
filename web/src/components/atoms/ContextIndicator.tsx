@@ -7,7 +7,7 @@ import type { SessionContextResponse } from '../../lib/types'
 import { IconButton } from './IconButton'
 
 const POPOVER_WIDTH = 220
-const POPOVER_HEIGHT = 180
+const POPOVER_HEIGHT = 200
 const CIRCLE_SIZE = 18
 const STROKE_WIDTH = 3
 const RADIUS = (CIRCLE_SIZE - STROKE_WIDTH) / 2
@@ -220,6 +220,10 @@ export function ContextIndicator() {
                   </div>
                 </>
               )}
+              <div className="flex justify-between border-t border-border pt-1 mt-1">
+                <span>{t('connection.compactions')}</span>
+                <span>{context.compaction_count}</span>
+              </div>
             </div>
           </>
         )}

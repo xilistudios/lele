@@ -313,6 +313,7 @@ type SessionContextResponse struct {
 	CumulativeTotalTokens  int     `json:"cumulative_total_tokens"`
 	ContextWindow          int     `json:"context_window"`
 	UsagePercent           float64 `json:"usage_percent"`
+	CompactionCount        int     `json:"compaction_count"`
 }
 
 type SubagentTaskEntry struct {
