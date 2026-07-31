@@ -48,6 +48,7 @@
   "tui.inputSent": "Input sent",
   "tui.outputReceived": "Output received",
   "tui.totalSent": "Total sent",
+  "tui.compactions": "Compactions",
   "tui.tokens": "tokens",
   "tui.used": "%.1f%% used",
   "tui.spent": "$0.00 spent",

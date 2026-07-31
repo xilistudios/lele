@@ -672,6 +672,20 @@ func (ap *agentProvidableImpl) GetTokenCounts(sessionKey string) (inputTokens, o
 	return
 }
 
+// GetCompactionCount returns the number of compactions performed on a session.
+func (ap *agentProvidableImpl) GetCompactionCount(sessionKey string) int {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0
+	}
+	session := agent.Sessions.GetOrCreate(resolvedSessionKey)
+	if session == nil {
+		return 0
+	}
+	return session.CompactionCount
+}
+
 // GetSessionContextWindow returns the context window for a session.
 func (ap *agentProvidableImpl) GetSessionContextWindow(sessionKey string) int {
 	return ap.al.getSessionContextWindow(sessionKey)

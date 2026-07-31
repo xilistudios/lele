@@ -251,6 +251,10 @@ func (m *nativeTestAgentLoop) GetCurrentContextUsage(sessionKey string) (int, in
 	return 0, 128000
 }
 
+func (m *nativeTestAgentLoop) GetCompactionCount(sessionKey string) int {
+	return 0
+}
+
 func (m *nativeTestAgentLoop) GetSessionSummary(sessionKey string) string {
 	return ""
 }

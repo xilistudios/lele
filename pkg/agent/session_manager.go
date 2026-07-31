@@ -408,6 +408,7 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	// (they remain in storage for the web UI)
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
 	agent.Sessions.Save(sessionKey)
+	agent.Sessions.IncrementCompactionCount(sessionKey)
 	// Prune excluded messages from RAM — they're already saved to disk.
 	agent.Sessions.PruneExcludedMessages(sessionKey)
 
@@ -732,6 +733,7 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	}
 
 	agent.Sessions.Save(sessionKey)
+	agent.Sessions.IncrementCompactionCount(sessionKey)
 	// Prune excluded messages from RAM — they're already saved to disk
 	// and only waste memory keeping them in the in-memory slice.
 	agent.Sessions.PruneExcludedMessages(sessionKey)

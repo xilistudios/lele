@@ -584,6 +584,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 								"error":       saveErr.Error(),
 							})
 						}
+						agent.Sessions.IncrementCompactionCount(opts.SessionKey)
 						logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{
 							"session_key":   opts.SessionKey,
 							"summary_chars": len(compacted[1].Content),

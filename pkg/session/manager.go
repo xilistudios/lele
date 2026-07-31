@@ -35,8 +35,9 @@ type Session struct {
 	lastStreamFlush    time.Time           // throttle for stream persistence (not persisted)
 	hadStreamedContent bool                // tracks if content was delivered via streaming this turn (not persisted)
 	// Token tracking
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
+	InputTokens     int `json:"input_tokens,omitempty"`
+	OutputTokens    int `json:"output_tokens,omitempty"`
+	CompactionCount int `json:"compaction_count,omitempty"`
 }
 
 // sessionMetadata holds lightweight session info for sessions not yet
@@ -1361,6 +1362,31 @@ func (sm *SessionManager) ResetTokenCounts(key string) {
 	sm.touchSession(key)
 }
 
+// IncrementCompactionCount atomically increments the compaction counter for a session.
+func (sm *SessionManager) IncrementCompactionCount(key string) {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			session = &Session{
+				Key:      key,
+				Messages: []providers.Message{},
+				Created:  time.Now(),
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
+		}
+	}
+
+	session.CompactionCount++
+	session.Updated = time.Now()
+	sm.touchSession(key)
+}
+
 // saveUnlocked saves a session without acquiring the lock (caller must hold lock).
 func (sm *SessionManager) saveUnlocked(key string) error {
 	if sm.storage == "" {
@@ -1394,17 +1420,18 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	}
 
 	snapshot := Session{
-		Key:          stored.Key,
-		Name:         stored.Name,
-		Mode:         stored.Mode,
-		Summary:      stored.Summary,
-		VerboseMode:  stored.VerboseMode,
-		VerboseLevel: stored.VerboseLevel,
-		Model:        stored.Model,
-		Created:      stored.Created,
-		Updated:      stored.Updated,
-		InputTokens:  stored.InputTokens,
-		OutputTokens: stored.OutputTokens,
+		Key:             stored.Key,
+		Name:            stored.Name,
+		Mode:            stored.Mode,
+		Summary:         stored.Summary,
+		VerboseMode:     stored.VerboseMode,
+		VerboseLevel:    stored.VerboseLevel,
+		Model:           stored.Model,
+		Created:         stored.Created,
+		Updated:         stored.Updated,
+		InputTokens:     stored.InputTokens,
+		OutputTokens:    stored.OutputTokens,
+		CompactionCount: stored.CompactionCount,
 	}
 	if len(stored.Messages) > 0 {
 		snapshot.Messages = make([]providers.Message, len(stored.Messages))
