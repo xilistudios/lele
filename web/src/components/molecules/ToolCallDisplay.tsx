@@ -84,6 +84,38 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M4 7h16 M4 12h16 M4 17h16 M6 7v10 M18 7v10',
     color: 'text-state-info',
   },
+  sleep: {
+    icon: 'M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z',
+    color: 'text-text-tertiary',
+  },
+  list_background_execs: {
+    icon: 'M4 6h16 M4 12h16 M4 18h16',
+    color: 'text-brand-morado',
+  },
+  get_background_exec_output: {
+    icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8',
+    color: 'text-brand-morado',
+  },
+  stop_background_exec: {
+    icon: 'M6 6h12v12H6z',
+    color: 'text-state-error',
+  },
+  group_chat: {
+    icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
+    color: 'text-brand-rosa',
+  },
+  wait_for_subagent: {
+    icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4',
+    color: 'text-state-warning',
+  },
+  list_active_subagents: {
+    icon: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
+    color: 'text-state-info',
+  },
+  send_file: {
+    icon: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
+    color: 'text-state-success',
+  },
 }
 
 const GENERIC_ICON =
@@ -124,38 +156,104 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     spi: t('toolCalls.spi'),
     read_image: t('toolCalls.readImage'),
     compact: t('toolCalls.compactContext'),
+    sleep: t('toolCalls.sleep'),
+    list_background_execs: t('toolCalls.listBgExecs'),
+    get_background_exec_output: t('toolCalls.getBgOutput'),
+    stop_background_exec: t('toolCalls.stopBgExec'),
+    group_chat: t('toolCalls.groupChat'),
+    wait_for_subagent: t('toolCalls.waitSubagent'),
+    list_active_subagents: t('toolCalls.listSubagents'),
+    send_file: t('toolCalls.sendFile'),
   }
 
   const key = toolName.toLowerCase()
   return labels[key] || t('toolCalls.genericAction')
 }
 
-function parseArgsSummary(_toolName?: string, args?: string): string {
+function parseArgsSummary(toolName?: string, args?: string): string {
   if (!args) return ''
 
+  // args format is "toolName {json}" or just "{json}" or raw text
   const lines = args.split('\n')
   const firstLine = lines[0].trim()
 
-  // Handle "toolName {...}" format: extract the JSON part
+  // Extract JSON portion: find first '{' and try to parse from there
   const jsonStart = firstLine.indexOf('{')
   if (jsonStart !== -1) {
+    // Try to find the matching closing brace for robust parsing
+    const jsonStr = firstLine.slice(jsonStart)
+    let parsed: Record<string, unknown> | null = null
     try {
-      const jsonStr = firstLine.slice(jsonStart)
-      const parsed = JSON.parse(jsonStr)
-      if (parsed.path) return parsed.path
-      if (parsed.url) return parsed.url
-      if (parsed.command) {
-        const cmd = parsed.command
-        if (cmd.length > 60) return `${cmd.slice(0, 57)}...`
-        return cmd
-      }
-      if (parsed.query) return parsed.query
-      if (parsed.message) return parsed.message
+      parsed = JSON.parse(jsonStr)
     } catch {
-      // Not valid JSON, fall through
+      // JSON might be truncated in display; try to extract key fields via regex
+      const idMatch = jsonStr.match(/"id"\s*:\s*"([^"]+)"/)
+      const secondsMatch = jsonStr.match(/"seconds"\s*:\s*(\d+)/)
+      const pathMatch = jsonStr.match(/"path"\s*:\s*"([^"]+)"/)
+      const urlMatch = jsonStr.match(/"url"\s*:\s*"([^"]+)"/)
+      const commandMatch = jsonStr.match(/"command"\s*:\s*"([^"]+)"/)
+      const queryMatch = jsonStr.match(/"query"\s*:\s*"([^"]+)"/)
+      const taskMatch = jsonStr.match(/"task"\s*:\s*"([^"]+)"/)
+
+      if (idMatch) parsed = { id: idMatch[1] }
+      else if (secondsMatch) parsed = { seconds: Number(secondsMatch[1]) }
+      else if (pathMatch) parsed = { path: pathMatch[1] }
+      else if (urlMatch) parsed = { url: urlMatch[1] }
+      else if (commandMatch) parsed = { command: commandMatch[1] }
+      else if (queryMatch) parsed = { query: queryMatch[1] }
+      else if (taskMatch) parsed = { task: taskMatch[1] }
+    }
+
+    if (parsed) {
+      // File operations
+      if (parsed.path) return parsed.path as string
+      if (parsed.url) return parsed.url as string
+
+      // Exec commands
+      if (parsed.command) {
+        const cmd = parsed.command as string
+        return cmd.length > 60 ? `${cmd.slice(0, 57)}...` : cmd
+      }
+
+      // Web search
+      if (parsed.query) return parsed.query as string
+
+      // Messaging / cron
+      if (parsed.message) {
+        const msg = parsed.message as string
+        return msg.length > 50 ? `${msg.slice(0, 47)}...` : msg
+      }
+
+      // Spawn / subagent tasks
+      if (parsed.task) {
+        const task = parsed.task as string
+        return task.length > 50 ? `${task.slice(0, 47)}...` : task
+      }
+
+      // Background exec operations
+      if (parsed.id) return `#${parsed.id}`
+
+      // Sleep
+      if (parsed.seconds !== undefined) return `${parsed.seconds}s`
+
+      // Generic: show first meaningful string value
+      const values = Object.values(parsed)
+      for (const v of values) {
+        if (typeof v === 'string' && v.length > 0 && v.length <= 60) return v
+        if (typeof v === 'number') return String(v)
+      }
     }
   }
 
+  // Fallback: if the first line has no JSON or parsing failed,
+  // strip the tool name prefix if present and show the rest
+  const toolPrefix = toolName ? firstLine.indexOf(toolName) : -1
+  if (toolPrefix === 0 && toolName) {
+    const rest = firstLine.slice(toolName.length).trim()
+    if (rest && rest.length <= 60) return rest
+  }
+
+  // Last resort: truncate the line
   if (firstLine.length > 50) return `${firstLine.slice(0, 47)}...`
   return firstLine
 }

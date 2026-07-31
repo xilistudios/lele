@@ -87,6 +87,17 @@ export function useAppLogic(
   const sessionAgentSeqRef = useRef(0)
   const modelLoadKeyRef = useRef<string | null>(null)
 
+  // Reset subscription tracking on WebSocket reconnection to force re-subscribe.
+  // This fixes the bug where the frontend thinks it's subscribed but the backend
+  // has already cleaned up the client (e.g., after >30s disconnect).
+  const prevWsStatusRef = useRef(wsStatus)
+  useEffect(() => {
+    if (prevWsStatusRef.current !== 'connected' && wsStatus === 'connected') {
+      subscribedSessionRef.current = null
+    }
+    prevWsStatusRef.current = wsStatus
+  }, [wsStatus])
+
   const agentsRef = useRef(agents)
   useEffect(() => {
     agentsRef.current = agents

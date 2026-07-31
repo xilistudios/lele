@@ -213,6 +213,23 @@ function handleMessageThinking(ctx: MessageEventContext, data: Record<string, un
   const chunk = (data.chunk as string) ?? ''
   const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
 
+  // After page reload, the welcome event creates a restore- message with
+  // accumulated reasoning. When real thinking chunks arrive with the actual
+  // message_id, we need to migrate the restore- message to the real ID so
+  // reasoning content is preserved instead of creating a duplicate.
+  ctx.setStreamingMessages((current) => {
+    const hasReal = current.some((m) => m.id === msgId)
+    if (!hasReal) {
+      const restoreIdx = current.findIndex(
+        (m) => m.id.startsWith('restore-') && m.sessionKey === sessionKey,
+      )
+      if (restoreIdx >= 0) {
+        return current.map((m, i) => (i === restoreIdx ? { ...m, id: msgId } : m))
+      }
+    }
+    return current
+  })
+
   // Ensure the assistant placeholder exists before updating reasoning content.
   // Without this, thinking chunks arriving before message.stream (e.g., after
   // page reload or reconnection) are silently dropped because there's no
@@ -271,6 +288,10 @@ function handleMessageComplete(ctx: MessageEventContext, data: Record<string, un
   ctx.setStreamingMessages((current) => {
     const targetSessionKey = eventSessionKey ?? ctx.currentSessionKeyRef.current
     return current.flatMap((m) => {
+      // Clean up stale restore- placeholders once the real message completes
+      if (m.id.startsWith('restore-') && m.sessionKey === targetSessionKey) {
+        return []
+      }
       if (m.role === 'assistant' && m.id === (data.message_id as string)) {
         const content = (data.content as string) || m.content
         return [{ ...m, content, streaming: false }]
