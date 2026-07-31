@@ -24,6 +24,8 @@ import type {
   FileUploadResponse,
   GroupsConfig,
   HistoryResponse,
+  LogsDatesResponse,
+  LogsResponse,
   ModelsResponse,
   ProviderModelsResponse,
   SafeClientInfo,
@@ -554,6 +556,20 @@ export const createApiClient = (baseUrl: string) => {
         request<BackgroundExecStopResponse>(endpoints.backgroundExec.stop(id), {
           method: 'POST',
         }),
+    },
+    logs: {
+      list: (params?: { level?: string; date?: string; lines?: number }) => {
+        const query = new URLSearchParams()
+        if (params?.level) query.set('level', params.level)
+        if (params?.date) query.set('date', params.date)
+        if (params?.lines) query.set('lines', String(params.lines))
+        const qs = query.toString()
+        return request<LogsResponse>(
+          `${endpoints.logs.list}${qs ? `?${qs}` : ''}`,
+          { method: 'GET' },
+        )
+      },
+      dates: () => request<LogsDatesResponse>(endpoints.logs.dates, { method: 'GET' }),
     },
     uploadFiles: async (files: File[]) => {
       const formData = new FormData()

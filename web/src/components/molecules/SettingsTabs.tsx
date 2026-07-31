@@ -11,6 +11,7 @@ type SettingsTab =
   | 'system'
   | 'advanced'
   | 'diagnostics'
+  | 'logs'
 
 type Props = {
   activeTab: SettingsTab
@@ -31,6 +32,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     { id: 'system', label: t('settings.tabs.system') },
     { id: 'advanced', label: t('settings.tabs.advanced') },
     { id: 'diagnostics', label: t('settings.tabs.diagnostics') },
+    { id: 'logs', label: t('settings.tabs.logs') },
   ]
 
   return (

@@ -922,3 +922,25 @@ export type BackgroundExecStopResponse = {
   id: string
   stopped: boolean
 }
+
+export type LogEntry = {
+  level: string
+  timestamp: string
+  component?: string
+  message: string
+  fields?: Record<string, unknown>
+  caller?: string
+}
+
+export type LogsResponse = {
+  entries: LogEntry[]
+  total_lines: number
+  returned_lines: number
+  file: string
+  date: string
+  level: string
+}
+
+export type LogsDatesResponse = {
+  dates: string[]
+}
