@@ -51,9 +51,10 @@ type Props = {
   isLast?: boolean
   onNavigateToSession?: (sessionKey: string) => void
   apiUrl?: string
+  onRetry?: (message: ChatMessage) => void
 }
 
-export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: Props) {
+export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl, onRetry }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -165,6 +166,21 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl }: 
             </div>
           ) : null}
         </div>
+        {message.failed && (
+          <div className="text-xs text-state-error flex items-center gap-2 mt-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-state-error" />
+            <span>Failed to send</span>
+            {onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(message)}
+                className="underline hover:text-state-error/80 font-medium"
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
       </div>
     )
   }

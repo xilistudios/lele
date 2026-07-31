@@ -491,6 +491,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// subagent tasks spawned via the spawn tool above.
 	agent.Tools.Register(tools.NewWaitForSubagentTool(subagentManager))
 	agent.Tools.Register(tools.NewListSubagentsTool(subagentManager))
+	agent.Tools.Register(tools.NewCancelSubagentTool(subagentManager))
 
 	// Sleep tool: useful for rate limiting, polling intervals, etc.
 	agent.Tools.Register(tools.NewSleepTool())
@@ -512,6 +513,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		"send_file",
 		"wait_for_subagent",
 		"list_active_subagents",
+		"cancel_subagent",
 		"list_background_execs",
 		"get_background_exec_output",
 		"stop_background_exec",

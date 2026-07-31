@@ -106,7 +106,8 @@
     "contextWindow": "Context window",
     "cumulativeInput": "Input sent",
     "cumulativeOutput": "Output received",
-    "cumulativeTotal": "Total sent"
+    "cumulativeTotal": "Total sent",
+    "compactions": "Compactions"
   },
   "approval": {
     "inlineTitle": "Approval required",

@@ -11,7 +11,7 @@ export type ClientCommand =
     }
   | { event: 'cancel'; data: Record<string, never> }
   | { event: 'ping'; data: Record<string, never> }
-  | { event: 'typing'; data: Record<string, never> }
+  | { event: 'typing'; data: { session_key?: string } }
 
 export type { ClientEvent }
 

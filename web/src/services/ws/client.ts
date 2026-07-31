@@ -3,6 +3,11 @@ import type { ClientEvent } from './events'
 import { type ClientCommand, parseEvent, serializeCommand } from './events'
 import { type ReconnectStrategy, defaultReconnectStrategy } from './reconnect'
 
+const MAX_QUEUE_SIZE = 50
+
+const PING_INTERVAL_MS = 15000
+const PONG_TIMEOUT_MS = 10000
+
 type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 
 type SocketEventMap = {
@@ -31,6 +36,10 @@ export class LeleSocket {
   private confirmedSessionKey: string | null = null
   private _state: ConnectionState = 'disconnected'
   private readonly listeners: { [K in SocketEventKey]?: Array<SocketEventMap[K]> } = {}
+  private pingInterval: ReturnType<typeof setInterval> | null = null
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null
+  private lastPongReceived: number = 0
+  private visibilityHandler: (() => void) | null = null
 
   constructor(
     private readonly baseUrl: string,
@@ -43,6 +52,15 @@ export class LeleSocket {
 
   get state(): ConnectionState {
     return this._state
+  }
+
+  get reconnectAttemptCount(): number {
+    return this.reconnectAttempts
+  }
+
+  /** Timestamp (ms) of the last pong received from the server. 0 = never. */
+  get lastPong(): number {
+    return this.lastPongReceived
   }
 
   on<K extends SocketEventKey>(event: K, handler: SocketEventMap[K]): this {
@@ -77,21 +95,50 @@ export class LeleSocket {
     this.emit('stateChange', next)
   }
 
+  private clearPingPong() {
+    if (this.pingInterval !== null) {
+      clearInterval(this.pingInterval)
+      this.pingInterval = null
+    }
+    if (this.pongTimeout !== null) {
+      clearTimeout(this.pongTimeout)
+      this.pongTimeout = null
+    }
+  }
+
   connect() {
     this.shouldReconnect = true
     this.reconnectAttempts = 0
     this.setState('connecting')
     this.emit('connecting')
     this.open()
+
+    if (typeof document !== 'undefined') {
+      this.visibilityHandler = () => {
+        if (document.visibilityState === 'visible') {
+          if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            this.reconnectAttempts = 0
+            this.open()
+          }
+        }
+      }
+      document.addEventListener('visibilitychange', this.visibilityHandler)
+    }
   }
 
   close() {
     this.shouldReconnect = false
+    this.clearPingPong()
     this.socket?.close()
     this.socket = null
     this.pendingSessionKey = null
     this.confirmedSessionKey = null
     this.setState('disconnected')
+
+    if (this.visibilityHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler)
+      this.visibilityHandler = null
+    }
   }
 
   clearSubscription() {
@@ -138,6 +185,16 @@ export class LeleSocket {
     const command = { event, data } as ClientCommand
 
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      if (this.openQueue.length >= MAX_QUEUE_SIZE) {
+        const nonCritical = this.openQueue.findIndex(
+          (cmd) => cmd.event !== 'subscribe' && cmd.event !== 'unsubscribe',
+        )
+        if (nonCritical !== -1) {
+          this.openQueue.splice(nonCritical, 1)
+        } else {
+          this.openQueue.shift()
+        }
+      }
       this.openQueue.push(command)
       return
     }
@@ -146,6 +203,15 @@ export class LeleSocket {
   }
 
   handleEvent(event: ClientEvent) {
+    if (event.event === 'pong') {
+      this.lastPongReceived = Date.now()
+      if (this.pongTimeout !== null) {
+        clearTimeout(this.pongTimeout)
+        this.pongTimeout = null
+      }
+      return
+    }
+
     if (event.event === 'subscribe.ack') {
       const data = event.data as { session_key?: string; processing?: boolean }
       wsDebug('[WS] subscribe.ack received', {
@@ -185,6 +251,16 @@ export class LeleSocket {
           socket.send(serializeCommand(message))
         }
       }
+
+      this.clearPingPong()
+      this.pingInterval = setInterval(() => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(serializeCommand({ event: 'ping', data: {} }))
+          this.pongTimeout = setTimeout(() => {
+            this.socket?.close()
+          }, PONG_TIMEOUT_MS)
+        }
+      }, PING_INTERVAL_MS)
     })
 
     socket.addEventListener('message', (event) => {
@@ -205,6 +281,7 @@ export class LeleSocket {
     })
 
     socket.addEventListener('close', () => {
+      this.clearPingPong()
       this.emit('close')
       if (!this.shouldReconnect) {
         this.setState('disconnected')
@@ -212,9 +289,8 @@ export class LeleSocket {
       }
 
       if (this.reconnectAttempts >= this.reconnectStrategy.maxRetries) {
-        this.setState('disconnected')
-        this.emit('error', new Event('max_reconnect_attempts'))
-        return
+        this.reconnectAttempts = 0
+        this.reconnectDelay = this.reconnectStrategy.maxDelay
       }
 
       this.setState('connecting')

@@ -174,6 +174,8 @@ func (n *NativeChannel) handleSessionContext(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	compactionCount := n.agentLoop.GetCompactionCount(sessionKey)
+
 	writeJSON(w, http.StatusOK, SessionContextResponse{
 		SessionKey:             sessionKey,
 		InputTokens:            currentTokens,
@@ -183,6 +185,7 @@ func (n *NativeChannel) handleSessionContext(w http.ResponseWriter, r *http.Requ
 		CumulativeTotalTokens:  cumInputTokens + cumOutputTokens,
 		ContextWindow:          contextWindow,
 		UsagePercent:           usagePercent,
+		CompactionCount:        compactionCount,
 	})
 }
 

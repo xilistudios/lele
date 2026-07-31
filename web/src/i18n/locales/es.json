@@ -106,7 +106,8 @@
     "contextWindow": "Ventana de contexto",
     "cumulativeInput": "Entrada enviada",
     "cumulativeOutput": "Salida recibida",
-    "cumulativeTotal": "Total enviado"
+    "cumulativeTotal": "Total enviado",
+    "compactions": "Compacciones"
   },
   "approval": {
     "inlineTitle": "Aprobación requerida",

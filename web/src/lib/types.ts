@@ -488,6 +488,7 @@ export type SessionContextResponse = {
   cumulative_total_tokens: number
   context_window: number
   usage_percent: number
+  compaction_count: number
 }
 
 export type SubagentTaskInfo = {
@@ -649,6 +650,7 @@ export type ChatMessage = {
   streaming: boolean
   createdAt: string
   optimistic?: boolean
+  failed?: boolean
   optimisticBaseCount?: number
   attachments?: Attachment[]
   sessionKey?: string

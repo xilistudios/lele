@@ -43,11 +43,14 @@ export function ChatComposer() {
     onSelectModel,
     onSelectThinkLevel,
     chatMode,
+    sendTyping,
+    currentSessionKey,
   } = useAppLogicContext()
   const { apiUrl } = useAuthContext()
 
   const [draft, setDraft] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const lastTypingSentRef = useRef(0)
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
@@ -72,6 +75,12 @@ export function ChatComposer() {
     setDraft(e.target.value)
     e.target.style.height = 'auto'
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
+
+    const now = Date.now()
+    if (now - lastTypingSentRef.current > 2000 && currentSessionKey) {
+      lastTypingSentRef.current = now
+      sendTyping(currentSessionKey)
+    }
   }
 
   const agentsOptions = agents.map((agent) => ({
