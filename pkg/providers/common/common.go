@@ -483,6 +483,29 @@ func ResponsePreview(body []byte, maxLen int) string {
 	return string(trimmed[:maxLen]) + "..."
 }
 
+// SanitizeToolCallID ensures a tool call ID is valid for all providers.
+// Anthropic requires IDs to match ^[a-zA-Z0-9_-]+$. Any character outside
+// this set is replaced with '_'. If the result is empty, a fallback ID is returned.
+func SanitizeToolCallID(id string) string {
+	if id == "" {
+		return "tool_call_0"
+	}
+	var b strings.Builder
+	b.Grow(len(id))
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	if result == "" {
+		return "tool_call_0"
+	}
+	return result
+}
+
 func leadingTrimmedPrefix(body []byte, maxLen int) []byte {
 	i := 0
 	for i < len(body) {

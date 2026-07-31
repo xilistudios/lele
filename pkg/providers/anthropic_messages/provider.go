@@ -278,7 +278,7 @@ func buildRequestBody(
 				// Tool result message — merge into previous user message if it contains tool_results
 				toolResultBlock := map[string]any{
 					"type":        "tool_result",
-					"tool_use_id": msg.ToolCallID,
+					"tool_use_id": common.SanitizeToolCallID(msg.ToolCallID),
 					"content":     msg.Content,
 				}
 				if len(apiMessages) > 0 {
@@ -326,7 +326,7 @@ func buildRequestBody(
 
 				toolUse := map[string]any{
 					"type":  "tool_use",
-					"id":    tc.ID,
+					"id":    common.SanitizeToolCallID(tc.ID),
 					"name":  tc.Name,
 					"input": input,
 				}
@@ -342,7 +342,7 @@ func buildRequestBody(
 			// Tool result (alternative format) — merge into previous user message if it contains tool_results
 			toolResultBlock := map[string]any{
 				"type":        "tool_result",
-				"tool_use_id": msg.ToolCallID,
+				"tool_use_id": common.SanitizeToolCallID(msg.ToolCallID),
 				"content":     msg.Content,
 			}
 			if len(apiMessages) > 0 {
