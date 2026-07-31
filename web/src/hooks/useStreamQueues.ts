@@ -5,6 +5,12 @@ import type { ChatMessage } from '../lib/types'
 // Interval between characters when animating streaming text in the UI.
 const STREAM_CHAR_INTERVAL_MS = 12
 
+// NOTE: For O(1) lookups by message ID in consumer components, use the
+// useMessageIndex hook from './useMessageIndex'. The setState callbacks
+// below still use array scans because they need the latest closure state,
+// but external handlers (e.g. event-handlers) can avoid repeated .find()
+// calls by calling useMessageIndex(streamingMessages) once per render.
+
 type StreamQueue = {
   sessionKey: string
   chars: string[]

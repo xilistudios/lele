@@ -14,6 +14,21 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 )
 
+const (
+	// wsReadBufferSize is the size of the WebSocket read buffer in bytes.
+	wsReadBufferSize = 8192
+	// wsWriteBufferSize is the size of the WebSocket write buffer in bytes.
+	wsWriteBufferSize = 8192
+	// wsSendChanSize is the buffered channel capacity for outgoing messages.
+	wsSendChanSize = 512
+	// wsWriteTimeout is the deadline for normal write operations.
+	wsWriteTimeout = 90 * time.Second
+	// wsPingInterval is the interval between WebSocket ping frames.
+	wsPingInterval = 30 * time.Second
+	// wsReadDeadline is the read deadline reset on pong/ping and message receipt.
+	wsReadDeadline = 90 * time.Second
+)
+
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
@@ -56,8 +71,8 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	existingClient := n.findReconnectingClient(clientInfo.ClientID)
 
 	upgrader := websocket.Upgrader{
-		ReadBufferSize:    1024,
-		WriteBufferSize:   1024,
+		ReadBufferSize:    wsReadBufferSize,
+		WriteBufferSize:   wsWriteBufferSize,
 		CheckOrigin:       n.checkOrigin,
 		EnableCompression: true,
 	}
@@ -101,7 +116,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 		ClientInfo:    clientInfo,
 		SessionKey:    sessionKey,
 		Subscriptions: map[string]bool{sessionKey: true},
-		SendChan:      make(chan []byte, 256),
+		SendChan:      make(chan []byte, wsSendChanSize),
 	}
 
 	n.addWSClient(client)
@@ -128,12 +143,12 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 
 	conn := client.Conn
 	conn.SetReadLimit(1024 * 1024)
-	conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	conn.SetPongHandler(func(string) error {
-		return conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		return conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	})
 	conn.SetPingHandler(func(appData string) error {
-		if err := conn.SetReadDeadline(time.Now().Add(90 * time.Second)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(wsReadDeadline)); err != nil {
 			return err
 		}
 		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -151,7 +166,7 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 			return
 		}
 
-		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 
 		var msg WSMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
@@ -165,10 +180,13 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 
 func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 	conn := client.Conn
-	pingTicker := time.NewTicker(30 * time.Second)
+	pingTicker := time.NewTicker(wsPingInterval)
 	defer pingTicker.Stop()
 
 	for {
+		// Blocking read from SendChan is intentional: the buffered channel
+		// (wsSendChanSize) absorbs bursts while the goroutine sleeps when idle,
+		// avoiding busy-wait. QueueSend handles overflow with a timeout.
 		select {
 		case data, ok := <-client.SendChan:
 			if !ok {
@@ -177,7 +195,7 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 				client.mu.Unlock()
 				return
 			}
-			conn.SetWriteDeadline(time.Now().Add(90 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 			client.mu.Lock()
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				client.mu.Unlock()
@@ -444,6 +462,18 @@ func (n *NativeChannel) handleWSTyping(client *WSClient, data json.RawMessage) {
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return
 	}
+
+	sessionKey := payload.SessionKey
+	if sessionKey == "" {
+		sessionKey = client.SessionKey
+	}
+
+	// Broadcast typing indicator to clients subscribed to this session
+	n.emitNativeEvent(sessionKey, "typing.indicator", map[string]interface{}{
+		"session_key": sessionKey,
+		"client_id":   client.ClientInfo.ClientID,
+		"device_name": client.ClientInfo.DeviceName,
+	}, "")
 }
 
 func (n *NativeChannel) handleWSCancel(client *WSClient, data json.RawMessage, eventID string) {

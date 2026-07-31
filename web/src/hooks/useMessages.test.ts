@@ -94,6 +94,7 @@ function createMockContext(
       state.groups = next
     },
     setGroupsEnabled: () => {},
+    setTypingIndicator: () => {},
     ...overrides,
   }
 

@@ -7,9 +7,10 @@ import {
   parseSubagentSessionKey,
   toChatMessages,
 } from '../lib/chatMessageBuilder'
-import type { ChatMessage, GroupInfo, ToolStatus } from '../lib/types'
+import type { ChatMessage, ToolStatus } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
+import { useGroupState } from './useGroupState'
 import { useApprovals } from './useApprovals'
 import { chatHistoryQueryKey } from './useChatHistory'
 import { useProcessingSessions } from './useProcessingSessions'
@@ -30,10 +31,12 @@ export function useMessages(
   const [streamingMessages, setStreamingMessages] = useState<ChatMessage[]>([])
   const [toolStatus, setToolStatus] = useState<ToolStatus | null>(null)
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
-  const [groups, setGroups] = useState<Map<string, GroupInfo>>(new Map())
+  const groupState = useGroupState()
   const [groupsEnabled, setGroupsEnabled] = useState(false)
+  const [typingIndicator, setTypingIndicator] = useState<{ deviceId: string; deviceName: string; timestamp: number } | null>(null)
   const streamingRef = useRef(streamingMessages)
   const lastSessionRefreshRef = useRef<number>(0)
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const queryClient = useQueryClient()
 
@@ -60,47 +63,22 @@ export function useMessages(
     onSessionUpdated?.()
   }, [onSessionUpdated])
 
-  const upsertGroup = useCallback(
-    (groupId: string, updater: (existing: GroupInfo | undefined) => GroupInfo) => {
-      setGroups((prev) => {
-        const next = new Map(prev)
-        next.set(groupId, updater(prev.get(groupId)))
-        return next
-      })
-    },
-    [],
-  )
-
-  const hydrateGroups = useCallback((infos: GroupInfo[]) => {
-    setGroups((prev) => {
-      const next = new Map(prev)
-      for (const info of infos) {
-        next.set(info.groupID, info)
-      }
-      return next
-    })
+  const setTypingWithTimeout = useCallback((indicator: { deviceId: string; deviceName: string; timestamp: number } | null) => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current)
+      typingTimeoutRef.current = null
+    }
+    setTypingIndicator(indicator)
+    if (indicator) {
+      typingTimeoutRef.current = setTimeout(() => {
+        setTypingIndicator(null)
+      }, 5000)
+    }
   }, [])
 
-  const markActiveGroupsStopped = useCallback(() => {
-    setGroups((prev) => {
-      let found = false
-      for (const g of prev.values()) {
-        if (g.status === 'started') {
-          found = true
-          break
-        }
-      }
-      if (!found) return prev
-
-      const next = new Map(prev)
-      for (const [id, g] of prev) {
-        if (g.status === 'started') {
-          next.set(id, { ...g, status: 'stopped' })
-        }
-      }
-      return next
-    })
-  }, [])
+  const sendTyping = useCallback((sessionKey: string) => {
+    wsSend('typing', { session_key: sessionKey })
+  }, [wsSend])
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
@@ -136,10 +114,11 @@ export function useMessages(
     removeProcessingSession: processing.removeSession,
     syncProcessingSession: processing.syncSession,
     processingSessionKeyRef: processing.processingSessionKeyRef,
-    upsertGroup,
-    hydrateGroups,
-    markActiveGroupsStopped,
+    upsertGroup: groupState.upsertGroup,
+    hydrateGroups: groupState.hydrateGroups,
+    markActiveGroupsStopped: groupState.markActiveGroupsStopped,
     setGroupsEnabled,
+    setTypingIndicator: setTypingWithTimeout,
   }
 
   const handleEvent = useCallback((event: ClientEvent) => {
@@ -199,6 +178,34 @@ export function useMessages(
     [wsSend, getHistoryUserCount, queryClient],
   )
 
+  // ── Retry failed message ──────────────────────────────────────────────
+
+  const retryMessage = useCallback(
+    (failedMessage: ChatMessage) => {
+      const sessionKey = failedMessage.sessionKey
+      if (!sessionKey) return
+
+      // Remove the failed message from streaming state
+      setStreamingMessages((current) => current.filter((m) => m.id !== failedMessage.id))
+      // Remove from query cache too
+      const cached = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
+        chatHistoryQueryKey(sessionKey),
+      )
+      if (cached) {
+        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
+          ...cached,
+          messages: (cached.messages ?? []).filter((m) => m.id !== failedMessage.id),
+        })
+      }
+      // Re-send
+      const attachmentPaths = (failedMessage.attachments ?? [])
+        .map((a) => a.path ?? '')
+        .filter(Boolean)
+      sendMessage(failedMessage.content, attachmentPaths, sessionKey, null)
+    },
+    [queryClient, sendMessage],
+  )
+
   // ── Cleanup helpers ──────────────────────────────────────────────────────
 
   const clearStreaming = useCallback(() => {
@@ -207,9 +214,9 @@ export function useMessages(
     setToolStatus(null)
     approvals.clear()
     setPendingAttachments([])
-    setGroups(new Map())
+    groupState.clearGroups()
     processing.processingSessionKeyRef.current = null
-  }, [streamQueues.clearAllQueues, approvals, processing.processingSessionKeyRef])
+  }, [streamQueues.clearAllQueues, approvals, processing.processingSessionKeyRef, groupState.clearGroups])
 
   const clearAll = useCallback(() => {
     streamQueues.clearAllQueues()
@@ -217,14 +224,21 @@ export function useMessages(
     setToolStatus(null)
     approvals.clear()
     setPendingAttachments([])
-    setGroups(new Map())
+    groupState.clearGroups()
     processing.clearAll()
-  }, [streamQueues.clearAllQueues, approvals, processing])
+  }, [streamQueues.clearAllQueues, approvals, processing, groupState.clearGroups])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => streamQueues.clearAllQueues()
   }, [streamQueues.clearAllQueues])
+
+  // Cleanup typing timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
+    }
+  }, [])
 
   return {
     streamingMessages,
@@ -233,18 +247,21 @@ export function useMessages(
     approvalRequest: approvals.approvalRequest,
     approvalResult: approvals.approvalResult,
     pendingAttachments,
-    groups,
+    groups: groupState.groups,
     groupsEnabled,
-    hydrateGroups,
+    hydrateGroups: groupState.hydrateGroups,
     processingSessions: processing.processingSessions,
     setProcessingSessions: processing.setProcessingSessions,
     processingSessionKeyRef: processing.processingSessionKeyRef,
     ensureAssistantPlaceholder: streamQueues.ensureAssistantPlaceholder,
     sendMessage,
+    retryMessage,
     handleEvent,
     approveRequest: approvals.approveRequest,
     setPendingAttachments,
     clearStreaming,
     clearAll,
+    typingIndicator,
+    sendTyping,
   }
 }

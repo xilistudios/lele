@@ -649,6 +649,7 @@ export type ChatMessage = {
   streaming: boolean
   createdAt: string
   optimistic?: boolean
+  failed?: boolean
   optimisticBaseCount?: number
   attachments?: Attachment[]
   sessionKey?: string

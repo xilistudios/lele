@@ -555,6 +555,7 @@ export function useAppLogic(
     setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
     onSend: handleSend,
+    retryMessage: messagesHook.retryMessage,
     onApprove: handleApprove,
     onCancel: handleCancel,
     onSelectSession: handleSelectSession,
@@ -574,5 +575,7 @@ export function useAppLogic(
     loadMore: chatHistory.loadMore,
     hasMore: chatHistory.hasMore,
     isLoadingMore: chatHistory.isLoadingMore,
+    typingIndicator: messagesHook.typingIndicator,
+    sendTyping: messagesHook.sendTyping,
   }
 }

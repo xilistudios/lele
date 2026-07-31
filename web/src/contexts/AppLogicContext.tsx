@@ -38,10 +38,13 @@ export type AppLogicContextValue = {
   toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
   groups: ReturnType<typeof useAppLogicHook>['groups']
   groupsEnabled: boolean
+  typingIndicator: ReturnType<typeof useAppLogicHook>['typingIndicator']
+  sendTyping: ReturnType<typeof useAppLogicHook>['sendTyping']
 
   // Handlers from useAppLogic
   handleEvent: ReturnType<typeof useAppLogicHook>['handleEvent']
   onSend: ReturnType<typeof useAppLogicHook>['onSend']
+  onRetry: (message: import('../lib/types').ChatMessage) => void
   onApprove: ReturnType<typeof useAppLogicHook>['onApprove']
   onCancel: ReturnType<typeof useAppLogicHook>['onCancel']
   onSelectSession: ReturnType<typeof useAppLogicHook>['onSelectSession']
@@ -120,10 +123,13 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
     toolStatus: app.toolStatus,
     groups: app.groups,
     groupsEnabled: app.groupsEnabled,
+    typingIndicator: app.typingIndicator,
+    sendTyping: app.sendTyping,
 
     // Handlers from useAppLogic
     handleEvent: app.handleEvent,
     onSend: app.onSend,
+    onRetry: app.retryMessage,
     onApprove: app.onApprove,
     onCancel: app.onCancel,
     onSelectSession: app.onSelectSession,
