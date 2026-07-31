@@ -21,8 +21,10 @@ func (m *Model) listProviders() []string {
 	}
 	named := snapshot.Providers.ListNamed()
 	names := make([]string, 0, len(named))
-	for name := range named {
-		names = append(names, name)
+	for name, cfg := range named {
+		if len(cfg.Models) > 0 {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	return names
