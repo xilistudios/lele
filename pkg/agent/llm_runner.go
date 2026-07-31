@@ -559,7 +559,25 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						Metadata: map[string]string{"tool": "compact", "action": "Compacting context..."},
 					})
 				}
-				if compacted, ok := tools.CompactLoopMessages(ctx, agent.Provider, model, messages, 6); ok {
+				compactProvider := agent.Provider
+				compactModel := model
+				if cm := lr.al.cfg().CompactionModel(); cm != "" {
+					compactModel = cm
+				}
+				// Resolve the correct provider for the compaction model (which may
+				// be the session model or a dedicated compaction_model). Without
+				// this, the default agent.Provider is used even when the model
+				// belongs to a different provider (e.g. moonshotai/kimi-k3 on an
+				// Anthropic agent), causing 404 errors.
+				if ref := providers.ParseModelRef(compactModel, ""); ref != nil && ref.Provider != "" {
+					agentRef := providers.ParseModelRef(agent.Model, "")
+					if agentRef == nil || agentRef.Provider != ref.Provider {
+						if newProv, err := providers.CreateProviderForCandidate(lr.al.cfg(), ref.Provider); err == nil {
+							compactProvider = newProv
+						}
+					}
+				}
+				if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6); ok {
 					messages = compacted
 					if opts.Channel == "native" {
 						lr.al.bus.PublishOutbound(bus.OutboundMessage{
