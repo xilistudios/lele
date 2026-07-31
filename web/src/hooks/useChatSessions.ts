@@ -104,9 +104,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
         ? storedSessionKey
         : currentSessionKeyRef.current && availableKeys.has(currentSessionKeyRef.current)
           ? currentSessionKeyRef.current
-          : currentSessionKeyRef.current
-            ? currentSessionKeyRef.current
-            : fallbackKey
+          : fallbackKey
 
     persistCurrentSessionKey(nextSessionKey)
     return nextSessionKey

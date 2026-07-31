@@ -94,9 +94,13 @@ export function useAppLogic(
   useEffect(() => {
     if (prevWsStatusRef.current !== 'connected' && wsStatus === 'connected') {
       subscribedSessionRef.current = null
+      // Refresh sessions on reconnect to pick up changes made during disconnect
+      sessionsHook.refreshSessions().catch((err) => {
+        console.warn('[useAppLogic] Failed to refresh sessions on reconnect:', err)
+      })
     }
     prevWsStatusRef.current = wsStatus
-  }, [wsStatus])
+  }, [wsStatus, sessionsHook.refreshSessions])
 
   const agentsRef = useRef(agents)
   useEffect(() => {
@@ -112,33 +116,48 @@ export function useAppLogic(
     if (!token) return
 
     const initSession = async () => {
+      // 1. Load sessions first (critical for sidebar)
+      let sessionKey: string | null = null
       try {
-        const agentsResult = await api.agents()
-        setAgents(agentsResult.agents)
-
-        const sessionKey = await sessionsHook.refreshSessions()
-
-        if (sessionKey && !currentAgentIdRef.current) {
-          try {
-            const agentResult = await api.sessionAgent(sessionKey)
-            const validAgent = agentsResult.agents.find((a) => a.id === agentResult.agent_id)
-            if (validAgent) {
-              setCurrentAgentId(agentResult.agent_id)
-            } else if (agentsResult.agents.length > 0) {
-              setCurrentAgentId(agentsResult.agents[0].id)
-            }
-          } catch {
-            if (agentsResult.agents.length > 0) {
-              setCurrentAgentId(agentsResult.agents[0].id)
-            }
-          }
-        } else if (!currentAgentIdRef.current && agentsResult.agents.length > 0) {
-          setCurrentAgentId(agentsResult.agents[0].id)
-        }
-
+        sessionKey = await sessionsHook.refreshSessions()
         setError(null)
       } catch (err) {
         setError((err as Error).message)
+      }
+
+      // 2. Load agents separately with retry (non-blocking for sessions)
+      let agentsList: Agent[] = []
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const agentsResult = await api.agents()
+          agentsList = agentsResult.agents
+          setAgents(agentsList)
+          break
+        } catch (err) {
+          console.warn(`[useAppLogic] Failed to load agents (attempt ${attempt + 1}/3):`, err)
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+          }
+        }
+      }
+
+      // 3. Resolve agent for current session
+      if (sessionKey && !currentAgentIdRef.current) {
+        try {
+          const agentResult = await api.sessionAgent(sessionKey)
+          const validAgent = agentsList.find((a) => a.id === agentResult.agent_id)
+          if (validAgent) {
+            setCurrentAgentId(agentResult.agent_id)
+          } else if (agentsList.length > 0) {
+            setCurrentAgentId(agentsList[0].id)
+          }
+        } catch {
+          if (agentsList.length > 0) {
+            setCurrentAgentId(agentsList[0].id)
+          }
+        }
+      } else if (!currentAgentIdRef.current && agentsList.length > 0) {
+        setCurrentAgentId(agentsList[0].id)
       }
     }
 
