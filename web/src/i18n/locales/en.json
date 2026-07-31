@@ -594,6 +594,14 @@
     "spi": "SPI",
     "readImage": "Reading image",
     "compactContext": "Compacting context",
+    "sleep": "Waiting",
+    "listBgExecs": "Background processes",
+    "getBgOutput": "Reading process output",
+    "stopBgExec": "Stopping process",
+    "groupChat": "Group chat",
+    "waitSubagent": "Waiting for subagent",
+    "listSubagents": "Active subagents",
+    "sendFile": "Sending file",
     "genericAction": "Action"
   },
   "sidebar": {

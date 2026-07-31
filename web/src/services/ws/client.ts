@@ -165,8 +165,9 @@ export class LeleSocket {
     this.emit('connecting')
     this.reconnectAttempts++
     const params = new URLSearchParams({ token: this.token })
-    if (this.confirmedSessionKey) {
-      params.set('session_key', this.confirmedSessionKey)
+    const sessionForKey = this.confirmedSessionKey ?? this.pendingSessionKey
+    if (sessionForKey) {
+      params.set('session_key', sessionForKey)
     }
 
     const url = `${this.baseUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/api/v1/ws?${params.toString()}`
