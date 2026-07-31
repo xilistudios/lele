@@ -241,18 +241,21 @@ export function MessageList() {
 
   const renderItems: RenderItem[] = []
 
+  // Messages maintain their canonical array order (from mergeMessages).
+  // They are NEVER reordered — the previous global sort by createdAt
+  // was broken because message createdAt is fabricated by the frontend
+  // and gets reset on HTTP refetch, causing incorrect reordering.
   for (let i = 0; i < visibleMessages.length; i++) {
     renderItems.push({ type: 'message', message: visibleMessages[i], index: i })
   }
+
+  // Groups are appended after all messages. Since message createdAt is
+  // fabricated by the frontend and not reliable for cross-type comparison,
+  // we avoid timestamp-based interleaving to guarantee message order is
+  // never disrupted. Groups render at the end of the message list.
   for (const group of groups.values()) {
     renderItems.push({ type: 'group', group })
   }
-
-  renderItems.sort((a, b) => {
-    const timeA = a.type === 'message' ? a.message.createdAt : a.group.createdAt
-    const timeB = b.type === 'message' ? b.message.createdAt : b.group.createdAt
-    return new Date(timeA).getTime() - new Date(timeB).getTime()
-  })
 
   return (
     <div
