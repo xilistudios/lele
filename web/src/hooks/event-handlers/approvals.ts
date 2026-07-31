@@ -70,7 +70,18 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
             streaming: true,
           }
         } else {
-          updated.push({
+          // Insert right after the last user message for this session,
+          // not at the end of the array. Pushing to the end breaks
+          // position-based matching in mergeMessages, causing the
+          // restored assistant to render ABOVE the user message.
+          let insertIdx = updated.length
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].sessionKey === ackSessionKey && updated[i].role === 'user') {
+              insertIdx = i + 1
+              break
+            }
+          }
+          updated.splice(insertIdx, 0, {
             id: restoreId,
             role: 'assistant' as const,
             sessionKey: ackSessionKey,
