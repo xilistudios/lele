@@ -652,7 +652,23 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 	}
 
 	// Flush buffered events that accumulated during the disconnect window.
+	// Skip message.stream and message.thinking events — their content is
+	// already included in in_progress_messages (accumulated text) sent in
+	// the reconnected payload. Replaying individual chunks would cause the
+	// frontend to build a second assistant message from scratch, resulting
+	// in duplicated/overlapping text.
+	flushed := 0
+	skipped := 0
 	for _, payload := range buffered {
+		// Peek at the event type without full deserialization.
+		var peek struct {
+			Event string `json:"event"`
+		}
+		if json.Unmarshal(payload, &peek) == nil &&
+			(peek.Event == "message.stream" || peek.Event == "message.thinking") {
+			skipped++
+			continue
+		}
 		if err := client.Send(payload); err != nil {
 			logger.WarnCF("native", "Failed to flush buffered event during reconnect", map[string]interface{}{
 				"client_id": client.ID,
@@ -660,11 +676,14 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 			})
 			return
 		}
+		flushed++
 	}
 
 	logger.InfoCF("native", "Reconnected client buffered events flushed", map[string]interface{}{
 		"client_id":       client.ID,
 		"buffered_events": len(buffered),
+		"flushed":         flushed,
+		"skipped_stream":  skipped,
 	})
 }
 

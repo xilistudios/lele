@@ -98,6 +98,23 @@ export function handleMessageStream(ctx: MessageEventContext, data: Record<strin
   const chunk = (data.chunk as string) ?? ''
   const done = (data.done as boolean) ?? false
 
+  // After page reload or reconnection, the welcome/reconnected event creates
+  // a restore- message with accumulated content. When real stream chunks
+  // arrive with the actual message_id, migrate the restore- message to the
+  // real ID so content is preserved instead of creating a duplicate.
+  ctx.setStreamingMessages((current) => {
+    const hasReal = current.some((m) => m.id === msgId)
+    if (!hasReal) {
+      const restoreIdx = current.findIndex(
+        (m) => m.id.startsWith('restore-') && m.sessionKey === sessionKey,
+      )
+      if (restoreIdx >= 0) {
+        return current.map((m, i) => (i === restoreIdx ? { ...m, id: msgId } : m))
+      }
+    }
+    return current
+  })
+
   if (done && chunk) {
     ctx.clearQueue(msgId)
     ctx.ensureAssistantPlaceholder(msgId, sessionKey, chunk, true)
