@@ -52,6 +52,7 @@
     "showMore": "Show more",
     "showLess": "Show less",
     "deleteSession": "Delete session",
+    "confirmDelete": "Click again to confirm delete",
     "toggleSidebar": "Toggle sidebar",
     "backTo": "Back to {{title}}",
     "recent": "Recent",

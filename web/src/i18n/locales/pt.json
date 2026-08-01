@@ -52,6 +52,7 @@
     "showMore": "Ver mais",
     "showLess": "Ver menos",
     "deleteSession": "Excluir sessão",
+    "confirmDelete": "Clique novamente para confirmar",
     "toggleSidebar": "Mostrar/ocultar sidebar",
     "backTo": "Voltar para {{title}}",
     "recent": "Recentes",
