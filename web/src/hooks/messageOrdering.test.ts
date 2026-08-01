@@ -373,4 +373,114 @@ describe('Message ordering fixes', () => {
       expect(result.some((m) => m.id === 'a2-ws')).toBe(false)
     })
   })
+
+  describe('Bug 5: Actively streaming assistant should not replace older base assistant in-place', () => {
+    test('streaming assistant (post-tool-call) should be appended, not inserted at old position', () => {
+      // Scenario: Agent does iterative tool calls. HTTP history has caught up
+      // with the first assistant + tool, but the second assistant (response
+      // after tool result) is still streaming via WebSocket.
+      //
+      // base (HTTP):  [u1, a1, tool1]  — a1 is completed, tool1 is completed
+      // streaming (WS): [a2-stream]    — new response after tool1, actively streaming
+      //
+      // OLD BUG: position-based matching paired a1 (base) with a2-stream,
+      // and since a2-stream had isStreaming=true, it replaced a1 in-place.
+      // Result: [u1, a2-stream, tool1] — a2 appears BEFORE tool1!
+      //
+      // EXPECTED: [u1, a1, tool1, a2-stream] — a2 appended at the end.
+
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Do something'),
+        createTestMessage('a1-base', 'assistant', 'Let me check...'),
+        createTestMessage('t1', 'tool', '', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a2-stream', 'assistant', 'Here is the result...', {
+          streaming: true,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      // a1-base should remain in its original position
+      // a2-stream should be appended AFTER tool1
+      expect(result.map((m) => m.id)).toEqual(['u1', 'a1-base', 't1', 'a2-stream'])
+
+      // Verify roles are in correct order
+      expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    })
+
+    test('multiple streaming assistants after tool calls maintain order', () => {
+      // Scenario: Agent did two tool calls, now streaming the final response.
+      // base (HTTP):  [u1, a1, tool1, a2, tool2]
+      // streaming (WS): [a3-stream]
+      //
+      // Expected: [u1, a1, tool1, a2, tool2, a3-stream]
+
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Complex task'),
+        createTestMessage('a1-base', 'assistant', 'Step 1...'),
+        createTestMessage('t1', 'tool', '', {
+          toolName: 'read_file',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2-base', 'assistant', 'Step 2...'),
+        createTestMessage('t2', 'tool', '', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-2',
+        }),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a3-stream', 'assistant', 'Final answer...', {
+          streaming: true,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      expect(result.map((m) => m.id)).toEqual(['u1', 'a1-base', 't1', 'a2-base', 't2', 'a3-stream'])
+      expect(result.map((m) => m.role)).toEqual([
+        'user', 'assistant', 'tool', 'assistant', 'tool', 'assistant',
+      ])
+    })
+
+    test('completed streaming assistant is still deduped against base', () => {
+      // When streaming completes and HTTP catches up, the completed streaming
+      // assistant should be deduped (not appended as duplicate).
+      // base (HTTP):  [u1, a1, tool1, a2-final]
+      // streaming (WS): [a2-ws] (streaming=false, same content as a2-final)
+      //
+      // Expected: [u1, a1, tool1, a2-final] — no duplicate
+
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Do something'),
+        createTestMessage('a1-base', 'assistant', 'Let me check...'),
+        createTestMessage('t1', 'tool', '', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2-final', 'assistant', 'Done!'),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a2-ws', 'assistant', 'Done!', { streaming: false }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      // Should not have duplicate assistants
+      const assistants = result.filter((m) => m.role === 'assistant')
+      expect(assistants.length).toBe(2)
+      expect(result.some((m) => m.id === 'a2-ws')).toBe(false)
+    })
+  })
 })
