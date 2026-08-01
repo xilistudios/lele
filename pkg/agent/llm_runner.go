@@ -191,11 +191,131 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 			outboundMsg.ReplyTo = opts.ReplyTo
 		}
 		lr.al.bus.PublishOutbound(outboundMsg)
+	}
+
+	// 9. Goal continuation loop: if a persistent goal is active, evaluate
+	// whether it's achieved and continue automatically if not.
+	if !opts.SkipGoalLoop && lr.al.goalManager != nil && lr.al.goalManager.IsActive(opts.SessionKey) {
+		lr.runGoalContinuation(runCtx, agent, opts, finalContent)
+	}
+
+	if opts.SendResponse {
 		// Return empty string to prevent duplicate publish in loop.go
 		return "", nil
 	}
 
 	return finalContent, nil
+}
+
+// runGoalContinuation implements the autonomous goal loop. After each agent
+// turn, it evaluates whether the goal is achieved (via the judge). If not,
+// it injects a continuation prompt and runs another turn, repeating until
+// the goal is done, the budget is exhausted, or the context is cancelled.
+func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentInstance, opts processOptions, lastResponse string) {
+	gm := lr.al.goalManager
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		goal := gm.Get(opts.SessionKey)
+		if goal == nil || goal.Status != GoalActive {
+			return
+		}
+
+		// Increment turn counter; if budget exhausted, notify and stop.
+		if exhausted := gm.IncrementTurn(opts.SessionKey); exhausted {
+			updatedGoal := gm.Get(opts.SessionKey)
+			notice := fmt.Sprintf("🚫 Goal budget exhausted (%d/%d turns).\nGoal: %s\n\nThe goal has been marked as blocked. Use /goal clear to remove it, or /goal <text> --turns N to retry with a larger budget.",
+				updatedGoal.TurnsUsed, updatedGoal.MaxTurns, updatedGoal.Text)
+			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: opts.Channel,
+				ChatID:  opts.ChatID,
+				Content: notice,
+			})
+			return
+		}
+
+		// Evaluate goal completion via judge (if configured).
+		if gm.judge != nil {
+			history := agent.Sessions.GetHistoryView(opts.SessionKey)
+			isDone, _, err := gm.judge.JudgeGoal(ctx, goal.Text, lastResponse, history)
+			if err != nil {
+				logger.WarnCF("agent", "Goal judge failed, continuing loop", map[string]interface{}{
+					"session_key": opts.SessionKey,
+					"error":       err.Error(),
+				})
+				// On judge error, continue the loop (don't block progress)
+			} else if isDone {
+				gm.MarkDone(opts.SessionKey)
+				notice := fmt.Sprintf("✅ Goal achieved!\n🎯 %s\n   Completed in %d turns.", goal.Text, goal.TurnsUsed)
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel: opts.Channel,
+					ChatID:  opts.ChatID,
+					Content: notice,
+				})
+				return
+			}
+		}
+
+		// Re-check goal is still active (user may have cleared it).
+		if !gm.IsActive(opts.SessionKey) {
+			return
+		}
+
+		// Inject continuation prompt and run another turn.
+		updatedGoal := gm.Get(opts.SessionKey)
+		continuationPrompt := fmt.Sprintf(
+			"[GOAL CONTINUATION — Turn %d/%d]\n"+
+				"You have an active persistent goal:\n\n🎯 %s\n\n"+
+				"Continue working toward this goal. Do NOT ask for confirmation or wait for user input. "+
+				"Take the next concrete step. If you believe the goal is fully achieved, state that clearly.",
+			updatedGoal.TurnsUsed, updatedGoal.MaxTurns, updatedGoal.Text,
+		)
+
+		logger.InfoCF("agent", "Goal continuation turn", map[string]interface{}{
+			"session_key": opts.SessionKey,
+			"turn":        updatedGoal.TurnsUsed,
+			"max_turns":   updatedGoal.MaxTurns,
+			"goal":        updatedGoal.Text,
+		})
+
+		// Run another agent turn with the continuation prompt.
+		contOpts := processOptions{
+			SessionKey:      opts.SessionKey,
+			Channel:         opts.Channel,
+			ChatID:          opts.ChatID,
+			UserMessage:     continuationPrompt,
+			DefaultResponse: "Continuing to work on the goal...",
+			EnableSummary:   true,
+			SendResponse:    true,
+			NoHistory:       false,
+			SkipGoalLoop:    true, // prevent recursion
+		}
+
+		nextResponse, err := lr.runAgentLoop(ctx, agent, contOpts)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			logger.WarnCF("agent", "Goal continuation turn failed", map[string]interface{}{
+				"session_key": opts.SessionKey,
+				"error":       err.Error(),
+			})
+			// On error, stop the loop to avoid infinite retries
+			notice := fmt.Sprintf("⚠️ Goal continuation encountered an error: %s\nUse /goal resume to retry.", err.Error())
+			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: opts.Channel,
+				ChatID:  opts.ChatID,
+				Content: notice,
+			})
+			gm.Pause(opts.SessionKey)
+			return
+		}
+
+		lastResponse = nextResponse
+	}
 }
 
 // runLLMIteration executes the LLM call loop with tool handling.

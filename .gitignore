@@ -12,6 +12,7 @@ build/
 /lele-test
 /lele
 /main
+cmd/lele/lele
 cmd/lele/workspace
 
 # lele specific

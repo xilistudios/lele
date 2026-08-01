@@ -122,11 +122,16 @@ export function mergeMessages(
       if (baseAssistantIdx >= matchOffset && streamAsstIdx < orderedStreamingAssistants.length) {
         const entry = orderedStreamingAssistants[streamAsstIdx]
         if (entry.isStreaming) {
-          // Actively streaming → use streaming version in-place to preserve order
-          filteredBase.push(entry.msg)
-          entry.used = true
-          streamAsstIdx++
+          // Actively streaming → this is a NEW message that doesn't exist in
+          // base yet (base messages are always completed). Do NOT replace the
+          // base assistant in-place; that would put a newer message (e.g. a
+          // post-tool-call response) at the position of an older one, breaking
+          // chronological order. Keep the base version and let the streaming
+          // copy be appended via filteredStreaming.
+          //
+          // Skip this streaming entry so it remains available for dedup later.
           baseAssistantIdx++
+          filteredBase.push(msg)
           continue
         }
         // Both are completed → base version takes precedence.

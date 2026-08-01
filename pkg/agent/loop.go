@@ -56,6 +56,7 @@ type AgentLoop struct {
 	sessionManager     sessionManager
 	toolCoordinator    toolCoordinator
 	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
+	goalManager        *GoalManager         // Persistent goals (Hermes-style /goal)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
 }
@@ -279,6 +280,7 @@ type processOptions struct {
 	ReplyTo         string
 	MessageID       string
 	SkipUserMessage bool
+	SkipGoalLoop    bool // true when called from goal continuation (prevents recursion)
 }
 
 // SummarizeStats contains statistics about a summarization operation.
@@ -408,6 +410,18 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
 	loop.groupManager = gm
 
+	// Goal manager (persistent goals, Hermes-style /goal command).
+	goalMgr := NewGoalManager(filepath.Join(config.GetLeleDir(), "goals"))
+	// Wire up the LLM-based goal judge using the default agent's provider.
+	if defaultAgent != nil && defaultAgent.Provider != nil {
+		judgeModel := defaultAgent.Model
+		if judgeModel == "" {
+			judgeModel = cfg.Agents.Defaults.Model
+		}
+		goalMgr.SetJudge(NewLLMGoalJudge(defaultAgent.Provider, judgeModel))
+	}
+	loop.goalManager = goalMgr
+
 	// Register shared tools and create tool coordinator with subagents
 	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager, loop.groupManager)
 
@@ -444,6 +458,11 @@ func (al *AgentLoop) MessageBus() *bus.MessageBus {
 // GroupManager returns the group collaboration manager (Mixture of Agents).
 func (al *AgentLoop) GroupManager() *group.GroupManager {
 	return al.groupManager
+}
+
+// GoalManager returns the persistent goal manager.
+func (al *AgentLoop) GoalManager() *GoalManager {
+	return al.goalManager
 }
 
 // AllGroupSnapshots returns a GroupSnapshot for every tracked group.

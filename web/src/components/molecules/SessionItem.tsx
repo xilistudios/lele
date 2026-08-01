@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getModeTheme } from '../../lib/modeTheme'
 import type { ChatMode } from '../../lib/types'
@@ -29,6 +30,7 @@ export function SessionItem({
   mode,
 }: Props) {
   const { t } = useTranslation()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   if (collapsed) {
     return (
@@ -89,10 +91,20 @@ export function SessionItem({
         type="button"
         onClick={(event) => {
           event.stopPropagation()
-          onDelete()
+          if (confirmingDelete) {
+            setConfirmingDelete(false)
+            onDelete()
+          } else {
+            setConfirmingDelete(true)
+          }
         }}
-        aria-label={t('chat.deleteSession')}
-        className="ml-auto flex items-center justify-center rounded-md p-2 text-text-tertiary opacity-0 transition-all hover:bg-state-error-light hover:text-state-error group-hover:opacity-100"
+        onBlur={() => setConfirmingDelete(false)}
+        aria-label={confirmingDelete ? t('chat.confirmDelete') : t('chat.deleteSession')}
+        className={`ml-auto flex items-center justify-center rounded-md p-2 transition-all ${
+          confirmingDelete
+            ? 'opacity-100 bg-state-error-light text-state-error'
+            : 'text-text-tertiary opacity-0 hover:bg-state-error-light hover:text-state-error group-hover:opacity-100'
+        }`}
       >
         <TrashIcon size={12} />
       </button>
