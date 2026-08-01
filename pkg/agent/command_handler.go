@@ -796,7 +796,6 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 		groupID, profile.Strategy, len(participants), groupID)
 }
 
-
 // handleGoalCommand dispatches /goal subcommands.
 // Subcommands:
 //
