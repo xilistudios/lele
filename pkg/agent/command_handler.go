@@ -207,6 +207,8 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 			callerID = agent.ID
 		}
 		return ch.handleGroupCommand(ctx, msg, callerID, strings.Join(args, " ")), true
+	case "/goal":
+		return ch.handleGoalCommand(sessionKey, args), true
 	}
 
 	return "", false
@@ -792,4 +794,91 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 	ch.tagGroupSession(groupID, task, msg.ChatID)
 	return fmt.Sprintf("✅ Grupo iniciado: %s\nEstrategia: %s · Participantes: %d\nLos turnos se mostrarán aquí en streaming. Usa /group stop %s para detenerlo.",
 		groupID, profile.Strategy, len(participants), groupID)
+}
+
+
+// handleGoalCommand dispatches /goal subcommands.
+// Subcommands:
+//
+//	/goal <text>       - Set a persistent goal
+//	/goal status       - Show current goal status
+//	/goal pause        - Pause the goal loop
+//	/goal resume       - Resume a paused goal
+//	/goal clear        - Remove the goal
+func (ch *commandHandlerImpl) handleGoalCommand(sessionKey string, args []string) string {
+	gm := ch.al.GoalManager()
+	if gm == nil {
+		return "❌ Goal manager not initialized."
+	}
+
+	if len(args) == 0 {
+		// Show usage or current goal status
+		goal := gm.Get(sessionKey)
+		if goal != nil {
+			return goal.FormatStatus()
+		}
+		return "🎯 Uso: /goal <texto del objetivo>\n" +
+			"   Establece un objetivo persistente que el agente perseguirá automáticamente.\n\n" +
+			"Subcomandos:\n" +
+			"  /goal status  - Ver estado del objetivo actual\n" +
+			"  /goal pause   - Pausar el loop\n" +
+			"  /goal resume  - Reanudar un objetivo pausado\n" +
+			"  /goal clear   - Eliminar el objetivo\n\n" +
+			"Ejemplo: /goal Fix every lint error in src/ and verify the build passes"
+	}
+
+	subcmd := args[0]
+	switch subcmd {
+	case "status":
+		goal := gm.Get(sessionKey)
+		if goal == nil {
+			return "📭 No hay objetivo activo para esta sesión."
+		}
+		return goal.FormatStatus()
+
+	case "pause":
+		if gm.Pause(sessionKey) {
+			return "⏸️ Objetivo pausado. Usa /goal resume para reanudar."
+		}
+		return "❌ No hay objetivo activo para pausar."
+
+	case "resume":
+		if gm.Resume(sessionKey) {
+			goal := gm.Get(sessionKey)
+			return fmt.Sprintf("▶️ Objetivo reanudado.\n%s", goal.FormatStatus())
+		}
+		return "❌ No hay objetivo pausado para reanudar."
+
+	case "clear":
+		if gm.Clear(sessionKey) {
+			return "🗑️ Objetivo eliminado."
+		}
+		return "❌ No hay objetivo activo para eliminar."
+
+	default:
+		// Treat everything as goal text
+		goalText := strings.Join(args, " ")
+		maxTurns := DefaultGoalMaxTurns
+
+		// Check for --turns flag
+		parts := strings.Fields(goalText)
+		var textParts []string
+		for i := 0; i < len(parts); i++ {
+			if parts[i] == "--turns" && i+1 < len(parts) {
+				fmt.Sscanf(parts[i+1], "%d", &maxTurns)
+				i++ // skip the value
+			} else {
+				textParts = append(textParts, parts[i])
+			}
+		}
+		goalText = strings.Join(textParts, " ")
+
+		if goalText == "" {
+			return "❌ Se requiere un texto para el objetivo. Uso: /goal <texto>"
+		}
+
+		goal := gm.Set(sessionKey, goalText, maxTurns)
+		return fmt.Sprintf("🎯 Objetivo establecido:\n%s\n\nEl agente continuará trabajando automáticamente hacia este objetivo después de cada turno.\nCualquier mensaje tuyo interrumpirá el loop. Usa /goal clear para cancelarlo.",
+			goal.FormatStatus())
+	}
 }

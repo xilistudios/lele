@@ -368,6 +368,17 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		})
 		return "", nil
 
+	case "/goal":
+		response := mp.al.commandHandler.(*commandHandlerImpl).handleGoalCommand(sessionKey, args)
+		mp.al.bus.PublishOutbound(bus.OutboundMessage{
+			Channel:   originChannel,
+			ChatID:    originChatID,
+			Content:   response,
+			ReplyTo:   replyToMessageID,
+			MessageID: replyToMessageID,
+		})
+		return "", nil
+
 	}
 
 	// Check if subagent result was already consumed via wait_for_subagent.
