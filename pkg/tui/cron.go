@@ -181,7 +181,6 @@ func (m *Model) renderCronDetail() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
 
-
 // selectedCronJobID returns the ID of the currently selected cron job in the
 // modal list, or "" if none is selected (e.g. empty list).
 func (m *Model) selectedCronJobID() string {
