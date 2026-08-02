@@ -211,7 +211,6 @@ func TestShellTool_RestrictToWorkspace(t *testing.T) {
 	}
 }
 
-
 // newTestKeyring builds an in-memory (file-backed, temp dir) keyring service for tests.
 func newTestKeyring(t *testing.T) *keyring.Service {
 	t.Helper()

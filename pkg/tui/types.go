@@ -184,10 +184,10 @@ type Model struct {
 	cronDetailJobID string            // ID of the job being viewed in detail
 
 	// Secrets (keyring) management state
-	secretsModalKeys   []string // maps modal items to secret names
-	secretsDetailMode  bool     // true when showing detail of a selected secret
-	secretsDetailName  string   // name of the secret being viewed in detail
-	secretsReveal      bool     // true when the secret value is temporarily revealed
+	secretsModalKeys  []string // maps modal items to secret names
+	secretsDetailMode bool     // true when showing detail of a selected secret
+	secretsDetailName string   // name of the secret being viewed in detail
+	secretsReveal     bool     // true when the secret value is temporarily revealed
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

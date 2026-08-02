@@ -372,14 +372,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	})
 
 	loop := &AgentLoop{
-		bus:              msgBus,
-		registry:         registry,
-		state:            stateManager,
-		summarizing:      sync.Map{},
-		fallback:         fallbackChain,
-		verboseManager:   verboseManager,
-		approvalManager:  approvalManager,
-		keyringService:   keyringSvc,
+		bus:             msgBus,
+		registry:        registry,
+		state:           stateManager,
+		summarizing:     sync.Map{},
+		fallback:        fallbackChain,
+		verboseManager:  verboseManager,
+		approvalManager: approvalManager,
+		keyringService:  keyringSvc,
 	}
 	loop.cfgPtr.Store(cfg)
 

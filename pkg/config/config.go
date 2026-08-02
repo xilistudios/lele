@@ -416,8 +416,8 @@ type LogsConfig struct {
 // KeyringConfig holds configuration for the encrypted secret store.
 type KeyringConfig struct {
 	Enabled          bool   `json:"enabled" env:"LELE_KEYRING_ENABLED"`
-	Path             string `json:"path,omitempty" env:"LELE_KEYRING_PATH"`         // Vault file (default: ~/.lele/keyring.enc)
-	Backend          string `json:"backend,omitempty" env:"LELE_KEYRING_BACKEND"`   // "auto", "keychain", or "file"
+	Path             string `json:"path,omitempty" env:"LELE_KEYRING_PATH"`       // Vault file (default: ~/.lele/keyring.enc)
+	Backend          string `json:"backend,omitempty" env:"LELE_KEYRING_BACKEND"` // "auto", "keychain", or "file"
 	AuditLogSize     int    `json:"audit_log_size,omitempty" env:"LELE_KEYRING_AUDIT_LOG_SIZE"`
 	AllowAgentSet    bool   `json:"allow_agent_set" env:"LELE_KEYRING_ALLOW_AGENT_SET"`
 	AllowAgentDelete bool   `json:"allow_agent_delete" env:"LELE_KEYRING_ALLOW_AGENT_DELETE"`
