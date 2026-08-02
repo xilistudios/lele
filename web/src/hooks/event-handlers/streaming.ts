@@ -11,6 +11,7 @@ import { wsDebug } from '../../lib/debug'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
 import {
   type HistoryMessage,
+  buildChatHistoryQueryKey,
   chatHistoryQueryKey,
   updateChatHistoryFromRaw,
 } from '../useChatHistory'
@@ -213,7 +214,12 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
         return []
       }
       if (m.role === 'assistant' && m.id === (data.message_id as string)) {
-        const content = (data.content as string) || m.content
+        // Only overwrite content if the server sent a non-empty final version.
+        // Some providers send message.complete with empty content (the real
+        // text was already delivered via stream chunks). Overwriting with ''
+        // would erase the accumulated response.
+        const serverContent = data.content as string | undefined
+        const content = serverContent && serverContent.length > 0 ? serverContent : m.content
         return [{ ...m, content, streaming: false }]
       }
       if (m.role === 'user' && m.sessionKey === targetSessionKey && m.content.trim() === '') {
@@ -242,12 +248,37 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
         if (m.sessionKey !== historySessionKey) return true
         // Remove optimistic user messages — they're now confirmed in the HTTP history
         if (m.role === 'user' && m.optimistic) return false
-        // Remove completed assistant messages — the HTTP refetch (triggered by
-        // invalidateQueries above) will return them in baseMessages. Keeping
-        // them in streamingMessages creates a second source of truth that the
-        // position-based merge has to deduplicate, which is fragile because
-        // WebSocket IDs (UUID) and HTTP IDs (content-hash) don't match.
-        if (m.role === 'assistant' && !m.streaming) return false
+        // Remove completed assistant messages ONLY if the HTTP cache already
+        // contains them. Previously we removed them unconditionally, but the
+        // invalidateQueries refetch is async — if the base messages haven't
+        // arrived yet, the message disappears from the UI until the refetch
+        // completes (causing flicker or permanent loss on slow connections).
+        //
+        // Matching uses a prefix comparison (first 200 chars) instead of full
+        // string equality to tolerate minor server-side normalization (trailing
+        // newlines, unicode encoding differences). The 4s HTTP polling in
+        // useChatHistory is the real safety net: even if this check misses,
+        // mergeMessages' position-based dedup will remove the stale streaming
+        // copy once base catches up.
+        if (m.role === 'assistant' && !m.streaming) {
+          const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
+            buildChatHistoryQueryKey(historySessionKey, ctx.parentSessionKeyRef.current ?? undefined),
+          )
+          const prefix = m.content.slice(0, 200)
+          // Guard: an empty prefix would match ANY assistant in base via
+          // startsWith(''), causing an empty completed message to be dropped
+          // prematurely. Only match on a non-empty prefix; otherwise keep the
+          // message and let the polling safety net reconcile it.
+          const inBase =
+            prefix.length > 0 &&
+            cached?.messages?.some(
+              (bm) => bm.role === 'assistant' && bm.content.startsWith(prefix),
+            )
+          if (inBase) return false
+          // Keep it — base hasn't caught up yet. The next history.updated or
+          // polling cycle will clean it up once the refetch lands.
+          return true
+        }
         return true
       }),
     )
@@ -322,15 +353,18 @@ export function handleMessageError(ctx: MessageEventContext, data: Record<string
 
   // Rollback from query cache
   const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-    chatHistoryQueryKey(errorSessionKey),
+    buildChatHistoryQueryKey(errorSessionKey, ctx.parentSessionKeyRef.current ?? undefined),
   )
   if (cached) {
-    ctx.queryClient.setQueryData(chatHistoryQueryKey(errorSessionKey), {
-      ...cached,
-      messages: (cached.messages ?? []).map((m) =>
+    ctx.queryClient.setQueryData(
+      buildChatHistoryQueryKey(errorSessionKey, ctx.parentSessionKeyRef.current ?? undefined),
+      {
+        ...cached,
+        messages: (cached.messages ?? []).map((m) =>
           m.role === 'user' && m.optimistic ? { ...m, failed: true } : m,
         ),
-    })
+      },
+    )
   }
 
   ctx.removeProcessingSession(errorSessionKey)
@@ -355,7 +389,8 @@ export function handleStreamError(ctx: MessageEventContext, data: Record<string,
 
 export function handleTypingIndicator(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
-  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'typing.indicator')) return
+  if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'typing.indicator'))
+    return
 
   ctx.setTypingIndicator({
     deviceId: (data.client_id as string) ?? '',

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { ChatMessage } from '../lib/types'
 
 import { mergeMessages } from './useChatHistory'
+import { computeAssistantInsertIndex } from './useStreamQueues'
 
 function createTestMessage(
   id: string,
@@ -371,6 +372,66 @@ describe('Message ordering fixes', () => {
       expect(assistantMessages.length).toBe(2) // a1 + a2
       expect(assistantMessages[1].id).toBe('a2-base')
       expect(result.some((m) => m.id === 'a2-ws')).toBe(false)
+    })
+  })
+
+  describe('Bug 6: New assistant inserted before optimistic user when prior assistant is retained', () => {
+    test('new assistant should go AFTER the optimistic user, not after the retained assistant', () => {
+      // Scenario: Turn 1 completed but HTTP cache hasn't caught up yet, so
+      // a1-completed is retained in streamingMessages. User sends turn 2.
+      // streamingMessages = [a1-completed, u2-opt]
+      // message.ack arrives → ensureAssistantPlaceholder inserts a2.
+      //
+      // OLD BUG: lastAssistantIdx finds a1 at index 0, inserts a2 at index 1.
+      // Result: [a1, a2, u2-opt] — assistant appears BEFORE user message!
+      //
+      // FIX: detect that the last user is AFTER the last assistant → insert
+      // after the user instead.
+      // Result: [a1, u2-opt, a2] ✓
+
+      const current: ChatMessage[] = [
+        createTestMessage('a1', 'assistant', 'First response', { streaming: false }),
+        createTestMessage('u2-opt', 'user', 'Second question', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
+      ]
+
+      const newMsg = createTestMessage('a2', 'assistant', '', { streaming: true })
+
+      // Use the real insertion logic (single source of truth).
+      const arr = [...current]
+      arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
+
+      // Assistant must come AFTER the user message
+      expect(arr.map((m) => m.id)).toEqual(['a1', 'u2-opt', 'a2'])
+      expect(arr.map((m) => m.role)).toEqual(['assistant', 'user', 'assistant'])
+    })
+
+    test('continuation after tool calls still works when no user is after assistant', () => {
+      // Scenario: same turn, tools completed, new assistant is post-tool response.
+      // streamingMessages = [u1-opt, a1, t1, t2]
+      // New assistant a2 should go after t2 (continuation logic).
+
+      const current: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'Do something', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1', 'assistant', 'Let me check', { streaming: false }),
+        createTestMessage('t1', 'tool', '', { toolName: 'exec', toolStatus: 'completed' }),
+        createTestMessage('t2', 'tool', '', { toolName: 'read_file', toolStatus: 'completed' }),
+      ]
+
+      const newMsg = createTestMessage('a2', 'assistant', 'Here is the result', {
+        streaming: true,
+      })
+
+      const arr = [...current]
+      arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
+
+      // a2 goes after t2 (continuation of same turn)
+      expect(arr.map((m) => m.id)).toEqual(['u1-opt', 'a1', 't1', 't2', 'a2'])
     })
   })
 
