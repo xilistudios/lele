@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-01
+
+### Added
+
+#### Agent
+- `/goal` command — persistent goal system inspired by Hermes Agent. The agent works autonomously toward a goal across multiple turns until achieved or the turn budget is exhausted. Includes a state machine (active/paused/done/blocked), disk persistence, and an LLM-based goal judge for completion evaluation. Subcommands: `status`, `pause`, `resume`, `clear`. Supports `--turns N` to set the budget.
+
+#### WebUI
+- Cron job management page with full CRUD: list, create, edit, delete, enable/disable, and run-now. Includes `useCronJobs` hook with react-query integration, sidebar navigation entry, and i18n support (en/es/pt).
+- Double-click confirmation for session deletion — requires two clicks on the trash button before deleting, with confirmation state styling and blur-to-reset.
+
+#### TUI
+- `/cron` command opens a modal listing all scheduled jobs with detail view (schedule, payload, state, next/last run). Keyboard actions: E (enable/disable), R (run now), D (delete), ENTER (detail). Uses a read/manage-only CronService instance that never fires jobs from the TUI.
+
+#### Backend
+- REST endpoints for cron management in the native channel: `GET/POST/PUT/DELETE /api/v1/cron/*`.
+- CronService extended with `ListJobs`, `GetJob`, `EnableJob`, `RemoveJob`, `RunJobNow`.
+
+### Fixed
+
+#### WebUI
+- Streaming assistant messages no longer replace older completed assistants in-place during iterative tool calls — actively streaming assistants are always appended as new messages, preserving chronological order (post-tool-call response now correctly appears after the tool call).
+- Duplicated/overlapping streaming text after WebSocket reconnection — backend now skips `message.stream` and `message.thinking` events when flushing buffered events during reconnect (content already included in `in_progress_messages`); frontend migrates `restore-{sessionKey}` placeholder messages to the real `message_id` when live chunks arrive.
+- Hardened streaming/HTTP message reconciliation: extracted `computeAssistantInsertIndex()` as a pure shared function for the 3-case ordering rule; unified React Query keys with `buildChatHistoryQueryKey` for subagent sessions; guarded against empty content prefix in `handleHistoryUpdated`; scoped 4s reconciliation polling to the current `sessionKey`.
+
 ## [0.3.4] - 2026-07-29
 
 ### Fixed
