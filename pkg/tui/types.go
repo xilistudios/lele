@@ -90,6 +90,8 @@ const (
 	ModalAddProvider    // form to add a new provider
 	ModalAddModel       // form to add a new model to a provider
 	ModalCron           // list of cron jobs
+	ModalSecrets        // list of keyring secrets
+	ModalAddSecret      // form to add a new secret
 )
 
 type formStep int
@@ -120,6 +122,7 @@ var allCommands = []commandInfo{
 	{name: "/cron", description: "Manage scheduled cron jobs"},
 	{name: "/providers", description: "Manage providers"},
 	{name: "/connect", description: "Connect a new provider"},
+	{name: "/secrets", description: "Manage secrets (keyring)"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/quit", description: "Exit TUI"},
 }
@@ -179,6 +182,12 @@ type Model struct {
 	cronModalKeys   []string          // maps modal items to job IDs
 	cronDetailMode  bool              // true when showing detail of a selected job
 	cronDetailJobID string            // ID of the job being viewed in detail
+
+	// Secrets (keyring) management state
+	secretsModalKeys   []string // maps modal items to secret names
+	secretsDetailMode  bool     // true when showing detail of a selected secret
+	secretsDetailName  string   // name of the secret being viewed in detail
+	secretsReveal      bool     // true when the secret value is temporarily revealed
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

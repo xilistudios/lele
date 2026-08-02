@@ -18,6 +18,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -50,6 +51,7 @@ type NativeChannel struct {
 	workspacePath    string
 	reloadConfig     func() error // called after config save to reload runtime config
 	cronService      CronProvidable
+	keyringService   *keyring.Service
 }
 
 // CronProvidable is the interface for managing cron jobs via the API.
@@ -69,6 +71,13 @@ func (n *NativeChannel) SetCronService(cs CronProvidable) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.cronService = cs
+}
+
+// SetKeyringService sets the keyring service for API access.
+func (n *NativeChannel) SetKeyringService(ks *keyring.Service) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.keyringService = ks
 }
 
 // SetReloadConfig sets a callback to be called after config is saved via the API.
@@ -344,6 +353,14 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/cron/{id}/enable", withAuth(n.handleCronEnable))
 	mux.HandleFunc("POST /api/v1/cron/{id}/disable", withAuth(n.handleCronDisable))
 	mux.HandleFunc("POST /api/v1/cron/{id}/run", withAuth(n.handleCronRun))
+
+	// Secrets (keyring)
+	mux.HandleFunc("GET /api/v1/secrets", withAuth(n.handleSecretsList))
+	mux.HandleFunc("POST /api/v1/secrets", withAuth(applyBodyLimit(n.handleSecretCreate)))
+	mux.HandleFunc("GET /api/v1/secrets/status", withAuth(n.handleSecretsStatus))
+	mux.HandleFunc("GET /api/v1/secrets/audit", withAuth(n.handleSecretsAudit))
+	mux.HandleFunc("GET /api/v1/secrets/{name}", withAuth(n.handleSecretGet))
+	mux.HandleFunc("DELETE /api/v1/secrets/{name}", withAuth(n.handleSecretDelete))
 
 	// Files
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))

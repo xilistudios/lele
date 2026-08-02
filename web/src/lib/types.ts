@@ -995,6 +995,53 @@ export type CronJobInput = {
   to?: string
 }
 
+export type SecretMeta = {
+  name: string
+  description: string
+  tags: string[] | null
+  scope: string[] | null
+  created_at: string
+  updated_at: string
+  created_by: string
+}
+
+export type SecretStatus = {
+  enabled: boolean
+  backend: string
+  count: number
+}
+
+export type SecretsListResponse = {
+  secrets: SecretMeta[]
+  status: SecretStatus
+}
+
+export type SecretDetailResponse = {
+  secret: SecretMeta
+  value: string
+}
+
+export type SecretInput = {
+  name: string
+  value: string
+  description?: string
+  tags?: string[]
+  scope?: string[]
+}
+
+export type SecretAuditRecord = {
+  secret_name: string
+  agent_id: string
+  session_key: string
+  action: string
+  timestamp: string
+  granted: boolean
+}
+
+export type SecretsAuditResponse = {
+  audit: SecretAuditRecord[]
+}
+
 export type LogEntry = {
   level: string
   timestamp: string

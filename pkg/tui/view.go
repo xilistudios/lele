@@ -151,6 +151,9 @@ func (m *Model) View() string {
 			if m.modalMode == ModalCron && m.cronDetailMode {
 				return m.renderCronDetail()
 			}
+			if m.modalMode == ModalSecrets && m.secretsDetailMode {
+				return m.renderSecretDetail()
+			}
 			var modalTitle string
 			switch m.modalMode {
 			case ModalAgent:
@@ -169,6 +172,8 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.backgroundProcesses")
 			case ModalCron:
 				modalTitle = i18n.T("tui.cronJobs")
+			case ModalSecrets:
+				modalTitle = m.secretsHeader()
 			case ModalProviders:
 				modalTitle = i18n.T("tui.selectProvider")
 			case ModalProviderDetail:
@@ -177,10 +182,15 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.addProvider")
 			case ModalAddModel:
 				modalTitle = i18n.T("tui.addModel")
+			case ModalAddSecret:
+				modalTitle = i18n.T("tui.secrets")
 			}
 
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
 				return m.renderFormModal(modalTitle, m.formStepNames())
+			}
+			if m.modalMode == ModalSecrets {
+				return m.renderSecretsList(modalTitle)
 			}
 			return m.renderModal(modalTitle)
 		}
@@ -410,6 +420,9 @@ func (m *Model) View() string {
 		if m.modalMode == ModalCron && m.cronDetailMode {
 			return m.renderCronDetail()
 		}
+		if m.modalMode == ModalSecrets && m.secretsDetailMode {
+			return m.renderSecretDetail()
+		}
 		var modalTitle string
 		switch m.modalMode {
 		case ModalAgent:
@@ -428,6 +441,8 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.backgroundProcesses")
 		case ModalCron:
 			modalTitle = i18n.T("tui.cronJobs")
+		case ModalSecrets:
+			modalTitle = m.secretsHeader()
 		case ModalProviders:
 			modalTitle = i18n.T("tui.selectProvider")
 		case ModalProviderDetail:
@@ -436,10 +451,15 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.addProvider")
 		case ModalAddModel:
 			modalTitle = i18n.T("tui.addModel")
+		case ModalAddSecret:
+			modalTitle = i18n.T("tui.secrets")
 		}
 
-		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
 			return m.renderFormModal(modalTitle, m.formStepNames())
+		}
+		if m.modalMode == ModalSecrets {
+			return m.renderSecretsList(modalTitle)
 		}
 		return m.renderModal(modalTitle)
 	}
@@ -574,6 +594,14 @@ func (m *Model) formStepNames() []string {
 		return []string{"Provider name", "Provider type", "API Key", "API Base URL"}
 	case ModalAddModel:
 		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
+	case ModalAddSecret:
+		return []string{
+			i18n.T("tui.secretName"),
+			i18n.T("tui.secretValue"),
+			i18n.T("tui.secretDescription"),
+			i18n.T("tui.secretTags"),
+			i18n.T("tui.secretScope"),
+		}
 	default:
 		return nil
 	}

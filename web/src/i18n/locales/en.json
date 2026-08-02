@@ -537,6 +537,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "create": "Create",
+    "confirm": "Confirm",
     "optional": "optional",
     "yes": "Yes",
     "no": "No"
@@ -630,7 +631,8 @@
     "navigation": "Navigation",
     "collapse": "Minimize",
     "expand": "Expand",
-    "cron": "Scheduled Jobs"
+    "cron": "Scheduled Jobs",
+    "secrets": "Secrets"
   },
   "backgroundExecs": {
     "title": "Background Processes",
@@ -718,5 +720,43 @@
     "errorInterval": "Interval must be a positive number of seconds",
     "errorCron": "Enter a cron expression",
     "errorMessage": "Message or command is required"
+  },
+  "secrets": {
+    "title": "Secrets",
+    "subtitle": "Encrypted secret storage",
+    "empty": "No secrets stored",
+    "createFirst": "Add your first secret",
+    "new": "New",
+    "newSecret": "New Secret",
+    "name": "Name",
+    "namePlaceholder": "e.g. openai.api_key",
+    "value": "Value",
+    "valuePlaceholder": "Secret value (stored encrypted)",
+    "description": "Description",
+    "descriptionPlaceholder": "Optional description",
+    "tags": "Tags",
+    "tagsPlaceholder": "Comma-separated tags",
+    "scope": "Scope",
+    "scopePlaceholder": "Agent IDs (empty = all agents)",
+    "backend": "Backend",
+    "count": "secrets",
+    "reveal": "Reveal",
+    "hide": "Hide",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "delete": "Delete",
+    "confirmDelete": "Delete this secret?",
+    "createdBy": "Created by",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "allAgents": "all agents",
+    "audit": "Audit Log",
+    "auditEmpty": "No access records",
+    "action": "Action",
+    "agent": "Agent",
+    "granted": "Granted",
+    "denied": "Denied",
+    "errorName": "Name is required",
+    "errorValue": "Value is required"
   }
 }

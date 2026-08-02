@@ -17,6 +17,7 @@ import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { CronPage } from './components/pages/CronPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
+import { SecretsPage } from './components/pages/SecretsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
@@ -261,6 +262,7 @@ function AppContent() {
         <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="background-exec" element={<BackgroundExecsPage />} />
         <Route path="cron" element={<CronPage />} />
+        <Route path="secrets" element={<SecretsPage />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
         <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
         <Route path="settings/agents" element={<Navigate to="/agents" replace />} />

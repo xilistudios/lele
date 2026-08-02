@@ -5,8 +5,10 @@ import "context"
 type contextKey string
 
 const (
-	channelCtxKey contextKey = "tool_channel"
-	chatIDCtxKey  contextKey = "tool_chat_id"
+	channelCtxKey    contextKey = "tool_channel"
+	chatIDCtxKey     contextKey = "tool_chat_id"
+	agentIDCtxKey    contextKey = "tool_agent_id"
+	sessionKeyCtxKey contextKey = "tool_session_key"
 )
 
 // WithToolContext returns a context with channel and chatID stored as values.
@@ -16,11 +18,28 @@ func WithToolContext(ctx context.Context, channel, chatID string) context.Contex
 	return ctx
 }
 
+// WithAgentToolContext returns a context carrying the acting agent ID and
+// session key. Tools that need to enforce per-agent access control (e.g. the
+// keyring secret tool) read these via AgentToolContextFromCtx.
+func WithAgentToolContext(ctx context.Context, agentID, sessionKey string) context.Context {
+	ctx = context.WithValue(ctx, agentIDCtxKey, agentID)
+	ctx = context.WithValue(ctx, sessionKeyCtxKey, sessionKey)
+	return ctx
+}
+
 // ToolContextFromCtx extracts channel and chatID from a context.
 func ToolContextFromCtx(ctx context.Context) (channel, chatID string) {
 	ch, _ := ctx.Value(channelCtxKey).(string)
 	cid, _ := ctx.Value(chatIDCtxKey).(string)
 	return ch, cid
+}
+
+// AgentToolContextFromCtx extracts the acting agent ID and session key from a
+// context. Both may be empty if the tool was invoked outside an agent turn.
+func AgentToolContextFromCtx(ctx context.Context) (agentID, sessionKey string) {
+	aid, _ := ctx.Value(agentIDCtxKey).(string)
+	sk, _ := ctx.Value(sessionKeyCtxKey).(string)
+	return aid, sk
 }
 
 // Tool is the interface that all tools must implement.

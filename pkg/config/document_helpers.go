@@ -19,6 +19,26 @@ func envPlaceholderString(secret SecretValue) string {
 	return fmt.Sprintf("{{ENV_%s}}", secret.EnvName)
 }
 
+// keyringPlaceholderString renders a {{SECRET:name}} placeholder for saving.
+func keyringPlaceholderString(secret SecretValue) string {
+	return fmt.Sprintf("{{SECRET:%s}}", secret.SecretName)
+}
+
+// writeSecret writes a SecretValue into the given map under key, preserving
+// ENV and keyring placeholders and emitting literal values directly.
+func writeSecret(m map[string]interface{}, key string, secret SecretValue) {
+	switch secret.Mode {
+	case SecretModeEnv:
+		m[key] = envPlaceholderString(secret)
+	case SecretModeKeyring:
+		m[key] = keyringPlaceholderString(secret)
+	case SecretModeLiteral:
+		if secret.Value != "" {
+			m[key] = secret.Value
+		}
+	}
+}
+
 func mergeNamedProvider(base, overlay EditableNamedProviderConfig) EditableNamedProviderConfig {
 	if overlay.Type != "" {
 		base.Type = overlay.Type

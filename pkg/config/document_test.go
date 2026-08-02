@@ -113,6 +113,62 @@ func TestLoadEditableDocument_WithEnvPlaceholder(t *testing.T) {
 	}
 }
 
+func TestLoadEditableDocument_WithSecretPlaceholder(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	config := `{
+		"channels": {
+			"telegram": {
+				"enabled": true,
+				"token": "{{SECRET:telegram.token}}"
+			}
+		}
+	}`
+
+	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	doc, meta, err := LoadEditableDocument(path)
+	if err != nil {
+		t.Fatalf("LoadEditableDocument failed: %v", err)
+	}
+
+	if doc.Channels.Telegram.Token.Mode != SecretModeKeyring {
+		t.Errorf("token mode = %q, want keyring", doc.Channels.Telegram.Token.Mode)
+	}
+	if doc.Channels.Telegram.Token.SecretName != "telegram.token" {
+		t.Errorf("secret name = %q, want telegram.token", doc.Channels.Telegram.Token.SecretName)
+	}
+	if meta.SecretsByPath["channels.telegram.token"] != "keyring" {
+		t.Error("expected secret path to be marked as keyring")
+	}
+}
+
+func TestSecretValue_ResolveKeyring(t *testing.T) {
+	// Install a test resolver and restore the previous one afterwards.
+	prev := keyringResolver
+	defer RegisterKeyringResolver(prev)
+	RegisterKeyringResolver(func(name string) (string, error) {
+		if name == "openai.api_key" {
+			return "sk-from-keyring", nil
+		}
+		return "", os.ErrNotExist
+	})
+
+	sv := SecretValue{Mode: SecretModeKeyring, SecretName: "openai.api_key"}
+	if got := sv.resolve(); got != "sk-from-keyring" {
+		t.Errorf("resolve() = %q, want sk-from-keyring", got)
+	}
+
+	// Unknown secret resolves to empty string (no panic).
+	missing := SecretValue{Mode: SecretModeKeyring, SecretName: "does.not.exist"}
+	if got := missing.resolve(); got != "" {
+		t.Errorf("resolve() missing = %q, want empty", got)
+	}
+}
+
 func TestLoadEditableDocument_WithEnvPlaceholderAndDefault(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
@@ -686,6 +742,23 @@ func TestEditableDocument_Serialization(t *testing.T) {
 	openai := providers["openai"].(map[string]interface{})
 	if openai["api_key"] != "sk-test" {
 		t.Errorf("openai api_key = %q, want sk-test", openai["api_key"])
+	}
+}
+
+func TestEditableDocument_SerializationKeyring(t *testing.T) {
+	doc := &EditableDocument{
+		Channels: EditableChannelsConfig{
+			Telegram: EditableTelegramConfig{
+				Token: SecretValue{Mode: SecretModeKeyring, SecretName: "telegram.token"},
+			},
+		},
+	}
+
+	serializable := doc.toSerializable()
+	channels := serializable["channels"].(map[string]interface{})
+	telegram := channels["telegram"].(map[string]interface{})
+	if telegram["token"] != "{{SECRET:telegram.token}}" {
+		t.Errorf("telegram token = %q, want {{SECRET:telegram.token}}", telegram["token"])
 	}
 }
 

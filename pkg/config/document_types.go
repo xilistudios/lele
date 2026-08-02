@@ -10,6 +10,8 @@ const (
 	SecretModeLiteral SecretMode = "literal"
 	// SecretModeEnv means the value comes from an environment variable.
 	SecretModeEnv SecretMode = "env"
+	// SecretModeKeyring means the value comes from the encrypted keyring.
+	SecretModeKeyring SecretMode = "keyring"
 	// SecretModeEmpty means the value is empty.
 	SecretModeEmpty SecretMode = "empty"
 )
@@ -20,6 +22,7 @@ type SecretValue struct {
 	Value      string     `json:"value,omitempty"`
 	EnvName    string     `json:"env_name,omitempty"`
 	EnvDefault *string    `json:"env_default,omitempty"`
+	SecretName string     `json:"secret_name,omitempty"`
 	HasEnvVar  bool       `json:"has_env_var"`
 }
 
@@ -288,7 +291,25 @@ func (sv SecretValue) resolve() string {
 			return *sv.EnvDefault
 		}
 		return ""
+	case SecretModeKeyring:
+		if keyringResolver != nil {
+			if val, err := keyringResolver(sv.SecretName); err == nil {
+				return val
+			}
+		}
+		return ""
 	default:
 		return ""
 	}
+}
+
+// keyringResolver resolves a keyring secret name to its value. It is registered
+// by the keyring service at startup to avoid an import cycle (config must not
+// import keyring, but keyring may depend on config types).
+var keyringResolver func(name string) (string, error)
+
+// RegisterKeyringResolver installs the function used to resolve
+// {{SECRET:name}} placeholders. Passing nil clears it.
+func RegisterKeyringResolver(fn func(name string) (string, error)) {
+	keyringResolver = fn
 }
