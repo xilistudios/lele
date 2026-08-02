@@ -84,21 +84,30 @@ func (m *Model) getRenderedStream(width int) string {
 
 	if len(m.streamRenderedLines) == 0 {
 		m.streamRenderedLines = make([]string, 0, len(rawLines))
+		m.streamRenderedJoined = ""
 	}
 
+	// Render newly completed lines and append them to the accumulated joined
+	// string in O(1), avoiding an O(n²) strings.Join over all cached lines on
+	// every streaming chunk.
 	for len(m.streamRenderedLines) < len(rawLines)-1 {
 		idx := len(m.streamRenderedLines)
 		renderedLine := renderSingleLine(rawLines[idx], width)
 		m.streamRenderedLines = append(m.streamRenderedLines, renderedLine)
+		if m.streamRenderedJoined == "" {
+			m.streamRenderedJoined = renderedLine
+		} else {
+			m.streamRenderedJoined += "\n" + renderedLine
+		}
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
 	renderedLastLine := renderSingleLine(lastLine, width)
 
-	if len(m.streamRenderedLines) == 0 {
+	if m.streamRenderedJoined == "" {
 		return renderedLastLine
 	}
-	return strings.Join(m.streamRenderedLines, "\n") + "\n" + renderedLastLine
+	return m.streamRenderedJoined + "\n" + renderedLastLine
 }
 
 // getRenderedThinking wraps and returns the thinking stream text line-by-line, utilizing a line cache for speed.
@@ -110,21 +119,27 @@ func (m *Model) getRenderedThinking(width int) string {
 
 	if len(m.thinkingRenderedLines) == 0 {
 		m.thinkingRenderedLines = make([]string, 0, len(rawLines))
+		m.thinkingRenderedJoined = ""
 	}
 
 	for len(m.thinkingRenderedLines) < len(rawLines)-1 {
 		idx := len(m.thinkingRenderedLines)
 		renderedLine := renderSingleLine(rawLines[idx], width)
 		m.thinkingRenderedLines = append(m.thinkingRenderedLines, renderedLine)
+		if m.thinkingRenderedJoined == "" {
+			m.thinkingRenderedJoined = renderedLine
+		} else {
+			m.thinkingRenderedJoined += "\n" + renderedLine
+		}
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
 	renderedLastLine := renderSingleLine(lastLine, width)
 
-	if len(m.thinkingRenderedLines) == 0 {
+	if m.thinkingRenderedJoined == "" {
 		return renderedLastLine
 	}
-	return strings.Join(m.thinkingRenderedLines, "\n") + "\n" + renderedLastLine
+	return m.thinkingRenderedJoined + "\n" + renderedLastLine
 }
 
 func renderSingleLine(line string, width int) string {

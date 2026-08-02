@@ -282,6 +282,8 @@ func (m *Model) resetStreamState() {
 	m.currentThinking = ""
 	m.streamRenderedLines = nil
 	m.thinkingRenderedLines = nil
+	m.streamRenderedJoined = ""
+	m.thinkingRenderedJoined = ""
 }
 
 // clearStreamingState resets all streaming/processing state.
