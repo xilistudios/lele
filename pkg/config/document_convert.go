@@ -299,11 +299,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"allow_from": doc.Channels.Telegram.AllowFrom,
 		"verbose":    doc.Channels.Telegram.Verbose,
 	}
-	if doc.Channels.Telegram.Token.Mode == SecretModeEnv {
-		telegram["token"] = envPlaceholderString(doc.Channels.Telegram.Token)
-	} else if doc.Channels.Telegram.Token.Mode == SecretModeLiteral && doc.Channels.Telegram.Token.Value != "" {
-		telegram["token"] = doc.Channels.Telegram.Token.Value
-	}
+	writeSecret(telegram, "token", doc.Channels.Telegram.Token)
 	channels["telegram"] = telegram
 
 	// Discord
@@ -311,11 +307,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":    doc.Channels.Discord.Enabled,
 		"allow_from": doc.Channels.Discord.AllowFrom,
 	}
-	if doc.Channels.Discord.Token.Mode == SecretModeEnv {
-		discord["token"] = envPlaceholderString(doc.Channels.Discord.Token)
-	} else if doc.Channels.Discord.Token.Mode == SecretModeLiteral && doc.Channels.Discord.Token.Value != "" {
-		discord["token"] = doc.Channels.Discord.Token.Value
-	}
+	writeSecret(discord, "token", doc.Channels.Discord.Token)
 	channels["discord"] = discord
 
 	// Feishu
@@ -323,16 +315,8 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":    doc.Channels.Feishu.Enabled,
 		"allow_from": doc.Channels.Feishu.AllowFrom,
 	}
-	if doc.Channels.Feishu.AppID.Mode == SecretModeEnv {
-		feishu["app_id"] = envPlaceholderString(doc.Channels.Feishu.AppID)
-	} else if doc.Channels.Feishu.AppID.Mode == SecretModeLiteral && doc.Channels.Feishu.AppID.Value != "" {
-		feishu["app_id"] = doc.Channels.Feishu.AppID.Value
-	}
-	if doc.Channels.Feishu.AppSecret.Mode == SecretModeEnv {
-		feishu["app_secret"] = envPlaceholderString(doc.Channels.Feishu.AppSecret)
-	} else if doc.Channels.Feishu.AppSecret.Mode == SecretModeLiteral && doc.Channels.Feishu.AppSecret.Value != "" {
-		feishu["app_secret"] = doc.Channels.Feishu.AppSecret.Value
-	}
+	writeSecret(feishu, "app_id", doc.Channels.Feishu.AppID)
+	writeSecret(feishu, "app_secret", doc.Channels.Feishu.AppSecret)
 	channels["feishu"] = feishu
 
 	// Slack
@@ -340,11 +324,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":    doc.Channels.Slack.Enabled,
 		"allow_from": doc.Channels.Slack.AllowFrom,
 	}
-	if doc.Channels.Slack.BotToken.Mode == SecretModeEnv {
-		slack["bot_token"] = envPlaceholderString(doc.Channels.Slack.BotToken)
-	} else if doc.Channels.Slack.BotToken.Mode == SecretModeLiteral && doc.Channels.Slack.BotToken.Value != "" {
-		slack["bot_token"] = doc.Channels.Slack.BotToken.Value
-	}
+	writeSecret(slack, "bot_token", doc.Channels.Slack.BotToken)
 	channels["slack"] = slack
 
 	// LINE
@@ -355,16 +335,8 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"webhook_path": doc.Channels.LINE.WebhookPath,
 		"allow_from":   doc.Channels.LINE.AllowFrom,
 	}
-	if doc.Channels.LINE.ChannelSecret.Mode == SecretModeEnv {
-		line["channel_secret"] = envPlaceholderString(doc.Channels.LINE.ChannelSecret)
-	} else if doc.Channels.LINE.ChannelSecret.Mode == SecretModeLiteral && doc.Channels.LINE.ChannelSecret.Value != "" {
-		line["channel_secret"] = doc.Channels.LINE.ChannelSecret.Value
-	}
-	if doc.Channels.LINE.ChannelAccessToken.Mode == SecretModeEnv {
-		line["channel_access_token"] = envPlaceholderString(doc.Channels.LINE.ChannelAccessToken)
-	} else if doc.Channels.LINE.ChannelAccessToken.Mode == SecretModeLiteral && doc.Channels.LINE.ChannelAccessToken.Value != "" {
-		line["channel_access_token"] = doc.Channels.LINE.ChannelAccessToken.Value
-	}
+	writeSecret(line, "channel_secret", doc.Channels.LINE.ChannelSecret)
+	writeSecret(line, "channel_access_token", doc.Channels.LINE.ChannelAccessToken)
 	channels["line"] = line
 
 	// OneBot
@@ -375,11 +347,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"group_trigger_prefix": doc.Channels.OneBot.GroupTriggerPrefix,
 		"allow_from":           doc.Channels.OneBot.AllowFrom,
 	}
-	if doc.Channels.OneBot.AccessToken.Mode == SecretModeEnv {
-		onebot["access_token"] = envPlaceholderString(doc.Channels.OneBot.AccessToken)
-	} else if doc.Channels.OneBot.AccessToken.Mode == SecretModeLiteral && doc.Channels.OneBot.AccessToken.Value != "" {
-		onebot["access_token"] = doc.Channels.OneBot.AccessToken.Value
-	}
+	writeSecret(onebot, "access_token", doc.Channels.OneBot.AccessToken)
 	channels["onebot"] = onebot
 
 	// QQ
@@ -387,16 +355,8 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":    doc.Channels.QQ.Enabled,
 		"allow_from": doc.Channels.QQ.AllowFrom,
 	}
-	if doc.Channels.QQ.AppID.Mode == SecretModeEnv {
-		qq["app_id"] = envPlaceholderString(doc.Channels.QQ.AppID)
-	} else if doc.Channels.QQ.AppID.Mode == SecretModeLiteral && doc.Channels.QQ.AppID.Value != "" {
-		qq["app_id"] = doc.Channels.QQ.AppID.Value
-	}
-	if doc.Channels.QQ.AppSecret.Mode == SecretModeEnv {
-		qq["app_secret"] = envPlaceholderString(doc.Channels.QQ.AppSecret)
-	} else if doc.Channels.QQ.AppSecret.Mode == SecretModeLiteral && doc.Channels.QQ.AppSecret.Value != "" {
-		qq["app_secret"] = doc.Channels.QQ.AppSecret.Value
-	}
+	writeSecret(qq, "app_id", doc.Channels.QQ.AppID)
+	writeSecret(qq, "app_secret", doc.Channels.QQ.AppSecret)
 	channels["qq"] = qq
 
 	// DingTalk
@@ -404,16 +364,8 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":    doc.Channels.DingTalk.Enabled,
 		"allow_from": doc.Channels.DingTalk.AllowFrom,
 	}
-	if doc.Channels.DingTalk.ClientID.Mode == SecretModeEnv {
-		dingtalk["client_id"] = envPlaceholderString(doc.Channels.DingTalk.ClientID)
-	} else if doc.Channels.DingTalk.ClientID.Mode == SecretModeLiteral && doc.Channels.DingTalk.ClientID.Value != "" {
-		dingtalk["client_id"] = doc.Channels.DingTalk.ClientID.Value
-	}
-	if doc.Channels.DingTalk.ClientSecret.Mode == SecretModeEnv {
-		dingtalk["client_secret"] = envPlaceholderString(doc.Channels.DingTalk.ClientSecret)
-	} else if doc.Channels.DingTalk.ClientSecret.Mode == SecretModeLiteral && doc.Channels.DingTalk.ClientSecret.Value != "" {
-		dingtalk["client_secret"] = doc.Channels.DingTalk.ClientSecret.Value
-	}
+	writeSecret(dingtalk, "client_id", doc.Channels.DingTalk.ClientID)
+	writeSecret(dingtalk, "client_secret", doc.Channels.DingTalk.ClientSecret)
 	channels["dingtalk"] = dingtalk
 
 	// WhatsApp
@@ -451,11 +403,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		if len(provider.Models) > 0 {
 			prov["models"] = provider.Models
 		}
-		if provider.APIKey.Mode == SecretModeEnv {
-			prov["api_key"] = envPlaceholderString(provider.APIKey)
-		} else if provider.APIKey.Mode == SecretModeLiteral && provider.APIKey.Value != "" {
-			prov["api_key"] = provider.APIKey.Value
-		}
+		writeSecret(prov, "api_key", provider.APIKey)
 		providers[name] = prov
 	}
 	if len(providers) > 0 {
@@ -492,22 +440,14 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"enabled":     doc.Tools.Web.Brave.Enabled,
 		"max_results": doc.Tools.Web.Brave.MaxResults,
 	}
-	if doc.Tools.Web.Brave.APIKey.Mode == SecretModeEnv {
-		brave["api_key"] = envPlaceholderString(doc.Tools.Web.Brave.APIKey)
-	} else if doc.Tools.Web.Brave.APIKey.Mode == SecretModeLiteral && doc.Tools.Web.Brave.APIKey.Value != "" {
-		brave["api_key"] = doc.Tools.Web.Brave.APIKey.Value
-	}
+	writeSecret(brave, "api_key", doc.Tools.Web.Brave.APIKey)
 	web["brave"] = brave
 
 	perplexity := map[string]interface{}{
 		"enabled":     doc.Tools.Web.Perplexity.Enabled,
 		"max_results": doc.Tools.Web.Perplexity.MaxResults,
 	}
-	if doc.Tools.Web.Perplexity.APIKey.Mode == SecretModeEnv {
-		perplexity["api_key"] = envPlaceholderString(doc.Tools.Web.Perplexity.APIKey)
-	} else if doc.Tools.Web.Perplexity.APIKey.Mode == SecretModeLiteral && doc.Tools.Web.Perplexity.APIKey.Value != "" {
-		perplexity["api_key"] = doc.Tools.Web.Perplexity.APIKey.Value
-	}
+	writeSecret(perplexity, "api_key", doc.Tools.Web.Perplexity.APIKey)
 	web["perplexity"] = perplexity
 
 	tools["web"] = web

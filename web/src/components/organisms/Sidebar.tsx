@@ -11,6 +11,7 @@ import {
   ChatBubbleIcon,
   ClockIcon,
   HistoryIcon,
+  LockIcon,
   LogoutIcon,
   MoreIcon,
   PlusCircleIcon,
@@ -130,6 +131,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
       path: '/cron',
       label: t('sidebar.cron'),
       icon: ClockIcon,
+    },
+    {
+      path: '/secrets',
+      label: t('sidebar.secrets'),
+      icon: LockIcon,
     },
   ]
 

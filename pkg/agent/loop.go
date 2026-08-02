@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
+	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
@@ -57,6 +58,7 @@ type AgentLoop struct {
 	toolCoordinator    toolCoordinator
 	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
 	goalManager        *GoalManager         // Persistent goals (Hermes-style /goal)
+	keyringService     *keyring.Service     // Encrypted secret storage
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
 }
@@ -92,7 +94,7 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	// Re-register shared tools for new/recreated agents
 	existingSubagents := al.toolCoordinator.GetSubagents()
 	existingBgManagers := al.toolCoordinator.(*toolCoordinatorImpl).bgManagers
-	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers, al.groupManager)
+	updatedSubagents, updatedBgManagers := updateSharedTools(cfg, al.bus, al.registry, al.approvalManager, existingSubagents, existingBgManagers, al.groupManager, al.keyringService)
 
 	// Wire up session key and cancel callbacks for all subagents
 	for agentID, sm := range updatedSubagents {
@@ -300,6 +302,17 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// Create approval manager early so it can be passed to tools during registration
 	approvalManager := channels.NewApprovalManager()
 
+	// Initialize keyring service for encrypted secret storage
+	keyringSvc := keyring.NewService(keyring.ServiceConfig{
+		Enabled:          cfg.Keyring.Enabled,
+		VaultPath:        cfg.KeyringVaultPath(),
+		Backend:          cfg.Keyring.Backend,
+		AuditLogSize:     cfg.Keyring.AuditLogSize,
+		AllowAgentSet:    cfg.Keyring.AllowAgentSet,
+		AllowAgentDelete: cfg.Keyring.AllowAgentDelete,
+		LeleDir:          config.GetLeleDir(),
+	})
+
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
 	fallbackChain := providers.NewFallbackChain(cooldown)
@@ -366,6 +379,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		fallback:        fallbackChain,
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
+		keyringService:  keyringSvc,
 	}
 	loop.cfgPtr.Store(cfg)
 
@@ -423,7 +437,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	loop.goalManager = goalMgr
 
 	// Register shared tools and create tool coordinator with subagents
-	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager, loop.groupManager)
+	subagents, bgManagers := registerSharedTools(cfg, msgBus, registry, approvalManager, loop.groupManager, keyringSvc)
 
 	// Wire up session key and cancel callbacks so the agent layer can build an O(1)
 	// subagent session-to-agent mapping for GetSessionHistory.
@@ -463,6 +477,12 @@ func (al *AgentLoop) GroupManager() *group.GroupManager {
 // GoalManager returns the persistent goal manager.
 func (al *AgentLoop) GoalManager() *GoalManager {
 	return al.goalManager
+}
+
+// KeyringService returns the encrypted secret storage service (may be nil if
+// the keyring module is disabled).
+func (al *AgentLoop) KeyringService() *keyring.Service {
+	return al.keyringService
 }
 
 // AllGroupSnapshots returns a GroupSnapshot for every tracked group.

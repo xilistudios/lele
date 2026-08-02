@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/keyring"
 )
 
 //go:generate cp -r ../../workspace .
@@ -26,7 +27,34 @@ func getLeleDir() string {
 }
 
 func loadConfig() (*config.Config, error) {
+	cfg, err := config.LoadConfig(getConfigPath())
+	if err != nil {
+		return nil, err
+	}
+	// Register the keyring resolver so {{SECRET:name}} placeholders can be
+	// resolved, then reload so secret-backed config values are populated.
+	registerKeyringResolver(cfg)
 	return config.LoadConfig(getConfigPath())
+}
+
+// registerKeyringResolver installs a config-level resolver that reads secret
+// values from the keyring. The service is created lazily and performs no I/O
+// until a {{SECRET:}} placeholder is actually resolved.
+func registerKeyringResolver(cfg *config.Config) {
+	if cfg == nil || !cfg.Keyring.Enabled {
+		config.RegisterKeyringResolver(nil)
+		return
+	}
+	svc := keyring.NewService(keyring.ServiceConfig{
+		Enabled:      cfg.Keyring.Enabled,
+		VaultPath:    cfg.KeyringVaultPath(),
+		Backend:      cfg.Keyring.Backend,
+		AuditLogSize: cfg.Keyring.AuditLogSize,
+		LeleDir:      config.GetLeleDir(),
+	})
+	config.RegisterKeyringResolver(func(name string) (string, error) {
+		return svc.GetRaw(name)
+	})
 }
 
 func copyDirectory(src, dst string) error {

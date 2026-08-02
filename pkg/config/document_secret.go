@@ -7,11 +7,12 @@ import (
 )
 
 var envPlaceholderRegex = regexp.MustCompile(`^\{\{ENV_([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}\}$`)
+var secretPlaceholderRegex = regexp.MustCompile(`^\{\{SECRET:([^}]+)\}\}$`)
 
 func parseSecretValue(raw json.RawMessage, path string, secretsByPath map[string]string) SecretValue {
 	var strValue string
 	if err := json.Unmarshal(raw, &strValue); err == nil {
-		// Check whether the string is a placeholder.
+		// Check whether the string is an ENV placeholder.
 		matches := envPlaceholderRegex.FindStringSubmatch(strValue)
 		if len(matches) >= 2 {
 			var envDefault *string
@@ -25,6 +26,15 @@ func parseSecretValue(raw json.RawMessage, path string, secretsByPath map[string
 				EnvName:    matches[1],
 				EnvDefault: envDefault,
 				HasEnvVar:  os.Getenv(matches[1]) != "",
+			}
+		}
+
+		// Check whether the string is a keyring SECRET placeholder.
+		if sm := secretPlaceholderRegex.FindStringSubmatch(strValue); len(sm) >= 2 {
+			secretsByPath[path] = "keyring"
+			return SecretValue{
+				Mode:       SecretModeKeyring,
+				SecretName: sm[1],
 			}
 		}
 

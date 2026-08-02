@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -32,7 +33,13 @@ type ExecTool struct {
 	verboseLevel        session.VerboseLevel                  // Verbose level for feedback messages
 	backgroundManager   *BackgroundProcessManager             // Manager for background processes
 	backgroundThreshold time.Duration                         // Duration threshold for auto-backgrounding
+	keyringSvc          *keyring.Service                      // Optional keyring for {{SECRET:name}} substitution
+	secretSubstitution  bool                                  // Enable {{SECRET:name}} substitution (default true)
 }
+
+// secretPlaceholderInlineRegex matches {{SECRET:name}} placeholders anywhere in
+// a command string (not just whole-string, unlike the config resolver).
+var secretPlaceholderInlineRegex = regexp.MustCompile(`\{\{SECRET:([^}]+)\}\}`)
 
 // SetContext implements ContextualTool interface
 func (t *ExecTool) SetContext(channel, chatID string) {
@@ -139,6 +146,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		allowPatterns:       nil,
 		restrictToWorkspace: restrict,
 		backgroundThreshold: 60 * time.Second,
+		secretSubstitution:  true,
 	}
 }
 
@@ -147,7 +155,7 @@ func (t *ExecTool) Name() string {
 }
 
 func (t *ExecTool) Description() string {
-	return "Execute a shell command and return its output. Use with caution."
+	return "Execute a shell command and return its output. Use with caution. Supports {{SECRET:name}} placeholders that are substituted with the named keyring secret at run time (the raw value never appears in logs or session history)."
 }
 
 func (t *ExecTool) Parameters() map[string]interface{} {
@@ -232,6 +240,15 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		cmdCtx, cancel = context.WithCancel(ctx)
 	}
 	defer cancel()
+
+	// Resolve {{SECRET:name}} placeholders just before execution. The guard
+	// checks above ran against the placeholder form, so raw secret values are
+	// never exposed to safety guards, logs, or session history.
+	resolvedCommand, err := t.substituteSecrets(ctx, command)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	command = resolvedCommand
 
 	// Detached context for the command process (survives after we return
 	// for backgrounded processes)
@@ -516,6 +533,57 @@ func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
 
 func (t *ExecTool) SetTimeout(timeout time.Duration) {
 	t.timeout = timeout
+}
+
+// SetKeyringService attaches a keyring service used to resolve {{SECRET:name}}
+// placeholders in commands at run time.
+func (t *ExecTool) SetKeyringService(svc *keyring.Service) {
+	t.keyringSvc = svc
+}
+
+// SetSecretSubstitution enables or disables {{SECRET:name}} substitution.
+func (t *ExecTool) SetSecretSubstitution(enabled bool) {
+	t.secretSubstitution = enabled
+}
+
+// substituteSecrets replaces every {{SECRET:name}} placeholder in the command
+// with the corresponding keyring value, scoped to the acting agent. The raw
+// secret value is injected only here, immediately before execution, so it never
+// appears in guard checks, logs, or session history. If no keyring is attached
+// or substitution is disabled, the command is returned unchanged. An unknown or
+// inaccessible secret yields an error so the command is not run with a literal
+// placeholder.
+func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (string, error) {
+	if !t.secretSubstitution || t.keyringSvc == nil {
+		return command, nil
+	}
+	if !secretPlaceholderInlineRegex.MatchString(command) {
+		return command, nil
+	}
+
+	agentID, sessionKey := AgentToolContextFromCtx(ctx)
+	if agentID == "" {
+		agentID = "unknown"
+	}
+
+	var subErr error
+	resolved := secretPlaceholderInlineRegex.ReplaceAllStringFunc(command, func(match string) string {
+		if subErr != nil {
+			return match
+		}
+		name := secretPlaceholderInlineRegex.FindStringSubmatch(match)[1]
+		name = strings.TrimSpace(name)
+		value, err := t.keyringSvc.GetForAgent(name, agentID, sessionKey)
+		if err != nil {
+			subErr = fmt.Errorf("failed to resolve secret %q: %w", name, err)
+			return match
+		}
+		return value
+	})
+	if subErr != nil {
+		return "", subErr
+	}
+	return resolved, nil
 }
 
 func (t *ExecTool) SetRestrictToWorkspace(restrict bool) {

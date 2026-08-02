@@ -80,10 +80,13 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 
 	// Execute tool with approval handling for exec
 	var toolResult *tools.ToolResult
+	// Inject the acting agent ID and session key so tools that enforce
+	// per-agent access control (e.g. the keyring secret tool) can read them.
+	execCtx := tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
 	if opts.tc.Name == "exec" && te.al.approvalManager != nil {
 		toolResult = te.executeWithApproval(opts, asyncCallback)
 	} else {
-		toolResult = opts.agent.Tools.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
+		toolResult = opts.agent.Tools.ExecuteWithContext(execCtx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 	}
 
 	// Handle nil result

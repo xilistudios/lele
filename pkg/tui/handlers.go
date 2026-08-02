@@ -237,6 +237,48 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.textInput.Placeholder = "Vision support? (yes/no)"
 					}
 					return m, nil
+				} else if m.modalMode == ModalAddSecret {
+					// Form-based modal: name, value, description, tags, scope
+					val := m.textInput.Value()
+					// Name and value are required; the rest are optional.
+					if m.formStepIndex <= 1 && strings.TrimSpace(val) == "" {
+						m.formError = "This field is required"
+						return m, nil
+					}
+					m.formError = ""
+					m.formValues[m.formStepIndex] = val
+					if m.formStepIndex >= 4 {
+						// Last step — save secret
+						svc := m.keyringSvc()
+						if svc == nil {
+							m.formError = i18n.T("tui.secretsUnavailable")
+							return m, nil
+						}
+						tags := splitCSV(m.formValues[3])
+						scope := splitCSV(m.formValues[4])
+						if err := svc.SetFromUI(m.formValues[0], m.formValues[1], m.formValues[2], tags, scope, "tui"); err != nil {
+							m.formError = err.Error()
+							return m, nil
+						}
+						m.resetModal(ModalSecrets)
+						m.loadSecrets()
+						m.reselectSecret(m.formValues[0])
+						return m, nil
+					}
+					// Advance to next step
+					m.formStepIndex++
+					m.textInput.SetValue("")
+					switch m.formStepIndex {
+					case 1:
+						m.textInput.Placeholder = "Secret value (stored encrypted)"
+					case 2:
+						m.textInput.Placeholder = "Description (optional)"
+					case 3:
+						m.textInput.Placeholder = "Tags, comma-separated (optional)"
+					case 4:
+						m.textInput.Placeholder = "Scope: agent IDs, comma-separated (empty = all)"
+					}
+					return m, nil
 				} else if len(m.modalItems) > 0 {
 					selectedVal := m.modalItems[m.modalSelectedIdx]
 					if m.modalMode == ModalAgent {
@@ -415,8 +457,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.cronDetailJobID = m.cronModalKeys[m.modalSelectedIdx]
 							return m, m.tickCmd()
 						}
+					} else if m.modalMode == ModalSecrets {
+						if m.secretsDetailMode {
+							// In detail view - go back to list
+							m.secretsDetailMode = false
+							m.secretsDetailName = ""
+							m.secretsReveal = false
+							m.loadSecrets()
+							return m, m.tickCmd()
+						}
+						if m.modalSelectedIdx < len(m.secretsModalKeys) {
+							m.secretsDetailMode = true
+							m.secretsDetailName = m.secretsModalKeys[m.modalSelectedIdx]
+							m.secretsReveal = false
+							return m, m.tickCmd()
+						}
 					}
-					if !m.bgExecViewMode && !m.cronDetailMode {
+					if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
 						m.modalMode = ModalNone
 					}
 					m.reloadSessions()
@@ -436,6 +493,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cronDetailMode = false
 					m.cronDetailJobID = ""
 					m.loadCronJobs()
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSecrets && m.secretsDetailMode {
+					// In detail view: go back to list
+					m.secretsDetailMode = false
+					m.secretsDetailName = ""
+					m.secretsReveal = false
+					m.loadSecrets()
 					return m, m.tickCmd()
 				}
 				m.modalMode = ModalNone
@@ -476,6 +541,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				}
+				// Reveal/hide a secret value in the detail view
+				if m.modalMode == ModalSecrets && m.secretsDetailMode {
+					m.secretsReveal = !m.secretsReveal
+					return m, m.tickCmd()
+				}
+			case "a":
+				// Add a new secret
+				if m.modalMode == ModalSecrets && !m.secretsDetailMode {
+					if m.keyringSvc() != nil {
+						m.startAddSecret()
+						return m, m.tickCmd()
+					}
+				}
 			case "d":
 				// Delete a cron job
 				if m.modalMode == ModalCron && m.cronService != nil {
@@ -488,10 +566,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				}
+				// Delete a secret
+				if m.modalMode == ModalSecrets && m.keyringSvc() != nil {
+					name := m.selectedSecretName()
+					if name != "" {
+						_ = m.keyringSvc().DeleteFromUI(name, "tui")
+						m.secretsDetailMode = false
+						m.secretsDetailName = ""
+						m.secretsReveal = false
+						m.loadSecrets()
+						return m, m.tickCmd()
+					}
+				}
 			}
 			// Forward keystrokes to textInput for form-based modals
 			// so users can type in the input fields.
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel {
+			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
@@ -1247,6 +1337,10 @@ func (m *Model) resetModal(mode modalType) {
 	m.cronModalKeys = nil
 	m.cronDetailMode = false
 	m.cronDetailJobID = ""
+	m.secretsModalKeys = nil
+	m.secretsDetailMode = false
+	m.secretsDetailName = ""
+	m.secretsReveal = false
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -1260,7 +1354,7 @@ func (m *Model) resetModal(mode modalType) {
 // (navigable with up/down keys), as opposed to form-based modals.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalAddSecret:
 		return false
 	default:
 		return true

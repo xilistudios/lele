@@ -33,6 +33,11 @@ import type {
   ModelsResponse,
   ProviderModelsResponse,
   SafeClientInfo,
+  SecretDetailResponse,
+  SecretInput,
+  SecretMeta,
+  SecretsAuditResponse,
+  SecretsListResponse,
   SendMessageRequest,
   SendMessageResponse,
   SessionAgentResponse,
@@ -590,6 +595,20 @@ export const createApiClient = (baseUrl: string) => {
         request<{ id: string; ran: boolean; job: CronJob }>(endpoints.cron.run(id), {
           method: 'POST',
         }),
+    },
+    secrets: {
+      list: () => request<SecretsListResponse>(endpoints.secrets.list, { method: 'GET' }),
+      get: (name: string) =>
+        request<SecretDetailResponse>(endpoints.secrets.get(name), { method: 'GET' }),
+      create: (input: SecretInput) =>
+        request<{ secret: SecretMeta }>(endpoints.secrets.create, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      remove: (name: string) =>
+        request<{ deleted: string }>(endpoints.secrets.remove(name), { method: 'DELETE' }),
+      status: () => request<SecretsListResponse['status']>(endpoints.secrets.status, { method: 'GET' }),
+      audit: () => request<SecretsAuditResponse>(endpoints.secrets.audit, { method: 'GET' }),
     },
     logs: {
       list: (params?: { level?: string; date?: string; lines?: number }) => {

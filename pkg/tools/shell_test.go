@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/keyring"
 )
 
 // TestShellTool_Success verifies successful command execution
@@ -206,5 +208,162 @@ func TestShellTool_RestrictToWorkspace(t *testing.T) {
 
 	if !strings.Contains(result.ForLLM, "blocked") && !strings.Contains(result.ForUser, "blocked") {
 		t.Errorf("Expected 'blocked' message for path traversal, got ForLLM: %s, ForUser: %s", result.ForLLM, result.ForUser)
+	}
+}
+
+// newTestKeyring builds an in-memory (file-backed, temp dir) keyring service for tests.
+func newTestKeyring(t *testing.T) *keyring.Service {
+	t.Helper()
+	dir := t.TempDir()
+	return keyring.NewService(keyring.ServiceConfig{
+		Enabled:      true,
+		VaultPath:    filepath.Join(dir, "keyring.enc"),
+		Backend:      keyring.BackendFile,
+		AuditLogSize: 100,
+		LeleDir:      dir,
+	})
+}
+
+// TestShellTool_SecretSubstitution verifies {{SECRET:name}} is replaced with the
+// keyring value at run time.
+func TestShellTool_SecretSubstitution(t *testing.T) {
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("test.token", "s3cr3t-value", "test", nil, nil, "tui"); err != nil {
+		t.Fatalf("failed to set secret: %v", err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "session-1")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:test.token}}",
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, "s3cr3t-value") {
+		t.Errorf("expected substituted value in output, got: %s", result.ForUser)
+	}
+	if strings.Contains(result.ForUser, "{{SECRET:") {
+		t.Errorf("placeholder should have been substituted, got: %s", result.ForUser)
+	}
+}
+
+// TestShellTool_SecretSubstitution_Multiple verifies several placeholders in one command.
+func TestShellTool_SecretSubstitution_Multiple(t *testing.T) {
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("a", "AAA", "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetFromUI("b", "BBB", "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:a}}-{{SECRET:b}}",
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, "AAA-BBB") {
+		t.Errorf("expected 'AAA-BBB' in output, got: %s", result.ForUser)
+	}
+}
+
+// TestShellTool_SecretSubstitution_Unknown verifies an unknown secret aborts the command.
+func TestShellTool_SecretSubstitution_Unknown(t *testing.T) {
+	svc := newTestKeyring(t)
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:does.not.exist}}",
+	})
+
+	if !result.IsError {
+		t.Fatalf("expected error for unknown secret, got success: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "does.not.exist") {
+		t.Errorf("expected error to mention secret name, got: %s", result.ForLLM)
+	}
+}
+
+// TestShellTool_SecretSubstitution_Disabled verifies substitution can be turned off,
+// leaving the placeholder literal.
+func TestShellTool_SecretSubstitution_Disabled(t *testing.T) {
+	svc := newTestKeyring(t)
+	if err := svc.SetFromUI("test.token", "s3cr3t-value", "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+	tool.SetSecretSubstitution(false)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo '{{SECRET:test.token}}'",
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, "{{SECRET:test.token}}") {
+		t.Errorf("expected literal placeholder when disabled, got: %s", result.ForUser)
+	}
+	if strings.Contains(result.ForUser, "s3cr3t-value") {
+		t.Errorf("value should NOT be substituted when disabled, got: %s", result.ForUser)
+	}
+}
+
+// TestShellTool_SecretSubstitution_NoKeyring verifies commands without a keyring
+// attached run unchanged (placeholders left literal, no crash).
+func TestShellTool_SecretSubstitution_NoKeyring(t *testing.T) {
+	tool := NewExecTool("", false)
+
+	ctx := context.Background()
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo '{{SECRET:x}}'",
+	})
+
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, "{{SECRET:x}}") {
+		t.Errorf("expected literal placeholder with no keyring, got: %s", result.ForUser)
+	}
+}
+
+// TestShellTool_SecretSubstitution_ScopeDenied verifies a secret scoped to another
+// agent cannot be resolved by this agent.
+func TestShellTool_SecretSubstitution_ScopeDenied(t *testing.T) {
+	svc := newTestKeyring(t)
+	// Scoped to "other-agent" only.
+	if err := svc.SetFromUI("restricted", "hidden", "", nil, []string{"other-agent"}, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:restricted}}",
+	})
+
+	if !result.IsError {
+		t.Fatalf("expected access-denied error, got success: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForUser, "hidden") {
+		t.Errorf("secret value must not leak on denied access, got: %s", result.ForUser)
 	}
 }

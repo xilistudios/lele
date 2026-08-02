@@ -524,6 +524,7 @@
     "delete": "Eliminar",
     "edit": "Editar",
     "create": "Crear",
+    "confirm": "Confirmar",
     "optional": "opcional",
     "yes": "Sí",
     "no": "No"
@@ -617,7 +618,8 @@
     "navigation": "Navegación",
     "collapse": "Minimizar",
     "expand": "Expandir",
-    "cron": "Tareas programadas"
+    "cron": "Tareas programadas",
+    "secrets": "Secretos"
   },
   "backgroundExecs": {
     "title": "Procesos en Segundo Plano",
@@ -705,5 +707,43 @@
     "errorInterval": "El intervalo debe ser un número positivo de segundos",
     "errorCron": "Introduce una expresión cron",
     "errorMessage": "Se requiere un mensaje o un comando"
+  },
+  "secrets": {
+    "title": "Secretos",
+    "subtitle": "Almacenamiento cifrado de secretos",
+    "empty": "No hay secretos guardados",
+    "createFirst": "Añade tu primer secreto",
+    "new": "Nuevo",
+    "newSecret": "Nuevo secreto",
+    "name": "Nombre",
+    "namePlaceholder": "ej. openai.api_key",
+    "value": "Valor",
+    "valuePlaceholder": "Valor del secreto (cifrado)",
+    "description": "Descripción",
+    "descriptionPlaceholder": "Descripción opcional",
+    "tags": "Etiquetas",
+    "tagsPlaceholder": "Etiquetas separadas por comas",
+    "scope": "Alcance",
+    "scopePlaceholder": "IDs de agentes (vacío = todos)",
+    "backend": "Backend",
+    "count": "secretos",
+    "reveal": "Revelar",
+    "hide": "Ocultar",
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "delete": "Eliminar",
+    "confirmDelete": "¿Eliminar este secreto?",
+    "createdBy": "Creado por",
+    "createdAt": "Creado",
+    "updatedAt": "Actualizado",
+    "allAgents": "todos los agentes",
+    "audit": "Registro de acceso",
+    "auditEmpty": "Sin registros de acceso",
+    "action": "Acción",
+    "agent": "Agente",
+    "granted": "Concedido",
+    "denied": "Denegado",
+    "errorName": "El nombre es obligatorio",
+    "errorValue": "El valor es obligatorio"
   }
 }

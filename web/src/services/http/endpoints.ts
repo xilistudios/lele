@@ -85,6 +85,14 @@ export const endpoints = {
     disable: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}/disable`,
     run: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}/run`,
   },
+  secrets: {
+    list: '/api/v1/secrets',
+    create: '/api/v1/secrets',
+    get: (name: string) => `/api/v1/secrets/${encodeURIComponent(name)}`,
+    remove: (name: string) => `/api/v1/secrets/${encodeURIComponent(name)}`,
+    status: '/api/v1/secrets/status',
+    audit: '/api/v1/secrets/audit',
+  },
   logs: {
     list: '/api/v1/logs',
     dates: '/api/v1/logs/dates',

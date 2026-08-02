@@ -150,6 +150,11 @@ func gatewayCmd() {
 			// Expose the cron service through the API so the Web UI and TUI
 			// can view and manage scheduled jobs.
 			nc.SetCronService(cronService)
+			// Expose the keyring service so the Web UI can manage secrets.
+			// Uses the same instance as the agent tool for a shared audit log.
+			if ks := agentLoop.KeyringService(); ks != nil {
+				nc.SetKeyringService(ks)
+			}
 			// Set up a reload callback so config changes via the API trigger
 			// an immediate runtime reload (not waiting for fsnotify/kqueue).
 			nc.SetReloadConfig(func() error {

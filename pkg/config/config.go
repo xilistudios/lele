@@ -141,6 +141,7 @@ type Config struct {
 	Heartbeat HeartbeatConfig  `json:"heartbeat"`
 	Devices   DevicesConfig    `json:"devices"`
 	Logs      LogsConfig       `json:"logs"`
+	Keyring   KeyringConfig    `json:"keyring"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	mu        sync.RWMutex
 }
@@ -410,6 +411,16 @@ type LogsConfig struct {
 	Path     string `json:"path,omitempty" env:"LELE_LOGS_PATH"`         // Custom path (default: ~/.lele/logs)
 	MaxDays  int    `json:"max_days,omitempty" env:"LELE_LOGS_MAX_DAYS"` // Max days to keep logs (default: 7)
 	Rotation string `json:"rotation,omitempty" env:"LELE_LOGS_ROTATION"` // "daily" or "weekly" (default: daily)
+}
+
+// KeyringConfig holds configuration for the encrypted secret store.
+type KeyringConfig struct {
+	Enabled          bool   `json:"enabled" env:"LELE_KEYRING_ENABLED"`
+	Path             string `json:"path,omitempty" env:"LELE_KEYRING_PATH"`       // Vault file (default: ~/.lele/keyring.enc)
+	Backend          string `json:"backend,omitempty" env:"LELE_KEYRING_BACKEND"` // "auto", "keychain", or "file"
+	AuditLogSize     int    `json:"audit_log_size,omitempty" env:"LELE_KEYRING_AUDIT_LOG_SIZE"`
+	AllowAgentSet    bool   `json:"allow_agent_set" env:"LELE_KEYRING_ALLOW_AGENT_SET"`
+	AllowAgentDelete bool   `json:"allow_agent_delete" env:"LELE_KEYRING_ALLOW_AGENT_DELETE"`
 }
 
 type ProvidersConfig struct {
@@ -1059,6 +1070,14 @@ func DefaultConfig() *Config {
 			MaxDays:  7,
 			Rotation: "daily",
 		},
+		Keyring: KeyringConfig{
+			Enabled:          true,
+			Path:             "",
+			Backend:          "auto",
+			AuditLogSize:     1000,
+			AllowAgentSet:    false,
+			AllowAgentDelete: false,
+		},
 	}
 }
 
@@ -1163,6 +1182,7 @@ func (c *Config) Reload(path string) error {
 	c.Heartbeat = loaded.Heartbeat
 	c.Devices = loaded.Devices
 	c.Logs = loaded.Logs
+	c.Keyring = loaded.Keyring
 	return nil
 }
 
@@ -1281,6 +1301,17 @@ func (c *Config) LogsPath() string {
 		return filepath.Join(GetLeleDir(), "logs")
 	}
 	return expandHome(c.Logs.Path)
+}
+
+// KeyringVaultPath returns the path to the encrypted keyring vault file,
+// defaulting to <lele-dir>/keyring.enc when unset.
+func (c *Config) KeyringVaultPath() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.Keyring.Path == "" {
+		return filepath.Join(GetLeleDir(), "keyring.enc")
+	}
+	return expandHome(c.Keyring.Path)
 }
 
 func (c *Config) GetAPIKey() string {
