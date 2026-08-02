@@ -532,7 +532,14 @@
     "disabled": "Disabled",
     "status": "Status",
     "expand": "Expand",
-    "collapse": "Collapse"
+    "collapse": "Collapse",
+    "refresh": "Refresh",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "optional": "optional",
+    "yes": "Yes",
+    "no": "No"
   },
   "groups": {
     "title": "Group Chat",
@@ -622,7 +629,8 @@
     "backgroundExecs": "Background Processes",
     "navigation": "Navigation",
     "collapse": "Minimize",
-    "expand": "Expand"
+    "expand": "Expand",
+    "cron": "Scheduled Jobs"
   },
   "backgroundExecs": {
     "title": "Background Processes",
@@ -668,5 +676,47 @@
     "chatDescription": "Simple chat with web search",
     "agentDescription": "Full agent with all tools",
     "groupDescription": "Multi-agent group chat"
+  },
+  "cron": {
+    "title": "Scheduled Jobs",
+    "jobs": "jobs",
+    "nextWake": "next wake",
+    "new": "New",
+    "newJob": "New Job",
+    "editJob": "Edit Job",
+    "empty": "No scheduled jobs",
+    "createFirst": "Create your first job",
+    "enabled": "enabled",
+    "disabled": "disabled",
+    "nextRun": "Next run",
+    "lastRun": "Last run",
+    "message": "Message",
+    "command": "Command",
+    "deliver": "Deliver",
+    "deliverHint": "Deliver message directly to channel",
+    "channel": "Channel",
+    "to": "To",
+    "created": "Created",
+    "updated": "Updated",
+    "spawn": "Spawn",
+    "name": "Name",
+    "namePlaceholder": "Optional label",
+    "messagePlaceholder": "What should happen when this runs?",
+    "schedule": "Schedule",
+    "once": "One-time",
+    "interval": "Interval",
+    "cronExpr": "Cron",
+    "seconds": "seconds",
+    "run": "Run",
+    "runNow": "Run now",
+    "enable": "Enable",
+    "disable": "Disable",
+    "confirmDelete": "Delete this job?",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "errorDatetime": "Select a date and time",
+    "errorInterval": "Interval must be a positive number of seconds",
+    "errorCron": "Enter a cron expression",
+    "errorMessage": "Message or command is required"
   }
 }

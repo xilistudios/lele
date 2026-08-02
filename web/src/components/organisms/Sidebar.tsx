@@ -9,6 +9,7 @@ import { IconButton } from '../atoms/IconButton'
 import {
   AgentsIcon,
   ChatBubbleIcon,
+  ClockIcon,
   HistoryIcon,
   LogoutIcon,
   MoreIcon,
@@ -124,6 +125,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
       path: '/background-exec',
       label: t('sidebar.backgroundExecs'),
       icon: TerminalIcon,
+    },
+    {
+      path: '/cron',
+      label: t('sidebar.cron'),
+      icon: ClockIcon,
     },
   ]
 

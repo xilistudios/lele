@@ -20,6 +20,10 @@ import type {
   ConfigUpdateResponse,
   ConfigValidateResponse,
   CreateSessionResponse,
+  CronJob,
+  CronJobInput,
+  CronJobResponse,
+  CronJobsResponse,
   EditableConfig,
   FileUploadResponse,
   GroupsConfig,
@@ -557,6 +561,36 @@ export const createApiClient = (baseUrl: string) => {
           method: 'POST',
         }),
     },
+    cron: {
+      list: (includeDisabled = true) =>
+        request<CronJobsResponse>(
+          `${endpoints.cron.list}${includeDisabled ? '?include_disabled=true' : ''}`,
+          { method: 'GET' },
+        ),
+      get: (id: string) => request<CronJobResponse>(endpoints.cron.get(id), { method: 'GET' }),
+      create: (input: CronJobInput) =>
+        request<CronJobResponse>(endpoints.cron.create, {
+          method: 'POST',
+          body: JSON.stringify(input),
+        }),
+      update: (id: string, input: CronJobInput) =>
+        request<CronJobResponse>(endpoints.cron.update(id), {
+          method: 'PUT',
+          body: JSON.stringify(input),
+        }),
+      remove: (id: string) =>
+        request<{ id: string; removed: boolean }>(endpoints.cron.remove(id), {
+          method: 'DELETE',
+        }),
+      enable: (id: string) =>
+        request<CronJobResponse>(endpoints.cron.enable(id), { method: 'POST' }),
+      disable: (id: string) =>
+        request<CronJobResponse>(endpoints.cron.disable(id), { method: 'POST' }),
+      run: (id: string) =>
+        request<{ id: string; ran: boolean; job: CronJob }>(endpoints.cron.run(id), {
+          method: 'POST',
+        }),
+    },
     logs: {
       list: (params?: { level?: string; date?: string; lines?: number }) => {
         const query = new URLSearchParams()
@@ -564,10 +598,9 @@ export const createApiClient = (baseUrl: string) => {
         if (params?.date) query.set('date', params.date)
         if (params?.lines) query.set('lines', String(params.lines))
         const qs = query.toString()
-        return request<LogsResponse>(
-          `${endpoints.logs.list}${qs ? `?${qs}` : ''}`,
-          { method: 'GET' },
-        )
+        return request<LogsResponse>(`${endpoints.logs.list}${qs ? `?${qs}` : ''}`, {
+          method: 'GET',
+        })
       },
       dates: () => request<LogsDatesResponse>(endpoints.logs.dates, { method: 'GET' }),
     },

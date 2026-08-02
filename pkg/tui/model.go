@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
@@ -104,6 +106,13 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		mouseEnabled:           true,
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
 	}
+
+	// Initialize a read/manage-only cron service backed by the same store the
+	// gateway uses. We intentionally do NOT call Start() so the TUI never
+	// schedules or fires jobs — it only lists, enables/disables, runs-now and
+	// deletes them.
+	cronStorePath := filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json")
+	m.cronService = cron.NewCronService(cronStorePath, nil)
 
 	// If an initial session ID was provided, try to open it
 	if len(initialSessionID) > 0 && initialSessionID[0] != "" {

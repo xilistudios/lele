@@ -925,6 +925,76 @@ export type BackgroundExecStopResponse = {
   stopped: boolean
 }
 
+export type CronSchedule = {
+  kind: 'at' | 'every' | 'cron' | string
+  atMs?: number | null
+  everyMs?: number | null
+  expr?: string
+  tz?: string
+}
+
+export type CronSpawnConfig = {
+  task: string
+  label?: string
+  agent_id?: string
+  guidance?: string
+}
+
+export type CronPayload = {
+  kind: string
+  message: string
+  command?: string
+  deliver: boolean
+  channel?: string
+  to?: string
+  spawn?: CronSpawnConfig | null
+}
+
+export type CronJobState = {
+  nextRunAtMs?: number | null
+  lastRunAtMs?: number | null
+  lastStatus?: string
+  lastError?: string
+}
+
+export type CronJob = {
+  id: string
+  name: string
+  enabled: boolean
+  schedule: CronSchedule
+  payload: CronPayload
+  state: CronJobState
+  createdAtMs: number
+  updatedAtMs: number
+  deleteAfterRun: boolean
+}
+
+export type CronStatus = {
+  enabled: boolean
+  jobs: number
+  nextWakeAtMS?: number | null
+}
+
+export type CronJobsResponse = {
+  jobs: CronJob[]
+  status: CronStatus
+}
+
+export type CronJobResponse = {
+  job: CronJob
+}
+
+export type CronJobInput = {
+  name?: string
+  enabled?: boolean
+  schedule: CronSchedule
+  message?: string
+  command?: string
+  deliver?: boolean
+  channel?: string
+  to?: string
+}
+
 export type LogEntry = {
   level: string
   timestamp: string

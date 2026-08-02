@@ -172,6 +172,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 		return nil
 
+	case "/cron":
+		m.resetModal(ModalCron)
+		m.loadCronJobs()
+		return nil
+
 	case "/providers":
 		m.resetModal(ModalProviders)
 		m.providerModalKeys = nil

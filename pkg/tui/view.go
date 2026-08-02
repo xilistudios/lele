@@ -148,6 +148,9 @@ func (m *Model) View() string {
 			if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
 				return m.renderBgExecOutput()
 			}
+			if m.modalMode == ModalCron && m.cronDetailMode {
+				return m.renderCronDetail()
+			}
 			var modalTitle string
 			switch m.modalMode {
 			case ModalAgent:
@@ -164,6 +167,8 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.selectLanguage")
 			case ModalBackgroundExecs:
 				modalTitle = i18n.T("tui.backgroundProcesses")
+			case ModalCron:
+				modalTitle = i18n.T("tui.cronJobs")
 			case ModalProviders:
 				modalTitle = i18n.T("tui.selectProvider")
 			case ModalProviderDetail:
@@ -402,6 +407,9 @@ func (m *Model) View() string {
 		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
 			return m.renderBgExecOutput()
 		}
+		if m.modalMode == ModalCron && m.cronDetailMode {
+			return m.renderCronDetail()
+		}
 		var modalTitle string
 		switch m.modalMode {
 		case ModalAgent:
@@ -418,6 +426,8 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.selectLanguage")
 		case ModalBackgroundExecs:
 			modalTitle = i18n.T("tui.backgroundProcesses")
+		case ModalCron:
+			modalTitle = i18n.T("tui.cronJobs")
 		case ModalProviders:
 			modalTitle = i18n.T("tui.selectProvider")
 		case ModalProviderDetail:

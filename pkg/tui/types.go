@@ -7,6 +7,7 @@ import (
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/session"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -88,6 +89,7 @@ const (
 	ModalProviderDetail // provider detail (edit/delete/add model)
 	ModalAddProvider    // form to add a new provider
 	ModalAddModel       // form to add a new model to a provider
+	ModalCron           // list of cron jobs
 )
 
 type formStep int
@@ -115,6 +117,7 @@ var allCommands = []commandInfo{
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
 	{name: "/bg", description: "View background processes"},
+	{name: "/cron", description: "Manage scheduled cron jobs"},
 	{name: "/providers", description: "Manage providers"},
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/compact", description: "Compact conversation history"},
@@ -170,6 +173,12 @@ type Model struct {
 	bgExecViewOutput string   // current output text
 	bgExecViewStatus string   // current status
 	bgExecModalKeys  []string // maps modal items to process IDs
+
+	// Cron job management state
+	cronService     *cron.CronService // read/manage access to the cron store
+	cronModalKeys   []string          // maps modal items to job IDs
+	cronDetailMode  bool              // true when showing detail of a selected job
+	cronDetailJobID string            // ID of the job being viewed in detail
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

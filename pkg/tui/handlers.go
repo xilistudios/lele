@@ -402,8 +402,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							}
 							return m, m.tickCmd()
 						}
+					} else if m.modalMode == ModalCron {
+						if m.cronDetailMode {
+							// In detail view - go back to list
+							m.cronDetailMode = false
+							m.cronDetailJobID = ""
+							m.loadCronJobs()
+							return m, m.tickCmd()
+						}
+						if m.modalSelectedIdx < len(m.cronModalKeys) {
+							m.cronDetailMode = true
+							m.cronDetailJobID = m.cronModalKeys[m.modalSelectedIdx]
+							return m, m.tickCmd()
+						}
 					}
-					if !m.bgExecViewMode {
+					if !m.bgExecViewMode && !m.cronDetailMode {
 						m.modalMode = ModalNone
 					}
 					m.reloadSessions()
@@ -418,6 +431,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				}
+				if m.modalMode == ModalCron && m.cronDetailMode {
+					// In detail view: go back to list
+					m.cronDetailMode = false
+					m.cronDetailJobID = ""
+					m.loadCronJobs()
+					return m, m.tickCmd()
+				}
 				m.modalMode = ModalNone
 			case "s":
 				if m.modalMode == ModalBackgroundExecs && !m.bgExecViewMode {
@@ -426,6 +446,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						_ = m.agentLoop.GetProvidable().StopBackgroundExec(procID)
 						// Refresh the list
 						return m, m.executeCommand("/bg")
+					}
+				}
+			case "e":
+				// Toggle enable/disable for a cron job
+				if m.modalMode == ModalCron && m.cronService != nil {
+					jobID := m.selectedCronJobID()
+					if jobID != "" {
+						if job := m.cronService.GetJob(jobID); job != nil {
+							m.cronService.EnableJob(jobID, !job.Enabled)
+							if m.cronDetailMode {
+								m.cronDetailJobID = jobID
+							}
+							m.loadCronJobs()
+							// Re-select the same job and restore detail mode if needed.
+							m.reselectCronJob(jobID)
+							return m, m.tickCmd()
+						}
+					}
+				}
+			case "r":
+				// Run a cron job now
+				if m.modalMode == ModalCron && m.cronService != nil {
+					jobID := m.selectedCronJobID()
+					if jobID != "" {
+						_ = m.cronService.RunJobNow(jobID)
+						m.loadCronJobs()
+						m.reselectCronJob(jobID)
+						return m, m.tickCmd()
+					}
+				}
+			case "d":
+				// Delete a cron job
+				if m.modalMode == ModalCron && m.cronService != nil {
+					jobID := m.selectedCronJobID()
+					if jobID != "" {
+						m.cronService.RemoveJob(jobID)
+						m.cronDetailMode = false
+						m.cronDetailJobID = ""
+						m.loadCronJobs()
+						return m, m.tickCmd()
 					}
 				}
 			}
@@ -1184,6 +1244,9 @@ func (m *Model) resetModal(mode modalType) {
 	m.bgExecViewID = ""
 	m.bgExecViewOutput = ""
 	m.bgExecViewStatus = ""
+	m.cronModalKeys = nil
+	m.cronDetailMode = false
+	m.cronDetailJobID = ""
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""

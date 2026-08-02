@@ -15,6 +15,7 @@ import { AuthPage } from './components/pages/AuthPage'
 import { BackgroundExecsPage } from './components/pages/BackgroundExecsPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
+import { CronPage } from './components/pages/CronPage'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
@@ -259,6 +260,7 @@ function AppContent() {
         <Route path="skills" element={<SkillsPage />} />
         <Route path="chats" element={<ChatHistoryPage />} />
         <Route path="background-exec" element={<BackgroundExecsPage />} />
+        <Route path="cron" element={<CronPage />} />
         <Route path="settings/:tab?" element={<SettingsRoute />} />
         <Route path="settings/agent/:agentId/:fileName?" element={<AgentFilesPage />} />
         <Route path="settings/agents" element={<Navigate to="/agents" replace />} />
