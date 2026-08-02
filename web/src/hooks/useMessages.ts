@@ -10,9 +10,9 @@ import {
 import type { ChatMessage, ToolStatus } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
-import { useGroupState } from './useGroupState'
 import { useApprovals } from './useApprovals'
 import { chatHistoryQueryKey } from './useChatHistory'
+import { useGroupState } from './useGroupState'
 import { useProcessingSessions } from './useProcessingSessions'
 import { useStreamQueues } from './useStreamQueues'
 
@@ -33,7 +33,11 @@ export function useMessages(
   const [pendingAttachments, setPendingAttachments] = useState<string[]>([])
   const groupState = useGroupState()
   const [groupsEnabled, setGroupsEnabled] = useState(false)
-  const [typingIndicator, setTypingIndicator] = useState<{ deviceId: string; deviceName: string; timestamp: number } | null>(null)
+  const [typingIndicator, setTypingIndicator] = useState<{
+    deviceId: string
+    deviceName: string
+    timestamp: number
+  } | null>(null)
   const streamingRef = useRef(streamingMessages)
   const lastSessionRefreshRef = useRef<number>(0)
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,22 +67,28 @@ export function useMessages(
     onSessionUpdated?.()
   }, [onSessionUpdated])
 
-  const setTypingWithTimeout = useCallback((indicator: { deviceId: string; deviceName: string; timestamp: number } | null) => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current)
-      typingTimeoutRef.current = null
-    }
-    setTypingIndicator(indicator)
-    if (indicator) {
-      typingTimeoutRef.current = setTimeout(() => {
-        setTypingIndicator(null)
-      }, 5000)
-    }
-  }, [])
+  const setTypingWithTimeout = useCallback(
+    (indicator: { deviceId: string; deviceName: string; timestamp: number } | null) => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current)
+        typingTimeoutRef.current = null
+      }
+      setTypingIndicator(indicator)
+      if (indicator) {
+        typingTimeoutRef.current = setTimeout(() => {
+          setTypingIndicator(null)
+        }, 5000)
+      }
+    },
+    [],
+  )
 
-  const sendTyping = useCallback((sessionKey: string) => {
-    wsSend('typing', { session_key: sessionKey })
-  }, [wsSend])
+  const sendTyping = useCallback(
+    (sessionKey: string) => {
+      wsSend('typing', { session_key: sessionKey })
+    },
+    [wsSend],
+  )
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
@@ -216,7 +226,12 @@ export function useMessages(
     setPendingAttachments([])
     groupState.clearGroups()
     processing.processingSessionKeyRef.current = null
-  }, [streamQueues.clearAllQueues, approvals, processing.processingSessionKeyRef, groupState.clearGroups])
+  }, [
+    streamQueues.clearAllQueues,
+    approvals,
+    processing.processingSessionKeyRef,
+    groupState.clearGroups,
+  ])
 
   const clearAll = useCallback(() => {
     streamQueues.clearAllQueues()

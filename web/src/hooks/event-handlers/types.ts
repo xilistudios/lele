@@ -5,7 +5,7 @@
  * that every handler function receives.
  */
 import type { QueryClient } from '@tanstack/react-query'
-import type { GroupInfo, ToolStatus, ChatMessage } from '../../lib/types'
+import type { ChatMessage, GroupInfo, ToolStatus } from '../../lib/types'
 
 export type ClientEvent = { event: string; data: unknown }
 
@@ -36,5 +36,7 @@ export type MessageEventContext = {
   hydrateGroups: (infos: GroupInfo[]) => void
   markActiveGroupsStopped: () => void
   setGroupsEnabled: (enabled: boolean) => void
-  setTypingIndicator: (indicator: { deviceId: string; deviceName: string; timestamp: number } | null) => void
+  setTypingIndicator: (
+    indicator: { deviceId: string; deviceName: string; timestamp: number } | null,
+  ) => void
 }

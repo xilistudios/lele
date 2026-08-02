@@ -1,86 +1,62 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { createAssistantMessage } from '../lib/chatMessageBuilder'
 import type { ChatMessage } from '../lib/types'
 
-// Interval between characters when animating streaming text in the UI.
-const STREAM_CHAR_INTERVAL_MS = 12
+// Assistant insertion ordering lives in messageInsertion.ts (shared with
+// the tool handlers). Re-exported here to preserve the existing import
+// path used by messageOrdering.test.ts.
+import { computeAssistantInsertIndex } from './messageInsertion'
+export { computeAssistantInsertIndex }
 
-// If the queue accumulates more than this many characters (e.g., because the
-// tab was backgrounded and setInterval was throttled), flush them all at once
-// instead of animating one-by-one. This prevents the UI from appearing "stuck"
-// after the user returns to the tab.
-const FLUSH_THRESHOLD = 80
+// ── Animation tuning ────────────────────────────────────────────────────────
 
-/**
- * Compute the index at which a new assistant message should be inserted into
- * the current streaming message array so it lands in the correct chronological
- * position relative to user messages, prior assistants, and tools.
- *
- * Case 1 — user message is AFTER the last assistant:
- *   e.g. [a1-completed, u2-opt] — a1 was retained from a previous turn (HTTP
- *   cache hasn't caught up yet). The new assistant responds to u2, so it must
- *   go AFTER u2, not after a1.
- *
- * Case 2 — last assistant is AFTER the last user (or no user exists):
- *   e.g. [u1-opt, a1, t1] — the new assistant is a continuation of the same turn
- *   (post-tool-call response). Insert after the last assistant and its trailing
- *   tools.
- *
- * Case 3 — no assistant exists:
- *   e.g. [t1, t2] — tools arrived before message.stream (ack delayed). Insert
- *   BEFORE the first tool so order is: assistant → tool calls.
- *
- * Exported as a pure function so the ordering rules can be unit-tested directly
- * (see messageOrdering.test.ts) without rendering React or driving a queue.
- */
-export function computeAssistantInsertIndex(current: ChatMessage[]): number {
-  const lastUserRevIdx = [...current].reverse().findIndex((m) => m.role === 'user')
-  const lastAsstRevIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
-  const lastUserPos = lastUserRevIdx >= 0 ? current.length - 1 - lastUserRevIdx : -1
-  const lastAsstPos = lastAsstRevIdx >= 0 ? current.length - 1 - lastAsstRevIdx : -1
+// One tick of the shared animation loop. ~60fps.
+const TICK_MS = 16
 
-  if (lastUserPos > lastAsstPos) {
-    // User message is after the last assistant — insert right after it
-    return lastUserPos + 1
-  }
+// Base characters rendered per message per tick (the typewriter pace).
+const CHARS_PER_TICK = 2
 
-  if (lastAsstPos >= 0) {
-    // Continuation of the current turn — insert after assistant + its tools
-    let insertIdx = lastAsstPos + 1
-    while (insertIdx < current.length && current[insertIdx].role === 'tool') {
-      insertIdx++
-    }
-    return insertIdx
-  }
-
-  // No assistant exists — insert before all tool messages
-  const firstToolIdx = current.findIndex((m) => m.role === 'tool')
-  return firstToolIdx >= 0 ? firstToolIdx : current.length
-}
-
-// NOTE: For O(1) lookups by message ID in consumer components, use the
-// useMessageIndex hook from './useMessageIndex'. The setState callbacks
-// below still use array scans because they need the latest closure state,
-// but external handlers (e.g. event-handlers) can avoid repeated .find()
-// calls by calling useMessageIndex(streamingMessages) once per render.
+// When a message falls behind (e.g. the tab was backgrounded and ticks were
+// throttled), the per-tick budget grows proportionally so the backlog drains
+// over roughly CATCHUP_FRAMES frames. This smooth catch-up replaces the old
+// hard FLUSH_THRESHOLD band-aid.
+const CATCHUP_FRAMES = 8
 
 type StreamQueue = {
   sessionKey: string
-  chars: string[]
+  /** Buffered characters not yet rendered. */
+  pending: string
+  /** True once the server signalled the stream is done. */
   done: boolean
-  timer: ReturnType<typeof setInterval> | null
 }
 
 type SetStreamingMessages = React.Dispatch<React.SetStateAction<ChatMessage[]>>
 
 /**
- * Manages per-message character animation queues for streaming assistant responses.
- * Each message gets its own queue that drains one character at a time for a
- * smooth typewriter effect.
+ * Manages the typewriter animation for streaming assistant responses.
+ *
+ * A SINGLE shared interval drives every active message: each tick drains a
+ * small budget of buffered characters from each queue and applies all updates
+ * in ONE batched setState. This avoids the per-message timers and per-character
+ * re-renders of the previous implementation while keeping the same smooth
+ * typewriter feel.
  */
 export function useStreamQueues(setStreamingMessages: SetStreamingMessages) {
   const queuesRef = useRef<Map<string, StreamQueue>>(new Map())
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  /**
+   * Insert (or update) an assistant message. Used directly by message.ack,
+   * message.thinking, and the done-with-chunk path — i.e. anywhere we need the
+   * placeholder to exist immediately rather than waiting for the next tick.
+   */
   const ensureAssistantPlaceholder = useCallback(
     (messageId: string, sessionKey: string, chunk = '', isDone = false) => {
       setStreamingMessages((current) => {
@@ -103,61 +79,80 @@ export function useStreamQueues(setStreamingMessages: SetStreamingMessages) {
           content: chunk,
           streaming: !isDone,
         })
-
-        // Compute the chronological insertion point (see computeAssistantInsertIndex
-        // for the full case breakdown) and splice the new assistant in.
-        const insertIdx = computeAssistantInsertIndex(current)
         const arr = [...current]
-        arr.splice(insertIdx, 0, newMsg)
+        arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
         return arr
       })
     },
     [setStreamingMessages],
   )
 
-  const clearQueue = useCallback((messageId: string) => {
-    const queue = queuesRef.current.get(messageId)
-    if (queue?.timer) clearInterval(queue.timer)
-    queuesRef.current.delete(messageId)
-  }, [])
-
-  const clearAllQueues = useCallback(() => {
-    for (const queue of queuesRef.current.values()) {
-      if (queue.timer) clearInterval(queue.timer)
+  // One tick drains a budget of characters from EVERY active queue and applies
+  // all the updates (creation + append + finalization) in a single setState.
+  const tick = useCallback(() => {
+    const queues = queuesRef.current
+    if (queues.size === 0) {
+      stopTimer()
+      return
     }
-    queuesRef.current.clear()
-  }, [])
 
-  const drainQueue = useCallback(
-    (messageId: string) => {
-      const queue = queuesRef.current.get(messageId)
-      if (!queue) return
+    const appends = new Map<string, { sessionKey: string; text: string }>()
+    const finished = new Set<string>()
 
-      // If the queue has accumulated too many characters (tab was throttled),
-      // flush them all at once to catch up immediately.
-      if (queue.chars.length > FLUSH_THRESHOLD) {
-        const bulk = queue.chars.splice(0, queue.chars.length).join('')
-        ensureAssistantPlaceholder(messageId, queue.sessionKey, bulk, false)
-        if (queue.done) {
-          clearQueue(messageId)
-          ensureAssistantPlaceholder(messageId, queue.sessionKey, '', true)
+    for (const [messageId, queue] of queues) {
+      if (queue.pending.length > 0) {
+        const budget = Math.max(CHARS_PER_TICK, Math.ceil(queue.pending.length / CATCHUP_FRAMES))
+        appends.set(messageId, {
+          sessionKey: queue.sessionKey,
+          text: queue.pending.slice(0, budget),
+        })
+        queue.pending = queue.pending.slice(budget)
+      }
+      if (queue.pending.length === 0 && queue.done) {
+        finished.add(messageId)
+      }
+    }
+
+    for (const messageId of finished) queues.delete(messageId)
+    if (queues.size === 0) stopTimer()
+    if (appends.size === 0 && finished.size === 0) return
+
+    setStreamingMessages((current) => {
+      // Ensure every message that receives an append exists. Creation can be
+      // load-bearing: when message.ack is lost/delayed, tools arrive first and
+      // the assistant must be created here, ordered before those tools.
+      let next = current
+      for (const [messageId, { sessionKey }] of appends) {
+        if (!next.some((m) => m.id === messageId)) {
+          const arr = [...next]
+          arr.splice(
+            computeAssistantInsertIndex(next),
+            0,
+            createAssistantMessage({ id: messageId, sessionKey, content: '', streaming: true }),
+          )
+          next = arr
         }
-        return
       }
 
-      const nextChar = queue.chars.shift()
-      if (nextChar) {
-        ensureAssistantPlaceholder(messageId, queue.sessionKey, nextChar, false)
-        return
-      }
+      return next.map((m) => {
+        const append = appends.get(m.id)
+        const isFinished = finished.has(m.id)
+        if (!append && !isFinished) return m
+        return {
+          ...m,
+          content: append ? m.content + append.text : m.content,
+          sessionKey: append ? append.sessionKey : m.sessionKey,
+          streaming: isFinished ? false : m.streaming,
+        }
+      })
+    })
+  }, [setStreamingMessages, stopTimer])
 
-      if (queue.done) {
-        clearQueue(messageId)
-        ensureAssistantPlaceholder(messageId, queue.sessionKey, '', true)
-      }
-    },
-    [clearQueue, ensureAssistantPlaceholder],
-  )
+  const startTimer = useCallback(() => {
+    if (!timerRef.current) {
+      timerRef.current = setInterval(tick, TICK_MS)
+    }
+  }, [tick])
 
   const enqueueChunk = useCallback(
     (messageId: string, sessionKey: string, chunk: string, done: boolean) => {
@@ -165,20 +160,34 @@ export function useStreamQueues(setStreamingMessages: SetStreamingMessages) {
 
       let queue = queuesRef.current.get(messageId)
       if (!queue) {
-        queue = { sessionKey, chars: [], done: false, timer: null }
+        queue = { sessionKey, pending: '', done: false }
         queuesRef.current.set(messageId, queue)
       }
 
       queue.sessionKey = sessionKey
-      if (chunk) queue.chars.push(...Array.from(chunk))
+      if (chunk) queue.pending += chunk
       if (done) queue.done = true
 
-      if (!queue.timer) {
-        queue.timer = setInterval(() => drainQueue(messageId), STREAM_CHAR_INTERVAL_MS)
-      }
+      startTimer()
     },
-    [drainQueue],
+    [startTimer],
   )
+
+  const clearQueue = useCallback(
+    (messageId: string) => {
+      queuesRef.current.delete(messageId)
+      if (queuesRef.current.size === 0) stopTimer()
+    },
+    [stopTimer],
+  )
+
+  const clearAllQueues = useCallback(() => {
+    queuesRef.current.clear()
+    stopTimer()
+  }, [stopTimer])
+
+  // Never leak the shared timer past unmount.
+  useEffect(() => stopTimer, [stopTimer])
 
   return {
     enqueueChunk,

@@ -1,14 +1,26 @@
 /**
  * Streaming / message lifecycle event handlers.
  *
- * Handles the full lifecycle of a chat message as it flows through
- * the WebSocket: welcome/reconnect, stream chunks, thinking reasoning,
+ * Handles the full lifecycle of a chat message as it flows through the
+ * WebSocket: welcome/reconnect, stream chunks, thinking reasoning,
  * acknowledgement, completion, history updates, catchup, attachments,
  * errors, and typing indicators.
+ *
+ * State transitions are delegated to the pure helpers in `streamingOps.ts`;
+ * this file is responsible for event parsing, session-mismatch guards, and
+ * orchestrating side effects (queues, cache, processing state).
  */
-import { createAssistantMessage } from '../../lib/chatMessageBuilder'
 import { wsDebug } from '../../lib/debug'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
+import {
+  applyMessageComplete,
+  attachToLastAssistant,
+  markOptimisticUserFailed,
+  markStreamingAssistantsErrored,
+  migrateRestoreId,
+  removeRestorePlaceholders,
+  restoreInProgressAssistant,
+} from '../streamingOps'
 import {
   type HistoryMessage,
   buildChatHistoryQueryKey,
@@ -35,44 +47,24 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
   // The backend includes accumulated content and reasoning so the frontend
   // doesn't have to wait for the next chunk to see the current state.
   const inProgress = data.in_progress_messages as
-    | Array<{
-        role: string
-        content?: string
-        reasoning_content?: string
-      }>
+    | Array<{ role: string; content?: string; reasoning_content?: string }>
     | undefined
   if (inProgress && inProgress.length > 0 && sessionKey) {
-    ctx.setStreamingMessages((current) => {
-      const updated = [...current]
-      for (const msg of inProgress) {
-        if (msg.role !== 'assistant') continue
-        const content = msg.content ?? ''
-        const reasoning = msg.reasoning_content ?? ''
-        // Use a deterministic ID so we don't create duplicates if the
-        // real stream events arrive shortly after.
-        const restoreId = `restore-${sessionKey}`
-        const existingIdx = updated.findIndex((m) => m.id === restoreId)
-        if (existingIdx >= 0) {
-          updated[existingIdx] = {
-            ...updated[existingIdx],
-            content: content || updated[existingIdx].content,
-            reasoningContent: reasoning || updated[existingIdx].reasoningContent,
-            streaming: true,
-          }
-        } else {
-          updated.push(
-            createAssistantMessage({
-              id: restoreId,
-              sessionKey,
-              content,
-              reasoningContent: reasoning || undefined,
-              streaming: true,
-            }),
+    ctx.setStreamingMessages((current) =>
+      inProgress.reduce<ChatMessage[]>(
+        (acc, msg) => {
+          if (msg.role !== 'assistant') return acc
+          return restoreInProgressAssistant(
+            acc,
+            sessionKey,
+            msg.content ?? '',
+            msg.reasoning_content ?? '',
+            false, // welcome: no user context yet → append at end
           )
-        }
-      }
-      return updated
-    })
+        },
+        [...current],
+      ),
+    )
   }
 
   // Rehydrate group snapshots from welcome/reconnected data
@@ -86,6 +78,11 @@ export function handleMessageStream(ctx: MessageEventContext, data: Record<strin
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.stream')) return
 
+  const msgId = data.message_id as string
+  const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+  const chunk = (data.chunk as string) ?? ''
+  const done = (data.done as boolean) ?? false
+
   wsDebug('[WS] message.stream received', {
     messageId: data.message_id,
     eventSessionKey,
@@ -94,27 +91,9 @@ export function handleMessageStream(ctx: MessageEventContext, data: Record<strin
     done: data.done,
   })
 
-  const msgId = data.message_id as string
-  const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
-  const chunk = (data.chunk as string) ?? ''
-  const done = (data.done as boolean) ?? false
-
-  // After page reload or reconnection, the welcome/reconnected event creates
-  // a restore- message with accumulated content. When real stream chunks
-  // arrive with the actual message_id, migrate the restore- message to the
-  // real ID so content is preserved instead of creating a duplicate.
-  ctx.setStreamingMessages((current) => {
-    const hasReal = current.some((m) => m.id === msgId)
-    if (!hasReal) {
-      const restoreIdx = current.findIndex(
-        (m) => m.id.startsWith('restore-') && m.sessionKey === sessionKey,
-      )
-      if (restoreIdx >= 0) {
-        return current.map((m, i) => (i === restoreIdx ? { ...m, id: msgId } : m))
-      }
-    }
-    return current
-  })
+  // Migrate any restore- placeholder to the real message id so accumulated
+  // content is preserved instead of creating a duplicate.
+  ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
 
   if (done && chunk) {
     ctx.clearQueue(msgId)
@@ -134,27 +113,12 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
   const chunk = (data.chunk as string) ?? ''
   const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
 
-  // After page reload, the welcome event creates a restore- message with
-  // accumulated reasoning. When real thinking chunks arrive with the actual
-  // message_id, we need to migrate the restore- message to the real ID so
-  // reasoning content is preserved instead of creating a duplicate.
-  ctx.setStreamingMessages((current) => {
-    const hasReal = current.some((m) => m.id === msgId)
-    if (!hasReal) {
-      const restoreIdx = current.findIndex(
-        (m) => m.id.startsWith('restore-') && m.sessionKey === sessionKey,
-      )
-      if (restoreIdx >= 0) {
-        return current.map((m, i) => (i === restoreIdx ? { ...m, id: msgId } : m))
-      }
-    }
-    return current
-  })
+  // Migrate any restore- placeholder to the real message id (see stream handler).
+  ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
 
   // Ensure the assistant placeholder exists before updating reasoning content.
   // Without this, thinking chunks arriving before message.stream (e.g., after
-  // page reload or reconnection) are silently dropped because there's no
-  // assistant message to attach them to.
+  // page reload or reconnection) are silently dropped.
   ctx.ensureAssistantPlaceholder(msgId, sessionKey)
 
   ctx.setStreamingMessages((current) =>
@@ -175,12 +139,10 @@ export function handleMessageAck(ctx: MessageEventContext, data: Record<string, 
   ctx.ensureAssistantPlaceholder(data.message_id as string, ackSessionKey)
 
   // Remove restored placeholder messages for this session now that a real
-  // message is starting. This prevents duplicates when the restored content
-  // and the real stream coexist briefly.
+  // message is starting, preventing duplicates when restored content and the
+  // real stream coexist briefly.
   if (ackSessionKey) {
-    ctx.setStreamingMessages((current) =>
-      current.filter((m) => !(m.id.startsWith('restore-') && m.sessionKey === ackSessionKey)),
-    )
+    ctx.setStreamingMessages((current) => removeRestorePlaceholders(current, ackSessionKey))
   }
 }
 
@@ -206,35 +168,45 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
     return
   }
 
-  ctx.setStreamingMessages((current) => {
-    const targetSessionKey = eventSessionKey ?? ctx.currentSessionKeyRef.current
-    return current.flatMap((m) => {
-      // Clean up stale restore- placeholders once the real message completes
-      if (m.id.startsWith('restore-') && m.sessionKey === targetSessionKey) {
-        return []
-      }
-      if (m.role === 'assistant' && m.id === (data.message_id as string)) {
-        // Only overwrite content if the server sent a non-empty final version.
-        // Some providers send message.complete with empty content (the real
-        // text was already delivered via stream chunks). Overwriting with ''
-        // would erase the accumulated response.
-        const serverContent = data.content as string | undefined
-        const content = serverContent && serverContent.length > 0 ? serverContent : m.content
-        return [{ ...m, content, streaming: false }]
-      }
-      if (m.role === 'user' && m.sessionKey === targetSessionKey && m.content.trim() === '') {
-        return []
-      }
-      if (m.role === 'tool' && m.sessionKey === targetSessionKey) {
-        return [{ ...m, streaming: false }]
-      }
-      return [m]
-    })
-  })
+  const targetSessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+  ctx.setStreamingMessages((current) =>
+    applyMessageComplete(
+      current,
+      data.message_id as string,
+      targetSessionKey,
+      data.content as string | undefined,
+    ),
+  )
   ctx.setToolStatus(null)
   ctx.setPendingAttachments([])
   ctx.processingSessionKeyRef.current = null
   ctx.debouncedSessionRefresh()
+}
+
+/**
+ * Whether a streaming message already has a confirmed (non-optimistic) copy in
+ * the HTTP cache, matched by a 200-char content prefix. The prefix comparison
+ * tolerates minor server-side normalization (trailing newlines, unicode). An
+ * empty prefix never matches, so empty messages are kept and reconciled by the
+ * 4s HTTP polling safety net instead.
+ */
+function isConfirmedInCache(
+  msg: ChatMessage,
+  cached: { messages?: ChatMessage[] } | undefined,
+): boolean {
+  const prefix = msg.content.slice(0, 200)
+  if (prefix.length === 0) return false
+  return (
+    cached?.messages?.some((bm) => {
+      if (msg.role === 'user') {
+        return bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix)
+      }
+      if (msg.role === 'assistant') {
+        return bm.role === 'assistant' && bm.content.startsWith(prefix)
+      }
+      return false
+    }) ?? false
+  )
 }
 
 export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -242,47 +214,25 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
   ctx.queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(historySessionKey) })
   ctx.debouncedSessionRefresh()
 
-  if (historySessionKey === ctx.currentSessionKeyRef.current) {
-    ctx.setStreamingMessages((current) =>
-      current.filter((m) => {
-        if (m.sessionKey !== historySessionKey) return true
-        // Remove optimistic user messages — they're now confirmed in the HTTP history
-        if (m.role === 'user' && m.optimistic) return false
-        // Remove completed assistant messages ONLY if the HTTP cache already
-        // contains them. Previously we removed them unconditionally, but the
-        // invalidateQueries refetch is async — if the base messages haven't
-        // arrived yet, the message disappears from the UI until the refetch
-        // completes (causing flicker or permanent loss on slow connections).
-        //
-        // Matching uses a prefix comparison (first 200 chars) instead of full
-        // string equality to tolerate minor server-side normalization (trailing
-        // newlines, unicode encoding differences). The 4s HTTP polling in
-        // useChatHistory is the real safety net: even if this check misses,
-        // mergeMessages' position-based dedup will remove the stale streaming
-        // copy once base catches up.
-        if (m.role === 'assistant' && !m.streaming) {
-          const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-            buildChatHistoryQueryKey(historySessionKey, ctx.parentSessionKeyRef.current ?? undefined),
-          )
-          const prefix = m.content.slice(0, 200)
-          // Guard: an empty prefix would match ANY assistant in base via
-          // startsWith(''), causing an empty completed message to be dropped
-          // prematurely. Only match on a non-empty prefix; otherwise keep the
-          // message and let the polling safety net reconcile it.
-          const inBase =
-            prefix.length > 0 &&
-            cached?.messages?.some(
-              (bm) => bm.role === 'assistant' && bm.content.startsWith(prefix),
-            )
-          if (inBase) return false
-          // Keep it — base hasn't caught up yet. The next history.updated or
-          // polling cycle will clean it up once the refetch lands.
-          return true
-        }
-        return true
-      }),
-    )
-  }
+  if (historySessionKey !== ctx.currentSessionKeyRef.current) return
+
+  // invalidateQueries triggers an ASYNC refetch. We must only strip optimistic
+  // users / completed assistants once the HTTP cache already holds the
+  // confirmed copy — otherwise the message vanishes until the refetch lands
+  // (flicker, or the assistant appearing to jump ahead of the user). The 4s
+  // HTTP poll + mergeMessages dedup are the safety net if this check misses.
+  const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
+    buildChatHistoryQueryKey(historySessionKey, ctx.parentSessionKeyRef.current ?? undefined),
+  )
+
+  ctx.setStreamingMessages((current) =>
+    current.filter((m) => {
+      if (m.sessionKey !== historySessionKey) return true
+      if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
+      if (m.role === 'assistant' && !m.streaming) return !isConfirmedInCache(m, cached)
+      return true
+    }),
+  )
 }
 
 export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -313,12 +263,12 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
     ctx.parentSessionKeyRef.current ?? undefined,
   )
 
+  // Catchup provides canonical history directly into baseMessages. Remove all
+  // assistant/tool streaming messages to prevent duplicates — the catchup data
+  // is the single source of truth.
   ctx.setStreamingMessages((current) =>
     current.filter((message) => {
       if (message.sessionKey !== targetSessionKey) return true
-      // Catchup provides canonical history directly into baseMessages.
-      // Remove all assistant/tool streaming messages to prevent duplicates
-      // — the catchup data is the single source of truth.
       if (message.role === 'assistant') return false
       if (message.role === 'tool') return false
       return true
@@ -327,44 +277,30 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
 }
 
 export function handleAttachments(ctx: MessageEventContext, event: ClientEvent) {
-  ctx.setStreamingMessages((current) => {
-    const idx = [...current].reverse().findIndex((m) => m.role === 'assistant')
-    if (idx < 0) return current
-    const targetIndex = current.length - idx - 1
-    return current.map((m, i) =>
-      i === targetIndex
-        ? { ...m, attachments: event.data as ChatMessage['attachments'], streaming: false }
-        : m,
-    )
-  })
+  ctx.setStreamingMessages((current) =>
+    attachToLastAssistant(current, event.data as ChatMessage['attachments']),
+  )
 }
 
 export function handleMessageError(ctx: MessageEventContext, data: Record<string, unknown>) {
   const errorSessionKey = (getSessionKey(data) ?? ctx.currentSessionKeyRef.current ?? '') as string
 
   // Mark optimistic user message as failed (instead of removing it)
-  ctx.setStreamingMessages((current) =>
-    current.map((m) =>
-      m.role === 'user' && m.optimistic && m.sessionKey === errorSessionKey
-        ? { ...m, failed: true, streaming: false }
-        : m,
-    ),
-  )
+  ctx.setStreamingMessages((current) => markOptimisticUserFailed(current, errorSessionKey))
 
   // Rollback from query cache
-  const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-    buildChatHistoryQueryKey(errorSessionKey, ctx.parentSessionKeyRef.current ?? undefined),
+  const cacheKey = buildChatHistoryQueryKey(
+    errorSessionKey,
+    ctx.parentSessionKeyRef.current ?? undefined,
   )
+  const cached = ctx.queryClient.getQueryData<{ messages?: ChatMessage[] }>(cacheKey)
   if (cached) {
-    ctx.queryClient.setQueryData(
-      buildChatHistoryQueryKey(errorSessionKey, ctx.parentSessionKeyRef.current ?? undefined),
-      {
-        ...cached,
-        messages: (cached.messages ?? []).map((m) =>
-          m.role === 'user' && m.optimistic ? { ...m, failed: true } : m,
-        ),
-      },
-    )
+    ctx.queryClient.setQueryData(cacheKey, {
+      ...cached,
+      messages: (cached.messages ?? []).map((m) =>
+        m.role === 'user' && m.optimistic ? { ...m, failed: true } : m,
+      ),
+    })
   }
 
   ctx.removeProcessingSession(errorSessionKey)
@@ -375,12 +311,11 @@ export function handleStreamError(ctx: MessageEventContext, data: Record<string,
   const errorSessionKey = (getSessionKey(data) ?? ctx.currentSessionKeyRef.current ?? '') as string
 
   ctx.setStreamingMessages((current) =>
-    current.map((m) => {
-      if (m.sessionKey === errorSessionKey && m.role === 'assistant' && m.streaming) {
-        return { ...m, streaming: false, error: (data.error as string) || 'Stream error' }
-      }
-      return m
-    }),
+    markStreamingAssistantsErrored(
+      current,
+      errorSessionKey,
+      (data.error as string) || 'Stream error',
+    ),
   )
 
   ctx.removeProcessingSession(errorSessionKey)
