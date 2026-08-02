@@ -232,6 +232,12 @@ export function useChatHistory(
   const [hasMore, setHasMore] = useState(true)
   const isLoadingMoreRef = useRef(false)
 
+  // Keep a ref to streamingMessages so the refetchInterval callback always
+  // reads the latest value without depending on React Query re-evaluating
+  // the query options on every render.
+  const streamingMessagesRef = useRef(streamingMessages)
+  streamingMessagesRef.current = streamingMessages
+
   const query = useQuery({
     queryKey: buildChatHistoryQueryKey(sessionKey ?? '', parentSessionKey),
     queryFn: async () => {
@@ -304,6 +310,27 @@ export function useChatHistory(
       token !== null &&
       !(sessionKey.startsWith('subagent:') && !parentSessionKey),
     refetchOnWindowFocus: true, // safety net: recovers from WS gaps after tab switch
+    // Poll every 4s while the session is processing so that if the WebSocket
+    // drops events (reconnect, tab throttle, etc.) the UI still updates via
+    // HTTP. Stops polling automatically once processing ends.
+    //
+    // This polling is the authoritative safety net for message reconciliation.
+    // handleHistoryUpdated (streaming.ts) conditionally retains completed
+    // streaming messages until the HTTP cache catches up, but if that check
+    // misses (e.g., content normalization), the next poll brings the message
+    // into baseMessages and mergeMessages' position-based dedup removes the
+    // stale streaming copy.
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (data?.processing) return 4000
+      // Also poll if THIS session has streaming messages (WS-driven) to
+      // reconcile. Scoped to sessionKey so an unrelated session streaming in
+      // the background doesn't keep this query polling. Uses a ref to avoid
+      // stale closures during batched state updates.
+      if (streamingMessagesRef.current.some((m) => m.streaming && m.sessionKey === sessionKey))
+        return 4000
+      return false
+    },
     retry: false,
   })
 

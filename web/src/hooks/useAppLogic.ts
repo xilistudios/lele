@@ -98,9 +98,13 @@ export function useAppLogic(
       sessionsHook.refreshSessions().catch((err) => {
         console.warn('[useAppLogic] Failed to refresh sessions on reconnect:', err)
       })
+      // Refetch chat history to recover messages that arrived during the
+      // disconnect window. The WS reconnected event includes in_progress
+      // content, but completed messages are only available via HTTP.
+      chatHistory.invalidateHistory()
     }
     prevWsStatusRef.current = wsStatus
-  }, [wsStatus, sessionsHook.refreshSessions])
+  }, [wsStatus, sessionsHook.refreshSessions, chatHistory.invalidateHistory])
 
   const agentsRef = useRef(agents)
   useEffect(() => {
