@@ -257,7 +257,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           </div>
         )}
 
-        <div className={`${collapsed ? 'px-2' : 'px-3 py-3'}`}>
+        <div className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3'}>
           {collapsed ? (
             <Popover
               block
@@ -323,7 +323,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
             </Popover>
           ) : (
             <>
-              <div className="flex items-center justify-between px-1 py-1">
+              <div className="flex shrink-0 items-center justify-between px-1 py-1">
                 <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
@@ -354,7 +354,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               </div>
               {sortedSessions.length > 0 && (
                 <>
-                  <nav className="mt-2 space-y-0.5 overflow-y-auto max-h-[240px]">
+                  <nav className="mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto">
                     {recentSessions.map((s) => (
                       <SessionItem
                         key={s.key}
@@ -374,7 +374,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     <button
                       type="button"
                       onClick={() => setRecentExpanded((v) => !v)}
-                      className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                      className="flex shrink-0 items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
                     >
                       <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
                       {!recentExpanded && (
@@ -391,7 +391,13 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Agents & Providers navigation */}
-        <nav className="px-2 flex flex-col gap-1">
+        <nav
+          className={
+            collapsed
+              ? 'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2'
+              : 'flex shrink-0 flex-col gap-1 px-2 pt-1'
+          }
+        >
           {collapsed ? (
             <>
               {navItems.map((item) => (
