@@ -474,6 +474,69 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	return enabled
 }
 
+// GetJob returns a copy of the job with the given ID, or nil if not found.
+func (cs *CronService) GetJob(jobID string) *CronJob {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == jobID {
+			jobCopy := cs.store.Jobs[i]
+			return &jobCopy
+		}
+	}
+	return nil
+}
+
+// RunJobNow executes a job immediately without waiting for its schedule and
+// without altering its enabled state or next run time. It records the outcome
+// in the job's state (last run timestamp, status, and error). Returns an error
+// if the job is not found.
+func (cs *CronService) RunJobNow(jobID string) error {
+	startTime := time.Now().UnixMilli()
+
+	cs.mu.RLock()
+	var callbackJob *CronJob
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == jobID {
+			jobCopy := cs.store.Jobs[i]
+			callbackJob = &jobCopy
+			break
+		}
+	}
+	cs.mu.RUnlock()
+
+	if callbackJob == nil {
+		return fmt.Errorf("job not found")
+	}
+
+	var err error
+	if cs.onJob != nil {
+		_, err = cs.onJob(callbackJob)
+	}
+
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == jobID {
+			job := &cs.store.Jobs[i]
+			job.State.LastRunAtMS = &startTime
+			job.UpdatedAtMS = time.Now().UnixMilli()
+			if err != nil {
+				job.State.LastStatus = "error"
+				job.State.LastError = err.Error()
+			} else {
+				job.State.LastStatus = "ok"
+				job.State.LastError = ""
+			}
+			break
+		}
+	}
+
+	return cs.saveStoreUnsafe()
+}
+
 func (cs *CronService) Status() map[string]interface{} {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()

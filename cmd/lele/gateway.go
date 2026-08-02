@@ -147,6 +147,9 @@ func gatewayCmd() {
 	if nativeCh, ok := channelManager.GetChannel("native"); ok {
 		if nc, ok := nativeCh.(*channels.NativeChannel); ok {
 			nc.RegisterRoutes(srv.Mux())
+			// Expose the cron service through the API so the Web UI and TUI
+			// can view and manage scheduled jobs.
+			nc.SetCronService(cronService)
 			// Set up a reload callback so config changes via the API trigger
 			// an immediate runtime reload (not waiting for fsnotify/kqueue).
 			nc.SetReloadConfig(func() error {

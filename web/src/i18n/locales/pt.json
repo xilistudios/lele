@@ -519,7 +519,14 @@
     "reset": "Restaurar",
     "enabled": "Habilitado",
     "disabled": "Desabilitado",
-    "status": "Estado"
+    "status": "Estado",
+    "refresh": "Atualizar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "create": "Criar",
+    "optional": "opcional",
+    "yes": "Sim",
+    "no": "Não"
   },
   "groups": {
     "title": "Chat em grupo",
@@ -609,7 +616,8 @@
     "backgroundExecs": "Processos em Segundo Plano",
     "navigation": "Navegação",
     "collapse": "Minimizar",
-    "expand": "Expandir"
+    "expand": "Expandir",
+    "cron": "Tarefas agendadas"
   },
   "backgroundExecs": {
     "title": "Processos em Segundo Plano",
@@ -655,5 +663,47 @@
     "chatDescription": "Chat simples com busca na web",
     "agentDescription": "Agente completo com todas as ferramentas",
     "groupDescription": "Chat em grupo multi-agente"
+  },
+  "cron": {
+    "title": "Tarefas agendadas",
+    "jobs": "tarefas",
+    "nextWake": "próxima execução",
+    "new": "Nova",
+    "newJob": "Nova tarefa",
+    "editJob": "Editar tarefa",
+    "empty": "Nenhuma tarefa agendada",
+    "createFirst": "Crie sua primeira tarefa",
+    "enabled": "ativada",
+    "disabled": "desativada",
+    "nextRun": "Próxima execução",
+    "lastRun": "Última execução",
+    "message": "Mensagem",
+    "command": "Comando",
+    "deliver": "Entregar",
+    "deliverHint": "Entregar a mensagem diretamente no canal",
+    "channel": "Canal",
+    "to": "Para",
+    "created": "Criada",
+    "updated": "Atualizada",
+    "spawn": "Subagente",
+    "name": "Nome",
+    "namePlaceholder": "Rótulo opcional",
+    "messagePlaceholder": "O que deve acontecer quando executar?",
+    "schedule": "Agendamento",
+    "once": "Uma vez",
+    "interval": "Intervalo",
+    "cronExpr": "Cron",
+    "seconds": "segundos",
+    "run": "Executar",
+    "runNow": "Executar agora",
+    "enable": "Ativar",
+    "disable": "Desativar",
+    "confirmDelete": "Excluir esta tarefa?",
+    "expand": "Expandir",
+    "collapse": "Recolher",
+    "errorDatetime": "Selecione uma data e hora",
+    "errorInterval": "O intervalo deve ser um número positivo de segundos",
+    "errorCron": "Insira uma expressão cron",
+    "errorMessage": "É necessário uma mensagem ou comando"
   }
 }

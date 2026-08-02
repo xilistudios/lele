@@ -75,6 +75,16 @@ export const endpoints = {
     stop: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stop`,
     stream: (id: string) => `/api/v1/background-exec/${encodeURIComponent(id)}/stream`,
   },
+  cron: {
+    list: '/api/v1/cron',
+    create: '/api/v1/cron',
+    get: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}`,
+    update: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}`,
+    remove: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}`,
+    enable: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}/enable`,
+    disable: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}/disable`,
+    run: (id: string) => `/api/v1/cron/${encodeURIComponent(id)}/run`,
+  },
   logs: {
     list: '/api/v1/logs',
     dates: '/api/v1/logs/dates',

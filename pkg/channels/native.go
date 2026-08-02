@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -48,6 +49,26 @@ type NativeChannel struct {
 	skillInstaller   *skills.SkillInstaller
 	workspacePath    string
 	reloadConfig     func() error // called after config save to reload runtime config
+	cronService      CronProvidable
+}
+
+// CronProvidable is the interface for managing cron jobs via the API.
+type CronProvidable interface {
+	ListJobs(includeDisabled bool) []cron.CronJob
+	GetJob(jobID string) *cron.CronJob
+	AddJob(name string, schedule cron.CronSchedule, message string, deliver bool, channel, to string) (*cron.CronJob, error)
+	UpdateJob(job *cron.CronJob) error
+	RemoveJob(jobID string) bool
+	EnableJob(jobID string, enabled bool) *cron.CronJob
+	RunJobNow(jobID string) error
+	Status() map[string]interface{}
+}
+
+// SetCronService sets the cron service for API access.
+func (n *NativeChannel) SetCronService(cs CronProvidable) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.cronService = cs
 }
 
 // SetReloadConfig sets a callback to be called after config is saved via the API.
@@ -313,6 +334,16 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/background-exec/{id}/output", withAuth(n.handleBackgroundExecOutput))
 	mux.HandleFunc("POST /api/v1/background-exec/{id}/stop", withAuth(n.handleBackgroundExecStop))
 	mux.HandleFunc("GET /api/v1/background-exec/{id}/stream", withAuth(n.handleBackgroundExecStream))
+
+	// Cron jobs
+	mux.HandleFunc("GET /api/v1/cron", withAuth(n.handleCronList))
+	mux.HandleFunc("POST /api/v1/cron", withAuth(applyBodyLimit(n.handleCronCreate)))
+	mux.HandleFunc("GET /api/v1/cron/{id}", withAuth(n.handleCronGet))
+	mux.HandleFunc("PUT /api/v1/cron/{id}", withAuth(applyBodyLimit(n.handleCronUpdate)))
+	mux.HandleFunc("DELETE /api/v1/cron/{id}", withAuth(n.handleCronDelete))
+	mux.HandleFunc("POST /api/v1/cron/{id}/enable", withAuth(n.handleCronEnable))
+	mux.HandleFunc("POST /api/v1/cron/{id}/disable", withAuth(n.handleCronDisable))
+	mux.HandleFunc("POST /api/v1/cron/{id}/run", withAuth(n.handleCronRun))
 
 	// Files
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
@@ -1160,4 +1191,244 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 			}
 		}
 	}
+}
+
+// ============================================================================
+// Cron job handlers
+// ============================================================================
+
+// cronScheduleInput is the request body shape for creating/updating a schedule.
+type cronScheduleInput struct {
+	Kind    string `json:"kind"`
+	AtMS    *int64 `json:"atMs,omitempty"`
+	EveryMS *int64 `json:"everyMs,omitempty"`
+	Expr    string `json:"expr,omitempty"`
+	TZ      string `json:"tz,omitempty"`
+}
+
+// cronJobInput is the request body for creating or updating a cron job.
+type cronJobInput struct {
+	Name     string            `json:"name"`
+	Enabled  *bool             `json:"enabled,omitempty"`
+	Schedule cronScheduleInput `json:"schedule"`
+	Message  string            `json:"message"`
+	Command  string            `json:"command,omitempty"`
+	Deliver  *bool             `json:"deliver,omitempty"`
+	Channel  string            `json:"channel,omitempty"`
+	To       string            `json:"to,omitempty"`
+}
+
+func (n *NativeChannel) cronAvailable(w http.ResponseWriter) bool {
+	if n.cronService == nil {
+		writeError(w, http.StatusServiceUnavailable, "cron service not available", "cron_unavailable")
+		return false
+	}
+	return true
+}
+
+// handleCronList returns all cron jobs.
+// GET /api/v1/cron?include_disabled=true
+func (n *NativeChannel) handleCronList(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	includeDisabled := r.URL.Query().Get("include_disabled") == "true"
+	jobs := n.cronService.ListJobs(includeDisabled)
+	if jobs == nil {
+		jobs = []cron.CronJob{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"jobs":   jobs,
+		"status": n.cronService.Status(),
+	})
+}
+
+// handleCronGet returns a single cron job.
+// GET /api/v1/cron/{id}
+func (n *NativeChannel) handleCronGet(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	job := n.cronService.GetJob(id)
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found", "cron_not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
+}
+
+// handleCronCreate creates a new cron job.
+// POST /api/v1/cron
+func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	var input cronJobInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_body")
+		return
+	}
+	if input.Message == "" && input.Command == "" {
+		writeError(w, http.StatusBadRequest, "message or command is required", "missing_message")
+		return
+	}
+
+	schedule := cron.CronSchedule{
+		Kind:    input.Schedule.Kind,
+		AtMS:    input.Schedule.AtMS,
+		EveryMS: input.Schedule.EveryMS,
+		Expr:    input.Schedule.Expr,
+		TZ:      input.Schedule.TZ,
+	}
+	if schedule.Kind == "" {
+		writeError(w, http.StatusBadRequest, "schedule.kind is required (at|every|cron)", "missing_schedule")
+		return
+	}
+
+	deliver := true
+	if input.Deliver != nil {
+		deliver = *input.Deliver
+	}
+	if input.Command != "" {
+		deliver = false
+	}
+
+	name := input.Name
+	if name == "" {
+		name = input.Message
+		if len(name) > 30 {
+			name = name[:30]
+		}
+	}
+
+	job, err := n.cronService.AddJob(name, schedule, input.Message, deliver, input.Channel, input.To)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "cron_add_failed")
+		return
+	}
+
+	if input.Command != "" {
+		job.Payload.Command = input.Command
+		_ = n.cronService.UpdateJob(job)
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"job": job})
+}
+
+// handleCronUpdate updates an existing cron job.
+// PUT /api/v1/cron/{id}
+func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	existing := n.cronService.GetJob(id)
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "job not found", "cron_not_found")
+		return
+	}
+
+	var input cronJobInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_body")
+		return
+	}
+
+	if input.Name != "" {
+		existing.Name = input.Name
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+	if input.Schedule.Kind != "" {
+		existing.Schedule = cron.CronSchedule{
+			Kind:    input.Schedule.Kind,
+			AtMS:    input.Schedule.AtMS,
+			EveryMS: input.Schedule.EveryMS,
+			Expr:    input.Schedule.Expr,
+			TZ:      input.Schedule.TZ,
+		}
+	}
+	if input.Message != "" {
+		existing.Payload.Message = input.Message
+	}
+	if input.Command != "" {
+		existing.Payload.Command = input.Command
+	}
+	if input.Deliver != nil {
+		existing.Payload.Deliver = *input.Deliver
+	}
+	if input.Channel != "" {
+		existing.Payload.Channel = input.Channel
+	}
+	if input.To != "" {
+		existing.Payload.To = input.To
+	}
+
+	if err := n.cronService.UpdateJob(existing); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "cron_update_failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"job": existing})
+}
+
+// handleCronDelete removes a cron job.
+// DELETE /api/v1/cron/{id}
+func (n *NativeChannel) handleCronDelete(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	if !n.cronService.RemoveJob(id) {
+		writeError(w, http.StatusNotFound, "job not found", "cron_not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "removed": true})
+}
+
+// handleCronEnable enables a cron job.
+// POST /api/v1/cron/{id}/enable
+func (n *NativeChannel) handleCronEnable(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	job := n.cronService.EnableJob(id, true)
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found", "cron_not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
+}
+
+// handleCronDisable disables a cron job.
+// POST /api/v1/cron/{id}/disable
+func (n *NativeChannel) handleCronDisable(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	job := n.cronService.EnableJob(id, false)
+	if job == nil {
+		writeError(w, http.StatusNotFound, "job not found", "cron_not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"job": job})
+}
+
+// handleCronRun triggers a cron job immediately.
+// POST /api/v1/cron/{id}/run
+func (n *NativeChannel) handleCronRun(w http.ResponseWriter, r *http.Request) {
+	if !n.cronAvailable(w) {
+		return
+	}
+	id := r.PathValue("id")
+	if err := n.cronService.RunJobNow(id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error(), "cron_run_failed")
+		return
+	}
+	job := n.cronService.GetJob(id)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": id, "ran": true, "job": job})
 }
