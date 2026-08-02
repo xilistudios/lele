@@ -283,6 +283,10 @@ type Model struct {
 	streamThrottleInterval time.Duration
 	streamRenderedLines    []string
 	thinkingRenderedLines  []string
+	// Accumulated joined string of completed rendered lines. Avoids O(n²)
+	// strings.Join on every streaming chunk — new lines are appended in O(1).
+	streamRenderedJoined   string
+	thinkingRenderedJoined string
 
 	// Cached glamour renderer (keyed by width)
 	cachedRenderer      *glamour.TermRenderer
@@ -299,6 +303,18 @@ type Model struct {
 	renderedMsgStartIdx int // first message index included in renderedBase
 	renderedMsgEndIdx   int // last message index included in renderedBase (exclusive)
 	maxRenderedMessages int // max messages to render at once (0 = unlimited, backward compat)
+
+	// Cached token/context usage for the sidebar. GetCurrentContextUsage is
+	// expensive (it rebuilds the system prompt from disk and estimates tokens
+	// over the whole history), so it must NOT run on every View() render.
+	// The cache is refreshed at most once per tokenCacheTTL and is invalidated
+	// immediately when the history message count changes.
+	tokenCacheKey       string    // sessionKey:msgCount the cache belongs to
+	tokenCacheTime      time.Time // when the cache was last refreshed
+	tokenCacheCurrent   int       // cached current context tokens
+	tokenCacheWindow    int       // cached context window
+	tokenCacheCumInput  int       // cached cumulative input tokens
+	tokenCacheCumOutput int       // cached cumulative output tokens
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget

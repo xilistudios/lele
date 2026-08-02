@@ -1176,6 +1176,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// need to set them here — we just need to ensure caches are cleared.
 		m.streamRenderedLines = nil
 		m.thinkingRenderedLines = nil
+		m.streamRenderedJoined = ""
+		m.thinkingRenderedJoined = ""
 		m.renderedBase = ""
 		m.renderedBaseKey = ""
 		m.cachedRenderer = nil

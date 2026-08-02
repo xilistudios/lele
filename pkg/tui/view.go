@@ -261,9 +261,10 @@ func (m *Model) View() string {
 	m.chatInput.SetWidth(leftWidth - 4)
 	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.chatInput.View())
 
-	// Cache token counts to avoid duplicate API calls
-	currentTokens, contextWindow := m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
-	cumInput, cumOutput, _ := m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
+	// Use cached token counts — GetCurrentContextUsage is expensive (rebuilds
+	// system prompt from disk + estimates tokens over full history). The cache
+	// refreshes at most once per 2s or when message count changes.
+	currentTokens, contextWindow, cumInput, cumOutput := m.getTokenUsage()
 
 	pct := 0.0
 	if contextWindow > 0 {
@@ -358,6 +359,15 @@ func (m *Model) View() string {
 			contentWidth = 1
 		}
 
+		// Compute the base height once before the loop. The original code
+		// re-rendered the FULL accumulated rightBuilder string on every
+		// iteration to measure yStart, making the loop O(n²) with many
+		// subagents. Now we render only the single new line per iteration
+		// (O(1) each → O(n) total) while preserving exact click-target
+		// geometry, including any line wrapping on very narrow terminals.
+		baseHeight := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(rightBuilder.String()))
+		currentY := baseHeight
+
 		for _, sa := range subagents {
 			label := sa.Label
 			if label == "" {
@@ -395,10 +405,11 @@ func (m *Model) View() string {
 				statusDot = "○"
 			}
 
-			yStart := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(rightBuilder.String())) - 1
+			yStart := currentY - 1
 			lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
 			rightBuilder.WriteString(lineStr)
-			yEnd := yStart + lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(strings.TrimRight(lineStr, "\n")))
+			lineHeight := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(strings.TrimRight(lineStr, "\n")))
+			yEnd := yStart + lineHeight
 
 			// Track this subagent item's position for click handling
 			m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
@@ -406,6 +417,7 @@ func (m *Model) View() string {
 				yEnd:   yEnd,
 				key:    sa.SessionKey,
 			})
+			currentY += lineHeight
 		}
 	}
 

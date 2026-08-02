@@ -3,10 +3,47 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
+
+// tokenCacheTTL bounds how often the expensive token/context usage is
+// recomputed for the sidebar. The value is refreshed immediately whenever the
+// history message count changes, so this TTL only throttles recomputation
+// during idle renders (cursor blink, mouse moves) within a single turn.
+const tokenCacheTTL = 2 * time.Second
+
+// getTokenUsage returns cached token/context usage for the sidebar, refreshing
+// the underlying (expensive) backend calls at most once per tokenCacheTTL or
+// when the history message count changes. This keeps View() cheap: previously
+// GetCurrentContextUsage ran on every render, rebuilding the system prompt from
+// disk and estimating tokens over the full history each time.
+func (m *Model) getTokenUsage() (current, window, cumInput, cumOutput int) {
+	if m.currentKey == "" {
+		return 0, 0, 0, 0
+	}
+
+	msgCount := m.getHistoryMessageCount()
+	cacheKey := fmt.Sprintf("%s:%d", m.currentKey, msgCount)
+
+	if m.tokenCacheKey == cacheKey && time.Since(m.tokenCacheTime) < tokenCacheTTL {
+		return m.tokenCacheCurrent, m.tokenCacheWindow, m.tokenCacheCumInput, m.tokenCacheCumOutput
+	}
+
+	current, window = m.agentLoop.GetProvidable().GetCurrentContextUsage(m.currentKey)
+	cumInput, cumOutput, _ = m.agentLoop.GetProvidable().GetTokenCounts(m.currentKey)
+
+	m.tokenCacheKey = cacheKey
+	m.tokenCacheTime = time.Now()
+	m.tokenCacheCurrent = current
+	m.tokenCacheWindow = window
+	m.tokenCacheCumInput = cumInput
+	m.tokenCacheCumOutput = cumOutput
+
+	return current, window, cumInput, cumOutput
+}
 
 // isCompactionSummary reports whether msg is an internal context-compaction
 // summary that should not be rendered in the TUI chat history.
