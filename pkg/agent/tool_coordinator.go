@@ -87,8 +87,12 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 			continue
 		}
 
-		// Set context for all tools implementing ContextualTool interface
-		if ct, ok := tool.(tools.ContextualTool); ok {
+		// Set session context for tools implementing SessionAwareTool interface
+		// (provides channel, chatID, AND sessionKey)
+		if st, ok := tool.(tools.SessionAwareTool); ok {
+			st.SetSessionContext(channel, chatID, sessionKey)
+		} else if ct, ok := tool.(tools.ContextualTool); ok {
+			// Fallback: set context for tools implementing only ContextualTool
 			ct.SetContext(channel, chatID)
 		}
 

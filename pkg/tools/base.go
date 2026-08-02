@@ -57,6 +57,14 @@ type ContextualTool interface {
 	SetContext(channel, chatID string)
 }
 
+// SessionAwareTool is an optional interface for tools that need the full
+// session context including the session key. Tools implementing this interface
+// will receive the sessionKey in addition to channel and chatID.
+type SessionAwareTool interface {
+	Tool
+	SetSessionContext(channel, chatID, sessionKey string)
+}
+
 // AsyncCallback is a function type that async tools use to notify completion.
 // When an async tool finishes its work, it calls this callback with the result.
 //
