@@ -143,6 +143,9 @@ func (m *Model) renderCronDetail() string {
 	}
 
 	addField(i18n.T("tui.cronID"), job.ID)
+	if job.Scope != "" {
+		addField("Scope", job.Scope)
+	}
 	addField(i18n.T("tui.cronSchedule"), formatCronSchedule(job.Schedule))
 	if job.Schedule.TZ != "" {
 		addField(i18n.T("tui.cronTimezone"), job.Schedule.TZ)
@@ -158,6 +161,9 @@ func (m *Model) renderCronDetail() string {
 	}
 	if job.Payload.To != "" {
 		addField(i18n.T("tui.cronTo"), job.Payload.To)
+	}
+	if job.Payload.SessionKey != "" {
+		addField("Session", job.Payload.SessionKey)
 	}
 	addField(i18n.T("tui.cronDeliver"), fmt.Sprintf("%v", job.Payload.Deliver))
 

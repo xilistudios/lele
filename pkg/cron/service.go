@@ -31,13 +31,14 @@ type SpawnConfig struct {
 }
 
 type CronPayload struct {
-	Kind    string       `json:"kind"`
-	Message string       `json:"message"`
-	Command string       `json:"command,omitempty"`
-	Deliver bool         `json:"deliver"`
-	Channel string       `json:"channel,omitempty"`
-	To      string       `json:"to,omitempty"`
-	Spawn   *SpawnConfig `json:"spawn,omitempty"`
+	Kind       string       `json:"kind"`
+	Message    string       `json:"message"`
+	Command    string       `json:"command,omitempty"`
+	Deliver    bool         `json:"deliver"`
+	Channel    string       `json:"channel,omitempty"`
+	To         string       `json:"to,omitempty"`
+	Spawn      *SpawnConfig `json:"spawn,omitempty"`
+	SessionKey string       `json:"session_key,omitempty"` // Originating session key (for session-scoped jobs)
 }
 
 type CronJobState struct {
@@ -51,6 +52,7 @@ type CronJob struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
 	Enabled        bool         `json:"enabled"`
+	Scope          string       `json:"scope,omitempty"` // "global" (default) or "session"
 	Schedule       CronSchedule `json:"schedule"`
 	Payload        CronPayload  `json:"payload"`
 	State          CronJobState `json:"state"`
@@ -353,6 +355,13 @@ func (cs *CronService) saveStoreUnsafe() error {
 }
 
 func (cs *CronService) AddJob(name string, schedule CronSchedule, message string, deliver bool, channel, to string) (*CronJob, error) {
+	return cs.AddJobWithOptions(name, schedule, message, deliver, channel, to, "", "")
+}
+
+// AddJobWithOptions adds a job with scope and sessionKey support.
+// scope can be "global" (default) or "session".
+// sessionKey is the originating session key for session-scoped jobs.
+func (cs *CronService) AddJobWithOptions(name string, schedule CronSchedule, message string, deliver bool, channel, to, scope, sessionKey string) (*CronJob, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
@@ -361,17 +370,23 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 	// One-time tasks (at) should be deleted after execution
 	deleteAfterRun := (schedule.Kind == "at")
 
+	if scope == "" {
+		scope = "global"
+	}
+
 	job := CronJob{
 		ID:       generateID(),
 		Name:     name,
 		Enabled:  true,
+		Scope:    scope,
 		Schedule: schedule,
 		Payload: CronPayload{
-			Kind:    "agent_turn",
-			Message: message,
-			Deliver: deliver,
-			Channel: channel,
-			To:      to,
+			Kind:       "agent_turn",
+			Message:    message,
+			Deliver:    deliver,
+			Channel:    channel,
+			To:         to,
+			SessionKey: sessionKey,
 		},
 		State: CronJobState{
 			NextRunAtMS: cs.computeNextRun(&schedule, now),
