@@ -509,7 +509,12 @@ describe('Message ordering fixes', () => {
 
       expect(result.map((m) => m.id)).toEqual(['u1', 'a1-base', 't1', 'a2-base', 't2', 'a3-stream'])
       expect(result.map((m) => m.role)).toEqual([
-        'user', 'assistant', 'tool', 'assistant', 'tool', 'assistant',
+        'user',
+        'assistant',
+        'tool',
+        'assistant',
+        'tool',
+        'assistant',
       ])
     })
 
@@ -542,6 +547,66 @@ describe('Message ordering fixes', () => {
       const assistants = result.filter((m) => m.role === 'assistant')
       expect(assistants.length).toBe(2)
       expect(result.some((m) => m.id === 'a2-ws')).toBe(false)
+    })
+
+    test('drops orphaned post-tool-call assistant when base merged the turn', () => {
+      // Scenario: a turn with tool calls. The backend persists the whole turn
+      // as a SINGLE assistant message (text + tool_use + tool_result + final
+      // text). The frontend received TWO streaming assistants:
+      //   - pre-tool-call response ("Let me check...")
+      //   - post-tool-call response ("Done!")
+      // After the HTTP refetch, base has ONE merged assistant. Both streaming
+      // copies must be dropped to avoid duplicates.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Run a command'),
+        createTestMessage('a1-merged', 'assistant', 'Let me check... Done!'),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a1-pre', 'assistant', 'Let me check...', {
+          streaming: false,
+        }),
+        createTestMessage('a1-post', 'assistant', 'Done!', { streaming: false }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+      expect(assistants.length).toBe(1)
+      expect(assistants[0].id).toBe('a1-merged')
+      expect(result.some((m) => m.id === 'a1-pre')).toBe(false)
+      expect(result.some((m) => m.id === 'a1-post')).toBe(false)
+    })
+    test('drops empty tool-call iteration placeholder to prevent 2->1 flicker', () => {
+      // Scenario: a turn with a tool call. The backend generates distinct
+      // message IDs per iteration (iterationMsgID: baseID, baseID-2). The first
+      // iteration is a tool-call-only response with NO text content; the second
+      // is the final response. During streaming the frontend creates TWO
+      // assistant placeholders, but the canonical HTTP history only persists
+      // ONE (toChatMessages skips content-less tool-call assistants).
+      //
+      // Before the HTTP refetch lands (baseHasCurrentTurn=false), the empty
+      // placeholder would still render, showing 2 bubbles that collapse to 1
+      // once base catches up — a visible flicker. The empty completed assistant
+      // must be dropped regardless of baseHasCurrentTurn.
+      const baseMessages: ChatMessage[] = [createTestMessage('u1', 'user', 'Run a command')]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a1', 'assistant', '', { streaming: false }),
+        createTestMessage('t1', 'tool', 'result', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a1-2', 'assistant', 'Done!', { streaming: false }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+      expect(assistants.length).toBe(1)
+      expect(assistants[0].id).toBe('a1-2')
+      expect(result.some((m) => m.id === 'a1')).toBe(false)
     })
   })
 })

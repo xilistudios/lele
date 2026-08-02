@@ -9,7 +9,12 @@
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
 export type { ClientEvent, MessageEventContext } from './types'
-export { snapshotToGroupInfo, getSessionKey, isSessionMismatch, findToolMessageIndex } from './helpers'
+export {
+  snapshotToGroupInfo,
+  getSessionKey,
+  isSessionMismatch,
+  findToolMessageIndex,
+} from './helpers'
 
 export {
   handleWelcome,
@@ -47,37 +52,28 @@ export {
 
 // ── Imports for dispatcher ──────────────────────────────────────────────────
 
-import type { ClientEvent, MessageEventContext } from './types'
-import {
-  handleWelcome,
-  handleMessageStream,
-  handleMessageThinking,
-  handleMessageAck,
-  handleMessageComplete,
-  handleHistoryUpdated,
-  handleMessagesCatchup,
-  handleAttachments,
-  handleMessageError,
-  handleStreamError,
-  handleTypingIndicator,
-} from './streaming'
-import {
-  handleToolExecuting,
-  handleToolResult,
-  handleSubagentResult,
-} from './tools'
 import {
   handleApprovalRequest,
   handleApproveResult,
   handleCancelAck,
   handleSubscribeAck,
 } from './approvals'
+import { handleGroupComplete, handleGroupStatus, handleGroupTool, handleGroupTurn } from './groups'
 import {
-  handleGroupStatus,
-  handleGroupTurn,
-  handleGroupTool,
-  handleGroupComplete,
-} from './groups'
+  handleAttachments,
+  handleHistoryUpdated,
+  handleMessageAck,
+  handleMessageComplete,
+  handleMessageError,
+  handleMessageStream,
+  handleMessageThinking,
+  handleMessagesCatchup,
+  handleStreamError,
+  handleTypingIndicator,
+  handleWelcome,
+} from './streaming'
+import { handleSubagentResult, handleToolExecuting, handleToolResult } from './tools'
+import type { ClientEvent, MessageEventContext } from './types'
 
 // ── Dispatcher ──────────────────────────────────────────────────────────────
 

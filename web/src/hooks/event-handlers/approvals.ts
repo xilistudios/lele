@@ -5,6 +5,8 @@
  * cancel acknowledgements, and subscribe acknowledgements that keep
  * the client processing-session state in sync.
  */
+import type { ChatMessage } from '../../lib/types'
+import { restoreInProgressAssistant, stopAllStreaming } from '../streamingOps'
 import type { ClientEvent, MessageEventContext } from './types'
 
 export function handleApprovalRequest(ctx: MessageEventContext, event: ClientEvent) {
@@ -26,7 +28,7 @@ export function handleCancelAck(ctx: MessageEventContext, data: Record<string, u
     ctx.removeProcessingSession(cancelledSessionKey)
   }
 
-  ctx.setStreamingMessages((current) => current.map((m) => ({ ...m, streaming: false })))
+  ctx.setStreamingMessages(stopAllStreaming)
 
   // Mark any active groups as stopped — without this, groups with status 'started'
   // would remain 'started' forever and the processing indicator would never clear.
@@ -55,44 +57,19 @@ export function handleSubscribeAck(ctx: MessageEventContext, data: Record<string
       )
       if (hasExisting) return current
 
-      const updated = [...current]
-      for (const msg of inProgress) {
-        if (msg.role !== 'assistant') continue
-        const content = msg.content ?? ''
-        const reasoning = msg.reasoning_content ?? ''
-        const restoreId = `restore-${ackSessionKey}`
-        const existingIdx = updated.findIndex((m) => m.id === restoreId)
-        if (existingIdx >= 0) {
-          updated[existingIdx] = {
-            ...updated[existingIdx],
-            content: content || updated[existingIdx].content,
-            reasoningContent: reasoning || updated[existingIdx].reasoningContent,
-            streaming: true,
-          }
-        } else {
-          // Insert right after the last user message for this session,
-          // not at the end of the array. Pushing to the end breaks
-          // position-based matching in mergeMessages, causing the
-          // restored assistant to render ABOVE the user message.
-          let insertIdx = updated.length
-          for (let i = updated.length - 1; i >= 0; i--) {
-            if (updated[i].sessionKey === ackSessionKey && updated[i].role === 'user') {
-              insertIdx = i + 1
-              break
-            }
-          }
-          updated.splice(insertIdx, 0, {
-            id: restoreId,
-            role: 'assistant' as const,
-            sessionKey: ackSessionKey,
-            content,
-            reasoningContent: reasoning || undefined,
-            streaming: true,
-            createdAt: new Date().toISOString(),
-          })
-        }
-      }
-      return updated
+      return inProgress.reduce<ChatMessage[]>(
+        (acc, msg) => {
+          if (msg.role !== 'assistant') return acc
+          return restoreInProgressAssistant(
+            acc,
+            ackSessionKey,
+            msg.content ?? '',
+            msg.reasoning_content ?? '',
+            true, // subscribe.ack: insert after the session's last user message
+          )
+        },
+        [...current],
+      )
     })
   }
 }

@@ -11,6 +11,7 @@ import {
   parseSubagentSessionKey,
 } from '../../lib/chatMessageBuilder'
 import type { ToolStatus } from '../../lib/types'
+import { computeToolInsertIndex } from '../messageInsertion'
 import { findToolMessageIndex, getSessionKey, isSessionMismatch } from './helpers'
 import type { MessageEventContext } from './types'
 
@@ -48,17 +49,9 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
     }
     // Insert tool messages after the last assistant message AND any existing
     // tool messages that follow it, to preserve chronological order within
-    // the current LLM iteration. Previously this inserted right after the
-    // assistant (before existing tools), causing reverse-chronological order.
-    const lastAssistantIdx = [...current].reverse().findIndex((m) => m.role === 'assistant')
-    if (lastAssistantIdx < 0) return [...current, toolMsg]
-    const assistantOriginalIdx = current.length - 1 - lastAssistantIdx
-    let insertIdx = assistantOriginalIdx + 1
-    while (insertIdx < current.length && current[insertIdx].role === 'tool') {
-      insertIdx++
-    }
+    // the current LLM iteration (see computeToolInsertIndex).
     const arr = [...current]
-    arr.splice(insertIdx, 0, toolMsg)
+    arr.splice(computeToolInsertIndex(current), 0, toolMsg)
     return arr
   })
 }
