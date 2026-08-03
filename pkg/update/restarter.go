@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -149,9 +148,7 @@ func (r *Restarter) selfExec() error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	}
+	setDetachFlags(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("spawning new process: %w", err)
 	}
