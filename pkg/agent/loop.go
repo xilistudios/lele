@@ -479,6 +479,20 @@ func (al *AgentLoop) GoalManager() *GoalManager {
 	return al.goalManager
 }
 
+// HandleGoalCommand processes a /goal command for the given session key.
+// This is exposed for the TUI, which dispatches slash commands locally
+// without routing them through the message bus.
+func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string {
+	if al.commandHandler == nil {
+		return "❌ Command handler not initialized."
+	}
+	impl, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		return "❌ Command handler not available."
+	}
+	return impl.handleGoalCommand(sessionKey, args)
+}
+
 // KeyringService returns the encrypted secret storage service (may be nil if
 // the keyring module is disabled).
 func (al *AgentLoop) KeyringService() *keyring.Service {
