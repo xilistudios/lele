@@ -329,7 +329,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 
 	// System / self-update
 	mux.HandleFunc("GET /api/v1/system/version", withAuth(n.handleSystemVersion))
-	mux.HandleFunc("GET /api/v1/system/updates/check", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(withAuth(n.handleUpdatesCheck))).ServeHTTP)
+	mux.HandleFunc("GET /api/v1/system/updates/check", n.rateLimitMiddleware(n.apiLimiter, withAuth(n.handleUpdatesCheck)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/system/updates/apply", withAuth(applyBodyLimit(n.handleUpdatesApply)))
 	mux.HandleFunc("GET /api/v1/system/updates/status", withAuth(n.handleUpdatesStatus))
 	mux.HandleFunc("POST /api/v1/system/updates/rollback", withAuth(n.handleUpdatesRollback))

@@ -33,12 +33,11 @@ func CurrentBinaryPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locating executable: %w", err)
 	}
-	resolved, err := filepath.EvalSymlinks(exe)
-	if err != nil {
-		// Fall back to the unresolved path if symlink resolution fails.
-		return exe, nil
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved, nil
 	}
-	return resolved, nil
+	// Fall back to the unresolved path if symlink resolution fails.
+	return exe, nil
 }
 
 // Install atomically replaces targetPath with newBinaryPath.

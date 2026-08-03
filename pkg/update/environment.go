@@ -5,20 +5,20 @@ import (
 	"strings"
 )
 
-// ErrUnsupportedEnvironment is returned when self-update cannot run.
-type ErrUnsupportedEnvironment struct {
+// UnsupportedEnvironmentError is returned when self-update cannot run.
+type UnsupportedEnvironmentError struct {
 	Reason string
 }
 
-func (e *ErrUnsupportedEnvironment) Error() string {
+func (e *UnsupportedEnvironmentError) Error() string {
 	return e.Reason
 }
 
 // CheckEnvironment verifies self-update is possible in this environment.
-// Returns an *ErrUnsupportedEnvironment when it is not.
+// Returns an *UnsupportedEnvironmentError when it is not.
 func CheckEnvironment() error {
 	if isDocker() {
-		return &ErrUnsupportedEnvironment{
+		return &UnsupportedEnvironmentError{
 			Reason: "running inside Docker; update the image instead (docker pull / compose up)",
 		}
 	}
