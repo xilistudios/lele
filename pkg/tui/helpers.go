@@ -89,6 +89,7 @@ func (m *Model) submitMessage() tea.Cmd {
 
 	m.chatInput.SetValue("")
 	m.compactFeedback = ""
+	m.goalFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
 	m.elapsedTime = 0
@@ -151,6 +152,7 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 	m.showWelcome = false
 	m.chatInput.SetValue("")
 	m.compactFeedback = ""
+	m.goalFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
 	m.elapsedTime = 0

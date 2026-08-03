@@ -63,11 +63,14 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	if !ok {
 		agent = ch.al.registry.GetDefaultAgent()
 	}
+	// Use the routed session key, but honor the message's explicit session key
+	// when set. This must match message_processor.processMessage, which honors
+	// msg.SessionKey unconditionally — otherwise session-scoped commands (e.g.
+	// /goal, /model, /clear) would operate on a different key than the one the
+	// LLM runner and goal loop use, and the command would appear to do nothing.
 	sessionKey := route.SessionKey
 	if msg.SessionKey != "" {
-		if strings.HasPrefix(msg.SessionKey, "agent:") || strings.HasPrefix(msg.SessionKey, "telegram:") {
-			sessionKey = msg.SessionKey
-		}
+		sessionKey = msg.SessionKey
 	}
 	baseSessionKey := sessionKey
 	sessionKey = ch.al.ResolveSessionKey(sessionKey)

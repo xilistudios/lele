@@ -245,6 +245,17 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			return compactResultMsg{result: result, sessionKey: key}
 		}
 
+	case "/goal":
+		if m.currentKey == "" {
+			m.goalFeedback = "❌ No hay sesión activa. Empieza un chat primero (/new o envía un mensaje)."
+			m.updateViewport()
+			return nil
+		}
+		m.compactFeedback = ""
+		m.goalFeedback = m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
+		m.updateViewport()
+		return nil
+
 	case "/quit":
 		m.printSessionSummary()
 		m.cancel()

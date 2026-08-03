@@ -158,6 +158,11 @@ func (m *Model) updateViewport() {
 		sb.WriteString(m.compactFeedback + "\n\n")
 	}
 
+	// Show /goal command feedback
+	if m.goalFeedback != "" {
+		sb.WriteString(m.goalFeedback + "\n\n")
+	}
+
 	// Check if viewport is at bottom BEFORE updating content.
 	// This preserves the user's scroll position when they've scrolled up.
 	// forceGotoBottom overrides this when switching sessions or creating a new chat.

@@ -124,6 +124,7 @@ var allCommands = []commandInfo{
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/secrets", description: "Manage secrets (keyring)"},
 	{name: "/compact", description: "Compact conversation history"},
+	{name: "/goal", description: "Set a persistent goal (status/pause/resume/clear)"},
 	{name: "/quit", description: "Exit TUI"},
 }
 
@@ -331,6 +332,10 @@ type Model struct {
 	// compactFeedback holds the result of /compact to display in the viewport.
 	// Cleared when the user sends the next message.
 	compactFeedback string
+
+	// goalFeedback holds the result of a /goal command to display in the
+	// viewport. Cleared when the user sends the next message.
+	goalFeedback string
 
 	// Pending command approval state — set when the agent requests approval
 	// for a potentially dangerous exec command. The user must approve (y) or
