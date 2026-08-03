@@ -94,9 +94,20 @@ release:
     **Install with one command:**
 
 
+    Linux / macOS / BSD:
+
     ```sh
 
     curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+
+    ```
+
+
+    Windows (PowerShell):
+
+    ```powershell
+
+    irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
 
     ```
 
