@@ -91,6 +91,26 @@ Controls device event monitoring.
 
 Controls host and port for the health endpoints exposed by the gateway process.
 
+## `updates`
+
+Controls self-update behavior (CLI `lele update` and Web UI).
+
+```json
+{
+  "updates": {
+    "enabled": true,
+    "channel": "stable",
+    "repo": ""
+  }
+}
+```
+
+- `enabled` — allow checking for and applying updates (default `true`)
+- `channel` — release channel; only `stable` is supported for now
+- `repo` — override the GitHub repository (`owner/name`); empty means `xilistudios/lele`
+
+Env overrides: `LELE_UPDATES_ENABLED`, `LELE_UPDATES_CHANNEL`, `LELE_UPDATES_REPO`.
+
 ## `logs`
 
 Controls:

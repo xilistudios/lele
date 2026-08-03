@@ -18,6 +18,7 @@ import {
   SessionSettings,
   SystemSettings,
   ToolsSettings,
+  UpdatesSettings,
 } from '../organisms/settings'
 
 type SettingsTab =
@@ -28,6 +29,7 @@ type SettingsTab =
   | 'groups'
   | 'tools'
   | 'system'
+  | 'updates'
   | 'advanced'
   | 'diagnostics'
   | 'logs'
@@ -40,6 +42,7 @@ const VALID_TABS: SettingsTab[] = [
   'groups',
   'tools',
   'system',
+  'updates',
   'advanced',
   'diagnostics',
   'logs',
@@ -102,6 +105,8 @@ export function SettingsPage() {
         return <ToolsSettings />
       case 'system':
         return <SystemSettings />
+      case 'updates':
+        return <UpdatesSettings />
       case 'advanced':
         return <AdvancedSettings />
       case 'diagnostics':

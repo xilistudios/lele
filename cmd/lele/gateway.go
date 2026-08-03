@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/server"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/tools"
+	"github.com/xilistudios/lele/pkg/update"
 	"github.com/xilistudios/lele/pkg/voice"
 )
 
@@ -155,6 +156,12 @@ func gatewayCmd() {
 			if ks := agentLoop.KeyringService(); ks != nil {
 				nc.SetKeyringService(ks)
 			}
+			// Expose the self-update service so the Web UI can check for and
+			// apply updates. Backups live under <leleDir>/backups.
+			channels.SetBuildInfo(version, gitCommit, buildTime)
+			updateBackupDir := filepath.Join(getLeleDir(), "backups")
+			updater := update.NewUpdater(cfg.Updates.Repo, updateBackupDir, version)
+			nc.SetUpdateService(updater)
 			// Set up a reload callback so config changes via the API trigger
 			// an immediate runtime reload (not waiting for fsnotify/kqueue).
 			nc.SetReloadConfig(func() error {

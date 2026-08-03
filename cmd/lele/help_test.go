@@ -46,6 +46,7 @@ func TestPrintHelp_ContainsCommands(t *testing.T) {
 		"migrate",
 		"skills",
 		"client",
+		"update",
 		"version",
 	}
 

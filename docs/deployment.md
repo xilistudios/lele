@@ -131,6 +131,31 @@ spec:
 
 The gateway watches the config file and can reload major runtime configuration without a full restart in some cases.
 
+## Self-Update
+
+Lele can update itself from GitHub Releases (stable channel only), from both the CLI and the Web UI.
+
+CLI:
+
+```bash
+lele update --check     # check only
+lele update             # install latest (with confirmation)
+lele update --rollback  # restore previous binary from backup
+```
+
+Web UI: Settings → Updates (check, install with progress, rollback).
+
+Behavior:
+
+- Downloads are verified against the release `checksums.txt` before install.
+- Install is atomic: the new binary is written to a temp file and swapped in place.
+- The previous binary is backed up to `~/.lele/backups/` (newest 3 kept).
+- Restart uses the detected supervisor: systemd user service (`systemctl --user restart lele`), or self-exec fallback.
+- Dev builds (`version == "dev"`) are skipped unless `--force` is passed.
+- Docker deployments are detected and refused (update the image instead).
+
+Disable with `updates.enabled: false` in config (or `LELE_UPDATES_ENABLED=false`).
+
 ## Backups
 
 Important paths to back up:

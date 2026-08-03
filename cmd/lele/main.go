@@ -89,6 +89,8 @@ func main() {
 		}
 	case "client":
 		clientCmd()
+	case "update":
+		updateCmd()
 	case "tui":
 		// Parse -s flag for session ID
 		sessionID := ""
