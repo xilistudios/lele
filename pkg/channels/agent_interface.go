@@ -94,6 +94,12 @@ type AgentProvidable interface {
 	// ProcessHeartbeat processes a heartbeat request without session history.
 	ProcessHeartbeat(ctx context.Context, content, channel, chatID string) (string, error)
 
+	// ListAllSessions returns a summary of every persisted session across all
+	// agents (including system sessions such as heartbeat and cron). This is
+	// used by the session-history UI which needs to surface sessions that are
+	// not tracked by a native client.
+	ListAllSessions() []SessionKindInfo
+
 	// ========================================================================
 	// Streaming support — persists assistant message chunks in the session file
 	// ========================================================================

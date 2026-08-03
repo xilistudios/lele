@@ -432,11 +432,18 @@ export const createApiClient = (baseUrl: string) => {
         method: 'GET',
       })
     },
-    sessions: (mode?: string) => {
-      const url = mode
-        ? `${endpoints.chat.sessions}?mode=${encodeURIComponent(mode)}`
-        : endpoints.chat.sessions
-      return request<ChatSessionsResponse>(url, { method: 'GET' })
+    sessions: (mode?: string, kind?: string, includeSystem?: boolean) => {
+      const params = new URLSearchParams()
+      if (mode) params.set('mode', mode)
+      if (kind) params.set('kind', kind)
+      if (includeSystem) params.set('include_system', 'true')
+      const query = params.toString()
+      return request<ChatSessionsResponse>(
+        query ? `${endpoints.chat.sessions}?${query}` : endpoints.chat.sessions,
+        {
+          method: 'GET',
+        },
+      )
     },
     createSession: (sessionKey: string, mode?: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {
@@ -607,7 +614,8 @@ export const createApiClient = (baseUrl: string) => {
         }),
       remove: (name: string) =>
         request<{ deleted: string }>(endpoints.secrets.remove(name), { method: 'DELETE' }),
-      status: () => request<SecretsListResponse['status']>(endpoints.secrets.status, { method: 'GET' }),
+      status: () =>
+        request<SecretsListResponse['status']>(endpoints.secrets.status, { method: 'GET' }),
       audit: () => request<SecretsAuditResponse>(endpoints.secrets.audit, { method: 'GET' }),
     },
     logs: {

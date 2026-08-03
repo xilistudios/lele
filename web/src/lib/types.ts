@@ -34,10 +34,13 @@ export type Attachment = {
 
 export type ChatMode = 'chat' | 'agent' | 'group'
 
+export type SessionKind = 'chat' | 'heartbeat' | 'cron' | 'cron-spawn' | 'subagent'
+
 export type ChatSession = {
   key: string
   name?: string
   mode?: ChatMode
+  kind?: SessionKind
   created: string
   updated: string
   message_count: number

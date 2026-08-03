@@ -1,13 +1,18 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatFilters } from '../../hooks/useChatFilters'
+import type { ChatSession, SessionKind } from '../../lib/types'
 import { SidebarToggleIcon } from '../atoms/Icons'
 import { ChatSearchBar } from '../molecules/ChatSearchBar'
 import { ChatListView } from '../organisms/ChatListView'
 import { Sidebar } from '../organisms/Sidebar'
+
+type KindTab = 'all' | SessionKind
+
+const KIND_TABS: KindTab[] = ['all', 'chat', 'heartbeat', 'cron', 'cron-spawn', 'subagent']
 
 export function ChatHistoryPage() {
   const { t } = useTranslation()
@@ -23,11 +28,57 @@ export function ChatHistoryPage() {
     onDeleteSession,
   } = useAppLogicContext()
 
-  const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } =
-    useChatFilters(sessions)
+  const [activeKind, setActiveKind] = useState<KindTab>('all')
+  const [systemSessions, setSystemSessions] = useState<ChatSession[]>([])
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Fetch all persisted sessions (including heartbeat/cron/subagent) once on
+  // mount. Context `sessions` (live chat sessions) take precedence when keys
+  // overlap so metadata stays fresh.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setLoadError(null)
+    api
+      .sessions(undefined, undefined, true)
+      .then((data) => {
+        if (!cancelled) setSystemSessions(data?.sessions ?? [])
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError((err as Error).message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [api])
+
+  const allSessions = useMemo(() => {
+    const byKey = new Map<string, ChatSession>()
+    for (const s of sessions) byKey.set(s.key, s)
+    for (const s of systemSessions) {
+      if (!byKey.has(s.key)) byKey.set(s.key, s)
+    }
+    return Array.from(byKey.values())
+  }, [sessions, systemSessions])
+
+  const kindFiltered = useMemo(() => {
+    if (activeKind === 'all') return allSessions
+    return allSessions.filter((s) => (s.kind ?? 'chat') === activeKind)
+  }, [allSessions, activeKind])
+
+  const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } = useChatFilters(
+    kindFiltered,
+    { includeEmpty: true },
+  )
 
   const handleSelect = useCallback(
     (key: string) => {
+      // Subagent sessions are only reachable via their parent chat's nested route
+      if (key.startsWith('subagent:')) return
       onSelectSession(key)
       navigate(`/chat/${encodeURIComponent(key)}`)
     },
@@ -76,7 +127,7 @@ export function ChatHistoryPage() {
                 {t('chat.allChats')}
               </h1>
               <p className="text-sm text-text-tertiary truncate">
-                {t('chat.totalChats', { count: sessions.length })}
+                {t('chat.totalSessions', { count: allSessions.length })}
               </p>
             </div>
           </div>
@@ -89,9 +140,35 @@ export function ChatHistoryPage() {
           />
         </div>
 
+        {/* Kind tabs */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2 md:px-6">
+          {KIND_TABS.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => setActiveKind(kind)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                activeKind === kind
+                  ? 'border-interaction-primary/50 bg-interaction-primary/20 text-interaction-primary'
+                  : 'border-border bg-background-secondary text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+              }`}
+            >
+              {t(`chat.filterKind.${kind}`)}
+            </button>
+          ))}
+        </div>
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          {filteredSessions.length === 0 ? (
+          {loading && allSessions.length === 0 ? (
+            <div className="flex h-64 items-center justify-center">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+            </div>
+          ) : loadError ? (
+            <div className="flex h-64 items-center justify-center text-sm text-warning">
+              {t('chat.loadError', { error: loadError })}
+            </div>
+          ) : filteredSessions.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-sm text-text-tertiary">
               {t('chat.noSearchResults')}
             </div>

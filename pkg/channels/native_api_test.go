@@ -271,6 +271,31 @@ func (m *nativeTestAgentLoop) ProcessHeartbeat(ctx context.Context, content, cha
 	return "HEARTBEAT_OK", nil
 }
 
+func (m *nativeTestAgentLoop) ListAllSessions() []SessionKindInfo {
+	var result []SessionKindInfo
+	seen := make(map[string]bool)
+	for key := range m.histories {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		count := 0
+		for _, msg := range m.histories[key] {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				count++
+			}
+		}
+		result = append(result, SessionKindInfo{
+			Key:          key,
+			Name:         m.sessionNames[key],
+			Mode:         m.GetSessionMode(key),
+			Kind:         classifySessionKeyKind(key),
+			MessageCount: count,
+		})
+	}
+	return result
+}
+
 func (m *nativeTestAgentLoop) AppendAssistantChunk(sessionKey, chunk string) {}
 
 func (m *nativeTestAgentLoop) AppendReasoningChunk(sessionKey, chunk string) {}
@@ -715,6 +740,187 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 	if !found {
 		t.Fatalf("expected session %q in payload %#v", trackedSession, payload.Sessions)
 	}
+}
+
+func TestNativeChannelChatSessionsKindFilter(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	// Tracked user session
+	userSession := "native:" + ts.clientID + ":user-chat"
+	ts.channel.auth.TrackSessionKey(ts.clientID, userSession)
+
+	// System sessions that exist in the shared session store but are NOT
+	// tracked by any native client (heartbeat + cron).
+	ts.loop.histories[userSession] = []providers.Message{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "Hi"},
+	}
+	ts.loop.histories["heartbeat"] = []providers.Message{
+		{Role: "user", Content: "# Heartbeat Check"},
+		{Role: "assistant", Content: "HEARTBEAT_OK"},
+	}
+	ts.loop.histories["cron-abc123"] = []providers.Message{
+		{Role: "user", Content: "Run daily report"},
+		{Role: "assistant", Content: "Done"},
+	}
+
+	t.Run("kind=heartbeat includes untracked heartbeat session", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?kind=heartbeat", nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+
+		var payload ChatSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		if len(payload.Sessions) != 1 {
+			t.Fatalf("len(sessions) = %d, want 1 (only heartbeat); got %#v", len(payload.Sessions), payload.Sessions)
+		}
+		if payload.Sessions[0].Key != "heartbeat" {
+			t.Fatalf("session key = %q, want %q", payload.Sessions[0].Key, "heartbeat")
+		}
+		if payload.Sessions[0].Kind != "heartbeat" {
+			t.Fatalf("session kind = %q, want %q", payload.Sessions[0].Kind, "heartbeat")
+		}
+	})
+
+	t.Run("kind=cron includes untracked cron session", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?kind=cron", nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		var payload ChatSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		if len(payload.Sessions) != 1 {
+			t.Fatalf("len(sessions) = %d, want 1 (only cron); got %#v", len(payload.Sessions), payload.Sessions)
+		}
+		if payload.Sessions[0].Key != "cron-abc123" {
+			t.Fatalf("session key = %q, want %q", payload.Sessions[0].Key, "cron-abc123")
+		}
+		if payload.Sessions[0].Kind != "cron" {
+			t.Fatalf("session kind = %q, want %q", payload.Sessions[0].Kind, "cron")
+		}
+	})
+
+	t.Run("kind=chat only returns tracked chat session", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?kind=chat", nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		var payload ChatSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		if len(payload.Sessions) != 1 {
+			t.Fatalf("len(sessions) = %d, want 1 (only chat); got %#v", len(payload.Sessions), payload.Sessions)
+		}
+		if payload.Sessions[0].Key != userSession {
+			t.Fatalf("session key = %q, want %q", payload.Sessions[0].Key, userSession)
+		}
+	})
+
+	t.Run("include_system=true merges heartbeat and cron in all view", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?include_system=true", nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		var payload ChatSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		keys := make(map[string]string)
+		for _, s := range payload.Sessions {
+			keys[s.Key] = s.Kind
+		}
+		if keys[userSession] != "chat" {
+			t.Fatalf("user session kind = %q, want chat; got %#v", keys[userSession], payload.Sessions)
+		}
+		if keys["heartbeat"] != "heartbeat" {
+			t.Fatalf("heartbeat session kind = %q, want heartbeat; got %#v", keys["heartbeat"], payload.Sessions)
+		}
+		if keys["cron-abc123"] != "cron" {
+			t.Fatalf("cron session kind = %q, want cron; got %#v", keys["cron-abc123"], payload.Sessions)
+		}
+	})
+
+	t.Run("kind filter keeps empty system sessions", func(t *testing.T) {
+		// An empty cron session (no messages) must still show up in the
+		// cron view so users can see that a cron run happened.
+		ts.loop.histories["cron-empty-job"] = []providers.Message{}
+
+		req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions?kind=cron", nil)
+		if err != nil {
+			t.Fatalf("NewRequest() error = %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+ts.token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		var payload ChatSessionsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		var found bool
+		for _, s := range payload.Sessions {
+			if s.Key == "cron-empty-job" {
+				found = true
+				if s.Kind != "cron" {
+					t.Fatalf("empty cron kind = %q, want cron", s.Kind)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("empty cron session not found in kind=cron; got %#v", payload.Sessions)
+		}
+	})
 }
 
 func TestNativeChannelCreateSession(t *testing.T) {
