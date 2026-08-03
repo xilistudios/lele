@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
 )
 
 var subagentIDRegex = regexp.MustCompile(`^subagent-\d+$`)
@@ -241,6 +242,12 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 
 	// Read optional mode filter
 	modeFilter := r.URL.Query().Get("mode")
+	// Read optional kind filter ("chat", "heartbeat", "cron", "cron-spawn", "subagent")
+	kindFilter := r.URL.Query().Get("kind")
+	// include_system=true also merges persisted system sessions (heartbeat,
+	// cron, subagents) even when no kind filter is given (used by the
+	// session-history "all" view).
+	includeSystem := r.URL.Query().Get("include_system") == "true"
 
 	// Collect session keys from ALL native clients (unified view).
 	// Native sessions are shared across all clients on the same machine.
@@ -273,6 +280,7 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 
 		// Get session mode
 		sessionMode := n.agentLoop.GetSessionMode(sk)
+		kind := classifySessionKeyKind(sk)
 
 		// Apply mode filter if specified
 		if modeFilter != "" {
@@ -284,15 +292,66 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 		}
+		// Apply kind filter if specified
+		if kindFilter != "" && kind != kindFilter {
+			continue
+		}
 
 		sessions = append(sessions, ChatSession{
 			Key:          sk,
 			Name:         n.agentLoop.GetName(sk),
 			Mode:         sessionMode,
+			Kind:         kind,
 			Created:      n.agentLoop.GetCreated(sk),
 			Updated:      n.agentLoop.GetUpdated(sk),
 			MessageCount: messageCount,
 		})
+	}
+
+	// Merge in every persisted session from the shared session manager
+	// (heartbeat, cron, subagents, etc.) so the session-history UI can see
+	// sessions that are not tracked by any native client. Duplicate keys are
+	// skipped (the tracked entry above wins, preserving any client metadata).
+	mergeAllSessions := n.agentLoop != nil && (kindFilter != "" || includeSystem)
+	if mergeAllSessions {
+		allSessions := n.agentLoop.ListAllSessions()
+		seen := make(map[string]bool, len(sessions))
+		for _, s := range sessions {
+			seen[s.Key] = true
+		}
+		for _, info := range allSessions {
+			if seen[info.Key] {
+				continue
+			}
+			// System sessions (heartbeat/cron) may legitimately have zero
+			// messages; keep them so the history shows the runs happened.
+			// Only drop empty system sessions when a kind filter targets
+			// "chat" (the tracked loop already skipped empties).
+			if info.MessageCount == 0 && kindFilter == "chat" {
+				continue
+			}
+			if modeFilter != "" {
+				effectiveMode := info.Mode
+				if effectiveMode == "" {
+					effectiveMode = "agent"
+				}
+				if effectiveMode != modeFilter {
+					continue
+				}
+			}
+			if kindFilter != "" && info.Kind != kindFilter {
+				continue
+			}
+			sessions = append(sessions, ChatSession{
+				Key:          info.Key,
+				Name:         info.Name,
+				Mode:         info.Mode,
+				Kind:         info.Kind,
+				Created:      info.Created,
+				Updated:      info.Updated,
+				MessageCount: info.MessageCount,
+			})
+		}
 	}
 
 	sort.Slice(sessions, func(i, j int) bool {
@@ -314,6 +373,27 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 		Total:    total,
 		HasMore:  end < total,
 	})
+}
+
+// classifySessionKeyKind derives the session kind from the session key.
+// Mirrors agent.classifySessionKind; both must stay in sync.
+func classifySessionKeyKind(sessionKey string) string {
+	if sessionKey == "" {
+		return "chat"
+	}
+	if sessionKey == "heartbeat" {
+		return "heartbeat"
+	}
+	if strings.HasPrefix(sessionKey, "cron-spawn-") {
+		return "cron-spawn"
+	}
+	if strings.HasPrefix(sessionKey, "cron-") {
+		return "cron"
+	}
+	if routing.IsSubagentSessionKey(sessionKey) {
+		return "subagent"
+	}
+	return "chat"
 }
 
 func (n *NativeChannel) handleCreateSession(w http.ResponseWriter, r *http.Request) {

@@ -738,6 +738,71 @@ func (ap *agentProvidableImpl) ProcessHeartbeat(ctx context.Context, content, ch
 	return ap.al.messageProcessor.ProcessHeartbeat(ctx, content, channel, chatID)
 }
 
+// ListAllSessions returns a summary of every persisted session across all
+// agents (including system sessions such as heartbeat and cron).
+func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
+	sm := ap.al.SessionManager()
+	if sm == nil {
+		return []channels.SessionKindInfo{}
+	}
+
+	sessions := sm.ListSessions()
+	result := make([]channels.SessionKindInfo, 0, len(sessions))
+	for _, s := range sessions {
+		if s == nil {
+			continue
+		}
+		count := 0
+		for _, msg := range s.Messages {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				// Skip injected context messages (e.g. from read_image tool)
+				if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+					continue
+				}
+				count++
+			}
+		}
+		result = append(result, channels.SessionKindInfo{
+			Key:          s.Key,
+			Name:         s.Name,
+			Mode:         s.Mode,
+			Kind:         classifySessionKind(s.Key),
+			Created:      s.Created,
+			Updated:      s.Updated,
+			MessageCount: count,
+		})
+	}
+	return result
+}
+
+// classifySessionKind derives the session kind from the session key.
+//   - "heartbeat"  — heartbeat service runs (key "heartbeat")
+//   - "cron"       — global cron job turns (key "cron-<jobID>")
+//   - "cron-spawn" — cron jobs that spawn a subagent (key "cron-spawn-<jobID>")
+//   - "subagent"   — subagent sessions (key "subagent:..." or ":subagent-N")
+//   - "chat"       — everything else (user chats)
+func classifySessionKind(sessionKey string) string {
+	if sessionKey == "" {
+		return "chat"
+	}
+	if sessionKey == "heartbeat" {
+		return "heartbeat"
+	}
+	if strings.HasPrefix(sessionKey, "cron-spawn-") {
+		return "cron-spawn"
+	}
+	if strings.HasPrefix(sessionKey, "cron-") {
+		return "cron"
+	}
+	if routing.IsSubagentSessionKey(sessionKey) {
+		return "subagent"
+	}
+	if idx := strings.LastIndex(sessionKey, ":subagent-"); idx > 0 {
+		return "subagent"
+	}
+	return "chat"
+}
+
 // ============================================================================
 // Streaming support — persists assistant message chunks in the session file
 // ============================================================================

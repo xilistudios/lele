@@ -93,7 +93,23 @@
     "subagents_one": "{{count}} subagent",
     "subagents_other": "{{count}} subagents",
     "subagentsTitle": "Subagents",
-    "noSubagents": "No subagents in this session"
+    "noSubagents": "No subagents in this session",
+    "kind": {
+      "heartbeat": "Heartbeat",
+      "cron": "Cron",
+      "cron-spawn": "Cron spawn",
+      "subagent": "Subagent"
+    },
+    "filterKind": {
+      "all": "All",
+      "chat": "Chat",
+      "heartbeat": "Heartbeat",
+      "cron": "Cron",
+      "cron-spawn": "Cron spawn",
+      "subagent": "Subagent"
+    },
+    "totalSessions": "{{count}} sessions total",
+    "loadError": "Failed to load sessions: {{error}}"
   },
   "connection": {
     "connected": "Connected",

@@ -157,6 +157,11 @@ const ChatListItem = memo(function ChatListItem({
                 {session.name || t('chat.unnamedSession', { key: session.key.slice(-8) })}
               </p>
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                {session.kind && session.kind !== 'chat' && (
+                  <span className="rounded-full border border-border bg-background-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                    {t(`chat.kind.${session.kind}`)}
+                  </span>
+                )}
                 <span>{t('chat.messageCount', { count: session.message_count })}</span>
                 <span className="h-1 w-1 rounded-full bg-text-tertiary/40" />
                 <span>{formatDateRelative(session.updated, t)}</span>

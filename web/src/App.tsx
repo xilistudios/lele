@@ -153,11 +153,19 @@ function ChatRoute() {
     const hasValidParent =
       !isNestedSubagent ||
       (derivedParentSessionKey ? availableKeys.has(derivedParentSessionKey) : false)
+    // System session keys (heartbeat, cron-*, cron-spawn-*) may not be in the
+    // regular sessions list, but they are still valid chat targets reachable
+    // from the chats (history) page.
+    const isSystemSessionKey =
+      targetSessionKey === 'heartbeat' ||
+      targetSessionKey.startsWith('cron-') ||
+      targetSessionKey.startsWith('cron-spawn-')
     // For nested subagents, the key comes from the subagent API (e.g. "UUID:taskID")
     // and won't be in the sessions list. We trust the URL since the parent is validated.
     const hasValidTarget = isNestedSubagent
       ? targetSessionKey.length > 0
-      : !targetSessionKey.startsWith('subagent:') && availableKeys.has(targetSessionKey)
+      : !targetSessionKey.startsWith('subagent:') &&
+        (availableKeys.has(targetSessionKey) || isSystemSessionKey)
 
     if (hasValidParent && hasValidTarget) {
       void onSelectSession(targetSessionKey, { parentSessionKey: derivedParentSessionKey })

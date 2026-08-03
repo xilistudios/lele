@@ -22,15 +22,16 @@ function formatMonthYear(d: Date): string {
   return `${month} ${d.getFullYear()}`
 }
 
-export function useChatFilters(allSessions: ChatSession[]) {
+export function useChatFilters(allSessions: ChatSession[], options?: { includeEmpty?: boolean }) {
   const [query, setQuery] = useState('')
   const [sortMode, setSortMode] = useState<SortMode>('recent')
+  const includeEmpty = options?.includeEmpty ?? false
 
   const filteredSessions = useMemo(() => {
-    // Defensive: drop sessions with invalid dates or zero messages
+    // Defensive: drop sessions with invalid dates or zero messages (unless includeEmpty)
     let list = allSessions.filter((s) => {
       const d = safeDate(s.updated)
-      return d !== null && s.message_count > 0
+      return d !== null && (includeEmpty || s.message_count > 0)
     })
 
     if (query.trim()) {
@@ -55,7 +56,7 @@ export function useChatFilters(allSessions: ChatSession[]) {
     }
 
     return list
-  }, [allSessions, query, sortMode])
+  }, [allSessions, query, sortMode, includeEmpty])
 
   const grouped: TimeGroup[] = useMemo(() => {
     if (!filteredSessions.length) return []
