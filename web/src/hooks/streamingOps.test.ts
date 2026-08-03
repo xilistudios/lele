@@ -161,6 +161,26 @@ describe('applyMessageComplete', () => {
     const next = applyMessageComplete(current, 'a1', 's1', 'FINAL')
     expect(next[0].content).toBe('FINAL')
   })
+
+  test('creates the message when complete arrives before any stream chunk drained', () => {
+    // message.complete can arrive before the typewriter queue's first tick
+    // (or when stream events are coalesced). The message must still appear
+    // with the final content instead of being silently dropped.
+    const current = [msg('u1', 'user', 'hi')]
+    const next = applyMessageComplete(current, 'a1', 's1', 'Parent response')
+    expect(next.map((m) => m.id)).toEqual(['u1', 'a1'])
+    expect(next.find((m) => m.id === 'a1')?.content).toBe('Parent response')
+    expect(next.find((m) => m.id === 'a1')?.streaming).toBe(false)
+  })
+
+  test('creates empty message when complete has no content and nothing was streamed', () => {
+    const current: ChatMessage[] = []
+    const next = applyMessageComplete(current, 'a1', 's1', undefined)
+    expect(next).toHaveLength(1)
+    expect(next[0].id).toBe('a1')
+    expect(next[0].content).toBe('')
+    expect(next[0].streaming).toBe(false)
+  })
 })
 
 describe('markOptimisticUserFailed', () => {

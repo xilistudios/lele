@@ -222,7 +222,10 @@ export function useAppLogic(
     }
 
     modelLoadKeyRef.current = modelLoadKey
-    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation)
+    loadModels(currentAgentId, sessionsHook.currentSessionKey, hasConversation).catch(() => {
+      // Model loading is best-effort; a failure here must not surface as an
+      // unhandled rejection (it would crash the app / pollute unrelated flows).
+    })
 
     api
       .sessionThinking(sessionsHook.currentSessionKey)

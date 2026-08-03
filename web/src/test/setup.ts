@@ -1,7 +1,64 @@
-import { afterEach } from 'bun:test'
+import { afterEach, mock } from 'bun:test'
 import { JSDOM } from 'jsdom'
+import React from 'react'
 
 import '@testing-library/jest-dom'
+
+// react-virtuoso relies on container measurements (getBoundingClientRect /
+// ResizeObserver) that are always 0 in jsdom, so the real component renders
+// no items and integration tests cannot find message text. Replace it with a
+// simple non-virtualized list that renders every item through the same
+// props (data, itemContent, computeItemKey, components.Header/Footer) so
+// behavior is preserved without depending on layout measurements.
+mock.module('react-virtuoso', () => {
+  const Virtuoso = React.forwardRef<unknown, Record<string, unknown>>(
+    function Virtuoso(props, ref) {
+      const { data, itemContent, computeItemKey, components } = props as {
+        data: unknown[]
+        itemContent: (index: number, item: unknown) => React.ReactNode
+        computeItemKey?: (index: number, item: unknown) => string
+        components?: {
+          Header?: React.ComponentType
+          Footer?: React.ComponentType
+        }
+      }
+
+      if (typeof ref === 'function') {
+        ref({ scrollToIndex: () => undefined, scrollTo: () => undefined })
+      } else if (ref && typeof ref === 'object') {
+        ;(ref as { current?: unknown }).current = {
+          scrollToIndex: () => undefined,
+          scrollTo: () => undefined,
+        }
+      }
+
+      const items = (data ?? []).map((item, index) => {
+        const key = computeItemKey ? computeItemKey(index, item) : index
+        return React.createElement('div', { key }, itemContent(index, item))
+      })
+
+      return React.createElement(
+        'div',
+        { 'data-testid': 'virtuoso-mock' },
+        components?.Header ? React.createElement(components.Header) : null,
+        items,
+        components?.Footer ? React.createElement(components.Footer) : null,
+      )
+    },
+  )
+  Virtuoso.displayName = 'Virtuoso'
+
+  return {
+    Virtuoso,
+    TableVirtuoso: Virtuoso,
+    GroupedVirtuoso: Virtuoso,
+    VirtuosoHandle: {},
+    VirtuosoGrid: Virtuoso,
+    VirtuosoGridHandle: {},
+    VirtuosoHandleMethods: {},
+    default: Virtuoso,
+  }
+})
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' })
 
