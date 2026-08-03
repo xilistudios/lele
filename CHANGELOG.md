@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-03
+
+### Added
+
+#### Update System
+- Self-update from GitHub Releases — lele can now check for new releases, download the right binary for the current platform, verify its SHA256 checksum, install it atomically (with backup for rollback), and restart. Available from the CLI (`lele update` with `--check`, `--yes`, `--version`, `--rollback`, `--no-restart`, `--force` flags), REST API (`/api/v1/system/version`, `/updates/check|apply|status|rollback`, `/system/restart`), and a new Updates section in Web UI Settings with progress display and one-click rollback (en/es/pt).
+
+#### Security
+- Keyring module for encrypted secret storage (`pkg/keyring`) — AES-256-GCM encrypted vault on disk with the master key stored in the OS keychain (macOS Keychain, GNOME Keyring/KWallet, Windows Credential Manager) and a file-based fallback for headless systems. Per-agent scoped access control and an in-memory audit ring buffer. Agents can reference secrets by name via the new `secret` tool (`list`/`get`) without raw values ever appearing in config files, logs, or session history. Exec supports `{{SECRET:name}}` placeholders.
+
+#### Cron
+- Session-scoped cron jobs — jobs can now be tied to the originating session (`scope: "session"`) and notify it upon completion. New `SessionAwareTool` interface lets tools receive the full session context (channel, chat ID, session key).
+
+#### WebUI
+- Heartbeat and cron session history — sessions triggered by heartbeat, cron, or subagents now appear in the session list with a `Kind` field (`chat`/`heartbeat`/`cron`/`cron-spawn`/`subagent`), not just normal user chats.
+
+#### TUI
+- `/goal` command wired into the TUI with in-viewport feedback, so the persistent goal system is usable without the web UI.
+
+#### Installers
+- PowerShell installer for Windows (`install.ps1`) mirroring `install.sh` — one-liner install with `-Version` and `-InstallDir` options.
+
+### Fixed
+
+#### WebUI
+- Duplicate WebSocket connections causing duplicated streaming text — the client now closes stale sockets and cancels pending reconnect timers before establishing a new connection (typical on mobile when returning to the tab), with stale-socket guards in event handlers. Includes regression tests.
+- Sidebar layout reorganized so navigation items never scroll or clip.
+- Stabilized flaky integration tests and fixed a message-complete race condition.
+
+#### Update
+- Windows build fixed by moving `Setsid` to platform-specific files.
+
+### Changed
+
+#### WebUI
+- Streaming message reconciliation logic simplified for maintainability.
+
+#### TUI
+- Fixed progressive CPU usage and render slowdowns — `View()` no longer recomputes token/context usage from disk on every render; expensive work is now cached and refreshed on demand.
+
 ## [0.4.0] - 2026-08-01
 
 ### Added
