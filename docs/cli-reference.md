@@ -123,6 +123,37 @@ lele client remove <client_id>
 lele client status
 ```
 
+## `lele update`
+
+Self-update from GitHub Releases (stable channel only).
+
+```bash
+lele update                    # Check and install the latest version (with confirmation)
+lele update --check            # Only check if an update is available
+lele update --yes              # Install without confirmation
+lele update --version vX.Y.Z   # Install a specific version
+lele update --rollback         # Restore the previous binary from backup
+lele update --no-restart       # Do not restart the service after installing
+lele update --force            # Allow updating a dev/local build
+```
+
+Options:
+
+- `-c, --check` — check only, do not install
+- `-y, --yes` — assume yes to prompts
+- `-v, --version` — install a specific version
+- `-f, --force` — force update of dev builds
+- `--no-restart` — skip service restart after install
+- `--rollback` — roll back to the previous version (from `~/.lele/backups`)
+
+Notes:
+
+- Downloads are verified against the release `checksums.txt` before install.
+- The previous binary is kept in `~/.lele/backups` for rollback.
+- Restart uses the detected supervisor (systemd user service, or self-exec).
+- Dev builds (`version == "dev"`) require `--force`.
+- Can be disabled with `updates.enabled: false` in config.
+
 ## `lele migrate`
 
 Options:

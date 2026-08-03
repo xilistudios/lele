@@ -72,6 +72,47 @@ export type SystemStatus = {
   version: string
 }
 
+export type SystemVersionInfo = {
+  version: string
+  git_commit: string
+  build_time: string
+  go_version: string
+  os: string
+  arch: string
+  binary: string
+  supervisor: string
+  dev_build: boolean
+  has_backup: boolean
+}
+
+export type UpdateCheckInfo = {
+  current: string
+  latest: string
+  update_available: boolean
+  changelog?: string
+  published_at?: string
+  html_url?: string
+}
+
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'downloading'
+  | 'verifying'
+  | 'installing'
+  | 'restarting'
+  | 'done'
+  | 'failed'
+
+export type UpdateState = {
+  phase: UpdatePhase
+  progress: number
+  from: string
+  to: string
+  error?: string
+  started_at?: string
+}
+
 export type AgentStatusResponse = {
   id: string
   status: string

@@ -52,7 +52,10 @@ import type {
   StreamMessageState,
   StreamStatusResponse,
   SystemStatus,
+  SystemVersionInfo,
   ToolsResponse,
+  UpdateCheckInfo,
+  UpdateState,
 } from '../../lib/types'
 import { endpoints } from './endpoints'
 import { ApiError, parseApiError } from './errors'
@@ -537,6 +540,17 @@ export const createApiClient = (baseUrl: string) => {
     tools: () => request<ToolsResponse>(endpoints.system.tools, { method: 'GET' }),
     channels: () => request<ChannelsResponse>(endpoints.system.channels, { method: 'GET' }),
     systemStatus: () => request<SystemStatus>(endpoints.system.status, { method: 'GET' }),
+    systemVersion: () => request<SystemVersionInfo>(endpoints.system.version, { method: 'GET' }),
+    updatesCheck: () => request<UpdateCheckInfo>(endpoints.system.updatesCheck, { method: 'GET' }),
+    updatesApply: (version?: string, restart?: boolean) =>
+      request<{ status: string }>(endpoints.system.updatesApply, {
+        method: 'POST',
+        body: JSON.stringify({ version, restart }),
+      }),
+    updatesStatus: () => request<UpdateState>(endpoints.system.updatesStatus, { method: 'GET' }),
+    updatesRollback: () =>
+      request<{ restored: string }>(endpoints.system.updatesRollback, { method: 'POST' }),
+    systemRestart: () => request<{ status: string }>(endpoints.system.restart, { method: 'POST' }),
     skills: () => request<SkillsResponse>(endpoints.skills.list, { method: 'GET' }),
     availableSkills: () =>
       request<AvailableSkillsResponse>(endpoints.skills.available, { method: 'GET' }),

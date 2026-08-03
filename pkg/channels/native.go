@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/skills"
+	"github.com/xilistudios/lele/pkg/update"
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
@@ -52,6 +53,7 @@ type NativeChannel struct {
 	reloadConfig     func() error // called after config save to reload runtime config
 	cronService      CronProvidable
 	keyringService   *keyring.Service
+	updateService    *update.Updater
 }
 
 // CronProvidable is the interface for managing cron jobs via the API.
@@ -324,6 +326,14 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/config", withAuth(n.handleGetConfig))
 	mux.HandleFunc("PUT /api/v1/config", withAuth(applyBodyLimit(n.handlePutConfig)))
 	mux.HandleFunc("POST /api/v1/config/validate", withAuth(applyBodyLimit(n.handleValidateConfig)))
+
+	// System / self-update
+	mux.HandleFunc("GET /api/v1/system/version", withAuth(n.handleSystemVersion))
+	mux.HandleFunc("GET /api/v1/system/updates/check", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(withAuth(n.handleUpdatesCheck))).ServeHTTP)
+	mux.HandleFunc("POST /api/v1/system/updates/apply", withAuth(applyBodyLimit(n.handleUpdatesApply)))
+	mux.HandleFunc("GET /api/v1/system/updates/status", withAuth(n.handleUpdatesStatus))
+	mux.HandleFunc("POST /api/v1/system/updates/rollback", withAuth(n.handleUpdatesRollback))
+	mux.HandleFunc("POST /api/v1/system/restart", withAuth(n.handleSystemRestart))
 
 	// Tools, Models, Skills, Status, Channels
 	mux.HandleFunc("GET /api/v1/tools", withAuth(n.handleTools))

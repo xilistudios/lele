@@ -9,6 +9,7 @@ type SettingsTab =
   | 'groups'
   | 'tools'
   | 'system'
+  | 'updates'
   | 'advanced'
   | 'diagnostics'
   | 'logs'
@@ -30,6 +31,7 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
     ...(groupsEnabled ? [{ id: 'groups' as const, label: t('settings.tabs.groups') }] : []),
     { id: 'tools', label: t('settings.tabs.tools') },
     { id: 'system', label: t('settings.tabs.system') },
+    { id: 'updates', label: t('settings.tabs.updates') },
     { id: 'advanced', label: t('settings.tabs.advanced') },
     { id: 'diagnostics', label: t('settings.tabs.diagnostics') },
     { id: 'logs', label: t('settings.tabs.logs') },

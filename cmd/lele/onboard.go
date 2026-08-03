@@ -81,6 +81,7 @@ func printHelp() {
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("migrate"), styleOption.Render("Migrate from OpenClaw to Lele"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("skills"), styleOption.Render("Manage skills (install, list, remove)"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("client"), styleOption.Render("Manage native channel clients (pair, list, remove)"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("update"), styleOption.Render("Update lele to the latest release"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("version"), styleOption.Render("Show version information"))
 }
 

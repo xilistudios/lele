@@ -56,6 +56,12 @@ export const endpoints = {
     channels: '/api/v1/channels',
     status: '/api/v1/status',
     models: '/api/v1/models',
+    version: '/api/v1/system/version',
+    updatesCheck: '/api/v1/system/updates/check',
+    updatesApply: '/api/v1/system/updates/apply',
+    updatesStatus: '/api/v1/system/updates/status',
+    updatesRollback: '/api/v1/system/updates/rollback',
+    restart: '/api/v1/system/restart',
   },
   providers: {
     models: (name: string) => `/api/v1/providers/${encodeURIComponent(name)}/models`,

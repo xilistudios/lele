@@ -142,6 +142,7 @@ type Config struct {
 	Devices   DevicesConfig    `json:"devices"`
 	Logs      LogsConfig       `json:"logs"`
 	Keyring   KeyringConfig    `json:"keyring"`
+	Updates   UpdatesConfig    `json:"updates"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	mu        sync.RWMutex
 }
@@ -403,6 +404,17 @@ type HeartbeatConfig struct {
 type DevicesConfig struct {
 	Enabled    bool `json:"enabled" env:"LELE_DEVICES_ENABLED"`
 	MonitorUSB bool `json:"monitor_usb" env:"LELE_DEVICES_MONITOR_USB"`
+}
+
+// UpdatesConfig controls self-update behavior.
+type UpdatesConfig struct {
+	// Enabled allows checking for and applying updates (CLI and API).
+	Enabled bool `json:"enabled" env:"LELE_UPDATES_ENABLED"`
+	// Channel selects the release channel. Currently only "stable" is supported.
+	Channel string `json:"channel,omitempty" env:"LELE_UPDATES_CHANNEL"`
+	// Repo overrides the GitHub repository used for releases (owner/name).
+	// Empty means the default xilistudios/lele.
+	Repo string `json:"repo,omitempty" env:"LELE_UPDATES_REPO"`
 }
 
 // LogsConfig holds logging-related configuration
@@ -1077,6 +1089,11 @@ func DefaultConfig() *Config {
 			AuditLogSize:     1000,
 			AllowAgentSet:    false,
 			AllowAgentDelete: false,
+		},
+		Updates: UpdatesConfig{
+			Enabled: true,
+			Channel: "stable",
+			Repo:    "",
 		},
 	}
 }
