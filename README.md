@@ -76,6 +76,8 @@ The main documentation gap was that the old README still described an earlier fo
 
 ### Install (Recommended)
 
+**Linux / macOS / BSD**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
 ```
@@ -90,7 +92,23 @@ curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | 
 curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh -s -- --prefix /usr/local
 ```
 
-The script detects your OS and architecture, downloads the correct binary, verifies its SHA256 checksum, and installs it.
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
+```
+
+Options:
+
+```powershell
+# Install a specific version
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1))) -Version v0.1.0
+
+# Custom install directory (default: %LOCALAPPDATA%\lele)
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1))) -InstallDir C:\tools\lele
+```
+
+The scripts detect your OS and architecture, download the correct binary, verify its SHA256 checksum, and install it. On Windows the installer also adds the binary to your user PATH (use `-NoPath` to opt out).
 
 ### Install From Source
 
