@@ -75,9 +75,14 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
     )
 
-    // Keep locally-created session in the list even if not yet on the backend
+    // Keep locally-created session in the list even if not yet on the backend.
+    // Subagent sessions are intentionally excluded: they are nested views
+    // (parent/subagent) rather than top-level sessions, so they must not
+    // appear in the sidebar list (and adding them with message_count 0 would
+    // shadow the name derived from their messages in ChatPageContext).
     if (
       currentSessionKeyRef.current &&
+      !isSubagentSessionKey(currentSessionKeyRef.current) &&
       !nextSessions.some((s) => s.key === currentSessionKeyRef.current)
     ) {
       nextSessions = [

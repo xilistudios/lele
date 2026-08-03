@@ -49,7 +49,6 @@ export function isSessionMismatch(
   }
   return false
 }
-
 export function findToolMessageIndex(
   messages: ChatMessage[],
   toolCallId: string | undefined,

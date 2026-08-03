@@ -147,6 +147,23 @@ export function applyMessageComplete(
   sessionKey: string,
   serverContent: string | undefined,
 ): ChatMessage[] {
+  // If the message never made it into the streaming list (e.g. message.complete
+  // arrived before the typewriter queue drained its first tick, or the stream
+  // events were coalesced/lost), create it with the final content instead of
+  // silently dropping the response.
+  if (!current.some((m) => m.role === 'assistant' && m.id === msgId)) {
+    const content = serverContent && serverContent.length > 0 ? serverContent : ''
+    const newMsg = createAssistantMessage({
+      id: msgId,
+      sessionKey,
+      content,
+      streaming: false,
+    })
+    const arr = [...current]
+    arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
+    return arr.filter((m) => !isRestorePlaceholder(m, sessionKey))
+  }
+
   return current.flatMap((m) => {
     if (isRestorePlaceholder(m, sessionKey)) return []
 
