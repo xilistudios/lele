@@ -386,9 +386,9 @@ func (sm *SubagentManager) MarkDelivered(taskID string) bool {
 // Returns the number of tasks removed.
 func (sm *SubagentManager) CleanupTerminalTasks() int {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	if sm.retentionPeriod <= 0 {
+		sm.mu.Unlock()
 		return 0
 	}
 
@@ -396,20 +396,31 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	thresholdMs := int64(sm.retentionPeriod / time.Millisecond)
 	removed := 0
 
-	evictCallback := sm.sessionEvictCallback
+	// Collect the session keys to evict, but do NOT invoke the callback while
+	// holding sm.mu. The callback calls SessionManager.EvictSession, which takes
+	// the session manager lock and does synchronous disk I/O. Holding sm.mu across
+	// that call creates a lock-ordering hazard (SubagentManager.mu -> SessionManager.mu)
+	// that can deadlock with the reverse path (session cancel -> SubagentManager.mu),
+	// permanently blocking all subsequent spawns.
+	var toEvict []string
 	for taskID, task := range sm.tasks {
 		if !isSubagentTerminalStatus(task.Status) {
 			continue
 		}
 		// Use Updated timestamp — it's set when the task reaches terminal state
 		if now-task.Updated > thresholdMs {
-			// Evict the subagent's session from memory before deleting the task
-			if evictCallback != nil {
-				sessionKey := task.OriginSessionKey + ":" + taskID
-				evictCallback(sessionKey)
-			}
+			toEvict = append(toEvict, task.OriginSessionKey+":"+taskID)
 			delete(sm.tasks, taskID)
 			removed++
+		}
+	}
+	evictCallback := sm.sessionEvictCallback
+	sm.mu.Unlock()
+
+	// Evict sessions outside the lock.
+	if evictCallback != nil {
+		for _, sessionKey := range toEvict {
+			evictCallback(sessionKey)
 		}
 	}
 
