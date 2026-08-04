@@ -66,6 +66,11 @@ type SessionManager struct {
 	maxInMemory int                  // max sessions to keep in memory (0 = unlimited). Default: 50.
 	evictionTTL time.Duration        // idle time before a session is eligible for eviction. Default: 30m.
 	accessTimes map[string]time.Time // last access time per session key (for LRU)
+
+	// saveSeq tracks in-flight save sequence numbers per session key so that
+	// a slow, out-of-order disk write can never overwrite a newer snapshot
+	// (saves release the lock during I/O). Guarded by sm.mu.
+	saveSeq map[string]uint64
 }
 
 func NewSessionManager(storage string) *SessionManager {
@@ -76,6 +81,7 @@ func NewSessionManager(storage string) *SessionManager {
 		maxInMemory: 50,
 		evictionTTL: 30 * time.Minute,
 		accessTimes: make(map[string]time.Time),
+		saveSeq:     make(map[string]uint64),
 	}
 
 	if storage != "" {
@@ -222,6 +228,27 @@ func (sm *SessionManager) touchSession(key string) {
 	sm.accessTimes[key] = time.Now()
 }
 
+// saveForEviction saves the session and reports whether it is still safe to
+// evict it from memory. saveUnlocked releases the lock during disk I/O, so a
+// concurrent goroutine may touch the session in that window; if that happens
+// the caller must NOT delete the in-memory copy (it may contain data newer
+// than the persisted snapshot). Caller must hold sm.mu.
+func (sm *SessionManager) saveForEviction(key string) bool {
+	prevAccess, hadAccess := sm.accessTimes[key]
+	_ = sm.saveUnlocked(key)
+	// If the session was accessed while our I/O was in flight, keep it.
+	// (A missing accessTimes entry both before and after means the session
+	// was never touched, so eviction is safe.)
+	curAccess, hasAccess := sm.accessTimes[key]
+	if hadAccess != hasAccess {
+		return false
+	}
+	if hasAccess && !curAccess.Equal(prevAccess) {
+		return false
+	}
+	return true
+}
+
 // evictIfNeeded evicts idle sessions when the in-memory session count
 // exceeds maxInMemory. Caller must hold sm.mu (write lock).
 func (sm *SessionManager) evictIfNeeded() {
@@ -235,7 +262,9 @@ func (sm *SessionManager) evictIfNeeded() {
 		for key, lastAccess := range sm.accessTimes {
 			if lastAccess.Before(cutoff) {
 				if _, ok := sm.sessions[key]; ok {
-					_ = sm.saveUnlocked(key)
+					if !sm.saveForEviction(key) {
+						continue
+					}
 				}
 				delete(sm.sessions, key)
 				delete(sm.accessTimes, key)
@@ -271,7 +300,9 @@ func (sm *SessionManager) evictIfNeeded() {
 	toEvict := len(sm.sessions) - sm.maxInMemory
 	for i := 0; i < toEvict && i < len(accesses); i++ {
 		key := accesses[i].key
-		_ = sm.saveUnlocked(key)
+		if !sm.saveForEviction(key) {
+			continue
+		}
 		delete(sm.sessions, key)
 		delete(sm.accessTimes, key)
 		logger.InfoCF("session", "LRU evicted session", map[string]interface{}{
@@ -295,7 +326,9 @@ func (sm *SessionManager) CleanupIdleSessions() int {
 		for key, lastAccess := range sm.accessTimes {
 			if lastAccess.Before(cutoff) {
 				if _, ok := sm.sessions[key]; ok {
-					_ = sm.saveUnlocked(key)
+					if !sm.saveForEviction(key) {
+						continue
+					}
 				}
 				delete(sm.sessions, key)
 				delete(sm.accessTimes, key)
@@ -305,14 +338,34 @@ func (sm *SessionManager) CleanupIdleSessions() int {
 	}
 
 	// Also clean up orphaned sessionMeta entries: metadata for sessions
-	// whose files no longer exist on disk.
+	// whose files no longer exist on disk. Collect keys first, then stat
+	// OUTSIDE the lock — disk I/O must not hold sm.mu.
+	var orphanCandidates []string
 	if sm.storage != "" {
 		for key := range sm.sessionMeta {
+			orphanCandidates = append(orphanCandidates, key)
+		}
+	}
+	if len(orphanCandidates) > 0 {
+		sm.mu.Unlock()
+		orphans := make([]string, 0)
+		for _, key := range orphanCandidates {
 			filename := sanitizeFilename(key)
 			sessionPath := filepath.Join(sm.storage, filename+".json")
 			if _, err := os.Stat(sessionPath); err != nil {
-				delete(sm.sessionMeta, key)
+				orphans = append(orphans, key)
 			}
+		}
+		sm.mu.Lock()
+		for _, key := range orphans {
+			// Re-check under the lock: if the session was loaded or saved
+			// while we were doing I/O, keep its metadata. (A save requires
+			// the session to be in memory, so this check is sufficient and
+			// avoids disk I/O while holding the lock.)
+			if _, ok := sm.sessions[key]; ok {
+				continue
+			}
+			delete(sm.sessionMeta, key)
 		}
 	}
 
@@ -1387,21 +1440,63 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 	sm.touchSession(key)
 }
 
-// saveUnlocked saves a session without acquiring the lock (caller must hold lock).
+// saveUnlocked saves a session. Caller must hold sm.mu (write lock).
+// It builds an in-memory snapshot under the lock, then TEMPORARILY releases
+// the lock for the disk I/O and re-acquires it before returning, so the
+// caller's lock invariant is preserved. The global mutex must not be held
+// during fsync — on slow storage a save can take 100-300ms, and every TUI
+// render (GetHistory, GetCurrentContextUsage, ...) needs this lock. Holding
+// it across the write froze the Bubble Tea event loop and caused key-repeat
+// bursts.
+//
+// Ordering guard: each snapshot gets a per-key sequence number. If a newer
+// save for the same key started while our disk I/O was in flight, our
+// snapshot is stale and its temp file is discarded instead of overwriting
+// the newer data.
 func (sm *SessionManager) saveUnlocked(key string) error {
-	if sm.storage == "" {
+	snapshot, seq, err := sm.snapshotUnlocked(key)
+	if err != nil {
+		return err
+	}
+	if snapshot == nil {
 		return nil
+	}
+
+	// Release the lock while doing disk I/O; the snapshot is a consistent
+	// deep copy, so concurrent mutations only make the persisted state
+	// slightly stale (it will be overwritten by the next save).
+	sm.mu.Unlock()
+	tmpPath, err := sm.writeTempSnapshot(key, snapshot)
+	sm.mu.Lock()
+	if err != nil {
+		return err
+	}
+	if sm.saveSeq[key] != seq {
+		// A newer save started while we were writing — let it win.
+		_ = os.Remove(tmpPath)
+		return nil
+	}
+	return sm.commitSnapshot(key, tmpPath, snapshot)
+}
+
+// snapshotUnlocked builds a consistent snapshot of the session while the
+// caller holds sm.mu. Returns (nil, 0, nil) if the session does not exist or
+// storage is not configured. The returned sequence number identifies this
+// snapshot for the out-of-order save guard.
+func (sm *SessionManager) snapshotUnlocked(key string) (*Session, uint64, error) {
+	if sm.storage == "" {
+		return nil, 0, nil
 	}
 
 	filename := sanitizeFilename(key)
 
 	if filename == "." || !filepath.IsLocal(filename) || strings.ContainsAny(filename, `/\`) {
-		return os.ErrInvalid
+		return nil, 0, os.ErrInvalid
 	}
 
 	stored, ok := sm.sessions[key]
 	if !ok {
-		return nil
+		return nil, 0, nil
 	}
 
 	// Prune old excluded messages when over the storage limit
@@ -1419,7 +1514,7 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 		stored.Messages = kept
 	}
 
-	snapshot := Session{
+	snapshot := &Session{
 		Key:             stored.Key,
 		Name:            stored.Name,
 		Mode:            stored.Mode,
@@ -1436,14 +1531,40 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	if len(stored.Messages) > 0 {
 		snapshot.Messages = make([]providers.Message, len(stored.Messages))
 		copy(snapshot.Messages, stored.Messages)
+		// Copy slice fields so the snapshot shares no backing arrays with
+		// the live session — the snapshot is encoded AFTER the lock is
+		// released, and concurrent appends must not be visible mid-encode.
+		for i := range snapshot.Messages {
+			m := &snapshot.Messages[i]
+			if len(m.ContentParts) > 0 {
+				parts := make([]providers.ContentPart, len(m.ContentParts))
+				copy(parts, m.ContentParts)
+				m.ContentParts = parts
+			}
+			if len(m.ToolCalls) > 0 {
+				calls := make([]providers.ToolCall, len(m.ToolCalls))
+				copy(calls, m.ToolCalls)
+				m.ToolCalls = calls
+			}
+			if len(m.Media) > 0 {
+				media := make([]string, len(m.Media))
+				copy(media, m.Media)
+				m.Media = media
+			}
+		}
 	} else {
 		snapshot.Messages = []providers.Message{}
 	}
+	sm.saveSeq[key]++
+	return snapshot, sm.saveSeq[key], nil
+}
 
-	sessionPath := filepath.Join(sm.storage, filename+".json")
+// writeTempSnapshot serializes the snapshot to a temp file WITHOUT holding
+// sm.mu (the caller must have released it). Returns the temp file path.
+func (sm *SessionManager) writeTempSnapshot(key string, snapshot *Session) (string, error) {
 	tmpFile, err := os.CreateTemp(sm.storage, "session-*.tmp")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	tmpPath := tmpFile.Name()
@@ -1459,34 +1580,43 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	// in-memory copy of the JSON representation.
 	encoder := json.NewEncoder(tmpFile)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(&snapshot); err != nil {
+	if err := encoder.Encode(snapshot); err != nil {
 		_ = tmpFile.Close()
-		return err
+		return "", err
 	}
 	if err := tmpFile.Chmod(0644); err != nil {
 		_ = tmpFile.Close()
-		return err
+		return "", err
 	}
 	if err := tmpFile.Sync(); err != nil {
 		_ = tmpFile.Close()
-		return err
+		return "", err
 	}
 	if err := tmpFile.Close(); err != nil {
-		return err
-	}
-
-	if err := os.Rename(tmpPath, sessionPath); err != nil {
-		return err
+		return "", err
 	}
 	cleanup = false
+	return tmpPath, nil
+}
+
+// commitSnapshot atomically renames the temp file into place and updates
+// metadata. Caller must hold sm.mu.
+func (sm *SessionManager) commitSnapshot(key string, tmpPath string, snapshot *Session) error {
+	filename := sanitizeFilename(key)
+	sessionPath := filepath.Join(sm.storage, filename+".json")
+
+	if err := os.Rename(tmpPath, sessionPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
 
 	// Update metadata to reflect the saved state
 	sm.sessionMeta[key] = &sessionMetadata{
-		Key:     stored.Key,
-		Name:    stored.Name,
-		Mode:    stored.Mode,
-		Created: stored.Created,
-		Updated: stored.Updated,
+		Key:     snapshot.Key,
+		Name:    snapshot.Name,
+		Mode:    snapshot.Mode,
+		Created: snapshot.Created,
+		Updated: snapshot.Updated,
 	}
 	sm.indexDirty = true
 
@@ -1750,13 +1880,19 @@ func (sm *SessionManager) EvictSession(key string) bool {
 
 	_, ok := sm.sessions[key]
 	if ok {
-		// Save before evicting to ensure latest state is persisted
-		_ = sm.saveUnlocked(key)
-		delete(sm.sessions, key)
-		delete(sm.accessTimes, key)
-		logger.InfoCF("session", "Session evicted from memory", map[string]interface{}{
-			"session_key": key,
-		})
+		// Save before evicting to ensure latest state is persisted.
+		// saveForEviction re-checks that the session wasn't touched while
+		// the save's disk I/O was in flight (the lock is released during it);
+		// if it was, we keep the in-memory copy to avoid losing data.
+		if sm.saveForEviction(key) {
+			delete(sm.sessions, key)
+			delete(sm.accessTimes, key)
+			logger.InfoCF("session", "Session evicted from memory", map[string]interface{}{
+				"session_key": key,
+			})
+		} else {
+			ok = false
+		}
 	}
 
 	// For subagent sessions (key contains ":subagent-"), also remove
