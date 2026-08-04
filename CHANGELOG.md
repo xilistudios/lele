@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Context compaction now sends only text to the compaction model — multimodal messages (e.g. from `read_image`) no longer leak base64 image data into summarization prompts, so compaction works with models that don't support vision. Image content is rendered as `[image]` and media attachments as `[media]` placeholders.
+
 ## [0.5.0] - 2026-08-03
 
 ### Added

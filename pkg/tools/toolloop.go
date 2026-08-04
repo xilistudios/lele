@@ -78,13 +78,17 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	tail := messages[len(messages)-keepLast:]
 	middle := messages[1 : len(messages)-keepLast]
 
-	// Build summary prompt from middle messages
+	// Build summary prompt from middle messages.
+	// Use text-only content so multimodal messages (e.g. from read_image)
+	// never leak base64 image data into the summarization prompt. The
+	// compaction model may not support vision.
 	var parts []string
 	for _, m := range middle {
+		content := m.TextOnlyContent()
 		switch m.Role {
 		case "assistant":
-			if m.Content != "" {
-				c := m.Content
+			if content != "" {
+				c := content
 				if len(c) > 500 {
 					c = c[:500] + "..."
 				}
@@ -101,13 +105,13 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 				parts = append(parts, fmt.Sprintf("Tool call: %s(%s)", tc.Name, args))
 			}
 		case "tool":
-			c := m.Content
+			c := content
 			if len(c) > 300 {
 				c = c[:300] + "..."
 			}
 			parts = append(parts, "Tool result: "+c)
 		case "user":
-			c := m.Content
+			c := content
 			if len(c) > 500 {
 				c = c[:500] + "..."
 			}
