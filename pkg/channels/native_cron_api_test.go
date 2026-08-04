@@ -118,6 +118,56 @@ func TestCronCreateWithSpawn(t *testing.T) {
 		}
 	})
 
+	t.Run("spawn with model override is persisted", func(t *testing.T) {
+		body := map[string]interface{}{
+			"schedule": map[string]interface{}{"kind": "every", "everyMs": 60000},
+			"spawn": map[string]interface{}{
+				"task":  "Summarize news",
+				"model": "anthropic:claude-sonnet",
+			},
+		}
+		resp := doCronRequest(t, ts, http.MethodPost, "/api/v1/cron", body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+		}
+		job := decodeCronJobResponse(t, resp)
+		if job.Payload.Spawn == nil || job.Payload.Spawn.Model != "anthropic:claude-sonnet" {
+			t.Fatalf("spawn.model = %q, want %q", job.Payload.Spawn.Model, "anthropic:claude-sonnet")
+		}
+	})
+
+	t.Run("spawn with bare model name is accepted", func(t *testing.T) {
+		body := map[string]interface{}{
+			"schedule": map[string]interface{}{"kind": "every", "everyMs": 60000},
+			"spawn": map[string]interface{}{
+				"task":  "Summarize news",
+				"model": "gpt-4o",
+			},
+		}
+		resp := doCronRequest(t, ts, http.MethodPost, "/api/v1/cron", body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+		}
+		job := decodeCronJobResponse(t, resp)
+		if job.Payload.Spawn == nil || job.Payload.Spawn.Model != "gpt-4o" {
+			t.Fatalf("spawn.model = %q, want %q", job.Payload.Spawn.Model, "gpt-4o")
+		}
+	})
+
+	t.Run("spawn with unknown provider in model is rejected", func(t *testing.T) {
+		body := map[string]interface{}{
+			"schedule": map[string]interface{}{"kind": "every", "everyMs": 60000},
+			"spawn": map[string]interface{}{
+				"task":  "Summarize news",
+				"model": "nonexistent:some-model",
+			},
+		}
+		resp := doCronRequest(t, ts, http.MethodPost, "/api/v1/cron", body)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+	})
+
 	t.Run("spawn with empty task rejected", func(t *testing.T) {
 		body := map[string]interface{}{
 			"schedule": map[string]interface{}{"kind": "every", "everyMs": 60000},

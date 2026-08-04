@@ -480,7 +480,7 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 	}
 
 	// Spawn the subagent
-	_, err := subagentManager.Spawn(
+	_, err := subagentManager.SpawnWithOptions(
 		ctx,
 		spawnConfig.Task,
 		spawnConfig.Label,
@@ -488,6 +488,7 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		channel,
 		chatID,
 		callback,
+		tools.SpawnOptions{ModelOverride: spawnConfig.Model},
 	)
 
 	if err != nil {
@@ -504,6 +505,7 @@ type spawnConfig struct {
 	AgentID  string
 	Guidance string
 	Context  string
+	Model    string
 }
 
 // parseSystemSpawnMessage parses a SYSTEM_SPAWN: message
@@ -527,6 +529,8 @@ func (mp *messageProcessorImpl) parseSystemSpawnMessage(content string) spawnCon
 			config.Guidance = strings.TrimSpace(line[9:])
 		} else if strings.HasPrefix(line, "CONTEXT:") {
 			config.Context = strings.TrimSpace(line[8:])
+		} else if strings.HasPrefix(line, "MODEL:") {
+			config.Model = strings.TrimSpace(line[6:])
 		}
 	}
 

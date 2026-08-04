@@ -59,6 +59,10 @@ func (t *SpawnTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "Optional target agent ID to delegate the task to",
 			},
+			"model": map[string]interface{}{
+				"type":        "string",
+				"description": "Optional model to use for the subagent (e.g., 'anthropic:claude-opus'). Defaults to the agent's configured model.",
+			},
 			"dependencies": map[string]interface{}{
 				"type":        "array",
 				"items":       map[string]interface{}{"type": "string"},
@@ -88,6 +92,7 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	taskID, _ := args["task_id"].(string)
 	guidance, _ := args["guidance"].(string)
 	agentID, _ := args["agent_id"].(string)
+	modelOverride, _ := args["model"].(string)
 
 	// Extract dependencies
 	var dependencies []string
@@ -135,7 +140,11 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	if strings.TrimSpace(taskID) != "" {
 		result, err = t.manager.ContinueTask(ctx, taskID, guidance, t.callback)
 	} else {
-		result, err = t.manager.SpawnWithDeps(ctx, task, label, agentID, originChannel, originChatID, t.callback, dependencies, maxRetries)
+		result, err = t.manager.SpawnWithOptions(ctx, task, label, agentID, originChannel, originChatID, t.callback, SpawnOptions{
+			Dependencies:  dependencies,
+			MaxRetries:    maxRetries,
+			ModelOverride: modelOverride,
+		})
 	}
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to manage subagent: %v", err))

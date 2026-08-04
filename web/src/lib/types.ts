@@ -982,6 +982,8 @@ export type CronSpawnConfig = {
   label?: string
   agent_id?: string
   guidance?: string
+  /** Optional model override (e.g. 'anthropic:claude-opus'). */
+  model?: string
 }
 
 export type CronPayload = {

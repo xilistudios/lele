@@ -214,6 +214,36 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	// Resolve agent config using shared method
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(task.AgentID)
 
+	// Apply per-task model override if configured and resolvable.
+	if task.ModelOverride != "" {
+		sm.mu.RLock()
+		resolver := sm.modelOverrideResolver
+		sm.mu.RUnlock()
+		if resolver != nil {
+			if overrideProvider, overrideModel, overrideWindow := resolver(task.ModelOverride); overrideProvider != nil && overrideModel != "" {
+				agentProvider = overrideProvider
+				agentModel = overrideModel
+				if overrideWindow > 0 {
+					agentContextWindow = overrideWindow
+				}
+				logger.InfoCF("subagent", "Subagent using model override",
+					map[string]interface{}{
+						"task_id":        task.ID,
+						"agent_id":       task.AgentID,
+						"model_override": task.ModelOverride,
+						"resolved_model": overrideModel,
+					})
+			} else {
+				logger.WarnCF("subagent", "Failed to resolve model override, using agent default",
+					map[string]interface{}{
+						"task_id":        task.ID,
+						"agent_id":       task.AgentID,
+						"model_override": task.ModelOverride,
+					})
+			}
+		}
+	}
+
 	messages := previousTask.buildMessages(systemPrompt)
 
 	// Check if context is already cancelled before starting

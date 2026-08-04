@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
+import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
 import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
 import { Sidebar } from '../organisms/Sidebar'
@@ -196,6 +198,9 @@ function JobCard({
                   label={t('cron.spawnAgent', 'Agent')}
                   value={job.payload.spawn.agent_id || t('cron.spawnAgentDefault', 'Default agent')}
                 />
+                {job.payload.spawn.model && (
+                  <Detail label={t('cron.spawnModel', 'Model')} value={job.payload.spawn.model} />
+                )}
                 <Detail
                   label={t('cron.spawnTask', 'Task instructions')}
                   value={job.payload.spawn.task}
@@ -299,6 +304,8 @@ function JobFormModal({
   busy: boolean
 }) {
   const { t } = useTranslation()
+  const { api } = useAuthContext()
+  const { groups: modelGroups, isLoading: isLoadingModels } = useAvailableModels(api)
   const [form, setForm] = useState(() => {
     const actionType: ActionKind = initial?.payload.spawn
       ? 'spawn'
@@ -314,6 +321,7 @@ function JobFormModal({
         command: initial.payload.command ?? '',
         spawnTask: initial.payload.spawn?.task ?? '',
         spawnAgent: initial.payload.spawn?.agent_id ?? '',
+        spawnModel: initial.payload.spawn?.model ?? '',
         spawnLabel: initial.payload.spawn?.label ?? '',
         spawnGuidance: initial.payload.spawn?.guidance ?? '',
         deliver: initial.payload.deliver,
@@ -340,6 +348,7 @@ function JobFormModal({
       command: '',
       spawnTask: '',
       spawnAgent: '',
+      spawnModel: '',
       spawnLabel: '',
       spawnGuidance: '',
       deliver: true,
@@ -397,6 +406,7 @@ function JobFormModal({
         spawn: {
           task,
           agent_id: form.spawnAgent || undefined,
+          model: form.spawnModel.trim() || undefined,
           label: form.spawnLabel.trim() || undefined,
           guidance: form.spawnGuidance.trim() || undefined,
         },
@@ -554,6 +564,37 @@ function JobFormModal({
                         {agent.name || agent.id}
                         {agent.default ? ` (${t('cron.default', 'default')})` : ''}
                       </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-model">
+                    {t('cron.spawnModel', 'Model')} ({t('common.optional', 'optional')})
+                  </label>
+                  <select
+                    id="cron-spawn-model"
+                    className={inputCls}
+                    value={form.spawnModel}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnModel: e.target.value }))}
+                    disabled={isLoadingModels}
+                  >
+                    <option value="">
+                      {isLoadingModels
+                        ? t('cron.spawnModelLoading', 'Loading models…')
+                        : t('cron.spawnModelDefault', "Agent's default model")}
+                    </option>
+                    {form.spawnModel &&
+                      !modelGroups.some((g) =>
+                        g.models.some((m) => m.value === form.spawnModel),
+                      ) && <option value={form.spawnModel}>{form.spawnModel}</option>}
+                    {modelGroups.map((group) => (
+                      <optgroup key={group.provider} label={group.provider}>
+                        {group.models.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>

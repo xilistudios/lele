@@ -19,6 +19,7 @@ type SubagentTask struct {
 	Task             string
 	Label            string
 	AgentID          string
+	ModelOverride    string // Optional model to use instead of the agent's default
 	OriginChannel    string
 	OriginChatID     string
 	OriginSessionKey string

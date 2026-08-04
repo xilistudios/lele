@@ -449,6 +449,26 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, agent.MaxIterations)
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.
+	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int) {
+		resolvedModel := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
+		providerName := extractProviderFromModel(resolvedModel, cfg.Agents.Defaults.Provider)
+		overrideProvider, err := providers.CreateProviderForCandidate(cfg, providerName)
+		if err != nil || overrideProvider == nil {
+			errMsg := "provider is nil"
+			if err != nil {
+				errMsg = err.Error()
+			}
+			logger.WarnCF("agent", "Failed to create provider for subagent model override",
+				map[string]interface{}{
+					"model":    model,
+					"provider": providerName,
+					"error":    errMsg,
+				})
+			return nil, "", 0
+		}
+		return overrideProvider, resolvedModel, getContextWindow(cfg, resolvedModel, providerName)
+	})
 	// Set subagent timeout from agent config (per-agent override or global default)
 	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
 		subagentManager.SetTimeout(time.Duration(agent.Subagents.TimeoutMin) * time.Minute)

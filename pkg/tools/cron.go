@@ -120,6 +120,10 @@ func (t *CronTool) Parameters() map[string]interface{} {
 						"type":        "string",
 						"description": "Additional guidance for the subagent",
 					},
+					"model": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional model to use for the subagent (e.g., 'anthropic:claude-opus'). Defaults to the agent's configured model.",
+					},
 				},
 				"required": []string{"task"},
 			},
@@ -244,6 +248,9 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 		}
 		if guidance, ok := spawnRaw["guidance"].(string); ok {
 			spawnConfig.Guidance = guidance
+		}
+		if model, ok := spawnRaw["model"].(string); ok {
+			spawnConfig.Model = model
 		}
 		// When spawn is configured, deliver must be false
 		deliver = false
@@ -528,6 +535,10 @@ func formatSystemSpawnMessage(job *cron.CronJob) string {
 
 	if spawn.Guidance != "" {
 		parts = append(parts, fmt.Sprintf("GUIDANCE: %s", spawn.Guidance))
+	}
+
+	if spawn.Model != "" {
+		parts = append(parts, fmt.Sprintf("MODEL: %s", spawn.Model))
 	}
 
 	// Add original job message as context if different from task

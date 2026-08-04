@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/update"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -1239,6 +1240,7 @@ type cronSpawnInput struct {
 	Label    string `json:"label,omitempty"`
 	AgentID  string `json:"agent_id,omitempty"`
 	Guidance string `json:"guidance,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // cronJobInput is the request body for creating or updating a cron job.
@@ -1294,6 +1296,7 @@ func parseSpawnInput(raw json.RawMessage) (*cronSpawnInput, bool, error) {
 
 // validateSpawnInput checks the spawn configuration and resolves it to the
 // service type. The agent ID, when provided, must reference an existing agent.
+// The model, when provided, must reference a configured provider.
 func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfig, error) {
 	if in == nil {
 		return nil, nil
@@ -1315,12 +1318,42 @@ func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfi
 			return nil, fmt.Errorf("unknown agent %q", agentID)
 		}
 	}
+	model := strings.TrimSpace(in.Model)
+	if model != "" {
+		if err := n.validateSpawnModel(model); err != nil {
+			return nil, err
+		}
+	}
 	return &cron.SpawnConfig{
 		Task:     task,
 		Label:    strings.TrimSpace(in.Label),
 		AgentID:  agentID,
 		Guidance: strings.TrimSpace(in.Guidance),
+		Model:    model,
 	}, nil
+}
+
+// validateSpawnModel checks that a model override references a configured
+// provider. Models may be "provider:model" or a bare model name (resolved
+// against the default provider at runtime).
+func (n *NativeChannel) validateSpawnModel(model string) error {
+	ref := providers.ParseModelRef(model, "")
+	if ref == nil {
+		return fmt.Errorf("invalid model %q", model)
+	}
+	// Bare model names are resolved against the default provider at runtime,
+	// so only validate the provider when one is explicitly given.
+	if !strings.Contains(model, ":") {
+		return nil
+	}
+	cfg := n.cfgSnapshot()
+	if cfg == nil {
+		return nil
+	}
+	if _, ok := cfg.Providers.GetNamed(ref.Provider); ok {
+		return nil
+	}
+	return fmt.Errorf("unknown provider %q in model %q", ref.Provider, model)
 }
 
 func (n *NativeChannel) cronAvailable(w http.ResponseWriter) bool {
