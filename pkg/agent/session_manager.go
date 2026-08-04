@@ -362,18 +362,21 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 		count := 0
 		for i := 0; i < mid && count < maxSummaryMsgs; i++ {
 			msg := conversation[i]
-			if msg.Content == "" {
+			// Text-only content so multimodal messages (e.g. from read_image)
+			// still contribute their text instead of being skipped.
+			text := msg.TextOnlyContent()
+			if text == "" {
 				continue
 			}
 			switch msg.Role {
 			case "user":
-				content := msg.Content
+				content := text
 				if len(content) > 150 {
 					content = content[:150] + "..."
 				}
 				localSummary += fmt.Sprintf("User: %s\n", content)
 			case "assistant":
-				content := msg.Content
+				content := text
 				if len(content) > 150 {
 					content = content[:150] + "..."
 				}
@@ -384,7 +387,7 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 					}
 				}
 			case "tool":
-				content := msg.Content
+				content := text
 				if len(content) > 100 {
 					content = content[:100] + "..."
 				}
@@ -601,7 +604,13 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 	messagesSkipped := 0
 	for _, m := range toSummarize {
 		role := strings.ToUpper(m.Role)
-		content := m.Content
+		// Use a text-only representation so multimodal messages (e.g. from
+		// read_image) never leak base64 image data into the summarization
+		// prompt. The compaction model may not support vision.
+		content := m.TextOnlyContent()
+		if content == "" {
+			continue
+		}
 		if len(content) > perMessageLimit {
 			content = truncateUTF8Safe(content, perMessageLimit) + "\n[Content truncated...]"
 		}

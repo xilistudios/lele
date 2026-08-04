@@ -177,6 +177,50 @@ func (m *Message) HasImageContent() bool {
 	return false
 }
 
+// TextOnlyContent returns a guaranteed text-only representation of the message,
+// suitable for feeding into a summarization/compaction model that may not
+// support vision. Image content parts are rendered as "[image]" and attached
+// media entries as "[media]" placeholders, so no base64 payloads or image URLs
+// ever reach the model. The result is always plain text.
+func (m *Message) TextOnlyContent() string {
+	var builder strings.Builder
+
+	// Plain text content takes priority.
+	if text := strings.TrimSpace(m.Content); text != "" {
+		builder.WriteString(m.Content)
+	}
+
+	// Append text from multimodal content parts (images become "[image]").
+	for _, part := range m.ContentParts {
+		switch part.Type {
+		case "text":
+			text := strings.TrimSpace(part.Text)
+			if text == "" {
+				continue
+			}
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(text)
+		case "image_url":
+			if builder.Len() > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString("[image]")
+		}
+	}
+
+	// Append placeholders for channel media attachments.
+	for range m.Media {
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString("[media]")
+	}
+
+	return builder.String()
+}
+
 func textFromParts(parts []ContentPart) string {
 	if len(parts) == 0 {
 		return ""
