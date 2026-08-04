@@ -54,6 +54,20 @@ LABEL: weekly-report`,
 			},
 		},
 		{
+			name: "task with model override",
+			content: `SYSTEM_SPAWN:
+TASK: Generate weekly report
+LABEL: weekly-report
+AGENT_ID: coder
+MODEL: anthropic:claude-opus`,
+			expected: spawnConfig{
+				Task:    "Generate weekly report",
+				Label:   "weekly-report",
+				AgentID: "coder",
+				Model:   "anthropic:claude-opus",
+			},
+		},
+		{
 			name:     "empty content",
 			content:  "SYSTEM_SPAWN:",
 			expected: spawnConfig{},
@@ -78,6 +92,9 @@ LABEL: weekly-report`,
 			}
 			if result.Context != tt.expected.Context {
 				t.Errorf("Context mismatch: got %q, want %q", result.Context, tt.expected.Context)
+			}
+			if result.Model != tt.expected.Model {
+				t.Errorf("Model mismatch: got %q, want %q", result.Model, tt.expected.Model)
 			}
 		})
 	}

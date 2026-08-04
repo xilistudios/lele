@@ -21,6 +21,7 @@ type SubagentManager struct {
 	workspace             string
 	tools                 *ToolRegistry
 	getAgentContext       func(agentID string) AgentContextInfo
+	modelOverrideResolver func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
 	maxIterations         int
 	maxTokens             int
 	temperature           float64
@@ -35,6 +36,13 @@ type SubagentManager struct {
 	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
 	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
+}
+
+// SpawnOptions holds optional parameters for spawning a subagent.
+type SpawnOptions struct {
+	Dependencies  []string // task IDs that must complete before this task starts
+	MaxRetries    int      // maximum automatic retry attempts for transient failures
+	ModelOverride string   // optional model to use instead of the agent's default
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
@@ -120,6 +128,16 @@ func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string)
 	sm.getAgentContext = callback
 }
 
+// SetModelOverrideResolver registers a callback that resolves a per-task model
+// override (e.g. "anthropic:claude-opus") into a provider, model name, and
+// context window. When the resolver is nil or returns a nil provider, the
+// task falls back to the agent's (or manager's) default model.
+func (sm *SubagentManager) SetModelOverrideResolver(resolver func(model string) (providers.LLMProvider, string, int)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.modelOverrideResolver = resolver
+}
+
 func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -194,6 +212,15 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, agentID, orig
 // status and a background goroutine polls until all dependencies are met before
 // transitioning to "running".
 func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, dependencies []string, maxRetries int) (string, error) {
+	return sm.SpawnWithOptions(ctx, task, label, agentID, originChannel, originChatID, callback, SpawnOptions{
+		Dependencies: dependencies,
+		MaxRetries:   maxRetries,
+	})
+}
+
+// SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
+// which additionally supports a per-task model override.
+func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
 	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -213,11 +240,12 @@ func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agent
 
 	// Determine initial status based on dependencies
 	initialStatus := SubagentStatusRunning
-	if len(dependencies) > 0 && !sm.checkDependencies(&SubagentTask{Dependencies: dependencies}) {
+	if len(opts.Dependencies) > 0 && !sm.checkDependencies(&SubagentTask{Dependencies: opts.Dependencies}) {
 		initialStatus = SubagentStatusPending
 	}
 
 	// Use default max retries if not explicitly set
+	maxRetries := opts.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = sm.defaultMaxRetries
 	}
@@ -227,13 +255,14 @@ func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agent
 		Task:             task,
 		Label:            label,
 		AgentID:          agentID,
+		ModelOverride:    strings.TrimSpace(opts.ModelOverride),
 		OriginChannel:    originChannel,
 		OriginChatID:     originChatID,
 		OriginSessionKey: originSessionKey,
 		Status:           initialStatus,
 		Created:          time.Now().UnixMilli(),
 		Updated:          time.Now().UnixMilli(),
-		Dependencies:     dependencies,
+		Dependencies:     opts.Dependencies,
 		MaxRetries:       maxRetries,
 	}
 	subagentTask.InitDoneChannel()

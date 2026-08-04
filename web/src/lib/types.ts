@@ -982,6 +982,8 @@ export type CronSpawnConfig = {
   label?: string
   agent_id?: string
   guidance?: string
+  /** Optional model override (e.g. 'anthropic:claude-opus'). */
+  model?: string
 }
 
 export type CronPayload = {
@@ -1032,11 +1034,15 @@ export type CronJobInput = {
   name?: string
   enabled?: boolean
   schedule: CronSchedule
-  message?: string
-  command?: string
+  /** Explicit null clears an existing message on update. */
+  message?: string | null
+  /** Explicit null clears an existing command on update. */
+  command?: string | null
   deliver?: boolean
   channel?: string
   to?: string
+  /** Spawn config. Explicit null clears an existing spawn config on update. */
+  spawn?: CronSpawnConfig | null
 }
 
 export type SecretMeta = {

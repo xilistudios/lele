@@ -28,6 +28,7 @@ type SpawnConfig struct {
 	Label    string `json:"label,omitempty"`
 	AgentID  string `json:"agent_id,omitempty"`
 	Guidance string `json:"guidance,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 type CronPayload struct {

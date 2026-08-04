@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAuthContext } from '../../contexts/AuthContext'
+import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
-import type { CronJob, CronJobInput, CronSchedule } from '../../lib/types'
+import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -187,10 +189,29 @@ function JobCard({
               value={formatTimestamp(job.state.nextRunAtMs)}
             />
             {job.payload.spawn && (
-              <Detail
-                label={t('cron.spawn', 'Spawn')}
-                value={job.payload.spawn.label || job.payload.spawn.task}
-              />
+              <>
+                <Detail
+                  label={t('cron.spawn', 'Spawn')}
+                  value={job.payload.spawn.label || job.payload.spawn.task}
+                />
+                <Detail
+                  label={t('cron.spawnAgent', 'Agent')}
+                  value={job.payload.spawn.agent_id || t('cron.spawnAgentDefault', 'Default agent')}
+                />
+                {job.payload.spawn.model && (
+                  <Detail label={t('cron.spawnModel', 'Model')} value={job.payload.spawn.model} />
+                )}
+                <Detail
+                  label={t('cron.spawnTask', 'Task instructions')}
+                  value={job.payload.spawn.task}
+                />
+                {job.payload.spawn.guidance && (
+                  <Detail
+                    label={t('cron.spawnGuidance', 'Additional guidance')}
+                    value={job.payload.spawn.guidance}
+                  />
+                )}
+              </>
             )}
           </div>
           {job.state.lastError && (
@@ -267,26 +288,42 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
 // ---------------------------------------------------------------------------
 
 type ScheduleKind = 'at' | 'every' | 'cron'
+type ActionKind = 'message' | 'command' | 'spawn'
 
 function JobFormModal({
   initial,
+  agents,
   onClose,
   onSubmit,
   busy,
 }: {
   initial: CronJob | null
+  agents: Agent[]
   onClose: () => void
   onSubmit: (input: CronJobInput) => Promise<void>
   busy: boolean
 }) {
   const { t } = useTranslation()
+  const { api } = useAuthContext()
+  const { groups: modelGroups, isLoading: isLoadingModels } = useAvailableModels(api)
   const [form, setForm] = useState(() => {
+    const actionType: ActionKind = initial?.payload.spawn
+      ? 'spawn'
+      : initial?.payload.command
+        ? 'command'
+        : 'message'
     if (initial) {
       const kind = (initial.schedule.kind as ScheduleKind) || 'every'
       return {
         name: initial.name,
+        actionType,
         message: initial.payload.message,
         command: initial.payload.command ?? '',
+        spawnTask: initial.payload.spawn?.task ?? '',
+        spawnAgent: initial.payload.spawn?.agent_id ?? '',
+        spawnModel: initial.payload.spawn?.model ?? '',
+        spawnLabel: initial.payload.spawn?.label ?? '',
+        spawnGuidance: initial.payload.spawn?.guidance ?? '',
         deliver: initial.payload.deliver,
         channel: initial.payload.channel ?? '',
         to: initial.payload.to ?? '',
@@ -306,8 +343,14 @@ function JobFormModal({
     }
     return {
       name: '',
+      actionType: 'message' as ActionKind,
       message: '',
       command: '',
+      spawnTask: '',
+      spawnAgent: '',
+      spawnModel: '',
+      spawnLabel: '',
+      spawnGuidance: '',
       deliver: true,
       channel: '',
       to: '',
@@ -342,19 +385,60 @@ function JobFormModal({
       schedule.expr = form.cronExpr.trim()
     }
 
-    if (!form.message.trim() && !form.command.trim()) {
-      setError(t('cron.errorMessage', 'Message or command is required'))
-      return null
-    }
-
-    return {
+    const base: CronJobInput = {
       name: form.name.trim() || undefined,
-      message: form.message.trim(),
-      command: form.command.trim() || undefined,
-      deliver: form.command.trim() ? false : form.deliver,
       channel: form.channel.trim() || undefined,
       to: form.to.trim() || undefined,
       schedule,
+    }
+
+    if (form.actionType === 'spawn') {
+      const task = form.spawnTask.trim()
+      if (!task) {
+        setError(t('cron.errorSpawnTask', 'Task instructions are required'))
+        return null
+      }
+      return {
+        ...base,
+        message: null,
+        command: null,
+        deliver: false,
+        spawn: {
+          task,
+          agent_id: form.spawnAgent || undefined,
+          model: form.spawnModel.trim() || undefined,
+          label: form.spawnLabel.trim() || undefined,
+          guidance: form.spawnGuidance.trim() || undefined,
+        },
+      }
+    }
+
+    if (form.actionType === 'command') {
+      const command = form.command.trim()
+      if (!command) {
+        setError(t('cron.errorCommand', 'Command is required'))
+        return null
+      }
+      return {
+        ...base,
+        message: null,
+        command,
+        deliver: false,
+        spawn: null,
+      }
+    }
+
+    const message = form.message.trim()
+    if (!message) {
+      setError(t('cron.errorMessage', 'Message is required'))
+      return null
+    }
+    return {
+      ...base,
+      message,
+      command: null,
+      deliver: form.deliver,
+      spawn: null,
     }
   }
 
@@ -373,6 +457,12 @@ function JobFormModal({
   const inputCls =
     'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-interaction-primary/50'
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
+
+  const actionButtons: { kind: ActionKind; label: string }[] = [
+    { kind: 'message', label: t('cron.actionMessage', 'Message') },
+    { kind: 'command', label: t('cron.actionCommand', 'Command') },
+    { kind: 'spawn', label: t('cron.actionSpawn', 'Spawn agent') },
+  ]
 
   return (
     <div
@@ -408,29 +498,151 @@ function JobFormModal({
           </div>
 
           <div>
-            <label className={labelCls} htmlFor="cron-message">
-              {t('cron.message', 'Message')}
-            </label>
-            <textarea
-              id="cron-message"
-              className={`${inputCls} min-h-[70px] resize-y`}
-              value={form.message}
-              onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
-              placeholder={t('cron.messagePlaceholder', 'What should happen when this runs?')}
-            />
-          </div>
+            <span className={labelCls}>{t('cron.action', 'Action')}</span>
+            <div className="mb-2 flex gap-2">
+              {actionButtons.map(({ kind, label }) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, actionType: kind }))}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    form.actionType === kind
+                      ? 'border-interaction-primary/50 bg-interaction-primary/20 text-interaction-primary'
+                      : 'border-border bg-background-primary text-text-secondary hover:bg-surface-hover'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
 
-          <div>
-            <label className={labelCls} htmlFor="cron-command">
-              {t('cron.command', 'Command')} ({t('common.optional', 'optional')})
-            </label>
-            <input
-              id="cron-command"
-              className={`${inputCls} font-mono`}
-              value={form.command}
-              onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
-              placeholder="df -h"
-            />
+            {form.actionType === 'message' && (
+              <div>
+                <label className={labelCls} htmlFor="cron-message">
+                  {t('cron.message', 'Message')}
+                </label>
+                <textarea
+                  id="cron-message"
+                  className={`${inputCls} min-h-[70px] resize-y`}
+                  value={form.message}
+                  onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
+                  placeholder={t('cron.messagePlaceholder', 'What should happen when this runs?')}
+                />
+              </div>
+            )}
+
+            {form.actionType === 'command' && (
+              <div>
+                <label className={labelCls} htmlFor="cron-command">
+                  {t('cron.command', 'Command')}
+                </label>
+                <input
+                  id="cron-command"
+                  className={`${inputCls} font-mono`}
+                  value={form.command}
+                  onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+                  placeholder="df -h"
+                />
+              </div>
+            )}
+
+            {form.actionType === 'spawn' && (
+              <div className="space-y-3">
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-agent">
+                    {t('cron.spawnAgent', 'Agent')}
+                  </label>
+                  <select
+                    id="cron-spawn-agent"
+                    className={inputCls}
+                    value={form.spawnAgent}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnAgent: e.target.value }))}
+                  >
+                    <option value="">{t('cron.spawnAgentDefault', 'Default agent')}</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name || agent.id}
+                        {agent.default ? ` (${t('cron.default', 'default')})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-model">
+                    {t('cron.spawnModel', 'Model')} ({t('common.optional', 'optional')})
+                  </label>
+                  <select
+                    id="cron-spawn-model"
+                    className={inputCls}
+                    value={form.spawnModel}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnModel: e.target.value }))}
+                    disabled={isLoadingModels}
+                  >
+                    <option value="">
+                      {isLoadingModels
+                        ? t('cron.spawnModelLoading', 'Loading models…')
+                        : t('cron.spawnModelDefault', "Agent's default model")}
+                    </option>
+                    {form.spawnModel &&
+                      !modelGroups.some((g) =>
+                        g.models.some((m) => m.value === form.spawnModel),
+                      ) && <option value={form.spawnModel}>{form.spawnModel}</option>}
+                    {modelGroups.map((group) => (
+                      <optgroup key={group.provider} label={group.provider}>
+                        {group.models.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-task">
+                    {t('cron.spawnTask', 'Task instructions')}
+                  </label>
+                  <textarea
+                    id="cron-spawn-task"
+                    className={`${inputCls} min-h-[70px] resize-y`}
+                    value={form.spawnTask}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnTask: e.target.value }))}
+                    placeholder={t(
+                      'cron.spawnTaskPlaceholder',
+                      'What should the agent do when this runs?',
+                    )}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-label">
+                    {t('cron.spawnLabel', 'Label')} ({t('common.optional', 'optional')})
+                  </label>
+                  <input
+                    id="cron-spawn-label"
+                    className={inputCls}
+                    value={form.spawnLabel}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnLabel: e.target.value }))}
+                    placeholder={t('cron.spawnLabelPlaceholder', 'Short label for the subagent')}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls} htmlFor="cron-spawn-guidance">
+                    {t('cron.spawnGuidance', 'Additional guidance')} (
+                    {t('common.optional', 'optional')})
+                  </label>
+                  <textarea
+                    id="cron-spawn-guidance"
+                    className={`${inputCls} min-h-[50px] resize-y`}
+                    value={form.spawnGuidance}
+                    onChange={(e) => setForm((f) => ({ ...f, spawnGuidance: e.target.value }))}
+                    placeholder={t(
+                      'cron.spawnGuidancePlaceholder',
+                      'Extra instructions or constraints',
+                    )}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -513,16 +725,17 @@ function JobFormModal({
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-text-secondary">
-            <input
-              type="checkbox"
-              checked={form.deliver}
-              disabled={!!form.command.trim()}
-              onChange={(e) => setForm((f) => ({ ...f, deliver: e.target.checked }))}
-              className="h-4 w-4 rounded border-border"
-            />
-            {t('cron.deliverHint', 'Deliver message directly to channel')}
-          </label>
+          {form.actionType === 'message' && (
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={form.deliver}
+                onChange={(e) => setForm((f) => ({ ...f, deliver: e.target.checked }))}
+                className="h-4 w-4 rounded border-border"
+              />
+              {t('cron.deliverHint', 'Deliver message directly to channel')}
+            </label>
+          )}
 
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
@@ -559,7 +772,7 @@ function JobFormModal({
 
 export function CronPage() {
   const { t } = useTranslation()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, onToggleSidebar, agents } = useAppLogicContext()
   const { jobs, status, loading, refresh, toggleEnabled, removeJob, runJob, createJob, updateJob } =
     useCronJobs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -759,6 +972,7 @@ export function CronPage() {
       {formOpen && (
         <JobFormModal
           initial={editing}
+          agents={agents}
           busy={formBusy}
           onClose={() => setFormOpen(false)}
           onSubmit={handleFormSubmit}
