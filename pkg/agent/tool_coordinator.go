@@ -559,6 +559,13 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		agent.Sessions.EvictSession(sessionKey)
 	})
 
+	// Let the subagent manager detect existing session keys at spawn time, so it
+	// never reuses a task ID whose session already exists (e.g. after a restart,
+	// when the in-memory ID counter resets but persisted session files remain).
+	subagentManager.SetSessionExistsCallback(func(sessionKey string) bool {
+		return agent.Sessions.SessionExists(sessionKey)
+	})
+
 	agent.ContextBuilder.SetToolsRegistry(agent.Tools)
 
 	return subagentManager

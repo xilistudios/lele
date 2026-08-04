@@ -34,6 +34,7 @@ type SubagentManager struct {
 	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
 	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
 	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
+	sessionExists         func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
 	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
 }
@@ -171,6 +172,18 @@ func (sm *SubagentManager) SetSessionEvictCallback(callback func(sessionKey stri
 	sm.sessionEvictCallback = callback
 }
 
+// SetSessionExistsCallback sets a callback that reports whether a session key
+// already exists (in memory, metadata, or on disk). It is used at spawn time
+// to avoid reusing a task ID whose session already exists — which can happen
+// after a restart, when the in-memory ID counter resets to 1 but persisted
+// session files from previous runs remain. Colliding IDs cause unrelated runs
+// to merge into the same persisted session file.
+func (sm *SubagentManager) SetSessionExistsCallback(callback func(sessionKey string) bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionExists = callback
+}
+
 // RegisterTool registers a tool for subagent execution.
 func (sm *SubagentManager) RegisterTool(tool Tool) {
 	sm.mu.Lock()
@@ -218,24 +231,57 @@ func (sm *SubagentManager) SpawnWithDeps(ctx context.Context, task, label, agent
 	})
 }
 
+// claimTaskID returns a fresh, unique task ID ("subagent-N").
+//
+// It advances sm.nextID under the lock, then probes whether the resulting
+// session key ({originSessionKey}:subagent-N) already exists. If it does —
+// e.g. after a restart, when nextID resets to 1 but persisted session files
+// from previous runs remain — it keeps incrementing until it finds an unused
+// ID. This prevents unrelated runs from merging into the same persisted
+// session file.
+//
+// The existence probe runs OUTSIDE sm.mu: the sessionExists callback may take
+// the SessionManager lock and do disk I/O, and holding sm.mu across it would
+// recreate the lock-ordering hazard documented in CleanupTerminalTasks.
+func (sm *SubagentManager) claimTaskID(originSessionKey string) string {
+	for {
+		sm.mu.Lock()
+		taskID := fmt.Sprintf("subagent-%d", sm.nextID)
+		sm.nextID++
+		exists := sm.sessionExists
+		sm.mu.Unlock()
+
+		if exists == nil || !exists(originSessionKey+":"+taskID) {
+			return taskID
+		}
+		// Session key already in use (stale file from a previous run);
+		// try the next ID.
+	}
+}
+
 // SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
 // which additionally supports a per-task model override.
 func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
 	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
+
+	originSessionKey := originChannel + ":" + originChatID
+	if strings.HasPrefix(originChatID, originChannel+":") {
+		originSessionKey = originChatID
+	}
+
+	// Claim a unique task ID BEFORE taking sm.mu. The session-existence probe
+	// inside claimTaskID may call into the SessionManager (its own lock + disk
+	// I/O); running it while holding sm.mu would recreate the lock-ordering
+	// hazard (SubagentManager.mu -> SessionManager.mu) that caused the spawn
+	// deadlock fixed in the evict-callback change.
+	taskID := sm.claimTaskID(originSessionKey)
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	// Enforce concurrency limit
 	if sm.maxConcurrent > 0 && sm.countRunning() >= sm.maxConcurrent {
 		return "", fmt.Errorf("maximum concurrent subagents reached (%d running, limit %d)", sm.countRunning(), sm.maxConcurrent)
-	}
-
-	taskID := fmt.Sprintf("subagent-%d", sm.nextID)
-	sm.nextID++
-
-	originSessionKey := originChannel + ":" + originChatID
-	if strings.HasPrefix(originChatID, originChannel+":") {
-		originSessionKey = originChatID
 	}
 
 	// Determine initial status based on dependencies

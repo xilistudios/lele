@@ -1769,6 +1769,35 @@ func (sm *SessionManager) EvictSession(key string) bool {
 	return ok
 }
 
+// SessionExists reports whether a session exists for the given key in any
+// layer: in-memory, metadata index, or on disk. The disk check matters
+// because EvictSession removes subagent sessions from both memory and the
+// metadata index but deliberately leaves the persisted file behind.
+//
+// This is used to detect subagent session-key collisions (e.g. after a
+// restart, when in-memory ID counters reset). It only performs a cheap
+// os.Stat — it never loads the session.
+func (sm *SessionManager) SessionExists(key string) bool {
+	if key == "" {
+		return false
+	}
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	_, inMemory := sm.sessions[key]
+	_, inMeta := sm.sessionMeta[key]
+	sm.mu.RUnlock()
+	if inMemory || inMeta {
+		return true
+	}
+	// Evicted subagent sessions leave their file on disk even though
+	// memory and metadata are gone. Check the file directly.
+	filename := sanitizeFilename(key)
+	if _, err := os.Stat(filepath.Join(sm.storage, filename+".json")); err == nil {
+		return true
+	}
+	return false
+}
+
 // ActiveCount returns the number of sessions that exist (have metadata on disk).
 // This is useful for detecting agents with active conversations.
 func (sm *SessionManager) ActiveCount() int {
