@@ -1032,11 +1032,15 @@ export type CronJobInput = {
   name?: string
   enabled?: boolean
   schedule: CronSchedule
-  message?: string
-  command?: string
+  /** Explicit null clears an existing message on update. */
+  message?: string | null
+  /** Explicit null clears an existing command on update. */
+  command?: string | null
   deliver?: boolean
   channel?: string
   to?: string
+  /** Spawn config. Explicit null clears an existing spawn config on update. */
+  spawn?: CronSpawnConfig | null
 }
 
 export type SecretMeta = {

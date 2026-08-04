@@ -1233,16 +1233,94 @@ type cronScheduleInput struct {
 	TZ      string `json:"tz,omitempty"`
 }
 
+// cronSpawnInput mirrors cron.SpawnConfig for API input.
+type cronSpawnInput struct {
+	Task     string `json:"task"`
+	Label    string `json:"label,omitempty"`
+	AgentID  string `json:"agent_id,omitempty"`
+	Guidance string `json:"guidance,omitempty"`
+}
+
 // cronJobInput is the request body for creating or updating a cron job.
+// Message, Command and Spawn are raw JSON so updates can distinguish
+// between "not provided" (nil), "explicitly cleared" (null), and "set".
 type cronJobInput struct {
 	Name     string            `json:"name"`
 	Enabled  *bool             `json:"enabled,omitempty"`
 	Schedule cronScheduleInput `json:"schedule"`
-	Message  string            `json:"message"`
-	Command  string            `json:"command,omitempty"`
+	Message  json.RawMessage   `json:"message,omitempty"`
+	Command  json.RawMessage   `json:"command,omitempty"`
 	Deliver  *bool             `json:"deliver,omitempty"`
 	Channel  string            `json:"channel,omitempty"`
 	To       string            `json:"to,omitempty"`
+	Spawn    json.RawMessage   `json:"spawn,omitempty"`
+}
+
+// parseStringField decodes a raw JSON string field. It returns
+// ("", false, nil) when omitted, ("", true, nil) for an explicit null,
+// and the string value otherwise.
+func parseStringField(raw json.RawMessage) (string, bool, error) {
+	if raw == nil {
+		return "", false, nil
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "null" {
+		return "", true, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", true, fmt.Errorf("invalid string field: %w", err)
+	}
+	return s, true, nil
+}
+
+// parseSpawnInput decodes the raw spawn JSON. It returns (nil, false, nil)
+// when the field was omitted, (nil, true, nil) for an explicit null (clear),
+// and the parsed config otherwise.
+func parseSpawnInput(raw json.RawMessage) (*cronSpawnInput, bool, error) {
+	if raw == nil {
+		return nil, false, nil
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "null" {
+		return nil, true, nil
+	}
+	var in cronSpawnInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, true, fmt.Errorf("invalid spawn object: %w", err)
+	}
+	return &in, true, nil
+}
+
+// validateSpawnInput checks the spawn configuration and resolves it to the
+// service type. The agent ID, when provided, must reference an existing agent.
+func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfig, error) {
+	if in == nil {
+		return nil, nil
+	}
+	task := strings.TrimSpace(in.Task)
+	if task == "" {
+		return nil, fmt.Errorf("spawn.task is required")
+	}
+	agentID := strings.TrimSpace(in.AgentID)
+	if agentID != "" {
+		found := false
+		for _, id := range n.agentLoop.ListAvailableAgentIDs() {
+			if id == agentID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("unknown agent %q", agentID)
+		}
+	}
+	return &cron.SpawnConfig{
+		Task:     task,
+		Label:    strings.TrimSpace(in.Label),
+		AgentID:  agentID,
+		Guidance: strings.TrimSpace(in.Guidance),
+	}, nil
 }
 
 func (n *NativeChannel) cronAvailable(w http.ResponseWriter) bool {
@@ -1296,8 +1374,31 @@ func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_body")
 		return
 	}
-	if input.Message == "" && input.Command == "" {
-		writeError(w, http.StatusBadRequest, "message or command is required", "missing_message")
+
+	spawnIn, _, err := parseSpawnInput(input.Spawn)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
+		return
+	}
+	spawnConfig, err := n.validateSpawnInput(spawnIn)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
+		return
+	}
+
+	message, _, err := parseStringField(input.Message)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_body")
+		return
+	}
+	command, _, err := parseStringField(input.Command)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_body")
+		return
+	}
+
+	if message == "" && command == "" && spawnConfig == nil {
+		writeError(w, http.StatusBadRequest, "message, command, or spawn task is required", "missing_message")
 		return
 	}
 
@@ -1317,27 +1418,39 @@ func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request)
 	if input.Deliver != nil {
 		deliver = *input.Deliver
 	}
-	if input.Command != "" {
+	if command != "" || spawnConfig != nil {
 		deliver = false
 	}
 
 	name := input.Name
 	if name == "" {
-		name = input.Message
+		if spawnConfig != nil {
+			name = spawnConfig.Task
+		} else {
+			name = message
+		}
 		if len(name) > 30 {
 			name = name[:30]
 		}
 	}
 
-	job, err := n.cronService.AddJob(name, schedule, input.Message, deliver, input.Channel, input.To)
+	job, err := n.cronService.AddJob(name, schedule, message, deliver, input.Channel, input.To)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "cron_add_failed")
 		return
 	}
 
-	if input.Command != "" {
-		job.Payload.Command = input.Command
-		_ = n.cronService.UpdateJob(job)
+	if command != "" {
+		job.Payload.Command = command
+	}
+	if spawnConfig != nil {
+		job.Payload.Spawn = spawnConfig
+	}
+	if command != "" || spawnConfig != nil {
+		if err := n.cronService.UpdateJob(job); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "cron_add_failed")
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"job": job})
@@ -1377,11 +1490,17 @@ func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request)
 			TZ:      input.Schedule.TZ,
 		}
 	}
-	if input.Message != "" {
-		existing.Payload.Message = input.Message
+	if msg, msgProvided, err := parseStringField(input.Message); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_body")
+		return
+	} else if msgProvided {
+		existing.Payload.Message = msg
 	}
-	if input.Command != "" {
-		existing.Payload.Command = input.Command
+	if cmd, cmdProvided, err := parseStringField(input.Command); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_body")
+		return
+	} else if cmdProvided {
+		existing.Payload.Command = cmd
 	}
 	if input.Deliver != nil {
 		existing.Payload.Deliver = *input.Deliver
@@ -1391,6 +1510,28 @@ func (n *NativeChannel) handleCronUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	if input.To != "" {
 		existing.Payload.To = input.To
+	}
+	if spawnIn, spawnProvided, err := parseSpawnInput(input.Spawn); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
+		return
+	} else if spawnProvided {
+		// Explicitly provided: set ("spawn": {...}) or clear ("spawn": null).
+		spawnConfig, err := n.validateSpawnInput(spawnIn)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error(), "invalid_spawn")
+			return
+		}
+		existing.Payload.Spawn = spawnConfig
+	}
+
+	// A job must retain at least one action.
+	if existing.Payload.Message == "" && existing.Payload.Command == "" && existing.Payload.Spawn == nil {
+		writeError(w, http.StatusBadRequest, "message, command, or spawn task is required", "missing_message")
+		return
+	}
+	// Command and spawn jobs never deliver directly.
+	if existing.Payload.Command != "" || existing.Payload.Spawn != nil {
+		existing.Payload.Deliver = false
 	}
 
 	if err := n.cronService.UpdateJob(existing); err != nil {
