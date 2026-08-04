@@ -33,9 +33,9 @@ func TestTextOnlyContent_ContentPartsWithImage(t *testing.T) {
 
 func TestTextOnlyContent_Media(t *testing.T) {
 	m := Message{
-		Role:  "user",
+		Role:    "user",
 		Content: "look at this",
-		Media: []string{"/tmp/photo1.jpg", "/tmp/photo2.jpg"},
+		Media:   []string{"/tmp/photo1.jpg", "/tmp/photo2.jpg"},
 	}
 	got := m.TextOnlyContent()
 	want := "look at this\n[media]\n[media]"
