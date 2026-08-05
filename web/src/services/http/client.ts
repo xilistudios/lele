@@ -72,6 +72,7 @@ type TokenState = {
   token: string | null
   refreshToken: string | null
   onTokenRefresh?: (session: AuthSession) => void
+  onAuthFailure?: () => void
 }
 
 type SendMessageStreamOptions = {
@@ -148,7 +149,9 @@ export const createApiClient = (baseUrl: string) => {
       })
 
       if (!response.ok) {
+        const onFail = tokenState.onAuthFailure
         clearToken()
+        onFail?.()
         return null
       }
 
@@ -169,7 +172,9 @@ export const createApiClient = (baseUrl: string) => {
 
       return data.token
     } catch {
+      const onFail = tokenState.onAuthFailure
       clearToken()
+      onFail?.()
       return null
     }
   }
@@ -379,6 +384,26 @@ export const createApiClient = (baseUrl: string) => {
     setToken,
     clearToken,
     getToken,
+    setAuthFailureHandler: (handler: (() => void) | undefined) => {
+      tokenState.onAuthFailure = handler
+    },
+    logout: async () => {
+      // Revoke token server-side (fire-and-forget, don't block on errors)
+      if (tokenState.token) {
+        try {
+          await fetch(joinUrl(baseUrl, endpoints.auth.logout), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${tokenState.token}`,
+            },
+          })
+        } catch {
+          // Ignore network errors — we'll clear local state regardless
+        }
+      }
+      clearToken()
+    },
     pair: (pin: string, device_name: string) =>
       request<AuthPairResponse>(endpoints.auth.pair, {
         method: 'POST',
