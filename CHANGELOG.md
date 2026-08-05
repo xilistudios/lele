@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-05
+
+### Added
+
+#### Storage
+- SQLite storage backend — all persistent state (sessions, cron jobs, goals, groups, auth credentials, native clients, Telegram offset, workspace state) now lives in a single SQLite database with versioned migrations. Uses a pure-Go driver (`modernc.org/sqlite`) with zero CGO. Falls back gracefully to legacy JSON files when the store is unavailable. Includes a CLI migration tool (`lele migrate-storage`) with `--dry-run` and `--rollback` flags.
+- SQLite repos for cron, goals, groups, auth, native clients, sessions, and generic KV store — each with JSON fallback for environments without SQLite.
+- Smoke benchmarks comparing JSON vs SQLite persistence performance.
+
+#### CI
+- Cross-compile CI job for exotic release targets (linux/mips64, linux/s390x, linux/riscv64, etc.).
+
+### Fixed
+
+#### Auth
+- CLI `lele client pin` now works after SQLite migration — pending PINs from the JSON auth file are merged at runtime so the server can pick them up regardless of which storage backend is active.
+
+#### WebUI
+- Consolidated multi-iteration thinking blocks and improved scroll UX.
+
+#### Store
+- Build fixes for linux/mips64 and silenced nilerr in auth migration path.
+
 ## [0.5.1] - 2026-08-04
 
 ### Added
