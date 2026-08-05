@@ -449,12 +449,17 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 	// Determine max iterations for subagent tasks.
 	// Priority: 1) agent-specific subagent config, 2) global subagent_max_iterations, 3) agent's max_tool_iterations
-	subagentMaxIter := agent.MaxIterations
+	// A value of 0 means unlimited (converted to large number by NewSubagentManager).
+	subagentMaxIter := 0 // default: unlimited
 	if cfg.Agents.Defaults.SubagentMaxIterations > 0 {
 		subagentMaxIter = cfg.Agents.Defaults.SubagentMaxIterations
 	}
 	if agent.Subagents != nil && agent.Subagents.MaxIterations > 0 {
 		subagentMaxIter = agent.Subagents.MaxIterations
+	}
+	// If still 0 and agent has explicit max iterations, use that as fallback
+	if subagentMaxIter == 0 && agent.MaxIterations > 0 {
+		subagentMaxIter = agent.MaxIterations
 	}
 
 	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
