@@ -7,8 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-04
+
+### Added
+
+#### WebUI
+- Cron jobs can now spawn agents — the Cron section supports choosing the action type (message / command / spawn agent), picking the target agent, and providing task instructions, label, and guidance. Includes an optional model override (grouped by provider) for the spawned subagent. Backend `POST/PUT /api/v1/cron` accept a `spawn` config with validation against existing agents, and message/command/spawn fields can be cleared when editing.
+
+#### Tools
+- `spawn` and `cron` tools accept an optional `model` parameter for subagent model override (`provider:model` requires a configured provider; bare model names resolve at runtime).
+
 ### Fixed
+
+#### Agent
 - Context compaction now sends only text to the compaction model — multimodal messages (e.g. from `read_image`) no longer leak base64 image data into summarization prompts, so compaction works with models that don't support vision. Image content is rendered as `[image]` and media attachments as `[media]` placeholders.
+
+#### Session
+- TUI freezes during streaming fixed — `SessionManager.Save` no longer holds the manager lock during JSON encode + fsync (100–300ms on slow disks). Saves now snapshot under lock, do file I/O without the lock, and finish with an atomic rename; a per-key save sequence counter prevents slow saves from overwriting newer ones, and idle eviction re-checks access times after I/O. Readers (history, context usage) are never blocked by saves anymore.
+
+#### Tools
+- SubagentManager lock is now released before invoking session eviction callbacks, preventing lock-ordering issues when evicting idle subagent sessions.
 
 ## [0.5.0] - 2026-08-03
 
