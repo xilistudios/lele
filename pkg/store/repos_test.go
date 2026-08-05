@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -672,5 +673,62 @@ func TestSessionRepo_PruneExcluded(t *testing.T) {
 	count, _ := repo.MessageCount("test")
 	if count != 5 {
 		t.Errorf("MessageCount() after prune = %d, want 5", count)
+	}
+}
+
+func TestSessionRepo_ReplaceMessages(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	now := time.Now()
+	repo.UpsertSession(SessionMeta{Key: "rm-test", CreatedAt: now, UpdatedAt: now})
+
+	// Insert initial 3 messages.
+	for i := 0; i < 3; i++ {
+		msgJSON := fmt.Sprintf(`{"role":"user","content":"msg%d"}`, i)
+		repo.InsertMessage("rm-test", i, "user", fmt.Sprintf("msg%d", i), msgJSON, false)
+	}
+	count, _ := repo.MessageCount("rm-test")
+	if count != 3 {
+		t.Fatalf("initial MessageCount = %d, want 3", count)
+	}
+
+	// Replace with 5 new messages (simulates a session save after adding messages).
+	newRows := make([]MessageRow, 5)
+	for i := range newRows {
+		newRows[i] = MessageRow{
+			Seq:     i,
+			Role:    "assistant",
+			Content: fmt.Sprintf("new-%d", i),
+			JSON:    fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i),
+		}
+	}
+	if err := repo.ReplaceMessages("rm-test", newRows); err != nil {
+		t.Fatalf("ReplaceMessages() failed: %v", err)
+	}
+
+	count, _ = repo.MessageCount("rm-test")
+	if count != 5 {
+		t.Errorf("MessageCount after replace = %d, want 5", count)
+	}
+
+	msgs, err := repo.LoadMessages("rm-test")
+	if err != nil {
+		t.Fatalf("LoadMessages() failed: %v", err)
+	}
+	for i, m := range msgs {
+		want := fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i)
+		if m != want {
+			t.Errorf("message[%d] = %q, want %q", i, m, want)
+		}
+	}
+
+	// Replace with empty (clears all messages).
+	if err := repo.ReplaceMessages("rm-test", nil); err != nil {
+		t.Fatalf("ReplaceMessages(nil) failed: %v", err)
+	}
+	count, _ = repo.MessageCount("rm-test")
+	if count != 0 {
+		t.Errorf("MessageCount after clear = %d, want 0", count)
 	}
 }

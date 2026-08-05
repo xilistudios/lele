@@ -1,12 +1,14 @@
 package channels
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -183,8 +185,10 @@ func (c *TelegramChannel) loadOffsetFromKV() int {
 	if err != nil || !ok {
 		return 0
 	}
-	var id int
-	fmt.Sscanf(value, "%d", &id)
+	id, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
 	return id
 }
 
@@ -194,8 +198,10 @@ func loadLastUpdateIDFromFile(path string) int {
 	if err != nil {
 		return 0 // No persisted offset, start fresh
 	}
-	var id int
-	fmt.Sscanf(string(data), "%d", &id)
+	id, err := strconv.Atoi(string(bytes.TrimSpace(data)))
+	if err != nil {
+		return 0
+	}
 	return id
 }
 

@@ -189,6 +189,56 @@ func (r *SessionRepo) SessionExists(key string) (bool, error) {
 	return exists, nil
 }
 
+// MessageRow holds the data needed to insert a message row.
+type MessageRow struct {
+	Seq       int
+	Role      string
+	Content   string
+	JSON      string
+	Excluded  bool
+}
+
+// ReplaceMessages atomically replaces all messages for a session inside a
+// transaction. This is used by saveToSQLite to sync the full message list
+// in a crash-safe way (the old delete-then-insert-outside-tx pattern could
+// lose all messages if the process crashed between the DELETE and the last
+// INSERT).
+func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for replace messages %q: %w", sessionKey, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	if _, err := tx.Exec(
+		`DELETE FROM session_messages WHERE session_key = ?`, sessionKey,
+	); err != nil {
+		return fmt.Errorf("delete old messages %q: %w", sessionKey, err)
+	}
+
+	stmt, err := tx.Prepare(
+		`INSERT INTO session_messages(session_key, seq, role, content, message, excluded, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare insert messages %q: %w", sessionKey, err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().Format(time.RFC3339Nano)
+	for _, m := range messages {
+		exclInt := 0
+		if m.Excluded {
+			exclInt = 1
+		}
+		if _, err := stmt.Exec(sessionKey, m.Seq, m.Role, m.Content, m.JSON, exclInt, now); err != nil {
+			return fmt.Errorf("insert message %q seq=%d: %w", sessionKey, m.Seq, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 // InsertMessage appends a message to the session. The seq number determines
 // the ordering within the session. The messageJSON is the serialized
 // providers.Message. The content field is the plain text representation

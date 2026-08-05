@@ -222,8 +222,20 @@ func (am *AuthManager) saveStore() error {
 func (am *AuthManager) saveStoreUnlocked() error {
 	am.store.LastModified = time.Now()
 
-	// SQLite path
+	// SQLite path — delete removed clients, then upsert remaining ones.
 	if am.repo != nil {
+		// Build the set of current client IDs so we can delete stale rows.
+		existing, err := am.repo.ListClients()
+		if err != nil {
+			return fmt.Errorf("list clients for cleanup: %w", err)
+		}
+		for id := range existing {
+			if _, ok := am.store.Clients[id]; !ok {
+				if err := am.repo.DeleteClient(id); err != nil {
+					return fmt.Errorf("delete stale client %s: %w", id, err)
+				}
+			}
+		}
 		for id, client := range am.store.Clients {
 			clientJSON, err := json.Marshal(client)
 			if err != nil {
@@ -313,11 +325,20 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	// When using SQLite, skip reload: the server is the sole owner of the
-	// store and a reload would recreate the PendingPINs map from scratch,
-	// losing any PINs loaded from the JSON file (written by the CLI).
-	// For the JSON backend, reload to pick up concurrent changes.
-	if am.repo == nil {
+	if am.repo != nil {
+		// When using SQLite, the CLI writes pending PINs to the JSON file
+		// (native_clients.json) because it doesn't have access to the
+		// server's SQLite store. Read the JSON file and merge any new
+		// PINs into the current store without recreating it.
+		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
+			for p, pending := range jsonStore.PendingPINs {
+				if _, exists := am.store.PendingPINs[p]; !exists {
+					am.store.PendingPINs[p] = pending
+				}
+			}
+		}
+	} else {
+		// JSON backend: full reload to pick up concurrent changes.
 		if err := am.loadStore(); err != nil {
 			logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
 				"error": err.Error(),

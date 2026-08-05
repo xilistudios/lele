@@ -1596,16 +1596,17 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	return sm.commitSnapshot(key, tmpPath, snapshot)
 }
 
-// saveToSQLite persists the session to SQLite. Caller must hold sm.mu.
+// saveToSQLite persists the session to SQLite. It snapshots the data under
+// the write lock, then releases the lock while performing I/O — matching the
+// pattern used by the JSON path (see saveUnlocked). Concurrent mutations
+// that arrive while the I/O is in flight will be persisted by the next save.
 func (sm *SessionManager) saveToSQLite(key string) error {
 	session, ok := sm.sessions[key]
 	if !ok {
 		return nil
 	}
 
-	repo := sm.store.Sessions()
-
-	// Upsert session metadata
+	// ── Snapshot under lock ──
 	meta := store.SessionMeta{
 		Key:             session.Key,
 		Name:            session.Name,
@@ -1620,25 +1621,32 @@ func (sm *SessionManager) saveToSQLite(key string) error {
 		CreatedAt:       session.Created,
 		UpdatedAt:       session.Updated,
 	}
-	if err := repo.UpsertSession(meta); err != nil {
-		return err
-	}
 
-	// Sync messages: delete all and re-insert
-	// This handles streaming updates, truncation, and history replacement correctly.
-	// SQLite is fast enough for this pattern with typical session sizes.
-	if err := repo.DeleteMessagesFrom(key, 0); err != nil {
-		return fmt.Errorf("delete old messages: %w", err)
-	}
-
+	rows := make([]store.MessageRow, len(session.Messages))
 	for i, msg := range session.Messages {
 		msgJSON, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("marshal message %d: %w", i, err)
 		}
-		if err := repo.InsertMessage(key, i, msg.Role, msg.TextContent(), string(msgJSON), msg.ExcludeFromContext); err != nil {
-			return err
+		rows[i] = store.MessageRow{
+			Seq:      i,
+			Role:     msg.Role,
+			Content:  msg.TextContent(),
+			JSON:     string(msgJSON),
+			Excluded: msg.ExcludeFromContext,
 		}
+	}
+
+	// ── Release lock during I/O ──
+	sm.mu.Unlock()
+	err := sm.store.Sessions().UpsertSession(meta)
+	if err == nil {
+		err = sm.store.Sessions().ReplaceMessages(key, rows)
+	}
+	sm.mu.Lock()
+
+	if err != nil {
+		return fmt.Errorf("save session %q to sqlite: %w", key, err)
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1

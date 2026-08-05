@@ -53,13 +53,17 @@ func TestAuthManager_GeneratePIN_MaxPending(t *testing.T) {
 		t.Fatalf("failed to create auth manager: %v", err)
 	}
 
+	// Generate PINs up to the internal limit (10 pending max).
 	for i := 0; i < 10; i++ {
-		_, err := auth.GeneratePIN("Device")
-		if i >= 10 {
-			if err == nil {
-				t.Error("expected error when exceeding max pending PINs")
-			}
+		if _, err := auth.GeneratePIN("Device"); err != nil {
+			t.Fatalf("failed to generate PIN %d: %v", i, err)
 		}
+	}
+
+	// The 11th should be rejected.
+	_, err = auth.GeneratePIN("Device")
+	if err == nil {
+		t.Error("expected error when exceeding max pending PINs")
 	}
 }
 
@@ -613,5 +617,62 @@ func TestAuthManager_SQLiteServerPINWithPairInSameProcess(t *testing.T) {
 	}
 	if token == "" {
 		t.Error("expected non-empty token")
+	}
+}
+
+// TestAuthManager_SQLitePairAfterCLIGeneratesPIN tests the real-world
+// scenario: server starts (SetStore called), THEN the CLI generates a
+// PIN (writes to JSON file), THEN the webui tries to pair with that PIN.
+// This is the exact flow that caused "invalid PIN" before the fix.
+func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	// Step 1: Server starts. SetStore is called during initialization.
+	dbPath := filepath.Join(tmpDir, "test.db")
+	dbStore, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("server: failed to open store: %v", err)
+	}
+	defer dbStore.Close()
+
+	serverAuth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("server: failed to create auth manager: %v", err)
+	}
+	serverAuth.SetStore(dbStore.NativeClients())
+
+	// Step 2: CLI generates a PIN AFTER the server started.
+	// This is a separate process — no SQLite, writes to JSON file.
+	cliAuth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("CLI: failed to create auth manager: %v", err)
+	}
+	pending, err := cliAuth.GeneratePIN("CLI-Device")
+	if err != nil {
+		t.Fatalf("CLI: failed to generate PIN: %v", err)
+	}
+
+	// Step 3: Webui tries to pair with the CLI's PIN.
+	// PairWithPIN must read the JSON file to find the PIN.
+	client, token, _, err := serverAuth.PairWithPIN(pending.PIN, "")
+	if err != nil {
+		t.Fatalf("server: PairWithPIN failed: %v — PIN was %s", err, pending.PIN)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if token == "" {
+		t.Error("expected non-empty token")
+	}
+
+	// Token must be valid.
+	_, valid := serverAuth.ValidateToken(token)
+	if !valid {
+		t.Error("expected token to be valid after cross-process pairing")
 	}
 }

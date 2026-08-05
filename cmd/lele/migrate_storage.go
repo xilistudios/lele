@@ -130,6 +130,12 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 				raw.Key = key
 			}
 
+			// Parse messages array (needed for both migration and log line).
+			var messages []json.RawMessage
+			if raw.Messages != nil {
+				json.Unmarshal(raw.Messages, &messages)
+			}
+
 			if !dryRun {
 				meta := store.SessionMeta{
 					Key:             raw.Key,
@@ -150,11 +156,6 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 					continue
 				}
 
-				// Parse messages array.
-				var messages []json.RawMessage
-				if raw.Messages != nil {
-					json.Unmarshal(raw.Messages, &messages)
-				}
 				for i, msgRaw := range messages {
 					// Extract role for the content column.
 					var roleHolder struct {
@@ -198,13 +199,7 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 				}
 			}
 			totalSessions++
-			fmt.Printf("  [sessions] %s (%d messages)\n", raw.Key, len(func() []json.RawMessage {
-				var m []json.RawMessage
-				if raw.Messages != nil {
-					json.Unmarshal(raw.Messages, &m)
-				}
-				return m
-			}()))
+			fmt.Printf("  [sessions] %s (%d messages)\n", raw.Key, len(messages))
 		}
 	} else {
 		fmt.Println("  [sessions] directory not found, skipping")
@@ -384,6 +379,16 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 	// ── Backup legacy files ──
 	timestamp := time.Now().Format("20060102-150405")
 	backupDir := filepath.Join(leleDir, "backup-json-"+timestamp)
+	// Guard against same-second re-runs: append an incrementing suffix.
+	if _, err := os.Stat(backupDir); err == nil {
+		for i := 1; ; i++ {
+			candidate := fmt.Sprintf("%s-%d", backupDir, i)
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				backupDir = candidate
+				break
+			}
+		}
+	}
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		fmt.Printf("Error creating backup dir: %v\n", err)
 		os.Exit(1)
