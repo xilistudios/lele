@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // DefaultGroupRounds is the number of rounds (MoA layers / round_robin
@@ -71,6 +72,14 @@ func (gm *GroupManager) SetStoreDir(dir string) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 	gm.storeDir = dir
+}
+
+// SetStore configures SQLite persistence for this manager. When set,
+// group state is persisted through the repository instead of the JSON
+// dir. The repository is stored at package level (consistent with
+// pkg/auth.UseStore), so all managers in the process share it.
+func (gm *GroupManager) SetStore(repo *store.GroupRepo) {
+	UseStore(repo)
 }
 
 // SetModeratorDecider overrides the default moderator decider used by the
