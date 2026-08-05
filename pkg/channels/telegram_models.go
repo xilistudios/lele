@@ -162,7 +162,9 @@ func (c *TelegramChannel) applySelectedModel(query telego.CallbackQuery, provide
 
 	chat := query.Message.GetChat()
 	messageID := query.Message.GetMessageID()
-	c.publishSystemCommand(senderID, chat.ID, messageID, selectedModelCommand(provider, model), buildTelegramMetadata(messageID, &query.From, chat))
+	peerKind, peerID := telegramCallbackPeerInfo(query)
+	sessionKey := c.resolveSessionKey(peerKind, peerID)
+	c.publishSystemCommand(senderID, chat.ID, messageID, selectedModelCommand(provider, model), buildTelegramMetadata(messageID, &query.From, chat), sessionKey)
 	return true
 }
 

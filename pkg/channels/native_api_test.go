@@ -326,6 +326,17 @@ func (m *nativeTestAgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
 	return nil
 }
 
+func (m *nativeTestAgentLoop) ResolveRoute(channel, peerKind, peerID string) string {
+	// Simple test implementation: use per-peer scope if configured, else main.
+	if m.config != nil && m.config.Session.DMScope == "per-peer" && peerKind == "direct" && peerID != "" {
+		return fmt.Sprintf("agent:main:direct:%s", peerID)
+	}
+	if peerKind == "group" && peerID != "" {
+		return fmt.Sprintf("agent:main:%s:group:%s", channel, peerID)
+	}
+	return "agent:main:main"
+}
+
 type nativeTestServer struct {
 	channel  *NativeChannel
 	loop     *nativeTestAgentLoop

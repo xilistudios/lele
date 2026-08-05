@@ -336,6 +336,14 @@ func (c *LINEChannel) processEvent(event lineEvent) {
 		"message_id":  msg.ID,
 	}
 
+	// Routing metadata: group/room → group, user → direct.
+	peerKind := "direct"
+	if isGroup {
+		peerKind = "group"
+	}
+	metadata["peer_kind"] = peerKind
+	metadata["peer_id"] = chatID
+
 	logger.DebugCF("line", "Received message", map[string]interface{}{
 		"sender_id":    senderID,
 		"chat_id":      chatID,
