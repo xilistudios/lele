@@ -375,14 +375,6 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	channel := job.Payload.Channel
 	chatID := job.Payload.To
 
-	// Default values if not set
-	if channel == "" {
-		channel = "cli"
-	}
-	if chatID == "" {
-		chatID = "direct"
-	}
-
 	// Determine the session key to use for processing and notification.
 	// Session-scoped jobs use their stored session key; global jobs use a
 	// synthetic key derived from the job ID.
@@ -390,6 +382,16 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	effectiveSessionKey := job.Payload.SessionKey
 	if effectiveSessionKey == "" {
 		effectiveSessionKey = fmt.Sprintf("cron-%s", job.ID)
+	}
+
+	// Default values if not set. Use "native" so results are delivered to
+	// the WebUI (the native channel). The old default "cli" was an internal
+	// channel that the channel manager silently dropped.
+	if channel == "" {
+		channel = "native"
+	}
+	if chatID == "" {
+		chatID = effectiveSessionKey
 	}
 
 	// Execute command if present
