@@ -58,8 +58,8 @@ type SessionManager struct {
 	mu         sync.RWMutex
 	storage    string
 	store      *store.Store // SQLite store (nil = use JSON files)
-	loadOnce   sync.Once // ensures loadSessions runs exactly once, on first access
-	indexDirty bool      // true when sessionMeta has been modified since last index save
+	loadOnce   sync.Once    // ensures loadSessions runs exactly once, on first access
+	indexDirty bool         // true when sessionMeta has been modified since last index save
 
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
@@ -262,19 +262,19 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 	}
 
 	session := &Session{
-		Key:             meta.Key,
-		Name:            meta.Name,
-		Mode:            meta.Mode,
-		Summary:         meta.Summary,
-		VerboseLevel:    meta.VerboseLevel,
-		Model:           meta.Model,
-		ThinkingLevel:   meta.ThinkingLevel,
-		InputTokens:     meta.InputTokens,
-		OutputTokens:    meta.OutputTokens,
-		CompactionCount: meta.CompactionCount,
-		Created:         meta.CreatedAt,
-		Updated:         meta.UpdatedAt,
-		Messages:        messages,
+		Key:              meta.Key,
+		Name:             meta.Name,
+		Mode:             meta.Mode,
+		Summary:          meta.Summary,
+		VerboseLevel:     meta.VerboseLevel,
+		Model:            meta.Model,
+		ThinkingLevel:    meta.ThinkingLevel,
+		InputTokens:      meta.InputTokens,
+		OutputTokens:     meta.OutputTokens,
+		CompactionCount:  meta.CompactionCount,
+		Created:          meta.CreatedAt,
+		Updated:          meta.UpdatedAt,
+		Messages:         messages,
 		lastPersistedSeq: len(messages) - 1, // all messages are persisted
 	}
 
@@ -502,10 +502,10 @@ func (sm *SessionManager) GetOrCreate(key string) *Session {
 
 	// Create new session
 	session := &Session{
-		Key:      key,
-		Messages: []providers.Message{},
-		Created:  time.Now(),
-		Updated:  time.Now(),
+		Key:              key,
+		Messages:         []providers.Message{},
+		Created:          time.Now(),
+		Updated:          time.Now(),
 		lastPersistedSeq: -1,
 	}
 	sm.evictIfNeeded()
@@ -572,9 +572,9 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 		session, ok = sm.loadSessionFromDisk(sessionKey)
 		if !ok {
 			session = &Session{
-				Key:      sessionKey,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              sessionKey,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -750,9 +750,9 @@ func (sm *SessionManager) SetName(key string, name string) error {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1187,9 +1187,9 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1242,9 +1242,9 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1288,9 +1288,9 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1343,9 +1343,9 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1490,9 +1490,9 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1537,9 +1537,9 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -1936,9 +1936,9 @@ func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()

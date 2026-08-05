@@ -158,7 +158,7 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 				for i, msgRaw := range messages {
 					// Extract role for the content column.
 					var roleHolder struct {
-						Role              string `json:"role"`
+						Role               string `json:"role"`
 						ExcludeFromContext bool   `json:"exclude_from_context"`
 					}
 					json.Unmarshal(msgRaw, &roleHolder)

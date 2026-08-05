@@ -422,17 +422,17 @@ func TestSessionRepo_CRUD(t *testing.T) {
 	// Upsert a session.
 	now := time.Now().Truncate(time.Microsecond)
 	if err := repo.UpsertSession(SessionMeta{
-		Key:          "test:session-1",
-		Name:         "Test Session",
-		Mode:         "agent",
-		Summary:      "Test summary",
-		VerboseLevel: "full",
-		Model:        "gpt-4",
+		Key:           "test:session-1",
+		Name:          "Test Session",
+		Mode:          "agent",
+		Summary:       "Test summary",
+		VerboseLevel:  "full",
+		Model:         "gpt-4",
 		ThinkingLevel: "high",
-		InputTokens:  100,
-		OutputTokens: 50,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		InputTokens:   100,
+		OutputTokens:  50,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}); err != nil {
 		t.Fatalf("UpsertSession() failed: %v", err)
 	}
@@ -475,13 +475,13 @@ func TestSessionRepo_CRUD(t *testing.T) {
 
 	// Update metadata.
 	if err := repo.UpsertSession(SessionMeta{
-		Key:       "test:session-1",
-		Name:      "Updated Name",
-		Mode:      "chat",
-		InputTokens: 200,
+		Key:          "test:session-1",
+		Name:         "Updated Name",
+		Mode:         "chat",
+		InputTokens:  200,
 		OutputTokens: 100,
-		CreatedAt: now,
-		UpdatedAt: now.Add(time.Second),
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(time.Second),
 	}); err != nil {
 		t.Fatalf("UpsertSession(update) failed: %v", err)
 	}
