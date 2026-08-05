@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-05
+
+### Added
+
+#### WebUI
+- Logout button and auto-redirect on session expiry — users can now log out from the Web UI, and expired sessions automatically redirect to the login page.
+
+### Fixed
+
+#### TUI
+- Allow Enter to send message when autocomplete has no matches — the Enter key now correctly submits the message even when the autocomplete dropdown is visible but empty, instead of being silently swallowed.
+
 ## [0.6.0] - 2026-08-05
 
 ### Added
