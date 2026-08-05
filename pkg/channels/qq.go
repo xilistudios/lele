@@ -163,6 +163,9 @@ func (c *QQChannel) handleC2CMessage() event.C2CMessageEventHandler {
 			"message_id": data.ID,
 		}
 
+		metadata["peer_kind"] = "direct"
+		metadata["peer_id"] = senderID
+
 		c.HandleMessage(senderID, senderID, content, []string{}, metadata)
 
 		return nil
@@ -204,6 +207,9 @@ func (c *QQChannel) handleGroupATMessage() event.GroupATMessageEventHandler {
 			"message_id": data.ID,
 			"group_id":   data.GroupID,
 		}
+
+		metadata["peer_kind"] = "group"
+		metadata["peer_id"] = data.GroupID
 
 		c.HandleMessage(senderID, data.GroupID, content, []string{}, metadata)
 

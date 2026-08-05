@@ -188,7 +188,11 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	}
 
 	metadata := buildTelegramMetadata(message.MessageID, user, message.Chat)
-	sessionKey := telegramSessionKey(chatID)
+
+	// Resolve session key through the routing system (unified cross-channel).
+	peerKind := metadata["peer_kind"]
+	peerID := metadata["peer_id"]
+	sessionKey := c.resolveSessionKey(peerKind, peerID)
 
 	c.HandleMessageWithAttachments(fmt.Sprintf("%d", user.ID), fmt.Sprintf("%d", chatID), content, attachments, metadata, sessionKey)
 	return nil
@@ -217,7 +221,10 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 
 	senderID := fmt.Sprintf("%d", user.ID)
 	chatID := message.Chat.ID
-	sessionKey := telegramSessionKey(chatID)
+
+	// Resolve session key through the routing system (unified cross-channel).
+	peerKind, peerID := telegramPeerInfo(message)
+	sessionKey := c.resolveSessionKey(peerKind, peerID)
 
 	switch cmd {
 	case "new":
@@ -264,14 +271,14 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/subagents"))
 		c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("subagents", args), map[string]string{
 			"message_id": fmt.Sprintf("%d", message.MessageID),
-		})
+		}, sessionKey)
 		return nil
 
 	case "toggle":
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/toggle"))
 		c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("toggle", args), map[string]string{
 			"message_id": fmt.Sprintf("%d", message.MessageID),
-		})
+		}, sessionKey)
 		return nil
 
 	case "verbose":
@@ -292,7 +299,7 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		args := strings.TrimSpace(strings.TrimPrefix(message.Text, "/model"))
 		c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("model", args), map[string]string{
 			"message_id": fmt.Sprintf("%d", message.MessageID),
-		})
+		}, sessionKey)
 		return nil
 	}
 
@@ -312,7 +319,7 @@ func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message 
 		if args != "" {
 			c.publishSystemCommand(senderID, chatID, message.MessageID, telegramCommandText("agent", args), map[string]string{
 				"message_id": fmt.Sprintf("%d", message.MessageID),
-			})
+			}, sessionKey)
 			return nil
 		}
 		return c.commands.Agent(ctx, *message)
@@ -335,7 +342,7 @@ func (c *TelegramChannel) sendReplyText(ctx context.Context, message *telego.Mes
 	return err
 }
 
-func (c *TelegramChannel) publishSystemCommand(senderID string, chatID int64, messageID int, content string, metadata map[string]string) {
+func (c *TelegramChannel) publishSystemCommand(senderID string, chatID int64, messageID int, content string, metadata map[string]string, sessionKey string) {
 	if c.bus == nil || strings.TrimSpace(content) == "" {
 		return
 	}
@@ -346,7 +353,6 @@ func (c *TelegramChannel) publishSystemCommand(senderID string, chatID int64, me
 		metadata["message_id"] = fmt.Sprintf("%d", messageID)
 	}
 
-	sessionKey := telegramSessionKey(chatID)
 	c.bus.PublishInbound(bus.InboundMessage{
 		Channel:    "system",
 		SenderID:   senderID,
@@ -365,16 +371,44 @@ func telegramCommandText(command, args string) string {
 	return "/" + command + " " + args
 }
 
-func telegramSessionKey(chatID int64) string {
-	return fmt.Sprintf("telegram:%d", chatID)
-}
-
 func telegramSenderID(userID int64, username string) string {
 	senderID := fmt.Sprintf("%d", userID)
 	if username != "" {
 		senderID = fmt.Sprintf("%d|%s", userID, username)
 	}
 	return senderID
+}
+
+// resolveSessionKey resolves the session key through the routing system.
+// Falls back to legacy telegram:<chatID> format if agentLoop is nil.
+func (c *TelegramChannel) resolveSessionKey(peerKind, peerID string) string {
+	if c.agentLoop != nil {
+		return c.agentLoop.ResolveRoute("telegram", peerKind, peerID)
+	}
+	return telegramSessionKeyLegacy(peerKind, peerID)
+}
+
+// telegramSessionKeyLegacy generates the legacy session key when the routing
+// system is not available (e.g. in tests without agentLoop).
+func telegramSessionKeyLegacy(peerKind, peerID string) string {
+	if peerKind == "group" {
+		return fmt.Sprintf("telegram:%s", peerID)
+	}
+	return fmt.Sprintf("telegram:%s", peerID)
+}
+
+// telegramPeerInfo extracts peer kind and peer ID from a Telegram message.
+func telegramPeerInfo(message *telego.Message) (peerKind string, peerID string) {
+	if message == nil {
+		return "direct", ""
+	}
+	if message.Chat.Type != "private" {
+		return "group", fmt.Sprintf("%d", message.Chat.ID)
+	}
+	if message.From != nil {
+		return "direct", fmt.Sprintf("%d", message.From.ID)
+	}
+	return "direct", ""
 }
 
 func buildTelegramMetadata(messageID int, user *telego.User, chat telego.Chat) map[string]string {

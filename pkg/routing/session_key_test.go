@@ -1,6 +1,10 @@
 package routing
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/xilistudios/lele/pkg/config"
+)
 
 func TestBuildAgentMainSessionKey(t *testing.T) {
 	got := BuildAgentMainSessionKey("sales")
@@ -158,5 +162,280 @@ func TestIsSubagentSessionKey(t *testing.T) {
 		if got := IsSubagentSessionKey(tt.input); got != tt.want {
 			t.Errorf("IsSubagentSessionKey(%q) = %v, want %v", tt.input, got, tt.want)
 		}
+	}
+}
+
+// ─── Cross-channel session unification tests (Phase 6) ────────────────────
+
+// TestCrossChannel_UnifiedSession_PerPeer verifies the core unification scenario:
+// same user on Telegram + WhatsApp + Discord with dm_scope=per-peer gets the
+// same session key, enabling shared conversation history.
+func TestCrossChannel_UnifiedSession_PerPeer(t *testing.T) {
+	links := map[string][]string{
+		"john": {"telegram:123456", "whatsapp:+1234567890", "discord:john#1234"},
+	}
+	params := func(channel, peerID string) SessionKeyParams {
+		return SessionKeyParams{
+			AgentID:       "main",
+			Channel:       channel,
+			Peer:          &RoutePeer{Kind: "direct", ID: peerID},
+			DMScope:       DMScopePerPeer,
+			IdentityLinks: links,
+		}
+	}
+
+	tgKey := BuildAgentPeerSessionKey(params("telegram", "123456"))
+	waKey := BuildAgentPeerSessionKey(params("whatsapp", "+1234567890"))
+	dcKey := BuildAgentPeerSessionKey(params("discord", "john#1234"))
+
+	// All three should resolve to the identity-linked canonical key
+	want := "agent:main:direct:john"
+	if tgKey != want {
+		t.Errorf("Telegram key = %q, want %q", tgKey, want)
+	}
+	if waKey != want {
+		t.Errorf("WhatsApp key = %q, want %q", waKey, want)
+	}
+	if dcKey != want {
+		t.Errorf("Discord key = %q, want %q", dcKey, want)
+	}
+}
+
+// TestCrossChannel_SeparateSession_PerChannelPeer verifies that with
+// dm_scope=per-channel-peer, the same linked user gets different sessions
+// per channel.
+func TestCrossChannel_SeparateSession_PerChannelPeer(t *testing.T) {
+	links := map[string][]string{
+		"john": {"telegram:123456", "whatsapp:+1234567890"},
+	}
+	params := func(channel, peerID string) SessionKeyParams {
+		return SessionKeyParams{
+			AgentID:       "main",
+			Channel:       channel,
+			Peer:          &RoutePeer{Kind: "direct", ID: peerID},
+			DMScope:       DMScopePerChannelPeer,
+			IdentityLinks: links,
+		}
+	}
+
+	tgKey := BuildAgentPeerSessionKey(params("telegram", "123456"))
+	waKey := BuildAgentPeerSessionKey(params("whatsapp", "+1234567890"))
+
+	if tgKey == waKey {
+		t.Errorf("per-channel-peer should produce different keys, both got %q", tgKey)
+	}
+
+	if tgKey != "agent:main:telegram:direct:john" {
+		t.Errorf("Telegram key = %q, want %q", tgKey, "agent:main:telegram:direct:john")
+	}
+	if waKey != "agent:main:whatsapp:direct:john" {
+		t.Errorf("WhatsApp key = %q, want %q", waKey, "agent:main:whatsapp:direct:john")
+	}
+}
+
+// TestCrossChannel_GroupSessionsRemainIsolated verifies that group sessions
+// always include the channel+group in the key and never unify cross-channel,
+// even with identity links.
+func TestCrossChannel_GroupSessionsRemainIsolated(t *testing.T) {
+	links := map[string][]string{
+		// Identity links should NOT affect group sessions
+		"team": {"telegram:group100", "discord:channel200"},
+	}
+
+	tgKey := BuildAgentPeerSessionKey(SessionKeyParams{
+		AgentID:       "main",
+		Channel:       "telegram",
+		Peer:          &RoutePeer{Kind: "group", ID: "group100"},
+		DMScope:       DMScopePerPeer,
+		IdentityLinks: links,
+	})
+	dcKey := BuildAgentPeerSessionKey(SessionKeyParams{
+		AgentID:       "main",
+		Channel:       "discord",
+		Peer:          &RoutePeer{Kind: "channel", ID: "channel200"},
+		DMScope:       DMScopePerPeer,
+		IdentityLinks: links,
+	})
+
+	if tgKey == dcKey {
+		t.Errorf("group sessions should never unify cross-channel, both got %q", tgKey)
+	}
+
+	// Groups always include channel prefix
+	if tgKey != "agent:main:telegram:group:group100" {
+		t.Errorf("Telegram group key = %q, want %q", tgKey, "agent:main:telegram:group:group100")
+	}
+	if dcKey != "agent:main:discord:channel:channel200" {
+		t.Errorf("Discord channel key = %q, want %q", dcKey, "agent:main:discord:channel:channel200")
+	}
+}
+
+// TestCrossChannel_IdentityLink_ResolveMultiple verifies that a single identity
+// can have many linked identifiers across channels and they all resolve to the same key.
+func TestCrossChannel_IdentityLink_ResolveMultiple(t *testing.T) {
+	links := map[string][]string{
+		"alice": {
+			"telegram:alice_tg",
+			"whatsapp:+15550001111",
+			"discord:alice_dc",
+			"slack:U0ALICE",
+			"feishu:ou_alice",
+			"line:U_alice_line",
+			"onebot:10001",
+			"qq:alice_qq",
+			"dingtalk:alice_dd",
+		},
+	}
+
+	want := "agent:main:direct:alice"
+	channels := []struct {
+		channel string
+		peerID  string
+	}{
+		{"telegram", "alice_tg"},
+		{"whatsapp", "+15550001111"},
+		{"discord", "alice_dc"},
+		{"slack", "U0ALICE"},
+		{"feishu", "ou_alice"},
+		{"line", "U_alice_line"},
+		{"onebot", "10001"},
+		{"qq", "alice_qq"},
+		{"dingtalk", "alice_dd"},
+	}
+
+	for _, ch := range channels {
+		key := BuildAgentPeerSessionKey(SessionKeyParams{
+			AgentID:       "main",
+			Channel:       ch.channel,
+			Peer:          &RoutePeer{Kind: "direct", ID: ch.peerID},
+			DMScope:       DMScopePerPeer,
+			IdentityLinks: links,
+		})
+		if key != want {
+			t.Errorf("%s key = %q, want %q", ch.channel, key, want)
+		}
+	}
+}
+
+// TestCrossChannel_ResolveRoute_CrossChannelSameKey verifies the full pipeline:
+// RouteResolver.ResolveRoute() produces the same session key for a linked user
+// arriving from different channels with dm_scope=per-peer.
+func TestCrossChannel_ResolveRoute_CrossChannelSameKey(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: "/tmp/lele-test",
+				Model:     "gpt-4",
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-peer",
+			IdentityLinks: map[string][]string{
+				"john": {"telegram:123456", "whatsapp:+1234567890", "discord:john#1234"},
+			},
+		},
+	}
+	r := NewRouteResolver(cfg)
+
+	tgRoute := r.ResolveRoute(RouteInput{
+		Channel: "telegram",
+		Peer:    &RoutePeer{Kind: "direct", ID: "123456"},
+	})
+	waRoute := r.ResolveRoute(RouteInput{
+		Channel: "whatsapp",
+		Peer:    &RoutePeer{Kind: "direct", ID: "+1234567890"},
+	})
+	dcRoute := r.ResolveRoute(RouteInput{
+		Channel: "discord",
+		Peer:    &RoutePeer{Kind: "direct", ID: "john#1234"},
+	})
+
+	if tgRoute.SessionKey != waRoute.SessionKey {
+		t.Errorf("Telegram=%q vs WhatsApp=%q — should be same session", tgRoute.SessionKey, waRoute.SessionKey)
+	}
+	if tgRoute.SessionKey != dcRoute.SessionKey {
+		t.Errorf("Telegram=%q vs Discord=%q — should be same session", tgRoute.SessionKey, dcRoute.SessionKey)
+	}
+
+	// Verify the expected canonical key
+	want := "agent:main:direct:john"
+	if tgRoute.SessionKey != want {
+		t.Errorf("SessionKey = %q, want %q", tgRoute.SessionKey, want)
+	}
+}
+
+// TestCrossChannel_ResolveRoute_PerChannelPeer_ProducesDifferentKeys verifies
+// that the full pipeline with per-channel-peer scope produces distinct session
+// keys per channel even with identity links.
+func TestCrossChannel_ResolveRoute_PerChannelPeer_ProducesDifferentKeys(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: "/tmp/lele-test",
+				Model:     "gpt-4",
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-channel-peer",
+			IdentityLinks: map[string][]string{
+				"john": {"telegram:123456", "whatsapp:+1234567890"},
+			},
+		},
+	}
+	r := NewRouteResolver(cfg)
+
+	tgRoute := r.ResolveRoute(RouteInput{
+		Channel: "telegram",
+		Peer:    &RoutePeer{Kind: "direct", ID: "123456"},
+	})
+	waRoute := r.ResolveRoute(RouteInput{
+		Channel: "whatsapp",
+		Peer:    &RoutePeer{Kind: "direct", ID: "+1234567890"},
+	})
+
+	if tgRoute.SessionKey == waRoute.SessionKey {
+		t.Errorf("per-channel-peer: Telegram=%q should differ from WhatsApp=%q", tgRoute.SessionKey, waRoute.SessionKey)
+	}
+}
+
+// TestCrossChannel_ResolveRoute_GroupRoutes correctly verifies that group
+// routes are always channel-scoped and never unified.
+func TestCrossChannel_ResolveRoute_GroupRoutes(t *testing.T) {
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			List: []config.AgentConfig{
+				{ID: "main", Default: true},
+			},
+		},
+		Session: config.SessionConfig{
+			DMScope: "per-peer",
+		},
+	}
+	r := NewRouteResolver(cfg)
+
+	tgGroup := r.ResolveRoute(RouteInput{
+		Channel: "telegram",
+		Peer:    &RoutePeer{Kind: "group", ID: "group100"},
+	})
+	waGroup := r.ResolveRoute(RouteInput{
+		Channel: "whatsapp",
+		Peer:    &RoutePeer{Kind: "group", ID: "group100"},
+	})
+
+	if tgGroup.SessionKey == waGroup.SessionKey {
+		t.Errorf("group sessions should be channel-scoped, both got %q", tgGroup.SessionKey)
+	}
+
+	if tgGroup.SessionKey != "agent:main:telegram:group:group100" {
+		t.Errorf("Telegram group = %q, want %q", tgGroup.SessionKey, "agent:main:telegram:group:group100")
+	}
+	if waGroup.SessionKey != "agent:main:whatsapp:group:group100" {
+		t.Errorf("WhatsApp group = %q, want %q", waGroup.SessionKey, "agent:main:whatsapp:group:group100")
 	}
 }

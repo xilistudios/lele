@@ -783,6 +783,15 @@ func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
 		metadata["nickname"] = sender.Nickname
 	}
 
+	// Routing metadata: group messages → group, private → direct.
+	if raw.MessageType == "group" {
+		metadata["peer_kind"] = "group"
+		metadata["peer_id"] = chatID // "group:<groupID>"
+	} else {
+		metadata["peer_kind"] = "direct"
+		metadata["peer_id"] = senderID
+	}
+
 	c.lastMessageID.Store(chatID, messageID)
 
 	if raw.MessageType == "group" && messageID != "" && messageID != "0" {

@@ -151,6 +151,14 @@ func (c *DingTalkChannel) onChatBotMessageReceived(ctx context.Context, data *ch
 		"session_webhook":   data.SessionWebhook,
 	}
 
+	// Routing metadata: conversationType "1" → direct, else → group.
+	peerKind := "direct"
+	if data.ConversationType != "1" {
+		peerKind = "group"
+	}
+	metadata["peer_kind"] = peerKind
+	metadata["peer_id"] = chatID
+
 	logger.DebugCF("dingtalk", "Received message", map[string]interface{}{
 		"sender_nick": senderNick,
 		"sender_id":   senderID,

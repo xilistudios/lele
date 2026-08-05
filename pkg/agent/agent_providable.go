@@ -723,6 +723,24 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 // Public Methods for External Access (Direct Processing)
 // ============================================================================
 
+// ResolveRoute computes the unified session key for a channel+peer combination
+// using the configured DM scope and identity links via the routing resolver.
+func (ap *agentProvidableImpl) ResolveRoute(channel, peerKind, peerID string) string {
+	peer := &routing.RoutePeer{
+		Kind: peerKind,
+		ID:   peerID,
+	}
+	if peerKind == "" {
+		peer.Kind = "direct"
+	}
+
+	route := ap.al.registry.ResolveRoute(routing.RouteInput{
+		Channel: channel,
+		Peer:    peer,
+	})
+	return route.SessionKey
+}
+
 // ProcessDirect processes a message directly without going through the message bus.
 func (ap *agentProvidableImpl) ProcessDirect(ctx context.Context, content, sessionKey string) (string, error) {
 	return ap.al.messageProcessor.ProcessDirect(ctx, content, sessionKey)

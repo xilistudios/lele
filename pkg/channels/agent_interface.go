@@ -87,6 +87,10 @@ type AgentProvidable interface {
 	// and the context window for a session. Unlike GetTokenCounts which returns cumulative totals,
 	// this reflects what would actually be sent to the LLM on the next turn.
 	GetCurrentContextUsage(sessionKey string) (currentTokens, contextWindow int)
+	// ResolveRoute computes the unified session key for a channel+peer combination
+	// using the configured DM scope and identity links.
+	ResolveRoute(channel, peerKind, peerID string) string
+
 	// ProcessDirect processes a message directly without going through the message bus.
 	ProcessDirect(ctx context.Context, content, sessionKey string) (string, error)
 	// ProcessDirectWithChannel processes a message directly with channel information.

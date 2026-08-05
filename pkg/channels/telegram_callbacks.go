@@ -47,7 +47,9 @@ func (c *TelegramChannel) handleAgentCallback(ctx context.Context, query telego.
 		chat := query.Message.GetChat()
 		messageID := query.Message.GetMessageID()
 		senderID := telegramSenderID(query.From.ID, query.From.Username)
-		c.publishSystemCommand(senderID, chat.ID, messageID, telegramCommandText("agent", agentID), buildTelegramMetadata(messageID, &query.From, chat))
+		peerKind, peerID := telegramCallbackPeerInfo(query)
+		sessionKey := c.resolveSessionKey(peerKind, peerID)
+		c.publishSystemCommand(senderID, chat.ID, messageID, telegramCommandText("agent", agentID), buildTelegramMetadata(messageID, &query.From, chat), sessionKey)
 
 		text := formatAgentSelectedMessage(agentInfo, agentID)
 		editMsg := tu.EditMessageText(tu.ID(chat.ID), messageID, text)
@@ -103,7 +105,8 @@ func (c *TelegramChannel) handleVerboseCallback(ctx context.Context, query teleg
 		return nil
 	}
 
-	sessionKey := telegramSessionKey(query.Message.GetChat().ID)
+	peerKind, peerID := telegramCallbackPeerInfo(query)
+	sessionKey := c.resolveSessionKey(peerKind, peerID)
 	previousLevel := c.agentLoop.GetVerboseLevel(sessionKey)
 
 	if !c.agentLoop.SetVerboseLevel(sessionKey, level) {
@@ -172,7 +175,8 @@ func (c *TelegramChannel) handleThinkCallback(ctx context.Context, query telego.
 		return nil
 	}
 
-	sessionKey := telegramSessionKey(query.Message.GetChat().ID)
+	peerKind, peerID := telegramCallbackPeerInfo(query)
+	sessionKey := c.resolveSessionKey(peerKind, peerID)
 
 	if !c.agentLoop.SetThinkLevel(sessionKey, level) {
 		_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Failed to set think level"))
@@ -214,4 +218,16 @@ func (c *TelegramChannel) handleThinkCallback(ctx context.Context, query telego.
 
 	_ = c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Think level set to "+level))
 	return nil
+}
+
+// telegramCallbackPeerInfo extracts peer kind and peer ID from a Telegram callback query.
+func telegramCallbackPeerInfo(query telego.CallbackQuery) (peerKind string, peerID string) {
+	if query.Message != nil {
+		chat := query.Message.GetChat()
+		if chat.Type != "private" {
+			return "group", fmt.Sprintf("%d", chat.ID)
+		}
+	}
+	// For DMs, use the callback sender's user ID
+	return "direct", fmt.Sprintf("%d", query.From.ID)
 }
