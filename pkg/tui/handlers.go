@@ -634,6 +634,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "tab", "enter":
+				// Only consume Enter if there are autocomplete items to select.
+				// If the user typed arguments (e.g. "/goal something") and no
+				// completions match, fall through to normal message sending.
 				if len(m.autocompleteItems) > 0 {
 					completed := m.autocompleteItems[m.autocompleteIdx].name
 					m.chatInput.SetValue(completed)
@@ -645,8 +648,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.chatInput.SetValue("")
 					}
+					return m, tea.Batch(cmds...)
 				}
-				return m, tea.Batch(cmds...)
+				// No autocomplete items — dismiss autocomplete and let
+				// Enter fall through to send the message.
+				m.showAutocomplete = false
 			case "esc":
 				m.showAutocomplete = false
 				return m, nil
