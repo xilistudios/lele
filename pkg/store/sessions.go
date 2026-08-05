@@ -191,11 +191,11 @@ func (r *SessionRepo) SessionExists(key string) (bool, error) {
 
 // MessageRow holds the data needed to insert a message row.
 type MessageRow struct {
-	Seq       int
-	Role      string
-	Content   string
-	JSON      string
-	Excluded  bool
+	Seq      int
+	Role     string
+	Content  string
+	JSON     string
+	Excluded bool
 }
 
 // ReplaceMessages atomically replaces all messages for a session inside a
