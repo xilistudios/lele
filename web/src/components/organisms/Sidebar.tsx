@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -52,6 +52,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     onCreateSession,
     onDeleteSession,
     onToggleSidebar,
+    onLogout,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
 
@@ -98,6 +99,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     navigate(`/chat/${encodeURIComponent(key)}`)
     if (isMobile) onClose()
   }
+
+  const handleLogoutClick = useCallback(async () => {
+    if (isMobile) onClose()
+    await onLogout()
+    navigate('/pair', { replace: true })
+  }, [onLogout, navigate, isMobile, onClose])
 
   const isActiveRoute = (path: string) => location.pathname === path
 
@@ -496,13 +503,11 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               <button
                 type="button"
                 aria-label={t('chat.logout')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors cursor-not-allowed opacity-60"
-                title="Función deshabilitada"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-hover hover:text-red-400"
+                onClick={handleLogoutClick}
               >
-                <span className="opacity-50">
-                  <LogoutIcon />
-                </span>
-                <span>Cerrar sesión</span>
+                <LogoutIcon />
+                <span>{t('chat.logout')}</span>
               </button>
             </div>
           </Popover>

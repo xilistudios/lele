@@ -103,6 +103,22 @@ func (n *NativeChannel) handleListClients(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, safeClients)
 }
 
+func (n *NativeChannel) handleLogout(w http.ResponseWriter, r *http.Request) {
+	clientID := r.Header.Get("X-Client-Id")
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "missing client context", "logout_error")
+		return
+	}
+
+	if err := n.auth.RemoveClient(clientID); err != nil {
+		// Client already removed is not an error
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (n *NativeChannel) handleRemoveClient(w http.ResponseWriter, r *http.Request) {
 	clientID := r.PathValue("clientID")
 	if clientID == "" {

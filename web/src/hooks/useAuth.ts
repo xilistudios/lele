@@ -28,6 +28,12 @@ export function useAuth(defaultApiUrl: string) {
   const api = useMemo(() => {
     const client = createApiClient(apiUrl)
 
+    // When a 401 + refresh failure occurs, clear the session so the
+    // user is redirected to the PIN screen by ProtectedRoute.
+    client.setAuthFailureHandler(() => {
+      persistSession(null)
+    })
+
     if (session?.token && session.refresh_token) {
       client.setToken(session.token, session.refresh_token, (nextSession) => {
         persistSession({
