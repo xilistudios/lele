@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 type CronSchedule struct {
@@ -67,11 +68,19 @@ type CronStore struct {
 	Jobs    []CronJob `json:"jobs"`
 }
 
+// cronPayloadWithMeta wraps CronPayload to persist DeleteAfterRun inside
+// the payload JSON, since cron_jobs has no dedicated column for it.
+type cronPayloadWithMeta struct {
+	CronPayload
+	DeleteAfterRun bool `json:"delete_after_run,omitempty"`
+}
+
 type JobHandler func(job *CronJob) (string, error)
 
 type CronService struct {
 	storePath string
 	store     *CronStore
+	repo      *store.CronRepo
 	onJob     JobHandler
 	mu        sync.RWMutex
 	running   bool
@@ -324,7 +333,23 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 	cs.onJob = handler
 }
 
+// SetStore switches persistence to the given SQLite repository.
+// If the repository is empty and the legacy jobs.json exists, jobs are
+// migrated lazily on first load. Pass nil to revert to the JSON backend.
+func (cs *CronService) SetStore(repo *store.CronRepo) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.repo = repo
+	if err := cs.loadStore(); err != nil {
+		log.Printf("[cron] failed to load store after SetStore: %v", err)
+	}
+}
+
 func (cs *CronService) loadStore() error {
+	if cs.repo != nil {
+		return cs.loadFromRepo()
+	}
+
 	cs.store = &CronStore{
 		Version: 1,
 		Jobs:    []CronJob{},
@@ -341,7 +366,61 @@ func (cs *CronService) loadStore() error {
 	return json.Unmarshal(data, cs.store)
 }
 
+// loadFromRepo loads jobs from the SQLite repository. If the repo is empty
+// and a legacy JSON file exists, it migrates the jobs lazily.
+func (cs *CronService) loadFromRepo() error {
+	cs.store = &CronStore{
+		Version: 1,
+		Jobs:    []CronJob{},
+	}
+
+	rows, err := cs.repo.ListCronJobs()
+	if err != nil {
+		return fmt.Errorf("cron: list jobs from store: %w", err)
+	}
+
+	if len(rows) == 0 {
+		// Attempt lazy migration from legacy JSON.
+		data, readErr := os.ReadFile(cs.storePath)
+		if os.IsNotExist(readErr) {
+			return nil // no legacy file, empty store
+		}
+		if readErr != nil {
+			return readErr
+		}
+		if unmarshalErr := json.Unmarshal(data, cs.store); unmarshalErr != nil {
+			return unmarshalErr
+		}
+		for _, job := range cs.store.Jobs {
+			row, convErr := cronJobToRow(&job)
+			if convErr != nil {
+				log.Printf("[cron] failed to convert job %s during migration: %v", job.ID, convErr)
+				continue
+			}
+			if upsertErr := cs.repo.UpsertCronJob(row); upsertErr != nil {
+				log.Printf("[cron] failed to upsert job %s during migration: %v", job.ID, upsertErr)
+				return nil
+			}
+		}
+		return nil
+	}
+
+	// Load from SQLite.
+	for _, row := range rows {
+		job, convErr := rowToCronJob(&row)
+		if convErr != nil {
+			return convErr
+		}
+		cs.store.Jobs = append(cs.store.Jobs, *job)
+	}
+	return nil
+}
+
 func (cs *CronService) saveStoreUnsafe() error {
+	if cs.repo != nil {
+		return cs.saveToRepo()
+	}
+
 	dir := filepath.Dir(cs.storePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -353,6 +432,45 @@ func (cs *CronService) saveStoreUnsafe() error {
 	}
 
 	return os.WriteFile(cs.storePath, data, 0600)
+}
+
+// saveToRepo persists the in-memory jobs to the SQLite repository.
+// Upserts run first, then stale rows are deleted. If a failure occurs
+// mid-operation the worst case is a leftover stale row that is cleaned
+// up on the next save.
+func (cs *CronService) saveToRepo() error {
+	existing, err := cs.repo.ListCronJobs()
+	if err != nil {
+		return fmt.Errorf("cron: list jobs before save: %w", err)
+	}
+
+	// Upsert all current jobs.
+	for i := range cs.store.Jobs {
+		row, convErr := cronJobToRow(&cs.store.Jobs[i])
+		if convErr != nil {
+			return convErr
+		}
+		if upsertErr := cs.repo.UpsertCronJob(row); upsertErr != nil {
+			return fmt.Errorf("cron: upsert job %s: %w", row.ID, upsertErr)
+		}
+	}
+
+	// Build set of current IDs for delete sweep.
+	currentIDs := make(map[string]bool, len(cs.store.Jobs))
+	for i := range cs.store.Jobs {
+		currentIDs[cs.store.Jobs[i].ID] = true
+	}
+
+	// Delete stale rows.
+	for _, row := range existing {
+		if !currentIDs[row.ID] {
+			if delErr := cs.repo.DeleteCronJob(row.ID); delErr != nil {
+				return fmt.Errorf("cron: delete stale job %s: %w", row.ID, delErr)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (cs *CronService) AddJob(name string, schedule CronSchedule, message string, deliver bool, channel, to string) (*CronJob, error) {
@@ -569,6 +687,62 @@ func (cs *CronService) Status() map[string]interface{} {
 		"jobs":         len(cs.store.Jobs),
 		"nextWakeAtMS": cs.getNextWakeMS(),
 	}
+}
+
+// cronJobToRow converts a domain CronJob to a store CronJobRow.
+func cronJobToRow(job *CronJob) (*store.CronJobRow, error) {
+	schedJSON, err := json.Marshal(job.Schedule)
+	if err != nil {
+		return nil, fmt.Errorf("cron: marshal schedule: %w", err)
+	}
+	payloadJSON, err := json.Marshal(cronPayloadWithMeta{
+		CronPayload:    job.Payload,
+		DeleteAfterRun: job.DeleteAfterRun,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cron: marshal payload: %w", err)
+	}
+	stateJSON, err := json.Marshal(job.State)
+	if err != nil {
+		return nil, fmt.Errorf("cron: marshal state: %w", err)
+	}
+	return &store.CronJobRow{
+		ID:          job.ID,
+		Name:        job.Name,
+		Enabled:     job.Enabled,
+		Schedule:    string(schedJSON),
+		Payload:     string(payloadJSON),
+		State:       string(stateJSON),
+		Scope:       job.Scope,
+		SessionKey:  job.Payload.SessionKey,
+		CreatedAtMS: job.CreatedAtMS,
+		UpdatedAtMS: job.UpdatedAtMS,
+	}, nil
+}
+
+// rowToCronJob converts a store CronJobRow to a domain CronJob.
+func rowToCronJob(row *store.CronJobRow) (*CronJob, error) {
+	job := &CronJob{
+		ID:          row.ID,
+		Name:        row.Name,
+		Enabled:     row.Enabled,
+		Scope:       row.Scope,
+		CreatedAtMS: row.CreatedAtMS,
+		UpdatedAtMS: row.UpdatedAtMS,
+	}
+	if err := json.Unmarshal([]byte(row.Schedule), &job.Schedule); err != nil {
+		return nil, fmt.Errorf("cron: unmarshal schedule for job %s: %w", row.ID, err)
+	}
+	var meta cronPayloadWithMeta
+	if err := json.Unmarshal([]byte(row.Payload), &meta); err != nil {
+		return nil, fmt.Errorf("cron: unmarshal payload for job %s: %w", row.ID, err)
+	}
+	job.Payload = meta.CronPayload
+	job.DeleteAfterRun = meta.DeleteAfterRun
+	if err := json.Unmarshal([]byte(row.State), &job.State); err != nil {
+		return nil, fmt.Errorf("cron: unmarshal state for job %s: %w", row.ID, err)
+	}
+	return job, nil
 }
 
 func generateID() string {
