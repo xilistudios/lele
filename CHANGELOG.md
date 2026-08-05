@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-05
+
+### Added
+
+#### Routing
+- Session unification — all channels now route through a unified routing system (`ResolveRoute`) with `peer_kind` and `peer_id` metadata. Telegram, WhatsApp, Discord, Slack, Feishu, LINE, OneBot, QQ, and DingTalk all participate in cross-channel session resolution with identity linking. Groups remain isolated per-channel. 38 routing tests including 7 new cross-channel scenarios.
+
+#### Subagents
+- Configurable `subagents.max_iterations` with a higher default of 100 for subagents (previously inherited from agent or used hardcoded limits).
+
+### Fixed
+
+#### Agent
+- Main agent iteration limit disabled by default — agents no longer hit an artificial 100-iteration cap when running autonomously. The default is now 0 (unlimited), with subagents defaulting to 100.
+
+#### Cron
+- Default delivery channel for WebUI-created cron jobs changed from `cli` to `native` so scheduled messages actually reach the user.
+
+#### WebUI
+- Stale `processingSessions` cleared on HTTP poll transition — prevents ghost "processing" spinners when switching between WebSocket and HTTP fallback modes.
+
 ## [0.6.1] - 2026-08-05
 
 ### Added
