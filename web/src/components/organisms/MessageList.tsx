@@ -210,6 +210,10 @@ export function MessageList() {
     [],
   )
 
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: renderItems.length - 1, behavior: 'smooth' })
+  }, [renderItems.length])
+
   // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
     const modeTheme = getModeTheme(chatMode)
@@ -230,121 +234,135 @@ export function MessageList() {
   }
 
   return (
-    <Virtuoso
-      ref={virtuosoRef}
-      key={currentSessionKey ?? 'default'}
-      className="mx-auto max-w-3xl space-y-1 h-full w-full"
-      data={renderItems}
-      itemContent={renderItem}
-      computeItemKey={computeItemKey}
-      followOutput={atBottom ? 'smooth' : false}
-      atBottomStateChange={setAtBottom}
-      atBottomThreshold={300}
-      startReached={handleStartReached}
-      initialTopMostItemIndex={Math.max(0, renderItems.length - 1)}
-      components={{
-        Header: () => (
-          <>
-            {isLoadingMore && (
-              <div className="flex justify-center py-2">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              </div>
-            )}
-            {!isLoadingMore && hasMore && (
-              <p className="text-center py-2 text-xs text-text-tertiary">
-                {t('chat.scrollUpForMore')}
-              </p>
-            )}
-          </>
-        ),
-        Footer: () => (
-          <>
-            {approvalRequest && !approvalResult && (
-              <div className="py-2">
-                <div className="rounded-lg border border-border bg-background-primary p-4">
-                  <p className="text-sm font-medium text-text-secondary mb-2">
-                    {approvalRequest.command}
-                  </p>
-                  <p className="text-xs text-text-secondary mb-4">{approvalRequest.reason}</p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onApprove(true)}
-                      className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success-light/80"
-                    >
-                      {t('approval.approve')}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onApprove(false)}
-                      className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error-light/80"
-                    >
-                      {t('approval.reject')}
-                    </button>
+    <div className="relative h-full w-full">
+      <Virtuoso
+        ref={virtuosoRef}
+        key={currentSessionKey ?? 'default'}
+        className="mx-auto max-w-3xl space-y-1 h-full w-full"
+        data={renderItems}
+        itemContent={renderItem}
+        computeItemKey={computeItemKey}
+        followOutput={atBottom ? 'smooth' : false}
+        atBottomStateChange={setAtBottom}
+        atBottomThreshold={300}
+        startReached={handleStartReached}
+        initialTopMostItemIndex={Math.max(0, renderItems.length - 1)}
+        components={{
+          Header: () => (
+            <>
+              {isLoadingMore && (
+                <div className="flex justify-center py-2">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                </div>
+              )}
+              {!isLoadingMore && hasMore && (
+                <p className="text-center py-2 text-xs text-text-tertiary">
+                  {t('chat.scrollUpForMore')}
+                </p>
+              )}
+            </>
+          ),
+          Footer: () => (
+            <>
+              {approvalRequest && !approvalResult && (
+                <div className="py-2">
+                  <div className="rounded-lg border border-border bg-background-primary p-4">
+                    <p className="text-sm font-medium text-text-secondary mb-2">
+                      {approvalRequest.command}
+                    </p>
+                    <p className="text-xs text-text-secondary mb-4">{approvalRequest.reason}</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onApprove(true)}
+                        className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success-light/80"
+                      >
+                        {t('approval.approve')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onApprove(false)}
+                        className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error-light/80"
+                      >
+                        {t('approval.reject')}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-            {approvalResult && (
-              <div className="py-2">
-                <div
-                  className={`rounded-lg border p-4 ${
-                    approvalResult.approved
-                      ? 'border-state-success bg-state-success-light/10'
-                      : 'border-state-error bg-state-error-light/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{approvalResult.approved ? '✅' : '❌'}</span>
-                    <span
-                      className={`text-sm font-medium ${
-                        approvalResult.approved ? 'text-state-success' : 'text-state-error'
-                      }`}
-                    >
-                      {approvalResult.approved
-                        ? t('approval.commandApproved')
-                        : t('approval.commandRejected')}
-                    </span>
+              )}
+              {approvalResult && (
+                <div className="py-2">
+                  <div
+                    className={`rounded-lg border p-4 ${
+                      approvalResult.approved
+                        ? 'border-state-success bg-state-success-light/10'
+                        : 'border-state-error bg-state-error-light/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{approvalResult.approved ? '✅' : '❌'}</span>
+                      <span
+                        className={`text-sm font-medium ${
+                          approvalResult.approved ? 'text-state-success' : 'text-state-error'
+                        }`}
+                      >
+                        {approvalResult.approved
+                          ? t('approval.commandApproved')
+                          : t('approval.commandRejected')}
+                      </span>
+                    </div>
+                    {approvalResult.command && (
+                      <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap break-all">
+                        {approvalResult.command}
+                      </pre>
+                    )}
                   </div>
-                  {approvalResult.command && (
-                    <pre className="mt-2 text-xs text-text-secondary whitespace-pre-wrap break-all">
-                      {approvalResult.command}
-                    </pre>
-                  )}
                 </div>
-              </div>
-            )}
-            {/* Group execution loading indicator — shown when a group is actively running */}
-            {hasActiveGroup && !messages.some((m) => m.streaming) && (
-              <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
-                <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
-                <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.2s]" />
-                <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.4s]" />
-                <span className="ml-1 text-xs">{t('groups.executing')}</span>
-              </div>
-            )}
-            {/* Regular loading dots — hidden when a group is active to avoid duplication */}
-            {isProcessing && !hasActiveGroup && !messages.some((m) => m.streaming) && (
-              <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
-                <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
-                <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />
-                <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
-              </div>
-            )}
-            {/* Typing indicator from another device */}
-            {typingIndicator && typingIndicator.deviceId !== session?.client_id && (
-              <div className="flex items-center gap-2 px-4 py-2 text-xs text-text-tertiary animate-pulse">
-                <span className="flex gap-0.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '300ms' }} />
-                </span>
-                <span>{typingIndicator.deviceName} is typing...</span>
-              </div>
-            )}
-          </>
-        ),
-      }}
-    />
+              )}
+              {/* Group execution loading indicator — shown when a group is actively running */}
+              {hasActiveGroup && !messages.some((m) => m.streaming) && (
+                <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
+                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.2s]" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.4s]" />
+                  <span className="ml-1 text-xs">{t('groups.executing')}</span>
+                </div>
+              )}
+              {/* Regular loading dots — hidden when a group is active to avoid duplication */}
+              {isProcessing && !hasActiveGroup && !messages.some((m) => m.streaming) && (
+                <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
+                  <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.2s]" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-text-tertiary animate-pulse [animation-delay:0.4s]" />
+                </div>
+              )}
+              {/* Typing indicator from another device */}
+              {typingIndicator && typingIndicator.deviceId !== session?.client_id && (
+                <div className="flex items-center gap-2 px-4 py-2 text-xs text-text-tertiary animate-pulse">
+                  <span className="flex gap-0.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                  <span>{typingIndicator.deviceName} is typing...</span>
+                </div>
+              )}
+            </>
+          ),
+        }}
+      />
+      {!atBottom && renderItems.length > 0 && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background-secondary shadow-md transition-opacity hover:bg-background-tertiary"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 3v10m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
+    </div>
   )
 }

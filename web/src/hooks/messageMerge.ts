@@ -251,6 +251,88 @@ function filterStreamingLeftovers(
  * Merge canonical HTTP history with live WebSocket streaming state into a
  * single, deduplicated, chronologically-ordered message list for rendering.
  */
+/**
+ * Consolidate `reasoningContent` from consecutive assistant messages
+ * belonging to the same turn into a single thinking block on the LAST
+ * assistant of that sequence.
+ *
+ * A "turn group" is a maximal run of messages that contains no user message.
+ * Tool messages between assistants do NOT break the group — they are part
+ * of the same tool-use turn.
+ */
+function mergeThinkingBlocks(messages: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = []
+  let groupStart = 0
+
+  for (let i = 0; i <= messages.length; i++) {
+    // A user message (or end of array) terminates the current group.
+    const isEnd = i === messages.length
+    const isUser = !isEnd && messages[i].role === 'user'
+
+    if (isEnd || isUser) {
+      // Process the group [groupStart, i)
+      processThinkingGroup(messages, groupStart, i, result)
+      groupStart = i
+    }
+
+    if (isUser) {
+      result.push(messages[i])
+      groupStart = i + 1
+    }
+  }
+
+  return result
+}
+
+/**
+ * Process a single turn group: if 2+ assistants have reasoningContent,
+ * consolidate them into the last assistant.
+ */
+function processThinkingGroup(
+  messages: ChatMessage[],
+  start: number,
+  end: number,
+  out: ChatMessage[],
+): void {
+  // Collect indices of assistants with reasoningContent in this group
+  const assistantsWithReasoning: number[] = []
+
+  for (let i = start; i < end; i++) {
+    if (messages[i].role === 'assistant' && messages[i].reasoningContent) {
+      assistantsWithReasoning.push(i)
+    }
+  }
+
+  // If fewer than 2 have reasoning, just push everything as-is
+  if (assistantsWithReasoning.length < 2) {
+    for (let i = start; i < end; i++) {
+      out.push(messages[i])
+    }
+    return
+  }
+
+  // Concatenate all reasoning into a single string
+  const merged = assistantsWithReasoning
+    .map((idx) => messages[idx].reasoningContent!.trim())
+    .filter(Boolean)
+    .join('\n\n')
+
+  const lastReasoningIdx = assistantsWithReasoning[assistantsWithReasoning.length - 1]
+
+  // Push all messages in the group, clearing reasoning from all but the last
+  for (let i = start; i < end; i++) {
+    if (messages[i].role === 'assistant' && messages[i].reasoningContent) {
+      if (i === lastReasoningIdx) {
+        out.push({ ...messages[i], reasoningContent: merged })
+      } else {
+        out.push({ ...messages[i], reasoningContent: undefined })
+      }
+    } else {
+      out.push(messages[i])
+    }
+  }
+}
+
 export function mergeMessages(
   baseMessages: ChatMessage[],
   streamingMessages: ChatMessage[],
@@ -280,5 +362,6 @@ export function mergeMessages(
     baseHasCurrentTurn,
   )
 
-  return [...filteredBase, ...filteredStreaming]
+  const merged = [...filteredBase, ...filteredStreaming]
+  return mergeThinkingBlocks(merged)
 }

@@ -97,6 +97,15 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl, on
     }
   }, [message.streaming, message.reasoningContent])
 
+  // Auto-collapse thinking when streaming completes
+  const wasStreamingRef = useRef(message.streaming)
+  useEffect(() => {
+    if (wasStreamingRef.current && !message.streaming) {
+      setThinkingOpen(false)
+    }
+    wasStreamingRef.current = message.streaming
+  }, [message.streaming])
+
   const blocks = useMemo(() => {
     if (isUser || isTool) return null
     // Don't parse blocks while streaming — partial content causes false positives

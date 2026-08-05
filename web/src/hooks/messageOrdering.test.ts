@@ -609,4 +609,167 @@ describe('Message ordering fixes', () => {
       expect(result.some((m) => m.id === 'a1')).toBe(false)
     })
   })
+
+  describe('Thinking block merge: consecutive assistant reasoningContent consolidated', () => {
+    test('merges reasoningContent from multiple assistants in the same turn into the last one', () => {
+      // Scenario: Multi-iteration tool-use turn. Each iteration streamed its
+      // own reasoningContent. All should be merged into the last assistant.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Analyze this code'),
+        createTestMessage('a1', 'assistant', 'Let me read the file', {
+          reasoningContent: 'I need to read the file first',
+        }),
+        createTestMessage('t1', 'tool', 'file contents', {
+          toolName: 'read_file',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2', 'assistant', 'Now let me run a test', {
+          reasoningContent: 'The file looks correct, let me verify with a test',
+        }),
+        createTestMessage('t2', 'tool', 'test output', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-2',
+        }),
+        createTestMessage('a3', 'assistant', 'Everything looks good!', {
+          reasoningContent: 'Tests pass, the code is correct',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, [])
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+
+      // First two assistants should have reasoningContent cleared
+      expect(assistants[0].reasoningContent).toBeUndefined()
+      expect(assistants[1].reasoningContent).toBeUndefined()
+
+      // Last assistant should have all reasoning merged
+      expect(assistants[2].reasoningContent).toBe(
+        'I need to read the file first\n\nThe file looks correct, let me verify with a test\n\nTests pass, the code is correct',
+      )
+    })
+
+    test('does NOT merge reasoningContent across user messages', () => {
+      // Reasoning from different turns (separated by user messages) should stay separate.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'First question'),
+        createTestMessage('a1', 'assistant', 'Step 1', {
+          reasoningContent: 'Thinking about turn 1',
+        }),
+        createTestMessage('t1', 'tool', 'result', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2', 'assistant', 'Answer 1', {
+          reasoningContent: 'More thinking for turn 1',
+        }),
+        createTestMessage('u2', 'user', 'Second question'),
+        createTestMessage('a3', 'assistant', 'Answer 2', {
+          reasoningContent: 'Thinking about turn 2',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, [])
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+
+      // Turn 1: a1's reasoning cleared, a2 gets merged turn-1 reasoning
+      expect(assistants[0].reasoningContent).toBeUndefined()
+      expect(assistants[1].reasoningContent).toBe(
+        'Thinking about turn 1\n\nMore thinking for turn 1',
+      )
+
+      // Turn 2: a3 keeps its own reasoning (only 1 assistant in this turn)
+      expect(assistants[2].reasoningContent).toBe('Thinking about turn 2')
+    })
+
+    test('single assistant with reasoningContent is left untouched', () => {
+      // When there's only one assistant with reasoning in a turn, no merge needed.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Hello'),
+        createTestMessage('a1', 'assistant', 'Hi!', {
+          reasoningContent: 'Simple greeting',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, [])
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+      expect(assistants[0].reasoningContent).toBe('Simple greeting')
+    })
+
+    test('assistant without reasoningContent is skipped during merge', () => {
+      // Some iterations may not have reasoning (e.g. tool-call-only responses).
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Do something'),
+        createTestMessage('a1', 'assistant', '', {
+          reasoningContent: 'Initial analysis',
+        }),
+        createTestMessage('t1', 'tool', 'result', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2', 'assistant', 'Continuing...', {
+          // No reasoningContent on this one
+        }),
+        createTestMessage('t2', 'tool', 'result2', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-2',
+        }),
+        createTestMessage('a3', 'assistant', 'Done!', {
+          reasoningContent: 'Final reasoning',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, [])
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+
+      // a1 had reasoning but only 2 assistants total had reasoning (a1, a3)
+      // so merge should happen: a1 cleared, a3 gets both
+      expect(assistants[0].reasoningContent).toBeUndefined()
+      expect(assistants[1].reasoningContent).toBeUndefined() // had no reasoning, stays undefined
+      expect(assistants[2].reasoningContent).toBe(
+        'Initial analysis\n\nFinal reasoning',
+      )
+    })
+
+    test('merges reasoningContent during active streaming', () => {
+      // Simulates live streaming state where iterations are still arriving.
+      const baseMessages: ChatMessage[] = []
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Analyze this'),
+        createTestMessage('a1-ws', 'assistant', 'Reading file...', {
+          streaming: false,
+          reasoningContent: 'Let me start by reading the file',
+        }),
+        createTestMessage('t1', 'tool', 'contents', {
+          toolName: 'read_file',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2-ws', 'assistant', 'Here is my analysis...', {
+          streaming: true,
+          reasoningContent: 'After reading the file, I can see...',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+
+      const assistants = result.filter((m) => m.role === 'assistant')
+
+      // a1's reasoning should be cleared (merged into a2)
+      expect(assistants[0].reasoningContent).toBeUndefined()
+      // a2 should have the merged reasoning
+      expect(assistants[1].reasoningContent).toBe(
+        'Let me start by reading the file\n\nAfter reading the file, I can see...',
+      )
+    })
+  })
 })
