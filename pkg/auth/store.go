@@ -104,7 +104,7 @@ func migrateFromJSONIfNeeded(repo *store.AuthRepo) error {
 	legacy, err := loadJSONStore()
 	if err != nil {
 		logger.WarnCF("auth", "Failed to load legacy auth.json during migration", map[string]interface{}{"error": err.Error()})
-		return nil
+		return nil //nolint:nilerr // best-effort migration: a broken legacy file must never block authentication
 	}
 	if legacy == nil {
 		return nil // no legacy file, nothing to migrate
@@ -118,7 +118,7 @@ func migrateFromJSONIfNeeded(repo *store.AuthRepo) error {
 		}
 		if err := repo.SetCredential(key, string(data)); err != nil {
 			logger.WarnCF("auth", "Failed to persist credential during migration", map[string]interface{}{"provider": key, "error": err.Error()})
-			return nil
+			return nil //nolint:nilerr // best-effort migration: partial migration is acceptable, JSON fallback remains
 		}
 	}
 	return nil

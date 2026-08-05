@@ -2,9 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
-
-	_ "modernc.org/sqlite"
 )
 
 // Store provides SQLite-backed persistence for lele service state.
@@ -33,6 +32,10 @@ type Store struct {
 // The pool is limited to a single connection: one writer at a time is
 // a requirement of the storage plan.
 func Open(path string) (*Store, error) {
+	if !sqliteSupported {
+		return nil, errors.New("store: SQLite is not supported on this platform (linux/mips64); use the legacy JSON backends")
+	}
+
 	dsn := path +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
