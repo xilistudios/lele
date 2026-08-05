@@ -1468,7 +1468,15 @@ func (n *NativeChannel) handleCronCreate(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	job, err := n.cronService.AddJob(name, schedule, message, deliver, input.Channel, input.To)
+	// Default channel to "native" so results are delivered to the WebUI.
+	// When the channel is empty, ExecuteJob would default to "cli" which is
+	// an internal channel whose outbound messages are silently dropped.
+	channel := input.Channel
+	if channel == "" {
+		channel = "native"
+	}
+
+	job, err := n.cronService.AddJob(name, schedule, message, deliver, channel, input.To)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "cron_add_failed")
 		return
