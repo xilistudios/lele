@@ -219,9 +219,9 @@ type AgentConfig struct {
 type SubagentsConfig struct {
 	AllowAgents   []string          `json:"allow_agents,omitempty"`
 	Model         *AgentModelConfig `json:"model,omitempty"`
-	TimeoutMin    int               `json:"timeout_minutes,omitempty"`    // 0 means no timeout
-	MaxConcurrent int               `json:"max_concurrent,omitempty"`     // max concurrent subagent tasks (0 = unlimited)
-	MaxIterations int               `json:"max_iterations,omitempty"`     // max tool iterations for subagent tasks (0 = unlimited)
+	TimeoutMin    int               `json:"timeout_minutes,omitempty"` // 0 means no timeout
+	MaxConcurrent int               `json:"max_concurrent,omitempty"`  // max concurrent subagent tasks (0 = unlimited)
+	MaxIterations int               `json:"max_iterations,omitempty"`  // max tool iterations for subagent tasks (0 = unlimited)
 }
 
 type PeerMatch struct {
@@ -271,8 +271,8 @@ type AgentDefaults struct {
 	MaxReadLines           int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
 	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
 	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
-	SubagentMaxRetries       int      `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`               // max retry attempts for transient failures (0 = no retry)
-	SubagentMaxIterations    int      `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`           // max tool iterations for subagent tasks (0 = unlimited)
+	SubagentMaxRetries     int      `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`         // max retry attempts for transient failures (0 = no retry)
+	SubagentMaxIterations  int      `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
 }
 
 type ChannelsConfig struct {
