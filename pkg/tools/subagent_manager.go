@@ -47,11 +47,6 @@ type SpawnOptions struct {
 }
 
 func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace string, bus *bus.MessageBus, maxIterations int) *SubagentManager {
-	// A value of 0 means unlimited — converted to a very large number to
-	// avoid infinite loop semantics while effectively disabling the cap.
-	if maxIterations <= 0 {
-		maxIterations = 1_000_000
-	}
 	return &SubagentManager{
 		tasks:           make(map[string]*SubagentTask),
 		cancels:         make(map[string]context.CancelFunc),

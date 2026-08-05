@@ -179,7 +179,8 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 	}
 
-	for iteration < config.MaxIterations {
+	// MaxIterations <= 0 means unlimited (timeout is the real safety guard)
+	for config.MaxIterations <= 0 || iteration < config.MaxIterations {
 		iteration++
 
 		logger.DebugCF("toolloop", "LLM iteration",
