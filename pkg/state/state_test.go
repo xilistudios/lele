@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 func TestAtomicSave(t *testing.T) {
@@ -212,5 +214,106 @@ func TestNewManager_EmptyWorkspace(t *testing.T) {
 
 	if !sm.GetTimestamp().IsZero() {
 		t.Error("Expected zero timestamp for new state")
+	}
+}
+
+func TestKVRepoPersistence(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "state-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Open a SQLite store for the test.
+	s, err := store.Open(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	defer s.Close()
+
+	// Create state manager and wire in the KV repo.
+	sm := NewManager(tmpDir)
+	sm.SetKVRepo(s.KV())
+
+	// Set state via the manager.
+	if err := sm.SetLastChannel("kv-channel"); err != nil {
+		t.Fatalf("SetLastChannel failed: %v", err)
+	}
+	if err := sm.SetLastChatID("kv-chat-id"); err != nil {
+		t.Fatalf("SetLastChatID failed: %v", err)
+	}
+
+	// Verify the state was written to the KV store under the expected key.
+	key := "state:" + tmpDir
+	val, ok, err := s.KV().Get(key)
+	if err != nil || !ok {
+		t.Fatalf("KV Get(%q) = (_, %v, %v), want (_, true, nil)", key, ok, err)
+	}
+	var persisted State
+	if err := json.Unmarshal([]byte(val), &persisted); err != nil {
+		t.Fatalf("KV value is invalid JSON: %v", err)
+	}
+	if persisted.LastChannel != "kv-channel" || persisted.LastChatID != "kv-chat-id" {
+		t.Errorf("KV persisted state = %+v, want channel 'kv-channel', chat ID 'kv-chat-id'", persisted)
+	}
+
+	// When KV is wired in, no state.json file should be written.
+	if _, err := os.Stat(filepath.Join(tmpDir, "state", "state.json")); !os.IsNotExist(err) {
+		t.Error("Expected no state.json file when KV repo is wired in")
+	}
+
+	// A new manager wired to the same store should load from KV.
+	sm2 := NewManager(tmpDir)
+	sm2.SetKVRepo(s.KV())
+	if sm2.GetLastChannel() != "kv-channel" {
+		t.Errorf("Expected loaded channel 'kv-channel', got '%s'", sm2.GetLastChannel())
+	}
+	if sm2.GetLastChatID() != "kv-chat-id" {
+		t.Errorf("Expected loaded chat ID 'kv-chat-id', got '%s'", sm2.GetLastChatID())
+	}
+}
+
+func TestKVRepoFallbackToFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "state-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Save state using the JSON file path (no KV repo).
+	sm := NewManager(tmpDir)
+	if err := sm.SetLastChannel("file-channel"); err != nil {
+		t.Fatalf("SetLastChannel failed: %v", err)
+	}
+
+	// Now wire in a KV repo: the manager keeps the file-loaded state in
+	// memory (KV key doesn't exist), and future saves go to KV.
+	s, err := store.Open(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	defer s.Close()
+
+	sm.SetKVRepo(s.KV())
+
+	// Updating state should now persist to KV.
+	if err := sm.SetLastChatID("kv-chat-id"); err != nil {
+		t.Fatalf("SetLastChatID failed: %v", err)
+	}
+
+	key := "state:" + tmpDir
+	val, ok, err := s.KV().Get(key)
+	if err != nil || !ok {
+		t.Fatalf("KV Get(%q) = (_, %v, %v), want (_, true, nil)", key, ok, err)
+	}
+	var persisted State
+	if err := json.Unmarshal([]byte(val), &persisted); err != nil {
+		t.Fatalf("KV value is invalid JSON: %v", err)
+	}
+	if persisted.LastChannel != "file-channel" {
+		t.Errorf("Expected channel 'file-channel' carried into KV, got '%s'", persisted.LastChannel)
+	}
+	if persisted.LastChatID != "kv-chat-id" {
+		t.Errorf("Expected chat ID 'kv-chat-id' in KV, got '%s'", persisted.LastChatID)
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 type AuthManager struct {
@@ -22,6 +23,7 @@ type AuthManager struct {
 	storePath string
 	mu        sync.RWMutex
 	secret    string
+	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file)
 }
 
 func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, error) {
@@ -42,6 +44,33 @@ func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, err
 	}
 
 	return am, nil
+}
+
+// SetStore configures SQLite persistence for native clients. When set,
+// clients are read/written through the repository instead of the JSON file.
+func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.repo = repo
+	if repo == nil {
+		return
+	}
+
+	// Migration-on-first-set: if the in-memory store was loaded from JSON,
+	// persist it to SQLite so subsequent loads come from the DB.
+	if am.store != nil && len(am.store.Clients) > 0 {
+		for id, client := range am.store.Clients {
+			data, err := json.Marshal(client)
+			if err != nil {
+				logger.ErrorCF("native", fmt.Sprintf("SetStore: marshal client %s: %v", id, err), nil)
+				continue
+			}
+			if err := repo.SetClient(id, string(data)); err != nil {
+				logger.ErrorCF("native", fmt.Sprintf("SetStore: persist client %s: %v", id, err), nil)
+			}
+		}
+	}
 }
 
 func generateSecret() string {
@@ -83,6 +112,32 @@ func hashToken(token string) string {
 }
 
 func (am *AuthManager) loadStore() error {
+	// SQLite path
+	if am.repo != nil {
+		clients, err := am.repo.ListClients()
+		if err != nil {
+			return fmt.Errorf("list clients from sqlite: %w", err)
+		}
+		store := &ClientStore{
+			Clients:     make(map[string]*ClientInfo, len(clients)),
+			PendingPINs: make(map[string]*PendingPIN),
+		}
+		for id, clientJSON := range clients {
+			var info ClientInfo
+			if err := json.Unmarshal([]byte(clientJSON), &info); err != nil {
+				logger.WarnCF("native", fmt.Sprintf("loadStore: unmarshal client %s: %v", id, err), nil)
+				continue
+			}
+			if len(info.SessionKeys) == 0 {
+				info.SessionKeys = []string{id}
+			}
+			store.Clients[id] = &info
+		}
+		am.store = store
+		return nil
+	}
+
+	// JSON file path
 	data, err := os.ReadFile(am.storePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -118,6 +173,22 @@ func (am *AuthManager) saveStore() error {
 
 func (am *AuthManager) saveStoreUnlocked() error {
 	am.store.LastModified = time.Now()
+
+	// SQLite path
+	if am.repo != nil {
+		for id, client := range am.store.Clients {
+			clientJSON, err := json.Marshal(client)
+			if err != nil {
+				return fmt.Errorf("marshal client %s: %w", id, err)
+			}
+			if err := am.repo.SetClient(id, string(clientJSON)); err != nil {
+				return fmt.Errorf("save client %s: %w", id, err)
+			}
+		}
+		return nil
+	}
+
+	// JSON file path
 	data, err := json.MarshalIndent(am.store, "", "  ")
 	if err != nil {
 		return err

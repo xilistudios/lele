@@ -16,8 +16,13 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/store"
 	"github.com/xilistudios/lele/pkg/voice"
 )
+
+// telegramOffsetKey is the KV store key used to persist the last
+// processed Telegram UpdateID.
+const telegramOffsetKey = "telegram:offset"
 
 type TelegramChannel struct {
 	*BaseChannel
@@ -39,7 +44,8 @@ type TelegramChannel struct {
 	// Deduplication using UpdateID (Telegram's unique identifier for each update)
 	lastUpdateID   int
 	updateIDMu     sync.Mutex
-	offsetFilePath string // Path to persist last UpdateID
+	offsetFilePath string // Path to persist last UpdateID (fallback when kvRepo is nil)
+	kvRepo         *store.KVRepo
 	// Fallback deduplication using ChatID:MessageID
 	processedIDs map[string]struct{}
 	processedMu  sync.Mutex
@@ -124,8 +130,9 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 	// Determine offset file path for persisting last UpdateID
 	offsetFilePath := filepath.Join(config.GetLeleDir(), "telegram_offset.txt")
 
-	// Load persisted last UpdateID
-	lastUpdateID := loadLastUpdateID(offsetFilePath)
+	// Load persisted last UpdateID (flat file; the KV store is wired later
+	// via SetKVRepo once the channel manager is built)
+	lastUpdateID := loadLastUpdateIDFromFile(offsetFilePath)
 
 	return &TelegramChannel{
 		BaseChannel:     base,
@@ -148,8 +155,41 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
-// loadLastUpdateID reads the last processed UpdateID from a file
-func loadLastUpdateID(path string) int {
+// SetKVRepo wires the KV store used to persist the last processed
+// UpdateID. When set, the KV store takes precedence over the flat file
+// fallback. If the KV store already holds an offset, it is preferred
+// over the offset loaded from the flat file in the constructor.
+func (c *TelegramChannel) SetKVRepo(repo *store.KVRepo) {
+	c.kvRepo = repo
+	if repo == nil {
+		return
+	}
+	if id := c.loadOffsetFromKV(); id > 0 {
+		c.updateIDMu.Lock()
+		if id > c.lastUpdateID {
+			c.lastUpdateID = id
+		}
+		c.updateIDMu.Unlock()
+	}
+}
+
+// loadOffsetFromKV reads the last processed UpdateID from the KV store.
+// It returns 0 when no offset has been persisted yet or on error.
+func (c *TelegramChannel) loadOffsetFromKV() int {
+	if c.kvRepo == nil {
+		return 0
+	}
+	value, ok, err := c.kvRepo.Get(telegramOffsetKey)
+	if err != nil || !ok {
+		return 0
+	}
+	var id int
+	fmt.Sscanf(value, "%d", &id)
+	return id
+}
+
+// loadLastUpdateIDFromFile reads the last processed UpdateID from a file
+func loadLastUpdateIDFromFile(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0 // No persisted offset, start fresh
@@ -159,17 +199,33 @@ func loadLastUpdateID(path string) int {
 	return id
 }
 
-// saveLastUpdateID persists the last processed UpdateID to a file
+// saveLastUpdateID persists the last processed UpdateID. The KV store is
+// the primary backend when wired via SetKVRepo; otherwise it falls back
+// to the flat file.
 func (c *TelegramChannel) saveLastUpdateID() {
 	c.updateIDMu.Lock()
 	id := c.lastUpdateID
 	c.updateIDMu.Unlock()
 
-	if id <= 0 || c.offsetFilePath == "" {
+	if id <= 0 {
 		return
 	}
 
-	// Write as simple text file
+	// KV store is the primary persistence backend.
+	if c.kvRepo != nil {
+		if err := c.kvRepo.Set(telegramOffsetKey, fmt.Sprintf("%d", id)); err != nil {
+			logger.WarnCF("telegram", "Failed to persist UpdateID offset to KV store", map[string]interface{}{
+				"error": err.Error(),
+				"key":   telegramOffsetKey,
+			})
+		}
+		return
+	}
+
+	// Fallback: write as simple text file.
+	if c.offsetFilePath == "" {
+		return
+	}
 	data := fmt.Sprintf("%d", id)
 	err := os.WriteFile(c.offsetFilePath, []byte(data), 0600)
 	if err != nil {

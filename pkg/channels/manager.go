@@ -15,6 +15,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 type Manager struct {
@@ -358,6 +359,16 @@ func (m *Manager) GetChannel(name string) (Channel, bool) {
 	defer m.mu.RUnlock()
 	channel, ok := m.channels[name]
 	return channel, ok
+}
+
+// SetNativeClientStore wires the SQLite native client repository into the
+// native channel's auth manager. No-op if the native channel is not enabled.
+func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {
+	if ch, ok := m.GetChannel("native"); ok {
+		if nc, ok := ch.(*NativeChannel); ok {
+			nc.auth.SetStore(repo)
+		}
+	}
 }
 
 func (m *Manager) GetStatus() map[string]interface{} {
