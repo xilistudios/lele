@@ -18,6 +18,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // GoalStatus represents the state of a persistent goal.
@@ -51,6 +52,7 @@ type GoalManager struct {
 	goals    map[string]*Goal // sessionKey -> active goal
 	storeDir string
 	judge    GoalJudge
+	repo     *store.GoalRepo
 }
 
 // GoalJudge evaluates whether a goal has been achieved after each turn.
@@ -75,6 +77,60 @@ func (gm *GoalManager) SetJudge(judge GoalJudge) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 	gm.judge = judge
+}
+
+// SetStore switches goal persistence to the given SQLite repository.
+// If the repository is empty and legacy goal files exist, they are
+// migrated lazily. Pass nil to revert to the JSON backend.
+func (gm *GoalManager) SetStore(repo *store.GoalRepo) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	gm.repo = repo
+	if repo == nil {
+		return
+	}
+
+	goalsJSON, err := repo.ListGoals()
+	if err != nil {
+		logger.WarnCF("agent", "Failed to list goals from store", map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	if len(goalsJSON) > 0 {
+		for sessionKey, goalJSON := range goalsJSON {
+			var goal Goal
+			if err := json.Unmarshal([]byte(goalJSON), &goal); err != nil {
+				logger.WarnCF("agent", "Skipping corrupt goal in store", map[string]interface{}{
+					"session_key": sessionKey,
+					"error":       err.Error(),
+				})
+				continue
+			}
+			if goal.Status == GoalActive || goal.Status == GoalPaused {
+				gm.goals[goal.SessionKey] = &goal
+			}
+		}
+		return
+	}
+
+	// Repository empty: migrate goals already loaded in memory by loadFromDisk.
+	for sessionKey, goal := range gm.goals {
+		data, err := json.Marshal(goal)
+		if err != nil {
+			logger.WarnCF("agent", "Failed to marshal goal during migration", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+			continue
+		}
+		if err := repo.SetGoal(sessionKey, string(data)); err != nil {
+			logger.WarnCF("agent", "Failed to migrate goal to store", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+	}
 }
 
 // Set creates or replaces the goal for a session.
@@ -240,6 +296,20 @@ func (gm *GoalManager) goalFilePath(sessionKey string) string {
 }
 
 func (gm *GoalManager) persist(sessionKey string, goal *Goal) {
+	if gm.repo != nil {
+		data, err := json.Marshal(goal)
+		if err != nil {
+			return
+		}
+		if err := gm.repo.SetGoal(sessionKey, string(data)); err != nil {
+			logger.WarnCF("agent", "Failed to persist goal", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+		return
+	}
+
 	if gm.storeDir == "" {
 		return
 	}
@@ -261,6 +331,15 @@ func (gm *GoalManager) persist(sessionKey string, goal *Goal) {
 }
 
 func (gm *GoalManager) removePersisted(sessionKey string) {
+	if gm.repo != nil {
+		if err := gm.repo.DeleteGoal(sessionKey); err != nil {
+			logger.WarnCF("agent", "Failed to delete goal from store", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+		return
+	}
 	if gm.storeDir == "" {
 		return
 	}
@@ -268,6 +347,16 @@ func (gm *GoalManager) removePersisted(sessionKey string) {
 }
 
 func (gm *GoalManager) loadFromDisk() {
+	if gm.repo != nil {
+		gm.loadFromRepo()
+		return
+	}
+	gm.loadFromLegacyFiles()
+}
+
+// loadFromLegacyFiles loads goals from JSON files on disk. Only active
+// or paused goals are restored.
+func (gm *GoalManager) loadFromLegacyFiles() {
 	if gm.storeDir == "" {
 		return
 	}
@@ -290,6 +379,54 @@ func (gm *GoalManager) loadFromDisk() {
 		// Only restore active or paused goals
 		if goal.Status == GoalActive || goal.Status == GoalPaused {
 			gm.goals[goal.SessionKey] = &goal
+		}
+	}
+}
+
+// loadFromRepo loads goals from the SQLite repository. Corrupt entries
+// are skipped with a warning. Only active or paused goals are restored.
+// If the repository is empty and legacy JSON files exist in storeDir,
+// they are loaded and migrated into the repository best-effort.
+func (gm *GoalManager) loadFromRepo() {
+	goalsJSON, err := gm.repo.ListGoals()
+	if err != nil {
+		logger.WarnCF("agent", "Failed to list goals from store", map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	if len(goalsJSON) > 0 {
+		for sessionKey, goalJSON := range goalsJSON {
+			var goal Goal
+			if err := json.Unmarshal([]byte(goalJSON), &goal); err != nil {
+				logger.WarnCF("agent", "Skipping corrupt goal in store", map[string]interface{}{
+					"session_key": sessionKey,
+					"error":       err.Error(),
+				})
+				continue
+			}
+			if goal.Status == GoalActive || goal.Status == GoalPaused {
+				gm.goals[goal.SessionKey] = &goal
+			}
+		}
+		return
+	}
+
+	// Repository empty: load legacy JSON files and migrate them.
+	gm.loadFromLegacyFiles()
+	for sessionKey, goal := range gm.goals {
+		data, err := json.Marshal(goal)
+		if err != nil {
+			logger.WarnCF("agent", "Failed to marshal goal during migration", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+			continue
+		}
+		if err := gm.repo.SetGoal(sessionKey, string(data)); err != nil {
+			logger.WarnCF("agent", "Failed to migrate goal to store", map[string]interface{}{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
 		}
 	}
 }
