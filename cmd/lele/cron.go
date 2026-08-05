@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 func cronCmd() {
@@ -25,21 +27,31 @@ func cronCmd() {
 
 	cronStorePath := filepath.Join(cfg.WorkspacePath(), "cron", "jobs.json")
 
+	// Open SQLite store when available so the CLI reads/writes the same
+	// database as the running server. Falls back to JSON file otherwise.
+	var cronRepo *store.CronRepo
+	leleDir := config.GetLeleDir()
+	dbPath := filepath.Join(leleDir, "lele.db")
+	if s, err := store.Open(dbPath); err == nil {
+		cronRepo = s.Cron()
+		defer s.Close()
+	}
+
 	switch subcommand {
 	case "list":
-		cronListCmd(cronStorePath)
+		cronListCmd(cronStorePath, cronRepo)
 	case "add":
-		cronAddCmd(cronStorePath)
+		cronAddCmd(cronStorePath, cronRepo)
 	case "remove":
 		if len(os.Args) < 4 {
 			fmt.Println("Usage: lele cron remove <job_id>")
 			return
 		}
-		cronRemoveCmd(cronStorePath, os.Args[3])
+		cronRemoveCmd(cronStorePath, os.Args[3], cronRepo)
 	case "enable":
-		cronEnableCmd(cronStorePath, false)
+		cronEnableCmd(cronStorePath, false, cronRepo)
 	case "disable":
-		cronEnableCmd(cronStorePath, true)
+		cronEnableCmd(cronStorePath, true, cronRepo)
 	default:
 		fmt.Printf("Unknown cron command: %s\n", subcommand)
 		cronHelp()
@@ -64,8 +76,11 @@ func cronHelp() {
 	fmt.Println("  --channel        Channel for delivery")
 }
 
-func cronListCmd(storePath string) {
+func cronListCmd(storePath string, repo *store.CronRepo) {
 	cs := cron.NewCronService(storePath, nil)
+	if repo != nil {
+		cs.SetStore(repo)
+	}
 	jobs := cs.ListJobs(true)
 
 	if len(jobs) == 0 {
@@ -103,7 +118,7 @@ func cronListCmd(storePath string) {
 	}
 }
 
-func cronAddCmd(storePath string) {
+func cronAddCmd(storePath string, repo *store.CronRepo) {
 	name := ""
 	message := ""
 	var everySec *int64
@@ -182,6 +197,9 @@ func cronAddCmd(storePath string) {
 	}
 
 	cs := cron.NewCronService(storePath, nil)
+	if repo != nil {
+		cs.SetStore(repo)
+	}
 	job, err := cs.AddJob(name, schedule, message, deliver, channel, to)
 	if err != nil {
 		fmt.Printf("Error adding job: %v\n", err)
@@ -191,8 +209,11 @@ func cronAddCmd(storePath string) {
 	fmt.Printf("✓ Added job '%s' (%s)\n", job.Name, job.ID)
 }
 
-func cronRemoveCmd(storePath, jobID string) {
+func cronRemoveCmd(storePath, jobID string, repo *store.CronRepo) {
 	cs := cron.NewCronService(storePath, nil)
+	if repo != nil {
+		cs.SetStore(repo)
+	}
 	if cs.RemoveJob(jobID) {
 		fmt.Printf("✓ Removed job %s\n", jobID)
 	} else {
@@ -200,7 +221,7 @@ func cronRemoveCmd(storePath, jobID string) {
 	}
 }
 
-func cronEnableCmd(storePath string, disable bool) {
+func cronEnableCmd(storePath string, disable bool, repo *store.CronRepo) {
 	if len(os.Args) < 4 {
 		fmt.Println("Usage: lele cron enable/disable <job_id>")
 		return
@@ -208,6 +229,9 @@ func cronEnableCmd(storePath string, disable bool) {
 
 	jobID := os.Args[3]
 	cs := cron.NewCronService(storePath, nil)
+	if repo != nil {
+		cs.SetStore(repo)
+	}
 	enabled := !disable
 
 	job := cs.EnableJob(jobID, enabled)

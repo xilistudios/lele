@@ -133,6 +133,30 @@ func (am *AuthManager) loadStore() error {
 			}
 			store.Clients[id] = &info
 		}
+
+		// The CLI (lele client pin) writes pending PINs to the JSON file
+		// because it doesn't have access to the server's SQLite store.
+		// Read them so pairing works across the CLI→server boundary.
+		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
+			for pin, pending := range jsonStore.PendingPINs {
+				if _, exists := store.PendingPINs[pin]; !exists {
+					store.PendingPINs[pin] = pending
+				}
+			}
+		}
+
+		// Preserve any pending PINs already in memory (e.g. generated
+		// by the running server via GeneratePIN → saveStoreUnlocked
+		// which does not persist PendingPINs to SQLite).
+		if am.store != nil {
+			for pin, pending := range am.store.PendingPINs {
+				if _, exists := store.PendingPINs[pin]; !exists {
+					store.PendingPINs[pin] = pending
+				}
+			}
+		}
+
+		store.LastModified = time.Now()
 		am.store = store
 		return nil
 	}
@@ -163,6 +187,30 @@ func (am *AuthManager) loadStore() error {
 	}
 	am.cleanupExpired()
 	return nil
+}
+
+// loadJSONStoreFromFile reads the legacy JSON file from disk. Returns
+// (nil, nil) when the file does not exist. Used by loadStore() to pick
+// up pending PINs written by the CLI when the server uses SQLite.
+func (am *AuthManager) loadJSONStoreFromFile() (*ClientStore, error) {
+	data, err := os.ReadFile(am.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var store ClientStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return nil, err
+	}
+	if store.PendingPINs == nil {
+		store.PendingPINs = make(map[string]*PendingPIN)
+	}
+	if store.Clients == nil {
+		store.Clients = make(map[string]*ClientInfo)
+	}
+	return &store, nil
 }
 
 func (am *AuthManager) saveStore() error {
@@ -265,10 +313,16 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	if err := am.loadStore(); err != nil {
-		logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
-			"error": err.Error(),
-		})
+	// When using SQLite, skip reload: the server is the sole owner of the
+	// store and a reload would recreate the PendingPINs map from scratch,
+	// losing any PINs loaded from the JSON file (written by the CLI).
+	// For the JSON backend, reload to pick up concurrent changes.
+	if am.repo == nil {
+		if err := am.loadStore(); err != nil {
+			logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
 	}
 
 	pin = strings.TrimSpace(pin)
