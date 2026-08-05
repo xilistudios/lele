@@ -447,7 +447,17 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		}
 	}
 
-	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, agent.MaxIterations)
+	// Determine max iterations for subagent tasks.
+	// Priority: 1) agent-specific subagent config, 2) global subagent_max_iterations, 3) agent's max_tool_iterations
+	subagentMaxIter := agent.MaxIterations
+	if cfg.Agents.Defaults.SubagentMaxIterations > 0 {
+		subagentMaxIter = cfg.Agents.Defaults.SubagentMaxIterations
+	}
+	if agent.Subagents != nil && agent.Subagents.MaxIterations > 0 {
+		subagentMaxIter = agent.Subagents.MaxIterations
+	}
+
+	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.
 	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int) {

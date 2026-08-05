@@ -64,6 +64,7 @@ type EditableAgentDefaults struct {
 	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes,omitempty"`
 	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent,omitempty"`
 	SubagentMaxRetries     int      `json:"subagent_max_retries,omitempty"`
+	SubagentMaxIterations  int      `json:"subagent_max_iterations,omitempty"`
 }
 
 // EditableAgentConfig represents an agent in editable mode.
