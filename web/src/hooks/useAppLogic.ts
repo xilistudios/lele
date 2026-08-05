@@ -244,7 +244,9 @@ export function useAppLogic(
     chatHistory.rawMessages.length,
   ])
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
+    // Revoke token server-side first
+    await api.logout()
     subscribedSessionRef.current = null
     modelLoadKeyRef.current = null
     wsClose()
@@ -255,7 +257,7 @@ export function useAppLogic(
     setCurrentAgentId(null)
     setDiagnostics({ status: null, channels: [], tools: [], config: null, agentInfo: null })
     setError(null)
-  }, [wsClose, messagesHook.clearAll, persistSession])
+  }, [api, wsClose, messagesHook.clearAll, persistSession])
 
   const handleSend = useCallback(
     async (content: string, attachments: string[]) => {

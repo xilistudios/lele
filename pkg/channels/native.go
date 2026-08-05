@@ -285,6 +285,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/auth/clients", withAuth(n.handleListClients))
 	mux.HandleFunc("DELETE /api/v1/auth/clients/{clientID}", withAuth(n.handleRemoveClient))
+	mux.HandleFunc("POST /api/v1/auth/logout", withAuth(n.handleLogout))
 
 	// WebSocket
 	mux.HandleFunc("GET /api/v1/ws", n.handleWebSocket)
