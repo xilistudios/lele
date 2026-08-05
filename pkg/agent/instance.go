@@ -219,9 +219,7 @@ func NewAgentInstance(
 	}
 
 	maxIter := defaults.MaxToolIterations
-	if maxIter == 0 {
-		maxIter = 20
-	}
+	// 0 means unlimited — loop runs until LLM stops calling tools
 
 	maxTokens := defaults.MaxTokens
 	if maxTokens == 0 {

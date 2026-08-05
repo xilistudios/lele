@@ -346,7 +346,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 	}
 
-	for iteration < agent.MaxIterations {
+	// MaxIterations <= 0 means unlimited (timeout + loop detector are the real safety guards)
+	for agent.MaxIterations <= 0 || iteration < agent.MaxIterations {
 		if err := ctx.Err(); err != nil {
 			return "", iteration, err
 		}
@@ -500,7 +501,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
 			// If response is empty, retry by prompting the model again
-			if len(strings.TrimSpace(finalContent)) == 0 && iteration < agent.MaxIterations-2 {
+			if len(strings.TrimSpace(finalContent)) == 0 && (agent.MaxIterations <= 0 || iteration < agent.MaxIterations-2) {
 				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
 					map[string]interface{}{
 						"agent_id":  agent.ID,
