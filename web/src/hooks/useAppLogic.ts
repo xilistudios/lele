@@ -507,12 +507,23 @@ export function useAppLogic(
           return prev
         })
       }
+    } else if (prevProcessingRef.current) {
+      // Backend reports processing has ended (HTTP poll is the ground truth
+      // after the deferred cleanup in runAgentLoop removes sessionCancels).
+      // Clean up processingSessions as a safety net in case the WebSocket
+      // message.complete event was lost (e.g., reconnect after the 30s buffer
+      // window expired). Without this, the loading indicator stays stuck
+      // indefinitely until the user reloads the page.
+      //
+      // We only act on the true→false transition (prevProcessingRef) to avoid
+      // spurious removals on initial load when processing is already false.
+      messagesHook.setProcessingSessions((prev: Set<string>) => {
+        if (!prev.has(sessionKey)) return prev
+        const next = new Set(prev)
+        next.delete(sessionKey)
+        return next
+      })
     }
-    // IMPORTANT: Do NOT remove from processingSessions when chatHistory.processing
-    // becomes false. The HTTP poll may transiently report processing=false during
-    // an active SSE stream (race between IsSessionProcessing check and agent state).
-    // message.complete and cancel.ack WebSocket events are the authoritative
-    // signals for when processing truly ends.
 
     prevProcessingRef.current = chatHistory.processing
   }, [chatHistory.processing, sessionsHook.currentSessionKey])
@@ -521,9 +532,11 @@ export function useAppLogic(
   const processingSessions = messagesHook.processingSessions
   // isProcessing covers both active SSE streaming and agent thinking/tool-calls.
   // It drives the loading indicator (dots) and scroll-pin behavior in MessageList.
-  // Uses processingSessions (WebSocket-driven) instead of chatHistory.processing
-  // (HTTP poll) because the HTTP poll can transiently report false during active
-  // SSE streams, causing the loading dots and cancel button to disappear prematurely.
+  // processingSessions is the primary driver (WebSocket events: message.ack adds,
+  // message.complete removes). The HTTP poll (chatHistory.processing) acts as a
+  // safety net: when it transitions true→false, the session is removed from
+  // processingSessions in case the WebSocket event was lost (e.g., reconnect
+  // after the 30s buffer window expired).
   // hasActiveGroup ensures the loading indicator stays visible during group
   // execution, even after message.complete removes the session from
   // processingSessions (race condition between message.complete and
