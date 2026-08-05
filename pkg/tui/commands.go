@@ -208,8 +208,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.resetModal(ModalAddProvider)
 		m.providerEditMode = false
 		m.providerSelectedName = ""
+		m.providerSavedInFlow = false
 		m.formStepIndex = 0
-		m.formValues = make([]string, 4) // name, type, api_key, api_base
+		m.formValues = make([]string, 10) // 0-3: provider, 4-8: model, 9: review
 		m.formError = ""
 		m.formConfirmMode = false
 		m.textInput.SetValue("")

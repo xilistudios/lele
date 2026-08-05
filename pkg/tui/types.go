@@ -194,6 +194,7 @@ type Model struct {
 	providerModalKeys    []string // maps modal items to provider names (for /providers)
 	providerSelectedName string   // currently selected provider name in detail view
 	providerEditMode     bool     // true when editing an existing provider
+	providerSavedInFlow  bool     // true after /connect saves provider (enables model config steps)
 
 	// Form state for add-provider / add-model flows
 	formStepIndex   int      // current step in the form
