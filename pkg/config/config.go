@@ -925,7 +925,7 @@ func DefaultConfig() *Config {
 				Provider:               "nanogpt",
 				Model:                  "nanogpt/qwen3-5-397b-a17b-thinking",
 				MaxTokens:              8192,
-				MaxToolIterations:      20,
+				MaxToolIterations:      0, // 0 = unlimited (timeout is the real safety guard)
 				MaxReadLines:           500,
 				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
 				SubagentMaxIterations:  0,  // default unlimited for subagent tasks
