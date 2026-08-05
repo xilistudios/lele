@@ -61,6 +61,11 @@ func gatewayCmd() {
 	execTimeout := time.Duration(cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
 	cronService := setupCronTool(agentLoop.GetProvidable(), agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)
 
+	// Wire SQLite store into cron service for persistent storage.
+	if s := agentLoop.Store(); s != nil {
+		cronService.SetStore(s.Cron())
+	}
+
 	heartbeatService := heartbeat.NewHeartbeatService(
 		cfg.WorkspacePath(),
 		cfg.Heartbeat.Interval,
@@ -88,6 +93,18 @@ func gatewayCmd() {
 	}
 
 	agentLoop.SetChannelManager(channelManager)
+
+	// Wire the SQLite KV store into the Telegram channel so the last
+	// processed update offset is persisted there instead of a flat file.
+	if s := agentLoop.Store(); s != nil {
+		if tc, ok := channelManager.GetChannel("telegram"); ok {
+			if tgc, ok := tc.(*channels.TelegramChannel); ok {
+				tgc.SetKVRepo(s.KV())
+			}
+		}
+		// Wire SQLite store into native channel for client persistence.
+		channelManager.SetNativeClientStore(s.NativeClients())
+	}
 
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {

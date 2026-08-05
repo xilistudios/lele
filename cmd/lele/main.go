@@ -33,6 +33,8 @@ func main() {
 		statusCmd()
 	case "migrate":
 		migrateCmd()
+	case "migrate-storage":
+		migrateStorageCmd()
 	case "auth":
 		authCmd()
 	case "cron":

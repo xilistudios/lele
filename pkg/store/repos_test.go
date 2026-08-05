@@ -1,8 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestCronRepo_CRUD(t *testing.T) {
@@ -390,5 +392,343 @@ func TestNativeClientRepo_CRUD(t *testing.T) {
 	}
 	if len(clients) != 0 {
 		t.Fatalf("ListClients() returned %d entries, want 0", len(clients))
+	}
+}
+
+func TestSessionRepo_CRUD(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	// List on empty table returns empty slice.
+	metas, err := repo.ListSessionMeta()
+	if err != nil {
+		t.Fatalf("ListSessionMeta() on empty table failed: %v", err)
+	}
+	if metas == nil {
+		t.Fatal("ListSessionMeta() returned nil, want non-nil empty slice")
+	}
+	if len(metas) != 0 {
+		t.Fatalf("ListSessionMeta() returned %d entries, want 0", len(metas))
+	}
+
+	// Get missing returns nil.
+	meta, err := repo.GetSessionMeta("missing")
+	if err != nil {
+		t.Fatalf("GetSessionMeta(missing) error: %v", err)
+	}
+	if meta != nil {
+		t.Fatalf("GetSessionMeta(missing) = %v, want nil", meta)
+	}
+
+	// Upsert a session.
+	now := time.Now().Truncate(time.Microsecond)
+	if err := repo.UpsertSession(SessionMeta{
+		Key:           "test:session-1",
+		Name:          "Test Session",
+		Mode:          "agent",
+		Summary:       "Test summary",
+		VerboseLevel:  "full",
+		Model:         "gpt-4",
+		ThinkingLevel: "high",
+		InputTokens:   100,
+		OutputTokens:  50,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("UpsertSession() failed: %v", err)
+	}
+
+	// Get and compare.
+	got, err := repo.GetSessionMeta("test:session-1")
+	if err != nil {
+		t.Fatalf("GetSessionMeta(test:session-1) error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetSessionMeta(test:session-1) = nil, want non-nil")
+	}
+	if got.Key != "test:session-1" {
+		t.Errorf("Key = %q, want %q", got.Key, "test:session-1")
+	}
+	if got.Name != "Test Session" {
+		t.Errorf("Name = %q, want %q", got.Name, "Test Session")
+	}
+	if got.Mode != "agent" {
+		t.Errorf("Mode = %q, want %q", got.Mode, "agent")
+	}
+	if got.Summary != "Test summary" {
+		t.Errorf("Summary = %q, want %q", got.Summary, "Test summary")
+	}
+	if got.VerboseLevel != "full" {
+		t.Errorf("VerboseLevel = %q, want %q", got.VerboseLevel, "full")
+	}
+	if got.Model != "gpt-4" {
+		t.Errorf("Model = %q, want %q", got.Model, "gpt-4")
+	}
+	if got.ThinkingLevel != "high" {
+		t.Errorf("ThinkingLevel = %q, want %q", got.ThinkingLevel, "high")
+	}
+	if got.InputTokens != 100 {
+		t.Errorf("InputTokens = %d, want %d", got.InputTokens, 100)
+	}
+	if got.OutputTokens != 50 {
+		t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, 50)
+	}
+
+	// Update metadata.
+	if err := repo.UpsertSession(SessionMeta{
+		Key:          "test:session-1",
+		Name:         "Updated Name",
+		Mode:         "chat",
+		InputTokens:  200,
+		OutputTokens: 100,
+		CreatedAt:    now,
+		UpdatedAt:    now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("UpsertSession(update) failed: %v", err)
+	}
+
+	got, _ = repo.GetSessionMeta("test:session-1")
+	if got.Name != "Updated Name" {
+		t.Errorf("Name after update = %q, want %q", got.Name, "Updated Name")
+	}
+	if got.Mode != "chat" {
+		t.Errorf("Mode after update = %q, want %q", got.Mode, "chat")
+	}
+	if got.InputTokens != 200 {
+		t.Errorf("InputTokens after update = %d, want %d", got.InputTokens, 200)
+	}
+
+	// List sessions.
+	metas, _ = repo.ListSessionMeta()
+	if len(metas) != 1 {
+		t.Fatalf("ListSessionMeta() returned %d entries, want 1", len(metas))
+	}
+
+	// Insert messages.
+	msg1 := `{"role":"user","content":"Hello"}`
+	if err := repo.InsertMessage("test:session-1", 0, "user", "Hello", msg1, false); err != nil {
+		t.Fatalf("InsertMessage(0) failed: %v", err)
+	}
+	msg2 := `{"role":"assistant","content":"Hi there!"}`
+	if err := repo.InsertMessage("test:session-1", 1, "assistant", "Hi there!", msg2, false); err != nil {
+		t.Fatalf("InsertMessage(1) failed: %v", err)
+	}
+
+	// Load messages.
+	msgs, err := repo.LoadMessages("test:session-1")
+	if err != nil {
+		t.Fatalf("LoadMessages() failed: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("LoadMessages() returned %d messages, want 2", len(msgs))
+	}
+	if msgs[0] != msg1 {
+		t.Errorf("Message[0] = %q, want %q", msgs[0], msg1)
+	}
+	if msgs[1] != msg2 {
+		t.Errorf("Message[1] = %q, want %q", msgs[1], msg2)
+	}
+
+	// Message count.
+	count, err := repo.MessageCount("test:session-1")
+	if err != nil {
+		t.Fatalf("MessageCount() failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("MessageCount() = %d, want 2", count)
+	}
+
+	// Max seq.
+	maxSeq, err := repo.MaxSeq("test:session-1")
+	if err != nil {
+		t.Fatalf("MaxSeq() failed: %v", err)
+	}
+	if maxSeq != 1 {
+		t.Errorf("MaxSeq() = %d, want 1", maxSeq)
+	}
+
+	// Update message.
+	msg3 := `{"role":"assistant","content":"Updated response"}`
+	if err := repo.UpdateMessage("test:session-1", 1, "assistant", "Updated response", msg3, false); err != nil {
+		t.Fatalf("UpdateMessage() failed: %v", err)
+	}
+	msgs, _ = repo.LoadMessages("test:session-1")
+	if msgs[1] != msg3 {
+		t.Errorf("Message[1] after update = %q, want %q", msgs[1], msg3)
+	}
+
+	// Delete last message.
+	deletedSeq, err := repo.DeleteLastMessage("test:session-1")
+	if err != nil {
+		t.Fatalf("DeleteLastMessage() failed: %v", err)
+	}
+	if deletedSeq != 1 {
+		t.Errorf("DeleteLastMessage() returned seq %d, want 1", deletedSeq)
+	}
+	count, _ = repo.MessageCount("test:session-1")
+	if count != 1 {
+		t.Errorf("MessageCount() after delete = %d, want 1", count)
+	}
+
+	// Add more messages for delete range test.
+	for i := 1; i < 5; i++ {
+		msgJSON := `{"role":"user","content":"msg"}`
+		repo.InsertMessage("test:session-1", i, "user", "msg", msgJSON, false)
+	}
+
+	// Delete messages from seq 3 onwards.
+	if err := repo.DeleteMessagesFrom("test:session-1", 3); err != nil {
+		t.Fatalf("DeleteMessagesFrom(3) failed: %v", err)
+	}
+	count, _ = repo.MessageCount("test:session-1")
+	if count != 3 {
+		t.Errorf("MessageCount() after delete from = %d, want 3", count)
+	}
+
+	// Session exists.
+	exists, err := repo.SessionExists("test:session-1")
+	if err != nil {
+		t.Fatalf("SessionExists() failed: %v", err)
+	}
+	if !exists {
+		t.Error("SessionExists() = false, want true")
+	}
+	exists, _ = repo.SessionExists("nonexistent")
+	if exists {
+		t.Error("SessionExists(nonexistent) = true, want false")
+	}
+
+	// Delete session.
+	if err := repo.DeleteSession("test:session-1"); err != nil {
+		t.Fatalf("DeleteSession() failed: %v", err)
+	}
+	exists, _ = repo.SessionExists("test:session-1")
+	if exists {
+		t.Error("SessionExists() after delete = true, want false")
+	}
+}
+
+func TestSessionRepo_ListByMode(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	now := time.Now()
+	// Create sessions with different modes.
+	repo.UpsertSession(SessionMeta{Key: "s1", Mode: "agent", CreatedAt: now, UpdatedAt: now})
+	repo.UpsertSession(SessionMeta{Key: "s2", Mode: "chat", CreatedAt: now, UpdatedAt: now})
+	repo.UpsertSession(SessionMeta{Key: "s3", Mode: "agent", CreatedAt: now, UpdatedAt: now})
+	repo.UpsertSession(SessionMeta{Key: "s4", Mode: "", CreatedAt: now, UpdatedAt: now})
+
+	// List by mode "agent".
+	agents, err := repo.ListSessionMetaByMode("agent")
+	if err != nil {
+		t.Fatalf("ListSessionMetaByMode(agent) failed: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Errorf("ListSessionMetaByMode(agent) returned %d, want 2", len(agents))
+	}
+
+	// List by mode "chat".
+	chats, err := repo.ListSessionMetaByMode("chat")
+	if err != nil {
+		t.Fatalf("ListSessionMetaByMode(chat) failed: %v", err)
+	}
+	if len(chats) != 1 {
+		t.Errorf("ListSessionMetaByMode(chat) returned %d, want 1", len(chats))
+	}
+
+	// List by mode "" (should return "agent" sessions).
+	empty, err := repo.ListSessionMetaByMode("")
+	if err != nil {
+		t.Fatalf("ListSessionMetaByMode('') failed: %v", err)
+	}
+	if len(empty) != 2 {
+		t.Errorf("ListSessionMetaByMode('') returned %d, want 2", len(empty))
+	}
+}
+
+func TestSessionRepo_PruneExcluded(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	now := time.Now()
+	repo.UpsertSession(SessionMeta{Key: "test", CreatedAt: now, UpdatedAt: now})
+
+	// Add 10 messages, mark first 7 as excluded.
+	for i := 0; i < 10; i++ {
+		excluded := i < 7
+		msgJSON := `{"role":"user","content":"msg"}`
+		repo.InsertMessage("test", i, "user", "msg", msgJSON, excluded)
+	}
+
+	// Prune to keep 5.
+	pruned, err := repo.PruneExcluded("test", 5)
+	if err != nil {
+		t.Fatalf("PruneExcluded() failed: %v", err)
+	}
+	if pruned != 5 {
+		t.Errorf("PruneExcluded() pruned %d, want 5", pruned)
+	}
+
+	count, _ := repo.MessageCount("test")
+	if count != 5 {
+		t.Errorf("MessageCount() after prune = %d, want 5", count)
+	}
+}
+
+func TestSessionRepo_ReplaceMessages(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	now := time.Now()
+	repo.UpsertSession(SessionMeta{Key: "rm-test", CreatedAt: now, UpdatedAt: now})
+
+	// Insert initial 3 messages.
+	for i := 0; i < 3; i++ {
+		msgJSON := fmt.Sprintf(`{"role":"user","content":"msg%d"}`, i)
+		repo.InsertMessage("rm-test", i, "user", fmt.Sprintf("msg%d", i), msgJSON, false)
+	}
+	count, _ := repo.MessageCount("rm-test")
+	if count != 3 {
+		t.Fatalf("initial MessageCount = %d, want 3", count)
+	}
+
+	// Replace with 5 new messages (simulates a session save after adding messages).
+	newRows := make([]MessageRow, 5)
+	for i := range newRows {
+		newRows[i] = MessageRow{
+			Seq:     i,
+			Role:    "assistant",
+			Content: fmt.Sprintf("new-%d", i),
+			JSON:    fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i),
+		}
+	}
+	if err := repo.ReplaceMessages("rm-test", newRows); err != nil {
+		t.Fatalf("ReplaceMessages() failed: %v", err)
+	}
+
+	count, _ = repo.MessageCount("rm-test")
+	if count != 5 {
+		t.Errorf("MessageCount after replace = %d, want 5", count)
+	}
+
+	msgs, err := repo.LoadMessages("rm-test")
+	if err != nil {
+		t.Fatalf("LoadMessages() failed: %v", err)
+	}
+	for i, m := range msgs {
+		want := fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i)
+		if m != want {
+			t.Errorf("message[%d] = %q, want %q", i, m, want)
+		}
+	}
+
+	// Replace with empty (clears all messages).
+	if err := repo.ReplaceMessages("rm-test", nil); err != nil {
+		t.Fatalf("ReplaceMessages(nil) failed: %v", err)
+	}
+	count, _ = repo.MessageCount("rm-test")
+	if count != 0 {
+		t.Errorf("MessageCount after clear = %d, want 0", count)
 	}
 }

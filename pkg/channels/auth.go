@@ -14,6 +14,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 type AuthManager struct {
@@ -22,6 +23,7 @@ type AuthManager struct {
 	storePath string
 	mu        sync.RWMutex
 	secret    string
+	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file)
 }
 
 func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, error) {
@@ -42,6 +44,33 @@ func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, err
 	}
 
 	return am, nil
+}
+
+// SetStore configures SQLite persistence for native clients. When set,
+// clients are read/written through the repository instead of the JSON file.
+func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	am.repo = repo
+	if repo == nil {
+		return
+	}
+
+	// Migration-on-first-set: if the in-memory store was loaded from JSON,
+	// persist it to SQLite so subsequent loads come from the DB.
+	if am.store != nil && len(am.store.Clients) > 0 {
+		for id, client := range am.store.Clients {
+			data, err := json.Marshal(client)
+			if err != nil {
+				logger.ErrorCF("native", fmt.Sprintf("SetStore: marshal client %s: %v", id, err), nil)
+				continue
+			}
+			if err := repo.SetClient(id, string(data)); err != nil {
+				logger.ErrorCF("native", fmt.Sprintf("SetStore: persist client %s: %v", id, err), nil)
+			}
+		}
+	}
 }
 
 func generateSecret() string {
@@ -83,6 +112,56 @@ func hashToken(token string) string {
 }
 
 func (am *AuthManager) loadStore() error {
+	// SQLite path
+	if am.repo != nil {
+		clients, err := am.repo.ListClients()
+		if err != nil {
+			return fmt.Errorf("list clients from sqlite: %w", err)
+		}
+		store := &ClientStore{
+			Clients:     make(map[string]*ClientInfo, len(clients)),
+			PendingPINs: make(map[string]*PendingPIN),
+		}
+		for id, clientJSON := range clients {
+			var info ClientInfo
+			if err := json.Unmarshal([]byte(clientJSON), &info); err != nil {
+				logger.WarnCF("native", fmt.Sprintf("loadStore: unmarshal client %s: %v", id, err), nil)
+				continue
+			}
+			if len(info.SessionKeys) == 0 {
+				info.SessionKeys = []string{id}
+			}
+			store.Clients[id] = &info
+		}
+
+		// The CLI (lele client pin) writes pending PINs to the JSON file
+		// because it doesn't have access to the server's SQLite store.
+		// Read them so pairing works across the CLI→server boundary.
+		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
+			for pin, pending := range jsonStore.PendingPINs {
+				if _, exists := store.PendingPINs[pin]; !exists {
+					store.PendingPINs[pin] = pending
+				}
+			}
+		}
+
+		// Preserve any pending PINs already in memory (e.g. generated
+		// by the running server via GeneratePIN → saveStoreUnlocked
+		// which does not persist PendingPINs to SQLite).
+		if am.store != nil {
+			for pin, pending := range am.store.PendingPINs {
+				if _, exists := store.PendingPINs[pin]; !exists {
+					store.PendingPINs[pin] = pending
+				}
+			}
+		}
+
+		store.LastModified = time.Now()
+		am.store = store
+		return nil
+	}
+
+	// JSON file path
 	data, err := os.ReadFile(am.storePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -110,6 +189,30 @@ func (am *AuthManager) loadStore() error {
 	return nil
 }
 
+// loadJSONStoreFromFile reads the legacy JSON file from disk. Returns
+// (nil, nil) when the file does not exist. Used by loadStore() to pick
+// up pending PINs written by the CLI when the server uses SQLite.
+func (am *AuthManager) loadJSONStoreFromFile() (*ClientStore, error) {
+	data, err := os.ReadFile(am.storePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var store ClientStore
+	if err := json.Unmarshal(data, &store); err != nil {
+		return nil, err
+	}
+	if store.PendingPINs == nil {
+		store.PendingPINs = make(map[string]*PendingPIN)
+	}
+	if store.Clients == nil {
+		store.Clients = make(map[string]*ClientInfo)
+	}
+	return &store, nil
+}
+
 func (am *AuthManager) saveStore() error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -118,6 +221,34 @@ func (am *AuthManager) saveStore() error {
 
 func (am *AuthManager) saveStoreUnlocked() error {
 	am.store.LastModified = time.Now()
+
+	// SQLite path — delete removed clients, then upsert remaining ones.
+	if am.repo != nil {
+		// Build the set of current client IDs so we can delete stale rows.
+		existing, err := am.repo.ListClients()
+		if err != nil {
+			return fmt.Errorf("list clients for cleanup: %w", err)
+		}
+		for id := range existing {
+			if _, ok := am.store.Clients[id]; !ok {
+				if err := am.repo.DeleteClient(id); err != nil {
+					return fmt.Errorf("delete stale client %s: %w", id, err)
+				}
+			}
+		}
+		for id, client := range am.store.Clients {
+			clientJSON, err := json.Marshal(client)
+			if err != nil {
+				return fmt.Errorf("marshal client %s: %w", id, err)
+			}
+			if err := am.repo.SetClient(id, string(clientJSON)); err != nil {
+				return fmt.Errorf("save client %s: %w", id, err)
+			}
+		}
+		return nil
+	}
+
+	// JSON file path
 	data, err := json.MarshalIndent(am.store, "", "  ")
 	if err != nil {
 		return err
@@ -194,10 +325,25 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	if err := am.loadStore(); err != nil {
-		logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
-			"error": err.Error(),
-		})
+	if am.repo != nil {
+		// When using SQLite, the CLI writes pending PINs to the JSON file
+		// (native_clients.json) because it doesn't have access to the
+		// server's SQLite store. Read the JSON file and merge any new
+		// PINs into the current store without recreating it.
+		if jsonStore, err := am.loadJSONStoreFromFile(); err == nil && jsonStore != nil {
+			for p, pending := range jsonStore.PendingPINs {
+				if _, exists := am.store.PendingPINs[p]; !exists {
+					am.store.PendingPINs[p] = pending
+				}
+			}
+		}
+	} else {
+		// JSON backend: full reload to pick up concurrent changes.
+		if err := am.loadStore(); err != nil {
+			logger.WarnCF("native", "Could not reload store before pairing", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
 	}
 
 	pin = strings.TrimSpace(pin)

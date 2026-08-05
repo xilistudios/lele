@@ -11,13 +11,14 @@ import (
 // It owns a single *sql.DB connection pool limited to one connection
 // (single writer) and exposes the repositories built on top of it.
 type Store struct {
-	db      *sql.DB
-	kv      *KVRepo
-	cron    *CronRepo
-	goals   *GoalRepo
-	groups  *GroupRepo
-	auth    *AuthRepo
-	clients *NativeClientRepo
+	db       *sql.DB
+	kv       *KVRepo
+	cron     *CronRepo
+	goals    *GoalRepo
+	groups   *GroupRepo
+	auth     *AuthRepo
+	clients  *NativeClientRepo
+	sessions *SessionRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies any
@@ -56,13 +57,14 @@ func Open(path string) (*Store, error) {
 	}
 
 	return &Store{
-		db:      db,
-		kv:      &KVRepo{db: db},
-		cron:    &CronRepo{db: db},
-		goals:   &GoalRepo{db: db},
-		groups:  &GroupRepo{db: db},
-		auth:    &AuthRepo{db: db},
-		clients: &NativeClientRepo{db: db},
+		db:       db,
+		kv:       &KVRepo{db: db},
+		cron:     &CronRepo{db: db},
+		goals:    &GoalRepo{db: db},
+		groups:   &GroupRepo{db: db},
+		auth:     &AuthRepo{db: db},
+		clients:  &NativeClientRepo{db: db},
+		sessions: &SessionRepo{db: db},
 	}, nil
 }
 
@@ -100,6 +102,11 @@ func (s *Store) Auth() *AuthRepo {
 // NativeClients returns the native clients repository.
 func (s *Store) NativeClients() *NativeClientRepo {
 	return s.clients
+}
+
+// Sessions returns the sessions repository.
+func (s *Store) Sessions() *SessionRepo {
+	return s.sessions
 }
 
 // Close closes the underlying database connection.

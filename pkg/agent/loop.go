@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/auth"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
@@ -26,6 +27,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/state"
+	"github.com/xilistudios/lele/pkg/store"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -59,6 +61,7 @@ type AgentLoop struct {
 	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
 	goalManager        *GoalManager         // Persistent goals (Hermes-style /goal)
 	keyringService     *keyring.Service     // Encrypted secret storage
+	dbStore            *store.Store         // SQLite state store (nil if not available)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
 }
@@ -313,6 +316,21 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		LeleDir:          config.GetLeleDir(),
 	})
 
+	// Open the shared SQLite state store. This provides persistent storage
+	// for sessions, cron, goals, groups, auth, native clients, and KV data.
+	// Gracefully falls back to JSON-based storage if SQLite is not available
+	// (e.g., linux/mips64) or if opening fails.
+	var dbStore *store.Store
+	dbPath := filepath.Join(config.GetLeleDir(), "lele.db")
+	if s, err := store.Open(dbPath); err != nil {
+		logger.WarnC("store", fmt.Sprintf("Failed to open SQLite store at %s: %v — falling back to JSON storage", dbPath, err))
+	} else {
+		dbStore = s
+		logger.InfoC("store", fmt.Sprintf("SQLite store opened at %s", dbPath))
+		// Wire auth package to use SQLite for credential persistence.
+		auth.UseStore(dbStore.Auth())
+	}
+
 	// Set up shared fallback chain
 	cooldown := providers.NewCooldownTracker()
 	fallbackChain := providers.NewFallbackChain(cooldown)
@@ -322,6 +340,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// Migration from old per-workspace session dirs happens here too.
 	unifiedSessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
 	sharedSessionManager := session.NewSessionManager(unifiedSessionsDir)
+
+	// Wire SQLite store into session manager for persistent storage.
+	if dbStore != nil {
+		sharedSessionManager.SetStore(dbStore)
+	}
 
 	// Migrate sessions from old per-workspace locations to the unified directory.
 	// Run in background — migration is best-effort and should not block startup.
@@ -346,6 +369,12 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	var stateManager *state.Manager
 	if defaultAgent != nil {
 		stateManager = state.NewManager(defaultAgent.Workspace)
+	}
+
+	// Wire SQLite KV store into the state manager for persistent workspace
+	// state. Falls back to JSON file storage when the store is unavailable.
+	if dbStore != nil && stateManager != nil {
+		stateManager.SetKVRepo(dbStore.KV())
 	}
 
 	// Create verbose manager with session persistence
@@ -380,6 +409,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
 		keyringService:  keyringSvc,
+		dbStore:         dbStore,
 	}
 	loop.cfgPtr.Store(cfg)
 
@@ -422,10 +452,16 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	}
 	gm := group.NewGroupManager(resolveAgent, turnExecutor, loop.bus.PublishOutbound)
 	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
+	if dbStore != nil {
+		gm.SetStore(dbStore.Groups())
+	}
 	loop.groupManager = gm
 
 	// Goal manager (persistent goals, Hermes-style /goal command).
 	goalMgr := NewGoalManager(filepath.Join(config.GetLeleDir(), "goals"))
+	if dbStore != nil {
+		goalMgr.SetStore(dbStore.Goals())
+	}
 	// Wire up the LLM-based goal judge using the default agent's provider.
 	if defaultAgent != nil && defaultAgent.Provider != nil {
 		judgeModel := defaultAgent.Model
@@ -467,6 +503,13 @@ func (al *AgentLoop) GetProvidable() channels.AgentProvidable {
 // MessageBus returns the unexported bus of the agent loop.
 func (al *AgentLoop) MessageBus() *bus.MessageBus {
 	return al.bus
+}
+
+// Store returns the SQLite state store, or nil if SQLite is not available.
+// Callers can use this to wire additional consumers (e.g., cron) to the
+// shared database.
+func (al *AgentLoop) Store() *store.Store {
+	return al.dbStore
 }
 
 // GroupManager returns the group collaboration manager (Mixture of Agents).
@@ -604,6 +647,11 @@ func (al *AgentLoop) Stop() {
 		al.stopSessionCleanup()
 	}
 	al.wg.Wait()
+	if al.dbStore != nil {
+		if err := al.dbStore.Close(); err != nil {
+			logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
+		}
+	}
 }
 
 // SetChannelManager sets the channel manager for the agent loop.

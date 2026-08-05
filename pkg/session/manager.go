@@ -13,6 +13,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // maxStoredMessages is the maximum number of messages kept in a session file.
@@ -34,6 +35,7 @@ type Session struct {
 	Updated            time.Time           `json:"updated"`
 	lastStreamFlush    time.Time           // throttle for stream persistence (not persisted)
 	hadStreamedContent bool                // tracks if content was delivered via streaming this turn (not persisted)
+	lastPersistedSeq   int                 // last message seq persisted to SQLite (-1 = none)
 	// Token tracking
 	InputTokens     int `json:"input_tokens,omitempty"`
 	OutputTokens    int `json:"output_tokens,omitempty"`
@@ -55,8 +57,9 @@ type SessionManager struct {
 	sessions   map[string]*Session
 	mu         sync.RWMutex
 	storage    string
-	loadOnce   sync.Once // ensures loadSessions runs exactly once, on first access
-	indexDirty bool      // true when sessionMeta has been modified since last index save
+	store      *store.Store // SQLite store (nil = use JSON files)
+	loadOnce   sync.Once    // ensures loadSessions runs exactly once, on first access
+	indexDirty bool         // true when sessionMeta has been modified since last index save
 
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
@@ -91,11 +94,17 @@ func NewSessionManager(storage string) *SessionManager {
 	return sm
 }
 
+// SetStore sets the SQLite store for persistence. When set, the manager
+// will use SQLite instead of JSON files for session storage.
+func (sm *SessionManager) SetStore(s *store.Store) {
+	sm.store = s
+}
+
 // ensureLoaded triggers loadSessionMetadata exactly once, on the first call.
 // Must be called BEFORE acquiring sm.mu to avoid deadlock.
 func (sm *SessionManager) ensureLoaded() {
 	sm.loadOnce.Do(func() {
-		if sm.storage != "" {
+		if sm.storage != "" || sm.store != nil {
 			sm.loadSessionMetadata()
 		}
 	})
@@ -198,6 +207,11 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 		return nil, false
 	}
 
+	// Load from SQLite if available
+	if sm.store != nil {
+		return sm.loadFromSQLite(key)
+	}
+
 	// Load from disk
 	filename := sanitizeFilename(key)
 	sessionPath := filepath.Join(sm.storage, filename+".json")
@@ -219,6 +233,57 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 	sm.sessions[key] = &session
 	sm.accessTimes[key] = time.Now()
 	return &session, true
+}
+
+// loadFromSQLite loads a session from the SQLite store.
+// Caller must hold sm.mu (write lock).
+func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
+	repo := sm.store.Sessions()
+
+	// Load metadata
+	meta, err := repo.GetSessionMeta(key)
+	if err != nil || meta == nil {
+		return nil, false
+	}
+
+	// Load messages
+	msgJSONs, err := repo.LoadMessages(key)
+	if err != nil {
+		return nil, false
+	}
+
+	messages := make([]providers.Message, 0, len(msgJSONs))
+	for _, msgJSON := range msgJSONs {
+		var msg providers.Message
+		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
+			continue // skip corrupted messages
+		}
+		messages = append(messages, msg)
+	}
+
+	session := &Session{
+		Key:              meta.Key,
+		Name:             meta.Name,
+		Mode:             meta.Mode,
+		Summary:          meta.Summary,
+		VerboseLevel:     meta.VerboseLevel,
+		Model:            meta.Model,
+		ThinkingLevel:    meta.ThinkingLevel,
+		InputTokens:      meta.InputTokens,
+		OutputTokens:     meta.OutputTokens,
+		CompactionCount:  meta.CompactionCount,
+		Created:          meta.CreatedAt,
+		Updated:          meta.UpdatedAt,
+		Messages:         messages,
+		lastPersistedSeq: len(messages) - 1, // all messages are persisted
+	}
+
+	// Enforce memory limit before adding a new session
+	sm.evictIfNeeded()
+
+	sm.sessions[key] = session
+	sm.accessTimes[key] = time.Now()
+	return session, true
 }
 
 // touchSession updates the last access time for a session.
@@ -437,10 +502,11 @@ func (sm *SessionManager) GetOrCreate(key string) *Session {
 
 	// Create new session
 	session := &Session{
-		Key:      key,
-		Messages: []providers.Message{},
-		Created:  time.Now(),
-		Updated:  time.Now(),
+		Key:              key,
+		Messages:         []providers.Message{},
+		Created:          time.Now(),
+		Updated:          time.Now(),
+		lastPersistedSeq: -1,
 	}
 	sm.evictIfNeeded()
 	sm.sessions[key] = session
@@ -506,9 +572,10 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 		session, ok = sm.loadSessionFromDisk(sessionKey)
 		if !ok {
 			session = &Session{
-				Key:      sessionKey,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              sessionKey,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[sessionKey] = session
@@ -598,12 +665,15 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 
 func (sm *SessionManager) GetSummary(key string) string {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return ""
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return ""
+		}
 	}
 	return session.Summary
 }
@@ -680,9 +750,10 @@ func (sm *SessionManager) SetName(key string, name string) error {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -874,6 +945,11 @@ func (sm *SessionManager) Save(key string) error {
 // (_index.json), reducing startup from ~1.2s to ~3ms. On first startup or
 // when the index is stale, parallel loading is used (~120ms).
 func (sm *SessionManager) loadSessionMetadata() error {
+	// Use SQLite if available
+	if sm.store != nil {
+		return sm.loadSessionMetadataFromSQLite()
+	}
+
 	files, err := os.ReadDir(sm.storage)
 	if err != nil {
 		return err
@@ -903,6 +979,27 @@ func (sm *SessionManager) loadSessionMetadata() error {
 
 	// Save index for next startup
 	sm.saveIndexUnlocked()
+	return nil
+}
+
+// loadSessionMetadataFromSQLite loads session metadata from the SQLite store.
+func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
+	repo := sm.store.Sessions()
+	metas, err := repo.ListSessionMeta()
+	if err != nil {
+		return err
+	}
+
+	sm.sessionMeta = make(map[string]*sessionMetadata, len(metas))
+	for _, meta := range metas {
+		sm.sessionMeta[meta.Key] = &sessionMetadata{
+			Key:     meta.Key,
+			Name:    meta.Name,
+			Mode:    meta.Mode,
+			Created: meta.CreatedAt,
+			Updated: meta.UpdatedAt,
+		}
+	}
 	return nil
 }
 
@@ -1090,9 +1187,10 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1111,12 +1209,15 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 // Migration: if VerboseMode is true but VerboseLevel is empty, returns "full".
 func (sm *SessionManager) GetVerboseLevel(key string) string {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return "off"
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return "off"
+		}
 	}
 
 	// Migration: handle legacy VerboseMode field
@@ -1141,9 +1242,10 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1161,12 +1263,15 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 // GetModel returns the model override for a session.
 func (sm *SessionManager) GetModel(key string) string {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return ""
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return ""
+		}
 	}
 	return session.Model
 }
@@ -1183,9 +1288,10 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1237,9 +1343,10 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 		if !ok {
 			// Create session if it doesn't exist
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1316,12 +1423,15 @@ func (sm *SessionManager) ListSessionsByMode(mode string) []*Session {
 // GetThinkingLevel returns the thinking level for a session.
 func (sm *SessionManager) GetThinkingLevel(key string) string {
 	sm.ensureLoaded()
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 
 	session, ok := sm.sessions[key]
 	if !ok {
-		return ""
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return ""
+		}
 	}
 	return session.ThinkingLevel
 }
@@ -1380,9 +1490,10 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1426,9 +1537,10 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1454,6 +1566,11 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 // snapshot is stale and its temp file is discarded instead of overwriting
 // the newer data.
 func (sm *SessionManager) saveUnlocked(key string) error {
+	// Use SQLite if available
+	if sm.store != nil {
+		return sm.saveToSQLite(key)
+	}
+
 	snapshot, seq, err := sm.snapshotUnlocked(key)
 	if err != nil {
 		return err
@@ -1479,12 +1596,74 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	return sm.commitSnapshot(key, tmpPath, snapshot)
 }
 
+// saveToSQLite persists the session to SQLite. It snapshots the data under
+// the write lock, then releases the lock while performing I/O — matching the
+// pattern used by the JSON path (see saveUnlocked). Concurrent mutations
+// that arrive while the I/O is in flight will be persisted by the next save.
+func (sm *SessionManager) saveToSQLite(key string) error {
+	session, ok := sm.sessions[key]
+	if !ok {
+		return nil
+	}
+
+	// ── Snapshot under lock ──
+	meta := store.SessionMeta{
+		Key:             session.Key,
+		Name:            session.Name,
+		Mode:            session.Mode,
+		Summary:         session.Summary,
+		VerboseLevel:    session.VerboseLevel,
+		Model:           session.Model,
+		ThinkingLevel:   session.ThinkingLevel,
+		InputTokens:     session.InputTokens,
+		OutputTokens:    session.OutputTokens,
+		CompactionCount: session.CompactionCount,
+		CreatedAt:       session.Created,
+		UpdatedAt:       session.Updated,
+	}
+
+	rows := make([]store.MessageRow, len(session.Messages))
+	for i, msg := range session.Messages {
+		msgJSON, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal message %d: %w", i, err)
+		}
+		rows[i] = store.MessageRow{
+			Seq:      i,
+			Role:     msg.Role,
+			Content:  msg.TextContent(),
+			JSON:     string(msgJSON),
+			Excluded: msg.ExcludeFromContext,
+		}
+	}
+
+	// ── Release lock during I/O ──
+	sm.mu.Unlock()
+	err := sm.store.Sessions().UpsertSession(meta)
+	if err == nil {
+		err = sm.store.Sessions().ReplaceMessages(key, rows)
+	}
+	sm.mu.Lock()
+
+	if err != nil {
+		return fmt.Errorf("save session %q to sqlite: %w", key, err)
+	}
+
+	session.lastPersistedSeq = len(session.Messages) - 1
+	return nil
+}
+
 // snapshotUnlocked builds a consistent snapshot of the session while the
 // caller holds sm.mu. Returns (nil, 0, nil) if the session does not exist or
 // storage is not configured. The returned sequence number identifies this
 // snapshot for the out-of-order save guard.
 func (sm *SessionManager) snapshotUnlocked(key string) (*Session, uint64, error) {
-	if sm.storage == "" {
+	if sm.storage == "" && sm.store == nil {
+		return nil, 0, nil
+	}
+
+	// For SQLite, we don't need snapshots
+	if sm.store != nil {
 		return nil, 0, nil
 	}
 
@@ -1765,9 +1944,10 @@ func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
 			session = &Session{
-				Key:      key,
-				Messages: []providers.Message{},
-				Created:  time.Now(),
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
@@ -1804,7 +1984,7 @@ func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.M
 // maybeFlushStream saves the session to disk if enough time has passed since
 // the last stream flush. Caller must hold sm.mu.
 func (sm *SessionManager) maybeFlushStream(key string) {
-	if sm.storage == "" {
+	if sm.storage == "" && sm.store == nil {
 		return
 	}
 
@@ -1822,7 +2002,7 @@ func (sm *SessionManager) maybeFlushStream(key string) {
 
 // flushStreamNow saves the session to disk immediately. Caller must hold sm.mu.
 func (sm *SessionManager) flushStreamNow(key string) {
-	if sm.storage == "" {
+	if sm.storage == "" && sm.store == nil {
 		return
 	}
 	session, ok := sm.sessions[key]
@@ -1925,6 +2105,16 @@ func (sm *SessionManager) SessionExists(key string) bool {
 	if inMemory || inMeta {
 		return true
 	}
+
+	// Check SQLite if available
+	if sm.store != nil {
+		exists, err := sm.store.Sessions().SessionExists(key)
+		if err == nil && exists {
+			return true
+		}
+		return false
+	}
+
 	// Evicted subagent sessions leave their file on disk even though
 	// memory and metadata are gone. Check the file directly.
 	filename := sanitizeFilename(key)

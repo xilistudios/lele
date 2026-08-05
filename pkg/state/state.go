@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // State represents the persistent state for a workspace.
@@ -29,6 +31,7 @@ type Manager struct {
 	state     *State
 	mu        sync.RWMutex
 	stateFile string
+	kvRepo    *store.KVRepo
 }
 
 // NewManager creates a new state manager for the given workspace.
@@ -70,6 +73,31 @@ func NewManager(workspace string) *Manager {
 	}
 
 	return sm
+}
+
+// SetKVRepo wires the SQLite KV store into the state manager. When set,
+// state is persisted to the KV store under the key "state:" + workspace
+// instead of a JSON file on disk. Passing nil restores the JSON file
+// fallback behavior.
+func (sm *Manager) SetKVRepo(repo *store.KVRepo) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sm.kvRepo = repo
+	if repo == nil {
+		return
+	}
+
+	// Try to load state from KV store. If the key doesn't exist yet, fall
+	// back to whatever is currently in memory (e.g., already loaded from
+	// the JSON file or freshly initialized).
+	if data, ok, err := repo.Get("state:" + sm.workspace); err != nil {
+		log.Printf("[ERROR] state: failed to load state from KV store: %v", err)
+	} else if ok {
+		if err := json.Unmarshal([]byte(data), sm.state); err != nil {
+			log.Printf("[ERROR] state: failed to unmarshal state from KV store: %v", err)
+		}
+	}
 }
 
 // SetLastChannel atomically updates the last channel and saves the state.
@@ -135,16 +163,27 @@ func (sm *Manager) GetTimestamp() time.Time {
 // 2. Rename temp file to target (atomic on POSIX systems)
 // 3. If rename fails, cleanup the temp file
 //
+// When a KV repo is wired in, the state is persisted to the SQLite KV
+// store instead (key: "state:" + workspace), skipping the JSON file write.
+//
 // Must be called with the lock held.
 func (sm *Manager) saveAtomic() error {
-	// Create temp file in the same directory as the target
-	tempFile := sm.stateFile + ".tmp"
-
 	// Marshal state to JSON
 	data, err := json.MarshalIndent(sm.state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
+
+	// Prefer the KV store when wired in.
+	if sm.kvRepo != nil {
+		if err := sm.kvRepo.Set("state:"+sm.workspace, string(data)); err != nil {
+			return fmt.Errorf("failed to save state to KV store: %w", err)
+		}
+		return nil
+	}
+
+	// Create temp file in the same directory as the target
+	tempFile := sm.stateFile + ".tmp"
 
 	// Write to temp file
 	if err := os.WriteFile(tempFile, data, 0644); err != nil {
@@ -161,8 +200,24 @@ func (sm *Manager) saveAtomic() error {
 	return nil
 }
 
-// load loads the state from disk.
+// load loads the state from disk (or from the KV store when wired in).
 func (sm *Manager) load() error {
+	// Prefer the KV store when wired in.
+	if sm.kvRepo != nil {
+		data, ok, err := sm.kvRepo.Get("state:" + sm.workspace)
+		if err != nil {
+			return fmt.Errorf("failed to read state from KV store: %w", err)
+		}
+		if !ok {
+			// Key doesn't exist yet, that's OK.
+			return nil
+		}
+		if err := json.Unmarshal([]byte(data), sm.state); err != nil {
+			return fmt.Errorf("failed to unmarshal state: %w", err)
+		}
+		return nil
+	}
+
 	data, err := os.ReadFile(sm.stateFile)
 	if err != nil {
 		// File doesn't exist yet, that's OK
