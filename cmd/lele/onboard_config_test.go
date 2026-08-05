@@ -128,8 +128,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Agents.Defaults.MaxTokens <= 0 {
 		t.Error("MaxTokens should be positive")
 	}
-	if cfg.Agents.Defaults.MaxToolIterations <= 0 {
-		t.Error("MaxToolIterations should be positive")
+	if cfg.Agents.Defaults.MaxToolIterations < 0 {
+		t.Error("MaxToolIterations should not be negative (0 = unlimited)")
 	}
 }
 
@@ -172,8 +172,8 @@ func TestConfig_Defaults(t *testing.T) {
 	if cfg.Agents.Defaults.MaxTokens <= 0 {
 		t.Error("MaxTokens should be positive")
 	}
-	if cfg.Agents.Defaults.MaxToolIterations <= 0 {
-		t.Error("MaxToolIterations should be positive")
+	if cfg.Agents.Defaults.MaxToolIterations < 0 {
+		t.Error("MaxToolIterations should not be negative (0 = unlimited)")
 	}
 	if cfg.Agents.Defaults.Temperature != nil {
 		if *cfg.Agents.Defaults.Temperature < 0 || *cfg.Agents.Defaults.Temperature > 2 {
