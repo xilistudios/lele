@@ -35,16 +35,29 @@ export function ChatHistoryPage() {
 
   // Fetch all persisted sessions (including heartbeat/cron/subagent) once on
   // mount. Context `sessions` (live chat sessions) take precedence when keys
-  // overlap so metadata stays fresh.
+  // overlap so metadata stays fresh. The backend paginates; loop until the
+  // server reports no more pages so old chats are not silently dropped.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    api
-      .sessions(undefined, undefined, true)
-      .then((data) => {
-        if (!cancelled) setSystemSessions(data?.sessions ?? [])
-      })
+    const fetchAll = async () => {
+      const collected: ChatSession[] = []
+      let offset = 0
+      const pageSize = 200
+      for (;;) {
+        const data = await api.sessions(undefined, undefined, true, {
+          offset,
+          limit: pageSize,
+        })
+        if (cancelled) return
+        collected.push(...(data?.sessions ?? []))
+        if (!data?.has_more || !data?.sessions?.length) break
+        offset += data.sessions.length
+      }
+      setSystemSessions(collected)
+    }
+    fetchAll()
       .catch((err) => {
         if (!cancelled) setLoadError((err as Error).message)
       })
