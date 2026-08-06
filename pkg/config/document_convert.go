@@ -249,7 +249,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	}
 
 	// Session.
-	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 {
+	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 || doc.Session.CompactionModel != "" {
 		session := map[string]interface{}{
 			"ephemeral":                    doc.Session.Ephemeral,
 			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
