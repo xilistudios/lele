@@ -79,13 +79,30 @@ func (m *Model) updateViewport() {
 		m.renderedBaseMsgCount = historyMsgCount
 	}
 
+	// Fast path: nothing changed since the last render (same session, same
+	// width, same message count, no streaming/feedback state). Reuse the
+	// already-rendered viewport content — this avoids re-running glamour
+	// markdown rendering and wrapText over the whole history on every frame
+	// of the loading animation, mouse move, or cursor blink. This is the
+	// dominant cost for long (>400k token) conversations.
+	hasStreaming := m.processing && (m.currentStream != "" || m.currentThinking != "" || m.currentToolAction != "")
+	if cacheValid && !hasStreaming &&
+		m.pendingUserMessage == "" && m.pendingApprovalID == "" && m.approvalResult == "" &&
+		m.activeGroupID == "" && m.compactFeedback == "" && m.goalFeedback == "" {
+		if !m.selecting {
+			return
+		}
+		// While selecting we need the updated content for highlight; the base
+		// is cached so only the overlay pass runs.
+	}
+
 	var sb strings.Builder
 	sb.WriteString(m.renderedBase)
 	lastRole := m.lastHistoryRole()
 
 	// Show pending user message immediately (before agent responds)
 	if m.pendingUserMessage != "" {
-		history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 		// Search from the end since the message is most likely recent
 		alreadyInHistory := false
 		for i := len(history) - 1; i >= 0; i-- {
@@ -179,7 +196,7 @@ func (m *Model) updateViewport() {
 // For long conversations, it only renders the most recent maxRenderedMessages
 // messages to bound memory usage. The result is cached in renderedBase.
 func (m *Model) buildRenderedHistory() string {
-	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 
 	totalMsgs := len(history)
 
@@ -279,7 +296,7 @@ func (m *Model) renderApprovalPrompt() string {
 
 // lastHistoryRole returns the role of the last non-system message in history.
 func (m *Model) lastHistoryRole() string {
-	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "system" {
 			return history[i].Role

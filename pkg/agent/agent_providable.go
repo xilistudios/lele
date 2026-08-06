@@ -155,13 +155,21 @@ func (ap *agentProvidableImpl) AddSessionMessage(sessionKey string, msg provider
 
 // GetSessionHistory returns the persisted history for a session.
 func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.Message {
+	return ap.GetHistoryView(sessionKey)
+}
+
+// GetHistoryView returns the history slice without copying. The caller MUST
+// NOT modify the returned slice or any message in it. Used by hot read paths
+// (TUI viewport rendering, message counting, token estimation) where a full
+// copy per render would allocate tens of MB for long conversations.
+func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Message {
 	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
 
 	if routing.IsSubagentSessionKey(resolvedSessionKey) {
 		// Fast path: O(1) lookup in the subagent-to-agent mapping
 		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
 			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
-				history := agent.Sessions.GetHistory(resolvedSessionKey)
+				history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 				if len(history) > 0 {
 					return history
 				}
@@ -174,7 +182,7 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 			if !ok {
 				continue
 			}
-			history := agent.Sessions.GetHistory(resolvedSessionKey)
+			history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 			if len(history) > 0 {
 				// Cache this mapping for future O(1) lookups
 				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
@@ -188,7 +196,7 @@ func (ap *agentProvidableImpl) GetSessionHistory(sessionKey string) []providers.
 	if agent == nil {
 		return []providers.Message{}
 	}
-	return agent.Sessions.GetHistory(resolvedSessionKey)
+	return agent.Sessions.GetHistoryView(resolvedSessionKey)
 }
 
 // ============================================================================

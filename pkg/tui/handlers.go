@@ -173,26 +173,87 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.formError = ""
 					m.formValues[m.formStepIndex] = val
-					if m.formStepIndex >= 3 {
-						// Last step — save provider
-						if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
-							m.formError = err.Error()
+
+					// ── Provider steps (0-3) ──────────────────────────────
+					if !m.providerSavedInFlow {
+						if m.formStepIndex >= 3 {
+							// Last provider step — save provider
+							if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
+								m.formError = err.Error()
+								return m, nil
+							}
+							m.providerSavedInFlow = true
+							m.providerSelectedName = strings.ToLower(strings.TrimSpace(m.formValues[0]))
+							// Transition to model configuration steps
+							m.formStepIndex = 4
+							m.textInput.SetValue("")
+							m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
 							return m, nil
 						}
-						m.modalMode = ModalNone
+						// Advance to next provider step
+						m.formStepIndex++
+						m.textInput.SetValue("")
+						switch m.formStepIndex {
+						case 1:
+							m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+						case 2:
+							m.textInput.Placeholder = "API Key"
+						case 3:
+							m.textInput.Placeholder = "API Base URL (e.g. https://api.openai.com/v1)"
+						}
 						return m, nil
 					}
-					// Advance to next step
-					m.formStepIndex++
-					m.textInput.SetValue("")
-					switch m.formStepIndex {
-					case 1:
-						m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
-					case 2:
-						m.textInput.Placeholder = "API Key"
-					case 3:
-						m.textInput.Placeholder = "API Base URL (e.g. https://api.openai.com/v1)"
+
+					// ── Model steps (4-8) ────────────────────────────────
+					if m.formStepIndex <= 8 {
+						// Validate model fields before advancing
+						if m.formStepIndex == 6 || m.formStepIndex == 7 {
+							// Context window and max tokens must be integers
+							if _, err := strconv.Atoi(val); err != nil {
+								m.formError = "Must be a valid integer"
+								return m, nil
+							}
+						}
+						if m.formStepIndex == 8 {
+							// Vision must be yes/no
+							lower := strings.ToLower(val)
+							if lower != "yes" && lower != "no" {
+								m.formError = "Enter 'yes' or 'no'"
+								return m, nil
+							}
+							m.formValues[m.formStepIndex] = lower
+							// Advance to review step
+							m.formStepIndex = 9
+							m.textInput.SetValue("")
+							m.textInput.Placeholder = ""
+							return m, nil
+						}
+						// Advance to next model step
+						m.formStepIndex++
+						m.textInput.SetValue("")
+						switch m.formStepIndex {
+						case 5:
+							m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
+						case 6:
+							m.textInput.Placeholder = "Context window (e.g. 128000)"
+						case 7:
+							m.textInput.Placeholder = "Max tokens (e.g. 4096)"
+						case 8:
+							m.textInput.Placeholder = "Vision support? (yes/no)"
+						}
+						return m, nil
 					}
+
+					// ── Review step (9) — save model & close ─────────────
+					ctxWin, _ := strconv.Atoi(m.formValues[6])
+					maxTok, _ := strconv.Atoi(m.formValues[7])
+					vision := m.formValues[8] == "yes"
+					if err := m.addModelToProvider(m.providerSelectedName, m.formValues[4], m.formValues[5], ctxWin, maxTok, vision); err != nil {
+						m.formError = err.Error()
+						return m, nil
+					}
+					m.modalMode = ModalNone
+					m.providerSavedInFlow = false
 					return m, nil
 				} else if m.modalMode == ModalAddModel {
 					// Form-based modal: validate and advance steps
@@ -288,6 +349,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
 						}
+						// Agent name is rendered in the viewport header — force
+						// a re-render even if the content fingerprint is unchanged.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalModel {
 						if m.showWelcome {
 							m.pendingModel = selectedVal
@@ -295,6 +360,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
 						}
+						// Model name is rendered in the bottom bar — re-render.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalThink {
 						if m.showWelcome {
 							m.pendingThink = selectedVal
@@ -302,6 +370,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
 						}
+						// Think level is rendered in the bottom bar — re-render.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalSessions {
 						if m.modalSelectedIdx < len(m.modalSessionKeys) {
 							m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
@@ -502,6 +573,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.secretsReveal = false
 					m.loadSecrets()
 					return m, m.tickCmd()
+				}
+				// Reset provider-in-flow state when leaving AddProvider modal
+				if m.modalMode == ModalAddProvider {
+					m.providerSavedInFlow = false
 				}
 				m.modalMode = ModalNone
 			case "s":
@@ -707,7 +782,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.reloadSessions()
-			m.updateViewport()
 			return m, nil
 
 		case "ctrl+c":

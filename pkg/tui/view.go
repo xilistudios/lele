@@ -560,7 +560,28 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
 
+	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 9 && m.providerSavedInFlow
+
 	for i, step := range steps {
+		// In review mode, show provider steps (0-3) and model steps (4-8) as
+		// completed with their values, and the review step (9) as the current
+		// active item with a confirmation prompt.
+		if isReviewStep && i < 9 {
+			val := ""
+			if i < len(m.formValues) {
+				val = m.formValues[i]
+			}
+			// Mask API key for display
+			if i == 2 && len(val) > 8 {
+				val = val[:4] + "..." + val[len(val)-4:]
+			}
+			// Add a section header before model steps
+			if i == 4 {
+				sb.WriteString("\n" + SidebarHeader.Render(i18n.T("tui.connectReviewModel")) + "\n")
+			}
+			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  ✓ %s: %s", step, val)) + "\n")
+			continue
+		}
 		if i < m.formStepIndex {
 			// Completed step: show checkmark and value
 			val := ""
@@ -569,12 +590,16 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 			}
 			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  ✓ %s: %s", step, val)) + "\n")
 		} else if i == m.formStepIndex {
-			// Current step: highlighted with input indicator
-			val := m.textInput.Value()
-			if val == "" {
-				val = "…"
+			if isReviewStep {
+				sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  ▶ %s", step)) + "\n")
+			} else {
+				// Current step: highlighted with input indicator
+				val := m.textInput.Value()
+				if val == "" {
+					val = "…"
+				}
+				sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  ▶ %s: [%s]", step, val)) + "\n")
 			}
-			sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  ▶ %s: [%s]", step, val)) + "\n")
 		} else {
 			// Future step: muted
 			sb.WriteString(CommentColorStyle.Render(fmt.Sprintf("  ○ %s", step)) + "\n")
@@ -588,12 +613,20 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 		sb.WriteString(lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n\n")
 	}
 
-	// Text input field
-	m.textInput.Width = 40
-	sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
+	// Text input field (hidden on review step)
+	if !isReviewStep {
+		m.textInput.Width = 40
+		sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
+	}
 
 	// Hints
-	sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: cancel"))
+	if isReviewStep {
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectReviewHint")))
+	} else if m.providerSavedInFlow {
+		sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: skip model"))
+	} else {
+		sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: cancel"))
+	}
 
 	modalView := ModalContainer.Render(sb.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
@@ -603,7 +636,11 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
 	case ModalAddProvider:
-		return []string{"Provider name", "Provider type", "API Key", "API Base URL"}
+		return []string{
+			"Provider name", "Provider type", "API Key", "API Base URL",
+			"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)",
+			i18n.T("tui.connectReview"),
+		}
 	case ModalAddModel:
 		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
 	case ModalAddSecret:

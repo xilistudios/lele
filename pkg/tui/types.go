@@ -194,6 +194,7 @@ type Model struct {
 	providerModalKeys    []string // maps modal items to provider names (for /providers)
 	providerSelectedName string   // currently selected provider name in detail view
 	providerEditMode     bool     // true when editing an existing provider
+	providerSavedInFlow  bool     // true after /connect saves provider (enables model config steps)
 
 	// Form state for add-provider / add-model flows
 	formStepIndex   int      // current step in the form
@@ -298,6 +299,10 @@ type Model struct {
 	renderedBase         string
 	renderedBaseKey      string // session key the cache belongs to
 	renderedBaseMsgCount int    // number of history messages when cache was built
+
+	// lastViewportKey is a fingerprint of the last rendered viewport state.
+	// shouldSkipViewportUpdate compares against it to skip redundant re-renders.
+	lastViewportKey string
 
 	// Virtualized rendering: only render messages visible in the viewport
 	// plus a small buffer above/below for smooth scrolling.

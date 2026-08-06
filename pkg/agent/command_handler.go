@@ -228,6 +228,12 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 		agentModel = ch.al.cfg().Agents.Defaults.Model
 	}
 	ch.al.startFreshConversation(sessionKey, agent.ID, agentModel)
+	// Invalidate caches so the fresh conversation re-reads bootstrap files
+	// (AGENT.md, SOUL.md, ...) from disk and rebuilds its system prompt.
+	if agent.ContextBuilder != nil {
+		agent.ContextBuilder.ResetMemoryContext()
+		agent.ContextBuilder.ResetSystemPromptCache(sessionKey)
+	}
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
 

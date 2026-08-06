@@ -94,6 +94,10 @@ func (m *nativeTestAgentLoop) GetSessionHistory(sessionKey string) []providers.M
 	return result
 }
 
+func (m *nativeTestAgentLoop) GetHistoryView(sessionKey string) []providers.Message {
+	return m.histories[sessionKey]
+}
+
 func (m *nativeTestAgentLoop) AddSessionMessage(sessionKey string, msg providers.Message) error {
 	m.histories[sessionKey] = append(m.histories[sessionKey], msg)
 	return nil
