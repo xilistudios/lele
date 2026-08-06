@@ -1012,6 +1012,64 @@ func TestEditableDocument_JSONSerialization(t *testing.T) {
 	}
 }
 
+func TestEditableDocument_CompactionModel_Roundtrip(t *testing.T) {
+	// Regression: compaction_model was lost on save when no other session
+	// fields (dm_scope, ephemeral, identity_links) were set, because
+	// toSerializable() only emitted the session block if one of those
+	// three fields was non-zero.
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	doc := &EditableDocument{
+		Agents: EditableAgentsConfig{
+			Defaults: EditableAgentDefaults{
+				Workspace:         "/test",
+				Provider:          "openai",
+				Model:             "gpt-4",
+				MaxTokens:         8192,
+				MaxToolIterations: 20,
+			},
+		},
+		Session: EditableSessionConfig{
+			// Only compaction_model set — dm_scope empty, ephemeral false, identity_links nil.
+			CompactionModel: "openai:gpt-4o-mini",
+		},
+		Channels: EditableChannelsConfig{
+			Native: EditableNativeConfig{Enabled: true, Port: 8080},
+		},
+	}
+
+	if err := SaveEditableDocument(path, doc); err != nil {
+		t.Fatalf("SaveEditableDocument failed: %v", err)
+	}
+
+	// Read raw JSON to verify the session block was written.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	session, ok := parsed["session"].(map[string]interface{})
+	if !ok {
+		t.Fatal("session block missing from saved JSON — compaction_model will be lost")
+	}
+	if session["compaction_model"] != "openai:gpt-4o-mini" {
+		t.Errorf("saved compaction_model = %v, want openai:gpt-4o-mini", session["compaction_model"])
+	}
+
+	// Load and verify roundtrip.
+	loaded, _, err := LoadEditableDocument(path)
+	if err != nil {
+		t.Fatalf("LoadEditableDocument failed: %v", err)
+	}
+	if loaded.Session.CompactionModel != "openai:gpt-4o-mini" {
+		t.Errorf("loaded compaction_model = %q, want openai:gpt-4o-mini", loaded.Session.CompactionModel)
+	}
+}
+
 func TestLoadEditableDocument_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "config.json")
