@@ -1155,6 +1155,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.processing = true
 				m.startTime = time.Now()
 				m.lastDuration = 0
+				m.invalidateSubagentsCache() // subagent status changed
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())
 			case "approval.request":
@@ -1217,6 +1218,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.approvalResult = ""
 				// When a spawn tool completes, clear its subagent progress entry.
 				if msg.msg.Metadata["tool"] == "spawn" {
+					m.invalidateSubagentsCache() // a new subagent task now exists
 					if saKey := msg.msg.Metadata["subagent_session_key"]; saKey != "" {
 						// Extract the task ID suffix (e.g. "subagent-1") from the session key
 						if idx := strings.LastIndex(saKey, ":"); idx >= 0 {

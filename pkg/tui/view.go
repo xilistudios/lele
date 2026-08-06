@@ -343,7 +343,7 @@ func (m *Model) View() string {
 	if !strings.HasPrefix(subagentQueryKey, "native:") {
 		subagentQueryKey = "native:" + subagentQueryKey
 	}
-	subagents := m.agentLoop.GetProvidable().GetSessionSubagents(subagentQueryKey)
+	subagents := m.getSessionSubagentsCached(subagentQueryKey)
 
 	// Reset subagent click targets for fresh tracking
 	m.subagentClickTargets = nil
@@ -802,7 +802,7 @@ func (m *Model) getBouncingDots() string {
 	sb.WriteRune('[')
 	for i := 0; i < width; i++ {
 		if i == offset || i == offset+1 || i == offset+2 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(SecondaryColor).Render("●"))
+			sb.WriteString(bouncingDotChar)
 		} else {
 			sb.WriteRune(' ')
 		}
