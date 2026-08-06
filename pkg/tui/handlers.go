@@ -349,6 +349,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
 						}
+						// Agent name is rendered in the viewport header — force
+						// a re-render even if the content fingerprint is unchanged.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalModel {
 						if m.showWelcome {
 							m.pendingModel = selectedVal
@@ -356,6 +360,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
 						}
+						// Model name is rendered in the bottom bar — re-render.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalThink {
 						if m.showWelcome {
 							m.pendingThink = selectedVal
@@ -363,6 +370,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.currentKey != "" {
 							m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
 						}
+						// Think level is rendered in the bottom bar — re-render.
+						m.lastViewportKey = ""
+						m.renderedBaseKey = ""
 					} else if m.modalMode == ModalSessions {
 						if m.modalSelectedIdx < len(m.modalSessionKeys) {
 							m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
@@ -772,7 +782,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.reloadSessions()
-			m.updateViewport()
 			return m, nil
 
 		case "ctrl+c":

@@ -208,7 +208,7 @@ func (m *Model) reloadSessions() {
 
 	// Clear pending user message if it now appears in the session history
 	if m.pendingUserMessage != "" && m.currentKey != "" {
-		history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 		for _, msg := range history {
 			if msg.Role == "user" && msg.Content == m.pendingUserMessage {
 				m.pendingUserMessage = ""
@@ -220,7 +220,59 @@ func (m *Model) reloadSessions() {
 	// Clear streaming state if the assistant message is fully saved in history
 	m.cleanupStreamingIfComplete()
 
+	// Skip the re-render if nothing user-visible changed. reloadSessions is
+	// called on many events (including unrelated outbound events) and without
+	// this guard every one of them would rebuild and re-render the entire
+	// history — the dominant CPU cost for long conversations.
+	if m.shouldSkipViewportUpdate() {
+		return
+	}
+
 	m.updateViewport()
+}
+
+// getViewportContentKey returns a compact fingerprint of the state that affects
+// the rendered viewport. It is used to skip redundant updateViewport() calls
+// (and therefore expensive re-renders of the whole history) when nothing
+// user-visible changed. This keeps idle CPU low even for very long sessions.
+func (m *Model) getViewportContentKey() string {
+	msgCount := m.getHistoryMessageCount()
+	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v",
+		m.currentKey,
+		m.viewport.Width,
+		msgCount,
+		len(m.currentStream)+len(m.currentThinking),
+		m.currentToolAction,
+		m.pendingUserMessage,
+		m.pendingApprovalID,
+		m.approvalResult,
+		m.activeGroupID,
+		m.processing,
+		m.compactFeedback != "",
+		m.goalFeedback != "",
+	)
+}
+
+// shouldSkipViewportUpdate reports whether the current model state would
+// produce exactly the same viewport content as the last render. Used to avoid
+// redundant re-renders triggered by events that don't change visible output.
+func (m *Model) shouldSkipViewportUpdate() bool {
+	if m.currentKey == "" || m.showWelcome || m.selecting {
+		return false
+	}
+	if m.parentSessionKey != "" {
+		return false
+	}
+	// Always render when a modal is open (its content depends on more state).
+	if m.modalMode != ModalNone {
+		return false
+	}
+	key := m.getViewportContentKey()
+	if key == m.lastViewportKey && m.renderedBase != "" {
+		return true
+	}
+	m.lastViewportKey = key
+	return false
 }
 
 func (m *Model) createNewChat() {
@@ -257,7 +309,7 @@ func (m *Model) cleanupStreamingIfComplete() {
 	if (m.currentStream == "" && m.currentThinking == "") || m.currentKey == "" {
 		return
 	}
-	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 	var lastAssistantMsg *providers.Message
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
@@ -415,7 +467,7 @@ func (m *Model) getHistoryMessageCount() int {
 	if m.currentKey == "" {
 		return 0
 	}
-	history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 	count := 0
 	for _, msg := range history {
 		if msg.Role == "user" || msg.Role == "assistant" {
@@ -436,7 +488,7 @@ func (m *Model) printSessionSummary() {
 	userCount := 0
 	assistantCount := 0
 	if m.currentKey != "" {
-		history := m.agentLoop.GetProvidable().GetSessionHistory(m.currentKey)
+		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 		for _, msg := range history {
 			switch msg.Role {
 			case "user":

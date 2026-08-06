@@ -32,6 +32,12 @@ type ContextBuilder struct {
 	// see a byte-for-byte identical system message.
 	cachedSystemPrompt map[string]string
 	cacheMu            sync.RWMutex
+
+	// initialContext caches the result of GetInitialContext() (identity +
+	// bootstrap files + skills summary). It is constant for the lifetime of
+	// the process, so this avoids re-reading files on every token estimation.
+	initialContext string
+	initialMu      sync.RWMutex
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
@@ -61,6 +67,29 @@ func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 // GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
 // to be loaded at session start. This ensures consistent context across /new and subagents.
 func (cb *ContextBuilder) GetInitialContext() string {
+	// Fast path: the static system prompt (identity + bootstrap + skills
+	// summary) is constant per process, so cache it. The only dynamic part is
+	// the tools section, which is appended in buildSystemPromptForTurn via
+	// GetSystemPromptForSession. This makes the very hot TUI path
+	// (GetCurrentContextUsage → BuildSystemPromptForSession) read a single
+	// cached string instead of re-reading all bootstrap files and re-scanning
+	// skills directories on every sidebar refresh.
+	cb.initialMu.RLock()
+	if cb.initialContext != "" {
+		cached := cb.initialContext
+		cb.initialMu.RUnlock()
+		return cached
+	}
+	cb.initialMu.RUnlock()
+
+	cb.initialMu.Lock()
+	defer cb.initialMu.Unlock()
+	// Double-check under the write lock: another goroutine may have built it
+	// while we waited.
+	if cb.initialContext != "" {
+		return cb.initialContext
+	}
+
 	parts := []string{}
 
 	// Core identity section
@@ -83,7 +112,8 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 	}
 
 	// Join with "---" separator
-	return strings.Join(parts, "\n\n---\n\n")
+	cb.initialContext = strings.Join(parts, "\n\n---\n\n")
+	return cb.initialContext
 }
 
 func (cb *ContextBuilder) getIdentity() string {
@@ -164,6 +194,12 @@ func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string
 func (cb *ContextBuilder) ResetMemoryContext() {
 	// Memory store reads from disk each time, so no cache to clear
 	// But we could add caching here in the future if needed
+	// The initial context cache must be invalidated here too: /new re-reads
+	// bootstrap files (AGENT.md, SOUL.md, ...) from disk so the fresh
+	// conversation reflects any edits made while the process was running.
+	cb.initialMu.Lock()
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
 }
 
 // ResetSystemPromptCache clears the cached system prompt for the given session key,

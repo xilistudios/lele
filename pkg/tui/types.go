@@ -300,6 +300,10 @@ type Model struct {
 	renderedBaseKey      string // session key the cache belongs to
 	renderedBaseMsgCount int    // number of history messages when cache was built
 
+	// lastViewportKey is a fingerprint of the last rendered viewport state.
+	// shouldSkipViewportUpdate compares against it to skip redundant re-renders.
+	lastViewportKey string
+
 	// Virtualized rendering: only render messages visible in the viewport
 	// plus a small buffer above/below for smooth scrolling.
 	renderedMsgStartIdx int // first message index included in renderedBase

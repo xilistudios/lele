@@ -25,6 +25,12 @@ type AgentProvidable interface {
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
 	// GetSessionHistory devuelve el historial persistido de una sesión
 	GetSessionHistory(sessionKey string) []providers.Message
+	// GetHistoryView returns the history slice without copying. The caller
+	// MUST NOT modify the returned slice or any message in it. Use this on hot
+	// read paths (TUI rendering, token estimation) to avoid a full copy of the
+	// message slice on every render — copies become expensive (tens of MB) for
+	// long conversations.
+	GetHistoryView(sessionKey string) []providers.Message
 	// AddSessionMessage añade un mensaje al historial persistido de una sesión
 	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión
