@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-06
+
+### Added
+
+#### TUI
+- User-friendly `/connect` flow with provider presets — pick from 10 built-in provider types (OpenAI, Anthropic, OpenRouter, Gemini, DeepSeek, Ollama, Zhipu, Groq, Moonshot, NVIDIA) with pre-filled API base URL, API key hint, and model hint. Includes a success confirmation screen and a "+ Connect a provider" action in the `/providers` modal. Only ESC cancels the type picker. i18n strings for en/es/pt.
+- Model configuration integrated into `/connect` flow — after saving the provider, the form seamlessly continues with model fields (alias, name, context window, max tokens, vision) and a review step before saving. ESC on model steps closes cleanly since the provider is already persisted.
+
+### Fixed
+
+#### TUI
+- Reduce idle CPU for long conversations — zero-copy history reads (`GetHistoryView`), cached `GetInitialContext` (identity + bootstrap + skills summary), `/new` resets memory context and system prompt cache, `updateViewport` fast path skips markdown re-render when nothing user-visible changed, `reloadSessions` skip guard avoids rebuilding history on unrelated outbound events.
+
 ## [0.6.2] - 2026-08-05
 
 ### Added
