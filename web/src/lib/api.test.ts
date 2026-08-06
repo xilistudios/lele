@@ -37,7 +37,7 @@ describe('createApiClient', () => {
   test('loads sessions and channels', async () => {
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
-      const body = url.endsWith('/api/v1/chat/sessions')
+      const body = url.split('?')[0].endsWith('/api/v1/chat/sessions')
         ? {
             sessions: [
               {
