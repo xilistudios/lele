@@ -12,6 +12,31 @@ const buildDefaultSessionKey = (clientId: string) => clientId
 const isSubagentSessionKey = (sessionKey: string | null | undefined) =>
   Boolean(sessionKey?.startsWith('subagent:'))
 
+const SESSIONS_PAGE_SIZE = 200
+
+// fetchAllSessions retrieves every session from the paginated backend
+// endpoint. The API returns up to 200 sessions per page; without this we
+// would silently drop older chats once the user has more than a page.
+async function fetchAllSessions(
+  api: ApiClient,
+  mode?: string,
+  kind?: string,
+  includeSystem?: boolean,
+): Promise<ChatSession[]> {
+  const all: ChatSession[] = []
+  let offset = 0
+  for (;;) {
+    const page = await api.sessions(mode, kind, includeSystem, {
+      offset,
+      limit: SESSIONS_PAGE_SIZE,
+    })
+    all.push(...(page?.sessions ?? []))
+    if (!page?.has_more || page.sessions.length === 0) break
+    offset += page.sessions.length
+  }
+  return all
+}
+
 export function useChatSessions(api: ApiClient, token: string | null, clientId: string | null) {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [currentSessionKey, setCurrentSessionKey] = useState<string | null>(() =>
@@ -57,11 +82,11 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
   const refreshSessions = useCallback(async () => {
     if (!token || !clientId) return null
 
-    const result = await api.sessions()
+    const result = await fetchAllSessions(api)
     const defaultSessionKey = buildDefaultSessionKey(clientId)
     const fallbackSessions =
-      result.sessions.length > 0
-        ? result.sessions
+      result.length > 0
+        ? result
         : [
             {
               key: defaultSessionKey,

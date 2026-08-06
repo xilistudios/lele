@@ -94,6 +94,12 @@ const jsonResponse = (body: FetchResponseBody) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
+// Match the list-sessions endpoint regardless of query params (?offset=&limit=)
+const isSessionsEndpoint = (url: string) => {
+  const path = url.split('?')[0]
+  return path.endsWith('/api/v1/chat/sessions')
+}
+
 // Return a 404 (not a thrown Error) for unhandled URLs. A thrown non-ApiError
 // is retried by requestWithRetry after ~1s — by which time afterEach has
 // restored the real fetch, so the retry hits the network and the rejection
@@ -288,7 +294,7 @@ describe('App', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: [
@@ -425,7 +431,7 @@ describe('App', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: [
@@ -632,7 +638,7 @@ describe('Routing', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: overrides?.sessions ?? [
@@ -1150,7 +1156,7 @@ describe('Auto-pairing', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: [
@@ -1270,7 +1276,7 @@ describe('Auto-pairing', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(jsonResponse({ sessions: [] }))
       }
       if (url.includes('/api/v1/chat/')) {
@@ -1424,7 +1430,7 @@ describe('Session deletion', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: [
@@ -1587,7 +1593,7 @@ describe('Session deletion', () => {
       if (url.endsWith('/api/v1/config')) {
         return Promise.resolve(jsonResponse(mockConfigResponse()))
       }
-      if (url.endsWith('/api/v1/chat/sessions')) {
+      if (isSessionsEndpoint(url)) {
         return Promise.resolve(
           jsonResponse({
             sessions: [
