@@ -223,6 +223,11 @@ var (
 				Foreground(SecondaryColor).
 				Bold(true)
 
+	// SuccessStyle styles success confirmation messages in modals.
+	SuccessStyle = lipgloss.NewStyle().
+			Foreground(SecondaryColor).
+			Bold(true)
+
 	// ApprovalRejected styles the "rejected" result message.
 	ApprovalRejected = lipgloss.NewStyle().
 				Foreground(PrimaryColor).

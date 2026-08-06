@@ -202,6 +202,23 @@ type Model struct {
 	formError       string   // validation error to display
 	formConfirmMode bool     // true when showing confirmation step
 
+	// Provider-type picker state (step 2 of /connect). When true, the form
+	// shows a selectable list of known provider presets instead of a raw text
+	// input; up/down + enter pick a preset, "custom" allows a free-form type.
+	providerTypePicker    bool // true while picking a provider type from the preset list
+	providerTypePickerIdx int  // currently highlighted preset index
+	providerTypePickerMax int  // number of presets shown (including "custom" entry)
+
+	// Success screen shown after the /connect flow completes. When true, the
+	// form modal renders a confirmation with the provider/model that was saved
+	// instead of the step list.
+	connectSuccess bool // true when showing the post-save success screen
+
+	// providerTypeFromPreset remembers whether the chosen provider type came
+	// from a preset picker selection. When true, the API Base step is
+	// pre-filled and optional; a custom type requires an explicit base URL.
+	providerTypeFromPreset bool // true when the type was picked from the preset list
+
 	// Sub-components
 	viewport  viewport.Model
 	textInput textinput.Model // single-line input for modal forms (AddProvider, AddModel)

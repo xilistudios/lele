@@ -143,6 +143,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.modalMode != ModalNone {
+			// Provider-type picker navigation (up/down within the preset list).
+			if m.modalMode == ModalAddProvider && m.providerTypePicker {
+				switch msg.String() {
+				case "up", "k":
+					if m.providerTypePickerIdx > 0 {
+						m.providerTypePickerIdx--
+					}
+					return m, nil
+				case "down", "j":
+					max := m.providerTypePickerMax
+					if max <= 0 {
+						max = len(providerPresets) + 1
+					}
+					if m.providerTypePickerIdx < max-1 {
+						m.providerTypePickerIdx++
+					}
+					return m, nil
+				case "esc":
+					// Cancel back to free-form type entry.
+					m.providerTypePicker = false
+					m.formStepIndex = 1
+					m.textInput.SetValue("")
+					m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+					return m, nil
+				case "q":
+					// "q" must NOT cancel the picker — only ESC does.
+					// Swallow it so it doesn't fall through to the global
+					// modal-close handler.
+					return m, nil
+				}
+				// Fall through to textInput forwarding below for typing.
+			}
 			switch msg.String() {
 			case "up", "k":
 				if isListModal(m.modalMode) && m.modalSelectedIdx > 0 {
@@ -165,9 +197,60 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				// Handle form-based modals first — they don't use m.modalItems.
 				if m.modalMode == ModalAddProvider {
+					// ── Success screen — any Enter/ESC closes the modal ──
+					if m.connectSuccess {
+						m.connectSuccess = false
+						m.providerSavedInFlow = false
+						m.formStepIndex = 0
+						m.formValues = nil
+						m.modalMode = ModalNone
+						m.reloadSessions()
+						return m, nil
+					}
+					// ── Provider-type picker (step 1, typePicker active) ──
+					if m.providerTypePicker {
+						sel := m.providerTypePickerIdx
+						max := m.providerTypePickerMax
+						if max <= 0 {
+							max = len(providerPresets)
+						}
+						if sel >= 0 && sel < max {
+							if sel < len(providerPresets) {
+								p := providerPresets[sel]
+								m.formValues[1] = p.typ
+								m.providerTypeFromPreset = true
+								// Pre-fill the API base from the preset.
+								m.formValues[3] = p.apiBase
+								m.formStepIndex = 2 // next: API Key
+								m.textInput.SetValue("")
+								m.textInput.Placeholder = "API Key"
+								if p.keyHint != "" {
+									m.textInput.Placeholder = "API Key (" + p.keyHint + ")"
+								}
+							} else {
+								// "custom" entry — free-form type
+								m.formValues[1] = ""
+								m.providerTypeFromPreset = false
+								m.formStepIndex = 1 // stay on type step for free text
+								m.textInput.SetValue("")
+								m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
+							}
+							m.providerTypePicker = false
+							m.formError = ""
+							return m, nil
+						}
+						m.formError = "Select a provider type"
+						return m, nil
+					}
+
 					// Form-based modal: validate and advance steps
 					val := strings.TrimSpace(m.textInput.Value())
-					if val == "" {
+					// API Key (step 2) is optional — local providers (ollama)
+					// and custom endpoints may not require authentication.
+					// The review step (9) has no input — any Enter confirms.
+					allowEmpty := (m.formStepIndex == 2 && !m.providerSavedInFlow) ||
+						(m.formStepIndex == 9 && m.providerSavedInFlow)
+					if val == "" && !allowEmpty {
 						m.formError = "This field is required"
 						return m, nil
 					}
@@ -176,6 +259,62 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// ── Provider steps (0-3) ──────────────────────────────
 					if !m.providerSavedInFlow {
+						if m.formStepIndex == 0 {
+							// Provider name — validate duplicates early and
+							// offer the type picker on the next step.
+							key := strings.ToLower(strings.TrimSpace(val))
+							if m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
+								if _, exists := m.cfg.Providers.Named[key]; exists {
+									m.formError = fmt.Sprintf("Provider %q already exists", key)
+									return m, nil
+								}
+							}
+							m.formStepIndex = 1
+							m.providerTypePicker = true
+							m.providerTypePickerIdx = 0
+							// providerPresets + a trailing "custom" entry.
+							m.providerTypePickerMax = len(providerPresets) + 1
+							m.textInput.SetValue("")
+							m.textInput.Placeholder = ""
+							return m, nil
+						}
+						if m.formStepIndex == 1 {
+							// Free-form provider type (only reached when the
+							// user chose "custom" and typed a type).
+							typ := strings.ToLower(val)
+							if p := providerPresetByType(typ); p != nil {
+								m.providerTypeFromPreset = true
+								m.formValues[3] = p.apiBase
+							}
+							m.formStepIndex = 2
+							m.textInput.SetValue("")
+							m.textInput.Placeholder = "API Key"
+							if p := providerPresetByType(typ); p != nil && p.keyHint != "" {
+								m.textInput.Placeholder = "API Key (" + p.keyHint + ")"
+							}
+							return m, nil
+						}
+						if m.formStepIndex == 2 {
+							// API key — optional for presets/local providers.
+							// Always advance; a blank key is allowed for local
+							// (e.g. ollama) and custom providers.
+							m.formValues[2] = val
+							m.formStepIndex = 3
+							m.textInput.SetValue("")
+							if m.providerTypeFromPreset {
+								p := providerPresetByType(m.formValues[1])
+								if p != nil && p.apiBase != "" {
+									// Pre-filled from preset; keep it.
+									m.textInput.SetValue(p.apiBase)
+									m.textInput.Placeholder = "API Base URL (default for this provider)"
+								} else {
+									m.textInput.Placeholder = "API Base URL (e.g. https://api.example.com/v1)"
+								}
+							} else {
+								m.textInput.Placeholder = "API Base URL (e.g. https://api.example.com/v1)"
+							}
+							return m, nil
+						}
 						if m.formStepIndex >= 3 {
 							// Last provider step — save provider
 							if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
@@ -188,6 +327,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.formStepIndex = 4
 							m.textInput.SetValue("")
 							m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+							if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
+								m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
+							}
 							return m, nil
 						}
 						// Advance to next provider step
@@ -252,8 +394,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.formError = err.Error()
 						return m, nil
 					}
-					m.modalMode = ModalNone
+					// Show the success screen instead of closing abruptly.
+					m.connectSuccess = true
 					m.providerSavedInFlow = false
+					m.formStepIndex = 10
 					return m, nil
 				} else if m.modalMode == ModalAddModel {
 					// Form-based modal: validate and advance steps
@@ -402,6 +546,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						i18n.SetLanguage(langCode)
 						m.chatInput.Placeholder = i18n.T("tui.placeholder")
 					} else if m.modalMode == ModalProviders {
+						// "+ Connect a provider" action entry.
+						if m.modalSelectedIdx < len(m.modalItems) &&
+							m.modalItems[m.modalSelectedIdx] == i18n.T("tui.connectAction") {
+							return m, m.executeCommand("/connect")
+						}
 						if m.modalSelectedIdx < len(m.providerModalKeys) {
 							providerName := m.providerModalKeys[m.modalSelectedIdx]
 							m.providerSelectedName = providerName
@@ -577,6 +726,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Reset provider-in-flow state when leaving AddProvider modal
 				if m.modalMode == ModalAddProvider {
 					m.providerSavedInFlow = false
+					m.connectSuccess = false
+					m.providerTypePicker = false
 				}
 				m.modalMode = ModalNone
 			case "s":
@@ -1430,6 +1581,11 @@ func (m *Model) resetModal(mode modalType) {
 	m.providerModalKeys = nil
 	m.providerSelectedName = ""
 	m.providerEditMode = false
+	m.providerTypePicker = false
+	m.providerTypePickerIdx = 0
+	m.providerTypePickerMax = 0
+	m.connectSuccess = false
+	m.providerTypeFromPreset = false
 }
 
 // isListModal returns true if the modal type is a list-selection modal
