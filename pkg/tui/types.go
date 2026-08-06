@@ -205,9 +205,9 @@ type Model struct {
 	// Provider-type picker state (step 2 of /connect). When true, the form
 	// shows a selectable list of known provider presets instead of a raw text
 	// input; up/down + enter pick a preset, "custom" allows a free-form type.
-	providerTypePicker    bool     // true while picking a provider type from the preset list
-	providerTypePickerIdx int      // currently highlighted preset index
-	providerTypePickerMax int      // number of presets shown (including "custom" entry)
+	providerTypePicker    bool // true while picking a provider type from the preset list
+	providerTypePickerIdx int  // currently highlighted preset index
+	providerTypePickerMax int  // number of presets shown (including "custom" entry)
 
 	// Success screen shown after the /connect flow completes. When true, the
 	// form modal renders a confirmation with the provider/model that was saved

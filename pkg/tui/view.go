@@ -591,7 +591,7 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 
 	// ── Provider-type picker: list of known presets ──
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
-		sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickType"))+"\n\n")
+		sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickType")) + "\n\n")
 		max := m.providerTypePickerMax
 		if max <= 0 {
 			max = len(providerPresets) + 1
@@ -687,12 +687,12 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 	if m.modalMode == ModalAddProvider && !m.providerSavedInFlow && !m.providerTypePicker && !m.connectSuccess {
 		switch m.formStepIndex {
 		case 2:
-			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIKeyOptional"))+"\n\n")
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIKeyOptional")) + "\n\n")
 		case 3:
 			if m.providerTypeFromPreset {
-				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBasePrefilled"))+"\n\n")
+				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBasePrefilled")) + "\n\n")
 			} else {
-				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBaseRequired"))+"\n\n")
+				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBaseRequired")) + "\n\n")
 			}
 		}
 	}
