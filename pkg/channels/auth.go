@@ -71,6 +71,16 @@ func (am *AuthManager) SetStore(repo *store.NativeClientRepo) {
 			}
 		}
 	}
+
+	// Reload from SQLite to pick up all clients, including those that
+	// were persisted in a previous server run and are not present in the
+	// JSON file (which is stale when SQLite is the active backend because
+	// saveStoreUnlocked skips the JSON write when am.repo != nil).
+	if err := am.loadStore(); err != nil {
+		logger.WarnCF("native", "SetStore: could not reload store from SQLite, keeping current in-memory store", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
 }
 
 func generateSecret() string {

@@ -676,3 +676,92 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 		t.Error("expected token to be valid after cross-process pairing")
 	}
 }
+
+// TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart simulates the
+// real-world restart scenario where:
+//  1. Server starts, SQLite store is wired via SetStore
+//  2. Client pairs → client exists only in SQLite (JSON is stale)
+//  3. Server restarts → NewAuthManager loads from stale JSON (missing client)
+//  4. SetStore is called again → must reload from SQLite to recover the client
+//
+// Before the fix, SetStore did NOT reload from SQLite, so the client was lost
+// and ValidateToken returned false → 401 → session cleared in WebUI.
+func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// --- First server run: pair a client via SQLite ---
+	dbStore1, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("run 1: failed to open store: %v", err)
+	}
+
+	auth1, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("run 1: failed to create auth manager: %v", err)
+	}
+	auth1.SetStore(dbStore1.NativeClients())
+
+	// Generate PIN and pair — client is saved to SQLite only.
+	pending, err := auth1.GeneratePIN("Desktop")
+	if err != nil {
+		t.Fatalf("run 1: GeneratePIN failed: %v", err)
+	}
+	client, token, _, err := auth1.PairWithPIN(pending.PIN, "Desktop")
+	if err != nil {
+		t.Fatalf("run 1: PairWithPIN failed: %v", err)
+	}
+	if client == nil || token == "" {
+		t.Fatal("run 1: expected valid client and token")
+	}
+
+	// Verify the token works before restart.
+	if _, valid := auth1.ValidateToken(token); !valid {
+		t.Fatal("run 1: token should be valid")
+	}
+
+	// Close the store (simulates process exit).
+	dbStore1.Close()
+
+	// --- Second server run (restart) ---
+	// NewAuthManager loads from the JSON file, which is stale because
+	// saveStoreUnlocked skips the JSON write when SQLite is active.
+	auth2, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("run 2: failed to create auth manager: %v", err)
+	}
+
+	// Before SetStore, the token is NOT valid (client only in SQLite).
+	if _, valid := auth2.ValidateToken(token); valid {
+		t.Fatal("run 2: token should NOT be valid before SetStore (stale JSON)")
+	}
+
+	// Open the same SQLite store and wire it in.
+	dbStore2, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("run 2: failed to open store: %v", err)
+	}
+	defer dbStore2.Close()
+
+	auth2.SetStore(dbStore2.NativeClients())
+
+	// After SetStore, the token MUST be valid — SetStore must reload from SQLite.
+	if _, valid := auth2.ValidateToken(token); !valid {
+		t.Fatal("run 2: token MUST be valid after SetStore reloads from SQLite")
+	}
+
+	// Also verify the client metadata is preserved.
+	clients := auth2.ListClients()
+	if len(clients) != 1 {
+		t.Fatalf("run 2: expected 1 client, got %d", len(clients))
+	}
+	if clients[0].DeviceName != "Desktop" {
+		t.Errorf("run 2: expected device name 'Desktop', got '%s'", clients[0].DeviceName)
+	}
+}
