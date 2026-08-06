@@ -677,7 +677,6 @@ func TestAuthManager_SQLitePairAfterCLIGeneratesPIN(t *testing.T) {
 	}
 }
 
-
 // TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart simulates the
 // real-world restart scenario where:
 //  1. Server starts, SQLite store is wired via SetStore
