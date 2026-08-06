@@ -560,6 +560,70 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 	var sb strings.Builder
 	sb.WriteString(TitleStyle.Render(title) + "\n\n")
 
+	// ── Success screen: show what was saved and how to continue ──
+	if m.connectSuccess {
+		sb.WriteString(SuccessStyle.Render("  "+i18n.T("tui.connectModelSaved")) + "\n\n")
+
+		providerName := ""
+		providerType := ""
+		modelAlias := ""
+		if len(m.formValues) > 0 {
+			providerName = m.formValues[0]
+		}
+		if len(m.formValues) > 1 {
+			providerType = m.formValues[1]
+		}
+		if len(m.formValues) > 4 {
+			modelAlias = m.formValues[4]
+		}
+		sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  %s: %s", i18n.T("tui.connectReviewProvider"), providerName)) + "\n")
+		if providerType != "" {
+			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  Type: %s", providerType)) + "\n")
+		}
+		if modelAlias != "" {
+			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  %s: %s", i18n.T("tui.connectReviewModel"), modelAlias)) + "\n")
+		}
+		sb.WriteString("\n")
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectSuccessHint")))
+		modalView := ModalContainer.Render(sb.String())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	}
+
+	// ── Provider-type picker: list of known presets ──
+	if m.modalMode == ModalAddProvider && m.providerTypePicker {
+		sb.WriteString(ModalItemInactive.Render("  "+i18n.T("tui.connectPickType"))+"\n\n")
+		max := m.providerTypePickerMax
+		if max <= 0 {
+			max = len(providerPresets) + 1
+		}
+		for i := 0; i < max; i++ {
+			if i < len(providerPresets) {
+				p := providerPresets[i]
+				label := p.label
+				if p.apiBase != "" {
+					label += "  ·  " + p.apiBase
+				}
+				if i == m.providerTypePickerIdx {
+					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
+				} else {
+					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
+				}
+			} else {
+				// Last entry: "custom"
+				label := i18n.T("tui.connectCustomType")
+				if i == m.providerTypePickerIdx {
+					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
+				} else {
+					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
+				}
+			}
+		}
+		sb.WriteString("\n")
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectPickerHint")))
+		modalView := ModalContainer.Render(sb.String())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	}
+
 	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 9 && m.providerSavedInFlow
 
 	for i, step := range steps {
@@ -619,13 +683,27 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 		sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
 	}
 
+	// Contextual step hint (optional fields)
+	if m.modalMode == ModalAddProvider && !m.providerSavedInFlow && !m.providerTypePicker && !m.connectSuccess {
+		switch m.formStepIndex {
+		case 2:
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIKeyOptional"))+"\n\n")
+		case 3:
+			if m.providerTypeFromPreset {
+				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBasePrefilled"))+"\n\n")
+			} else {
+				sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.connectAPIBaseRequired"))+"\n\n")
+			}
+		}
+	}
+
 	// Hints
 	if isReviewStep {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectReviewHint")))
 	} else if m.providerSavedInFlow {
-		sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: skip model"))
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectModelStepsHint")))
 	} else {
-		sb.WriteString(HelpStyle.Render("  ENTER: next | ESC: cancel"))
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.formEnter")))
 	}
 
 	modalView := ModalContainer.Render(sb.String())

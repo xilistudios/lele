@@ -193,7 +193,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.formConfirmMode = false
 		providers := m.listProviders()
 		if len(providers) == 0 {
-			m.modalItems = append(m.modalItems, "No providers configured")
+			m.modalItems = append(m.modalItems, i18n.T("tui.noProviders"))
 		} else {
 			for _, name := range providers {
 				models := m.listProviderModels(name)
@@ -202,6 +202,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 				m.providerModalKeys = append(m.providerModalKeys, name)
 			}
 		}
+		m.modalItems = append(m.modalItems, "---")
+		m.modalItems = append(m.modalItems, i18n.T("tui.connectAction"))
 		return nil
 
 	case "/connect":
@@ -213,6 +215,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.formValues = make([]string, 10) // 0-3: provider, 4-8: model, 9: review
 		m.formError = ""
 		m.formConfirmMode = false
+		m.providerTypePicker = false
+		m.providerTypePickerIdx = 0
+		m.providerTypePickerMax = 0
+		m.connectSuccess = false
+		m.providerTypeFromPreset = false
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "Provider name (e.g. openai)"
 		return nil
