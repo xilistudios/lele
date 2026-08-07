@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/agent"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -19,7 +20,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -80,7 +80,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	ti.Width = 40
 	ti.Prompt = " "
 
-	vp := viewport.New(80, 20)
+	vp := newLineViewport(80, 20)
 	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -268,7 +268,7 @@ func (m *Model) shouldSkipViewportUpdate() bool {
 		return false
 	}
 	key := m.getViewportContentKey()
-	if key == m.lastViewportKey && m.renderedBase != "" {
+	if key == m.lastViewportKey && m.renderedBaseValid {
 		return true
 	}
 	m.lastViewportKey = key
@@ -310,6 +310,15 @@ func (m *Model) cleanupStreamingIfComplete() {
 		return
 	}
 	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	m.cleanupStreamingIfCompleteWithHistory(history)
+}
+
+// cleanupStreamingIfCompleteWithHistory is the variant that accepts an already-fetched
+// history slice, avoiding a redundant GetHistoryView call.
+func (m *Model) cleanupStreamingIfCompleteWithHistory(history []providers.Message) {
+	if (m.currentStream == "" && m.currentThinking == "") || m.currentKey == "" {
+		return
+	}
 	var lastAssistantMsg *providers.Message
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
@@ -381,8 +390,9 @@ func (m *Model) clearStreamingState() {
 	// Clear active group display when switching sessions (group maps persist)
 	m.activeGroupID = ""
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
-	m.renderedBase = ""
+	m.renderedBaseValid = false
 	m.renderedBaseKey = ""
+	m.msgRenderCacheLines = nil // clear per-message cache on session switch
 	m.forceGotoBottom = true
 }
 
@@ -412,6 +422,39 @@ func (m *Model) currentSubagentTaskID(chatID string) string {
 	return ""
 }
 
+// subagentsCacheTTL bounds how often the expensive GetSessionSubagents lookup
+// runs. It is called multiple times per frame (sidebar + processing checks)
+// and scans all agents' subagent managers and session storage, taking write
+// locks and possibly loading sessions from disk. Subagent lifecycle events
+// (subagent.result, spawn tool.result, subagent progress) invalidate the
+// cache immediately, so the TTL only throttles redundant lookups within a
+// single burst of frames.
+const subagentsCacheTTL = 500 * time.Millisecond
+
+// getSessionSubagentsCached returns subagent tasks for the given session key,
+// refreshing the underlying (expensive) backend call at most once per
+// subagentsCacheTTL. Call invalidateSubagentsCache() when a subagent event
+// changes the expected result.
+func (m *Model) getSessionSubagentsCached(queryKey string) []channels.SubagentTaskInfo {
+	if m.agentLoop == nil || queryKey == "" {
+		return nil
+	}
+	if m.subagentsCacheKey == queryKey && time.Since(m.subagentsCacheTime) < subagentsCacheTTL {
+		return m.subagentsCacheValue
+	}
+	subagents := m.agentLoop.GetProvidable().GetSessionSubagents(queryKey)
+	m.subagentsCacheKey = queryKey
+	m.subagentsCacheTime = time.Now()
+	m.subagentsCacheValue = subagents
+	return subagents
+}
+
+// invalidateSubagentsCache forces the next getSessionSubagentsCached call to
+// hit the backend. Called on subagent lifecycle events.
+func (m *Model) invalidateSubagentsCache() {
+	m.subagentsCacheKey = ""
+}
+
 func (m *Model) hasRunningSubagents() bool {
 	if m.agentLoop == nil || m.currentKey == "" {
 		return false
@@ -420,7 +463,7 @@ func (m *Model) hasRunningSubagents() bool {
 	if !strings.HasPrefix(subagentQueryKey, "native:") {
 		subagentQueryKey = "native:" + subagentQueryKey
 	}
-	subagents := m.agentLoop.GetProvidable().GetSessionSubagents(subagentQueryKey)
+	subagents := m.getSessionSubagentsCached(subagentQueryKey)
 	for _, sa := range subagents {
 		if sa.Status == "running" {
 			return true
@@ -468,12 +511,22 @@ func (m *Model) getHistoryMessageCount() int {
 		return 0
 	}
 	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+
+	// Cache the O(n) role scan: the count only changes when len(history)
+	// changes, and this is called multiple times per frame.
+	if m.historyCountKey == m.currentKey && m.historyCountLen == len(history) {
+		return m.historyCountValue
+	}
+
 	count := 0
 	for _, msg := range history {
 		if msg.Role == "user" || msg.Role == "assistant" {
 			count++
 		}
 	}
+	m.historyCountKey = m.currentKey
+	m.historyCountLen = len(history)
+	m.historyCountValue = count
 	return count
 }
 

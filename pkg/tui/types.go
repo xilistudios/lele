@@ -6,13 +6,13 @@ import (
 
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/session"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 )
 
@@ -220,7 +220,7 @@ type Model struct {
 	providerTypeFromPreset bool // true when the type was picked from the preset list
 
 	// Sub-components
-	viewport  viewport.Model
+	viewport  lineViewport
 	textInput textinput.Model // single-line input for modal forms (AddProvider, AddModel)
 	chatInput textarea.Model  // multi-line input for chat messages
 
@@ -311,9 +311,17 @@ type Model struct {
 	cachedRenderer      *glamour.TermRenderer
 	cachedRendererWidth int
 
-	// Cached rendered content for completed messages (avoids re-rendering
-	// all messages through glamour on every streaming chunk).
-	renderedBase         string
+	// Per-message render cache. Avoids re-rendering unchanged messages
+	// through glamour when the message count changes (e.g., a new message
+	// arrives). Key: FNV-64a content fingerprint. Value: rendered lines.
+	// Cleared on terminal width change or session switch. NOT cleared on
+	// message count change — that's the whole point.
+	msgRenderCacheLines map[string][]string // lines form (used for fast assembly)
+	msgRenderCacheWidth int                 // width the cache was built for
+
+	// Cached rendered base lines for completed messages. SetBaseLines pushes
+	// these to the viewport. Only rebuilt when messages change or width changes.
+	renderedBaseValid    bool   // whether viewport.baseLines is populated
 	renderedBaseKey      string // session key the cache belongs to
 	renderedBaseMsgCount int    // number of history messages when cache was built
 
@@ -338,6 +346,23 @@ type Model struct {
 	tokenCacheWindow    int       // cached context window
 	tokenCacheCumInput  int       // cached cumulative input tokens
 	tokenCacheCumOutput int       // cached cumulative output tokens
+
+	// Cached history message count (user+assistant). getHistoryMessageCount
+	// runs an O(n) role scan over the full history and is called multiple
+	// times per frame; the result only changes when the number of messages
+	// changes, so it is cached keyed by (sessionKey, len(history)).
+	historyCountKey   string // session key the count belongs to
+	historyCountLen   int    // len(history) when the count was computed
+	historyCountValue int    // cached user+assistant message count
+
+	// Cached session subagents. GetSessionSubagents is expensive (iterates all
+	// agents' subagent managers and session storage, taking write locks and
+	// possibly loading sessions from disk) and is called multiple times per
+	// frame for the sidebar + processing-state checks. It is cached for a short
+	// TTL and invalidated on subagent lifecycle events.
+	subagentsCacheKey   string
+	subagentsCacheTime  time.Time
+	subagentsCacheValue []channels.SubagentTaskInfo
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget

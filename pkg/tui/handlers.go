@@ -1155,6 +1155,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.processing = true
 				m.startTime = time.Now()
 				m.lastDuration = 0
+				m.invalidateSubagentsCache() // subagent status changed
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())
 			case "approval.request":
@@ -1217,6 +1218,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.approvalResult = ""
 				// When a spawn tool completes, clear its subagent progress entry.
 				if msg.msg.Metadata["tool"] == "spawn" {
+					m.invalidateSubagentsCache() // a new subagent task now exists
 					if saKey := msg.msg.Metadata["subagent_session_key"]; saKey != "" {
 						// Extract the task ID suffix (e.g. "subagent-1") from the session key
 						if idx := strings.LastIndex(saKey, ":"); idx >= 0 {
@@ -1376,6 +1378,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// turn, so its local loading state must be cleared explicitly.
 			m.processing = false
 			m.reloadSessions()
+
+			// Schedule a follow-up tick so the view re-renders once the
+			// backend's deferred session-cancel cleanup runs. Without this
+			// tick the loading indicator can stay stuck because
+			// isSessionProcessing() still returns true via the backend check
+			// even after m.processing is false, and no event triggers a
+			// re-render to detect the backend state change.
+			if m.isSessionProcessing() {
+				cmds = append(cmds, m.tickCmd())
+			}
 		}
 
 	case compactResultMsg:
@@ -1409,8 +1421,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinkingRenderedLines = nil
 		m.streamRenderedJoined = ""
 		m.thinkingRenderedJoined = ""
-		m.renderedBase = ""
+		m.renderedBaseValid = false
 		m.renderedBaseKey = ""
+		m.msgRenderCacheLines = nil // width changed — all rendered output is stale
 		m.cachedRenderer = nil
 		m.cachedRendererWidth = 0
 
