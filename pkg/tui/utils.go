@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,4 +246,24 @@ func sortSubagents(subagents []channels.SubagentTaskInfo) {
 		}
 		return subagents[i].TaskID > subagents[j].TaskID
 	})
+}
+
+// messageFingerprint returns a fast FNV-64a hash of the message content for
+// per-message render caching. The hash covers role, content, reasoning content,
+// tool calls, and the target render width. FNV-1a is designed for hash tables
+// and processes ~1 GB/s, so even 100K-char messages hash in microseconds.
+func messageFingerprint(msg providers.Message, width int) string {
+	h := fnv.New64a()
+	h.Write([]byte(msg.Role))
+	h.Write([]byte(msg.Content))
+	h.Write([]byte(msg.ReasoningContent))
+	for _, tc := range msg.ToolCalls {
+		h.Write([]byte(tc.Name))
+		if tc.Function != nil {
+			h.Write([]byte(tc.Function.Name))
+			h.Write([]byte(tc.Function.Arguments))
+		}
+	}
+	_ = binary.Write(h, binary.LittleEndian, uint32(width))
+	return fmt.Sprintf("%016x", h.Sum64())
 }

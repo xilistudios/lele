@@ -20,7 +20,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -81,7 +80,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	ti.Width = 40
 	ti.Prompt = " "
 
-	vp := viewport.New(80, 20)
+	vp := newLineViewport(80, 20)
 	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -269,7 +268,7 @@ func (m *Model) shouldSkipViewportUpdate() bool {
 		return false
 	}
 	key := m.getViewportContentKey()
-	if key == m.lastViewportKey && m.renderedBase != "" {
+	if key == m.lastViewportKey && m.renderedBaseValid {
 		return true
 	}
 	m.lastViewportKey = key
@@ -311,6 +310,15 @@ func (m *Model) cleanupStreamingIfComplete() {
 		return
 	}
 	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	m.cleanupStreamingIfCompleteWithHistory(history)
+}
+
+// cleanupStreamingIfCompleteWithHistory is the variant that accepts an already-fetched
+// history slice, avoiding a redundant GetHistoryView call.
+func (m *Model) cleanupStreamingIfCompleteWithHistory(history []providers.Message) {
+	if (m.currentStream == "" && m.currentThinking == "") || m.currentKey == "" {
+		return
+	}
 	var lastAssistantMsg *providers.Message
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role == "assistant" {
@@ -382,8 +390,9 @@ func (m *Model) clearStreamingState() {
 	// Clear active group display when switching sessions (group maps persist)
 	m.activeGroupID = ""
 	// Invalidate rendered cache to force a full rebuild on next updateViewport
-	m.renderedBase = ""
+	m.renderedBaseValid = false
 	m.renderedBaseKey = ""
+	m.msgRenderCacheLines = nil // clear per-message cache on session switch
 	m.forceGotoBottom = true
 }
 
