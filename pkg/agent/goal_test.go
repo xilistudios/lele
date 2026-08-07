@@ -303,6 +303,7 @@ func goalContainsStr(s, substr string) bool {
 	}
 	return false
 }
+
 // mockSummaryProvider returns a fixed summary for testing.
 type mockSummaryProvider struct {
 	summary string

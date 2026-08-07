@@ -248,6 +248,12 @@ func (lr *llmRunnerImpl) maybeRunGoalContinuation(agent *AgentInstance, opts pro
 func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentInstance, opts processOptions, lastResponse string) {
 	gm := lr.al.goalManager
 
+	// Mark the session as inside a goal loop for the entire duration so
+	// IsSessionProcessing stays true during the judge-evaluation gap between
+	// turns (when the per-session semaphore is released).
+	lr.al.markGoalLoopActive(opts.SessionKey)
+	defer lr.al.clearGoalLoopActive(opts.SessionKey)
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -327,7 +333,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			SkipGoalLoop:    true, // prevent recursion
 		}
 
-		nextResponse, err := lr.runAgentLoop(ctx, agent, contOpts)
+		_, err := lr.runAgentLoop(ctx, agent, contOpts)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -347,7 +353,10 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			return
 		}
 
-		lastResponse = nextResponse
+		// runAgentLoop returns "" when SendResponse=true (it publishes the
+		// outbound itself). Re-fetch the actual last assistant response from
+		// session history so the judge sees the real content.
+		lastResponse = lastAssistantResponse(agent, opts.SessionKey)
 	}
 }
 

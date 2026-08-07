@@ -70,6 +70,13 @@ type AgentLoop struct {
 	// continuation so `/goal clear` and shutdown can stop it promptly.
 	goalStopCtx    context.Context
 	goalStopCancel context.CancelFunc
+
+	// goalLoopSessions tracks sessions that are inside an active goal
+	// continuation loop. IsSessionProcessing consults this so the TUI loading
+	// indicator stays on during the judge-evaluation gap between goal turns
+	// (when the per-session semaphore is temporarily released).
+	goalLoopMu       sync.Mutex
+	goalLoopSessions map[string]struct{}
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -418,6 +425,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		dbStore:         dbStore,
 	}
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
+	loop.goalLoopSessions = make(map[string]struct{})
 	loop.cfgPtr.Store(cfg)
 
 	// Initialize internal components
@@ -686,6 +694,35 @@ func (al *AgentLoop) Stop() {
 			logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
 		}
 	}
+}
+
+// markGoalLoopActive records that the session is inside an active goal
+// continuation loop. While active, IsSessionProcessing reports true even
+// during the judge-evaluation gap between turns, so the TUI loading indicator
+// stays on for the whole autonomous run.
+func (al *AgentLoop) markGoalLoopActive(sessionKey string) {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	if al.goalLoopSessions == nil {
+		al.goalLoopSessions = make(map[string]struct{})
+	}
+	al.goalLoopSessions[sessionKey] = struct{}{}
+}
+
+// clearGoalLoopActive removes the session from the goal-loop tracking set.
+func (al *AgentLoop) clearGoalLoopActive(sessionKey string) {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	delete(al.goalLoopSessions, sessionKey)
+}
+
+// isGoalLoopActive reports whether the session is currently inside a goal
+// continuation loop.
+func (al *AgentLoop) isGoalLoopActive(sessionKey string) bool {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	_, ok := al.goalLoopSessions[sessionKey]
+	return ok
 }
 
 // SetChannelManager sets the channel manager for the agent loop.

@@ -178,10 +178,10 @@ func TestGoalContinuation_BudgetExhaustionMarksBlocked(t *testing.T) {
 	gm.Set("test-session", "Impossible goal", 1)
 
 	firstOpts := processOptions{
-		SessionKey:  "test-session",
-		Channel:     "test-channel",
-		ChatID:      "test-chat-id",
-		UserMessage: "Go",
+		SessionKey:   "test-session",
+		Channel:      "test-channel",
+		ChatID:       "test-chat-id",
+		UserMessage:  "Go",
 		SendResponse: false,
 	}
 	if _, err := runner.runAgentLoop(ctx, agent, firstOpts); err != nil {
@@ -219,5 +219,127 @@ func TestLastAssistantResponse(t *testing.T) {
 	sm2 := session.NewSessionManager(tmpDir)
 	if got := lastAssistantResponse(&AgentInstance{Sessions: sm2}, "other"); got != "" {
 		t.Errorf("lastAssistantResponse = %q, want empty", got)
+	}
+}
+
+// signalingGoalJudge blocks on JudgeGoal until released, reporting the
+// observed goal-loop state via a channel so the test can assert that the
+// session is marked as goal-loop-active while the judge is evaluating.
+type signalingGoalJudge struct {
+	evalStarted chan struct{} // closed when JudgeGoal is entered
+	release     chan struct{} // JudgeGoal blocks until this is closed
+	observed    chan bool     // receives al.isGoalLoopActive result mid-eval
+	al          *AgentLoop
+	sessionKey  string
+}
+
+func (j *signalingGoalJudge) JudgeGoal(_ context.Context, _, _, _ string) (bool, string, error) {
+	close(j.evalStarted)
+	// Report whether the session is tracked as goal-loop-active while we are
+	// inside the evaluation gap (semaphore released between turns).
+	j.observed <- j.al.isGoalLoopActive(j.sessionKey)
+	<-j.release
+	return true, "DONE", nil
+}
+
+// TestGoalContinuation_SessionMarkedActiveDuringJudgeEval is a regression
+// test for the TUI loading indicator dropping out during the goal loop. The
+// per-session semaphore is released between continuation turns, so
+// IsSessionProcessing would return false during the judge-evaluation gap.
+// runGoalContinuation must mark the session as goal-loop-active for the
+// whole loop so the TUI loading state stays on, and clear it when done.
+func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "goal-loop-active-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+				Provider:          "test-provider",
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+	gm := NewGoalManager(filepath.Join(tmpDir, "goals"))
+	judge := &signalingGoalJudge{
+		evalStarted: make(chan struct{}),
+		release:     make(chan struct{}),
+		observed:    make(chan bool, 1),
+		al:          al,
+		sessionKey:  "test-session",
+	}
+	gm.SetJudge(judge)
+	al.goalManager = gm
+	al.goalStopCtx, al.goalStopCancel = context.WithCancel(context.Background())
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "Working on the goal...",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
+
+	gm.Set("test-session", "Fix all lint errors", 10)
+
+	// Run the continuation loop in a goroutine; it will block inside the
+	// judge's JudgeGoal call.
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		runner.runGoalContinuation(context.Background(), agent, processOptions{
+			SessionKey: "test-session",
+			Channel:    "test-channel",
+			ChatID:     "test-chat-id",
+		}, "Working on the goal...")
+	}()
+
+	// Wait for the judge evaluation to start.
+	select {
+	case <-judge.evalStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("judge evaluation never started")
+	}
+
+	// While inside the judge gap, the session must be marked active.
+	select {
+	case active := <-judge.observed:
+		if !active {
+			t.Error("session not marked goal-loop-active during judge evaluation")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for judge observation")
+	}
+	if !al.isGoalLoopActive("test-session") {
+		t.Error("isGoalLoopActive = false during judge evaluation, want true")
+	}
+
+	// Release the judge (returns DONE) and wait for the loop to finish.
+	close(judge.release)
+	select {
+	case <-loopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goal continuation loop did not finish after judge DONE")
+	}
+
+	// After the loop, the session must no longer be marked active.
+	if al.isGoalLoopActive("test-session") {
+		t.Error("session still marked goal-loop-active after loop finished")
+	}
+
+	// Goal must be marked done.
+	goal := gm.Get("test-session")
+	if goal == nil || goal.Status != GoalDone {
+		t.Fatalf("expected goal DONE, got: %+v", goal)
 	}
 }
