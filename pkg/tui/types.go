@@ -6,6 +6,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/session"
@@ -338,6 +339,23 @@ type Model struct {
 	tokenCacheWindow    int       // cached context window
 	tokenCacheCumInput  int       // cached cumulative input tokens
 	tokenCacheCumOutput int       // cached cumulative output tokens
+
+	// Cached history message count (user+assistant). getHistoryMessageCount
+	// runs an O(n) role scan over the full history and is called multiple
+	// times per frame; the result only changes when the number of messages
+	// changes, so it is cached keyed by (sessionKey, len(history)).
+	historyCountKey   string // session key the count belongs to
+	historyCountLen   int    // len(history) when the count was computed
+	historyCountValue int    // cached user+assistant message count
+
+	// Cached session subagents. GetSessionSubagents is expensive (iterates all
+	// agents' subagent managers and session storage, taking write locks and
+	// possibly loading sessions from disk) and is called multiple times per
+	// frame for the sidebar + processing-state checks. It is cached for a short
+	// TTL and invalidated on subagent lifecycle events.
+	subagentsCacheKey   string
+	subagentsCacheTime  time.Time
+	subagentsCacheValue []channels.SubagentTaskInfo
 
 	// Subagent click targets in sidebar — tracks Y positions for mouse clicks
 	subagentClickTargets []subagentClickTarget

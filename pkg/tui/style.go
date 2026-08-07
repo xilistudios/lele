@@ -29,6 +29,12 @@ var (
 	StatusCompleted = lipgloss.NewStyle().Foreground(SecondaryColor)
 	StatusFailed    = lipgloss.NewStyle().Foreground(PrimaryColor)
 
+	// BouncingDot is the styled dot used by the loading animation. It is a
+	// package-level style because the animation runs ~10 times per second and
+	// allocating a new lipgloss style per dot per frame was measurable overhead.
+	BouncingDot     = lipgloss.NewStyle().Foreground(SecondaryColor)
+	bouncingDotChar = BouncingDot.Render("●")
+
 	// RightSidebar styles for the right column.
 	RightSidebar = lipgloss.NewStyle().
 			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
