@@ -29,35 +29,33 @@ export function ChatHistoryPage() {
   } = useAppLogicContext()
 
   const [activeKind, setActiveKind] = useState<KindTab>('all')
-  const [systemSessions, setSystemSessions] = useState<ChatSession[]>([])
+  const [allFetchedSessions, setAllFetchedSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [total, setTotal] = useState(0)
 
-  // Fetch all persisted sessions (including heartbeat/cron/subagent) once on
-  // mount. Context `sessions` (live chat sessions) take precedence when keys
-  // overlap so metadata stays fresh. The backend paginates; loop until the
-  // server reports no more pages so old chats are not silently dropped.
+  const PAGE_SIZE = 200 // backend max
+
+  // Fetch the first page of persisted sessions on mount or when kind filter changes.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setLoadError(null)
-    const fetchAll = async () => {
-      const collected: ChatSession[] = []
-      let offset = 0
-      const pageSize = 200
-      for (;;) {
-        const data = await api.sessions(undefined, undefined, true, {
-          offset,
-          limit: pageSize,
-        })
-        if (cancelled) return
-        collected.push(...(data?.sessions ?? []))
-        if (!data?.has_more || !data?.sessions?.length) break
-        offset += data.sessions.length
-      }
-      setSystemSessions(collected)
-    }
-    fetchAll()
+    setAllFetchedSessions([])
+    setHasMore(false)
+    setTotal(0)
+    const kindParam = activeKind === 'all' ? undefined : activeKind
+    api
+      .sessions(undefined, kindParam, true, { offset: 0, limit: PAGE_SIZE })
+      .then((data) => {
+        if (!cancelled) {
+          setAllFetchedSessions(data?.sessions ?? [])
+          setHasMore(data?.has_more ?? false)
+          setTotal(data?.total ?? 0)
+        }
+      })
       .catch((err) => {
         if (!cancelled) setLoadError((err as Error).message)
       })
@@ -67,24 +65,40 @@ export function ChatHistoryPage() {
     return () => {
       cancelled = true
     }
-  }, [api])
+  }, [api, activeKind])
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const kindParam = activeKind === 'all' ? undefined : activeKind
+      const data = await api.sessions(undefined, kindParam, true, {
+        offset: allFetchedSessions.length,
+        limit: PAGE_SIZE,
+      })
+      if (data?.sessions?.length) {
+        setAllFetchedSessions((prev) => [...prev, ...data.sessions])
+      }
+      setHasMore(data?.has_more ?? false)
+      setTotal(data?.total ?? 0)
+    } catch (err) {
+      setLoadError((err as Error).message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [api, activeKind, allFetchedSessions.length, hasMore, loadingMore])
 
   const allSessions = useMemo(() => {
     const byKey = new Map<string, ChatSession>()
     for (const s of sessions) byKey.set(s.key, s)
-    for (const s of systemSessions) {
+    for (const s of allFetchedSessions) {
       if (!byKey.has(s.key)) byKey.set(s.key, s)
     }
     return Array.from(byKey.values())
-  }, [sessions, systemSessions])
-
-  const kindFiltered = useMemo(() => {
-    if (activeKind === 'all') return allSessions
-    return allSessions.filter((s) => (s.kind ?? 'chat') === activeKind)
-  }, [allSessions, activeKind])
+  }, [sessions, allFetchedSessions])
 
   const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } = useChatFilters(
-    kindFiltered,
+    allSessions,
     { includeEmpty: true },
   )
 
@@ -140,7 +154,7 @@ export function ChatHistoryPage() {
                 {t('chat.allChats')}
               </h1>
               <p className="text-sm text-text-tertiary truncate">
-                {t('chat.totalSessions', { count: allSessions.length })}
+                {t('chat.totalSessions', { count: total || allSessions.length })}
               </p>
             </div>
           </div>
@@ -195,6 +209,28 @@ export function ChatHistoryPage() {
                 onDelete={handleDelete}
                 onClear={handleClear}
               />
+              {hasMore && (
+                <div className="flex justify-center py-6">
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="rounded-lg border border-border bg-background-secondary px-5 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+                  >
+                    {loadingMore ? (
+                      <span className="flex items-center gap-2">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+                        {t('chat.loadingMore')}
+                      </span>
+                    ) : (
+                      t('chat.loadMore', {
+                        loaded: filteredSessions.length,
+                        total: total || filteredSessions.length,
+                      })
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -109,7 +109,9 @@
       "subagent": "Subagente"
     },
     "totalSessions": "{{count}} sessões no total",
-    "loadError": "Falha ao carregar sessões: {{error}}"
+    "loadError": "Falha ao carregar sessões: {{error}}",
+    "loadMore": "Carregar mais ({{loaded}} de {{total}})",
+    "loadingMore": "Carregando…"
   },
   "connection": {
     "connected": "Conectado",
