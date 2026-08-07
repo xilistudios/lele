@@ -263,6 +263,20 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.compactFeedback = ""
 		m.goalFeedback = m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
 		m.updateViewport()
+
+		// Setting a new goal (as opposed to status/pause/resume/clear) kicks
+		// off an autonomous agent turn via the message bus. Mark the session
+		// as processing and start the tick chain so the loading indicator
+		// appears and stays in sync with the backend.
+		if isGoalSetCommand(parts[1:]) {
+			m.processing = true
+			m.startTime = time.Now()
+			m.elapsedTime = 0
+			m.currentStream = ""
+			m.currentThinking = ""
+			m.currentToolAction = ""
+			return m.tickCmd()
+		}
 		return nil
 
 	case "/quit":
@@ -271,4 +285,20 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		os.Exit(0)
 	}
 	return nil
+}
+
+// isGoalSetCommand reports whether the /goal arguments set a new goal
+// (free-form goal text) as opposed to invoking a subcommand
+// (status/pause/resume/clear) or showing usage. Only a new goal triggers
+// the autonomous kickoff turn, so only then should the TUI enter the
+// processing state.
+func isGoalSetCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "status", "pause", "resume", "clear":
+		return false
+	}
+	return true
 }
