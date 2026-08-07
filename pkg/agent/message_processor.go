@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -128,7 +129,22 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		MessageID:       messageID,
 	})
 	if err != nil {
-		return "", err
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			// Context cancelled (user stop, shutdown) — do not publish a
+			// response; the cancellation was already acknowledged upstream.
+			return "", err
+		}
+		// Return a user-facing error message instead of a bare error.
+		// With SendResponse=true, runAgentLoop publishes the final response
+		// directly to the bus. When it fails, nothing is published, which
+		// leaves channel-level UI (e.g. Telegram typing indicator + placeholder)
+		// stuck. Returning a non-empty string here lets Run() publish the
+		// error response through the normal path, which stops the indicator.
+		errMsg := fmt.Sprintf("❌ Error processing message: %v", err)
+		if len(errMsg) > 4000 {
+			errMsg = errMsg[:3997] + "..."
+		}
+		return errMsg, nil
 	}
 	if ephemeralNotice == "" {
 		return response, nil
