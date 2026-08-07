@@ -2413,3 +2413,58 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 		t.Error("Expected tool.result event for compact, not found")
 	}
 }
+// TestRunAgentLoop_SkipSessionSemaphore verifies that a runAgentLoop call with
+// SkipSessionSemaphore=true does not block even when the per-session semaphore
+// is already held by an outer call. This guards against the latent deadlock in
+// the goal continuation loop, which runs synchronously inside an outer
+// runAgentLoop call.
+func TestRunAgentLoop_SkipSessionSemaphore(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{
+			Content:   "ok",
+			ToolCalls: []providers.ToolCall{},
+		},
+	}
+
+	sessionKey := "goal-session"
+	opts := processOptions{
+		SessionKey:   sessionKey,
+		Channel:      "native",
+		ChatID:       sessionKey,
+		UserMessage:  "kicked off",
+		SendResponse: false,
+	}
+
+	// Pre-acquire the per-session semaphore, simulating an outer runAgentLoop
+	// call that is currently processing this session (and would then run the
+	// goal continuation).
+	sem, _ := al.sessionProcessing.LoadOrStore(sessionKey, make(chan struct{}, 1))
+	semCh := sem.(chan struct{})
+	semCh <- struct{}{}
+	defer func() { <-semCh }()
+
+	// Without SkipSessionSemaphore, this call would block forever trying to
+	// re-acquire the held semaphore. With it, it must complete immediately.
+	done := make(chan struct{})
+	go func() {
+		skipOpts := opts
+		skipOpts.SkipSessionSemaphore = true
+		_, err := runner.runAgentLoop(context.Background(), agent, skipOpts)
+		if err != nil {
+			t.Errorf("runAgentLoop with SkipSessionSemaphore returned error: %v", err)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success: the call completed without deadlocking.
+	case <-time.After(3 * time.Second):
+		t.Fatal("runAgentLoop with SkipSessionSemaphore deadlocked (blocked on held semaphore)")
+	}
+}

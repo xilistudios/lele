@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -260,7 +261,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			return nil
 		}
 		m.compactFeedback = ""
-		m.goalFeedback = m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
+		m.goalFeedback = m.agentLoop.HandleGoalCommandWithContext(context.Background(), "native", m.currentKey, m.currentKey, parts[1:])
 		m.updateViewport()
 		return nil
 

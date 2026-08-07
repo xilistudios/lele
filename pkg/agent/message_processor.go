@@ -369,7 +369,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/goal":
-		response := mp.al.commandHandler.(*commandHandlerImpl).handleGoalCommand(sessionKey, args)
+		response := mp.al.commandHandler.(*commandHandlerImpl).handleGoalCommand(ctx, originChannel, originChatID, sessionKey, args)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,

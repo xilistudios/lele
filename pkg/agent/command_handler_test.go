@@ -2435,3 +2435,69 @@ func TestAgentCommand_CleanSession(t *testing.T) {
 		t.Errorf("Expected 4 messages in old main session, got %d", historyCountOld)
 	}
 }
+// TestHandleGoalCommand_Kickoff verifies that setting a new goal via /goal
+// publishes an inbound kickoff message. This is the fix for the bug where
+// /goal set the goal but never triggered an agent turn, so the autonomous
+// goal loop never started (the continuation only runs at the end of a normal
+// runAgentLoop turn).
+func TestHandleGoalCommand_Kickoff(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "goal-kickoff-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+
+	msgBus := bus.NewMessageBus()
+	al := NewAgentLoop(cfg, msgBus)
+	ch := newCommandHandler(al)
+
+	goalText := "Fix all lint errors in src/"
+	result := ch.handleGoalCommand(
+		context.Background(),
+		"native",
+		"chat-goal-1",
+		"session-goal-1",
+		[]string{goalText},
+	)
+	if !strings.Contains(result, "Objetivo establecido") && !strings.Contains(result, "🎯") {
+		t.Fatalf("Expected goal-set confirmation, got: %s", result)
+	}
+
+	// Verify the goal was persisted.
+	goal := al.GoalManager().Get("session-goal-1")
+	if goal == nil {
+		t.Fatal("expected goal to be set after /goal")
+	}
+	if goal.Text != goalText {
+		t.Errorf("goal text = %q, want %q", goal.Text, goalText)
+	}
+
+	// Verify a kickoff inbound message was published so a normal turn runs.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	msg, ok := msgBus.ConsumeInbound(ctx)
+	if !ok {
+		t.Fatal("expected a kickoff inbound message to be published")
+	}
+	if msg.SessionKey != "session-goal-1" {
+		t.Errorf("kickoff session key = %q, want %q", msg.SessionKey, "session-goal-1")
+	}
+	if msg.Channel != "native" {
+		t.Errorf("kickoff channel = %q, want native", msg.Channel)
+	}
+	if !strings.Contains(msg.Content, goalText) {
+		t.Errorf("kickoff content should mention the goal, got: %s", msg.Content)
+	}
+}

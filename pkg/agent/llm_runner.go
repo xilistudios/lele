@@ -57,7 +57,7 @@ func newLLMRunner(al *AgentLoop) *llmRunnerImpl {
 
 // runAgentLoop is the core message processing logic.
 func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error) {
-	if opts.SessionKey != "" {
+	if opts.SessionKey != "" && !opts.SkipSessionSemaphore {
 		sem, _ := lr.al.sessionProcessing.LoadOrStore(opts.SessionKey, make(chan struct{}, 1))
 		semCh := sem.(chan struct{})
 		select {
@@ -283,15 +283,16 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 
 		// Run another agent turn with the continuation prompt.
 		contOpts := processOptions{
-			SessionKey:      opts.SessionKey,
-			Channel:         opts.Channel,
-			ChatID:          opts.ChatID,
-			UserMessage:     continuationPrompt,
-			DefaultResponse: "Continuing to work on the goal...",
-			EnableSummary:   true,
-			SendResponse:    true,
-			NoHistory:       false,
-			SkipGoalLoop:    true, // prevent recursion
+			SessionKey:           opts.SessionKey,
+			Channel:              opts.Channel,
+			ChatID:               opts.ChatID,
+			UserMessage:          continuationPrompt,
+			DefaultResponse:      "Continuing to work on the goal...",
+			EnableSummary:        true,
+			SendResponse:         true,
+			NoHistory:            false,
+			SkipGoalLoop:         true, // prevent recursion
+			SkipSessionSemaphore: true, // we already hold the per-session semaphore
 		}
 
 		nextResponse, err := lr.runAgentLoop(ctx, agent, contOpts)

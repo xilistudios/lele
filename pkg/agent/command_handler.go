@@ -211,7 +211,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		}
 		return ch.handleGroupCommand(ctx, msg, callerID, strings.Join(args, " ")), true
 	case "/goal":
-		return ch.handleGoalCommand(sessionKey, args), true
+		return ch.handleGoalCommand(ctx, msg.Channel, msg.ChatID, sessionKey, args), true
 	}
 
 	return "", false
@@ -813,7 +813,7 @@ func (ch *commandHandlerImpl) handleGroupStartProfile(ctx context.Context, msg b
 //	/goal pause        - Pause the goal loop
 //	/goal resume       - Resume a paused goal
 //	/goal clear        - Remove the goal
-func (ch *commandHandlerImpl) handleGoalCommand(sessionKey string, args []string) string {
+func (ch *commandHandlerImpl) handleGoalCommand(ctx context.Context, channel, chatID, sessionKey string, args []string) string {
 	gm := ch.al.GoalManager()
 	if gm == nil {
 		return "❌ Goal manager not initialized."
@@ -886,7 +886,47 @@ func (ch *commandHandlerImpl) handleGoalCommand(sessionKey string, args []string
 		}
 
 		goal := gm.Set(sessionKey, goalText, maxTurns)
+
+		// Kick off an agent turn so the autonomous goal loop starts immediately.
+		// Without this, the goal would be persisted but never acted upon because
+		// runGoalContinuation only fires at the end of a normal runAgentLoop turn.
+		ch.kickoffGoalTurn(ctx, "", channel, chatID, sessionKey, goalText)
+
 		return fmt.Sprintf("🎯 Objetivo establecido:\n%s\n\nEl agente continuará trabajando automáticamente hacia este objetivo después de cada turno.\nCualquier mensaje tuyo interrumpirá el loop. Usa /goal clear para cancelarlo.",
 			goal.FormatStatus())
 	}
+}
+
+// kickoffGoalTurn publishes an inbound message that triggers a fresh normal
+// agent turn for the session (and the originating channel/chat). The goal
+// continuation loop then runs at the end of that turn, making the autonomous
+// goal loop start immediately after /goal.
+//
+// senderID is optional; when empty it defaults to "tui" so the kickoff is
+// treated as a regular inbound user message.
+func (ch *commandHandlerImpl) kickoffGoalTurn(ctx context.Context, senderID, channel, chatID, sessionKey, goalText string) {
+	// Route the kickoff back through the originating message's channel/chat so
+	// the result is delivered to the same place the /goal was issued (TUI,
+	// WebUI, Telegram, etc.).
+	if channel == "" {
+		channel = "native"
+	}
+	if senderID == "" {
+		senderID = "tui"
+	}
+
+	prompt := fmt.Sprintf(
+		"[GOAL KICKOFF]\n"+
+			"A new persistent goal has just been set for this session:\n\n🎯 %s\n\n"+
+			"Begin working on this goal now. Take the first concrete step. Do NOT ask for confirmation.",
+		goalText,
+	)
+
+	ch.al.bus.PublishInbound(bus.InboundMessage{
+		Channel:    channel,
+		SenderID:   senderID,
+		ChatID:     chatID,
+		Content:    prompt,
+		SessionKey: sessionKey,
+	})
 }

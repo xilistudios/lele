@@ -286,6 +286,11 @@ type processOptions struct {
 	MessageID       string
 	SkipUserMessage bool
 	SkipGoalLoop    bool // true when called from goal continuation (prevents recursion)
+	// SkipSessionSemaphore bypasses the per-session processing semaphore.
+	// This is required for goal continuation turns, which run synchronously
+	// inside an outer runAgentLoop call that already holds the semaphore.
+	// Without it, the recursive call would deadlock trying to re-acquire it.
+	SkipSessionSemaphore bool
 }
 
 // SummarizeStats contains statistics about a summarization operation.
@@ -525,7 +530,15 @@ func (al *AgentLoop) GoalManager() *GoalManager {
 // HandleGoalCommand processes a /goal command for the given session key.
 // This is exposed for the TUI, which dispatches slash commands locally
 // without routing them through the message bus.
+// channel and chatID are used to route the goal kickoff turn back to the
+// originating location (defaults to native/tui when empty).
 func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string {
+	return al.HandleGoalCommandWithContext(context.Background(), "", "", sessionKey, args)
+}
+
+// HandleGoalCommandWithContext processes a /goal command with explicit
+// originating channel/chat context for routing the kickoff turn.
+func (al *AgentLoop) HandleGoalCommandWithContext(ctx context.Context, channel, chatID, sessionKey string, args []string) string {
 	if al.commandHandler == nil {
 		return "❌ Command handler not initialized."
 	}
@@ -533,7 +546,10 @@ func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string 
 	if !ok {
 		return "❌ Command handler not available."
 	}
-	return impl.handleGoalCommand(sessionKey, args)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return impl.handleGoalCommand(ctx, channel, chatID, sessionKey, args)
 }
 
 // KeyringService returns the encrypted secret storage service (may be nil if
