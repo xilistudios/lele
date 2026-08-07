@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### WebUI
+- Thinking blocks are now independent per turn — removed the logic that consolidated `reasoningContent` from all iterations of a multi-tool-call turn into one giant thinking block on the last assistant. Each assistant message now keeps its own separate "Thinking…" block, so a long multi-step turn no longer grows a single oversized block.
+
 ## [0.6.3] - 2026-08-06
 
 ### Added
