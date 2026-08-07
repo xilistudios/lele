@@ -64,6 +64,12 @@ type AgentLoop struct {
 	dbStore            *store.Store         // SQLite state store (nil if not available)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
+
+	// goalStopCtx is the parent context for goal continuation loops. Cancelling
+	// it (via goalStopCancel, called on Stop) aborts any in-flight /goal
+	// continuation so `/goal clear` and shutdown can stop it promptly.
+	goalStopCtx    context.Context
+	goalStopCancel context.CancelFunc
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -411,6 +417,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		keyringService:  keyringSvc,
 		dbStore:         dbStore,
 	}
+	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
 	loop.cfgPtr.Store(cfg)
 
 	// Initialize internal components
@@ -533,7 +540,7 @@ func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string 
 	if !ok {
 		return "❌ Command handler not available."
 	}
-	return impl.handleGoalCommand(sessionKey, args)
+	return impl.handleGoalCommand(context.Background(), "native", sessionKey, sessionKey, args)
 }
 
 // KeyringService returns the encrypted secret storage service (may be nil if
@@ -643,6 +650,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 // Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	if al.goalStopCancel != nil {
+		al.goalStopCancel()
+	}
 	if al.stopSessionCleanup != nil {
 		al.stopSessionCleanup()
 	}

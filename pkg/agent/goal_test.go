@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/xilistudios/lele/pkg/providers"
 )
 
 func TestGoalManager_SetAndGet(t *testing.T) {
@@ -228,7 +226,7 @@ type mockGoalJudge struct {
 	done bool
 }
 
-func (m *mockGoalJudge) JudgeGoal(_ context.Context, _, _ string, _ []providers.Message) (bool, string, error) {
+func (m *mockGoalJudge) JudgeGoal(_ context.Context, _, _, _ string) (bool, string, error) {
 	if m.done {
 		return true, "DONE", nil
 	}
@@ -244,7 +242,7 @@ func TestGoalManager_SetJudge(t *testing.T) {
 		t.Fatal("judge not set")
 	}
 
-	isDone, answer, err := gm.judge.JudgeGoal(context.Background(), "test", "response", nil)
+	isDone, answer, err := gm.judge.JudgeGoal(context.Background(), "key", "test", "response")
 	if err != nil {
 		t.Fatalf("JudgeGoal error: %v", err)
 	}

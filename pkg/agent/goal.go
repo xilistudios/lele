@@ -57,9 +57,11 @@ type GoalManager struct {
 
 // GoalJudge evaluates whether a goal has been achieved after each turn.
 type GoalJudge interface {
-	// JudgeGoal evaluates the agent's last response against the goal text.
-	// Returns true if the goal is achieved, false if more work is needed.
-	JudgeGoal(ctx context.Context, goalText string, lastResponse string, history []providers.Message) (bool, string, error)
+	// JudgeGoal evaluates the agent's progress toward the goal using the
+	// session's conversation summary (fetched by the judge) and the latest
+	// agent response. Returns true if the goal is achieved, false if more
+	// work is needed.
+	JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error)
 }
 
 // NewGoalManager creates a new goal manager.
@@ -481,7 +483,7 @@ Rules:
 - If the agent is stuck or going in circles, say CONTINUE (the budget system handles exhaustion).
 - Do NOT explain your reasoning. Only output DONE or CONTINUE.`
 
-func (j *llmGoalJudge) JudgeGoal(ctx context.Context, goalText string, lastResponse string, history []providers.Message) (bool, string, error) {
+func (j *llmGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error) {
 	if j.provider == nil {
 		return false, "", fmt.Errorf("goal judge: no provider configured")
 	}

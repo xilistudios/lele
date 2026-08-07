@@ -130,6 +130,14 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	if err != nil {
 		return "", err
 	}
+	// Caller-side goal continuation trigger. runAgentLoop has returned and
+	// released the per-session semaphore, so the continuation loop can run its
+	// recursive turns safely. Only triggered on the main processMessage path.
+	mp.al.llmRunner.maybeRunGoalContinuation(agent, processOptions{
+		SessionKey: sessionKey,
+		Channel:    msg.Channel,
+		ChatID:     msg.ChatID,
+	}, lastAssistantResponse(agent, sessionKey))
 	if ephemeralNotice == "" {
 		return response, nil
 	}
@@ -369,7 +377,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/goal":
-		response := mp.al.commandHandler.(*commandHandlerImpl).handleGoalCommand(sessionKey, args)
+		response := mp.al.commandHandler.(*commandHandlerImpl).handleGoalCommand(ctx, originChannel, originChatID, sessionKey, args)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,
