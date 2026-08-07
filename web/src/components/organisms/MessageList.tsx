@@ -54,6 +54,11 @@ export function MessageList() {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [atBottom, setAtBottom] = useState(true)
   const prevSessionKeyRef = useRef(currentSessionKey)
+  // Track the scroll element so we can attach a reliable scroll listener
+  // for triggering loadMore (Virtuoso's startReached can miss fires after
+  // items are prepended due to scroll-position adjustment).
+  const scrollerRef = useRef<HTMLElement | null>(null)
+  const loadMoreScrollAttached = useRef(false)
 
   // Handle session change — reset tracking
   useEffect(() => {
@@ -214,6 +219,56 @@ export function MessageList() {
     virtuosoRef.current?.scrollToIndex({ index: renderItems.length - 1, behavior: 'smooth' })
   }, [renderItems.length])
 
+  // Use refs for the scroll handler so it always reads latest state
+  // without needing to reattach the listener on every render.
+  const loadMoreRef = useRef(loadMore)
+  loadMoreRef.current = loadMore
+  const hasMoreRef = useRef(hasMore)
+  hasMoreRef.current = hasMore
+  const isLoadingMoreScrollRef = useRef(isLoadingMore)
+  isLoadingMoreScrollRef.current = isLoadingMore
+
+  // Stable scroll handler — reads from refs to avoid reattachment
+  const handleLoadMoreScroll = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el || !hasMoreRef.current || isLoadingMoreScrollRef.current) return
+    // Trigger when within 80px of the top (only for HTMLElement, not Window)
+    if (el instanceof HTMLElement && el.scrollTop < 80) {
+      loadMoreRef.current()
+    }
+  }, [])
+
+  // Attach a scroll listener to Virtuoso's internal scroll container.
+  // This is more reliable than Virtuoso's startReached for detecting
+  // scroll-to-top after items have been prepended (loadMore).
+  const scrollerRefCallback = useCallback(
+    (el: HTMLElement | Window | null) => {
+      // Clean up previous listener
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+      // Only track HTMLElement (not Window) for scrollTop-based detection
+      const htmlEl = el instanceof HTMLElement ? el : null
+      scrollerRef.current = htmlEl
+      if (htmlEl && !loadMoreScrollAttached.current) {
+        htmlEl.addEventListener('scroll', handleLoadMoreScroll, { passive: true })
+        loadMoreScrollAttached.current = true
+      }
+    },
+    [handleLoadMoreScroll],
+  )
+
+  // Clean up scroll listener on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+    }
+  }, [handleLoadMoreScroll])
+
   // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
     const modeTheme = getModeTheme(chatMode)
@@ -246,6 +301,7 @@ export function MessageList() {
         atBottomStateChange={setAtBottom}
         atBottomThreshold={300}
         startReached={handleStartReached}
+        scrollerRef={scrollerRefCallback}
         initialTopMostItemIndex={Math.max(0, renderItems.length - 1)}
         components={{
           Header: () => (
