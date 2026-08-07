@@ -143,6 +143,7 @@ type Config struct {
 	Logs      LogsConfig       `json:"logs"`
 	Keyring   KeyringConfig    `json:"keyring"`
 	Updates   UpdatesConfig    `json:"updates"`
+	Goal      GoalConfig       `json:"goal"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	mu        sync.RWMutex
 }
@@ -916,6 +917,23 @@ type ToolsConfig struct {
 	Exec ExecConfig      `json:"exec"`
 }
 
+// GoalConfig configures the /goal system.
+type GoalConfig struct {
+	// Judge controls how goal completion is evaluated.
+	// "inline" (default) uses a lightweight LLM judge call.
+	// "subagent" runs a separate subagent evaluator.
+	Judge GoalJudgeConfig `json:"judge"`
+}
+
+// GoalJudgeConfig configures the goal completion judge.
+type GoalJudgeConfig struct {
+	// Mode is "inline" (default) or "subagent".
+	Mode string `json:"mode" env:"LELE_GOAL_JUDGE_MODE"`
+	// Agent is the agent ID used when Mode is "subagent". Empty means the
+	// default agent.
+	Agent string `json:"agent,omitempty" env:"LELE_GOAL_JUDGE_AGENT"`
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Agents: AgentsConfig{
@@ -1097,6 +1115,11 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Channel: "stable",
 			Repo:    "",
+		},
+		Goal: GoalConfig{
+			Judge: GoalJudgeConfig{
+				Mode: "inline", // default: lightweight inline LLM judge
+			},
 		},
 	}
 }

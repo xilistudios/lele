@@ -469,14 +469,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	if dbStore != nil {
 		goalMgr.SetStore(dbStore.Goals())
 	}
-	// Wire up the LLM-based goal judge using the default agent's provider.
-	if defaultAgent != nil && defaultAgent.Provider != nil {
-		judgeModel := defaultAgent.Model
-		if judgeModel == "" {
-			judgeModel = cfg.Agents.Defaults.Model
-		}
-		goalMgr.SetJudge(NewLLMGoalJudge(defaultAgent.Provider, judgeModel))
-	}
 	loop.goalManager = goalMgr
 
 	// Register shared tools and create tool coordinator with subagents
@@ -495,6 +487,38 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	}
 
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers)
+
+	// Wire up the goal judge. The default is an inline LLM judge that evaluates
+	// progress from the session's conversation summary plus the latest response.
+	// When config goal.judge.mode = "subagent", a separate subagent evaluator is
+	// used instead (decoupled from the main agent loop).
+	if defaultAgent != nil && defaultAgent.Provider != nil {
+		judgeModel := defaultAgent.Model
+		if judgeModel == "" {
+			judgeModel = cfg.Agents.Defaults.Model
+		}
+		if cfg.Goal.Judge.Mode == "subagent" {
+			// Resolve the evaluator agent's SubagentManager. Fall back to the
+			// default agent's manager.
+			evaluatorAgentID := cfg.Goal.Judge.Agent
+			sm := subagents[evaluatorAgentID]
+			if sm == nil {
+				sm = subagents[defaultAgent.ID]
+			}
+			if sm != nil {
+				goalMgr.SetJudge(NewSubagentGoalJudge(sm, defaultAgent.Sessions, evaluatorAgentID, "goal", "", 60*time.Second))
+			} else {
+				// No subagent manager available; fall back to inline.
+				logger.WarnCF("agent", "goal.judge.mode=subagent but no subagent manager found; falling back to inline judge", map[string]interface{}{
+					"agent": evaluatorAgentID,
+				})
+				goalMgr.SetJudge(NewSummaryGoalJudge(defaultAgent.Provider, judgeModel, defaultAgent.Sessions))
+			}
+		} else {
+			goalMgr.SetJudge(NewSummaryGoalJudge(defaultAgent.Provider, judgeModel, defaultAgent.Sessions))
+		}
+	}
+
 	loop.providable = newAgentProvidable(loop)
 	loop.stopSessionCleanup = stopCleanup
 

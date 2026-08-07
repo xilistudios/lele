@@ -2,9 +2,15 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 func TestGoalManager_SetAndGet(t *testing.T) {
@@ -296,4 +302,184 @@ func goalContainsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+// mockSummaryProvider returns a fixed summary for testing.
+type mockSummaryProvider struct {
+	summary string
+}
+
+func (m *mockSummaryProvider) GetSummary(_ string) string {
+	return m.summary
+}
+
+func TestSummaryGoalJudge_FetchesSummaryAndEvaluates(t *testing.T) {
+	provider := &mockProvider{mockResponse: "DONE"}
+	summary := &mockSummaryProvider{summary: "The agent refactored the auth module and added tests."}
+	judge := NewSummaryGoalJudge(provider, "mock-model", summary)
+
+	isDone, answer, err := judge.JudgeGoal(context.Background(), "skey", "Refactor auth module", "Added tests and verified build.")
+	if err != nil {
+		t.Fatalf("JudgeGoal error: %v", err)
+	}
+	if !isDone {
+		t.Error("expected isDone=true when provider returns DONE")
+	}
+	if answer != "DONE" {
+		t.Errorf("answer = %q, want DONE", answer)
+	}
+}
+
+func TestSummaryGoalJudge_Continue(t *testing.T) {
+	provider := &mockProvider{mockResponse: "CONTINUE"}
+	judge := NewSummaryGoalJudge(provider, "mock-model", &mockSummaryProvider{summary: "Started the refactor, not finished."})
+
+	isDone, _, err := judge.JudgeGoal(context.Background(), "skey", "Refactor auth module", "Began work.")
+	if err != nil {
+		t.Fatalf("JudgeGoal error: %v", err)
+	}
+	if isDone {
+		t.Error("expected isDone=false when provider returns CONTINUE")
+	}
+}
+
+func TestSummaryGoalJudge_NoProviderError(t *testing.T) {
+	judge := NewSummaryGoalJudge(nil, "mock-model", &mockSummaryProvider{summary: "x"})
+	_, _, err := judge.JudgeGoal(context.Background(), "skey", "goal", "resp")
+	if err == nil {
+		t.Fatal("expected error when no provider configured")
+	}
+}
+
+func TestSummaryGoalJudge_ProviderError(t *testing.T) {
+	provider := &mockProvider{shouldError: true}
+	judge := NewSummaryGoalJudge(provider, "mock-model", &mockSummaryProvider{summary: "x"})
+	_, _, err := judge.JudgeGoal(context.Background(), "skey", "goal", "resp")
+	if err == nil {
+		t.Fatal("expected error when provider returns an error")
+	}
+}
+
+func TestBuildGoalJudgePrompt(t *testing.T) {
+	prompt := buildGoalJudgePrompt("Fix the bug", "The agent reproduced the bug and identified the cause.", "Applied the fix.")
+	for _, want := range []string{"GOAL: Fix the bug", "CONVERSATION SUMMARY", "The agent reproduced the bug", "APPLIED", "Reply DONE or CONTINUE"} {
+		if !goalContains(strings.ToUpper(prompt), strings.ToUpper(want)) {
+			t.Errorf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildGoalJudgePrompt_NoSummary(t *testing.T) {
+	prompt := buildGoalJudgePrompt("Fix the bug", "", "Applied the fix.")
+	if !goalContains(prompt, "No conversation summary available yet.") {
+		t.Errorf("prompt should note missing summary:\n%s", prompt)
+	}
+}
+
+func TestBuildGoalJudgePrompt_TruncatesLongResponse(t *testing.T) {
+	longResp := strings.Repeat("x", 5000)
+	prompt := buildGoalJudgePrompt("Goal", "summary", longResp)
+	if goalContains(prompt, strings.Repeat("x", 4001)) {
+		t.Error("prompt should truncate long responses")
+	}
+	if !goalContains(prompt, "[truncated]") {
+		t.Error("prompt should mark truncated response")
+	}
+}
+
+// mockSubagentRunner simulates a SubagentManager for the subagent goal judge.
+type mockSubagentRunner struct {
+	mu       sync.Mutex
+	tasks    map[string]*tools.SubagentTask
+	result   string
+	status   string
+	spawnErr error
+}
+
+func newMockSubagentRunner() *mockSubagentRunner {
+	return &mockSubagentRunner{
+		tasks:  make(map[string]*tools.SubagentTask),
+		status: tools.SubagentStatusCompleted,
+	}
+}
+
+func (m *mockSubagentRunner) SpawnWithOptions(_ context.Context, task, label, agentID, originChannel, originChatID string, _ tools.AsyncCallback, opts tools.SpawnOptions) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.spawnErr != nil {
+		return "", m.spawnErr
+	}
+	id := fmt.Sprintf("goalsub-%d", len(m.tasks)+1)
+	t := &tools.SubagentTask{
+		ID:            id,
+		Task:          task,
+		Label:         label,
+		AgentID:       agentID,
+		OriginChannel: originChannel,
+		OriginChatID:  originChatID,
+		Status:        m.status,
+		Result:        m.result,
+		MaxRetries:    opts.MaxRetries,
+	}
+	t.InitDoneChannel()
+	// Signal completion immediately.
+	t.SignalDone()
+	m.tasks[id] = t
+	return id, nil
+}
+
+func (m *mockSubagentRunner) GetTask(taskID string) (*tools.SubagentTask, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[taskID]
+	return t, ok
+}
+
+func TestSubagentGoalJudge_Done(t *testing.T) {
+	runner := newMockSubagentRunner()
+	runner.result = "DONE"
+	summary := &mockSummaryProvider{summary: "The agent finished the refactor and all tests pass."}
+	judge := NewSubagentGoalJudge(runner, summary, "", "goal", "skey", 5*time.Second)
+
+	isDone, answer, err := judge.JudgeGoal(context.Background(), "skey", "Refactor auth module", "Done, tests pass.")
+	if err != nil {
+		t.Fatalf("JudgeGoal error: %v", err)
+	}
+	if !isDone {
+		t.Error("expected isDone=true when subagent returns DONE")
+	}
+	if answer != "DONE" {
+		t.Errorf("answer = %q, want DONE", answer)
+	}
+}
+
+func TestSubagentGoalJudge_Continue(t *testing.T) {
+	runner := newMockSubagentRunner()
+	runner.result = "CONTINUE"
+	judge := NewSubagentGoalJudge(runner, &mockSummaryProvider{summary: "Started work."}, "", "goal", "skey", 5*time.Second)
+
+	isDone, _, err := judge.JudgeGoal(context.Background(), "skey", "Refactor auth module", "Began work.")
+	if err != nil {
+		t.Fatalf("JudgeGoal error: %v", err)
+	}
+	if isDone {
+		t.Error("expected isDone=false when subagent returns CONTINUE")
+	}
+}
+
+func TestSubagentGoalJudge_NoRunner(t *testing.T) {
+	judge := NewSubagentGoalJudge(nil, &mockSummaryProvider{summary: "x"}, "", "goal", "skey", 5*time.Second)
+	_, _, err := judge.JudgeGoal(context.Background(), "skey", "goal", "resp")
+	if err == nil {
+		t.Fatal("expected error when no runner configured")
+	}
+}
+
+func TestSubagentGoalJudge_SpawnError(t *testing.T) {
+	runner := newMockSubagentRunner()
+	runner.spawnErr = fmt.Errorf("maximum concurrent subagents reached")
+	judge := NewSubagentGoalJudge(runner, &mockSummaryProvider{summary: "x"}, "", "goal", "skey", 5*time.Second)
+	_, _, err := judge.JudgeGoal(context.Background(), "skey", "goal", "resp")
+	if err == nil {
+		t.Fatal("expected error when spawn fails")
+	}
 }

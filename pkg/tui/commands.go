@@ -254,10 +254,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 
 	case "/goal":
+		// If we're on the welcome screen with no session, create one now —
+		// the same behavior as submitMessage and submitGroupStart.
 		if m.currentKey == "" {
-			m.goalFeedback = "❌ No hay sesión activa. Empieza un chat primero (/new o envía un mensaje)."
-			m.updateViewport()
-			return nil
+			m.createNewChat()
+			m.showWelcome = false
 		}
 		m.compactFeedback = ""
 		m.goalFeedback = m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
