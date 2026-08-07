@@ -610,10 +610,11 @@ describe('Message ordering fixes', () => {
     })
   })
 
-  describe('Thinking block merge: consecutive assistant reasoningContent consolidated', () => {
-    test('merges reasoningContent from multiple assistants in the same turn into the last one', () => {
+  describe('Thinking blocks: each assistant keeps its own reasoningContent', () => {
+    test('keeps reasoningContent independent per assistant in a multi-iteration turn', () => {
       // Scenario: Multi-iteration tool-use turn. Each iteration streamed its
-      // own reasoningContent. All should be merged into the last assistant.
+      // own reasoningContent. Each assistant keeps its OWN thinking block —
+      // they must NOT be consolidated into a single giant block.
       const baseMessages: ChatMessage[] = [
         createTestMessage('u1', 'user', 'Analyze this code'),
         createTestMessage('a1', 'assistant', 'Let me read the file', {
@@ -641,18 +642,17 @@ describe('Message ordering fixes', () => {
 
       const assistants = result.filter((m) => m.role === 'assistant')
 
-      // First two assistants should have reasoningContent cleared
-      expect(assistants[0].reasoningContent).toBeUndefined()
-      expect(assistants[1].reasoningContent).toBeUndefined()
-
-      // Last assistant should have all reasoning merged
-      expect(assistants[2].reasoningContent).toBe(
-        'I need to read the file first\n\nThe file looks correct, let me verify with a test\n\nTests pass, the code is correct',
+      // Each assistant keeps its own reasoningContent untouched
+      expect(assistants[0].reasoningContent).toBe('I need to read the file first')
+      expect(assistants[1].reasoningContent).toBe(
+        'The file looks correct, let me verify with a test',
       )
+      expect(assistants[2].reasoningContent).toBe('Tests pass, the code is correct')
     })
 
-    test('does NOT merge reasoningContent across user messages', () => {
-      // Reasoning from different turns (separated by user messages) should stay separate.
+    test('keeps reasoningContent independent across turns', () => {
+      // Reasoning from different turns (separated by user messages) stays
+      // separate on each of its own assistants.
       const baseMessages: ChatMessage[] = [
         createTestMessage('u1', 'user', 'First question'),
         createTestMessage('a1', 'assistant', 'Step 1', {
@@ -676,18 +676,16 @@ describe('Message ordering fixes', () => {
 
       const assistants = result.filter((m) => m.role === 'assistant')
 
-      // Turn 1: a1's reasoning cleared, a2 gets merged turn-1 reasoning
-      expect(assistants[0].reasoningContent).toBeUndefined()
-      expect(assistants[1].reasoningContent).toBe(
-        'Thinking about turn 1\n\nMore thinking for turn 1',
-      )
+      // Turn 1 assistants keep their own reasoning
+      expect(assistants[0].reasoningContent).toBe('Thinking about turn 1')
+      expect(assistants[1].reasoningContent).toBe('More thinking for turn 1')
 
-      // Turn 2: a3 keeps its own reasoning (only 1 assistant in this turn)
+      // Turn 2 assistant keeps its own reasoning
       expect(assistants[2].reasoningContent).toBe('Thinking about turn 2')
     })
 
     test('single assistant with reasoningContent is left untouched', () => {
-      // When there's only one assistant with reasoning in a turn, no merge needed.
+      // One assistant with reasoning in a turn keeps its own reasoning.
       const baseMessages: ChatMessage[] = [
         createTestMessage('u1', 'user', 'Hello'),
         createTestMessage('a1', 'assistant', 'Hi!', {
@@ -701,8 +699,8 @@ describe('Message ordering fixes', () => {
       expect(assistants[0].reasoningContent).toBe('Simple greeting')
     })
 
-    test('assistant without reasoningContent is skipped during merge', () => {
-      // Some iterations may not have reasoning (e.g. tool-call-only responses).
+    test('assistant without reasoningContent stays undefined', () => {
+      // Iterations without reasoning stay without reasoning.
       const baseMessages: ChatMessage[] = [
         createTestMessage('u1', 'user', 'Do something'),
         createTestMessage('a1', 'assistant', '', {
@@ -730,17 +728,15 @@ describe('Message ordering fixes', () => {
 
       const assistants = result.filter((m) => m.role === 'assistant')
 
-      // a1 had reasoning but only 2 assistants total had reasoning (a1, a3)
-      // so merge should happen: a1 cleared, a3 gets both
-      expect(assistants[0].reasoningContent).toBeUndefined()
-      expect(assistants[1].reasoningContent).toBeUndefined() // had no reasoning, stays undefined
-      expect(assistants[2].reasoningContent).toBe(
-        'Initial analysis\n\nFinal reasoning',
-      )
+      // Each keeps its own: a1 has reasoning, a2 does not, a3 has reasoning
+      expect(assistants[0].reasoningContent).toBe('Initial analysis')
+      expect(assistants[1].reasoningContent).toBeUndefined()
+      expect(assistants[2].reasoningContent).toBe('Final reasoning')
     })
 
-    test('merges reasoningContent during active streaming', () => {
+    test('keeps reasoningContent independent during active streaming', () => {
       // Simulates live streaming state where iterations are still arriving.
+      // Each streaming iteration keeps its own thinking block.
       const baseMessages: ChatMessage[] = []
 
       const streamingMessages: ChatMessage[] = [
@@ -764,12 +760,9 @@ describe('Message ordering fixes', () => {
 
       const assistants = result.filter((m) => m.role === 'assistant')
 
-      // a1's reasoning should be cleared (merged into a2)
-      expect(assistants[0].reasoningContent).toBeUndefined()
-      // a2 should have the merged reasoning
-      expect(assistants[1].reasoningContent).toBe(
-        'Let me start by reading the file\n\nAfter reading the file, I can see...',
-      )
+      // Each assistant keeps its own reasoning
+      expect(assistants[0].reasoningContent).toBe('Let me start by reading the file')
+      expect(assistants[1].reasoningContent).toBe('After reading the file, I can see...')
     })
   })
 })
