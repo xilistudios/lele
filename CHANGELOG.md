@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-07
+
 ### Fixed
 
+#### TUI
+- Fix slow streaming on long conversations — replaced the stock `bubbles/viewport.Model` with a lightweight `lineViewport` optimized for large chat histories. Eliminates the O(2n) concat+Split pipeline, caches per-message renders (FNV-64a fingerprint), and pulls only visible lines per frame. Lipgloss styles cached in `View()` to avoid per-frame GC pressure.
+
 #### WebUI
-- Thinking blocks are now independent per turn — removed the logic that consolidated `reasoningContent` from all iterations of a multi-tool-call turn into one giant thinking block on the last assistant. Each assistant message now keeps its own separate "Thinking…" block, so a long multi-step turn no longer grows a single oversized block.
+- Independent thinking blocks per turn — removed the logic that consolidated `reasoningContent` from all iterations of a multi-tool-call turn into one giant thinking block on the last assistant. Each assistant message now keeps its own separate "Thinking…" block, so a long multi-step turn no longer grows a single oversized block.
+- Load More pagination on `/chats` page — replaces the eager fetch-all loop with page-by-page loading (200 per page) and a "Load more" button showing progress. Backend `kind` filter used instead of client-side filtering.
+- Session lost on service restart when SQLite is enabled — fixed a race where the WebUI session key was not persisted across server restarts.
+- `compaction_model` not saved when no other session fields set — the compaction model config is now correctly persisted even when it's the only field being updated.
+
+### Performance
+
+#### TUI
+- Cache per-frame history count and subagent lookups — `getHistoryMessageCount()` cached by (sessionKey, len(history)), `GetSessionSubagents()` cached with 500ms TTL, and `getBouncingDots()` pre-rendered at package init. Reduces redundant computation from 2–3×/frame to near-zero.
 
 ## [0.6.3] - 2026-08-06
 
