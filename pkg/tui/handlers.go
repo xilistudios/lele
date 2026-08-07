@@ -1378,6 +1378,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// turn, so its local loading state must be cleared explicitly.
 			m.processing = false
 			m.reloadSessions()
+
+			// Schedule a follow-up tick so the view re-renders once the
+			// backend's deferred session-cancel cleanup runs. Without this
+			// tick the loading indicator can stay stuck because
+			// isSessionProcessing() still returns true via the backend check
+			// even after m.processing is false, and no event triggers a
+			// re-render to detect the backend state change.
+			if m.isSessionProcessing() {
+				cmds = append(cmds, m.tickCmd())
+			}
 		}
 
 	case compactResultMsg:
@@ -1411,8 +1421,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinkingRenderedLines = nil
 		m.streamRenderedJoined = ""
 		m.thinkingRenderedJoined = ""
-		m.renderedBase = ""
+		m.renderedBaseValid = false
 		m.renderedBaseKey = ""
+		m.msgRenderCacheLines = nil // width changed — all rendered output is stale
 		m.cachedRenderer = nil
 		m.cachedRendererWidth = 0
 

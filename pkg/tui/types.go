@@ -13,7 +13,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 )
 
@@ -221,7 +220,7 @@ type Model struct {
 	providerTypeFromPreset bool // true when the type was picked from the preset list
 
 	// Sub-components
-	viewport  viewport.Model
+	viewport  lineViewport
 	textInput textinput.Model // single-line input for modal forms (AddProvider, AddModel)
 	chatInput textarea.Model  // multi-line input for chat messages
 
@@ -312,9 +311,17 @@ type Model struct {
 	cachedRenderer      *glamour.TermRenderer
 	cachedRendererWidth int
 
-	// Cached rendered content for completed messages (avoids re-rendering
-	// all messages through glamour on every streaming chunk).
-	renderedBase         string
+	// Per-message render cache. Avoids re-rendering unchanged messages
+	// through glamour when the message count changes (e.g., a new message
+	// arrives). Key: FNV-64a content fingerprint. Value: rendered lines.
+	// Cleared on terminal width change or session switch. NOT cleared on
+	// message count change — that's the whole point.
+	msgRenderCacheLines map[string][]string     // lines form (used for fast assembly)
+	msgRenderCacheWidth int                     // width the cache was built for
+
+	// Cached rendered base lines for completed messages. SetBaseLines pushes
+	// these to the viewport. Only rebuilt when messages change or width changes.
+	renderedBaseValid    bool   // whether viewport.baseLines is populated
 	renderedBaseKey      string // session key the cache belongs to
 	renderedBaseMsgCount int    // number of history messages when cache was built
 

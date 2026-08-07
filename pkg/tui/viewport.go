@@ -56,53 +56,79 @@ func isCompactionSummary(msg providers.Message) bool {
 func (m *Model) updateViewport() {
 	if m.currentKey == "" {
 		m.viewport.SetContent("")
-		m.renderedBase = ""
+		m.renderedBaseValid = false
 		m.renderedBaseKey = ""
 		return
 	}
 
+	// Fetch history ONCE for this entire render cycle. GetHistoryView returns
+	// a read-only reference (no copy), so this is cheap — but calling it once
+	// instead of 4+ times avoids redundant mutex acquisitions.
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+
 	// Clear streaming state if the assistant message is fully saved in history
-	m.cleanupStreamingIfComplete()
+	m.cleanupStreamingIfCompleteWithHistory(history)
+
+	// Compute message count from the already-fetched history (avoids another
+	// GetHistoryView call inside getHistoryMessageCount).
+	historyMsgCount := countHistoryMessages(history)
 
 	// Determine if the rendered base cache is still valid.
-	// Invalidated when session key, viewport width, or message count changes.
-	// During streaming the history doesn't grow (the assistant message is
-	// tracked via currentStream), so the cache can stay valid.
-	historyMsgCount := m.getHistoryMessageCount()
-	cacheKey := fmt.Sprintf("%s:%d:%d", m.currentKey, m.viewport.Width, historyMsgCount)
-	cacheValid := m.renderedBaseKey == cacheKey
+	// Invalidated when session key or viewport width changes.
+	// NOT invalidated on message count change — the per-message render cache
+	// handles incremental updates, so only new/changed messages are re-rendered.
+	widthCacheKey := fmt.Sprintf("%s:%d", m.currentKey, m.viewport.Width)
+	cacheValid := m.renderedBaseKey == widthCacheKey && m.renderedBaseValid
 
 	if !cacheValid {
-		// Rebuild the base content from session history
-		m.renderedBase = m.buildRenderedHistory()
-		m.renderedBaseKey = cacheKey
-		m.renderedBaseMsgCount = historyMsgCount
-	}
-
-	// Fast path: nothing changed since the last render (same session, same
-	// width, same message count, no streaming/feedback state). Reuse the
-	// already-rendered viewport content — this avoids re-running glamour
-	// markdown rendering and wrapText over the whole history on every frame
-	// of the loading animation, mouse move, or cursor blink. This is the
-	// dominant cost for long (>400k token) conversations.
-	hasStreaming := m.processing && (m.currentStream != "" || m.currentThinking != "" || m.currentToolAction != "")
-	if cacheValid && !hasStreaming &&
-		m.pendingUserMessage == "" && m.pendingApprovalID == "" && m.approvalResult == "" &&
-		m.activeGroupID == "" && m.compactFeedback == "" && m.goalFeedback == "" {
-		if !m.selecting {
-			return
+		// Width or session changed — clear per-message render cache
+		if m.msgRenderCacheWidth != m.viewport.Width {
+			m.msgRenderCacheLines = nil
+			m.msgRenderCacheLines = nil
+			m.msgRenderCacheWidth = m.viewport.Width
 		}
-		// While selecting we need the updated content for highlight; the base
-		// is cached so only the overlay pass runs.
 	}
 
-	var sb strings.Builder
-	sb.WriteString(m.renderedBase)
-	lastRole := m.lastHistoryRole()
+	// Rebuild base if cache is invalid OR message count changed
+	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount {
+		baseLines := m.buildRenderedHistoryLines(history)
+		m.renderedBaseKey = widthCacheKey
+		m.renderedBaseMsgCount = historyMsgCount
+		m.renderedBaseValid = len(baseLines) > 0
+		// Push the new base lines to the viewport — O(1) pointer swap.
+		// No more strings.Split on a giant concatenated string.
+		m.viewport.SetBaseLines(baseLines)
+	}
+
+	// ------------------------------------------------------------------
+	// FAST PATH: if there's no overlay content to show, skip the overlay
+	// build entirely. On idle frames (no streaming, no pending messages,
+	// no approvals, no feedback), this returns immediately after the base
+	// check above — O(1) per frame.
+	// ------------------------------------------------------------------
+	hasStreaming := m.processing && (m.currentStream != "" || m.currentThinking != "" || m.currentToolAction != "")
+	hasOverlay := hasStreaming ||
+		m.pendingUserMessage != "" ||
+		m.pendingApprovalID != "" || m.approvalResult != "" ||
+		m.activeGroupID != "" ||
+		m.compactFeedback != "" || m.goalFeedback != ""
+
+	if !hasOverlay && !m.selecting {
+		// Nothing ephemeral to show — ensure overlay is cleared and return.
+		if len(m.viewport.overlayLines) > 0 {
+			m.viewport.SetOverlayLines(nil)
+		}
+		return
+	}
+
+	// Build the ephemeral overlay (streaming, approvals, feedback).
+	// This is small — typically a few lines. We always rebuild it because
+	// it's cheap and avoids complex dirty-tracking.
+	var overlaySb strings.Builder
+	lastRole := lastHistoryRoleFromHistory(history)
 
 	// Show pending user message immediately (before agent responds)
 	if m.pendingUserMessage != "" {
-		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 		// Search from the end since the message is most likely recent
 		alreadyInHistory := false
 		for i := len(history) - 1; i >= 0; i-- {
@@ -117,8 +143,8 @@ func (m *Model) updateViewport() {
 			}
 		}
 		if !alreadyInHistory {
-			sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-			sb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
+			overlaySb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+			overlaySb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
 			lastRole = "user"
 		} else {
 			m.pendingUserMessage = ""
@@ -134,75 +160,107 @@ func (m *Model) updateViewport() {
 			if ok && agentInfo.Name != "" {
 				agentName = agentInfo.Name
 			}
-			sb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
+			overlaySb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
 		}
 
 		if m.currentThinking != "" {
 			rendered := m.getRenderedThinking(m.viewport.Width - 8)
-			sb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
+			overlaySb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
 		}
 		if m.currentStream != "" {
 			rendered := m.getRenderedStream(m.viewport.Width - 6)
-			sb.WriteString(rendered + "\n")
+			overlaySb.WriteString(rendered + "\n")
 		}
 		// Show the currently executing tool call (cleared when stream resumes or completes)
 		if m.currentToolAction != "" {
-			sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(m.currentToolAction) + "\n")
+			overlaySb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(m.currentToolAction) + "\n")
 		}
-		sb.WriteString("\n")
+		overlaySb.WriteString("\n")
 	}
 
 	// Show pending command approval prompt
 	if m.pendingApprovalID != "" {
-		sb.WriteString(m.renderApprovalPrompt())
+		overlaySb.WriteString(m.renderApprovalPrompt())
 	}
 
 	// Show brief approval result feedback (after user decision, before tool result)
 	if m.approvalResult != "" {
-		sb.WriteString(m.approvalResult + "\n\n")
+		overlaySb.WriteString(m.approvalResult + "\n\n")
 	}
 
 	// Show group chat turns (Mixture of Agents) when a group is active
 	if m.activeGroupID != "" {
 		if turns, ok := m.groupTranscripts[m.activeGroupID]; ok && len(turns) > 0 {
-			sb.WriteString(m.renderGroupTurns(turns, m.viewport.Width))
-			sb.WriteString("\n")
+			overlaySb.WriteString(m.renderGroupTurns(turns, m.viewport.Width))
+			overlaySb.WriteString("\n")
 		}
 	}
 
 	// Show compaction result feedback
 	if m.compactFeedback != "" {
-		sb.WriteString(m.compactFeedback + "\n\n")
+		overlaySb.WriteString(m.compactFeedback + "\n\n")
 	}
 
 	// Show /goal command feedback
 	if m.goalFeedback != "" {
-		sb.WriteString(m.goalFeedback + "\n\n")
+		overlaySb.WriteString(m.goalFeedback + "\n\n")
 	}
 
-	// Check if viewport is at bottom BEFORE updating content.
+	// Check if viewport is at bottom BEFORE updating overlay.
 	// This preserves the user's scroll position when they've scrolled up.
 	// forceGotoBottom overrides this when switching sessions or creating a new chat.
 	wasAtBottom := m.viewport.AtBottom() || m.forceGotoBottom
 	m.forceGotoBottom = false
 
-	m.viewport.SetContent(sb.String())
-	if wasAtBottom && sb.Len() > 0 && m.viewport.Height > 0 {
+	// Push overlay lines to the viewport. SetOverlayLines is O(overlay_lines)
+	// and does NOT trigger the expensive base-line Split/findLongestLineWidth.
+	overlayContent := overlaySb.String()
+	if overlayContent != "" {
+		overlayLines := strings.Split(strings.ReplaceAll(overlayContent, "\r\n", "\n"), "\n")
+		m.viewport.SetOverlayLines(overlayLines)
+	} else {
+		m.viewport.SetOverlayLines(nil)
+	}
+
+	if wasAtBottom && m.viewport.totalLines() > 0 && m.viewport.Height > 0 {
 		m.viewport.GotoBottom()
 	}
 }
 
-// buildRenderedHistory renders completed messages from session history.
-// For long conversations, it only renders the most recent maxRenderedMessages
-// messages to bound memory usage. The result is cached in renderedBase.
-func (m *Model) buildRenderedHistory() string {
-	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+// countHistoryMessages counts user+assistant messages in the given history slice.
+// This is the pure-function version of getHistoryMessageCount that accepts the
+// history directly, avoiding a redundant GetHistoryView call.
+func countHistoryMessages(history []providers.Message) int {
+	count := 0
+	for _, msg := range history {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			count++
+		}
+	}
+	return count
+}
 
+// lastHistoryRoleFromHistory returns the role of the last non-system message
+// from an already-fetched history slice.
+func lastHistoryRoleFromHistory(history []providers.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role != "system" {
+			return history[i].Role
+		}
+	}
+	return ""
+}
+
+// buildRenderedHistoryLines renders completed messages from the given
+// history slice using a per-message render cache. Returns []string lines
+// directly instead of a concatenated string — this avoids the O(n) string
+// concatenation + strings.Split roundtrip that the old string-based approach
+// required. Only new/changed messages go through glamour (O(k) where k = new).
+func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string {
 	totalMsgs := len(history)
 
 	// Virtualized rendering: only render the most recent N messages
-	// when the conversation is very long. This prevents the renderedBase
-	// string from growing unbounded with ANSI-heavy content.
+	// when the conversation is very long.
 	startIdx := 0
 	if m.maxRenderedMessages > 0 && totalMsgs > m.maxRenderedMessages {
 		startIdx = totalMsgs - m.maxRenderedMessages
@@ -211,9 +269,18 @@ func (m *Model) buildRenderedHistory() string {
 	m.renderedMsgStartIdx = startIdx
 	m.renderedMsgEndIdx = totalMsgs
 
-	var sb strings.Builder
+	// Lazily initialize per-message render cache (stores []string lines)
+	if m.msgRenderCacheLines == nil {
+		m.msgRenderCacheLines = make(map[string][]string, m.maxRenderedMessages)
+		m.msgRenderCacheWidth = m.viewport.Width
+	}
+
+	// Pre-allocate result with a reasonable capacity estimate.
+	result := make([]string, 0, min(totalMsgs-startIdx, m.maxRenderedMessages)*8)
+
 	if startIdx > 0 {
-		sb.WriteString(CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)\n\n", startIdx)))
+		header := CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)", startIdx))
+		result = append(result, header, "")
 	}
 
 	lastRole := ""
@@ -231,9 +298,19 @@ func (m *Model) buildRenderedHistory() string {
 			continue
 		}
 
+		// Compute fingerprint for per-message cache
+		fp := messageFingerprint(msg, m.viewport.Width)
+		if cachedLines, ok := m.msgRenderCacheLines[fp]; ok {
+			result = append(result, cachedLines...)
+			lastRole = msg.Role
+			continue
+		}
+
+		// Cache miss — render the message and store in cache
+		var msgSb strings.Builder
 		if msg.Role == "user" {
-			sb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-			sb.WriteString(UserMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
+			msgSb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+			msgSb.WriteString(UserMessageStyle.Render(wrapText(msg.Content, m.viewport.Width-4)) + "\n\n")
 		} else if msg.Role == "assistant" {
 			// Only show agent name when coming from user (start of a turn)
 			if lastRole == "" || lastRole == "user" || lastRole == "system" {
@@ -243,17 +320,17 @@ func (m *Model) buildRenderedHistory() string {
 				if ok && agentInfo.Name != "" {
 					agentName = agentInfo.Name
 				}
-				sb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
+				msgSb.WriteString(AssistantRoleStyle.Render(agentName) + "\n")
 			}
 
 			if msg.ReasoningContent != "" {
 				rendered := m.renderMarkdown(msg.ReasoningContent, m.viewport.Width-8)
-				sb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
+				msgSb.WriteString(ThinkingContentStyle.Render(rendered) + "\n")
 			}
 
 			if msg.Content != "" {
 				rendered := m.renderMarkdown(msg.Content, m.viewport.Width-6)
-				sb.WriteString(rendered + "\n")
+				msgSb.WriteString(rendered + "\n")
 			}
 
 			// Render tool calls from assistant message (compact: tool_name: params)
@@ -267,18 +344,32 @@ func (m *Model) buildRenderedHistory() string {
 				if args != "" {
 					line += ": " + args
 				}
-				sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
+				msgSb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
 			}
-			sb.WriteString("\n")
+			msgSb.WriteString("\n")
 		} else if msg.Role == "tool" {
 			summary := truncateToolResult(msg.Content, 150)
-			sb.WriteString(ToolResultLabel.Render("  → ") + ToolResultBox.Render(summary) + "\n")
+			msgSb.WriteString(ToolResultLabel.Render("  → ") + ToolResultBox.Render(summary) + "\n")
 		}
 		// Skip system messages — they are internal prompts, not user-facing
+
+		rendered := msgSb.String()
+		// Split into lines once and cache the lines. This avoids re-splitting
+		// on every frame when the viewport needs them.
+		msgLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
+		m.msgRenderCacheLines[fp] = msgLines   // cache lines for fast assembly
+		result = append(result, msgLines...)
 		lastRole = msg.Role
 	}
 
-	return sb.String()
+	return result
+}
+
+// buildRenderedHistory is the legacy entry point that fetches history internally.
+// Kept for callers that don't have the history slice available.
+func (m *Model) buildRenderedHistory() []string {
+	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
+	return m.buildRenderedHistoryLines(history)
 }
 
 // renderApprovalPrompt builds the inline approval prompt shown in the viewport
