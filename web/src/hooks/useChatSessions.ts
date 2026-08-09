@@ -82,7 +82,12 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
   const refreshSessions = useCallback(async () => {
     if (!token || !clientId) return null
 
-    const result = await fetchAllSessions(api)
+    // include_system=true merges every persisted session (including system
+    // sessions like heartbeat/cron/subagents) from the session manager. The
+    // native client only tracks a handful of session keys, so without this
+    // the sidebar would silently drop the vast majority of chats (e.g. show
+    // ~30 of 300). The /chats page already uses include_system=true.
+    const result = await fetchAllSessions(api, undefined, undefined, true)
     const defaultSessionKey = buildDefaultSessionKey(clientId)
     const fallbackSessions =
       result.length > 0
