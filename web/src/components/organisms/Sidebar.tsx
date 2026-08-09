@@ -68,7 +68,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
   const sortedSessions = useMemo(() => {
     const visible = sessions.filter(
       (s) =>
-        !s.key.startsWith('subagent:') &&
+        s.kind !== 'subagent' &&
         (s.message_count > 0 || s.key === selectedKey) &&
         (s.mode || 'agent') === chatMode,
     )

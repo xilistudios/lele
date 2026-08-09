@@ -78,6 +78,55 @@ describe('useChatSessions', () => {
     expect(result.current.sessions.length).toBe(allSessions.length)
   })
 
+  test('refreshSessions requests include_system=true so all persisted chats appear', async () => {
+    // Backend tracks only a handful of client session keys (~30), but the
+    // session manager persists hundreds. include_system=true is what merges
+    // the persisted sessions into the response; without it the sidebar would
+    // silently drop most chats.
+    const allSessions = Array.from({ length: 300 }, (_, i) =>
+      makeSession(`session-${i}`, new Date(2026, 0, 1, 0, 0, i).toISOString()),
+    )
+
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')) {
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
+      }
+      const parsed = new URL(url)
+      const offset = Number(parsed.searchParams.get('offset') ?? '0')
+      const limit = Number(parsed.searchParams.get('limit') ?? '50')
+      const page = allSessions.slice(offset, offset + limit)
+      return new Response(JSON.stringify(mockSessionsResponse(page, allSessions.length)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('token', 'refresh')
+
+    const { result } = renderHook(() => useChatSessions(api, 'token', 'client-1'))
+
+    await act(async () => {
+      await result.current.refreshSessions()
+    })
+
+    const sessionCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes('/api/v1/chat/sessions?'),
+    )
+    expect(sessionCalls.length).toBeGreaterThanOrEqual(1)
+    // Every page request must include include_system=true
+    for (const [input] of sessionCalls) {
+      const url = new URL(String(input))
+      expect(url.searchParams.get('include_system')).toBe('true')
+    }
+
+    // All 300 sessions present in state (pagination across pages works)
+    expect(result.current.sessions.length).toBe(allSessions.length)
+  })
+
   test('refreshSessions keeps current session when it is not on the backend yet', async () => {
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
