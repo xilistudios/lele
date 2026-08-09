@@ -117,9 +117,11 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		}
 		if thinkingKey != "" {
 			c.stopActiveThinking(thinkingKey)
-		} else {
-			c.stopAllThinkingForChat(msg.ChatID)
 		}
+		// Always sweep all thinking entries for this chat as a safety net.
+		// This catches orphaned indicators from concurrent messages, error
+		// paths, or any edge case where the specific key was not stored.
+		c.stopAllThinkingForChat(msg.ChatID)
 	}
 
 	if len(msg.Attachments) > 0 {
@@ -209,10 +211,13 @@ func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, m
 			})
 			return nil
 		} else {
-			logger.WarnCF("telegram", "Failed to edit placeholder, will send new message", map[string]interface{}{
+			logger.WarnCF("telegram", "Failed to edit placeholder, deleting and sending new message", map[string]interface{}{
 				"error":          err.Error(),
 				"placeholder_id": pID,
 			})
+			// Delete the stale "Thinking... 💭" placeholder so the user
+			// doesn't see it sitting above the real response.
+			c.deleteMessage(ctx, chatID, pID.(int))
 		}
 	}
 
@@ -253,6 +258,8 @@ func (c *TelegramChannel) sendPlainTextFallback(ctx context.Context, chatID int6
 		if _, err := c.bot.EditMessageText(ctx, editMsg); err == nil {
 			return nil
 		}
+		// Edit failed — delete the stale placeholder before sending a new message.
+		c.deleteMessage(ctx, chatID, pID.(int))
 	}
 
 	tgMsg := tu.Message(tu.ID(chatID), plainText)
@@ -290,10 +297,41 @@ func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID
 		htmlContent := markdownToTelegramHTML(content)
 		editMsg := tu.EditMessageText(tu.ID(chatID), pID.(int), htmlContent)
 		editMsg.ParseMode = telego.ModeHTML
-		_, _ = c.bot.EditMessageText(ctx, editMsg)
+		if _, err := c.bot.EditMessageText(ctx, editMsg); err != nil {
+			logger.WarnCF("telegram", "Failed to edit placeholder in resolvePlaceholderWithText", map[string]interface{}{
+				"error":          err.Error(),
+				"placeholder_id": pID,
+			})
+			c.deleteMessage(ctx, chatID, pID.(int))
+		}
 		return true
 	}
 	return false
+}
+
+// deleteMessage deletes a Telegram message by chat ID and message ID.
+// Best-effort: errors are logged but not returned.
+func (c *TelegramChannel) deleteMessage(ctx context.Context, chatID int64, messageID int) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/deleteMessage", c.config.Channels.Telegram.Token)
+	body := fmt.Sprintf(`{"chat_id":%d,"message_id":%d}`, chatID, messageID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		logger.DebugCF("telegram", "Failed to create deleteMessage request", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logger.DebugCF("telegram", "Failed to delete message", map[string]interface{}{"error": err.Error(), "message_id": messageID})
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		logger.DebugCF("telegram", "deleteMessage returned non-OK status", map[string]interface{}{
+			"status":     resp.StatusCode,
+			"message_id": messageID,
+		})
+	}
 }
 
 func (c *TelegramChannel) sendDocument(ctx context.Context, chatID int64, replyTo string, attachment bus.FileAttachment) error {
