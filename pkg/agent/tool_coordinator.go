@@ -374,6 +374,12 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		PerplexityAPIKey:     cfg.Tools.Web.Perplexity.APIKey,
 		PerplexityMaxResults: cfg.Tools.Web.Perplexity.MaxResults,
 		PerplexityEnabled:    cfg.Tools.Web.Perplexity.Enabled,
+		SearXNGEnabled:       cfg.Tools.Web.SearXNG.Enabled,
+		SearXNGInstanceURL:   cfg.Tools.Web.SearXNG.InstanceURL,
+		SearXNGCategories:    cfg.Tools.Web.SearXNG.Categories,
+		SearXNGLanguage:      cfg.Tools.Web.SearXNG.Language,
+		SearXNGSafeSearch:    cfg.Tools.Web.SearXNG.SafeSearch,
+		SearXNGMaxResults:    cfg.Tools.Web.SearXNG.MaxResults,
 	}); searchTool != nil {
 		agent.Tools.Register(searchTool)
 	}

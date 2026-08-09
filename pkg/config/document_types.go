@@ -232,6 +232,7 @@ type EditableWebToolsConfig struct {
 	Brave      EditableBraveConfig      `json:"brave"`
 	DuckDuckGo DuckDuckGoConfig         `json:"duckduckgo"`
 	Perplexity EditablePerplexityConfig `json:"perplexity"`
+	SearXNG    EditableSearXNGConfig    `json:"searxng"`
 }
 
 // EditableBraveConfig for Brave.
@@ -246,6 +247,16 @@ type EditablePerplexityConfig struct {
 	Enabled    bool        `json:"enabled"`
 	APIKey     SecretValue `json:"api_key"`
 	MaxResults int         `json:"max_results"`
+}
+
+// EditableSearXNGConfig for SearXNG.
+type EditableSearXNGConfig struct {
+	Enabled    bool   `json:"enabled"`
+	InstanceURL string `json:"instance_url"`
+	Categories string `json:"categories"`
+	Language   string `json:"language"`
+	SafeSearch int    `json:"safesearch"`
+	MaxResults int    `json:"max_results"`
 }
 
 // EditableExecConfig for exec.

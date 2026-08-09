@@ -224,6 +224,14 @@ func defaultEditableDocument() *EditableDocument {
 					APIKey:     SecretValue{Mode: SecretModeEmpty},
 					MaxResults: defaults.Tools.Web.Perplexity.MaxResults,
 				},
+				SearXNG: EditableSearXNGConfig{
+					Enabled:    defaults.Tools.Web.SearXNG.Enabled,
+					InstanceURL: defaults.Tools.Web.SearXNG.InstanceURL,
+					Categories: defaults.Tools.Web.SearXNG.Categories,
+					Language:   defaults.Tools.Web.SearXNG.Language,
+					SafeSearch: defaults.Tools.Web.SearXNG.SafeSearch,
+					MaxResults: defaults.Tools.Web.SearXNG.MaxResults,
+				},
 			},
 			Cron: defaults.Tools.Cron,
 			Exec: EditableExecConfig{
