@@ -39,7 +39,7 @@ export const ChatSearchBar = memo(function ChatSearchBar({
         aria-label={t('chat.sortBy')}
       >
         <option value="recent">{t('chat.sortRecent')}</option>
-        <option value="messages">{t('chat.sortDate')}</option>
+        <option value="messages">{t('chat.sortMessages')}</option>
         <option value="name">{t('chat.sortName')}</option>
       </select>
     </div>
