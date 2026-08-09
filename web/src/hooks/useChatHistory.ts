@@ -149,7 +149,16 @@ export function useChatHistory(
 
   const loadMore = useCallback(async () => {
     if (!sessionKey || !token || isLoadingMoreRef.current) return
-    const currentData = query.data
+    // Read the latest cache data directly to avoid stale closures.
+    // query.data in the useCallback deps may lag one render behind.
+    const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
+    const currentData = queryClient.getQueryData<{
+      sessionKey: string
+      messages: ChatMessage[]
+      rawMessages: HistoryMessage
+      hasMore: boolean
+      processing?: boolean
+    }>(queryKey)
     if (!currentData || !currentData.messages.length || !hasMore) return
 
     const oldestMessage = currentData.messages[0]
@@ -194,7 +203,7 @@ export function useChatHistory(
       isLoadingMoreRef.current = false
       setIsLoadingMore(false)
     }
-  }, [api, sessionKey, token, parentSessionKey, queryClient, query.data, hasMore])
+  }, [api, sessionKey, token, parentSessionKey, queryClient, hasMore])
 
   const baseMessages = query.data?.messages ?? []
 
