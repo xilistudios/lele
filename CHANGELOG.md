@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-09
+
+### Fixed
+
+#### Telegram
+- Typing indicator and placeholder stuck after agent finishes — three fixes:
+  1. Delete stale 'Thinking… 💭' placeholder before sending a new message when `EditMessageText` fails (rate limit, network error, message too old).
+  2. Always call `stopAllThinkingForChat()` when sending a non-intermediate message, catching orphaned indicators from concurrent messages or edge cases.
+  3. Return user-facing error string on non-cancel `runAgentLoop` failures so `Run()` publishes it through the normal outbound path instead of leaving the typing indicator running forever.
+
+#### WebUI
+- Make Load More reliable by attaching a direct scroll listener to Virtuoso's scroll container — `startReached` can miss fires after items are prepended due to internal scroll-position adjustment. Also reads `currentData` from `queryClient.getQueryData()` to avoid stale closures.
+- Include persisted sessions in sidebar — pass `include_system=true` to `fetchAllSessions` so the sidebar shows all persisted chats instead of only those tracked by the native client key set. Filter subagent sessions by `kind` field instead of string prefix matching on keys.
+
 ## [0.6.4] - 2026-08-07
 
 ### Fixed
