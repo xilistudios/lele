@@ -753,3 +753,335 @@ func TestWebFetchTool_Execute_ServerError(t *testing.T) {
 		t.Errorf("Expected status 500, got: %v", resultMap["status"])
 	}
 }
+
+// ========== SearXNG Search Provider Tests ==========
+
+func TestSearXNGSearchProvider_Search_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("format") != "json" {
+			t.Errorf("Expected format=json, got %s", r.URL.Query().Get("format"))
+		}
+		if r.URL.Query().Get("categories") != "general" {
+			t.Errorf("Expected categories=general, got %s", r.URL.Query().Get("categories"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"query": "test",
+			"number_of_results": 3,
+			"results": [
+				{"title": "Result 1", "url": "https://example.com/1", "content": "Snippet 1", "engine": "google"},
+				{"title": "Result 2", "url": "https://example.com/2", "content": "Snippet 2", "engine": "duckduckgo"},
+				{"title": "Result 3", "url": "https://example.com/3", "content": "Snippet 3", "engine": "bing"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+		safesearch:  0,
+	}
+
+	result, err := provider.Search(context.Background(), "test", 3)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Result 1") {
+		t.Errorf("Expected 'Result 1' in result, got: %s", result)
+	}
+	if !strings.Contains(result, "https://example.com/1") {
+		t.Errorf("Expected URL in result, got: %s", result)
+	}
+	if !strings.Contains(result, "Snippet 1") {
+		t.Errorf("Expected 'Snippet 1' in result, got: %s", result)
+	}
+	if !strings.Contains(result, "via SearXNG") {
+		t.Errorf("Expected 'via SearXNG' label, got: %s", result)
+	}
+}
+
+func TestSearXNGSearchProvider_Search_403_JSONDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("403 Forbidden"))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+	}
+
+	_, err := provider.Search(context.Background(), "test", 5)
+	if err == nil {
+		t.Fatal("Expected error for 403 response")
+	}
+	if !strings.Contains(err.Error(), "403 Forbidden") {
+		t.Errorf("Expected '403 Forbidden' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "settings.yml") {
+		t.Errorf("Expected settings.yml guidance in error, got: %v", err)
+	}
+}
+
+func TestSearXNGSearchProvider_Search_EmptyResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"query": "nothing", "number_of_results": 0, "results": []}`))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+	}
+
+	result, err := provider.Search(context.Background(), "nothing", 5)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "No results") {
+		t.Errorf("Expected 'No results' message, got: %s", result)
+	}
+}
+
+func TestSearXNGSearchProvider_Search_CountCapping(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"results": [
+				{"title": "A", "url": "https://a.com", "content": "A snippet"},
+				{"title": "B", "url": "https://b.com", "content": "B snippet"},
+				{"title": "C", "url": "https://c.com", "content": "C snippet"},
+				{"title": "D", "url": "https://d.com", "content": "D snippet"},
+				{"title": "E", "url": "https://e.com", "content": "E snippet"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+	}
+
+	result, err := provider.Search(context.Background(), "test", 2)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "A") {
+		t.Errorf("Expected result A, got: %s", result)
+	}
+	if !strings.Contains(result, "B") {
+		t.Errorf("Expected result B, got: %s", result)
+	}
+	if strings.Contains(result, "C") {
+		t.Errorf("Expected only 2 results, but got 'C': %s", result)
+	}
+}
+
+func TestSearXNGSearchProvider_Search_NetworkError(t *testing.T) {
+	provider := &SearXNGSearchProvider{
+		instanceURL: "http://127.0.0.1:1", // port 1 should refuse connections
+		categories:  "general",
+		language:    "auto",
+	}
+
+	_, err := provider.Search(context.Background(), "test", 5)
+	if err == nil {
+		t.Fatal("Expected error for connection refused")
+	}
+}
+
+func TestSearXNGSearchProvider_Search_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`not valid json`))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+	}
+
+	_, err := provider.Search(context.Background(), "test", 5)
+	if err == nil {
+		t.Fatal("Expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "parse") {
+		t.Errorf("Expected parse error, got: %v", err)
+	}
+}
+
+func TestSearXNGSearchProvider_Search_NoContentSnippet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"results": [
+				{"title": "Title Only", "url": "https://example.com", "content": ""},
+				{"title": "With Snippet", "url": "https://example.com/2", "content": "Has content"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	provider := &SearXNGSearchProvider{
+		instanceURL: server.URL,
+		categories:  "general",
+		language:    "auto",
+	}
+
+	result, err := provider.Search(context.Background(), "test", 5)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Title Only") {
+		t.Errorf("Expected 'Title Only', got: %s", result)
+	}
+	if !strings.Contains(result, "Has content") {
+		t.Errorf("Expected 'Has content', got: %s", result)
+	}
+}
+
+// ========== SearXNG WebSearchTool Integration Tests ==========
+
+func TestWebSearchTool_SearXNG_Created(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results": []}`))
+	}))
+	defer server.Close()
+
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     true,
+		SearXNGInstanceURL: server.URL,
+		SearXNGCategories:  "general",
+		SearXNGLanguage:    "auto",
+		SearXNGMaxResults:  3,
+	})
+	if tool == nil {
+		t.Fatal("Expected non-nil tool for enabled SearXNG")
+	}
+	if tool.Name() != "web_search" {
+		t.Errorf("Expected name 'web_search', got %s", tool.Name())
+	}
+	if tool.maxResults != 3 {
+		t.Errorf("Expected maxResults 3, got %d", tool.maxResults)
+	}
+}
+
+func TestWebSearchTool_SearXNG_NotCreatedWhenDisabled(t *testing.T) {
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     false,
+		SearXNGInstanceURL: "http://localhost",
+	})
+	if tool != nil {
+		t.Errorf("Expected nil tool when SearXNG disabled and no other provider enabled")
+	}
+}
+
+func TestWebSearchTool_SearXNG_NotCreatedWhenNoURL(t *testing.T) {
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     true,
+		SearXNGInstanceURL: "",
+	})
+	if tool != nil {
+		t.Errorf("Expected nil tool when SearXNG URL is empty")
+	}
+}
+
+func TestWebSearchTool_SearXNG_PriorityOverDDG(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results": []}`))
+	}))
+	defer server.Close()
+
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     true,
+		SearXNGInstanceURL: server.URL,
+		DuckDuckGoEnabled:  true,
+	})
+	if tool == nil {
+		t.Fatal("Expected non-nil tool")
+	}
+	// SearXNG should take priority over DuckDuckGo
+	if _, ok := tool.provider.(*SearXNGSearchProvider); !ok {
+		t.Errorf("Expected SearXNG provider, got %T", tool.provider)
+	}
+}
+
+func TestWebSearchTool_SearXNG_DefaultsApplied(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results": []}`))
+	}))
+	defer server.Close()
+
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     true,
+		SearXNGInstanceURL: server.URL + "/",
+		// Categories, Language left empty to test defaults
+	})
+	if tool == nil {
+		t.Fatal("Expected non-nil tool")
+	}
+	provider, ok := tool.provider.(*SearXNGSearchProvider)
+	if !ok {
+		t.Fatalf("Expected SearXNG provider, got %T", tool.provider)
+	}
+	if provider.categories != "general" {
+		t.Errorf("Expected default categories 'general', got '%s'", provider.categories)
+	}
+	if provider.language != "auto" {
+		t.Errorf("Expected default language 'auto', got '%s'", provider.language)
+	}
+	// Trailing slash should be trimmed
+	if strings.HasSuffix(provider.instanceURL, "/") {
+		t.Errorf("Expected instanceURL without trailing slash, got '%s'", provider.instanceURL)
+	}
+}
+
+func TestWebSearchTool_SearXNG_Execute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"results": [
+				{"title": "Go Lang", "url": "https://go.dev", "content": "Build fast software"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	tool := NewWebSearchTool(WebSearchToolOptions{
+		SearXNGEnabled:     true,
+		SearXNGInstanceURL: server.URL,
+	})
+
+	result := tool.Execute(context.Background(), map[string]interface{}{
+		"query": "golang",
+		"count": float64(1),
+	})
+
+	if result.IsError {
+		t.Fatalf("Expected success, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "Go Lang") {
+		t.Errorf("Expected 'Go Lang' in result, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "https://go.dev") {
+		t.Errorf("Expected URL in result, got: %s", result.ForLLM)
+	}
+}

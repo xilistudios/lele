@@ -894,10 +894,20 @@ type PerplexityConfig struct {
 	MaxResults int    `json:"max_results" env:"LELE_TOOLS_WEB_PERPLEXITY_MAX_RESULTS"`
 }
 
+type SearXNGConfig struct {
+	Enabled     bool   `json:"enabled" env:"LELE_TOOLS_WEB_SEARXNG_ENABLED"`
+	InstanceURL string `json:"instance_url" env:"LELE_TOOLS_WEB_SEARXNG_INSTANCE_URL"`
+	Categories  string `json:"categories" env:"LELE_TOOLS_WEB_SEARXNG_CATEGORIES"`
+	Language    string `json:"language" env:"LELE_TOOLS_WEB_SEARXNG_LANGUAGE"`
+	SafeSearch  int    `json:"safesearch" env:"LELE_TOOLS_WEB_SEARXNG_SAFESEARCH"`
+	MaxResults  int    `json:"max_results" env:"LELE_TOOLS_WEB_SEARXNG_MAX_RESULTS"`
+}
+
 type WebToolsConfig struct {
 	Brave      BraveConfig      `json:"brave"`
 	DuckDuckGo DuckDuckGoConfig `json:"duckduckgo"`
 	Perplexity PerplexityConfig `json:"perplexity"`
+	SearXNG    SearXNGConfig    `json:"searxng"`
 }
 
 type CronToolsConfig struct {
@@ -1061,6 +1071,14 @@ func DefaultConfig() *Config {
 					Enabled:    false,
 					APIKey:     "",
 					MaxResults: 5,
+				},
+				SearXNG: SearXNGConfig{
+					Enabled:     false,
+					InstanceURL: "",
+					Categories:  "general",
+					Language:    "auto",
+					SafeSearch:  0,
+					MaxResults:  5,
 				},
 			},
 			Cron: CronToolsConfig{

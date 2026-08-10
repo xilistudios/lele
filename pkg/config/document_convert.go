@@ -160,6 +160,14 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		APIKey:     doc.Tools.Web.Perplexity.APIKey.resolve(),
 		MaxResults: doc.Tools.Web.Perplexity.MaxResults,
 	}
+	cfg.Tools.Web.SearXNG = SearXNGConfig{
+		Enabled:     doc.Tools.Web.SearXNG.Enabled,
+		InstanceURL: doc.Tools.Web.SearXNG.InstanceURL,
+		Categories:  doc.Tools.Web.SearXNG.Categories,
+		Language:    doc.Tools.Web.SearXNG.Language,
+		SafeSearch:  doc.Tools.Web.SearXNG.SafeSearch,
+		MaxResults:  doc.Tools.Web.SearXNG.MaxResults,
+	}
 	cfg.Tools.Cron = doc.Tools.Cron
 	cfg.Tools.Exec = ExecConfig(doc.Tools.Exec)
 
@@ -450,6 +458,15 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	writeSecret(perplexity, "api_key", doc.Tools.Web.Perplexity.APIKey)
 	web["perplexity"] = perplexity
 
+	web["searxng"] = map[string]interface{}{
+		"enabled":      doc.Tools.Web.SearXNG.Enabled,
+		"instance_url": doc.Tools.Web.SearXNG.InstanceURL,
+		"categories":   doc.Tools.Web.SearXNG.Categories,
+		"language":     doc.Tools.Web.SearXNG.Language,
+		"safesearch":   doc.Tools.Web.SearXNG.SafeSearch,
+		"max_results":  doc.Tools.Web.SearXNG.MaxResults,
+	}
+
 	tools["web"] = web
 	result["tools"] = tools
 
@@ -540,6 +557,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 			Brave:      EditableBraveConfig{Enabled: cfg.Tools.Web.Brave.Enabled, APIKey: literalOrEmptySecret(cfg.Tools.Web.Brave.APIKey), MaxResults: cfg.Tools.Web.Brave.MaxResults},
 			DuckDuckGo: cfg.Tools.Web.DuckDuckGo,
 			Perplexity: EditablePerplexityConfig{Enabled: cfg.Tools.Web.Perplexity.Enabled, APIKey: literalOrEmptySecret(cfg.Tools.Web.Perplexity.APIKey), MaxResults: cfg.Tools.Web.Perplexity.MaxResults},
+			SearXNG:    EditableSearXNGConfig{Enabled: cfg.Tools.Web.SearXNG.Enabled, InstanceURL: cfg.Tools.Web.SearXNG.InstanceURL, Categories: cfg.Tools.Web.SearXNG.Categories, Language: cfg.Tools.Web.SearXNG.Language, SafeSearch: cfg.Tools.Web.SearXNG.SafeSearch, MaxResults: cfg.Tools.Web.SearXNG.MaxResults},
 		},
 		Cron: cfg.Tools.Cron,
 		Exec: EditableExecConfig(cfg.Tools.Exec),

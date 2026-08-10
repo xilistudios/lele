@@ -324,6 +324,22 @@ func TestDefaultConfig_WebTools(t *testing.T) {
 	if cfg.Tools.Web.DuckDuckGo.MaxResults != 5 {
 		t.Error("Expected DuckDuckGo MaxResults 5, got ", cfg.Tools.Web.DuckDuckGo.MaxResults)
 	}
+	// SearXNG defaults
+	if cfg.Tools.Web.SearXNG.Enabled {
+		t.Error("SearXNG should be disabled by default")
+	}
+	if cfg.Tools.Web.SearXNG.InstanceURL != "" {
+		t.Error("SearXNG InstanceURL should be empty by default, got ", cfg.Tools.Web.SearXNG.InstanceURL)
+	}
+	if cfg.Tools.Web.SearXNG.Categories != "general" {
+		t.Error("Expected SearXNG Categories 'general', got ", cfg.Tools.Web.SearXNG.Categories)
+	}
+	if cfg.Tools.Web.SearXNG.Language != "auto" {
+		t.Error("Expected SearXNG Language 'auto', got ", cfg.Tools.Web.SearXNG.Language)
+	}
+	if cfg.Tools.Web.SearXNG.MaxResults != 5 {
+		t.Error("Expected SearXNG MaxResults 5, got ", cfg.Tools.Web.SearXNG.MaxResults)
+	}
 }
 
 func TestSaveConfig_FilePermissions(t *testing.T) {
@@ -802,6 +818,53 @@ func TestProviderModelConfig_ValidateWithReasoning(t *testing.T) {
 	}
 	if err := pmc.Validate(); err != nil {
 		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestLoadConfig_SearXNGEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	configJSON := `{
+		"tools": {
+			"web": {
+				"searxng": {
+					"enabled": true,
+					"instance_url": "https://search.example.com",
+					"categories": "news",
+					"language": "es",
+					"safesearch": 2,
+					"max_results": 10
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if !cfg.Tools.Web.SearXNG.Enabled {
+		t.Error("SearXNG should be enabled")
+	}
+	if cfg.Tools.Web.SearXNG.InstanceURL != "https://search.example.com" {
+		t.Errorf("Expected instance_url 'https://search.example.com', got '%s'", cfg.Tools.Web.SearXNG.InstanceURL)
+	}
+	if cfg.Tools.Web.SearXNG.Categories != "news" {
+		t.Errorf("Expected categories 'news', got '%s'", cfg.Tools.Web.SearXNG.Categories)
+	}
+	if cfg.Tools.Web.SearXNG.Language != "es" {
+		t.Errorf("Expected language 'es', got '%s'", cfg.Tools.Web.SearXNG.Language)
+	}
+	if cfg.Tools.Web.SearXNG.SafeSearch != 2 {
+		t.Errorf("Expected safesearch 2, got %d", cfg.Tools.Web.SearXNG.SafeSearch)
+	}
+	if cfg.Tools.Web.SearXNG.MaxResults != 10 {
+		t.Errorf("Expected max_results 10, got %d", cfg.Tools.Web.SearXNG.MaxResults)
 	}
 }
 

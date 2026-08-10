@@ -60,6 +60,9 @@ func parseWebToolsWithPlaceholders(raw json.RawMessage, basePath string, secrets
 	if perplexityRaw, ok := rawMap["perplexity"]; ok {
 		cfg.Perplexity = parsePerplexityWithPlaceholders(perplexityRaw, basePath+".perplexity", secretsByPath)
 	}
+	if searxngRaw, ok := rawMap["searxng"]; ok {
+		json.Unmarshal(searxngRaw, &cfg.SearXNG)
+	}
 
 	return cfg
 }
