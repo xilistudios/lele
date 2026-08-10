@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -96,6 +96,14 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+`,
+	},
+	{
+		Version: 2,
+		DDL: `
+-- Drop the unused 'content' column from session_messages.
+-- The content is stored in the 'message' JSON blob and is never queried.
+ALTER TABLE session_messages DROP COLUMN content;
 `,
 	},
 }

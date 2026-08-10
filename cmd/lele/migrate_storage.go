@@ -164,34 +164,7 @@ func migrateStorageForward(leleDir string, dryRun bool) {
 					}
 					json.Unmarshal(msgRaw, &roleHolder)
 
-					// Extract plain text content for the content column.
-					var contentHolder struct {
-						Content string `json:"content"`
-					}
-					json.Unmarshal(msgRaw, &contentHolder)
-
-					textContent := contentHolder.Content
-					if textContent == "" {
-						// Try ContentParts extraction (array of {type,text}).
-						var cpHolder struct {
-							Content []struct {
-								Type string `json:"type"`
-								Text string `json:"text"`
-							} `json:"content"`
-						}
-						if json.Unmarshal(msgRaw, &cpHolder) == nil {
-							for _, p := range cpHolder.Content {
-								if p.Type == "text" && p.Text != "" {
-									if textContent != "" {
-										textContent += "\n"
-									}
-									textContent += p.Text
-								}
-							}
-						}
-					}
-
-					if err := dbStore.Sessions().InsertMessage(raw.Key, i, roleHolder.Role, textContent, string(msgRaw), roleHolder.ExcludeFromContext); err != nil {
+					if err := dbStore.Sessions().InsertMessage(raw.Key, i, roleHolder.Role, string(msgRaw), roleHolder.ExcludeFromContext); err != nil {
 						fmt.Printf("  [sessions] %s msg %d: insert: %v\n", key, i, err)
 					} else {
 						totalMessages++

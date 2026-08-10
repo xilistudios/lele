@@ -2,82 +2,13 @@ package session
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestSanitizeFilename(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"simple", "simple"},
-		{"telegram:123456", "telegram_123456"},
-		{"discord:987654321", "discord_987654321"},
-		{"slack:C01234", "slack_C01234"},
-		{"no-colons-here", "no-colons-here"},
-		{"multiple:colons:here", "multiple_colons_here"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := sanitizeFilename(tt.input)
-			if got != tt.expected {
-				t.Errorf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestSave_WithColonInKey(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-
-	// Create a session with a key containing colon (typical channel session key).
-	key := "telegram:123456"
-	sm.GetOrCreate(key)
-	sm.AddMessage(key, "user", "hello")
-
-	// Save should succeed even though the key contains ':'
-	if err := sm.Save(key); err != nil {
-		t.Fatalf("Save(%q) failed: %v", key, err)
-	}
-
-	// The file on disk should use sanitized name.
-	expectedFile := filepath.Join(tmpDir, "telegram_123456.json")
-	if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
-		t.Fatalf("expected session file %s to exist", expectedFile)
-	}
-
-	// Load into a fresh manager and verify the session round-trips.
-	sm2 := NewSessionManager(tmpDir)
-	history := sm2.GetHistory(key)
-	if len(history) != 1 {
-		t.Fatalf("expected 1 message after reload, got %d", len(history))
-	}
-	if history[0].Content != "hello" {
-		t.Errorf("expected message content %q, got %q", "hello", history[0].Content)
-	}
-}
-
-func TestSave_RejectsPathTraversal(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-
-	badKeys := []string{"", ".", "..", "foo/bar", "foo\\bar"}
-	for _, key := range badKeys {
-		sm.GetOrCreate(key)
-		if err := sm.Save(key); err == nil {
-			t.Errorf("Save(%q) should have failed but didn't", key)
-		}
-	}
-}
-
 func TestShouldStartFreshSession(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:123"
 	sm.AddMessage(key, "user", "hello")
 	session := sm.GetOrCreate(key)
@@ -93,7 +24,7 @@ func TestShouldStartFreshSession(t *testing.T) {
 }
 
 func TestShouldStartFreshSession_IgnoresEmptySession(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:empty"
 	session := sm.GetOrCreate(key)
 	session.Updated = time.Now().Add(-2 * time.Minute)
@@ -105,7 +36,7 @@ func TestShouldStartFreshSession_IgnoresEmptySession(t *testing.T) {
 }
 
 func TestSessionManager_AddTokenCounts(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:123456"
 
 	// Initially should be zero
@@ -129,28 +60,8 @@ func TestSessionManager_AddTokenCounts(t *testing.T) {
 	}
 }
 
-func TestSessionManager_AddTokenCounts_Persistence(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	key := "telegram:123456"
-
-	// Add tokens and save
-	sm.AddTokenCounts(key, 150, 80)
-	sm.AddMessage(key, "user", "test message")
-	if err := sm.Save(key); err != nil {
-		t.Fatalf("Save(%q) failed: %v", key, err)
-	}
-
-	// Load into fresh manager
-	sm2 := NewSessionManager(tmpDir)
-	input, output := sm2.GetTokenCounts(key)
-	if input != 150 || output != 80 {
-		t.Errorf("GetTokenCounts(%q) after reload = (%d, %d), want (150, 80)", key, input, output)
-	}
-}
-
 func TestSessionManager_GetTokenCounts_NonExistent(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "non-existent-session"
 
 	input, output := sm.GetTokenCounts(key)
@@ -160,7 +71,7 @@ func TestSessionManager_GetTokenCounts_NonExistent(t *testing.T) {
 }
 
 func TestSessionManager_AddTokenCounts_ZeroValues(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:test"
 
 	// Adding zero tokens should not change counts
@@ -172,7 +83,7 @@ func TestSessionManager_AddTokenCounts_ZeroValues(t *testing.T) {
 }
 
 func TestSessionManager_TokenCounts_WithMultipleSessions(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key1 := "telegram:111"
 	key2 := "telegram:222"
 
@@ -193,7 +104,7 @@ func TestSessionManager_TokenCounts_WithMultipleSessions(t *testing.T) {
 }
 
 func TestSessionManager_ResetTokenCounts(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:123456"
 
 	// Add some tokens
@@ -212,7 +123,7 @@ func TestSessionManager_ResetTokenCounts(t *testing.T) {
 }
 
 func TestSessionManager_ResetTokenCounts_NonExistent(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "non-existent-session"
 
 	// Reset on non-existent session should not panic or create session
@@ -223,34 +134,8 @@ func TestSessionManager_ResetTokenCounts_NonExistent(t *testing.T) {
 	}
 }
 
-func TestSessionManager_ResetTokenCounts_Persistence(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	key := "telegram:123456"
-
-	// Add tokens and save
-	sm.AddTokenCounts(key, 150, 80)
-	sm.AddMessage(key, "user", "test message")
-	if err := sm.Save(key); err != nil {
-		t.Fatalf("Save(%q) failed: %v", key, err)
-	}
-
-	// Reset tokens and save again
-	sm.ResetTokenCounts(key)
-	if err := sm.Save(key); err != nil {
-		t.Fatalf("Save(%q) after reset failed: %v", key, err)
-	}
-
-	// Load into fresh manager
-	sm2 := NewSessionManager(tmpDir)
-	input, output := sm2.GetTokenCounts(key)
-	if input != 0 || output != 0 {
-		t.Errorf("GetTokenCounts(%q) after reload = (%d, %d), want (0, 0)", key, input, output)
-	}
-}
-
 func TestSessionManager_ResetTokenCounts_OnlyTargetSession(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key1 := "telegram:111"
 	key2 := "telegram:222"
 
@@ -275,7 +160,7 @@ func TestSessionManager_ResetTokenCounts_OnlyTargetSession(t *testing.T) {
 }
 
 func TestSessionManager_ResetTokenCounts_UpdatesTimestamp(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:123456"
 
 	// Create session and add tokens
@@ -296,7 +181,7 @@ func TestSessionManager_ResetTokenCounts_UpdatesTimestamp(t *testing.T) {
 }
 
 func TestFindSubagentSessions_Empty(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "native:client-1"
 
 	// No sessions at all
@@ -307,7 +192,7 @@ func TestFindSubagentSessions_Empty(t *testing.T) {
 }
 
 func TestFindSubagentSessions_FindsMatchingSessions(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	parent := "native:client-1"
 
 	// Create subagent sessions
@@ -353,7 +238,7 @@ func TestFindSubagentSessions_FindsMatchingSessions(t *testing.T) {
 }
 
 func TestFindSubagentSessions_SkipsParentAndOtherSessions(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	parent := "native:client-1"
 
 	sm.AddMessage(parent, "user", "hello")
@@ -367,7 +252,7 @@ func TestFindSubagentSessions_SkipsParentAndOtherSessions(t *testing.T) {
 }
 
 func TestFindSubagentSessions_SummaryFromSession(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	parent := "native:client-1"
 
 	key := parent + ":subagent-1"
@@ -385,7 +270,7 @@ func TestFindSubagentSessions_SummaryFromSession(t *testing.T) {
 }
 
 func TestFindSubagentSessions_SummaryFallbackFromLastAssistant(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	parent := "native:client-1"
 
 	key := parent + ":subagent-1"
@@ -402,7 +287,7 @@ func TestFindSubagentSessions_SummaryFallbackFromLastAssistant(t *testing.T) {
 }
 
 func TestFindSubagentSessions_SummaryFallbackTruncatesLong(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	parent := "native:client-1"
 
 	key := parent + ":subagent-1"
@@ -422,50 +307,10 @@ func TestFindSubagentSessions_SummaryFallbackTruncatesLong(t *testing.T) {
 	}
 }
 
-func TestFindSubagentSessions_Persistence(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	parent := "native:client-1"
-
-	// Create and save subagent sessions
-	sm.AddMessage(parent+":subagent-1", "user", "task 1")
-	sm.AddMessage(parent+":subagent-1", "assistant", "done 1")
-	sm.SetSummary(parent+":subagent-1", "Completed task 1")
-	sm.Save(parent + ":subagent-1")
-
-	sm.AddMessage(parent+":subagent-2", "user", "task 2")
-	sm.AddMessage(parent+":subagent-2", "assistant", "done 2")
-	sm.Save(parent + ":subagent-2")
-
-	// Load into a fresh manager — should discover the past subagents
-	sm2 := NewSessionManager(tmpDir)
-	results := sm2.FindSubagentSessions(parent)
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results after reload, got %d", len(results))
-	}
-
-	byTaskID := make(map[string]SubagentSessionInfo)
-	for _, r := range results {
-		byTaskID[r.TaskID] = r
-	}
-
-	if _, ok := byTaskID["subagent-1"]; !ok {
-		t.Error("expected to find subagent-1 after reload")
-	}
-	if _, ok := byTaskID["subagent-2"]; !ok {
-		t.Error("expected to find subagent-2 after reload")
-	}
-
-	// Verify summary survived persistence
-	if byTaskID["subagent-1"].Summary != "Completed task 1" {
-		t.Errorf("summary = %q, want %q", byTaskID["subagent-1"].Summary, "Completed task 1")
-	}
-}
-
 // --- Mode Tests (3-mode feature) ---
 
 func TestSetModeGetMode(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:mode-test"
 
 	sm.GetOrCreate(key)
@@ -478,7 +323,7 @@ func TestSetModeGetMode(t *testing.T) {
 }
 
 func TestSetModeInvalid(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:invalid-mode"
 
 	sm.GetOrCreate(key)
@@ -499,26 +344,8 @@ func TestSetModeInvalid(t *testing.T) {
 	}
 }
 
-func TestSetModePersists(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	key := "telegram:persist-mode"
-
-	sm.GetOrCreate(key)
-	sm.AddMessage(key, "user", "hello")
-	if err := sm.SetMode(key, "group"); err != nil {
-		t.Fatalf("SetMode(%q, %q) failed: %v", key, "group", err)
-	}
-
-	// Verify persisted on disk by creating a new SessionManager
-	sm2 := NewSessionManager(tmpDir)
-	if got := sm2.GetMode(key); got != "group" {
-		t.Errorf("GetMode(%q) after reload = %q, want %q", key, got, "group")
-	}
-}
-
 func TestGetModeDefault(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "telegram:default-mode"
 
 	sm.GetOrCreate(key)
@@ -529,7 +356,7 @@ func TestGetModeDefault(t *testing.T) {
 }
 
 func TestGetModeNonExistent(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	// Non-existent session
 	if got := sm.GetMode("nonexistent"); got != "" {
 		t.Errorf("GetMode(nonexistent) = %q, want %q", got, "")
@@ -537,7 +364,7 @@ func TestGetModeNonExistent(t *testing.T) {
 }
 
 func TestListSessionsByMode(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 
 	// Create sessions with different modes
 	keys := map[string]string{
@@ -605,50 +432,8 @@ func TestListSessionsByMode(t *testing.T) {
 	}
 }
 
-func TestListSessionsByMode_Persistence(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-
-	// Create and persist sessions with different modes
-	for _, setup := range []struct {
-		key  string
-		mode string
-	}{
-		{"telegram:p-chat", "chat"},
-		{"telegram:p-agent", "agent"},
-		{"telegram:p-group", "group"},
-		{"telegram:p-nomode", ""},
-	} {
-		sm.GetOrCreate(setup.key)
-		sm.AddMessage(setup.key, "user", "test")
-		if setup.mode != "" {
-			sm.SetMode(setup.key, setup.mode)
-		}
-		sm.Save(setup.key)
-	}
-
-	// Load into fresh manager
-	sm2 := NewSessionManager(tmpDir)
-
-	chatSessions := sm2.ListSessionsByMode("chat")
-	if len(chatSessions) != 1 || chatSessions[0].Key != "telegram:p-chat" {
-		t.Errorf("persisted chat sessions: got %d, want 1 (p-chat)", len(chatSessions))
-	}
-
-	agentSessions := sm2.ListSessionsByMode("agent")
-	// agent + nomode = 2
-	if len(agentSessions) != 2 {
-		t.Errorf("persisted agent sessions: got %d, want 2", len(agentSessions))
-	}
-
-	groupSessions := sm2.ListSessionsByMode("group")
-	if len(groupSessions) != 1 || groupSessions[0].Key != "telegram:p-group" {
-		t.Errorf("persisted group sessions: got %d, want 1 (p-group)", len(groupSessions))
-	}
-}
-
 func TestSetMode_AllValidValues(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	validModes := []string{"", "chat", "agent", "group"}
 
 	for _, mode := range validModes {
@@ -663,28 +448,8 @@ func TestSetMode_AllValidValues(t *testing.T) {
 	}
 }
 
-func TestSetMode_PersistsImmediately(t *testing.T) {
-	// SetMode calls saveUnlocked internally, so it should persist to disk
-	// without needing an explicit Save() call.
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	key := "telegram:immediate-persist"
-
-	sm.GetOrCreate(key)
-	if err := sm.SetMode(key, "group"); err != nil {
-		t.Fatalf("SetMode failed: %v", err)
-	}
-
-	// Reload from disk — should see the mode
-	sm2 := NewSessionManager(tmpDir)
-	if got := sm2.GetMode(key); got != "group" {
-		t.Errorf("GetMode after SetMode reload = %q, want %q", got, "group")
-	}
-}
-
 func TestSave_Concurrent(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
+	sm := NewSessionManager()
 
 	// Create 20 distinct sessions, each with at least one message.
 	const numSessions = 20

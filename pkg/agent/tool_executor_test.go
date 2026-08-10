@@ -23,8 +23,7 @@ func TestChatModeToolGuard_BlockedTools(t *testing.T) {
 
 	for _, toolName := range blockedToolNames {
 		t.Run(toolName, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			sm := session.NewSessionManager(tmpDir)
+			sm := session.NewSessionManager()
 			sessionKey := "test:chat-guard:" + toolName
 
 			// Set session to chat mode
@@ -87,8 +86,7 @@ func TestChatModeToolGuard_AllowedTools(t *testing.T) {
 
 	for _, toolName := range allowedToolNames {
 		t.Run(toolName, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			sm := session.NewSessionManager(tmpDir)
+			sm := session.NewSessionManager()
 			sessionKey := "test:chat-allow:" + toolName
 
 			sm.GetOrCreate(sessionKey)
@@ -147,8 +145,7 @@ func TestChatModeToolGuard_AllowedTools(t *testing.T) {
 // TestChatModeGuard_AgentModeNoBlock verifies that the same tools are
 // NOT blocked when the session is in agent mode (default).
 func TestChatModeGuard_AgentModeNoBlock(t *testing.T) {
-	tmpDir := t.TempDir()
-	sm := session.NewSessionManager(tmpDir)
+	sm := session.NewSessionManager()
 	sessionKey := "test:agent-mode"
 
 	sm.GetOrCreate(sessionKey)

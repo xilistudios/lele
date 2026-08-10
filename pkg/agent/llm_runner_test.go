@@ -528,7 +528,7 @@ func createLLMRunnerTestAgentInstance(t *testing.T, tmpDir string) *AgentInstanc
 		Temperature:    0.7,
 		ContextWindow:  128000,
 		Provider:       provider,
-		Sessions:       session.NewSessionManager(sessionsDir),
+		Sessions:       session.NewSessionManager(),
 		ContextBuilder: contextBuilder,
 		Tools:          toolRegistry,
 		Candidates:     []providers.FallbackCandidate{},

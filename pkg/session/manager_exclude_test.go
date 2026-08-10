@@ -36,7 +36,7 @@ func assertExcluded(t *testing.T, msgs []providers.Message, excluded []int) {
 
 // Test 1: Normal exclusion with no tool messages works as before
 func TestExcludeOldMessages_NormalExclusion(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:normal"
 
 	// Create 6 plain messages: user, assistant, user, assistant, user, assistant
@@ -61,7 +61,7 @@ func TestExcludeOldMessages_NormalExclusion(t *testing.T) {
 // Test 2: Boundary that would split a tool_use/tool_result pair
 // moves forward to include the tool_results in the excluded set
 func TestExcludeOldMessages_BoundarySplitsToolPair_Forward(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:split-forward"
 
 	// Messages:
@@ -94,7 +94,7 @@ func TestExcludeOldMessages_BoundarySplitsToolPair_Forward(t *testing.T) {
 // Test 3: Assistant with tool_use at the boundary with no following tool_results
 // → boundary moves back to exclude the assistant message
 func TestExcludeOldMessages_OrphanedToolUse_MoveBack(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:move-back"
 
 	// Messages:
@@ -124,7 +124,7 @@ func TestExcludeOldMessages_OrphanedToolUse_MoveBack(t *testing.T) {
 
 // Test 4: keepCount=0 should exclude all messages
 func TestExcludeOldMessages_KeepCountZero(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:zero"
 
 	sm.AddMessage(key, "user", "a")
@@ -141,7 +141,7 @@ func TestExcludeOldMessages_KeepCountZero(t *testing.T) {
 
 // Test 5: keepCount >= len(messages) → no change
 func TestExcludeOldMessages_KeepCountLargerThanMessages(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:large-keep"
 
 	sm.AddMessage(key, "user", "a")
@@ -157,7 +157,7 @@ func TestExcludeOldMessages_KeepCountLargerThanMessages(t *testing.T) {
 
 // Test 6: Multiple tool calls in a single assistant message
 func TestExcludeOldMessages_MultipleToolResults(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:multi-tool"
 
 	// Messages:
@@ -194,7 +194,7 @@ func TestExcludeOldMessages_MultipleToolResults(t *testing.T) {
 
 // Test 7: Non-existent session key should not panic
 func TestExcludeOldMessages_NonExistentSession(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	// Should not panic
 	sm.ExcludeOldMessagesFromContext("nonexistent", 5)
 }
@@ -202,7 +202,7 @@ func TestExcludeOldMessages_NonExistentSession(t *testing.T) {
 // Test 8: Full tool cycle — user, assistant+tool_use, tool_result, assistant final
 // with keepCount set so the tool pair straddles the boundary
 func TestExcludeOldMessages_FullToolCycle(t *testing.T) {
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	key := "test:full-cycle"
 
 	// Messages:

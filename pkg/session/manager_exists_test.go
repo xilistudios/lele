@@ -1,17 +1,24 @@
 package session
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/store"
 )
 
-// TestSessionExists verifies SessionExists across all three layers:
-// in-memory, metadata-only, and disk-only (the state left behind by
-// EvictSession for subagent sessions).
+// TestSessionExists verifies SessionExists across layers (in-memory, metadata, and SQLite).
 func TestSessionExists(t *testing.T) {
 	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
+	dbPath := filepath.Join(tmpDir, "test.db")
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	sm := NewSessionManager()
+	sm.SetStore(s)
 
 	if sm.SessionExists("") {
 		t.Error("SessionExists(\"\") should be false")
@@ -27,8 +34,7 @@ func TestSessionExists(t *testing.T) {
 		t.Errorf("SessionExists(%q) = false, want true (in-memory)", key)
 	}
 
-	// Save so the file exists on disk, then evict. For subagent-style keys
-	// EvictSession also drops the metadata entry, leaving only the file.
+	// Save so it exists in DB, then evict.
 	subKey := "cli:direct:subagent-1"
 	sm.GetOrCreate(subKey)
 	sm.AddMessage(subKey, "user", "hello")
@@ -41,28 +47,26 @@ func TestSessionExists(t *testing.T) {
 	}
 
 	// After eviction the session is gone from memory and metadata, but the
-	// file remains on disk. SessionExists must still report true so the
+	// DB entry remains. SessionExists must still report true so the
 	// subagent manager does not reuse this ID.
 	if !sm.SessionExists(subKey) {
-		t.Errorf("SessionExists(%q) = false after EvictSession, want true (disk-only)", subKey)
+		t.Errorf("SessionExists(%q) = false after EvictSession, want true (DB-only)", subKey)
 	}
 
 	// A fresh manager (simulating a restart) must also see it.
-	sm2 := NewSessionManager(tmpDir)
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
 	if !sm2.SessionExists(subKey) {
 		t.Errorf("SessionExists(%q) = false in fresh manager, want true", subKey)
 	}
 
-	// Deleting the file makes it disappear entirely — but only for a manager
-	// that rescans from scratch (simulating a restart). A manager that already
-	// loaded the metadata keeps it until restart, which is harmless: it just
-	// makes ID claiming skip one extra number.
-	filename := filepath.Join(tmpDir, sanitizeFilename(subKey)+".json")
-	if err := os.Remove(filename); err != nil {
-		t.Fatalf("failed to remove %s: %v", filename, err)
+	// Deleting from the database makes it disappear entirely.
+	if err := s.Sessions().DeleteSession(subKey); err != nil {
+		t.Fatalf("failed to delete session from db: %v", err)
 	}
-	sm3 := NewSessionManager(tmpDir)
+	sm3 := NewSessionManager()
+	sm3.SetStore(s)
 	if sm3.SessionExists(subKey) {
-		t.Errorf("SessionExists(%q) = true after file deletion and fresh load, want false", subKey)
+		t.Errorf("SessionExists(%q) = true after DB deletion and fresh load, want false", subKey)
 	}
 }

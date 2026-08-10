@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -336,26 +337,22 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	fallbackChain := providers.NewFallbackChain(cooldown)
 
 	// Create a single, shared session manager for all agents.
-	// Sessions are stored in <lele-dir>/sessions (unified, not per-workspace).
-	// Migration from old per-workspace session dirs happens here too.
-	unifiedSessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
-	sharedSessionManager := session.NewSessionManager(unifiedSessionsDir)
+	// Uses SQLite for persistence when dbStore is available.
+	sharedSessionManager := session.NewSessionManager()
 
 	// Wire SQLite store into session manager for persistent storage.
 	if dbStore != nil {
 		sharedSessionManager.SetStore(dbStore)
 	}
 
-	// Migrate sessions from old per-workspace locations to the unified directory.
-	// Run in background — migration is best-effort and should not block startup.
-	go func() {
-		for _, agentID := range registry.ListAgentIDs() {
-			if agent, ok := registry.GetAgent(agentID); ok && agent != nil {
-				oldSessionsDir := filepath.Join(agent.Workspace, "sessions")
-				session.MigrateFromWorkspace(oldSessionsDir, unifiedSessionsDir)
-			}
-		}
-	}()
+	// Warn if a legacy JSON sessions directory exists — it will be ignored.
+	legacyDir := filepath.Join(config.GetLeleDir(), "sessions")
+	if info, statErr := os.Stat(legacyDir); statErr == nil && info.IsDir() {
+		logger.WarnCF("session", "Legacy JSON sessions directory found — ignored (SQLite-only)", map[string]interface{}{
+			"path":   legacyDir,
+			"action": "run 'lele migrate-storage' if sessions are missing",
+		})
+	}
 
 	// Replace per-agent session managers with the shared one.
 	registry.SetSharedSessionManager(sharedSessionManager)
