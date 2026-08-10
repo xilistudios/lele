@@ -89,13 +89,17 @@ export function ChatHistoryPage() {
   }, [api, activeKind, allFetchedSessions.length, hasMore, loadingMore])
 
   const allSessions = useMemo(() => {
+    // Filter context sessions by active kind — without this, live sessions
+    // bypass the kind tab filter because they are merged before API results.
+    const kindFiltered =
+      activeKind === 'all' ? sessions : sessions.filter((s) => s.kind === activeKind)
     const byKey = new Map<string, ChatSession>()
-    for (const s of sessions) byKey.set(s.key, s)
+    for (const s of kindFiltered) byKey.set(s.key, s)
     for (const s of allFetchedSessions) {
       if (!byKey.has(s.key)) byKey.set(s.key, s)
     }
     return Array.from(byKey.values())
-  }, [sessions, allFetchedSessions])
+  }, [sessions, allFetchedSessions, activeKind])
 
   const { query, setQuery, sortMode, setSortMode, grouped, filteredSessions } = useChatFilters(
     allSessions,
