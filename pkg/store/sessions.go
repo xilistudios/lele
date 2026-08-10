@@ -248,7 +248,7 @@ func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, messageJSO
 	}
 
 	if _, err := r.db.Exec(
-		`INSERT INTO session_messages(session_key, seq, role, message, excluded, created_at)
+		`INSERT OR REPLACE INTO session_messages(session_key, seq, role, message, excluded, created_at)
 		 VALUES(?, ?, ?, ?, ?, ?)`,
 		sessionKey,
 		seq,
@@ -275,7 +275,7 @@ func (r *SessionRepo) InsertMessages(sessionKey string, messages []MessageRow) e
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 
 	stmt, err := tx.Prepare(
-		`INSERT INTO session_messages(session_key, seq, role, message, excluded, created_at)
+		`INSERT OR REPLACE INTO session_messages(session_key, seq, role, message, excluded, created_at)
 		 VALUES(?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
