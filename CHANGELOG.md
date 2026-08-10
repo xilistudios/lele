@@ -7,10 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-10
+
 ### Added
 
 #### Tools
 - SearXNG search provider — self-hosted metasengine integration for `web_search`. Supports `instance_url`, `categories`, `language`, `safesearch`, and `max_results` configuration. No API key required. Positioned above DuckDuckGo in provider priority (Perplexity > Brave > SearXNG > DuckDuckGo). Requires JSON format enabled on the SearXNG instance (`settings.yml` → `search.formats: [html, json]`).
+
+### Fixed
+
+#### WebUI
+- Accurate session message counts in sidebar — sessions evicted from memory (metadata-only) previously reported 0 messages and were hidden. `AllMessageCounts()` now uses a single `GROUP BY` SQL query for batch counting, with in-memory counting for active sessions.
+
+#### TUI
+- Viewport cache invalidation on streaming→non-streaming transition — when the session manager replaces a streaming message with its final version (count unchanged), the rendered base cache was never rebuilt. Added `renderedBaseLastStreaming` tracking to detect this transition and force a cache rebuild.
 
 ## [0.6.5] - 2026-08-09
 
