@@ -173,7 +173,6 @@ func stripAnsi(s string) string {
 	return result.String()
 }
 
-
 // TestAutoScroll_NewMessageNoOverlay is a regression test for the bug where
 // the viewport didn't auto-scroll to bottom when a new message arrived but
 // there was no overlay content (no streaming, no pending messages, no
