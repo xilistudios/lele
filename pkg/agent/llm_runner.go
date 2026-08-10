@@ -364,8 +364,20 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
-		// Filter out read_image tool if the current model doesn't support vision
+		// Filter out read_image tool if ANY model in the fallback chain doesn't
+		// support vision. This prevents the scenario where the primary model (with
+		// vision) calls read_image, image content is added to messages, then the
+		// primary fails and a fallback model without vision rejects the image content.
 		modelHasVision := getSupportsImages(lr.al.cfg(), model, extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider))
+		if modelHasVision && len(candidates) > 1 {
+			for _, c := range candidates {
+				candidateModel := c.Provider + ":" + c.Model
+				if !getSupportsImages(lr.al.cfg(), candidateModel, c.Provider) {
+					modelHasVision = false
+					break
+				}
+			}
+		}
 		if !modelHasVision {
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
@@ -374,6 +386,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 				}
 			}
 			providerToolDefs = filtered
+
+			// Strip image_url ContentParts from messages. Historical messages
+			// may contain image data from previous turns (or from a different
+			// model that supported vision). Sending image content to a
+			// non-vision model causes API errors.
+			messages = stripImageContentParts(messages)
 		}
 
 		// In chat mode, only expose web_search and web_fetch tools.
@@ -644,6 +662,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Phase 3: Append all context messages (role: "user") after all tool messages
 		// This ensures tool messages are contiguous, satisfying the API requirement
 		// that all tool responses follow immediately after the assistant's tool_calls.
+		if !modelHasVision {
+			allContextMsgs = stripImageContentParts(allContextMsgs)
+		}
 		for _, ctxMsg := range allContextMsgs {
 			messages = append(messages, ctxMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, ctxMsg)
@@ -752,4 +773,28 @@ func iterationMsgID(baseID string, iteration int) string {
 		return fmt.Sprintf("%s-%d", baseID, iteration)
 	}
 	return baseID
+}
+
+// stripImageContentParts returns a copy of messages with all image_url
+// ContentParts removed. This is used when the current model does not support
+// vision — historical messages may contain image data from previous turns
+// (or from a different model that did support vision), and sending image
+// content to a non-vision model causes API errors.
+func stripImageContentParts(messages []providers.Message) []providers.Message {
+	stripped := make([]providers.Message, len(messages))
+	for i, msg := range messages {
+		if len(msg.ContentParts) == 0 {
+			stripped[i] = msg
+			continue
+		}
+		filtered := make([]providers.ContentPart, 0, len(msg.ContentParts))
+		for _, part := range msg.ContentParts {
+			if part.Type != "image_url" {
+				filtered = append(filtered, part)
+			}
+		}
+		stripped[i] = msg
+		stripped[i].ContentParts = filtered
+	}
+	return stripped
 }
