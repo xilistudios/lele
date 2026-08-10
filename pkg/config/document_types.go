@@ -251,12 +251,12 @@ type EditablePerplexityConfig struct {
 
 // EditableSearXNGConfig for SearXNG.
 type EditableSearXNGConfig struct {
-	Enabled    bool   `json:"enabled"`
+	Enabled     bool   `json:"enabled"`
 	InstanceURL string `json:"instance_url"`
-	Categories string `json:"categories"`
-	Language   string `json:"language"`
-	SafeSearch int    `json:"safesearch"`
-	MaxResults int    `json:"max_results"`
+	Categories  string `json:"categories"`
+	Language    string `json:"language"`
+	SafeSearch  int    `json:"safesearch"`
+	MaxResults  int    `json:"max_results"`
 }
 
 // EditableExecConfig for exec.

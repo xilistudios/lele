@@ -754,7 +754,6 @@ func TestWebFetchTool_Execute_ServerError(t *testing.T) {
 	}
 }
 
-
 // ========== SearXNG Search Provider Tests ==========
 
 func TestSearXNGSearchProvider_Search_Success(t *testing.T) {

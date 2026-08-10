@@ -161,12 +161,12 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		MaxResults: doc.Tools.Web.Perplexity.MaxResults,
 	}
 	cfg.Tools.Web.SearXNG = SearXNGConfig{
-		Enabled:    doc.Tools.Web.SearXNG.Enabled,
+		Enabled:     doc.Tools.Web.SearXNG.Enabled,
 		InstanceURL: doc.Tools.Web.SearXNG.InstanceURL,
-		Categories: doc.Tools.Web.SearXNG.Categories,
-		Language:   doc.Tools.Web.SearXNG.Language,
-		SafeSearch: doc.Tools.Web.SearXNG.SafeSearch,
-		MaxResults: doc.Tools.Web.SearXNG.MaxResults,
+		Categories:  doc.Tools.Web.SearXNG.Categories,
+		Language:    doc.Tools.Web.SearXNG.Language,
+		SafeSearch:  doc.Tools.Web.SearXNG.SafeSearch,
+		MaxResults:  doc.Tools.Web.SearXNG.MaxResults,
 	}
 	cfg.Tools.Cron = doc.Tools.Cron
 	cfg.Tools.Exec = ExecConfig(doc.Tools.Exec)
@@ -459,12 +459,12 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	web["perplexity"] = perplexity
 
 	web["searxng"] = map[string]interface{}{
-		"enabled":     doc.Tools.Web.SearXNG.Enabled,
+		"enabled":      doc.Tools.Web.SearXNG.Enabled,
 		"instance_url": doc.Tools.Web.SearXNG.InstanceURL,
-		"categories":  doc.Tools.Web.SearXNG.Categories,
-		"language":    doc.Tools.Web.SearXNG.Language,
-		"safesearch":  doc.Tools.Web.SearXNG.SafeSearch,
-		"max_results": doc.Tools.Web.SearXNG.MaxResults,
+		"categories":   doc.Tools.Web.SearXNG.Categories,
+		"language":     doc.Tools.Web.SearXNG.Language,
+		"safesearch":   doc.Tools.Web.SearXNG.SafeSearch,
+		"max_results":  doc.Tools.Web.SearXNG.MaxResults,
 	}
 
 	tools["web"] = web
