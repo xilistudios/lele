@@ -89,12 +89,17 @@ func (m *Model) updateViewport() {
 		}
 	}
 
-	// Rebuild base if cache is invalid OR message count changed
-	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount {
+	// Rebuild base if cache is invalid OR message count changed OR the last
+	// message transitioned from Streaming=true to Streaming=false (the count
+	// doesn't change but the rendered content does — the streaming message
+	// was skipped during processing and must now be included).
+	lastMsgStreaming := len(history) > 0 && history[len(history)-1].Streaming
+	if !cacheValid || m.renderedBaseMsgCount != historyMsgCount || (m.renderedBaseLastStreaming && !lastMsgStreaming) {
 		baseLines := m.buildRenderedHistoryLines(history)
 		m.renderedBaseKey = widthCacheKey
 		m.renderedBaseMsgCount = historyMsgCount
 		m.renderedBaseValid = len(baseLines) > 0
+		m.renderedBaseLastStreaming = lastMsgStreaming
 		// Push the new base lines to the viewport — O(1) pointer swap.
 		// No more strings.Split on a giant concatenated string.
 		m.viewport.SetBaseLines(baseLines)
@@ -114,9 +119,18 @@ func (m *Model) updateViewport() {
 		m.compactFeedback != "" || m.goalFeedback != ""
 
 	if !hasOverlay && !m.selecting {
-		// Nothing ephemeral to show — ensure overlay is cleared and return.
+		// Nothing ephemeral to show — ensure overlay is cleared.
 		if len(m.viewport.overlayLines) > 0 {
 			m.viewport.SetOverlayLines(nil)
+		}
+		// Even with no overlay, if the viewport was at the bottom (or a
+		// forced scroll is pending), scroll to bottom so new base content
+		// is visible. Without this, newly arrived messages that don't
+		// produce an overlay (e.g. a completed assistant response after
+		// streaming ends) would not trigger auto-scroll.
+		if m.forceGotoBottom || (m.viewport.AtBottom() && m.viewport.totalLines() > 0 && m.viewport.Height > 0) {
+			m.forceGotoBottom = false
+			m.viewport.GotoBottom()
 		}
 		return
 	}

@@ -321,9 +321,10 @@ type Model struct {
 
 	// Cached rendered base lines for completed messages. SetBaseLines pushes
 	// these to the viewport. Only rebuilt when messages change or width changes.
-	renderedBaseValid    bool   // whether viewport.baseLines is populated
-	renderedBaseKey      string // session key the cache belongs to
-	renderedBaseMsgCount int    // number of history messages when cache was built
+	renderedBaseValid         bool   // whether viewport.baseLines is populated
+	renderedBaseKey           string // session key the cache belongs to
+	renderedBaseMsgCount      int    // number of history messages when cache was built
+	renderedBaseLastStreaming bool   // whether the last msg was Streaming=true when cache was built
 
 	// lastViewportKey is a fingerprint of the last rendered viewport state.
 	// shouldSkipViewportUpdate compares against it to skip redundant re-renders.

@@ -2171,6 +2171,60 @@ func (sm *SessionManager) ListSessions() []*Session {
 	return res
 }
 
+// AllMessageCounts returns a map of session_key → message count for every
+// persisted session. For sessions in memory, it counts user+assistant messages
+// directly. For sessions only in metadata (evicted or not yet loaded), it
+// queries SQLite in a single batch query. This avoids loading full session
+// history just to count messages, which is critical for the WebUI sidebar
+// that lists all sessions.
+func (sm *SessionManager) AllMessageCounts() map[string]int {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	counts := make(map[string]int, len(sm.sessionMeta))
+
+	// Count messages for in-memory sessions directly (accurate, no I/O)
+	for key, session := range sm.sessions {
+		count := 0
+		for _, msg := range session.Messages {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				// Skip injected context messages (e.g. from read_image tool)
+				if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+					continue
+				}
+				count++
+			}
+		}
+		counts[key] = count
+	}
+
+	// For sessions only in metadata (not in memory), query SQLite in batch
+	if sm.store != nil {
+		var needFromStore []string
+		for key := range sm.sessionMeta {
+			if _, ok := sm.sessions[key]; !ok {
+				needFromStore = append(needFromStore, key)
+			}
+		}
+		if len(needFromStore) > 0 {
+			// Release lock for I/O
+			sm.mu.RUnlock()
+			storeCounts, err := sm.store.Sessions().AllMessageCounts()
+			sm.mu.RLock()
+			if err == nil {
+				for _, key := range needFromStore {
+					if c, ok := storeCounts[key]; ok {
+						counts[key] = c
+					}
+				}
+			}
+		}
+	}
+
+	return counts
+}
+
 // SubagentSessionInfo contains metadata about a persisted subagent session.
 type SubagentSessionInfo struct {
 	Key        string

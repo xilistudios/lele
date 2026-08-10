@@ -732,3 +732,42 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 		t.Errorf("MessageCount after clear = %d, want 0", count)
 	}
 }
+
+func TestSessionRepo_AllMessageCounts(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	now := time.Now()
+
+	// Create 3 sessions with different message counts
+	repo.UpsertSession(SessionMeta{Key: "sess-a", CreatedAt: now, UpdatedAt: now})
+	repo.UpsertSession(SessionMeta{Key: "sess-b", CreatedAt: now, UpdatedAt: now})
+	repo.UpsertSession(SessionMeta{Key: "sess-c", CreatedAt: now, UpdatedAt: now})
+
+	// sess-a: 2 messages
+	for i := 0; i < 2; i++ {
+		repo.InsertMessage("sess-a", i, "user", fmt.Sprintf("a%d", i),
+			fmt.Sprintf(`{"role":"user","content":"a%d"}`, i), false)
+	}
+	// sess-b: 5 messages
+	for i := 0; i < 5; i++ {
+		repo.InsertMessage("sess-b", i, "assistant", fmt.Sprintf("b%d", i),
+			fmt.Sprintf(`{"role":"assistant","content":"b%d"}`, i), false)
+	}
+	// sess-c: 0 messages (just metadata)
+
+	counts, err := repo.AllMessageCounts()
+	if err != nil {
+		t.Fatalf("AllMessageCounts() failed: %v", err)
+	}
+
+	if counts["sess-a"] != 2 {
+		t.Errorf("sess-a count = %d, want 2", counts["sess-a"])
+	}
+	if counts["sess-b"] != 5 {
+		t.Errorf("sess-b count = %d, want 5", counts["sess-b"])
+	}
+	if counts["sess-c"] != 0 {
+		t.Errorf("sess-c count = %d, want 0", counts["sess-c"])
+	}
+}
