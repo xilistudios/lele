@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Tools
+- SearXNG search provider — self-hosted metasengine integration for `web_search`. Supports `instance_url`, `categories`, `language`, `safesearch`, and `max_results` configuration. No API key required. Positioned above DuckDuckGo in provider priority (Perplexity > Brave > SearXNG > DuckDuckGo). Requires JSON format enabled on the SearXNG instance (`settings.yml` → `search.formats: [html, json]`).
+
 ## [0.6.5] - 2026-08-09
 
 ### Fixed

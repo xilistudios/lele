@@ -189,6 +189,14 @@
         "enabled": false,
         "api_key": "{{ENV_PERPLEXITY_API_KEY}}",
         "max_results": 5
+      },
+      "searxng": {
+        "enabled": false,
+        "instance_url": "https://search.mapachoshome.com",
+        "categories": "general",
+        "language": "auto",
+        "safesearch": 0,
+        "max_results": 5
       }
     },
     "cron": {

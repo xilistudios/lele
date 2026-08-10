@@ -10,7 +10,8 @@ Lele exposes tool-related runtime settings through the `tools` section in `~/.le
     "web": {
       "brave": { "enabled": false, "api_key": "", "max_results": 5 },
       "duckduckgo": { "enabled": true, "max_results": 5 },
-      "perplexity": { "enabled": false, "api_key": "", "max_results": 5 }
+      "perplexity": { "enabled": false, "api_key": "", "max_results": 5 },
+      "searxng": { "enabled": false, "instance_url": "", "categories": "general", "language": "auto", "safesearch": 0, "max_results": 5 }
     },
     "cron": {
       "exec_timeout_minutes": 5
@@ -49,6 +50,62 @@ These settings control search and web retrieval backends used by the agent.
 | `enabled` | bool | `false` | Enable Perplexity search |
 | `api_key` | string | empty | Perplexity API key |
 | `max_results` | int | `5` | Result limit |
+
+### SearXNG
+
+[SearXNG](https://docs.searxng.org/) is a privacy-respecting metasearch engine that aggregates results from 70+ search engines. It can be self-hosted, requires no API keys, and is ideal for local/private search.
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | bool | `false` | Enable SearXNG search |
+| `instance_url` | string | empty | SearXNG instance URL (e.g. `https://search.example.com`) |
+| `categories` | string | `general` | Search categories: `general`, `images`, `news`, `science`, `it`, etc. |
+| `language` | string | `auto` | Search language code (`en`, `es`, `auto`, etc.) |
+| `safesearch` | int | `0` | Safe search filter: `0` (off), `1` (moderate), `2` (strict) |
+| `max_results` | int | `5` | Result limit |
+
+#### SearXNG Instance Requirements
+
+The SearXNG instance must have the JSON output format enabled. In the instance's `settings.yml`:
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+Without this, the API returns `403 Forbidden`. The tool will show a clear error message if this is the case.
+
+#### Example
+
+```json
+{
+  "tools": {
+    "web": {
+      "searxng": {
+        "enabled": true,
+        "instance_url": "https://search.mapachoshome.com",
+        "categories": "general",
+        "language": "auto",
+        "safesearch": 0,
+        "max_results": 5
+      }
+    }
+  }
+}
+```
+
+#### Search Provider Priority
+
+When multiple providers are enabled, the priority order is:
+
+1. **Perplexity** — AI-powered search (API key required)
+2. **Brave** — independent search index (API key required)
+3. **SearXNG** — self-hosted metasearch (no API key)
+4. **DuckDuckGo** — HTML scraping fallback (fragile, may break)
+
+SearXNG is positioned above DuckDuckGo because it aggregates multiple engines and is more stable than scraping DuckDuckGo's HTML.
 
 ## Exec Tool
 
@@ -131,6 +188,8 @@ Examples:
 
 - `LELE_TOOLS_WEB_BRAVE_ENABLED=true`
 - `LELE_TOOLS_WEB_PERPLEXITY_API_KEY=...`
+- `LELE_TOOLS_WEB_SEARXNG_ENABLED=true`
+- `LELE_TOOLS_WEB_SEARXNG_INSTANCE_URL=https://search.example.com`
 - `LELE_TOOLS_EXEC_ENABLE_DENY_PATTERNS=false`
 - `LELE_TOOLS_CRON_EXEC_TIMEOUT_MINUTES=10`
 
