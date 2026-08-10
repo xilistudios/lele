@@ -1025,6 +1025,18 @@ func TestRunLLMIteration_AppendsToolContextMessages(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
+	// Configure the model with vision support so read_image is NOT filtered
+	// and image ContentParts are preserved in messages.
+	al.cfg().Providers = &config.ProvidersConfig{
+		Named: map[string]config.NamedProviderConfig{
+			"test-provider": {
+				Models: map[string]config.ProviderModelConfig{
+					"test-model": {Vision: true},
+				},
+			},
+		},
+	}
+
 	runner := newLLMRunner(al)
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
@@ -1099,6 +1111,51 @@ func TestRunLLMIteration_AppendsToolContextMessages(t *testing.T) {
 	}
 	if !foundImage {
 		t.Fatal("expected image context message to be saved in session history")
+	}
+}
+
+func TestRunLLMIteration_StripsImageContentParts_WhenNoVision(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	// No vision-capable model configured — getSupportsImages returns false.
+	// Image ContentParts in historical messages should be stripped before
+	// being sent to the LLM.
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	agent.Provider = &llmRunnerMockLLMProvider{
+		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
+			// Verify no messages contain image_url ContentParts
+			for _, msg := range messages {
+				for _, part := range msg.ContentParts {
+					if part.Type == "image_url" {
+						t.Fatal("expected image_url ContentParts to be stripped for non-vision model")
+					}
+				}
+			}
+			return &providers.LLMResponse{Content: "ok"}, nil
+		},
+	}
+
+	// Pre-populate messages with image content (simulates historical read_image result)
+	messages := []providers.Message{
+		{Role: "system", Content: "System prompt"},
+		{Role: "user", Content: "Read image"},
+		{Role: "user", ContentParts: []providers.ContentPart{
+			{Type: "text", Text: "Analyze this image"},
+			{Type: "image_url", ImageURL: &providers.ImageURL{URL: "data:image/png;base64,abcd", Detail: "auto"}},
+		}},
+	}
+	content, iterations, err := runner.runLLMIteration(context.Background(), agent, messages, processOptions{SessionKey: "test-session"})
+	if err != nil {
+		t.Fatalf("runLLMIteration error: %v", err)
+	}
+	if content != "ok" {
+		t.Fatalf("content = %q, want ok", content)
+	}
+	if iterations != 1 {
+		t.Fatalf("iterations = %d, want 1", iterations)
 	}
 }
 
