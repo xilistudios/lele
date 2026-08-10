@@ -419,3 +419,30 @@ func (r *SessionRepo) PruneExcluded(sessionKey string, keepCount int) (int, erro
 	affected, _ := result.RowsAffected()
 	return int(affected), nil
 }
+
+// AllMessageCounts returns a map of session_key → message count for all
+// sessions in a single query. This avoids N+1 queries when listing sessions
+// for the WebUI sidebar/history.
+func (r *SessionRepo) AllMessageCounts() (map[string]int, error) {
+	rows, err := r.db.Query(
+		`SELECT session_key, COUNT(*) FROM session_messages GROUP BY session_key`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("all message counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var key string
+		var count int
+		if err := rows.Scan(&key, &count); err != nil {
+			return nil, fmt.Errorf("all message counts scan: %w", err)
+		}
+		counts[key] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("all message counts rows: %w", err)
+	}
+	return counts, nil
+}
