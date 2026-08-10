@@ -256,19 +256,24 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 		t.Errorf("Expected summary to contain 'Summary', got: %s", summary)
 	}
 
-	// Verify messages are preserved on disk but excluded messages are pruned
-	// from the in-memory slice (they waste RAM since they're already saved
-	// to disk and stripped before sending to the LLM).
+	// Verify messages are preserved in memory with ExcludeFromContext flags.
+	// Old messages stay in memory (for TUI display) but are marked as excluded
+	// from the LLM context.
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	// After pruning, only the 2 context-included messages remain in memory.
-	if len(afterHistory) != 2 {
-		t.Errorf("Expected 2 messages remaining in memory after pruning excluded, got %d", len(afterHistory))
-	}
-
+	excludedCount := 0
+	includedCount := 0
 	for _, m := range afterHistory {
 		if m.ExcludeFromContext {
-			t.Errorf("Expected all remaining messages to be included in context")
+			excludedCount++
+		} else {
+			includedCount++
 		}
+	}
+	if excludedCount == 0 {
+		t.Error("Expected some messages to be excluded from context")
+	}
+	if includedCount != 2 {
+		t.Errorf("Expected 2 messages included in context, got %d", includedCount)
 	}
 }
 
@@ -435,18 +440,23 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 		stats.BeforeMessages, stats.AfterMessages, stats.DroppedMessages,
 		stats.BeforeTokens, stats.AfterTokens, stats.SavedTokens)
 
-	// Assert: old excluded messages are pruned from the in-memory slice;
-	// only the last 2 continuity messages remain.
+	// Assert: old excluded messages are marked with ExcludeFromContext but
+	// remain in the in-memory slice for TUI display.
 	afterHistory := agent.Sessions.GetHistory(sessionKey)
-	if len(afterHistory) != 2 {
-		t.Fatalf("Expected 2 messages remaining in memory after pruning excluded, got %d", len(afterHistory))
-	}
-
-	// All remaining messages should be in context (none excluded).
+	excludedCount := 0
+	includedCount := 0
 	for _, m := range afterHistory {
 		if m.ExcludeFromContext {
-			t.Errorf("Expected all remaining messages to be included in context")
+			excludedCount++
+		} else {
+			includedCount++
 		}
+	}
+	if excludedCount == 0 {
+		t.Error("Expected some messages to be excluded from context")
+	}
+	if includedCount != 2 {
+		t.Errorf("Expected 2 messages included in context, got %d", includedCount)
 	}
 
 	// Summary messages (if any) should never be excluded from context.
