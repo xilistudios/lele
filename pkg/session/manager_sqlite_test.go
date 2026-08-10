@@ -762,3 +762,47 @@ func TestSQLite_SessionManager_JsonFallback(t *testing.T) {
 		t.Errorf("expected message %q, got %q", "hello", history[0].Content)
 	}
 }
+
+func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager("")
+	sm.SetStore(s)
+
+	// Create sessions with messages
+	sm.GetOrCreate("sess-a")
+	sm.AddMessage("sess-a", "user", "hello")
+	sm.AddMessage("sess-a", "assistant", "hi there")
+	sm.GetOrCreate("sess-b")
+	sm.AddMessage("sess-b", "user", "world")
+
+	// Save to SQLite
+	sm.Save("sess-a")
+	sm.Save("sess-b")
+
+	// Create a session with no messages (just metadata)
+	sm.GetOrCreate("sess-empty")
+	sm.Save("sess-empty")
+
+	// Evict all sessions from memory to simulate the real scenario
+	// where sessions are only in metadata (the bug condition)
+	sm.mu.Lock()
+	for k := range sm.sessions {
+		delete(sm.sessions, k)
+		delete(sm.accessTimes, k)
+	}
+	sm.mu.Unlock()
+
+	// Now AllMessageCounts should still return correct counts
+	// even though sessions are not in memory
+	counts := sm.AllMessageCounts()
+
+	if counts["sess-a"] != 2 {
+		t.Errorf("sess-a count = %d, want 2", counts["sess-a"])
+	}
+	if counts["sess-b"] != 1 {
+		t.Errorf("sess-b count = %d, want 1", counts["sess-b"])
+	}
+	if counts["sess-empty"] != 0 {
+		t.Errorf("sess-empty count = %d, want 0", counts["sess-empty"])
+	}
+}
