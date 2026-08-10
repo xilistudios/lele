@@ -381,6 +381,15 @@ func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 		return "📭 Not enough messages to compact (need 5+)."
 	}
 
+	// Register a session cancel so IsSessionProcessing returns true during
+	// compaction. This keeps the TUI loading animation active while the LLM
+	// summarization call runs (can take several seconds).
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	unregister := ap.al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
+	defer unregister()
+	_ = ctx // context is used internally by summarizeSession
+
 	stats := ap.al.sessionManager.summarizeSession(agent, sessionKey)
 	if stats == nil {
 		return "❌ Compaction failed or nothing to compact."

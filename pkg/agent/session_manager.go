@@ -412,8 +412,6 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
 	agent.Sessions.Save(sessionKey)
 	agent.Sessions.IncrementCompactionCount(sessionKey)
-	// Prune excluded messages from RAM — they're already saved to disk.
-	agent.Sessions.PruneExcludedMessages(sessionKey)
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]interface{}{
 		"session_key":  sessionKey,
@@ -746,9 +744,6 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 
 	agent.Sessions.Save(sessionKey)
 	agent.Sessions.IncrementCompactionCount(sessionKey)
-	// Prune excluded messages from RAM — they're already saved to disk
-	// and only waste memory keeping them in the in-memory slice.
-	agent.Sessions.PruneExcludedMessages(sessionKey)
 
 	// Calculate after stats
 	afterHistory := agent.Sessions.GetHistoryView(sessionKey)
