@@ -9,7 +9,6 @@ package agent
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -182,7 +181,6 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 
 	// Create a dedicated session directory for this test to avoid loading
 	// real user sessions from ~/.lele/sessions.
-	testSessionsDir := filepath.Join(tmpDir, "sessions")
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -205,7 +203,7 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 
 	// Override the shared session manager with a test-local one so we don't
 	// load or persist data in the user's real ~/.lele/sessions directory.
-	testSessionMgr := session.NewSessionManager(testSessionsDir)
+	testSessionMgr := session.NewSessionManager()
 	al.registry.SetSharedSessionManager(testSessionMgr)
 
 	sm := newSessionManager(al)
@@ -384,8 +382,8 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	al := NewAgentLoop(cfg, msgBus)
 
 	// Use a test-local session manager so we don't touch real sessions.
-	testSessionsDir := filepath.Join(tmpDir, "sessions")
-	testSessionMgr := session.NewSessionManager(testSessionsDir)
+
+	testSessionMgr := session.NewSessionManager()
 	al.registry.SetSharedSessionManager(testSessionMgr)
 
 	sm := newSessionManager(al)

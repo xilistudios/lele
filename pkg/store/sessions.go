@@ -193,7 +193,6 @@ func (r *SessionRepo) SessionExists(key string) (bool, error) {
 type MessageRow struct {
 	Seq      int
 	Role     string
-	Content  string
 	JSON     string
 	Excluded bool
 }
@@ -217,8 +216,8 @@ func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) 
 	}
 
 	stmt, err := tx.Prepare(
-		`INSERT INTO session_messages(session_key, seq, role, content, message, excluded, created_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO session_messages(session_key, seq, role, message, excluded, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
 		return fmt.Errorf("prepare insert messages %q: %w", sessionKey, err)
@@ -231,7 +230,7 @@ func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) 
 		if m.Excluded {
 			exclInt = 1
 		}
-		if _, err := stmt.Exec(sessionKey, m.Seq, m.Role, m.Content, m.JSON, exclInt, now); err != nil {
+		if _, err := stmt.Exec(sessionKey, m.Seq, m.Role, m.JSON, exclInt, now); err != nil {
 			return fmt.Errorf("insert message %q seq=%d: %w", sessionKey, m.Seq, err)
 		}
 	}
@@ -241,21 +240,19 @@ func (r *SessionRepo) ReplaceMessages(sessionKey string, messages []MessageRow) 
 
 // InsertMessage appends a message to the session. The seq number determines
 // the ordering within the session. The messageJSON is the serialized
-// providers.Message. The content field is the plain text representation
-// (for search/display). The excluded flag marks messages excluded from context.
-func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, content, messageJSON string, excluded bool) error {
+// providers.Message. The excluded flag marks messages excluded from context.
+func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, messageJSON string, excluded bool) error {
 	exclInt := 0
 	if excluded {
 		exclInt = 1
 	}
 
 	if _, err := r.db.Exec(
-		`INSERT INTO session_messages(session_key, seq, role, content, message, excluded, created_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO session_messages(session_key, seq, role, message, excluded, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
 		sessionKey,
 		seq,
 		role,
-		content,
 		messageJSON,
 		exclInt,
 		time.Now().Format(time.RFC3339Nano),
@@ -265,18 +262,51 @@ func (r *SessionRepo) InsertMessage(sessionKey string, seq int, role, content, m
 	return nil
 }
 
+// InsertMessages batch-inserts multiple messages in a single transaction.
+// Used by the incremental save path to avoid per-message lock release.
+func (r *SessionRepo) InsertMessages(sessionKey string, messages []MessageRow) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for insert messages %q: %w", sessionKey, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	stmt, err := tx.Prepare(
+		`INSERT OR REPLACE INTO session_messages(session_key, seq, role, message, excluded, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare insert messages %q: %w", sessionKey, err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().Format(time.RFC3339Nano)
+	for _, m := range messages {
+		exclInt := 0
+		if m.Excluded {
+			exclInt = 1
+		}
+		if _, err := stmt.Exec(sessionKey, m.Seq, m.Role, m.JSON, exclInt, now); err != nil {
+			return fmt.Errorf("insert message %q seq=%d: %w", sessionKey, m.Seq, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // UpdateMessage updates an existing message in-place (used for streaming).
-func (r *SessionRepo) UpdateMessage(sessionKey string, seq int, role, content, messageJSON string, excluded bool) error {
+func (r *SessionRepo) UpdateMessage(sessionKey string, seq int, role, messageJSON string, excluded bool) error {
 	exclInt := 0
 	if excluded {
 		exclInt = 1
 	}
 
 	if _, err := r.db.Exec(
-		`UPDATE session_messages SET role = ?, content = ?, message = ?, excluded = ?
+		`UPDATE session_messages SET role = ?, message = ?, excluded = ?
 		 WHERE session_key = ? AND seq = ?`,
 		role,
-		content,
 		messageJSON,
 		exclInt,
 		sessionKey,
@@ -302,6 +332,41 @@ func (r *SessionRepo) UpdateMessagesExcluded(sessionKey string, fromSeq, toSeq i
 		return fmt.Errorf("update excluded session=%q seq=%d..%d: %w", sessionKey, fromSeq, toSeq, err)
 	}
 	return nil
+}
+
+// UpdateMessagesExcludedWithJSON updates both the excluded flag and the
+// serialized JSON for a batch of messages in a single transaction. Used by
+// the incremental save path when the excluded flag changes on existing messages,
+// keeping the denormalized excluded column and the JSON blob in sync.
+func (r *SessionRepo) UpdateMessagesExcludedWithJSON(sessionKey string, messages []MessageRow) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for update excluded %q: %w", sessionKey, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	stmt, err := tx.Prepare(
+		`UPDATE session_messages SET excluded = ?, message = ?
+		 WHERE session_key = ? AND seq = ?`,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare update excluded %q: %w", sessionKey, err)
+	}
+	defer stmt.Close()
+
+	for _, m := range messages {
+		exclInt := 0
+		if m.Excluded {
+			exclInt = 1
+		}
+		if _, err := stmt.Exec(exclInt, m.JSON, sessionKey, m.Seq); err != nil {
+			return fmt.Errorf("update excluded %q seq=%d: %w", sessionKey, m.Seq, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // DeleteMessagesFrom removes all messages with seq >= fromSeq.

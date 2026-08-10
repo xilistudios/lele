@@ -365,10 +365,20 @@ export type EditablePerplexityConfig = {
   max_results: number
 }
 
+export type EditableSearXNGConfig = {
+  enabled: boolean
+  instance_url: string
+  categories: string
+  language: string
+  safesearch: number
+  max_results: number
+}
+
 export type EditableWebToolsConfig = {
   brave: EditableBraveConfig
   duckduckgo: EditableDuckDuckGoConfig
   perplexity: EditablePerplexityConfig
+  searxng: EditableSearXNGConfig
 }
 
 export type EditableCronToolsConfig = {

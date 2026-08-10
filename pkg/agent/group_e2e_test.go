@@ -71,8 +71,7 @@ func buildE2EAgentLoop(t *testing.T, defs []e2eAgentDef) (
 func newE2EAgentInstance(t *testing.T, tmpDir, id, name, response string) *AgentInstance {
 	t.Helper()
 
-	sessionsDir := tmpDir + "/sessions-" + id
-	_ = session.NewSessionManager(sessionsDir) // ensure dir creation
+	_ = session.NewSessionManager() // ensure dir creation
 
 	toolRegistry := tools.NewToolRegistry()
 	cb := NewContextBuilder(tmpDir)
@@ -88,7 +87,7 @@ func newE2EAgentInstance(t *testing.T, tmpDir, id, name, response string) *Agent
 		Temperature:    0.7,
 		ContextWindow:  128000,
 		Provider:       &llmRunnerMockLLMProvider{response: fixedResponse(response)},
-		Sessions:       session.NewSessionManager(sessionsDir),
+		Sessions:       session.NewSessionManager(),
 		ContextBuilder: cb,
 		Tools:          toolRegistry,
 		Candidates:     []providers.FallbackCandidate{},

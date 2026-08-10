@@ -68,7 +68,7 @@ func seedSession(b *testing.B, repo *SessionRepo, key string, n int) {
 			role = "assistant"
 		}
 		msgJSON := makeMessageJSON(role, i)
-		if err := repo.InsertMessage(key, i, role, fmt.Sprintf("msg %d", i), msgJSON, false); err != nil {
+		if err := repo.InsertMessage(key, i, role, msgJSON, false); err != nil {
 			b.Fatalf("InsertMessage: %v", err)
 		}
 	}
@@ -170,7 +170,7 @@ func BenchmarkSessionWrite_SQLite(b *testing.B) {
 					if j%2 == 1 {
 						role = "assistant"
 					}
-					if err := repo.InsertMessage(key, j, role, fmt.Sprintf("msg %d", j), msgJSON, false); err != nil {
+					if err := repo.InsertMessage(key, j, role, msgJSON, false); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -288,7 +288,7 @@ func BenchmarkSessionAppend_SQLite(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				seq := existingMsgs + i
-				if err := repo.InsertMessage("bench:append", seq, "user", "new message", newMsg, false); err != nil {
+				if err := repo.InsertMessage("bench:append", seq, "user", newMsg, false); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -369,7 +369,7 @@ func BenchmarkSessionFullResave_SQLite(b *testing.B) {
 					if j%2 == 1 {
 						role = "assistant"
 					}
-					if err := repo.InsertMessage("bench:resave", j, role, fmt.Sprintf("msg %d", j), msgJSON, false); err != nil {
+					if err := repo.InsertMessage("bench:resave", j, role, msgJSON, false); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -716,7 +716,7 @@ func BenchmarkMemory_SessionAppend(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			repo.InsertMessage("bench:mem-append", 100+i, "user", "new", newMsg, false)
+			repo.InsertMessage("bench:mem-append", 100+i, "user", newMsg, false)
 		}
 	})
 
@@ -765,7 +765,7 @@ func BenchmarkDiskSize_100Sessions_50Msgs(b *testing.B) {
 					if k%2 == 1 {
 						role = "assistant"
 					}
-					repo.InsertMessage(key, k, role, fmt.Sprintf("msg %d", k), makeMessageJSON(role, k), false)
+					repo.InsertMessage(key, k, role, makeMessageJSON(role, k), false)
 				}
 			}
 

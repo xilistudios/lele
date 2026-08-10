@@ -3,9 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
+
 	"sort"
 	"strings"
 	"sync"
@@ -19,7 +17,6 @@ import (
 // maxStoredMessages is the maximum number of messages kept in a session file.
 // When exceeded, the oldest excluded messages are pruned on save.
 const maxStoredMessages = 10000
-const indexFileName = "_index.json"
 
 type Session struct {
 	Key                string              `json:"key"`
@@ -36,6 +33,11 @@ type Session struct {
 	lastStreamFlush    time.Time           // throttle for stream persistence (not persisted)
 	hadStreamedContent bool                // tracks if content was delivered via streaming this turn (not persisted)
 	lastPersistedSeq   int                 // last message seq persisted to SQLite (-1 = none)
+	metaDirty          bool                // metadata changed since last save (needs UpsertSession)
+	msgsAppended       int                 // messages appended since lastPersistedSeq (needs InsertMessage)
+	msgsModified       bool                // existing messages modified in-place, e.g. streaming (needs UpdateMessage)
+	excludedRange      [2]int              // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
+	lastMsgDeleted     bool                // last message was removed (needs DeleteLastMessage)
 	// Token tracking
 	InputTokens     int `json:"input_tokens,omitempty"`
 	OutputTokens    int `json:"output_tokens,omitempty"`
@@ -54,12 +56,10 @@ type sessionMetadata struct {
 }
 
 type SessionManager struct {
-	sessions   map[string]*Session
-	mu         sync.RWMutex
-	storage    string
-	store      *store.Store // SQLite store (nil = use JSON files)
-	loadOnce   sync.Once    // ensures loadSessions runs exactly once, on first access
-	indexDirty bool         // true when sessionMeta has been modified since last index save
+	sessions map[string]*Session
+	mu       sync.RWMutex
+	store    *store.Store // SQLite store
+	loadOnce sync.Once    // ensures loadSessions runs exactly once, on first access
 
 	// Lazy loading: lightweight metadata for sessions not yet loaded into memory.
 	// Populated by loadSessionMetadata() instead of loading full message history.
@@ -69,26 +69,15 @@ type SessionManager struct {
 	maxInMemory int                  // max sessions to keep in memory (0 = unlimited). Default: 50.
 	evictionTTL time.Duration        // idle time before a session is eligible for eviction. Default: 30m.
 	accessTimes map[string]time.Time // last access time per session key (for LRU)
-
-	// saveSeq tracks in-flight save sequence numbers per session key so that
-	// a slow, out-of-order disk write can never overwrite a newer snapshot
-	// (saves release the lock during I/O). Guarded by sm.mu.
-	saveSeq map[string]uint64
 }
 
-func NewSessionManager(storage string) *SessionManager {
+func NewSessionManager() *SessionManager {
 	sm := &SessionManager{
 		sessions:    make(map[string]*Session),
-		storage:     storage,
 		sessionMeta: make(map[string]*sessionMetadata),
 		maxInMemory: 50,
 		evictionTTL: 30 * time.Minute,
 		accessTimes: make(map[string]time.Time),
-		saveSeq:     make(map[string]uint64),
-	}
-
-	if storage != "" {
-		os.MkdirAll(storage, 0755)
 	}
 
 	return sm
@@ -104,94 +93,15 @@ func (sm *SessionManager) SetStore(s *store.Store) {
 // Must be called BEFORE acquiring sm.mu to avoid deadlock.
 func (sm *SessionManager) ensureLoaded() {
 	sm.loadOnce.Do(func() {
-		if sm.storage != "" || sm.store != nil {
-			sm.loadSessionMetadata()
+		if sm.store != nil {
+			sm.loadSessionMetadataFromSQLite()
+		} else {
+			logger.WarnCF("session", "SessionManager has no store — sessions will not persist to disk", nil)
 		}
 	})
 }
 
-// MigrateFromWorkspace moves session JSON files from an old per-workspace
-// sessions directory into the unified global sessions directory. Existing
-// files in the destination are never overwritten (first migration wins).
-// Errors are logged but not returned — migration is best-effort.
-func MigrateFromWorkspace(oldDir, newDir string) {
-	if oldDir == "" || newDir == "" || oldDir == newDir {
-		return
-	}
-
-	info, err := os.Stat(oldDir)
-	if err != nil || !info.IsDir() {
-		return
-	}
-
-	entries, err := os.ReadDir(oldDir)
-	if err != nil {
-		return
-	}
-
-	if err := os.MkdirAll(newDir, 0755); err != nil {
-		logger.WarnCF("session", "Cannot create unified sessions dir",
-			map[string]interface{}{"path": newDir, "error": err.Error()})
-		return
-	}
-
-	migrated := 0
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-
-		srcPath := filepath.Join(oldDir, entry.Name())
-		dstPath := filepath.Join(newDir, entry.Name())
-
-		// Never overwrite — the first agent that migrates wins.
-		if _, err := os.Stat(dstPath); err == nil {
-			continue
-		}
-
-		if err := os.Rename(srcPath, dstPath); err != nil {
-			// If rename fails (e.g. cross-device), fall back to copy+delete.
-			if err := copyFile(srcPath, dstPath); err != nil {
-				logger.WarnCF("session", "Failed to migrate session file",
-					map[string]interface{}{
-						"file":  entry.Name(),
-						"src":   oldDir,
-						"dst":   newDir,
-						"error": err.Error(),
-					})
-				continue
-			}
-			// Remove source after successful copy
-			_ = os.Remove(srcPath)
-		}
-		migrated++
-	}
-
-	if migrated > 0 {
-		logger.InfoCF("session", "Migrated sessions to unified directory",
-			map[string]interface{}{
-				"count": migrated,
-				"from":  oldDir,
-				"to":    newDir,
-			})
-	}
-}
-
-// copyFile copies a file from src to dst. Used as fallback when os.Rename fails.
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0644)
-}
-
-// StoragePath returns the storage directory path.
-func (sm *SessionManager) StoragePath() string {
-	return sm.storage
-}
-
-// loadSessionFromDisk loads a full session (including messages) from disk
+// loadSessionFromDisk loads a full session (including messages) from SQLite
 // into the sessions map. Called when a session is accessed that exists in
 // metadata but not in the in-memory map.
 // Caller must hold sm.mu (write lock).
@@ -212,27 +122,7 @@ func (sm *SessionManager) loadSessionFromDisk(key string) (*Session, bool) {
 		return sm.loadFromSQLite(key)
 	}
 
-	// Load from disk
-	filename := sanitizeFilename(key)
-	sessionPath := filepath.Join(sm.storage, filename+".json")
-	data, err := os.ReadFile(sessionPath)
-	if err != nil {
-		// Session file may have been deleted; clean up metadata
-		delete(sm.sessionMeta, key)
-		return nil, false
-	}
-
-	var session Session
-	if err := json.Unmarshal(data, &session); err != nil {
-		return nil, false
-	}
-
-	// Enforce memory limit before adding a new session
-	sm.evictIfNeeded()
-
-	sm.sessions[key] = &session
-	sm.accessTimes[key] = time.Now()
-	return &session, true
+	return nil, false
 }
 
 // loadFromSQLite loads a session from the SQLite store.
@@ -402,37 +292,9 @@ func (sm *SessionManager) CleanupIdleSessions() int {
 		}
 	}
 
-	// Also clean up orphaned sessionMeta entries: metadata for sessions
-	// whose files no longer exist on disk. Collect keys first, then stat
-	// OUTSIDE the lock — disk I/O must not hold sm.mu.
-	var orphanCandidates []string
-	if sm.storage != "" {
-		for key := range sm.sessionMeta {
-			orphanCandidates = append(orphanCandidates, key)
-		}
-	}
-	if len(orphanCandidates) > 0 {
-		sm.mu.Unlock()
-		orphans := make([]string, 0)
-		for _, key := range orphanCandidates {
-			filename := sanitizeFilename(key)
-			sessionPath := filepath.Join(sm.storage, filename+".json")
-			if _, err := os.Stat(sessionPath); err != nil {
-				orphans = append(orphans, key)
-			}
-		}
-		sm.mu.Lock()
-		for _, key := range orphans {
-			// Re-check under the lock: if the session was loaded or saved
-			// while we were doing I/O, keep its metadata. (A save requires
-			// the session to be in memory, so this check is sufficient and
-			// avoids disk I/O while holding the lock.)
-			if _, ok := sm.sessions[key]; ok {
-				continue
-			}
-			delete(sm.sessionMeta, key)
-		}
-	}
+	// Also clean up orphaned sessionMeta entries for subagents (handled below).
+	// With SQLite as the primary backend, session files don't exist on disk as JSON,
+	// so we no longer stat the filesystem here.
 
 	if evicted > 0 {
 		logger.InfoCF("session", "Idle sessions cleaned up", map[string]interface{}{
@@ -440,10 +302,6 @@ func (sm *SessionManager) CleanupIdleSessions() int {
 		})
 	}
 
-	if sm.indexDirty {
-		sm.saveIndexUnlocked()
-		sm.indexDirty = false
-	}
 	return evicted
 }
 
@@ -604,12 +462,14 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			msg.Streaming = false
 			*lastMsg = msg
 			session.Updated = time.Now()
+			session.msgsModified = true // in-place update, not a new append
 			return
 		}
 	}
 
 	session.Messages = append(session.Messages, msg)
 	session.Updated = time.Now()
+	session.msgsAppended++
 }
 
 func (sm *SessionManager) GetHistory(key string) []providers.Message {
@@ -737,6 +597,7 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 
 	session.Summary = summary
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 }
 
@@ -762,9 +623,10 @@ func (sm *SessionManager) SetName(key string, name string) error {
 
 	session.Name = strings.TrimSpace(name)
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
@@ -783,6 +645,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	if keepLast <= 0 {
 		session.Messages = []providers.Message{}
 		session.Updated = time.Now()
+		session.lastPersistedSeq = -1 // full rewrite: all messages removed
 		sm.touchSession(key)
 		return
 	}
@@ -793,6 +656,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
+	session.lastPersistedSeq = -1 // full rewrite: kept messages re-indexed
 	sm.touchSession(key)
 }
 
@@ -859,6 +723,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		session.Messages[i].ExcludeFromContext = true
 	}
 	session.Updated = time.Now()
+	session.excludedRange = [2]int{0, excludeUpTo}
 }
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.ensureLoaded()
@@ -879,6 +744,7 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 
 	session.Messages = session.Messages[:len(session.Messages)-1]
 	session.Updated = time.Now()
+	session.lastMsgDeleted = true
 	sm.touchSession(key)
 	return true
 }
@@ -920,66 +786,11 @@ func (sm *SessionManager) ShouldStartFreshSession(key string, threshold time.Dur
 	return true, idle
 }
 
-// sanitizeFilename converts a session key into a cross-platform safe filename.
-// Session keys use "channel:chatID" (e.g. "telegram:123456") but ':' is the
-// volume separator on Windows, so filepath.Base would misinterpret the key.
-// We replace it with '_'. The original key is preserved inside the JSON file,
-// so loadSessions still maps back to the right in-memory key.
-func sanitizeFilename(key string) string {
-	return strings.ReplaceAll(key, ":", "_")
-}
-
 func (sm *SessionManager) Save(key string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	return sm.saveUnlocked(key)
-}
-
-// loadSessionMetadata reads all session files but only parses lightweight
-// metadata (key, name, created, updated) — NOT the full message history.
-// This dramatically reduces startup memory for deployments with many sessions.
-// Full sessions are loaded on-demand via loadSessionFromDisk().
-//
-// On subsequent startups, the metadata is loaded from a cached index file
-// (_index.json), reducing startup from ~1.2s to ~3ms. On first startup or
-// when the index is stale, parallel loading is used (~120ms).
-func (sm *SessionManager) loadSessionMetadata() error {
-	// Use SQLite if available
-	if sm.store != nil {
-		return sm.loadSessionMetadataFromSQLite()
-	}
-
-	files, err := os.ReadDir(sm.storage)
-	if err != nil {
-		return err
-	}
-
-	// Count session files (exclude _index.json)
-	fileCount := 0
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
-			continue
-		}
-		if file.Name() == indexFileName {
-			continue
-		}
-		fileCount++
-	}
-
-	// Fast path: try loading from index file
-	if cached, err := sm.loadIndex(); err == nil && len(cached) == fileCount {
-		// Index is fresh — use it directly
-		sm.sessionMeta = cached
-		return nil
-	}
-
-	// Slow path: build index from files using parallel loading
-	sm.loadSessionMetadataParallel(files)
-
-	// Save index for next startup
-	sm.saveIndexUnlocked()
-	return nil
 }
 
 // loadSessionMetadataFromSQLite loads session metadata from the SQLite store.
@@ -1003,129 +814,6 @@ func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
 	return nil
 }
 
-// loadIndex reads the cached metadata index from _index.json.
-func (sm *SessionManager) loadIndex() (map[string]*sessionMetadata, error) {
-	if sm.storage == "" {
-		return nil, os.ErrNotExist
-	}
-	indexPath := filepath.Join(sm.storage, indexFileName)
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		return nil, err
-	}
-	var cached map[string]*sessionMetadata
-	if err := json.Unmarshal(data, &cached); err != nil {
-		return nil, err
-	}
-	return cached, nil
-}
-
-// saveIndexUnlocked writes the current sessionMeta to _index.json.
-// Caller must hold sm.mu (write lock).
-func (sm *SessionManager) saveIndexUnlocked() error {
-	if sm.storage == "" {
-		return nil
-	}
-	indexData, err := json.Marshal(sm.sessionMeta)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(sm.storage, indexFileName), indexData, 0644)
-}
-
-// loadSessionMetadataParallel loads metadata from all session files in parallel
-// using up to min(NumCPU, 16) workers. Caller must NOT hold sm.mu.
-func (sm *SessionManager) loadSessionMetadataParallel(files []os.DirEntry) {
-	type metaResult struct {
-		key  string
-		meta *sessionMetadata
-	}
-
-	// Collect session file entries (exclude _index.json)
-	var sessionFiles []os.DirEntry
-	for _, file := range files {
-		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
-			continue
-		}
-		if file.Name() == indexFileName {
-			continue
-		}
-		sessionFiles = append(sessionFiles, file)
-	}
-
-	// Determine worker count: min(NumCPU, 16, len(files))
-	workers := runtime.NumCPU()
-	if workers > 16 {
-		workers = 16
-	}
-	if workers > len(sessionFiles) {
-		workers = len(sessionFiles)
-	}
-	if workers < 1 {
-		workers = 1
-	}
-
-	jobs := make(chan os.DirEntry, len(sessionFiles))
-	results := make(chan metaResult, len(sessionFiles))
-
-	// Launch workers
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for file := range jobs {
-				path := filepath.Join(sm.storage, file.Name())
-				data, err := os.ReadFile(path)
-				if err != nil {
-					continue
-				}
-				var meta struct {
-					Key     string    `json:"key"`
-					Name    string    `json:"name"`
-					Mode    string    `json:"mode,omitempty"`
-					Created time.Time `json:"created"`
-					Updated time.Time `json:"updated"`
-				}
-				if err := json.Unmarshal(data, &meta); err != nil {
-					continue
-				}
-				key := meta.Key
-				if key == "" {
-					key = strings.ReplaceAll(file.Name()[:len(file.Name())-5], "_", ":")
-				}
-				results <- metaResult{
-					key: key,
-					meta: &sessionMetadata{
-						Key:     key,
-						Name:    meta.Name,
-						Mode:    meta.Mode,
-						Created: meta.Created,
-						Updated: meta.Updated,
-					},
-				}
-			}
-		}()
-	}
-
-	// Feed jobs
-	for _, f := range sessionFiles {
-		jobs <- f
-	}
-	close(jobs)
-
-	// Wait for workers to finish, then close results
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results
-	for r := range results {
-		sm.sessionMeta[r.key] = r.meta
-	}
-}
-
 // SetHistory updates the messages of a session.
 func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	sm.ensureLoaded()
@@ -1146,6 +834,7 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	copy(msgs, history)
 	session.Messages = msgs
 	session.Updated = time.Now()
+	session.lastPersistedSeq = -1 // force full rewrite on next save
 	sm.touchSession(key)
 }
 
@@ -1199,10 +888,11 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 
 	session.VerboseMode = enabled
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
 	// Persist immediately
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 // GetVerboseLevel returns the verbose level for a session ("off", "basic", or "full").
@@ -1254,10 +944,11 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 
 	session.VerboseLevel = level
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
 	// Persist immediately
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 // GetModel returns the model override for a session.
@@ -1300,10 +991,11 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 
 	session.Model = model
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
 	// Persist immediately
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 // GetMode returns the mode override for a session.
@@ -1355,6 +1047,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 
 	session.Mode = mode
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
 	// Update metadata
@@ -1366,7 +1059,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 		Updated: session.Updated,
 	}
 
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 // ListSessionsByMode returns sessions whose effective mode matches the given mode.
@@ -1457,9 +1150,10 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 
 	session.ThinkingLevel = level
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 
-	return sm.saveUnlocked(key)
+	return sm.saveMetaOnlyUnlocked(key)
 }
 
 // GetTokenCounts returns the input and output token counts for a session.
@@ -1503,6 +1197,7 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 	session.InputTokens += inputTokens
 	session.OutputTokens += outputTokens
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 }
 
@@ -1523,6 +1218,7 @@ func (sm *SessionManager) ResetTokenCounts(key string) {
 	session.InputTokens = 0
 	session.OutputTokens = 0
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 }
 
@@ -1549,79 +1245,73 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 
 	session.CompactionCount++
 	session.Updated = time.Now()
+	session.metaDirty = true
 	sm.touchSession(key)
 }
 
-// saveUnlocked saves a session. Caller must hold sm.mu (write lock).
-// It builds an in-memory snapshot under the lock, then TEMPORARILY releases
-// the lock for the disk I/O and re-acquires it before returning, so the
-// caller's lock invariant is preserved. The global mutex must not be held
-// during fsync — on slow storage a save can take 100-300ms, and every TUI
-// render (GetHistory, GetCurrentContextUsage, ...) needs this lock. Holding
-// it across the write froze the Bubble Tea event loop and caused key-repeat
-// bursts.
-//
-// Ordering guard: each snapshot gets a per-key sequence number. If a newer
-// save for the same key started while our disk I/O was in flight, our
-// snapshot is stale and its temp file is discarded instead of overwriting
-// the newer data.
-func (sm *SessionManager) saveUnlocked(key string) error {
-	// Use SQLite if available
-	if sm.store != nil {
-		return sm.saveToSQLite(key)
+// sessionMetaFromSession builds a SessionMeta for persistence.
+func sessionMetaFromSession(s *Session) store.SessionMeta {
+	return store.SessionMeta{
+		Key:             s.Key,
+		Name:            s.Name,
+		Mode:            s.Mode,
+		Summary:         s.Summary,
+		VerboseLevel:    s.VerboseLevel,
+		Model:           s.Model,
+		ThinkingLevel:   s.ThinkingLevel,
+		InputTokens:     s.InputTokens,
+		OutputTokens:    s.OutputTokens,
+		CompactionCount: s.CompactionCount,
+		CreatedAt:       s.Created,
+		UpdatedAt:       s.Updated,
 	}
-
-	snapshot, seq, err := sm.snapshotUnlocked(key)
-	if err != nil {
-		return err
-	}
-	if snapshot == nil {
-		return nil
-	}
-
-	// Release the lock while doing disk I/O; the snapshot is a consistent
-	// deep copy, so concurrent mutations only make the persisted state
-	// slightly stale (it will be overwritten by the next save).
-	sm.mu.Unlock()
-	tmpPath, err := sm.writeTempSnapshot(key, snapshot)
-	sm.mu.Lock()
-	if err != nil {
-		return err
-	}
-	if sm.saveSeq[key] != seq {
-		// A newer save started while we were writing — let it win.
-		_ = os.Remove(tmpPath)
-		return nil
-	}
-	return sm.commitSnapshot(key, tmpPath, snapshot)
 }
 
-// saveToSQLite persists the session to SQLite. It snapshots the data under
-// the write lock, then releases the lock while performing I/O — matching the
-// pattern used by the JSON path (see saveUnlocked). Concurrent mutations
-// that arrive while the I/O is in flight will be persisted by the next save.
-func (sm *SessionManager) saveToSQLite(key string) error {
+// clearDirtyFlags resets all dirty tracking flags on a session.
+func (s *Session) clearDirtyFlags() {
+	s.metaDirty = false
+	s.msgsAppended = 0
+	s.msgsModified = false
+	s.excludedRange = [2]int{}
+	s.lastMsgDeleted = false
+}
+
+// saveMetaOnlyUnlocked persists only session metadata (no message rewrite).
+// Caller must hold sm.mu.
+func (sm *SessionManager) saveMetaOnlyUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
+	}
 	session, ok := sm.sessions[key]
 	if !ok {
 		return nil
 	}
 
-	// ── Snapshot under lock ──
-	meta := store.SessionMeta{
-		Key:             session.Key,
-		Name:            session.Name,
-		Mode:            session.Mode,
-		Summary:         session.Summary,
-		VerboseLevel:    session.VerboseLevel,
-		Model:           session.Model,
-		ThinkingLevel:   session.ThinkingLevel,
-		InputTokens:     session.InputTokens,
-		OutputTokens:    session.OutputTokens,
-		CompactionCount: session.CompactionCount,
-		CreatedAt:       session.Created,
-		UpdatedAt:       session.Updated,
+	meta := sessionMetaFromSession(session)
+	sm.mu.Unlock()
+	err := sm.store.Sessions().UpsertSession(meta)
+	sm.mu.Lock()
+
+	if err != nil {
+		return fmt.Errorf("save session meta %q: %w", key, err)
+	}
+	session.metaDirty = false
+	return nil
+}
+
+// saveFullUnlocked persists metadata + all messages (DELETE + INSERT).
+// Used for initial saves, after truncation, or when messages were reordered.
+// Caller must hold sm.mu.
+func (sm *SessionManager) saveFullUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
+	}
+	session, ok := sm.sessions[key]
+	if !ok {
+		return nil
 	}
 
+	meta := sessionMetaFromSession(session)
 	rows := make([]store.MessageRow, len(session.Messages))
 	for i, msg := range session.Messages {
 		msgJSON, err := json.Marshal(msg)
@@ -1631,17 +1321,19 @@ func (sm *SessionManager) saveToSQLite(key string) error {
 		rows[i] = store.MessageRow{
 			Seq:      i,
 			Role:     msg.Role,
-			Content:  msg.TextContent(),
 			JSON:     string(msgJSON),
 			Excluded: msg.ExcludeFromContext,
 		}
 	}
 
-	// ── Release lock during I/O ──
+	// Release lock during I/O
 	sm.mu.Unlock()
 	err := sm.store.Sessions().UpsertSession(meta)
 	if err == nil {
 		err = sm.store.Sessions().ReplaceMessages(key, rows)
+		if err == nil {
+			_, _ = sm.store.Sessions().PruneExcluded(key, maxStoredMessages)
+		}
 	}
 	sm.mu.Lock()
 
@@ -1650,155 +1342,209 @@ func (sm *SessionManager) saveToSQLite(key string) error {
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1
+	session.clearDirtyFlags()
 	return nil
 }
 
-// snapshotUnlocked builds a consistent snapshot of the session while the
-// caller holds sm.mu. Returns (nil, 0, nil) if the session does not exist or
-// storage is not configured. The returned sequence number identifies this
-// snapshot for the out-of-order save guard.
-func (sm *SessionManager) snapshotUnlocked(key string) (*Session, uint64, error) {
-	if sm.storage == "" && sm.store == nil {
-		return nil, 0, nil
+// saveIncrementalUnlocked persists metadata + only new/modified messages.
+// Uses InsertMessages (batch) for appended messages and UpdateMessage for
+// in-place changes (e.g., streaming). Caller must hold sm.mu.
+func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
 	}
-
-	// For SQLite, we don't need snapshots
-	if sm.store != nil {
-		return nil, 0, nil
-	}
-
-	filename := sanitizeFilename(key)
-
-	if filename == "." || !filepath.IsLocal(filename) || strings.ContainsAny(filename, `/\`) {
-		return nil, 0, os.ErrInvalid
-	}
-
-	stored, ok := sm.sessions[key]
+	session, ok := sm.sessions[key]
 	if !ok {
-		return nil, 0, nil
+		return nil
 	}
 
-	// Prune old excluded messages when over the storage limit
-	if len(stored.Messages) > maxStoredMessages {
-		toRemove := len(stored.Messages) - maxStoredMessages
-		kept := make([]providers.Message, 0, maxStoredMessages)
-		removed := 0
-		for _, msg := range stored.Messages {
-			if removed < toRemove && msg.ExcludeFromContext {
-				removed++
-				continue
-			}
-			kept = append(kept, msg)
+	meta := sessionMetaFromSession(session)
+	repo := sm.store.Sessions()
+	startSeq := session.lastPersistedSeq + 1
+
+	// Build batch rows for all new messages
+	var newRows []store.MessageRow
+	for i := startSeq; i < len(session.Messages); i++ {
+		msg := session.Messages[i]
+		msgJSON, mErr := json.Marshal(msg)
+		if mErr != nil {
+			return fmt.Errorf("marshal message %d: %w", i, mErr)
 		}
-		stored.Messages = kept
+		newRows = append(newRows, store.MessageRow{
+			Seq:      i,
+			Role:     msg.Role,
+			JSON:     string(msgJSON),
+			Excluded: msg.ExcludeFromContext,
+		})
 	}
 
-	snapshot := &Session{
-		Key:             stored.Key,
-		Name:            stored.Name,
-		Mode:            stored.Mode,
-		Summary:         stored.Summary,
-		VerboseMode:     stored.VerboseMode,
-		VerboseLevel:    stored.VerboseLevel,
-		Model:           stored.Model,
-		Created:         stored.Created,
-		Updated:         stored.Updated,
-		InputTokens:     stored.InputTokens,
-		OutputTokens:    stored.OutputTokens,
-		CompactionCount: stored.CompactionCount,
-	}
-	if len(stored.Messages) > 0 {
-		snapshot.Messages = make([]providers.Message, len(stored.Messages))
-		copy(snapshot.Messages, stored.Messages)
-		// Copy slice fields so the snapshot shares no backing arrays with
-		// the live session — the snapshot is encoded AFTER the lock is
-		// released, and concurrent appends must not be visible mid-encode.
-		for i := range snapshot.Messages {
-			m := &snapshot.Messages[i]
-			if len(m.ContentParts) > 0 {
-				parts := make([]providers.ContentPart, len(m.ContentParts))
-				copy(parts, m.ContentParts)
-				m.ContentParts = parts
+	// Build update row for modified message (streaming)
+	var updateRow *store.MessageRow
+	var updateSeq int
+	if session.msgsModified && len(session.Messages) > 0 {
+		lastIdx := len(session.Messages) - 1
+		if lastIdx < startSeq {
+			msg := session.Messages[lastIdx]
+			msgJSON, mErr := json.Marshal(msg)
+			if mErr != nil {
+				return fmt.Errorf("marshal message %d: %w", lastIdx, mErr)
 			}
-			if len(m.ToolCalls) > 0 {
-				calls := make([]providers.ToolCall, len(m.ToolCalls))
-				copy(calls, m.ToolCalls)
-				m.ToolCalls = calls
+			updateRow = &store.MessageRow{
+				Seq:      lastIdx,
+				Role:     msg.Role,
+				JSON:     string(msgJSON),
+				Excluded: msg.ExcludeFromContext,
 			}
-			if len(m.Media) > 0 {
-				media := make([]string, len(m.Media))
-				copy(media, m.Media)
-				m.Media = media
-			}
+			updateSeq = lastIdx
 		}
-	} else {
-		snapshot.Messages = []providers.Message{}
 	}
-	sm.saveSeq[key]++
-	return snapshot, sm.saveSeq[key], nil
-}
 
-// writeTempSnapshot serializes the snapshot to a temp file WITHOUT holding
-// sm.mu (the caller must have released it). Returns the temp file path.
-func (sm *SessionManager) writeTempSnapshot(key string, snapshot *Session) (string, error) {
-	tmpFile, err := os.CreateTemp(sm.storage, "session-*.tmp")
+	// Single lock release for all I/O
+	sm.mu.Unlock()
+	err := repo.UpsertSession(meta)
+	if err == nil && len(newRows) > 0 {
+		err = repo.InsertMessages(key, newRows)
+	}
+	if err == nil && updateRow != nil {
+		err = repo.UpdateMessage(key, updateSeq, updateRow.Role, updateRow.JSON, updateRow.Excluded)
+	}
+	sm.mu.Lock()
+
 	if err != nil {
-		return "", err
+		return fmt.Errorf("incremental save %q: %w", key, err)
 	}
 
-	tmpPath := tmpFile.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	// Stream JSON directly to the temp file instead of buffering in memory.
-	// json.Encoder writes to the file as it serializes, avoiding a full
-	// in-memory copy of the JSON representation.
-	encoder := json.NewEncoder(tmpFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(snapshot); err != nil {
-		_ = tmpFile.Close()
-		return "", err
-	}
-	if err := tmpFile.Chmod(0644); err != nil {
-		_ = tmpFile.Close()
-		return "", err
-	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return "", err
-	}
-	if err := tmpFile.Close(); err != nil {
-		return "", err
-	}
-	cleanup = false
-	return tmpPath, nil
+	session.lastPersistedSeq = len(session.Messages) - 1
+	session.clearDirtyFlags()
+	return nil
 }
 
-// commitSnapshot atomically renames the temp file into place and updates
-// metadata. Caller must hold sm.mu.
-func (sm *SessionManager) commitSnapshot(key string, tmpPath string, snapshot *Session) error {
-	filename := sanitizeFilename(key)
-	sessionPath := filepath.Join(sm.storage, filename+".json")
-
-	if err := os.Rename(tmpPath, sessionPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+// saveDeleteLastUnlocked persists metadata + deletes the last message from SQLite.
+// Used when RemoveLastMessage removes the final message.
+// Caller must hold sm.mu.
+func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
+	}
+	session, ok := sm.sessions[key]
+	if !ok {
+		return nil
 	}
 
-	// Update metadata to reflect the saved state
-	sm.sessionMeta[key] = &sessionMetadata{
-		Key:     snapshot.Key,
-		Name:    snapshot.Name,
-		Mode:    snapshot.Mode,
-		Created: snapshot.Created,
-		Updated: snapshot.Updated,
-	}
-	sm.indexDirty = true
+	meta := sessionMetaFromSession(session)
+	repo := sm.store.Sessions()
 
+	sm.mu.Unlock()
+	err := repo.UpsertSession(meta)
+	if err == nil {
+		_, err = repo.DeleteLastMessage(key)
+	}
+	sm.mu.Lock()
+
+	if err != nil {
+		return fmt.Errorf("delete-last save %q: %w", key, err)
+	}
+
+	session.lastPersistedSeq = len(session.Messages) - 1
+	session.clearDirtyFlags()
+	return nil
+}
+
+// saveExcludedRangeUnlocked persists metadata + updates the excluded flag
+// for a range of messages in SQLite. Used when ExcludeOldMessagesFromContext
+// marks messages as excluded. Updates both the excluded column and the
+// serialized JSON to keep them in sync.
+// Caller must hold sm.mu.
+func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
+	}
+	session, ok := sm.sessions[key]
+	if !ok {
+		return nil
+	}
+
+	meta := sessionMetaFromSession(session)
+	repo := sm.store.Sessions()
+	from, to := session.excludedRange[0], session.excludedRange[1]
+
+	// Build update rows for the excluded range (re-marshal with updated flag)
+	rows := make([]store.MessageRow, 0, to-from)
+	for i := from; i < to && i < len(session.Messages); i++ {
+		msg := session.Messages[i]
+		msgJSON, mErr := json.Marshal(msg)
+		if mErr != nil {
+			return fmt.Errorf("marshal excluded message %d: %w", i, mErr)
+		}
+		rows = append(rows, store.MessageRow{
+			Seq:      i,
+			Role:     msg.Role,
+			JSON:     string(msgJSON),
+			Excluded: msg.ExcludeFromContext,
+		})
+	}
+
+	sm.mu.Unlock()
+	err := repo.UpsertSession(meta)
+	if err == nil {
+		err = repo.UpdateMessagesExcludedWithJSON(key, rows)
+	}
+	sm.mu.Lock()
+
+	if err != nil {
+		return fmt.Errorf("excluded-range save %q: %w", key, err)
+	}
+
+	session.clearDirtyFlags()
+	return nil
+}
+
+// saveUnlocked auto-detects the optimal save strategy:
+//   - If no store or session not in memory: no-op
+//   - If session is new (lastPersistedSeq == -1): full rewrite
+//   - If messages were truncated: targeted DELETE from SQLite
+//   - If last message was deleted: targeted DELETE from SQLite
+//   - If excluded range changed: targeted UPDATE from SQLite
+//   - If messages were appended or modified: incremental save
+//   - If only metadata changed: metadata-only save
+//   - Otherwise: no-op (nothing changed)
+//
+// Caller must hold sm.mu.
+func (sm *SessionManager) saveUnlocked(key string) error {
+	if sm.store == nil {
+		return nil
+	}
+	session, ok := sm.sessions[key]
+	if !ok {
+		return nil
+	}
+
+	// Full rewrite needed: new session (never persisted)
+	if session.lastPersistedSeq == -1 {
+		return sm.saveFullUnlocked(key)
+	}
+
+	// Targeted DELETE: last message was removed
+	if session.lastMsgDeleted {
+		return sm.saveDeleteLastUnlocked(key)
+	}
+
+	// Targeted UPDATE: excluded flag changed on a range
+	if session.excludedRange[1] > session.excludedRange[0] {
+		return sm.saveExcludedRangeUnlocked(key)
+	}
+
+	// Incremental: new messages appended or existing modified
+	if session.msgsAppended > 0 || session.msgsModified {
+		return sm.saveIncrementalUnlocked(key)
+	}
+
+	// Metadata only
+	if session.metaDirty {
+		return sm.saveMetaOnlyUnlocked(key)
+	}
+
+	// Nothing changed
 	return nil
 }
 
@@ -1829,6 +1575,7 @@ func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 	msg.Content += chunk
 	session.Updated = time.Now()
 	session.hadStreamedContent = true
+	session.msgsModified = true
 
 	sm.maybeFlushStream(key)
 }
@@ -1849,6 +1596,7 @@ func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 	msg.ReasoningContent += chunk
 	session.Updated = time.Now()
 	session.hadStreamedContent = true
+	session.msgsModified = true
 
 	sm.maybeFlushStream(key)
 }
@@ -1978,13 +1726,15 @@ func (sm *SessionManager) getOrCreateStreamingMsg(session *Session) *providers.M
 		Role:      "assistant",
 		Streaming: true,
 	})
+	session.msgsAppended++
 	return &session.Messages[len(session.Messages)-1]
 }
 
 // maybeFlushStream saves the session to disk if enough time has passed since
-// the last stream flush. Caller must hold sm.mu.
+// the last stream flush. Uses incremental save to avoid rewriting all messages.
+// Caller must hold sm.mu.
 func (sm *SessionManager) maybeFlushStream(key string) {
-	if sm.storage == "" && sm.store == nil {
+	if sm.store == nil {
 		return
 	}
 
@@ -1996,20 +1746,21 @@ func (sm *SessionManager) maybeFlushStream(key string) {
 	now := time.Now()
 	if now.Sub(session.lastStreamFlush) >= streamFlushInterval {
 		session.lastStreamFlush = now
-		sm.saveUnlocked(key)
+		sm.saveIncrementalUnlocked(key)
 	}
 }
 
-// flushStreamNow saves the session to disk immediately. Caller must hold sm.mu.
+// flushStreamNow saves the session to disk immediately using incremental save.
+// Caller must hold sm.mu.
 func (sm *SessionManager) flushStreamNow(key string) {
-	if sm.storage == "" && sm.store == nil {
+	if sm.store == nil {
 		return
 	}
 	session, ok := sm.sessions[key]
 	if ok {
 		session.lastStreamFlush = time.Now()
 	}
-	sm.saveUnlocked(key)
+	sm.saveIncrementalUnlocked(key)
 }
 
 // PruneExcludedMessages removes all messages marked ExcludeFromContext from
@@ -2115,12 +1866,6 @@ func (sm *SessionManager) SessionExists(key string) bool {
 		return false
 	}
 
-	// Evicted subagent sessions leave their file on disk even though
-	// memory and metadata are gone. Check the file directly.
-	filename := sanitizeFilename(key)
-	if _, err := os.Stat(filepath.Join(sm.storage, filename+".json")); err == nil {
-		return true
-	}
 	return false
 }
 

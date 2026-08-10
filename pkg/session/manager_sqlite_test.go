@@ -2,7 +2,7 @@ package session
 
 import (
 	"encoding/json"
-	"os"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -27,7 +27,7 @@ func newTestStore(t *testing.T) *store.Store {
 
 func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	// Create a session
@@ -64,7 +64,7 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 	}
 
 	// Create a new manager and load from SQLite
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
@@ -80,7 +80,7 @@ func TestSQLite_SessionManager_CreateAndLoad(t *testing.T) {
 
 func TestSQLite_SessionManager_Streaming(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:streaming"
@@ -98,7 +98,7 @@ func TestSQLite_SessionManager_Streaming(t *testing.T) {
 	}
 
 	// Load and verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
@@ -112,7 +112,7 @@ func TestSQLite_SessionManager_Streaming(t *testing.T) {
 
 func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:tokens"
@@ -126,7 +126,7 @@ func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 	}
 
 	// Load and verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	input, output := sm2.GetTokenCounts(key)
 	if input != 300 {
@@ -139,7 +139,7 @@ func TestSQLite_SessionManager_TokenCounts(t *testing.T) {
 
 func TestSQLite_SessionManager_Mode(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:mode"
@@ -154,7 +154,7 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 	}
 
 	// Load and verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	mode := sm2.GetMode(key)
 	if mode != "chat" {
@@ -173,7 +173,7 @@ func TestSQLite_SessionManager_Mode(t *testing.T) {
 
 func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	// Create multiple sessions
@@ -198,7 +198,7 @@ func TestSQLite_SessionManager_ListSessions(t *testing.T) {
 
 func TestSQLite_SessionManager_SessionExists(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:exists"
@@ -217,7 +217,7 @@ func TestSQLite_SessionManager_SessionExists(t *testing.T) {
 
 func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:stream-update"
@@ -246,7 +246,7 @@ func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 	}
 
 	// Load and verify final content
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
@@ -259,7 +259,7 @@ func TestSQLite_SessionManager_StreamingUpdate(t *testing.T) {
 
 func TestSQLite_SessionManager_Concurrent(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	var wg sync.WaitGroup
@@ -290,7 +290,7 @@ func TestSQLite_SessionManager_Concurrent(t *testing.T) {
 
 func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:compaction"
@@ -300,7 +300,7 @@ func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 	sm.Save(key)
 
 	// Load and verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	session := sm2.GetOrCreate(key)
 	if session.CompactionCount != 2 {
@@ -310,7 +310,7 @@ func TestSQLite_SessionManager_CompactionCount(t *testing.T) {
 
 func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:thinking"
@@ -319,7 +319,7 @@ func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 	sm.Save(key)
 
 	// Load and verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	level := sm2.GetThinkingLevel(key)
 	if level != "high" {
@@ -329,7 +329,7 @@ func TestSQLite_SessionManager_ThinkingLevel(t *testing.T) {
 
 func TestSQLite_SessionManager_TruncateHistory(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:truncate"
@@ -353,7 +353,7 @@ func TestSQLite_SessionManager_TruncateHistory(t *testing.T) {
 
 func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:thinking-persist"
@@ -362,7 +362,7 @@ func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 	sm.Save(key)
 
 	// Create new manager to test persistence
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 
 	level := sm2.GetThinkingLevel(key)
@@ -373,7 +373,7 @@ func TestSQLite_SessionManager_ThinkingLevel_Persistence(t *testing.T) {
 
 func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:set-history"
@@ -391,7 +391,7 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 3 {
@@ -404,7 +404,7 @@ func TestSQLite_SessionManager_SetHistory(t *testing.T) {
 
 func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:exclude"
@@ -436,7 +436,7 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 
 func TestSQLite_SessionManager_Name(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:name"
@@ -445,7 +445,7 @@ func TestSQLite_SessionManager_Name(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	name := sm2.GetName(key)
 	if name != "My Session" {
@@ -455,7 +455,7 @@ func TestSQLite_SessionManager_Name(t *testing.T) {
 
 func TestSQLite_SessionManager_Summary(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:summary"
@@ -464,7 +464,7 @@ func TestSQLite_SessionManager_Summary(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	summary := sm2.GetSummary(key)
 	if summary != "This is a summary" {
@@ -474,7 +474,7 @@ func TestSQLite_SessionManager_Summary(t *testing.T) {
 
 func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:remove-last"
@@ -492,7 +492,7 @@ func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 2 {
@@ -505,7 +505,7 @@ func TestSQLite_SessionManager_RemoveLastMessage(t *testing.T) {
 
 func TestSQLite_SessionManager_ShouldStartFreshSession(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:fresh"
@@ -532,7 +532,7 @@ func TestSQLite_SessionManager_ShouldStartFreshSession(t *testing.T) {
 
 func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:empty"
@@ -545,7 +545,7 @@ func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 	sm.Save(key)
 
 	// Verify metadata exists
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	name := sm2.GetName(key)
 	if name != "" {
@@ -555,7 +555,7 @@ func TestSQLite_SessionManager_GetOrCreate_NoMessages(t *testing.T) {
 
 func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:verbose"
@@ -564,7 +564,7 @@ func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	level := sm2.GetVerboseLevel(key)
 	if level != "full" {
@@ -574,7 +574,7 @@ func TestSQLite_SessionManager_VerboseLevel(t *testing.T) {
 
 func TestSQLite_SessionManager_Model(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:model"
@@ -583,7 +583,7 @@ func TestSQLite_SessionManager_Model(t *testing.T) {
 	sm.Save(key)
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	model := sm2.GetModel(key)
 	if model != "gpt-4" {
@@ -593,7 +593,7 @@ func TestSQLite_SessionManager_Model(t *testing.T) {
 
 func TestSQLite_SessionManager_CreatedUpdated(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:timestamps"
@@ -617,7 +617,7 @@ func TestSQLite_SessionManager_CreatedUpdated(t *testing.T) {
 
 func TestSQLite_SessionManager_GetHistory_NonExistent(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	// Get history for non-existent session
@@ -629,14 +629,14 @@ func TestSQLite_SessionManager_GetHistory_NonExistent(t *testing.T) {
 
 func TestSQLite_SessionManager_SetName_CreatesSession(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:setname-create"
 	sm.SetName(key, "New Name")
 
 	// Verify
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	name := sm2.GetName(key)
 	if name != "New Name" {
@@ -646,7 +646,7 @@ func TestSQLite_SessionManager_SetName_CreatesSession(t *testing.T) {
 
 func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:multi-save"
@@ -659,7 +659,7 @@ func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 	}
 
 	// Verify final state
-	sm2 := NewSessionManager("")
+	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	history := sm2.GetHistory(key)
 	if len(history) != 10 {
@@ -669,7 +669,7 @@ func TestSQLite_SessionManager_MultipleSaves(t *testing.T) {
 
 func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:concurrent-rw"
@@ -713,7 +713,7 @@ func TestSQLite_SessionManager_ConcurrentReadersWriter(t *testing.T) {
 
 func TestSQLite_SessionManager_LoadFromDisk(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	key := "test:lazy-load"
@@ -735,37 +735,9 @@ func TestSQLite_SessionManager_LoadFromDisk(t *testing.T) {
 	}
 }
 
-func TestSQLite_SessionManager_JsonFallback(t *testing.T) {
-	// Test that JSON fallback still works when no store is set
-	tmpDir := t.TempDir()
-	sm := NewSessionManager(tmpDir)
-	// No store set - should use JSON files
-
-	key := "test:json-fallback"
-	sm.GetOrCreate(key)
-	sm.AddMessage(key, "user", "hello")
-	sm.Save(key)
-
-	// Verify JSON file exists
-	filename := filepath.Join(tmpDir, "test_json-fallback.json")
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		t.Errorf("expected JSON file %s to exist", filename)
-	}
-
-	// Load in new manager
-	sm2 := NewSessionManager(tmpDir)
-	history := sm2.GetHistory(key)
-	if len(history) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(history))
-	}
-	if history[0].Content != "hello" {
-		t.Errorf("expected message %q, got %q", "hello", history[0].Content)
-	}
-}
-
 func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	s := newTestStore(t)
-	sm := NewSessionManager("")
+	sm := NewSessionManager()
 	sm.SetStore(s)
 
 	// Create sessions with messages
@@ -804,5 +776,223 @@ func TestSQLite_SessionManager_AllMessageCounts(t *testing.T) {
 	}
 	if counts["sess-empty"] != 0 {
 		t.Errorf("sess-empty count = %d, want 0", counts["sess-empty"])
+	}
+}
+
+// ============================================================================
+// Incremental save tests
+// ============================================================================
+
+// TestSQLite_IncrementalSave_AppendOnly verifies that adding new messages
+// uses InsertMessage (incremental) instead of ReplaceMessages (full rewrite).
+func TestSQLite_IncrementalSave_AppendOnly(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:incr-append"
+	sm.GetOrCreate(key)
+
+	// Add 3 messages and save (first save is always full)
+	sm.AddMessage(key, "user", "hello")
+	sm.AddMessage(key, "assistant", "hi")
+	sm.AddMessage(key, "user", "how are you?")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+
+	// Verify 3 messages in DB
+	repo := s.Sessions()
+	count, _ := repo.MessageCount(key)
+	if count != 3 {
+		t.Fatalf("after initial save: got %d messages, want 3", count)
+	}
+
+	// Add 2 more messages — next save should be incremental
+	sm.AddMessage(key, "assistant", "I'm good")
+	sm.AddMessage(key, "user", "great")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("incremental save: %v", err)
+	}
+
+	// Verify all 5 messages in DB
+	count, _ = repo.MessageCount(key)
+	if count != 5 {
+		t.Fatalf("after incremental save: got %d messages, want 5", count)
+	}
+
+	// Verify content of last message
+	msgJSONs, _ := repo.LoadMessages(key)
+	var lastMsg providers.Message
+	json.Unmarshal([]byte(msgJSONs[4]), &lastMsg)
+	if lastMsg.Content != "great" {
+		t.Errorf("last message content = %q, want %q", lastMsg.Content, "great")
+	}
+}
+
+// TestSQLite_IncrementalSave_StreamingUpdate verifies that streaming updates
+// use UpdateMessage for the last message instead of full ReplaceMessages.
+func TestSQLite_IncrementalSave_StreamingUpdate(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:incr-stream"
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "tell me a story")
+
+	// Initial save — creates the user message
+	sm.Save(key)
+
+	// Simulate streaming: create streaming message + append chunk
+	// The first chunk creates the streaming message and triggers a flush
+	// (first chunk always flushes because lastStreamFlush is zero).
+	sm.AppendAssistantChunk(key, "Once upon a time...")
+
+	// The streaming message should be in DB after flush
+	repo := s.Sessions()
+	count, _ := repo.MessageCount(key)
+	if count != 2 {
+		t.Fatalf("after streaming: got %d messages, want 2", count)
+	}
+
+	// Verify the streaming content was persisted
+	msgJSONs, _ := repo.LoadMessages(key)
+	var streamMsg providers.Message
+	json.Unmarshal([]byte(msgJSONs[1]), &streamMsg)
+	if streamMsg.Content != "Once upon a time..." {
+		t.Errorf("streaming content = %q, want %q", streamMsg.Content, "Once upon a time...")
+	}
+}
+
+// TestSQLite_MetaOnlySave verifies that metadata-only setters (SetName, SetModel)
+// don't touch the messages table.
+func TestSQLite_MetaOnlySave(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:meta-only"
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "hello")
+	sm.AddMessage(key, "assistant", "hi")
+	sm.Save(key)
+
+	// Get initial message count in DB
+	repo := s.Sessions()
+	countBefore, _ := repo.MessageCount(key)
+	if countBefore != 2 {
+		t.Fatalf("before meta save: got %d messages, want 2", countBefore)
+	}
+
+	// Change only metadata — should not touch messages
+	sm.SetName(key, "My Chat")
+	sm.SetModel(key, "gpt-4")
+
+	// Verify metadata was saved
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+	name := sm2.GetName(key)
+	model := sm2.GetModel(key)
+	if name != "My Chat" {
+		t.Errorf("name = %q, want %q", name, "My Chat")
+	}
+	if model != "gpt-4" {
+		t.Errorf("model = %q, want %q", model, "gpt-4")
+	}
+
+	// Messages should still be intact
+	countAfter, _ := repo.MessageCount(key)
+	if countAfter != 2 {
+		t.Errorf("after meta save: got %d messages, want 2", countAfter)
+	}
+}
+
+// TestSQLite_FullRewrite_AfterTruncate verifies that TruncateHistory forces
+// a full rewrite (ReplaceMessages) on the next save.
+func TestSQLite_FullRewrite_AfterTruncate(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:truncate"
+	sm.GetOrCreate(key)
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("msg-%d", i))
+	}
+	sm.Save(key)
+
+	// Verify 10 messages in DB
+	repo := s.Sessions()
+	count, _ := repo.MessageCount(key)
+	if count != 10 {
+		t.Fatalf("before truncate: got %d messages, want 10", count)
+	}
+
+	// Truncate to last 3
+	sm.TruncateHistory(key, 3)
+	sm.Save(key)
+
+	// Verify only 3 messages remain
+	count, _ = repo.MessageCount(key)
+	if count != 3 {
+		t.Errorf("after truncate: got %d messages, want 3", count)
+	}
+
+	// Verify content
+	msgJSONs, _ := repo.LoadMessages(key)
+	var firstMsg providers.Message
+	json.Unmarshal([]byte(msgJSONs[0]), &firstMsg)
+	if firstMsg.Content != "msg-7" {
+		t.Errorf("first remaining message = %q, want %q", firstMsg.Content, "msg-7")
+	}
+}
+
+// TestSQLite_DirtyFlags_Basic verifies that dirty flags are set and cleared
+// correctly after saves.
+func TestSQLite_DirtyFlags_Basic(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:dirty"
+	session := sm.GetOrCreate(key)
+
+	// New session has lastPersistedSeq = -1, which forces full save
+	if session.lastPersistedSeq != -1 {
+		t.Errorf("new session lastPersistedSeq = %d, want -1", session.lastPersistedSeq)
+	}
+
+	// After save, flags should be cleared
+	sm.Save(key)
+	if session.metaDirty {
+		t.Error("after save: metaDirty should be false")
+	}
+	if session.msgsAppended != 0 {
+		t.Errorf("after save: msgsAppended = %d, want 0", session.msgsAppended)
+	}
+	if session.lastPersistedSeq != -1 {
+		t.Errorf("after save (no messages): lastPersistedSeq = %d, want -1", session.lastPersistedSeq)
+	}
+
+	// Add a message — should set msgsAppended
+	sm.AddMessage(key, "user", "hello")
+	if session.msgsAppended != 1 {
+		t.Errorf("after add: msgsAppended = %d, want 1", session.msgsAppended)
+	}
+
+	// After save, should be cleared
+	sm.Save(key)
+	if session.msgsAppended != 0 {
+		t.Errorf("after save: msgsAppended = %d, want 0", session.msgsAppended)
+	}
+	if session.lastPersistedSeq != 0 {
+		t.Errorf("lastPersistedSeq = %d, want 0", session.lastPersistedSeq)
+	}
+
+	// SetName should set metaDirty, then clear it after immediate save
+	sm.SetName(key, "test")
+	if session.metaDirty {
+		t.Error("after SetName+save: metaDirty should be false (already persisted)")
 	}
 }

@@ -506,11 +506,11 @@ func TestSessionRepo_CRUD(t *testing.T) {
 
 	// Insert messages.
 	msg1 := `{"role":"user","content":"Hello"}`
-	if err := repo.InsertMessage("test:session-1", 0, "user", "Hello", msg1, false); err != nil {
+	if err := repo.InsertMessage("test:session-1", 0, "user", msg1, false); err != nil {
 		t.Fatalf("InsertMessage(0) failed: %v", err)
 	}
 	msg2 := `{"role":"assistant","content":"Hi there!"}`
-	if err := repo.InsertMessage("test:session-1", 1, "assistant", "Hi there!", msg2, false); err != nil {
+	if err := repo.InsertMessage("test:session-1", 1, "assistant", msg2, false); err != nil {
 		t.Fatalf("InsertMessage(1) failed: %v", err)
 	}
 
@@ -549,7 +549,7 @@ func TestSessionRepo_CRUD(t *testing.T) {
 
 	// Update message.
 	msg3 := `{"role":"assistant","content":"Updated response"}`
-	if err := repo.UpdateMessage("test:session-1", 1, "assistant", "Updated response", msg3, false); err != nil {
+	if err := repo.UpdateMessage("test:session-1", 1, "assistant", msg3, false); err != nil {
 		t.Fatalf("UpdateMessage() failed: %v", err)
 	}
 	msgs, _ = repo.LoadMessages("test:session-1")
@@ -573,7 +573,7 @@ func TestSessionRepo_CRUD(t *testing.T) {
 	// Add more messages for delete range test.
 	for i := 1; i < 5; i++ {
 		msgJSON := `{"role":"user","content":"msg"}`
-		repo.InsertMessage("test:session-1", i, "user", "msg", msgJSON, false)
+		repo.InsertMessage("test:session-1", i, "user", msgJSON, false)
 	}
 
 	// Delete messages from seq 3 onwards.
@@ -658,7 +658,7 @@ func TestSessionRepo_PruneExcluded(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		excluded := i < 7
 		msgJSON := `{"role":"user","content":"msg"}`
-		repo.InsertMessage("test", i, "user", "msg", msgJSON, excluded)
+		repo.InsertMessage("test", i, "user", msgJSON, excluded)
 	}
 
 	// Prune to keep 5.
@@ -686,7 +686,7 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 	// Insert initial 3 messages.
 	for i := 0; i < 3; i++ {
 		msgJSON := fmt.Sprintf(`{"role":"user","content":"msg%d"}`, i)
-		repo.InsertMessage("rm-test", i, "user", fmt.Sprintf("msg%d", i), msgJSON, false)
+		repo.InsertMessage("rm-test", i, "user", msgJSON, false)
 	}
 	count, _ := repo.MessageCount("rm-test")
 	if count != 3 {
@@ -697,10 +697,9 @@ func TestSessionRepo_ReplaceMessages(t *testing.T) {
 	newRows := make([]MessageRow, 5)
 	for i := range newRows {
 		newRows[i] = MessageRow{
-			Seq:     i,
-			Role:    "assistant",
-			Content: fmt.Sprintf("new-%d", i),
-			JSON:    fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i),
+			Seq:  i,
+			Role: "assistant",
+			JSON: fmt.Sprintf(`{"role":"assistant","content":"new-%d"}`, i),
 		}
 	}
 	if err := repo.ReplaceMessages("rm-test", newRows); err != nil {
@@ -746,12 +745,12 @@ func TestSessionRepo_AllMessageCounts(t *testing.T) {
 
 	// sess-a: 2 messages
 	for i := 0; i < 2; i++ {
-		repo.InsertMessage("sess-a", i, "user", fmt.Sprintf("a%d", i),
+		repo.InsertMessage("sess-a", i, "user",
 			fmt.Sprintf(`{"role":"user","content":"a%d"}`, i), false)
 	}
 	// sess-b: 5 messages
 	for i := 0; i < 5; i++ {
-		repo.InsertMessage("sess-b", i, "assistant", fmt.Sprintf("b%d", i),
+		repo.InsertMessage("sess-b", i, "assistant",
 			fmt.Sprintf(`{"role":"assistant","content":"b%d"}`, i), false)
 	}
 	// sess-c: 0 messages (just metadata)

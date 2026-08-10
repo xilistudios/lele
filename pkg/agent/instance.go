@@ -192,14 +192,11 @@ func NewAgentInstance(
 	// It will be filtered out from tool definitions if the current session model doesn't support vision.
 	toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
 
-	// Use a unified sessions directory under <lele-dir>/sessions instead of
-	// per-workspace session storage. Session keys are globally unique
-	// (agent-prefixed or channel-scoped), so a single directory works safely.
-	// When created through AgentLoop, each agent's Sessions field is replaced
-	// with a shared SessionManager instance. This per-agent one serves as a
-	// fallback for direct instantiation (e.g., tests).
-	sessionsDir := filepath.Join(config.GetLeleDir(), "sessions")
-	sessionsManager := session.NewSessionManager(sessionsDir)
+	// SessionManager uses SQLite for persistence. Each agent's Sessions field
+	// is replaced with a shared SessionManager instance when created through
+	// AgentLoop. This per-agent one serves as a fallback for direct
+	// instantiation (e.g., tests).
+	sessionsManager := session.NewSessionManager()
 
 	contextBuilder := NewContextBuilder(workspace)
 	contextBuilder.SetToolsRegistry(toolsRegistry)

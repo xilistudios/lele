@@ -78,8 +78,8 @@ func TestMigrations_Idempotent(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("read schema_version failed: %v", err)
 	}
-	if version != "1" {
-		t.Errorf("schema_version = %q, want %q", version, "1")
+	if version != "2" {
+		t.Errorf("schema_version = %q, want %q", version, "2")
 	}
 }
 
