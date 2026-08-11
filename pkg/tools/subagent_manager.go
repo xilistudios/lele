@@ -22,6 +22,7 @@ type SubagentManager struct {
 	tools                 *ToolRegistry
 	getAgentContext       func(agentID string) AgentContextInfo
 	modelOverrideResolver func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
+	visionChecker         func(model string) bool                                 // reports whether a model supports vision
 	maxIterations         int
 	maxTokens             int
 	temperature           float64
@@ -134,6 +135,15 @@ func (sm *SubagentManager) SetModelOverrideResolver(resolver func(model string) 
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.modelOverrideResolver = resolver
+}
+
+// SetVisionChecker registers a callback that reports whether a given model
+// supports vision. When the checker reports false (or is nil), the
+// read_image tool is filtered out of subagent tool definitions.
+func (sm *SubagentManager) SetVisionChecker(checker func(model string) bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.visionChecker = checker
 }
 
 func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {

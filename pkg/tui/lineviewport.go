@@ -236,25 +236,51 @@ func (v *lineViewport) recalcLongestWidth() {
 	v.longestLineWidth = w
 }
 
-// Update handles mouse wheel events for scrolling.
+// pageHeight returns the number of visible lines in the viewport, used for
+// page-up/page-down scrolling. Never returns less than 1 so page scrolling
+// always makes progress.
+func (v *lineViewport) pageHeight() int {
+	h := v.Height - v.Style.GetVerticalFrameSize()
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// Update handles keyboard and mouse wheel events for scrolling.
+//
+// Keyboard scrolling (up/down/pgup/pgdown) always works, regardless of
+// MouseWheelEnabled — that flag only gates mouse wheel events.
 func (v *lineViewport) Update(msg tea.Msg) (lineViewport, tea.Cmd) {
-	if !v.MouseWheelEnabled {
-		return *v, nil
-	}
-
-	mouseMsg, ok := msg.(tea.MouseMsg)
-	if !ok {
-		return *v, nil
-	}
-
-	switch mouseMsg.Action {
-	case tea.MouseActionPress:
-		switch mouseMsg.Button {
-		case tea.MouseButtonWheelUp:
-			lines := min(v.YOffset, v.MouseWheelDelta)
-			v.YOffset -= lines
-		case tea.MouseButtonWheelDown:
-			v.YOffset += v.MouseWheelDelta
+	switch m := msg.(type) {
+	case tea.MouseMsg:
+		if !v.MouseWheelEnabled {
+			return *v, nil
+		}
+		switch m.Action {
+		case tea.MouseActionPress:
+			switch m.Button {
+			case tea.MouseButtonWheelUp:
+				lines := min(v.YOffset, v.MouseWheelDelta)
+				v.YOffset -= lines
+			case tea.MouseButtonWheelDown:
+				v.YOffset += v.MouseWheelDelta
+				v.clampOffset()
+			}
+		}
+	case tea.KeyMsg:
+		switch m.String() {
+		case "up":
+			v.YOffset--
+			v.clampOffset()
+		case "down":
+			v.YOffset++
+			v.clampOffset()
+		case "pgup":
+			v.YOffset -= v.pageHeight()
+			v.clampOffset()
+		case "pgdown":
+			v.YOffset += v.pageHeight()
 			v.clampOffset()
 		}
 	}

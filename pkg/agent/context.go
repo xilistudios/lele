@@ -46,6 +46,11 @@ type ContextBuilder struct {
 	// the process, so this avoids re-reading files on every token estimation.
 	initialContext string
 	initialMu      sync.RWMutex
+
+	// visionSupported indicates whether the current model supports vision.
+	// When false, the read_image tool is hidden from the system prompt's
+	// tools section. Defaults to false (safe default).
+	visionSupported bool
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
@@ -70,6 +75,21 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 // SetToolsRegistry sets the tools registry for dynamic tool summary generation.
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 	cb.tools = registry
+}
+
+// SetVisionSupported sets whether the current model supports vision.
+// When false, the read_image tool is hidden from the system prompt's
+// tools section. Invalidates cached prompts so the next turn rebuilds.
+func (cb *ContextBuilder) SetVisionSupported(v bool) {
+	if cb.visionSupported == v {
+		return
+	}
+	cb.visionSupported = v
+	// Invalidate caches so the tools section is rebuilt
+	cb.initialMu.Lock()
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+	cb.ResetAllSystemPromptCaches()
 }
 
 // SetAvailableSubagents sets the list of subagents that this agent can delegate
@@ -199,6 +219,10 @@ func (cb *ContextBuilder) buildToolsSection() string {
 	sb.WriteString("**CRITICAL**: You MUST use tools to perform actions. Do NOT pretend to execute commands or schedule tasks.\n\n")
 	sb.WriteString("You have access to the following tools:\n\n")
 	for _, s := range summaries {
+		// Hide read_image when the model doesn't support vision
+		if !cb.visionSupported && strings.Contains(s, "`read_image`") {
+			continue
+		}
 		sb.WriteString(s)
 		sb.WriteString("\n")
 	}

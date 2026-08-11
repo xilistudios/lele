@@ -66,6 +66,18 @@ type AgentLoop struct {
 	dbStore            *store.Store         // SQLite state store (nil if not available)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
+
+	// goalStopCtx is the parent context for goal continuation loops. Cancelling
+	// it (via goalStopCancel, called on Stop) aborts any in-flight /goal
+	// continuation loop.
+	goalStopCtx    context.Context
+	goalStopCancel context.CancelFunc
+
+	// goalLoopSessions tracks sessions that are inside an active goal
+	// continuation loop, so IsSessionProcessing stays true during the
+	// judge-evaluation gap between turns.
+	goalLoopMu       sync.Mutex
+	goalLoopSessions map[string]struct{}
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -104,8 +116,14 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	// Wire up session key and cancel callbacks for all subagents
 	for agentID, sm := range updatedSubagents {
 		id := agentID // capture loop variable
-		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
-			al.subagentSessionAgent.Store(sessionKey, id)
+		sm.SetSessionKeyCallback(func(sessionKey, targetAgentID string) {
+			// Use the subagent's target agent (task.AgentID) so the session maps
+			// to the agent that actually executes it. Fall back to the owner
+			// agent when no explicit target was given.
+			if targetAgentID == "" {
+				targetAgentID = id
+			}
+			al.subagentSessionAgent.Store(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -409,6 +427,8 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		keyringService:  keyringSvc,
 		dbStore:         dbStore,
 	}
+	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
+	loop.goalLoopSessions = make(map[string]struct{})
 	loop.cfgPtr.Store(cfg)
 
 	// Initialize internal components
@@ -460,14 +480,6 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	if dbStore != nil {
 		goalMgr.SetStore(dbStore.Goals())
 	}
-	// Wire up the LLM-based goal judge using the default agent's provider.
-	if defaultAgent != nil && defaultAgent.Provider != nil {
-		judgeModel := defaultAgent.Model
-		if judgeModel == "" {
-			judgeModel = cfg.Agents.Defaults.Model
-		}
-		goalMgr.SetJudge(NewLLMGoalJudge(defaultAgent.Provider, judgeModel))
-	}
 	loop.goalManager = goalMgr
 
 	// Register shared tools and create tool coordinator with subagents
@@ -477,8 +489,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// subagent session-to-agent mapping for GetSessionHistory.
 	for agentID, sm := range subagents {
 		id := agentID // capture loop variable
-		sm.SetSessionKeyCallback(func(sessionKey, _ string) {
-			loop.subagentSessionAgent.Store(sessionKey, id)
+		sm.SetSessionKeyCallback(func(sessionKey, targetAgentID string) {
+			// Use the subagent's target agent (task.AgentID) so the session maps
+			// to the agent that actually executes it. Fall back to the owner
+			// agent when no explicit target was given.
+			if targetAgentID == "" {
+				targetAgentID = id
+			}
+			loop.subagentSessionAgent.Store(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return loop.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -486,6 +504,48 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	}
 
 	loop.toolCoordinator = newToolCoordinatorWithSubagents(loop, subagents, bgManagers)
+
+	// Wire up the goal judge. The default is an inline LLM judge that evaluates
+	// progress from the session's conversation summary plus the latest response.
+	// When config goal.judge.mode = "subagent", a separate subagent evaluator is
+	// used instead (decoupled from the main agent loop).
+	if defaultAgent != nil && defaultAgent.Provider != nil {
+		judgeModel := defaultAgent.Model
+		if judgeModel == "" {
+			judgeModel = cfg.Agents.Defaults.Model
+		}
+		// Resolve the session's model at evaluation time (the session may have a
+		// different model than the agent default, e.g. a per-session override).
+		// This ensures the judge uses the same model as the main agent loop.
+		modelResolver := func(sessionKey string) string {
+			return loop.sessionManager.ModelForSession(defaultAgent, sessionKey)
+		}
+		if cfg.Goal.Judge.Mode == "subagent" {
+			// Resolve the evaluator agent's SubagentManager. Fall back to the
+			// default agent's manager.
+			evaluatorAgentID := cfg.Goal.Judge.Agent
+			sm := subagents[evaluatorAgentID]
+			if sm == nil {
+				sm = subagents[defaultAgent.ID]
+			}
+			if sm != nil {
+				goalMgr.SetJudge(NewSubagentGoalJudge(sm, defaultAgent.Sessions, evaluatorAgentID, "goal", "", 60*time.Second))
+			} else {
+				// No subagent manager available; fall back to inline.
+				logger.WarnCF("agent", "goal.judge.mode=subagent but no subagent manager found; falling back to inline judge", map[string]interface{}{
+					"agent": evaluatorAgentID,
+				})
+				sj := NewSummaryGoalJudge(defaultAgent.Provider, judgeModel, defaultAgent.Sessions, modelResolver)
+				sj.SetConfig(cfg)
+				goalMgr.SetJudge(sj)
+			}
+		} else {
+			sj := NewSummaryGoalJudge(defaultAgent.Provider, judgeModel, defaultAgent.Sessions, modelResolver)
+			sj.SetConfig(cfg)
+			goalMgr.SetJudge(sj)
+		}
+	}
+
 	loop.providable = newAgentProvidable(loop)
 	loop.stopSessionCleanup = stopCleanup
 
@@ -531,7 +591,7 @@ func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string 
 	if !ok {
 		return "❌ Command handler not available."
 	}
-	return impl.handleGoalCommand(sessionKey, args)
+	return impl.handleGoalCommand(context.Background(), "native", sessionKey, sessionKey, args)
 }
 
 // KeyringService returns the encrypted secret storage service (may be nil if
@@ -667,6 +727,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 // Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	if al.goalStopCancel != nil {
+		al.goalStopCancel()
+	}
 	if al.stopSessionCleanup != nil {
 		al.stopSessionCleanup()
 	}
@@ -676,6 +739,35 @@ func (al *AgentLoop) Stop() {
 			logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
 		}
 	}
+}
+
+// markGoalLoopActive records that the session is inside an active goal
+// continuation loop. While active, IsSessionProcessing reports true even
+// during the judge-evaluation gap between turns, so the TUI loading indicator
+// stays on for the whole autonomous run.
+func (al *AgentLoop) markGoalLoopActive(sessionKey string) {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	if al.goalLoopSessions == nil {
+		al.goalLoopSessions = make(map[string]struct{})
+	}
+	al.goalLoopSessions[sessionKey] = struct{}{}
+}
+
+// clearGoalLoopActive removes the session from the goal-loop tracking set.
+func (al *AgentLoop) clearGoalLoopActive(sessionKey string) {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	delete(al.goalLoopSessions, sessionKey)
+}
+
+// isGoalLoopActive reports whether the session is currently inside a goal
+// continuation loop.
+func (al *AgentLoop) isGoalLoopActive(sessionKey string) bool {
+	al.goalLoopMu.Lock()
+	defer al.goalLoopMu.Unlock()
+	_, ok := al.goalLoopSessions[sessionKey]
+	return ok
 }
 
 // SetChannelManager sets the channel manager for the agent loop.
@@ -721,6 +813,16 @@ func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 	if agentID, ok := al.sessionAgents.Load(sessionKey); ok {
 		result := agentID.(string)
 		logger.DebugCF("agent", "getSessionAgent found in sessionAgents", map[string]interface{}{
+			"session_key": sessionKey,
+			"agent_id":    result,
+		})
+		return result
+	}
+	// Check subagent session mapping — subagent sessions are stored in a
+	// separate map populated by SetSessionKeyCallback at spawn time.
+	if agentID, ok := al.subagentSessionAgent.Load(sessionKey); ok {
+		result := agentID.(string)
+		logger.DebugCF("agent", "getSessionAgent found in subagentSessionAgent", map[string]interface{}{
 			"session_key": sessionKey,
 			"agent_id":    result,
 		})

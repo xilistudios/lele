@@ -346,6 +346,15 @@ type Model struct {
 	renderedMsgStartIdx int // first message index included in renderedBase
 	renderedMsgEndIdx   int // last message index included in renderedBase (exclusive)
 	maxRenderedMessages int // max messages to render at once (0 = unlimited, backward compat)
+	// renderStartIdx is the index into session.Messages of the first message
+	// currently rendered in the chat viewport. Enables lazy loading of older
+	// messages on scroll-up. A value of -1 means uninitialized; 0 means all
+	// messages are rendered.
+	renderStartIdx int
+
+	// renderWindowSessionKey tracks which session renderStartIdx belongs to.
+	// When the session changes, the render window resets to the default.
+	renderWindowSessionKey string
 
 	// Cached token/context usage for the sidebar. GetCurrentContextUsage is
 	// expensive (it rebuilds the system prompt from disk and estimates tokens
@@ -391,10 +400,6 @@ type Model struct {
 	// compactFeedback holds the result of /compact to display in the viewport.
 	// Cleared when the user sends the next message.
 	compactFeedback string
-
-	// goalFeedback holds the result of a /goal command to display in the
-	// viewport. Cleared when the user sends the next message.
-	goalFeedback string
 
 	// Pending command approval state — set when the agent requests approval
 	// for a potentially dangerous exec command. The user must approve (y) or

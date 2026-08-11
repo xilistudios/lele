@@ -143,6 +143,7 @@ type Config struct {
 	Logs      LogsConfig       `json:"logs"`
 	Keyring   KeyringConfig    `json:"keyring"`
 	Updates   UpdatesConfig    `json:"updates"`
+	Goal      GoalConfig       `json:"goal"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	mu        sync.RWMutex
 }
@@ -436,6 +437,23 @@ type KeyringConfig struct {
 	AuditLogSize     int    `json:"audit_log_size,omitempty" env:"LELE_KEYRING_AUDIT_LOG_SIZE"`
 	AllowAgentSet    bool   `json:"allow_agent_set" env:"LELE_KEYRING_ALLOW_AGENT_SET"`
 	AllowAgentDelete bool   `json:"allow_agent_delete" env:"LELE_KEYRING_ALLOW_AGENT_DELETE"`
+}
+
+// GoalConfig configures the /goal system.
+type GoalConfig struct {
+	// Judge controls how goal completion is evaluated.
+	// "inline" (default) uses a lightweight LLM judge call.
+	// "subagent" runs a separate subagent evaluator.
+	Judge GoalJudgeConfig `json:"judge"`
+}
+
+// GoalJudgeConfig configures the goal completion judge.
+type GoalJudgeConfig struct {
+	// Mode is "inline" (default) or "subagent".
+	Mode string `json:"mode" env:"LELE_GOAL_JUDGE_MODE"`
+	// Agent is the agent ID used when Mode is "subagent". Empty means the
+	// default agent.
+	Agent string `json:"agent,omitempty" env:"LELE_GOAL_JUDGE_AGENT"`
 }
 
 type ProvidersConfig struct {
@@ -1116,6 +1134,11 @@ func DefaultConfig() *Config {
 			Enabled: true,
 			Channel: "stable",
 			Repo:    "",
+		},
+		Goal: GoalConfig{
+			Judge: GoalJudgeConfig{
+				Mode: "inline", // default: lightweight inline LLM judge
+			},
 		},
 	}
 }

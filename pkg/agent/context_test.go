@@ -260,6 +260,90 @@ func TestBuildToolsSection_EmptyRegistry(t *testing.T) {
 	}
 }
 
+// TestBuildToolsSection_ReadImageHiddenWithoutVision tests that read_image is
+// hidden from the tools section when vision is not supported, and shown when it is.
+func TestBuildToolsSection_ReadImageHiddenWithoutVision(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Register a read_image mock tool plus a normal tool.
+	registry := tools.NewToolRegistry()
+	registry.Register(&mockTool{
+		name:        "read_image",
+		description: "Read an image file",
+	})
+	registry.Register(&mockTool{
+		name:        "read_file",
+		description: "Read a text file",
+	})
+	cb.SetToolsRegistry(registry)
+
+	// Default: vision not supported -> read_image hidden, read_file shown.
+	section := cb.buildToolsSection()
+	if strings.Contains(section, "`read_image`") {
+		t.Error("Expected read_image to be hidden when vision is not supported")
+	}
+	if !strings.Contains(section, "`read_file`") {
+		t.Error("Expected read_file to be present when vision is not supported")
+	}
+
+	// Enable vision -> read_image shown.
+	cb.SetVisionSupported(true)
+	section = cb.buildToolsSection()
+	if !strings.Contains(section, "`read_image`") {
+		t.Error("Expected read_image to be present when vision is supported")
+	}
+	if !strings.Contains(section, "`read_file`") {
+		t.Error("Expected read_file to be present when vision is supported")
+	}
+}
+
+// TestSetVisionSupported_InvalidatesCaches tests that SetVisionSupported
+// invalidates cached prompts so the tools section is rebuilt.
+func TestSetVisionSupported_InvalidatesCaches(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	registry := tools.NewToolRegistry()
+	registry.Register(&mockTool{
+		name:        "read_image",
+		description: "Read an image file",
+	})
+	cb.SetToolsRegistry(registry)
+
+	// Build the initial context (caches it) with vision disabled.
+	cb.SetVisionSupported(false)
+	initial := cb.GetInitialContext()
+	if strings.Contains(initial, "`read_image`") {
+		t.Error("Expected read_image hidden in initial context")
+	}
+
+	// Enable vision; the cached initial context must be invalidated so the
+	// next build reflects the change.
+	cb.SetVisionSupported(true)
+	updated := cb.GetInitialContext()
+	if !strings.Contains(updated, "`read_image`") {
+		t.Error("Expected read_image present after enabling vision")
+	}
+
+	// Setting the same value again must be a no-op (no unnecessary rebuild).
+	cb.SetVisionSupported(true)
+	again := cb.GetInitialContext()
+	if !strings.Contains(again, "`read_image`") {
+		t.Error("Expected read_image still present after redundant SetVisionSupported(true)")
+	}
+}
+
 // TestBuildSystemPrompt tests BuildSystemPrompt method
 func TestBuildSystemPrompt(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")

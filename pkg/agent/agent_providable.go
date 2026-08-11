@@ -670,7 +670,10 @@ func (ap *agentProvidableImpl) GetSubagentParentSessionKey(sessionKey string) st
 // IsSessionProcessing returns true if there is an active LLM processing loop for the session.
 func (ap *agentProvidableImpl) IsSessionProcessing(sessionKey string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
-	return ap.al.sessionManager.IsSessionProcessing(sessionKey)
+	if ap.al.sessionManager.IsSessionProcessing(sessionKey) {
+		return true
+	}
+	return ap.al.isGoalLoopActive(sessionKey)
 }
 
 // ============================================================================

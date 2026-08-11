@@ -255,23 +255,46 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.elapsedTime = 0
 		m.currentStream = ""
 		m.currentThinking = ""
-		m.currentToolAction = ""
+		m.currentToolAction = i18n.T("tui.compacting")
 		m.reloadSessions()
 		key := m.currentKey
-		return func() tea.Msg {
+		compactCmd := func() tea.Msg {
 			result := m.agentLoop.GetProvidable().CompactSession(key)
 			return compactResultMsg{result: result, sessionKey: key}
 		}
+		return tea.Batch(compactCmd, m.tickCmd())
 
 	case "/goal":
+		// If we're on the welcome screen with no session, create one now —
+		// the same behavior as submitMessage and submitGroupStart.
 		if m.currentKey == "" {
-			m.goalFeedback = "❌ No hay sesión activa. Empieza un chat primero (/new o envía un mensaje)."
-			m.updateViewport()
-			return nil
+			m.createNewChat()
+			m.showWelcome = false
 		}
 		m.compactFeedback = ""
-		m.goalFeedback = m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
+		result := m.agentLoop.HandleGoalCommand(m.currentKey, parts[1:])
 		m.updateViewport()
+
+		// Setting a new goal (as opposed to status/pause/resume/clear) kicks
+		// off an autonomous agent turn via the message bus. Mark the session
+		// as processing and start the tick chain so the loading indicator
+		// appears and stays in sync with the backend.
+		if isGoalSetCommand(parts[1:]) {
+			goalText := strings.Join(parts[1:], " ")
+			// Strip --turns flag from display
+			if idx := strings.Index(goalText, "--turns"); idx > 0 {
+				goalText = strings.TrimSpace(goalText[:idx])
+			}
+			m.currentToolAction = "🎯 Goal set: " + goalText
+			m.processing = true
+			m.startTime = time.Now()
+			m.elapsedTime = 0
+			m.currentStream = ""
+			m.currentThinking = ""
+			return m.tickCmd()
+		}
+		// For status/pause/resume/clear, show result as tool action briefly
+		m.currentToolAction = result
 		return nil
 
 	case "/quit":
@@ -280,4 +303,20 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		os.Exit(0)
 	}
 	return nil
+}
+
+// isGoalSetCommand reports whether the /goal arguments set a new goal
+// (free-form goal text) as opposed to invoking a subcommand
+// (status/pause/resume/clear) or showing usage. Only a new goal triggers
+// the autonomous kickoff turn, so only then should the TUI enter the
+// processing state.
+func isGoalSetCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "status", "pause", "resume", "clear":
+		return false
+	}
+	return true
 }

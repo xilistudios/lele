@@ -59,6 +59,20 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		}
 	}
 
+	// Vision guard: block read_image if the session's model doesn't support vision.
+	// This is defense-in-depth — the tool definition is normally filtered out in
+	// llm_runner.go, but this prevents execution if the LLM somehow calls it anyway.
+	if opts.tc.Name == "read_image" && opts.agent != nil && te.al != nil {
+		model := te.al.sessionManager.ModelForSession(opts.agent, opts.sessionKey)
+		if model != "" {
+			cfg := te.al.cfg()
+			providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+			if !getSupportsImages(cfg, model, providerName) {
+				return tools.ErrorResult("read_image is not available: the current model does not support vision"), nil
+			}
+		}
+	}
+
 	// Publish tool execution notification
 	te.publishExecuting(opts)
 

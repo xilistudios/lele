@@ -15,6 +15,10 @@ import (
 // during idle renders (cursor blink, mouse moves) within a single turn.
 const tokenCacheTTL = 2 * time.Second
 
+// lazyLoadBatchSize is the number of older messages loaded per scroll-up
+// batch when the render window expands toward the start of the history.
+const lazyLoadBatchSize = 50
+
 // getTokenUsage returns cached token/context usage for the sidebar, refreshing
 // the underlying (expensive) backend calls at most once per tokenCacheTTL or
 // when the history message count changes. This keeps View() cheap: previously
@@ -66,6 +70,12 @@ func (m *Model) updateViewport() {
 	// instead of 4+ times avoids redundant mutex acquisitions.
 	history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
 
+	// Reset the lazy-load render window when switching sessions.
+	if m.renderWindowSessionKey != m.currentKey {
+		m.renderWindowSessionKey = m.currentKey
+		m.renderStartIdx = -1
+	}
+
 	// Clear streaming state if the assistant message is fully saved in history
 	m.cleanupStreamingIfCompleteWithHistory(history)
 
@@ -116,7 +126,7 @@ func (m *Model) updateViewport() {
 		m.pendingUserMessage != "" ||
 		m.pendingApprovalID != "" || m.approvalResult != "" ||
 		m.activeGroupID != "" ||
-		m.compactFeedback != "" || m.goalFeedback != ""
+		m.compactFeedback != ""
 
 	if !hasOverlay && !m.selecting {
 		// Nothing ephemeral to show — ensure overlay is cleared.
@@ -215,11 +225,6 @@ func (m *Model) updateViewport() {
 		overlaySb.WriteString(m.compactFeedback + "\n\n")
 	}
 
-	// Show /goal command feedback
-	if m.goalFeedback != "" {
-		overlaySb.WriteString(m.goalFeedback + "\n\n")
-	}
-
 	// Check if viewport is at bottom BEFORE updating overlay.
 	// This preserves the user's scroll position when they've scrolled up.
 	// forceGotoBottom overrides this when switching sessions or creating a new chat.
@@ -239,6 +244,39 @@ func (m *Model) updateViewport() {
 	if wasAtBottom && m.viewport.totalLines() > 0 && m.viewport.Height > 0 {
 		m.viewport.GotoBottom()
 	}
+}
+
+// maybeExpandRenderWindow expands the lazy-load render window backwards by
+// lazyLoadBatchSize messages when the user has scrolled to the very top and
+// older unrendered messages exist. It rebuilds the viewport and compensates
+// YOffset so the content that was at the top stays visible. Returns true if
+// the window was expanded.
+func (m *Model) maybeExpandRenderWindow() bool {
+	if m.currentKey == "" || !m.viewport.AtTop() || m.renderStartIdx <= 0 {
+		return false
+	}
+	oldTotal := m.viewport.totalLines()
+
+	newStart := m.renderStartIdx - lazyLoadBatchSize
+	if newStart < 0 {
+		newStart = 0
+	}
+	m.renderStartIdx = newStart
+
+	// Force a base rebuild on the next updateViewport pass.
+	m.renderedBaseValid = false
+	m.renderedBaseKey = ""
+	m.renderedBaseMsgCount = -1
+
+	m.updateViewport()
+
+	// Compensate scroll position: the prepended lines shifted content down,
+	// so move YOffset down by the same amount to keep the same line at top.
+	if delta := m.viewport.totalLines() - oldTotal; delta > 0 {
+		m.viewport.YOffset = delta
+		m.viewport.clampOffset()
+	}
+	return true
 }
 
 // countHistoryMessages counts user+assistant messages in the given history slice.
@@ -265,6 +303,22 @@ func lastHistoryRoleFromHistory(history []providers.Message) string {
 	return ""
 }
 
+// defaultRenderStartIdx returns the default index of the first message to
+// render for a history of msgCount messages. When the history fits within the
+// max-rendered-messages window it starts at 0; otherwise it starts at the
+// oldest message that still fits within the window (the most recent
+// maxRenderedMessages messages). A maxRenderedMessages of 0 (unlimited,
+// backward compat) always starts at 0.
+func (m *Model) defaultRenderStartIdx(msgCount int) int {
+	if m.maxRenderedMessages <= 0 {
+		return 0
+	}
+	if msgCount <= m.maxRenderedMessages {
+		return 0
+	}
+	return msgCount - m.maxRenderedMessages
+}
+
 // buildRenderedHistoryLines renders completed messages from the given
 // history slice using a per-message render cache. Returns []string lines
 // directly instead of a concatenated string — this avoids the O(n) string
@@ -274,10 +328,14 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 	totalMsgs := len(history)
 
 	// Virtualized rendering: only render the most recent N messages
-	// when the conversation is very long.
-	startIdx := 0
-	if m.maxRenderedMessages > 0 && totalMsgs > m.maxRenderedMessages {
-		startIdx = totalMsgs - m.maxRenderedMessages
+	// when the conversation is very long. The render window start index is
+	// persisted in m.renderStartIdx so it can be expanded (lazy loading of
+	// older messages) on scroll-up. A value of -1 means uninitialized (falls
+	// back to the default window); 0 means all messages are rendered.
+	startIdx := m.renderStartIdx
+	if startIdx < 0 || startIdx > totalMsgs {
+		startIdx = m.defaultRenderStartIdx(totalMsgs)
+		m.renderStartIdx = startIdx
 	}
 
 	m.renderedMsgStartIdx = startIdx

@@ -105,6 +105,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		streamThrottleInterval: 32 * time.Millisecond,
 		mouseEnabled:           true,
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
+		renderStartIdx:         -1,  // uninitialized — compute default on first render
 	}
 
 	// Initialize a read/manage-only cron service backed by the same store the
@@ -237,7 +238,7 @@ func (m *Model) reloadSessions() {
 // user-visible changed. This keeps idle CPU low even for very long sessions.
 func (m *Model) getViewportContentKey() string {
 	msgCount := m.getHistoryMessageCount()
-	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v",
+	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%d",
 		m.currentKey,
 		m.viewport.Width,
 		msgCount,
@@ -249,7 +250,7 @@ func (m *Model) getViewportContentKey() string {
 		m.activeGroupID,
 		m.processing,
 		m.compactFeedback != "",
-		m.goalFeedback != "",
+		m.renderStartIdx,
 	)
 }
 

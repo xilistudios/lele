@@ -490,6 +490,12 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		}
 		return overrideProvider, resolvedModel, getContextWindow(cfg, resolvedModel, providerName)
 	})
+	// Report whether a model supports vision so subagent tool loops can
+	// filter out read_image for non-vision models.
+	subagentManager.SetVisionChecker(func(model string) bool {
+		providerName := extractProviderFromModel(model, cfg.Agents.Defaults.Provider)
+		return getSupportsImages(cfg, model, providerName)
+	})
 	// Set subagent timeout from agent config (per-agent override or global default)
 	if agent.Subagents != nil && agent.Subagents.TimeoutMin > 0 {
 		subagentManager.SetTimeout(time.Duration(agent.Subagents.TimeoutMin) * time.Minute)

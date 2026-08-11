@@ -244,6 +244,13 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		}
 	}
 
+	// Determine whether the resolved model supports vision so RunToolLoop
+	// can filter out read_image for non-vision models.
+	sm.mu.RLock()
+	visionChecker := sm.visionChecker
+	sm.mu.RUnlock()
+	visionSupported := visionChecker != nil && visionChecker(agentModel)
+
 	messages := previousTask.buildMessages(systemPrompt)
 
 	// Check if context is already cancelled before starting
@@ -302,6 +309,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		ContextWindow:   agentContextWindow,
 		MessageBus:      sm.bus,
 		ChatID:          sessionKey,
+		VisionSupported: visionSupported,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)

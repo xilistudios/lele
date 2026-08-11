@@ -76,6 +76,13 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	// Resolve agent config using shared method (same as runTask)
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, _ := sm.resolveAgentConfig(agentID)
 
+	// Determine whether the resolved model supports vision so RunToolLoop
+	// can filter out read_image for non-vision models.
+	sm.mu.RLock()
+	visionChecker := sm.visionChecker
+	sm.mu.RUnlock()
+	visionSupported := visionChecker != nil && visionChecker(agentModel)
+
 	// Build messages the same way as runTask: system prompt + user task
 	messages := []providers.Message{
 		{
@@ -119,12 +126,13 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 
 	loopResult, err := RunToolLoop(taskCtx, ToolLoopConfig{
-		Provider:      agentProvider,
-		Model:         agentModel,
-		Tools:         tools,
-		MaxIterations: maxIter,
-		LLMOptions:    llmOptions,
-		Retry:         retryConfigPtr(),
+		Provider:        agentProvider,
+		Model:           agentModel,
+		Tools:           tools,
+		MaxIterations:   maxIter,
+		LLMOptions:      llmOptions,
+		Retry:           retryConfigPtr(),
+		VisionSupported: visionSupported,
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
