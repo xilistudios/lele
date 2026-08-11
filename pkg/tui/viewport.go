@@ -65,6 +65,16 @@ func (m *Model) updateViewport() {
 		return
 	}
 
+	// Capture whether the viewport is currently at the bottom BEFORE any
+	// base/overlay rebuild. The rebuild can change maxYOffset (e.g. a new
+	// message is appended to baseLines), which would make a post-rebuild
+	// AtBottom() check return false even though the user was at the bottom a
+	// moment ago. Auto-scroll must reach the new bottom only when the user was
+	// already there; otherwise the user's scroll position is preserved.
+	// forceGotoBottom forces a scroll to bottom regardless (session switch,
+	// new chat, freshly created content).
+	wasAtBottom := m.viewport.AtBottom() || m.forceGotoBottom
+
 	// Fetch history ONCE for this entire render cycle. GetHistoryView returns
 	// a read-only reference (no copy), so this is cheap — but calling it once
 	// instead of 4+ times avoids redundant mutex acquisitions.
@@ -138,7 +148,7 @@ func (m *Model) updateViewport() {
 		// is visible. Without this, newly arrived messages that don't
 		// produce an overlay (e.g. a completed assistant response after
 		// streaming ends) would not trigger auto-scroll.
-		if m.forceGotoBottom || (m.viewport.AtBottom() && m.viewport.totalLines() > 0 && m.viewport.Height > 0) {
+		if m.forceGotoBottom || (wasAtBottom && m.viewport.totalLines() > 0 && m.viewport.Height > 0) {
 			m.forceGotoBottom = false
 			m.viewport.GotoBottom()
 		}
@@ -228,7 +238,8 @@ func (m *Model) updateViewport() {
 	// Check if viewport is at bottom BEFORE updating overlay.
 	// This preserves the user's scroll position when they've scrolled up.
 	// forceGotoBottom overrides this when switching sessions or creating a new chat.
-	wasAtBottom := m.viewport.AtBottom() || m.forceGotoBottom
+	// wasAtBottom was captured at the very start of updateViewport, before any
+	// base/overlay rebuild, so it reflects the user's true pre-update position.
 	m.forceGotoBottom = false
 
 	// Push overlay lines to the viewport. SetOverlayLines is O(overlay_lines)

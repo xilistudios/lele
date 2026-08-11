@@ -284,3 +284,74 @@ func TestAutoScroll_FastPathPreservesUserScroll(t *testing.T) {
 			m.viewport.YOffset, m.viewport.maxYOffset())
 	}
 }
+
+// TestAutoScroll_AtBottomNewMessageNoForceGotoBottom is a regression test for
+// the bug where auto-scroll failed when a new message arrived while the user
+// was at the bottom but forceGotoBottom was NOT set.
+//
+// Root cause: updateViewport() rebuilt baseLines (which grew maxYOffset) and
+// THEN checked AtBottom(). AtBottom() compares YOffset >= maxYOffset, so after
+// the content grew, the previous-bottom YOffset was no longer >= the new
+// maxYOffset — AtBottom() returned false and the viewport did not auto-scroll,
+// even though the user was at the bottom before the new content arrived.
+//
+// Fix: capture wasAtBottom at the very start of updateViewport(), before any
+// base/overlay rebuild, and use that captured value for auto-scroll decisions.
+func TestAutoScroll_AtBottomNewMessageNoForceGotoBottom(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	m = updated.(*Model)
+
+	key := "tui:chat:autoscroll-atbottom-no-force"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+
+	// Enough history to overflow the viewport.
+	for i := 0; i < 20; i++ {
+		m.sessionMgr.AddMessage(key, "user", fmt.Sprintf("Question %d", i))
+		m.sessionMgr.AddMessage(key, "assistant",
+			fmt.Sprintf("Answer %d line two line three line four line five.", i))
+	}
+
+	m.currentKey = key
+	m.showWelcome = false
+	m.processing = false
+	m.currentStream = ""
+	m.currentThinking = ""
+	m.currentToolAction = ""
+	m.forceGotoBottom = true
+	m.reloadSessions()
+	m.updateViewport()
+
+	if !m.viewport.AtBottom() {
+		t.Fatalf("precondition: viewport should be at bottom, YOffset=%d maxYOffset=%d",
+			m.viewport.YOffset, m.viewport.maxYOffset())
+	}
+
+	// Confirm the post-render state: forceGotoBottom is consumed by updateViewport.
+	m.forceGotoBottom = false
+
+	// A new message arrives while the user is at the bottom. There is NO
+	// overlay (no streaming, processing already done) and forceGotoBottom is
+	// false — the exact scenario that previously failed to auto-scroll.
+	m.sessionMgr.AddMessage(key, "user", "A brand new question after being at the bottom")
+	m.sessionMgr.AddMessage(key, "assistant",
+		"A brand new answer that is long enough to fill several lines in the viewport "+
+			"so that the content overflows and scrolling is required to see it.")
+
+	m.reloadSessions()
+	m.updateViewport()
+
+	if !m.viewport.AtBottom() {
+		t.Errorf("BUG: viewport did not auto-scroll to bottom when a new message arrived "+
+			"while at the bottom and forceGotoBottom was false. YOffset=%d maxYOffset=%d totalLines=%d",
+			m.viewport.YOffset, m.viewport.maxYOffset(), m.viewport.totalLines())
+	}
+
+	// Verify the new content is actually visible in the rendered base.
+	baseContent := stripAnsi(strings.Join(m.viewport.baseLines, "\n"))
+	if !strings.Contains(baseContent, "A brand new answer") {
+		t.Error("new assistant message not found in rendered base after auto-scroll")
+	}
+}

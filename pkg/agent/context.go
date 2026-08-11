@@ -471,6 +471,13 @@ func filterContextMessages(history []providers.Message) []providers.Message {
 // It removes orphaned tool_results (without matching tool_use) and adds placeholder
 // tool_results for missing ones. This prevents 400 errors from Anthropic/AWS Bedrock
 // when tool execution is cancelled mid-way or when summarization breaks pairing.
+//
+// It also strips malformed tool_call entries that lack a function name. Some
+// OpenAI-compatible providers (e.g. Xiaomi MiMo) reject assistant messages with
+// `tool_calls[i] is missing a function name` (HTTP 400). This can happen when a
+// historical message was persisted with an incomplete tool_call (e.g. a streaming
+// interruption that captured only an ID, or a provider that emitted a tool_call
+// placeholder without a name).
 func sanitizeToolMessages(history []providers.Message) []providers.Message {
 	if len(history) == 0 {
 		return history
@@ -507,6 +514,20 @@ func sanitizeToolMessages(history []providers.Message) []providers.Message {
 		}
 
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			// Strip tool_call entries that lack a function name. Some providers
+			// reject assistant messages whose tool_calls omit the function name
+			// (HTTP 400 "tool_calls[i] is missing a function name"). This can
+			// occur in history from a streaming interruption or a provider that
+			// emitted a tool_call placeholder without a name.
+			if cleaned := stripNamelessToolCalls(msg.ToolCalls); len(cleaned) != len(msg.ToolCalls) {
+				logger.DebugCF("agent", "Stripping tool_call entries missing a function name",
+					map[string]interface{}{
+						"removed": len(msg.ToolCalls) - len(cleaned),
+						"kept":    len(cleaned),
+					})
+				msg.ToolCalls = cleaned
+			}
+
 			// Collect tool_call IDs from this assistant message.
 			assistantToolCallIDs := make(map[string]bool)
 			for _, tc := range msg.ToolCalls {
@@ -578,6 +599,29 @@ func sanitizeToolMessages(history []providers.Message) []providers.Message {
 	}
 
 	return output
+}
+
+// stripNamelessToolCalls removes tool_call entries that lack a function name.
+// A valid tool_call must have either a top-level Name or a Function.Name.
+// Malformed entries (e.g. from a streaming interruption that captured only an
+// ID, or a provider that emitted a placeholder without a name) cause HTTP 400
+// errors on OpenAI-compatible APIs and must be filtered out before sending.
+func stripNamelessToolCalls(toolCalls []providers.ToolCall) []providers.ToolCall {
+	if len(toolCalls) == 0 {
+		return toolCalls
+	}
+	cleaned := make([]providers.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		name := tc.Name
+		if name == "" && tc.Function != nil {
+			name = tc.Function.Name
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		cleaned = append(cleaned, tc)
+	}
+	return cleaned
 }
 
 // ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
