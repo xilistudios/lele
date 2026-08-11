@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-10
+
+### Added
+
+#### Skills
+- Multi-skill repo scanning — discovers skills from multiple configured paths (workspace, global, and custom repos). New `workspace.skills` config section with `paths` and `repos` for flexible skill organization.
+- TUI `/skills` command — browse, search, and install skills directly from the terminal with a filterable modal.
+- WebUI Skills page — dedicated page for skill management with install/uninstall workflows.
+
+#### WebUI
+- SearXNG settings section in Tools page — configure SearXNG instance URL, categories, language, and safesearch directly from the UI without editing config files.
+
+#### Session
+- Incremental SQLite saves — replaces full JSON encode on every save with granular `INSERT OR REPLACE` for individual messages, reducing I/O and lock contention on long conversations.
+
+### Fixed
+
+#### Agent
+- Strip image content from messages when model lacks vision — prevents errors when non-vision models receive image parts in conversation history.
+
+#### TUI
+- Keep excluded messages visible during `/compact` — excluded messages (e.g. tool calls) now remain visible with a loading indicator while compaction runs, instead of disappearing temporarily.
+
+#### WebUI
+- Chat history kind tab filter and sort label — the session type filter (all/agent/subagent) and sort indicator now work correctly when navigating between pages.
+
 ## [0.6.6] - 2026-08-10
 
 ### Added
