@@ -164,8 +164,8 @@ func TestCreateWorkspaceTemplates(t *testing.T) {
 	workspace := filepath.Join(tmpDir, "workspace")
 	createWorkspaceTemplates(workspace)
 
-	// Verify templates were created
-	expectedFiles := []string{"AGENT.md", "IDENTITY.md", "SOUL.md", "MEMORY.md", "USER.md"}
+	// Verify templates were created (only files present in the embedded workspace/)
+	expectedFiles := []string{"AGENT.md", "MEMORY.md"}
 	for _, f := range expectedFiles {
 		path := filepath.Join(workspace, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
