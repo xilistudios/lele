@@ -271,3 +271,108 @@ func TestSanitizeToolMessages_AllToolResultsMissingEmptyContentWithReasoning(t *
 		t.Errorf("Expected reasoning content preserved, got %q", result[1].ReasoningContent)
 	}
 }
+func TestSanitizeToolMessages_NamelessToolCallStripped(t *testing.T) {
+	// An assistant message with a tool_call missing a function name (both
+	// top-level Name and Function.Name empty) causes HTTP 400 on OpenAI-compatible
+	// APIs. It must be stripped while valid tool_calls are preserved.
+	history := []providers.Message{
+		{Role: "user", Content: "Do things"},
+		{
+			Role:    "assistant",
+			Content: "Calling tools",
+			ToolCalls: []providers.ToolCall{
+				{ID: "tc_valid", Name: "read_file"},
+				{ID: "tc_nameless"}, // no Name, no Function
+			},
+		},
+		{Role: "tool", Content: "file contents", ToolCallID: "tc_valid"},
+		{Role: "user", Content: "Thanks"},
+	}
+
+	result := sanitizeToolMessages(history)
+
+	// user, assistant, tool(tc_valid), user = 4 messages
+	if len(result) != 4 {
+		t.Fatalf("Expected 4 messages, got %d", len(result))
+	}
+	if len(result[1].ToolCalls) != 1 {
+		t.Fatalf("Expected 1 tool_call after stripping, got %d", len(result[1].ToolCalls))
+	}
+	if result[1].ToolCalls[0].ID != "tc_valid" {
+		t.Errorf("Expected tc_valid to remain, got %q", result[1].ToolCalls[0].ID)
+	}
+}
+
+func TestSanitizeToolMessages_NamelessToolCallWithEmptyFunctionStripped(t *testing.T) {
+	// A tool_call with a present-but-empty Function struct must also be stripped.
+	history := []providers.Message{
+		{
+			Role:    "assistant",
+			Content: "tools",
+			ToolCalls: []providers.ToolCall{
+				{ID: "tc_bad", Function: &providers.FunctionCall{Name: ""}},
+				{ID: "tc_good", Function: &providers.FunctionCall{Name: "web_search"}},
+			},
+		},
+		{Role: "tool", Content: "results", ToolCallID: "tc_good"},
+	}
+
+	result := sanitizeToolMessages(history)
+
+	if len(result) != 2 {
+		t.Fatalf("Expected 2 messages, got %d", len(result))
+	}
+	if len(result[0].ToolCalls) != 1 {
+		t.Fatalf("Expected 1 tool_call after stripping, got %d", len(result[0].ToolCalls))
+	}
+	if len(result[0].ToolCalls) > 0 && result[0].ToolCalls[0].ID != "tc_good" {
+		t.Errorf("Expected tc_good to remain, got %q", result[0].ToolCalls[0].ID)
+	}
+}
+
+func TestSanitizeToolMessages_AllNamelessToolCallsStrippedKeepsContent(t *testing.T) {
+	// If ALL tool_calls are nameless, strip them all but keep the message content.
+	history := []providers.Message{
+		{Role: "user", Content: "hi"},
+		{
+			Role:    "assistant",
+			Content: "I tried but couldn't",
+			ToolCalls: []providers.ToolCall{
+				{ID: "tc_1"},
+				{ID: "tc_2"},
+			},
+		},
+		{Role: "user", Content: "ok"},
+	}
+
+	result := sanitizeToolMessages(history)
+
+	if len(result) != 3 {
+		t.Fatalf("Expected 3 messages, got %d", len(result))
+	}
+	if len(result[1].ToolCalls) != 0 {
+		t.Errorf("Expected 0 tool_calls, got %d", len(result[1].ToolCalls))
+	}
+	if result[1].Content != "I tried but couldn't" {
+		t.Errorf("Expected content preserved, got %q", result[1].Content)
+	}
+}
+
+func TestStripNamelessToolCalls(t *testing.T) {
+	calls := []providers.ToolCall{
+		{ID: "a", Name: "exec"},
+		{ID: "b"}, // stripped
+		{ID: "c", Function: &providers.FunctionCall{Name: "read_file"}},
+		{ID: "d", Function: &providers.FunctionCall{Name: "  "}}, // stripped (whitespace)
+		{ID: "e", Name: "write_file", Function: &providers.FunctionCall{Name: "other"}},
+	}
+
+	cleaned := stripNamelessToolCalls(calls)
+
+	if len(cleaned) != 3 {
+		t.Fatalf("Expected 3 tool_calls, got %d", len(cleaned))
+	}
+	if cleaned[0].ID != "a" || cleaned[1].ID != "c" || cleaned[2].ID != "e" {
+		t.Errorf("Unexpected cleaned order: %+v", cleaned)
+	}
+}

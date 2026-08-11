@@ -1212,7 +1212,7 @@ func TestBuildMessages_ToolNotAtStart(t *testing.T) {
 	// History with tool message after user message (should be preserved)
 	history := []providers.Message{
 		{Role: "user", Content: "User message"},
-		{Role: "assistant", Content: "Assistant response", ToolCalls: []providers.ToolCall{{ID: "call-1"}}},
+		{Role: "assistant", Content: "Assistant response", ToolCalls: []providers.ToolCall{{ID: "call-1", Name: "exec"}}},
 		{Role: "tool", Content: "Tool result", ToolCallID: "call-1"},
 	}
 
