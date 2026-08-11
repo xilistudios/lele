@@ -73,6 +73,7 @@ func (n *NativeChannel) handleSkills(w http.ResponseWriter, r *http.Request) {
 			Name:        s.Name,
 			Description: s.Description,
 			Installed:   true,
+			Enabled:     s.Enabled,
 			Source:      s.Source,
 		})
 	}
@@ -155,6 +156,145 @@ func (n *NativeChannel) handleSkillRemove(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": fmt.Sprintf("Skill '%s' removed successfully", skillName),
+	})
+}
+
+// handleSkillScan scans a GitHub repo for skills.
+func (n *NativeChannel) handleSkillScan(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Repo string `json:"repo"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
+		return
+	}
+
+	if req.Repo == "" {
+		writeError(w, http.StatusBadRequest, "repo is required", "missing_repo")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	scanned, err := n.skillInstaller.ScanGitHubRepo(ctx, req.Repo)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to scan repo: %v", err), "scan_failed")
+		return
+	}
+
+	// Convert skills.ScannedSkill to channels.ScannedSkill
+	result := make([]ScannedSkill, 0, len(scanned))
+	for _, s := range scanned {
+		result = append(result, ScannedSkill{
+			Name:        s.Name,
+			Description: s.Description,
+			Path:        s.Path,
+			HasSKILL:    s.HasSKILL,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, ScanSkillsResponse{
+		Skills: result,
+		Repo:   req.Repo,
+	})
+}
+
+// handleSkillInstallBatch installs multiple skills from a scanned repo.
+func (n *NativeChannel) handleSkillInstallBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Repo   string   `json:"repo"`
+		Skills []string `json:"skills"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
+		return
+	}
+
+	if req.Repo == "" {
+		writeError(w, http.StatusBadRequest, "repo is required", "missing_repo")
+		return
+	}
+
+	if len(req.Skills) == 0 {
+		writeError(w, http.StatusBadRequest, "skills list is required", "missing_skills")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	installed, err := n.skillInstaller.InstallMultiple(ctx, req.Repo, req.Skills)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to install skills: %v", err), "install_failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"installed": installed,
+		"count":     len(installed),
+		"message":   fmt.Sprintf("Installed %d skills successfully", len(installed)),
+	})
+}
+
+// handleSkillToggle enables or disables a skill in workspace config.
+func (n *NativeChannel) handleSkillToggle(w http.ResponseWriter, r *http.Request) {
+	skillName := r.PathValue("name")
+	if skillName == "" {
+		writeError(w, http.StatusBadRequest, "skill name is required", "missing_name")
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
+		return
+	}
+
+	// Get workspace config manager from skills loader
+	configMgr := n.skillsLoader.GetConfigManager()
+	if configMgr == nil {
+		writeError(w, http.StatusInternalServerError, "workspace config not available", "config_unavailable")
+		return
+	}
+
+	var err error
+	if req.Enabled {
+		err = configMgr.SetEnabled(skillName)
+	} else {
+		err = configMgr.SetDisabled(skillName)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to toggle skill: %v", err), "toggle_failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":    skillName,
+		"enabled": req.Enabled,
+		"message": fmt.Sprintf("Skill '%s' %s", skillName, map[bool]string{true: "enabled", false: "disabled"}[req.Enabled]),
+	})
+}
+
+// handleSkillWorkspaceConfig returns the workspace skills config.
+func (n *NativeChannel) handleSkillWorkspaceConfig(w http.ResponseWriter, r *http.Request) {
+	configMgr := n.skillsLoader.GetConfigManager()
+	if configMgr == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"skills": map[string]interface{}{
+				"enabled":  []string{},
+				"disabled": []string{},
+			},
+		})
+		return
+	}
+
+	cfg := configMgr.GetConfig()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"skills": cfg,
 	})
 }
 

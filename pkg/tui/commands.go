@@ -182,6 +182,16 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.loadSecrets()
 		return nil
 
+	case "/skills":
+		m.resetModal(ModalSkills)
+		m.skillsModalKeys = nil
+		m.skillsSelectedMap = nil
+		m.skillsScanResults = nil
+		m.skillsScanRepo = ""
+		m.skillsFeedback = ""
+		m.loadSkillsList()
+		return nil
+
 	case "/providers":
 		m.resetModal(ModalProviders)
 		m.providerModalKeys = nil

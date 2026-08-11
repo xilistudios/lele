@@ -8,6 +8,7 @@ type Props = {
   isLoading: boolean
   isRemoving: string | null
   onRemove: (name: string) => void
+  onToggle?: (name: string, enabled: boolean) => void
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -22,7 +23,7 @@ const SOURCE_LABELS: Record<string, string> = {
   builtin: 'Built-in',
 }
 
-export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
+export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }: Props) {
   const { t } = useTranslation()
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
@@ -77,7 +78,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
     <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
       {skills.map((skill) => (
         <div
-          key={skill.id}
+          key={skill.name}
           className="group flex flex-col rounded-xl border border-border bg-background-secondary/50 p-4 hover:border-brand-rosa/30 transition-all duration-200"
         >
           <div className="flex items-start justify-between">
@@ -102,53 +103,72 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
               <h4 className="text-sm font-medium text-text-primary truncate">{skill.name}</h4>
             </div>
 
-            {skill.source !== 'builtin' && (
-              <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                {confirmRemove === skill.name ? (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmRemove(skill.name)}
+            <div className="flex-shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {/* Enable/disable toggle */}
+              {onToggle && skill.source !== 'builtin' && (
+                <button
+                  type="button"
+                  onClick={() => onToggle(skill.name, !skill.enabled)}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    skill.enabled
+                      ? 'text-state-success hover:bg-state-success/10'
+                      : 'text-text-tertiary hover:bg-text-tertiary/10'
+                  }`}
+                  title={skill.enabled ? t('skills.disable', 'Disable') : t('skills.enable', 'Enable')}
+                >
+                  {skill.enabled ? '●' : '○'}
+                </button>
+              )}
+
+              {/* Remove button */}
+              {skill.source !== 'builtin' && (
+                <>
+                  {confirmRemove === skill.name ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmRemove(skill.name)}
+                        disabled={isRemoving === skill.name}
+                        className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        {isRemoving === skill.name ? (
+                          <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
+                        ) : (
+                          t('skills.removeConfirmYes', 'Yes, remove')
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemove(null)}
+                        className="rounded px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+                      >
+                        {t('skills.removeConfirmNo', 'No')}
+                      </button>
+                    </div>
+                  ) : (
+                    <IconButton
+                      onClick={() => handleRemoveClick(skill.name, skill.source)}
                       disabled={isRemoving === skill.name}
-                      className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                      variant="danger"
+                      title={t('skills.removeSkill', 'Remove')}
                     >
-                      {isRemoving === skill.name ? (
-                        <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
-                      ) : (
-                        t('skills.removeConfirmYes', 'Yes, remove')
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemove(null)}
-                      className="rounded px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
-                    >
-                      {t('skills.removeConfirmNo', 'No')}
-                    </button>
-                  </div>
-                ) : (
-                  <IconButton
-                    onClick={() => handleRemoveClick(skill.name, skill.source)}
-                    disabled={isRemoving === skill.name}
-                    variant="danger"
-                    title={t('skills.removeSkill', 'Remove')}
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <title>Delete</title>
-                      <path d="M3 6h18" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </IconButton>
-                )}
-              </div>
-            )}
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <title>Delete</title>
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </IconButton>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {skill.description && (
@@ -165,9 +185,9 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove }: Props) {
             )}
             <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
               <span
-                className={`h-1.5 w-1.5 rounded-full ${skill.installed ? 'bg-state-success' : 'bg-text-tertiary'}`}
+                className={`h-1.5 w-1.5 rounded-full ${skill.enabled ? 'bg-state-success' : 'bg-text-tertiary'}`}
               />
-              {skill.installed ? t('common.enabled') : t('common.disabled')}
+              {skill.enabled ? t('common.enabled') : t('common.disabled')}
             </span>
           </div>
         </div>

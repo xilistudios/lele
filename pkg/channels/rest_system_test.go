@@ -222,6 +222,170 @@ func TestHandleSkillsAvailable(t *testing.T) {
 	}
 }
 
+func TestHandleSkillScan_MissingRepo(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body := `{}`
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/skills/scan", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillScan_InvalidBody(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/skills/scan", strings.NewReader("not-json"))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillInstallBatch_MissingRepo(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body := `{"skills": ["weather"]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/skills/install-batch", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillInstallBatch_MissingSkills(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body := `{"repo": "user/repo"}`
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/skills/install-batch", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillInstallBatch_EmptySkills(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body := `{"repo": "user/repo", "skills": []}`
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/skills/install-batch", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillToggle_NoConfigManager(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	body := `{"enabled": true}`
+	req, _ := http.NewRequest(http.MethodPut, ts.server.URL+"/api/v1/skills/github/toggle", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Test server has no config manager initialized, so it returns 500
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleSkillToggle_InvalidBody(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPut, ts.server.URL+"/api/v1/skills/github/toggle", strings.NewReader("not-json"))
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleSkillWorkspaceConfig(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/skills/workspace-config", nil)
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+
+	// Should have a "skills" key with enabled/disabled
+	skills, ok := payload["skills"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'skills' key in response")
+	}
+	if _, hasEnabled := skills["enabled"]; !hasEnabled {
+		t.Fatal("expected 'enabled' in skills config")
+	}
+	if _, hasDisabled := skills["disabled"]; !hasDisabled {
+		t.Fatal("expected 'disabled' in skills config")
+	}
+}
+
 func TestIsAllowedProviderURL(t *testing.T) {
 	tests := []struct {
 		url   string

@@ -27,6 +27,7 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/state"
 	"github.com/xilistudios/lele/pkg/store"
 	"github.com/xilistudios/lele/pkg/tools"
@@ -537,6 +538,32 @@ func (al *AgentLoop) HandleGoalCommand(sessionKey string, args []string) string 
 // the keyring module is disabled).
 func (al *AgentLoop) KeyringService() *keyring.Service {
 	return al.keyringService
+}
+
+// SkillsLoader returns the skills loader from the default agent's context
+// builder. Returns nil if no default agent is available.
+func (al *AgentLoop) SkillsLoader() *skills.SkillsLoader {
+	if al.registry == nil {
+		return nil
+	}
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil || agent.ContextBuilder == nil {
+		return nil
+	}
+	return agent.ContextBuilder.skillsLoader
+}
+
+// SkillInstaller returns a skill installer for the default agent's workspace.
+// Returns nil if no default agent is available.
+func (al *AgentLoop) SkillInstaller() *skills.SkillInstaller {
+	if al.registry == nil {
+		return nil
+	}
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		return nil
+	}
+	return skills.NewSkillInstaller(agent.Workspace)
 }
 
 // AllGroupSnapshots returns a GroupSnapshot for every tracked group.

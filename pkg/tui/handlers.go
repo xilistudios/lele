@@ -692,6 +692,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.secretsReveal = false
 							return m, m.tickCmd()
 						}
+					} else if m.modalMode == ModalSkills {
+						// Handle skills list selection
+						if m.modalSelectedIdx < len(m.skillsModalKeys) {
+							selectedKey := m.skillsModalKeys[m.modalSelectedIdx]
+							if selectedKey == "__install__" {
+								// Switch to install modal
+								m.modalMode = ModalSkillInstall
+								m.textInput.SetValue("")
+								m.textInput.Placeholder = "user/repo or user/repo/skill-name"
+								m.formError = ""
+								return m, m.tickCmd()
+							} else if selectedKey != "" {
+								// Toggle skill enabled/disabled
+								return m, m.toggleSkillCmd(selectedKey)
+							}
+						}
+					} else if m.modalMode == ModalSkillInstall {
+						// Submit repo URL for scanning
+						return m, m.handleSkillInstallSubmit()
+					} else if m.modalMode == ModalSkillPicker {
+						// Install selected skills
+						return m, m.handleSkillPickerEnter()
 					}
 					if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
 						m.modalMode = ModalNone
@@ -721,6 +743,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.secretsDetailName = ""
 					m.secretsReveal = false
 					m.loadSecrets()
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSkillInstall {
+					// Go back to skills list
+					m.modalMode = ModalSkills
+					m.textInput.SetValue("")
+					m.formError = ""
+					m.loadSkillsList()
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSkillPicker {
+					// Go back to install modal
+					m.modalMode = ModalSkillInstall
+					m.skillsScanResults = nil
+					m.skillsSelectedMap = nil
+					m.formError = ""
 					return m, m.tickCmd()
 				}
 				// Reset provider-in-flow state when leaving AddProvider modal
@@ -804,10 +842,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				}
+				// Delete a skill
+				if m.modalMode == ModalSkills {
+					if m.modalSelectedIdx < len(m.skillsModalKeys) {
+						skillName := m.skillsModalKeys[m.modalSelectedIdx]
+						if skillName != "" && skillName != "__install__" {
+							return m, m.deleteSkillCmd(skillName)
+						}
+					}
+				}
+			case " ":
+				// Toggle checkbox in skill picker
+				if m.modalMode == ModalSkillPicker {
+					m.handleSkillPickerToggle()
+					return m, m.tickCmd()
+				}
 			}
 			// Forward keystrokes to textInput for form-based modals
 			// so users can type in the input fields.
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
+			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall {
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
@@ -1399,6 +1452,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadSessions()
 		}
 
+	case skillsScanResultMsg:
+		return m, m.handleSkillScanResult(msg)
+
+	case skillsInstallResultMsg:
+		return m, m.handleSkillInstallResult(msg)
+
+	case skillToggleResultMsg:
+		return m, m.handleSkillToggleResult(msg)
+
+	case skillDeleteResultMsg:
+		return m, m.handleSkillDeleteResult(msg)
+
 	case streamThrottleMsg:
 		m.streamThrottleActive = false
 		if m.streamPendingUpdate {
@@ -1434,7 +1499,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be
 		// excluded to prevent garbage characters in the input field.
 		switch msg := msg.(type) {
-		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg:
+		case outboundMsg, completeMsg, tickMsg, streamThrottleMsg, tea.MouseMsg, compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg, skillToggleResultMsg, skillDeleteResultMsg:
 			// skip — not relevant to textarea
 		case tea.KeyMsg:
 			if m.isEscapeSequenceFragment(msg) {
@@ -1605,7 +1670,7 @@ func (m *Model) resetModal(mode modalType) {
 // (navigable with up/down keys), as opposed to form-based modals.
 func isListModal(mode modalType) bool {
 	switch mode {
-	case ModalNone, ModalAddProvider, ModalAddModel, ModalAddSecret:
+	case ModalNone, ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall:
 		return false
 	default:
 		return true

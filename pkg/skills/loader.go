@@ -30,6 +30,7 @@ type SkillInfo struct {
 	Path        string `json:"path"`
 	Source      string `json:"source"`
 	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"` // Whether skill is enabled in workspace config
 }
 
 func (info SkillInfo) validate() error {
@@ -58,15 +59,37 @@ type SkillsLoader struct {
 	workspaceSkills string // workspace skills (项目级别)
 	globalSkills    string // 全局 skills (~/.lele/skills)
 	builtinSkills   string // 内置 skills
+	configMgr       *WorkspaceConfigManager
 }
 
 func NewSkillsLoader(workspace string, globalSkills string, builtinSkills string) *SkillsLoader {
-	return &SkillsLoader{
+	loader := &SkillsLoader{
 		workspace:       workspace,
 		workspaceSkills: filepath.Join(workspace, "skills"),
 		globalSkills:    globalSkills, // ~/.lele/skills
 		builtinSkills:   builtinSkills,
 	}
+
+	// Try to load workspace config
+	if workspace != "" {
+		if mgr, err := NewWorkspaceConfigManager(workspace); err == nil {
+			loader.configMgr = mgr
+		} else {
+			slog.Warn("failed to load workspace skills config", "error", err)
+		}
+	}
+
+	return loader
+}
+
+// SetConfigManager sets the workspace config manager (for testing or external injection).
+func (sl *SkillsLoader) SetConfigManager(mgr *WorkspaceConfigManager) {
+	sl.configMgr = mgr
+}
+
+// GetConfigManager returns the workspace config manager.
+func (sl *SkillsLoader) GetConfigManager() *WorkspaceConfigManager {
+	return sl.configMgr
 }
 
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
@@ -178,7 +201,21 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 		}
 	}
 
+	// Set Enabled field based on workspace config
+	for i := range skills {
+		skills[i].Enabled = sl.isSkillEnabled(skills[i].Name)
+	}
+
 	return skills
+}
+
+// isSkillEnabled checks if a skill is enabled based on workspace config.
+// If no config manager is set, all skills are enabled by default.
+func (sl *SkillsLoader) isSkillEnabled(name string) bool {
+	if sl.configMgr == nil {
+		return true
+	}
+	return sl.configMgr.IsEnabled(name)
 }
 
 func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
@@ -216,6 +253,11 @@ func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
 
 	var parts []string
 	for _, name := range skillNames {
+		// Skip disabled skills
+		if !sl.isSkillEnabled(name) {
+			continue
+		}
+
 		content, ok := sl.LoadSkill(name)
 		if ok {
 			parts = append(parts, fmt.Sprintf("### Skill: %s\n\n%s", name, content))
@@ -234,6 +276,11 @@ func (sl *SkillsLoader) BuildSkillsSummary() string {
 	var lines []string
 	lines = append(lines, "<skills>")
 	for _, s := range allSkills {
+		// Skip disabled skills in summary
+		if !s.Enabled {
+			continue
+		}
+
 		escapedName := escapeXML(s.Name)
 		escapedDesc := escapeXML(s.Description)
 		escapedPath := escapeXML(s.Path)

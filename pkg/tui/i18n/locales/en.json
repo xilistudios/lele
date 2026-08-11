@@ -164,5 +164,21 @@
 
   "tui.groupSelectProfile": "Select group profile:",
   "tui.groupTaskPlaceholder": "Type the task and press Enter to start the group",
-  "tui.noGroupProfiles": "No group profiles configured. Use: /group start --agents a,b --strategy moa <task>"
+  "tui.noGroupProfiles": "No group profiles configured. Use: /group start --agents a,b --strategy moa <task>",
+
+  "tui.skills": "Skills",
+  "tui.selectSkills": "Select Skills to Install",
+  "tui.installSkill": "Install Skill from GitHub",
+  "tui.installFromGitHub": "📥 Install from GitHub",
+  "tui.skillsListHints": "ENTER: toggle/install | D: delete | ESC: back",
+  "tui.skillPickerHints": "[Space] Toggle  [Enter] Install  [Esc] Back",
+  "tui.noSkillsInstalled": "No skills installed",
+  "tui.skillsUnavailable": "Skills loader not available",
+  "tui.skillEnabled": "enabled",
+  "tui.skillDisabled": "disabled",
+  "tui.skillToggleSuccess": "Skill '%s' %s",
+  "tui.skillInstallSuccess": "Installed %d skills",
+  "tui.skillScanLoading": "Scanning repository...",
+  "tui.skillScanNoResults": "No skills found in repository",
+  "tui.skillRepoPlaceholder": "user/repo or user/repo/skill-name"
 }

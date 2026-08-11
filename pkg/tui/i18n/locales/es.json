@@ -164,5 +164,21 @@
 
   "tui.groupSelectProfile": "Seleccioná un perfil de grupo:",
   "tui.groupTaskPlaceholder": "Escribí la tarea y presioná Enter para iniciar el grupo",
-  "tui.noGroupProfiles": "No hay perfiles de grupo configurados. Usá: /group start --agents a,b --strategy moa <task>"
+  "tui.noGroupProfiles": "No hay perfiles de grupo configurados. Usá: /group start --agents a,b --strategy moa <task>",
+
+  "tui.skills": "Habilidades",
+  "tui.selectSkills": "Seleccionar Habilidades para Instalar",
+  "tui.installSkill": "Instalar Habilidad desde GitHub",
+  "tui.installFromGitHub": "📥 Instalar desde GitHub",
+  "tui.skillsListHints": "ENTER: alternar/instalar | D: eliminar | ESC: volver",
+  "tui.skillPickerHints": "[Espacio] Alternar [Enter] Instalar [Esc] Volver",
+  "tui.noSkillsInstalled": "No hay habilidades instaladas",
+  "tui.skillsUnavailable": "Cargador de habilidades no disponible",
+  "tui.skillEnabled": "habilitada",
+  "tui.skillDisabled": "deshabilitada",
+  "tui.skillToggleSuccess": "Habilidad '%s' %s",
+  "tui.skillInstallSuccess": "Se instalaron %d habilidades",
+  "tui.skillScanLoading": "Escaneando repositorio...",
+  "tui.skillScanNoResults": "No se encontraron habilidades en el repositorio",
+  "tui.skillRepoPlaceholder": "usuario/repo o usuario/repo/habilidad"
 }

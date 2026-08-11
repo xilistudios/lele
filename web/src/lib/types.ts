@@ -834,6 +834,7 @@ export type SkillInfo = {
   name: string
   description: string
   installed: boolean
+  enabled: boolean
   source?: 'workspace' | 'global' | 'builtin'
 }
 
@@ -859,6 +860,28 @@ export type SkillInstallResponse = {
 }
 
 export type SkillRemoveResponse = {
+  message: string
+}
+
+export type ScannedSkill = {
+  name: string
+  description: string
+  path: string
+  has_skill: boolean
+}
+
+export type ScanSkillsResponse = {
+  skills: ScannedSkill[]
+  repo: string
+}
+
+export type SkillToggleRequest = {
+  enabled: boolean
+}
+
+export type SkillInstallBatchResponse = {
+  installed: string[]
+  count: number
   message: string
 }
 
