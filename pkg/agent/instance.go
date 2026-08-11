@@ -200,6 +200,9 @@ func NewAgentInstance(
 
 	contextBuilder := NewContextBuilder(workspace)
 	contextBuilder.SetToolsRegistry(toolsRegistry)
+	// Set vision support based on the agent's primary model so the system
+	// prompt correctly shows/hides the read_image tool.
+	contextBuilder.SetVisionSupported(getSupportsImages(cfg, model, providerName))
 
 	agentID := routing.DefaultAgentID
 	agentName := ""

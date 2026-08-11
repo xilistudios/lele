@@ -1921,3 +1921,202 @@ func TestSetSessionAgent_PreservesModelWhenAgentUnchanged(t *testing.T) {
 		t.Fatalf("Expected model 'test:agent2-model' after agent change, got '%s'", modelAfterChange)
 	}
 }
+
+func TestGetSessionAgent_SubagentSessionReturnsCorrectAgent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "default-model",
+				Provider:          "test",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Model: &config.AgentModelConfig{Primary: "default-model"}},
+				{ID: "coder", Model: &config.AgentModelConfig{Primary: "coder-model"}},
+				{ID: "explorer", Model: &config.AgentModelConfig{Primary: "explorer-model"}},
+			},
+		},
+		Providers: &config.ProvidersConfig{
+			Named: map[string]config.NamedProviderConfig{
+				"test": {
+					ProviderConfig: config.ProviderConfig{APIKey: "test-key"},
+					Models: map[string]config.ProviderModelConfig{
+						"default-model":  {Model: "default-model"},
+						"coder-model":    {Model: "coder-model"},
+						"explorer-model": {Model: "explorer-model"},
+					},
+				},
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+
+	// Simulate subagent session registration — this is what SetSessionKeyCallback does
+	subagentSessionKey := "subagent:task-123"
+	al.subagentSessionAgent.Store(subagentSessionKey, "coder")
+
+	// Verify getSessionAgent returns the correct agent for the subagent session
+	agentID := al.getSessionAgent(subagentSessionKey)
+	if agentID != "coder" {
+		t.Fatalf("Expected getSessionAgent to return 'coder' for subagent session, got '%s'", agentID)
+	}
+
+	// Verify GetSessionAgent (providable) also returns the correct agent
+	providableAgentID := al.providable.GetSessionAgent(subagentSessionKey)
+	if providableAgentID != "coder" {
+		t.Fatalf("Expected GetSessionAgent to return 'coder' for subagent session, got '%s'", providableAgentID)
+	}
+
+	// Verify agentForSession resolves to the correct agent instance
+	agent := al.agentForSession(subagentSessionKey)
+	if agent == nil {
+		t.Fatal("Expected agentForSession to return non-nil for subagent session")
+	}
+	if agent.ID != "coder" {
+		t.Fatalf("Expected agentForSession to return 'coder' agent, got '%s'", agent.ID)
+	}
+
+	// Verify GetSessionModel returns the subagent's model, not the parent's
+	model := al.providable.GetSessionModel(subagentSessionKey)
+	if model != "test:coder-model" {
+		t.Fatalf("Expected GetSessionModel to return 'test:coder-model' for subagent session, got '%s'", model)
+	}
+
+	// Verify a regular session still returns the default agent
+	regularSessionKey := "native:chat:regular-session"
+	regularAgent := al.getSessionAgent(regularSessionKey)
+	defaultAgentID := "main"
+	if regularAgent != defaultAgentID {
+		t.Fatalf("Expected getSessionAgent to return default '%s' for regular session, got '%s'", defaultAgentID, regularAgent)
+	}
+}
+
+// TestSubagentSessionAgent_MapsToTargetAgent is a regression test for the TUI
+// bug where navigating into a spawned subagent's chat showed the OWNER agent
+// (e.g. "software-engineer") instead of the TARGET agent (e.g. "coder").
+//
+// The SetSessionKeyCallback in the agent loop must store the subagent's target
+// agent (task.AgentID), not the agent that owns the subagent manager. This test
+// performs a real spawn and verifies the resulting session maps to the target
+// agent via getSessionAgent.
+func TestSubagentSessionAgent_MapsToTargetAgent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagent-session-agent-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				Provider:          "test",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Model: &config.AgentModelConfig{Primary: "test-model"}},
+				{ID: "coder", Model: &config.AgentModelConfig{Primary: "test-model"}},
+			},
+		},
+		Providers: &config.ProvidersConfig{
+			Named: map[string]config.NamedProviderConfig{
+				"test": {
+					ProviderConfig: config.ProviderConfig{APIKey: "test-key"},
+					Models: map[string]config.ProviderModelConfig{
+						"test-model": {Model: "test-model"},
+					},
+				},
+			},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+
+	// Give both agents a mock provider so the subagent run completes without a
+	// real LLM call.
+	for _, id := range []string{"main", "coder"} {
+		if agent, ok := al.registry.GetAgent(id); ok && agent != nil {
+			agent.Provider = &mockProvider{mockResponse: "DONE"}
+		}
+	}
+
+	// Spawn a subagent targeting the "coder" agent from the "main" agent's
+	// subagent manager.
+	mainAgent := al.registry.GetDefaultAgent()
+	if mainAgent == nil {
+		t.Fatal("No default agent found")
+	}
+	subagentManager := al.GetSubagents()[mainAgent.ID]
+	if subagentManager == nil {
+		t.Fatal("No subagent manager found for default agent")
+	}
+
+	originChannel := "native"
+	originChatID := "tui:chat:test-parent"
+	taskID, err := subagentManager.Spawn(
+		context.Background(),
+		"Implement the fix",
+		"goal-system-fix",
+		"coder", // target agent
+		originChannel,
+		originChatID,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+	// Spawn returns a human-readable string like
+	// "Spawned subagent task subagent-1 ('goal-system-fix') for task: ..."
+	// Extract the task ID (subagent-N) from it.
+	taskID = extractSpawnTaskIDForTest(taskID)
+	if taskID == "" {
+		t.Fatalf("Could not extract task ID from spawn result: %q", taskID)
+	}
+
+	// The session key callback runs inside runTask (async). Wait for the
+	// mapping to appear.
+	subagentSessionKey := originChannel + ":" + originChatID + ":" + taskID
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if agentID := al.getSessionAgent(subagentSessionKey); agentID == "coder" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("subagentSessionAgent did not map %s to 'coder' within timeout; got '%s'",
+				subagentSessionKey, al.getSessionAgent(subagentSessionKey))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Verify the providable path (used by the TUI bottom bar) also resolves.
+	if got := al.providable.GetSessionAgent(subagentSessionKey); got != "coder" {
+		t.Fatalf("GetSessionAgent(%s) = %q, want 'coder'", subagentSessionKey, got)
+	}
+}
+
+// extractSpawnTaskIDForTest extracts the "subagent-N" task ID from a spawn
+// result string (mirrors tools.extractSpawnTaskID).
+func extractSpawnTaskIDForTest(result string) string {
+	idx := strings.Index(result, "subagent-")
+	if idx < 0 {
+		return ""
+	}
+	trimmed := result[idx:]
+	if end := strings.IndexAny(trimmed, " \t\n('\""); end > 0 {
+		return trimmed[:end]
+	}
+	return trimmed
+}

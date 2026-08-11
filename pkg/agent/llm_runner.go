@@ -24,6 +24,7 @@ import (
 // llmRunner is an internal interface for LLM execution
 type llmRunner interface {
 	runAgentLoop(ctx context.Context, agent *AgentInstance, opts processOptions) (string, error)
+	maybeRunGoalContinuation(agent *AgentInstance, opts processOptions, lastResponse string)
 }
 
 // transientLLMRetries is the number of times a transient LLM error is retried
@@ -193,11 +194,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		lr.al.bus.PublishOutbound(outboundMsg)
 	}
 
-	// 9. Goal continuation loop: if a persistent goal is active, evaluate
-	// whether it's achieved and continue automatically if not.
-	if !opts.SkipGoalLoop && lr.al.goalManager != nil && lr.al.goalManager.IsActive(opts.SessionKey) {
-		lr.runGoalContinuation(runCtx, agent, opts, finalContent)
-	}
+	// 9. Goal continuation is triggered by the caller (message processor)
+	// AFTER this function returns and releases the per-session semaphore.
+	// See maybeRunGoalContinuation. This avoids the recursive runAgentLoop
+	// deadlock on the per-session semaphore.
 
 	if opts.SendResponse {
 		// Return empty string to prevent duplicate publish in loop.go
@@ -207,12 +207,57 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	return finalContent, nil
 }
 
+// lastAssistantResponse returns the content of the most recent assistant
+// message in the session's history, or an empty string if there is none.
+// It is used by the caller-side goal trigger to pass the latest agent output
+// to the continuation loop / judge.
+func lastAssistantResponse(agent *AgentInstance, sessionKey string) string {
+	if agent == nil || agent.Sessions == nil {
+		return ""
+	}
+	history := agent.Sessions.GetHistoryView(sessionKey)
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "assistant" {
+			return history[i].Content
+		}
+	}
+	return ""
+}
+
+// maybeRunGoalContinuation is the caller-side trigger for the autonomous goal
+// loop. It is invoked by the message processor AFTER runAgentLoop returns
+// (and releases the per-session semaphore), so the recursive runAgentLoop
+// calls inside the continuation each acquire and release the semaphore
+// independently. Without this, the recursive call would re-acquire the still
+// held semaphore and deadlock.
+func (lr *llmRunnerImpl) maybeRunGoalContinuation(agent *AgentInstance, opts processOptions, lastResponse string) {
+	if opts.SkipGoalLoop {
+		return
+	}
+	if lr.al.goalManager == nil || !lr.al.goalManager.IsActive(opts.SessionKey) {
+		return
+	}
+	// Use the goal stop context as parent so /goal clear and loop shutdown can
+	// cancel an in-flight continuation loop.
+	ctx := lr.al.goalStopCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lr.runGoalContinuation(ctx, agent, opts, lastResponse)
+}
+
 // runGoalContinuation implements the autonomous goal loop. After each agent
 // turn, it evaluates whether the goal is achieved (via the judge). If not,
 // it injects a continuation prompt and runs another turn, repeating until
 // the goal is done, the budget is exhausted, or the context is cancelled.
 func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentInstance, opts processOptions, lastResponse string) {
 	gm := lr.al.goalManager
+
+	// Mark the session as inside a goal loop for the entire duration so
+	// IsSessionProcessing stays true during the judge-evaluation gap between
+	// turns (when the per-session semaphore is released).
+	lr.al.markGoalLoopActive(opts.SessionKey)
+	defer lr.al.clearGoalLoopActive(opts.SessionKey)
 
 	for {
 		if ctx.Err() != nil {
@@ -238,9 +283,32 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 		}
 
 		// Evaluate goal completion via judge (if configured).
+		judgeAnswer := ""
 		if gm.judge != nil {
-			history := agent.Sessions.GetHistoryView(opts.SessionKey)
-			isDone, _, err := gm.judge.JudgeGoal(ctx, goal.Text, lastResponse, history)
+			// Notify TUI that the goal is being reviewed.
+			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: opts.Channel,
+				ChatID:  opts.ChatID,
+				Event:   "tool.executing",
+				Metadata: map[string]string{
+					"tool":   "goal",
+					"action": "🔍 Reviewing goal result...",
+				},
+			})
+
+			var isDone bool
+			var err error
+			isDone, judgeAnswer, err = gm.judge.JudgeGoal(ctx, opts.SessionKey, goal.Text, lastResponse)
+			// Clear the reviewing indicator.
+			lr.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: opts.Channel,
+				ChatID:  opts.ChatID,
+				Event:   "tool.result",
+				Metadata: map[string]string{
+					"tool": "goal",
+				},
+			})
+
 			if err != nil {
 				logger.WarnCF("agent", "Goal judge failed, continuing loop", map[string]interface{}{
 					"session_key": opts.SessionKey,
@@ -266,13 +334,29 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 
 		// Inject continuation prompt and run another turn.
 		updatedGoal := gm.Get(opts.SessionKey)
-		continuationPrompt := fmt.Sprintf(
-			"[GOAL CONTINUATION — Turn %d/%d]\n"+
-				"You have an active persistent goal:\n\n🎯 %s\n\n"+
-				"Continue working toward this goal. Do NOT ask for confirmation or wait for user input. "+
-				"Take the next concrete step. If you believe the goal is fully achieved, state that clearly.",
-			updatedGoal.TurnsUsed, updatedGoal.MaxTurns, updatedGoal.Text,
-		)
+		// If the judge supplied specific next-step guidance (subagent judge
+		// acting as a supervisor), use it as the next turn's prompt instead of
+		// the generic continuation prompt.
+		guidance := extractContinuationGuidance(judgeAnswer)
+		var continuationPrompt string
+		if guidance != "" {
+			continuationPrompt = fmt.Sprintf(
+				"[GOAL CONTINUATION — Turn %d/%d]\n"+
+					"You have an active persistent goal:\n\n🎯 %s\n\n"+
+					"The goal supervisor has directed the next step:\n▶ %s\n\n"+
+					"Execute this specific step now. Do NOT ask for confirmation or wait for user input. "+
+					"If after completing this step you believe the goal is fully achieved, state that clearly.",
+				updatedGoal.TurnsUsed, updatedGoal.MaxTurns, updatedGoal.Text, guidance,
+			)
+		} else {
+			continuationPrompt = fmt.Sprintf(
+				"[GOAL CONTINUATION — Turn %d/%d]\n"+
+					"You have an active persistent goal:\n\n🎯 %s\n\n"+
+					"Continue working toward this goal. Do NOT ask for confirmation or wait for user input. "+
+					"Take the next concrete step. If you believe the goal is fully achieved, state that clearly.",
+				updatedGoal.TurnsUsed, updatedGoal.MaxTurns, updatedGoal.Text,
+			)
+		}
 
 		logger.InfoCF("agent", "Goal continuation turn", map[string]interface{}{
 			"session_key": opts.SessionKey,
@@ -294,7 +378,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			SkipGoalLoop:    true, // prevent recursion
 		}
 
-		nextResponse, err := lr.runAgentLoop(ctx, agent, contOpts)
+		_, err := lr.runAgentLoop(ctx, agent, contOpts)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -314,7 +398,10 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 			return
 		}
 
-		lastResponse = nextResponse
+		// runAgentLoop returns "" when SendResponse=true (it publishes the
+		// outbound itself). Re-fetch the actual last assistant response from
+		// session history so the judge sees the real content.
+		lastResponse = lastAssistantResponse(agent, opts.SessionKey)
 	}
 }
 

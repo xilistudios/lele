@@ -254,6 +254,33 @@ func (m *Model) View() string {
 		statusLine = i18n.T("tui.ready")
 	}
 
+	// Append goal badge to the right of the status line.
+	// Orange = goal in progress, Green = goal completed.
+	if m.currentKey != "" && m.agentLoop != nil {
+		if goal := m.agentLoop.GoalManager().Get(m.currentKey); goal != nil {
+			goalLabel := goal.Text
+			const maxGoalLabelLen = 40
+			if len(goalLabel) > maxGoalLabelLen {
+				goalLabel = goalLabel[:maxGoalLabelLen-3] + "..."
+			}
+			goalColor := OrangeColor
+			if goal.Status == agent.GoalDone {
+				goalColor = SecondaryColor
+			}
+			statusWidth := lipgloss.Width(statusLine)
+			remaining := (leftWidth - 2) - statusWidth
+			if remaining > 0 {
+				goalBadge := lipgloss.NewStyle().
+					Foreground(goalColor).
+					Bold(true).
+					Width(remaining).
+					Align(lipgloss.Right).
+					Render("🎯 " + goalLabel)
+				statusLine = lipgloss.JoinHorizontal(lipgloss.Top, statusLine, goalBadge)
+			}
+		}
+	}
+
 	var autocompleteView string
 	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
 		var autoSb strings.Builder

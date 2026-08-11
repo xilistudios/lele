@@ -891,6 +891,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "down", "pgup", "pgdown":
 				var cmd tea.Cmd
 				m.viewport, cmd = m.viewport.Update(msg)
+				if msg.String() == "up" || msg.String() == "pgup" {
+					m.maybeExpandRenderWindow()
+				}
 				return m, cmd
 			}
 			// Block all other input while approval is pending
@@ -913,22 +916,44 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.autocompleteIdx = 0
 				}
 				return m, nil
-			case "tab", "enter":
-				// Only consume Enter if there are autocomplete items to select.
-				// If the user typed arguments (e.g. "/goal something") and no
-				// completions match, fall through to normal message sending.
+			case "tab":
 				if len(m.autocompleteItems) > 0 {
 					completed := m.autocompleteItems[m.autocompleteIdx].name
 					m.chatInput.SetValue(completed)
 					m.showAutocomplete = false
-					if msg.String() == "enter" {
-						cmd := m.executeCommand(completed)
-						if cmd != nil {
-							cmds = append(cmds, cmd)
-						}
+					// Tab only fills the input — lets the user add arguments
+					// before pressing Enter to execute.
+					return m, nil
+				}
+				m.showAutocomplete = false
+			case "enter":
+				if len(m.autocompleteItems) > 0 {
+					completed := m.autocompleteItems[m.autocompleteIdx].name
+					m.showAutocomplete = false
+					// If the user already typed arguments beyond the command
+					// name (e.g. "/goal achieve X"), execute the full input
+					// directly instead of just the completed command.
+					inputVal := m.chatInput.Value()
+					if strings.HasPrefix(inputVal, completed) && len(inputVal) > len(completed) && inputVal[len(completed)] == ' ' {
 						m.chatInput.SetValue("")
+						cmd := m.executeCommand(inputVal)
+						if cmd != nil {
+							return m, cmd
+						}
+						return m, nil
 					}
-					return m, tea.Batch(cmds...)
+					// /goal needs a text argument — fill but don't execute.
+					if completed == "/goal" {
+						m.chatInput.SetValue(completed)
+						return m, nil
+					}
+					// All other commands execute immediately.
+					m.chatInput.SetValue("")
+					cmd := m.executeCommand(completed)
+					if cmd != nil {
+						return m, cmd
+					}
+					return m, nil
 				}
 				// No autocomplete items — dismiss autocomplete and let
 				// Enter fall through to send the message.
@@ -1068,6 +1093,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
+			if msg.String() == "up" || msg.String() == "pgup" {
+				m.maybeExpandRenderWindow()
+			}
 			cmds = append(cmds, cmd)
 		case "home":
 			m.viewport.GotoTop()
@@ -1113,6 +1141,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
+			if msg.Button == tea.MouseButtonWheelUp {
+				m.maybeExpandRenderWindow()
+			}
 			return m, cmd
 		}
 
@@ -1448,6 +1479,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.sessionKey == m.currentKey {
 			m.lastDuration = time.Since(m.startTime)
 			m.processing = false
+			m.currentToolAction = ""
 			m.compactFeedback = msg.result
 			m.forceGotoBottom = true
 			m.reloadSessions()

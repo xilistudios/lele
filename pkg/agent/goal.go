@@ -12,13 +12,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/store"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // GoalStatus represents the state of a persistent goal.
@@ -57,9 +60,11 @@ type GoalManager struct {
 
 // GoalJudge evaluates whether a goal has been achieved after each turn.
 type GoalJudge interface {
-	// JudgeGoal evaluates the agent's last response against the goal text.
-	// Returns true if the goal is achieved, false if more work is needed.
-	JudgeGoal(ctx context.Context, goalText string, lastResponse string, history []providers.Message) (bool, string, error)
+	// JudgeGoal evaluates the agent's progress toward the goal using the
+	// session's conversation summary (fetched by the judge) and the latest
+	// agent response. Returns true if the goal is achieved, false if more
+	// work is needed.
+	JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error)
 }
 
 // NewGoalManager creates a new goal manager.
@@ -455,67 +460,209 @@ func sanitizeFileName(s string) string {
 }
 
 // ============================================================================
-// LLM-based Goal Judge
+// Summary-based Goal Judge
 // ============================================================================
 
-// llmGoalJudge uses an LLM to evaluate whether a goal has been achieved.
-type llmGoalJudge struct {
-	provider providers.LLMProvider
-	model    string
+// SummaryProvider returns the conversation summary for a given session key.
+type SummaryProvider interface {
+	// GetSummary returns the current compressed summary for the session.
+	GetSummary(sessionKey string) string
 }
 
-// NewLLMGoalJudge creates a goal judge that uses an LLM to evaluate progress.
-func NewLLMGoalJudge(provider providers.LLMProvider, model string) GoalJudge {
-	return &llmGoalJudge{
-		provider: provider,
-		model:    model,
+// ModelResolver returns the model to use for a given session key.
+type ModelResolver func(sessionKey string) string
+
+// SummaryGoalJudge uses an LLM to evaluate whether a goal has been achieved,
+// based on the session's conversation summary and the latest agent response.
+// The summary is fetched from the session manager instead of passing raw
+// history, so the judge sees the full trajectory of the conversation in a
+// compact form rather than only the final message.
+type SummaryGoalJudge struct {
+	provider      providers.LLMProvider
+	model         string
+	summary       SummaryProvider
+	modelResolver ModelResolver
+	cfg           *config.Config
+}
+
+// NewSummaryGoalJudge creates a goal judge that evaluates progress using the
+// conversation summary (from the provided SummaryProvider) plus the latest
+// agent response. model is the fallback model used when resolver is nil or
+// returns an empty string. The resolver, when provided, selects the model at
+// evaluation time (e.g. the session's own model) so the judge uses the same
+// model as the main agent loop.
+func NewSummaryGoalJudge(provider providers.LLMProvider, model string, summary SummaryProvider, resolver ModelResolver) *SummaryGoalJudge {
+	return &SummaryGoalJudge{
+		provider:      provider,
+		model:         model,
+		summary:       summary,
+		modelResolver: resolver,
 	}
 }
 
-const goalJudgeSystemPrompt = `You are a goal completion judge. Your ONLY job is to evaluate whether an AI agent has achieved its assigned goal based on its latest response.
+// SetConfig sets the config used to resolve the correct provider for the
+// session's model. Required for correct provider routing when the session
+// model uses a different provider than the agent default.
+func (j *SummaryGoalJudge) SetConfig(cfg *config.Config) {
+	j.cfg = cfg
+}
+
+const goalJudgeSystemPrompt = `You are a goal completion judge. Your ONLY job is to evaluate whether an AI agent has achieved its assigned goal, based on the conversation summary and the agent's latest response.
 
 Rules:
 - Respond with EXACTLY one word: "DONE" if the goal is fully achieved, or "CONTINUE" if more work is needed.
 - Be strict: only say DONE when the goal is genuinely and completely fulfilled.
+- Consider the FULL trajectory in the summary, not just the latest response. The agent may have completed the goal several turns ago.
 - If the agent is making progress but hasn't finished, say CONTINUE.
 - If the agent is stuck or going in circles, say CONTINUE (the budget system handles exhaustion).
 - Do NOT explain your reasoning. Only output DONE or CONTINUE.`
 
-func (j *llmGoalJudge) JudgeGoal(ctx context.Context, goalText string, lastResponse string, history []providers.Message) (bool, string, error) {
-	if j.provider == nil {
-		return false, "", fmt.Errorf("goal judge: no provider configured")
-	}
-
-	// Truncate last response to avoid excessive token usage
+// buildGoalJudgePrompt assembles the evaluation prompt from the goal text,
+// the session summary, and the latest response. The summary is fetched by the
+// caller and passed in, keeping this function pure and testable.
+func buildGoalJudgePrompt(goalText, summary, lastResponse string) string {
 	truncated := lastResponse
 	if len(truncated) > 4000 {
 		truncated = truncated[:4000] + "\n...[truncated]"
 	}
 
-	userPrompt := fmt.Sprintf("GOAL: %s\n\nAGENT'S LATEST RESPONSE:\n%s\n\nIs the goal achieved? Reply DONE or CONTINUE.", goalText, truncated)
+	prompt := "GOAL: " + goalText + "\n\n"
+	if summary != "" {
+		prompt += "=== CONVERSATION SUMMARY ===\n" + summary + "\n\n"
+	} else {
+		prompt += "(No conversation summary available yet.)\n\n"
+	}
+	prompt += "=== AGENT'S LATEST RESPONSE ===\n" + truncated + "\n\n"
+	prompt += "Is the goal achieved? Reply DONE or CONTINUE."
+	return prompt
+}
+
+// buildSubagentJudgePrompt assembles the evaluation prompt for the SUBAGENT
+// goal judge. It is like buildGoalJudgePrompt but instructs the evaluator to
+// act as a supervisor: when more work is needed it must provide a specific
+// next step (CONTINUE: <step>) that the continuation loop uses as the next
+// turn's prompt. The summary is fetched by the caller and passed in, keeping
+// this function pure and testable.
+func buildSubagentJudgePrompt(goalText, summary, lastResponse string) string {
+	truncated := lastResponse
+	if len(truncated) > 4000 {
+		truncated = truncated[:4000] + "\n...[truncated]"
+	}
+
+	prompt := "GOAL: " + goalText + "\n\n"
+	if summary != "" {
+		prompt += "=== CONVERSATION SUMMARY ===\n" + summary + "\n\n"
+	} else {
+		prompt += "(No conversation summary available yet.)\n\n"
+	}
+	prompt += "=== AGENT'S LATEST RESPONSE ===\n" + truncated + "\n\n"
+	prompt += "Reply with EXACTLY one of these two formats:\n"
+	prompt += "- DONE if the goal is fully achieved.\n"
+	prompt += "- CONTINUE: <specific next step> if more work is needed, where <specific next step> is a concrete, actionable instruction for the next iteration (what to do next, what to check, what to fix, etc.).\n"
+	prompt += "Be strict: only reply DONE when the goal is genuinely and completely fulfilled. Consider the full trajectory in the summary, not just the latest response."
+	return prompt
+}
+
+// continueGuidanceRe matches the "CONTINUE:" prefix (case-insensitive,
+// allowing optional whitespace before the colon, e.g. "CONTINUE:" or
+// "CONTINUE :"). The text after it is the specific next-step guidance.
+var continueGuidanceRe = regexp.MustCompile(`(?i)CONTINUE\s*:`)
+
+// extractContinuationGuidance returns the specific next-step guidance from a
+// subagent judge answer, or "" if none is available. It returns "" when the
+// answer does not indicate CONTINUE (DONE or empty), and also when the answer
+// contains "CONTINUE" without a "CONTINUE:" prefix (no guidance available).
+func extractContinuationGuidance(answer string) string {
+	if answer == "" {
+		return ""
+	}
+	if !strings.Contains(strings.ToUpper(answer), "CONTINUE") {
+		return ""
+	}
+	loc := continueGuidanceRe.FindStringIndex(answer)
+	if loc == nil {
+		// Contains CONTINUE but no CONTINUE: prefix -> no guidance available.
+		return ""
+	}
+	return strings.TrimSpace(answer[loc[1]:])
+}
+
+func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error) {
+	if j.provider == nil {
+		return false, "", fmt.Errorf("goal judge: no provider configured")
+	}
+
+	// Resolve the model to use. Prefer the session model from the resolver
+	// (so the judge uses the same model as the main agent loop), falling back
+	// to the fixed model captured at construction.
+	model := j.model
+	if j.modelResolver != nil {
+		if m := j.modelResolver(sessionKey); m != "" {
+			model = m
+		}
+	}
+
+	// Fetch the session summary for the given session key.
+	summary := ""
+	if j.summary != nil {
+		summary = j.summary.GetSummary(sessionKey)
+	}
+
+	userPrompt := buildGoalJudgePrompt(goalText, summary, lastResponse)
 
 	messages := []providers.Message{
 		{Role: "system", Content: goalJudgeSystemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 
+	// The judge is a trivial one-word classifier (DONE / CONTINUE). Reasoning
+	// models (e.g. mimo-v2.5-pro) spend the max_tokens budget on thinking
+	// tokens BEFORE producing content, so a tiny max_tokens yields an empty
+	// answer and the loop never sees DONE. Disable reasoning where supported
+	// and give enough headroom that even a model that ignores the disable can
+	// still emit its answer.
 	options := map[string]interface{}{
-		"max_tokens":  10,
+		"max_tokens":  1024,
 		"temperature": 0.0,
+		"reasoning": map[string]interface{}{
+			"enabled": false,
+		},
 	}
 
-	resp, err := j.provider.Chat(ctx, messages, nil, j.model, options)
+	// Resolve the correct provider for the session's model, mirroring the
+	// main agent loop (llm_caller.go call()). The model may carry a provider
+	// prefix (e.g. "llmproxy:mimo-v2.5-pro") that must be stripped for the
+	// API call, and the provider may differ from the agent's default.
+	apiModel := providers.StripProviderPrefix(model)
+	callProvider := j.provider
+	if ref := providers.ParseModelRef(model, ""); ref != nil && ref.Provider != "" {
+		agentRef := providers.ParseModelRef(j.model, "")
+		if agentRef == nil || agentRef.Provider != ref.Provider {
+			if j.cfg != nil {
+				if newProv, err := providers.CreateProviderForCandidate(j.cfg, ref.Provider); err == nil {
+					callProvider = newProv
+				}
+			}
+		}
+	}
+
+	resp, err := callProvider.Chat(ctx, messages, nil, apiModel, options)
 	if err != nil {
 		return false, "", fmt.Errorf("goal judge LLM call failed: %w", err)
 	}
 
-	answer := resp.Content
+	answer := strings.TrimSpace(resp.Content)
+	if answer == "" {
+		return false, "", fmt.Errorf("goal judge returned empty response (model %q)", apiModel)
+	}
 	isDone := containsDone(answer)
 
 	logger.DebugCF("agent", "Goal judge evaluation", map[string]interface{}{
-		"goal":    goalText,
-		"answer":  answer,
-		"is_done": isDone,
+		"session_key": sessionKey,
+		"goal":        goalText,
+		"has_summary": summary != "",
+		"answer":      answer,
+		"is_done":     isDone,
 	})
 
 	return isDone, answer, nil
@@ -525,4 +672,126 @@ func (j *llmGoalJudge) JudgeGoal(ctx context.Context, goalText string, lastRespo
 func containsDone(s string) bool {
 	upper := strings.ToUpper(s)
 	return strings.Contains(upper, "DONE") && !strings.Contains(upper, "NOT DONE")
+}
+
+// ============================================================================
+// Subagent-based Goal Judge
+// ============================================================================
+
+// SubagentRunner is the minimal interface the subagent goal judge needs to
+// spawn and await a subagent task. It is satisfied by *tools.SubagentManager.
+type SubagentRunner interface {
+	// SpawnWithOptions starts a subagent task and returns its task ID.
+	SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback tools.AsyncCallback, opts tools.SpawnOptions) (string, error)
+	// GetTask returns the task snapshot, or false if not found.
+	GetTask(taskID string) (*tools.SubagentTask, bool)
+}
+
+// SubagentGoalJudge evaluates goal completion by running a separate subagent
+// that reads the goal text, the conversation summary, and the latest response.
+// This decouples evaluation from the main agent loop and gives it a clean
+// context for reasoning.
+type SubagentGoalJudge struct {
+	runner     SubagentRunner
+	summary    SummaryProvider
+	agentID    string // agent to run the evaluator as (empty = default)
+	originChan string // origin channel for the spawned subagent
+	originChat string // origin chat id for the spawned subagent
+	timeout    time.Duration
+	retries    int
+}
+
+// NewSubagentGoalJudge creates a goal judge that evaluates progress by
+// spawning a separate subagent. agentID selects the evaluator agent (empty =
+// default). originChannel/originChatID identify the session context the
+// subagent is spawned from. timeout bounds the wait for the subagent result.
+func NewSubagentGoalJudge(runner SubagentRunner, summary SummaryProvider, agentID, originChannel, originChatID string, timeout time.Duration) *SubagentGoalJudge {
+	return &SubagentGoalJudge{
+		runner:     runner,
+		summary:    summary,
+		agentID:    agentID,
+		originChan: originChannel,
+		originChat: originChatID,
+		timeout:    timeout,
+	}
+}
+
+// WithRetries sets the number of automatic retries for transient failures.
+func (j *SubagentGoalJudge) WithRetries(n int) *SubagentGoalJudge {
+	j.retries = n
+	return j
+}
+
+// JudgeGoal spawns a subagent to evaluate the goal and awaits its result.
+func (j *SubagentGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText string, lastResponse string) (bool, string, error) {
+	if j.runner == nil {
+		return false, "", fmt.Errorf("goal subagent judge: no subagent runner configured")
+	}
+
+	// Fetch the session summary.
+	summary := ""
+	if j.summary != nil {
+		summary = j.summary.GetSummary(sessionKey)
+	}
+
+	// Build the evaluation task prompt.
+	taskPrompt := buildSubagentJudgePrompt(goalText, summary, lastResponse)
+
+	// Origin session key for the spawned subagent.
+	originChannel := j.originChan
+	if originChannel == "" {
+		originChannel = "goal"
+	}
+	originChat := j.originChat
+	if originChat == "" {
+		originChat = sessionKey
+	}
+
+	// Spawn the evaluator subagent.
+	taskID, err := j.runner.SpawnWithOptions(ctx, taskPrompt, "goal-evaluator", j.agentID, originChannel, originChat, nil, tools.SpawnOptions{
+		MaxRetries: j.retries,
+	})
+	if err != nil {
+		return false, "", fmt.Errorf("goal subagent judge: spawn failed: %w", err)
+	}
+
+	// Await completion, bounded by the configured timeout.
+	waitCtx := ctx
+	cancel := func() {}
+	if j.timeout > 0 {
+		waitCtx, cancel = context.WithTimeout(ctx, j.timeout)
+	}
+	defer cancel()
+
+	task, ok := j.runner.GetTask(taskID)
+	if !ok {
+		return false, "", fmt.Errorf("goal subagent judge: task %s not found", taskID)
+	}
+
+	select {
+	case <-waitCtx.Done():
+		return false, "", fmt.Errorf("goal subagent judge: timed out waiting for task %s", taskID)
+	case <-task.DoneChannel():
+	}
+
+	// Re-fetch the task for its final result.
+	task, ok = j.runner.GetTask(taskID)
+	if !ok {
+		return false, "", fmt.Errorf("goal subagent judge: task %s not found after completion", taskID)
+	}
+
+	answer := task.Result
+	isDone := containsDone(answer)
+
+	logger.DebugCF("agent", "Goal subagent judge evaluation", map[string]interface{}{
+		"session_key": sessionKey,
+		"goal":        goalText,
+		"task_id":     taskID,
+		"status":      task.Status,
+		"has_summary": summary != "",
+		"answer":      answer,
+		"is_done":     isDone,
+	})
+
+	return isDone, answer, nil
 }

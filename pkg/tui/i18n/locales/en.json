@@ -49,6 +49,7 @@
   "tui.outputReceived": "Output received",
   "tui.totalSent": "Total sent",
   "tui.compactions": "Compactions",
+  "tui.compacting": "🗜️ Compacting session history...",
   "tui.tokens": "tokens",
   "tui.used": "%.1f%% used",
   "tui.spent": "$0.00 spent",

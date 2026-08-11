@@ -42,6 +42,7 @@ type ToolLoopConfig struct {
 	MessageBus      *bus.MessageBus // Optional: publish real-time events to TUI.
 	Channel         string          // Origin channel for events.
 	ChatID          string          // Origin chatID for events (subagent sessionKey).
+	VisionSupported bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -193,6 +194,18 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		var providerToolDefs []providers.ToolDefinition
 		if config.Tools != nil {
 			providerToolDefs = config.Tools.ToProviderDefs()
+		}
+
+		// Filter out read_image when the model doesn't support vision.
+		// Mirrors the filtering in the main agent loop (pkg/agent/llm_runner.go).
+		if !config.VisionSupported {
+			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
+			for _, def := range providerToolDefs {
+				if def.Function.Name != "read_image" {
+					filtered = append(filtered, def)
+				}
+			}
+			providerToolDefs = filtered
 		}
 
 		// 2. Set default LLM options
