@@ -75,6 +75,10 @@ export const endpoints = {
     available: '/api/v1/skills/available',
     install: '/api/v1/skills',
     remove: (name: string) => `/api/v1/skills/${encodeURIComponent(name)}`,
+    scan: '/api/v1/skills/scan',
+    installBatch: '/api/v1/skills/install-batch',
+    toggle: (name: string) => `/api/v1/skills/${encodeURIComponent(name)}/toggle`,
+    workspaceConfig: '/api/v1/skills/workspace-config',
   },
   backgroundExec: {
     list: '/api/v1/background-exec',

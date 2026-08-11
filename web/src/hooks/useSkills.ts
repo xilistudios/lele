@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AvailableSkill, SkillInfo } from '../lib/types'
+import type { AvailableSkill, ScannedSkill, SkillInfo } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
 type SkillsState = {
@@ -9,6 +9,9 @@ type SkillsState = {
   isAvailableLoading: boolean
   isInstalling: boolean
   isRemoving: string | null
+  isScanning: boolean
+  scanResults: ScannedSkill[] | null
+  scanRepo: string | null
   error: string | null
 }
 
@@ -20,6 +23,9 @@ export function useSkills(api: ApiClient) {
     isAvailableLoading: false,
     isInstalling: false,
     isRemoving: null,
+    isScanning: false,
+    scanResults: null,
+    scanRepo: null,
     error: null,
   })
 
@@ -91,6 +97,67 @@ export function useSkills(api: ApiClient) {
     [api, fetchSkills],
   )
 
+  const scanRepo = useCallback(
+    async (repo: string) => {
+      setState((prev) => ({ ...prev, isScanning: true, error: null, scanResults: null, scanRepo: null }))
+      try {
+        const response = await api.scanSkills(repo)
+        setState((prev) => ({
+          ...prev,
+          scanResults: response.skills,
+          scanRepo: response.repo,
+          isScanning: false,
+        }))
+        return response.skills
+      } catch (err) {
+        setState((prev) => ({
+          ...prev,
+          error: (err as Error).message,
+          isScanning: false,
+        }))
+        return null
+      }
+    },
+    [api],
+  )
+
+  const installBatch = useCallback(
+    async (repo: string, skills: string[]) => {
+      setState((prev) => ({ ...prev, isInstalling: true, error: null }))
+      try {
+        await api.installSkillsBatch(repo, skills)
+        await fetchSkills()
+        setState((prev) => ({ ...prev, isInstalling: false, scanResults: null, scanRepo: null }))
+      } catch (err) {
+        setState((prev) => ({
+          ...prev,
+          error: (err as Error).message,
+          isInstalling: false,
+        }))
+      }
+    },
+    [api, fetchSkills],
+  )
+
+  const toggleSkill = useCallback(
+    async (name: string, enabled: boolean) => {
+      try {
+        await api.toggleSkill(name, enabled)
+        await fetchSkills()
+      } catch (err) {
+        setState((prev) => ({
+          ...prev,
+          error: (err as Error).message,
+        }))
+      }
+    },
+    [api, fetchSkills],
+  )
+
+  const clearScanResults = useCallback(() => {
+    setState((prev) => ({ ...prev, scanResults: null, scanRepo: null }))
+  }, [])
+
   useEffect(() => {
     fetchSkills()
   }, [fetchSkills])
@@ -101,5 +168,9 @@ export function useSkills(api: ApiClient) {
     fetchAvailableSkills,
     installSkill,
     removeSkill,
+    scanRepo: scanRepo,
+    installBatch,
+    toggleSkill,
+    clearScanResults,
   }
 }

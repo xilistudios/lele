@@ -46,9 +46,11 @@ import type {
   SessionNameResponse,
   SessionSubagentsResponse,
   SessionThinkingResponse,
+  SkillInstallBatchResponse,
   SkillInstallResponse,
   SkillRemoveResponse,
   SkillsResponse,
+  ScanSkillsResponse,
   StreamMessageState,
   StreamStatusResponse,
   SystemStatus,
@@ -597,6 +599,21 @@ export const createApiClient = (baseUrl: string) => {
       }),
     removeSkill: (name: string) =>
       request<SkillRemoveResponse>(endpoints.skills.remove(name), { method: 'DELETE' }),
+    scanSkills: (repo: string) =>
+      request<ScanSkillsResponse>(endpoints.skills.scan, {
+        method: 'POST',
+        body: JSON.stringify({ repo }),
+      }),
+    installSkillsBatch: (repo: string, skills: string[]) =>
+      request<SkillInstallBatchResponse>(endpoints.skills.installBatch, {
+        method: 'POST',
+        body: JSON.stringify({ repo, skills }),
+      }),
+    toggleSkill: (name: string, enabled: boolean) =>
+      request<{ name: string; enabled: boolean; message: string }>(endpoints.skills.toggle(name), {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
     streamStatus: (sessionKey: string) =>
       request<StreamStatusResponse>(endpoints.chat.streams(sessionKey), { method: 'GET' }),
     streamState: (sessionKey: string, messageID: string) =>

@@ -453,6 +453,7 @@ type SkillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Installed   bool   `json:"installed"`
+	Enabled     bool   `json:"enabled"`
 	Source      string `json:"source,omitempty"`
 }
 
@@ -463,6 +464,36 @@ type SkillInstallRequest struct {
 type SkillInstallResponse struct {
 	SkillID string `json:"skill_id"`
 	Message string `json:"message"`
+}
+
+// ScanSkillsResponse is the response from scanning a repo for skills.
+type ScanSkillsResponse struct {
+	Skills []ScannedSkill `json:"skills"`
+	Repo   string         `json:"repo"`
+}
+
+// ScannedSkill represents a skill found in a GitHub repo.
+type ScannedSkill struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Path        string `json:"path"`
+	HasSKILL    bool   `json:"has_skill"`
+}
+
+// SkillScanRequest is the request body for scanning a repo.
+type SkillScanRequest struct {
+	Repo string `json:"repo"`
+}
+
+// SkillInstallBatchRequest is the request body for batch installing skills.
+type SkillInstallBatchRequest struct {
+	Repo   string   `json:"repo"`
+	Skills []string `json:"skills"`
+}
+
+// SkillToggleRequest is the request body for toggling a skill.
+type SkillToggleRequest struct {
+	Enabled bool `json:"enabled"`
 }
 
 type SystemStatusResponse struct {

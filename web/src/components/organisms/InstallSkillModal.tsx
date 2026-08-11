@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AvailableSkill } from '../../lib/types'
+import type { AvailableSkill, ScannedSkill } from '../../lib/types'
 import { Modal, Spinner } from '../atoms'
 
 type Props = {
@@ -9,7 +9,12 @@ type Props = {
   availableSkills: AvailableSkill[]
   isAvailableLoading: boolean
   isInstalling: boolean
+  isScanning: boolean
+  scanResults: ScannedSkill[] | null
   onInstall: (url: string) => void
+  onScan: (repo: string) => Promise<ScannedSkill[] | null>
+  onInstallBatch: (repo: string, skills: string[]) => void
+  onClearScan: () => void
 }
 
 export function InstallSkillModal({
@@ -18,12 +23,19 @@ export function InstallSkillModal({
   availableSkills,
   isAvailableLoading,
   isInstalling,
+  isScanning,
+  scanResults,
   onInstall,
+  onScan,
+  onInstallBatch,
+  onClearScan,
 }: Props) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'browse' | 'url'>('browse')
   const [repoUrl, setRepoUrl] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set())
+  const [scannedRepo, setScannedRepo] = useState<string | null>(null)
 
   const filteredSkills = availableSkills.filter((skill) => {
     if (!searchQuery.trim()) return true
@@ -46,10 +58,114 @@ export function InstallSkillModal({
     }
   }
 
+  const handleScan = async () => {
+    if (!repoUrl.trim()) return
+    setSelectedSkills(new Set())
+    setScannedRepo(repoUrl.trim())
+    const results = await onScan(repoUrl.trim())
+    if (results) {
+      // Pre-select all skills
+      setSelectedSkills(new Set(results.map((s) => s.path)))
+    }
+  }
+
+  const handleToggleSkill = (path: string) => {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }
+
+  const handleInstallSelected = () => {
+    if (scannedRepo && selectedSkills.size > 0) {
+      onInstallBatch(scannedRepo, Array.from(selectedSkills))
+    }
+  }
+
+  const handleClose = () => {
+    onClearScan()
+    setRepoUrl('')
+    setSearchQuery('')
+    setSelectedSkills(new Set())
+    setScannedRepo(null)
+    onClose()
+  }
+
+  // If scan results are available, show the picker
+  if (scanResults && scanResults.length > 0) {
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        title={t('skills.selectSkills', 'Select Skills to Install')}
+        size="lg"
+      >
+        <div className="flex flex-col p-6">
+          <p className="text-sm text-text-secondary mb-4">
+            {t('skills.foundSkills', 'Found {{count}} skills in', { count: scanResults.length })}{' '}
+            <span className="font-medium text-text-primary">{scannedRepo}</span>
+          </p>
+
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {scanResults.map((skill) => (
+              <label
+                key={skill.path}
+                className="flex items-start gap-3 rounded-lg border border-border bg-background-secondary/50 p-3 hover:border-brand-rosa/30 transition-colors cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedSkills.has(skill.path)}
+                  onChange={() => handleToggleSkill(skill.path)}
+                  className="mt-0.5 h-4 w-4 rounded border-border text-brand-rosa focus:ring-brand-rosa/30"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-primary">{skill.name}</div>
+                  {skill.description && (
+                    <p className="mt-0.5 text-xs text-text-secondary line-clamp-2">{skill.description}</p>
+                  )}
+                  <p className="mt-1 text-[10px] text-text-tertiary">{skill.path}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          <div className="flex justify-between items-center mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                onClearScan()
+                setScannedRepo(null)
+                setSelectedSkills(new Set())
+              }}
+              className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+            >
+              ← {t('common.back', 'Back')}
+            </button>
+            <button
+              type="button"
+              onClick={handleInstallSelected}
+              disabled={isInstalling || selectedSkills.size === 0}
+              className="rounded-lg bg-brand-rosa px-4 py-2 text-sm font-medium text-white hover:bg-brand-rosa/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isInstalling
+                ? t('skills.installing', 'Installing...')
+                : t('skills.installSelected', 'Install {{count}} skills', { count: selectedSkills.size })}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    )
+  }
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={t('skills.installSkill', 'Install Skill')}
       size="lg"
     >
@@ -170,18 +286,36 @@ export function InstallSkillModal({
                 type="text"
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
-                placeholder="sipeed/lele-skills/weather"
+                placeholder="sipeed/lele-skills"
                 className="w-full rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand-rosa/30 focus:border-brand-rosa/50"
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleUrlInstall()
+                  if (e.key === 'Enter') handleScan()
                 }}
               />
               <p className="mt-1.5 text-xs text-text-tertiary">
-                {t('skills.githubRepoHint', 'e.g. sipeed/lele-skills/weather')}
+                {t('skills.githubRepoHint', 'e.g. sipeed/lele-skills — scan for multiple skills or install a single skill')}
               </p>
             </div>
 
-            <div className="flex justify-end">
+            {/* Scanning indicator */}
+            {isScanning && (
+              <div className="flex items-center justify-center py-4">
+                <Spinner />
+                <span className="ml-3 text-sm text-text-secondary">
+                  {t('skills.scanning', 'Scanning repository...')}
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleScan}
+                disabled={isScanning || isInstalling || !repoUrl.trim()}
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isScanning ? t('skills.scanning', 'Scanning...') : t('skills.scan', 'Scan')}
+              </button>
               <button
                 type="button"
                 onClick={handleUrlInstall}

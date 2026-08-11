@@ -92,6 +92,9 @@ const (
 	ModalCron           // list of cron jobs
 	ModalSecrets        // list of keyring secrets
 	ModalAddSecret      // form to add a new secret
+	ModalSkills         // list of installed skills with actions
+	ModalSkillInstall   // form to enter GitHub repo URL for scanning
+	ModalSkillPicker    // multi-select which skills to install from scanned repo
 )
 
 type formStep int
@@ -123,6 +126,7 @@ var allCommands = []commandInfo{
 	{name: "/providers", description: "Manage providers"},
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/secrets", description: "Manage secrets (keyring)"},
+	{name: "/skills", description: "Manage agent skills"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/goal", description: "Set a persistent goal (status/pause/resume/clear)"},
 	{name: "/quit", description: "Exit TUI"},
@@ -189,6 +193,13 @@ type Model struct {
 	secretsDetailMode bool     // true when showing detail of a selected secret
 	secretsDetailName string   // name of the secret being viewed in detail
 	secretsReveal     bool     // true when the secret value is temporarily revealed
+
+	// Skills management state
+	skillsModalKeys   []string                // maps modal items to skill names
+	skillsScanResults []channels.ScannedSkill // results from repo scan
+	skillsScanRepo    string                  // repo being scanned
+	skillsSelectedMap map[int]bool            // multi-select state for skill picker
+	skillsFeedback    string                  // brief feedback after install/remove/toggle
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

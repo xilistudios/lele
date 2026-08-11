@@ -184,6 +184,12 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.addModel")
 			case ModalAddSecret:
 				modalTitle = i18n.T("tui.secrets")
+			case ModalSkills:
+				modalTitle = i18n.T("tui.skills")
+			case ModalSkillInstall:
+				modalTitle = i18n.T("tui.installSkill")
+			case ModalSkillPicker:
+				modalTitle = i18n.T("tui.selectSkills")
 			}
 
 			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
@@ -191,6 +197,12 @@ func (m *Model) View() string {
 			}
 			if m.modalMode == ModalSecrets {
 				return m.renderSecretsList(modalTitle)
+			}
+			if m.modalMode == ModalSkillInstall {
+				return m.renderFormModal(modalTitle, []string{"GitHub Repository"})
+			}
+			if m.modalMode == ModalSkillPicker {
+				return m.renderSkillPicker(modalTitle)
 			}
 			return m.renderModal(modalTitle)
 		}
@@ -809,4 +821,70 @@ func (m *Model) getBouncingDots() string {
 	}
 	sb.WriteRune(']')
 	return sb.String()
+}
+
+// renderSkillPicker renders a multi-select modal for choosing skills to install.
+func (m *Model) renderSkillPicker(modalTitle string) string {
+	maxVisible := m.maxModalVisible()
+
+	// Clamp scroll offset so selected item is always visible
+	if m.modalSelectedIdx < m.modalScrollOffset {
+		m.modalScrollOffset = m.modalSelectedIdx
+	}
+	if m.modalSelectedIdx >= m.modalScrollOffset+maxVisible {
+		m.modalScrollOffset = m.modalSelectedIdx - maxVisible + 1
+	}
+	if m.modalScrollOffset < 0 {
+		m.modalScrollOffset = 0
+	}
+
+	var modalSb strings.Builder
+	modalSb.WriteString(TitleStyle.Render(modalTitle) + "\n")
+
+	// Show repo name
+	if m.skillsScanRepo != "" {
+		modalSb.WriteString(CommentColorStyle.Render("  Repo: "+m.skillsScanRepo) + "\n")
+	}
+	modalSb.WriteString("\n")
+
+	// Initialize selection map if needed
+	if m.skillsSelectedMap == nil {
+		m.skillsSelectedMap = make(map[int]bool)
+		// Pre-select all by default
+		for i := range m.skillsScanResults {
+			m.skillsSelectedMap[i] = true
+		}
+	}
+
+	// Render only the visible window of items
+	endIdx := m.modalScrollOffset + maxVisible
+	if endIdx > len(m.skillsScanResults) {
+		endIdx = len(m.skillsScanResults)
+	}
+
+	for i := m.modalScrollOffset; i < endIdx; i++ {
+		if i >= len(m.skillsScanResults) {
+			break
+		}
+		skill := m.skillsScanResults[i]
+		selected := m.skillsSelectedMap[i]
+		item := formatPickerItem(skill.Name, skill.Description, selected)
+
+		if i == m.modalSelectedIdx {
+			modalSb.WriteString(ModalItemActive.Render("> "+item) + "\n")
+		} else {
+			modalSb.WriteString(ModalItemInactive.Render("  "+item) + "\n")
+		}
+	}
+
+	// Show error if any
+	if m.formError != "" {
+		modalSb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
+	}
+
+	// Hints
+	modalSb.WriteString("\n" + CommentColorStyle.Render("  [Space] Toggle  [Enter] Install  [Esc] Back") + "\n")
+
+	modalView := ModalContainer.Render(modalSb.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
 }

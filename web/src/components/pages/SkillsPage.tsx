@@ -18,10 +18,16 @@ export function SkillsPage() {
     isAvailableLoading,
     isInstalling,
     isRemoving,
+    isScanning,
+    scanResults,
     error,
     fetchAvailableSkills,
     installSkill,
     removeSkill,
+    scanRepo,
+    installBatch,
+    toggleSkill,
+    clearScanResults,
   } = useSkills(api)
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -40,6 +46,28 @@ export function SkillsPage() {
       await installSkill(url)
     },
     [installSkill],
+  )
+
+  const handleScan = useCallback(
+    async (repo: string) => {
+      return await scanRepo(repo)
+    },
+    [scanRepo],
+  )
+
+  const handleInstallBatch = useCallback(
+    async (repo: string, skills: string[]) => {
+      await installBatch(repo, skills)
+      setModalOpen(false)
+    },
+    [installBatch],
+  )
+
+  const handleToggle = useCallback(
+    async (name: string, enabled: boolean) => {
+      await toggleSkill(name, enabled)
+    },
+    [toggleSkill],
   )
 
   return (
@@ -118,6 +146,7 @@ export function SkillsPage() {
             isLoading={isLoading}
             isRemoving={isRemoving}
             onRemove={removeSkill}
+            onToggle={handleToggle}
           />
         </div>
       </main>
@@ -128,7 +157,12 @@ export function SkillsPage() {
         availableSkills={availableSkills}
         isAvailableLoading={isAvailableLoading}
         isInstalling={isInstalling}
+        isScanning={isScanning}
+        scanResults={scanResults}
         onInstall={handleInstall}
+        onScan={handleScan}
+        onInstallBatch={handleInstallBatch}
+        onClearScan={clearScanResults}
       />
     </div>
   )
