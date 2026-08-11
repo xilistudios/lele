@@ -206,7 +206,12 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		id := routing.NormalizeAgentID(ac.ID)
 
 		if existing, ok := r.agents[id]; ok && !agentConfigChanged(existing, ac, &cfg.Agents.Defaults, cfg) {
-			// Agent config unchanged — preserve existing instance (keeps sessions alive)
+			// Agent config unchanged — but subagent list may have changed if
+			// another agent was added/removed/updated, so refresh it.
+			if ac.Subagents != nil && len(ac.Subagents.AllowAgents) > 0 {
+				available := resolveAvailableSubagents(ac, cfg)
+				existing.ContextBuilder.SetAvailableSubagents(available)
+			}
 			continue
 		}
 
@@ -218,6 +223,12 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 		if old, ok := r.agents[id]; ok {
 			instance.Sessions = old.Sessions
 			instance.ContextBuilder = old.ContextBuilder
+			// Refresh subagents on the preserved ContextBuilder since the
+			// agent list may have changed.
+			if ac.Subagents != nil && len(ac.Subagents.AllowAgents) > 0 {
+				available := resolveAvailableSubagents(ac, cfg)
+				old.ContextBuilder.SetAvailableSubagents(available)
+			}
 		} else if r.sharedSessionManager != nil {
 			// New agent: use the shared session manager if one is configured.
 			instance.Sessions = r.sharedSessionManager

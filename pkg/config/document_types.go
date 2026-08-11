@@ -72,6 +72,7 @@ type EditableAgentConfig struct {
 	ID          string            `json:"id"`
 	Default     bool              `json:"default,omitempty"`
 	Name        string            `json:"name,omitempty"`
+	Description string            `json:"description,omitempty"`
 	Workspace   string            `json:"workspace,omitempty"`
 	Model       *AgentModelConfig `json:"model,omitempty"`
 	Skills      []string          `json:"skills,omitempty"`
