@@ -192,7 +192,7 @@
       },
       "searxng": {
         "enabled": false,
-        "instance_url": "https://search.mapachoshome.com",
+        "instance_url": "https://search.searxnginstance.com",
         "categories": "general",
         "language": "auto",
         "safesearch": 0,
