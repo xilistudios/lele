@@ -465,9 +465,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.formError = err.Error()
 							return m, nil
 						}
+						secretName := m.formValues[0]
 						m.resetModal(ModalSecrets)
 						m.loadSecrets()
-						m.reselectSecret(m.formValues[0])
+						m.reselectSecret(secretName)
 						return m, nil
 					}
 					// Advance to next step
