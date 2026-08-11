@@ -1641,3 +1641,174 @@ func TestBuildMessagesChatModeCacheIsolation(t *testing.T) {
 		t.Error("Agent session cached prompt should be byte-identical across turns")
 	}
 }
+
+// --- Subagents in system prompt tests ---
+
+// TestSubagentsInSystemPrompt_ExplicitList verifies that an agent with
+// allow_agents listing specific agents includes them in the system prompt.
+func TestSubagentsInSystemPrompt_ExplicitList(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetAvailableSubagents([]subagentInfo{
+		{ID: "sales", Description: "Handles sales inquiries"},
+		{ID: "support", Description: "Technical support"},
+	})
+
+	prompt := cb.GetInitialContext()
+
+	if !strings.Contains(prompt, "## Subagents Available") {
+		t.Error("Expected prompt to contain '## Subagents Available'")
+	}
+	if !strings.Contains(prompt, "spawn") {
+		t.Error("Expected prompt to mention spawn tool")
+	}
+	if !strings.Contains(prompt, "**sales**") {
+		t.Error("Expected prompt to contain sales agent")
+	}
+	if !strings.Contains(prompt, "**support**") {
+		t.Error("Expected prompt to contain support agent")
+	}
+}
+
+// TestSubagentsInSystemPrompt_Wildcard verifies that a wildcard allow_agents
+// config results in all agents (except self) being listed.
+func TestSubagentsInSystemPrompt_Wildcard(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-wildcard-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	// Simulate what resolveAvailableSubagents would return for wildcard
+	cb.SetAvailableSubagents([]subagentInfo{
+		{ID: "agent-a", Description: "Agent A"},
+		{ID: "agent-b", Description: "Agent B"},
+		{ID: "agent-c"}, // no description
+	})
+
+	prompt := cb.GetInitialContext()
+
+	if !strings.Contains(prompt, "**agent-a**") {
+		t.Error("Expected prompt to contain agent-a")
+	}
+	if !strings.Contains(prompt, "**agent-b**") {
+		t.Error("Expected prompt to contain agent-b")
+	}
+	if !strings.Contains(prompt, "**agent-c**") {
+		t.Error("Expected prompt to contain agent-c")
+	}
+	// agent-c has no description, so should NOT have " — "
+	if strings.Contains(prompt, "**agent-c** —") {
+		t.Error("agent-c should not have a description dash")
+	}
+}
+
+// TestSubagentsInSystemPrompt_NoSubagents verifies that when no subagents
+// are configured, the system prompt does NOT contain a Subagents section.
+func TestSubagentsInSystemPrompt_NoSubagents(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "no-subagents-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	// Don't call SetAvailableSubagents — default is nil/empty
+
+	prompt := cb.GetInitialContext()
+
+	if strings.Contains(prompt, "## Subagents Available") {
+		t.Error("Expected prompt to NOT contain '## Subagents Available' when no subagents configured")
+	}
+}
+
+// TestSubagentsInSystemPrompt_WithDescription verifies that agent descriptions
+// are rendered correctly in the system prompt.
+func TestSubagentsInSystemPrompt_WithDescription(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-desc-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetAvailableSubagents([]subagentInfo{
+		{ID: "sales", Description: "Handles sales inquiries and product recommendations"},
+	})
+
+	prompt := cb.GetInitialContext()
+
+	expected := "**sales** — Handles sales inquiries and product recommendations"
+	if !strings.Contains(prompt, expected) {
+		t.Errorf("Expected prompt to contain %q", expected)
+	}
+}
+
+// TestSubagentsInSystemPrompt_EmptyDescription verifies that when an agent
+// has no description, only the ID is shown (no dash separator).
+func TestSubagentsInSystemPrompt_EmptyDescription(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-empty-desc-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetAvailableSubagents([]subagentInfo{
+		{ID: "minimal-agent"},
+	})
+
+	prompt := cb.GetInitialContext()
+
+	if !strings.Contains(prompt, "**minimal-agent**") {
+		t.Error("Expected prompt to contain minimal-agent ID")
+	}
+	// Should have a newline after the ID, not " — "
+	lines := strings.Split(prompt, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "minimal-agent") {
+			if strings.Contains(line, "—") {
+				t.Errorf("Expected no dash separator for empty description, got line: %q", line)
+			}
+			break
+		}
+	}
+}
+
+// TestSubagentsInSystemPrompt_Invalidation verifies that SetAvailableSubagents
+// invalidates the cached initial context.
+func TestSubagentsInSystemPrompt_Invalidation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "subagents-invalidation-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+
+	// First build — no subagents
+	prompt1 := cb.GetInitialContext()
+	if strings.Contains(prompt1, "## Subagents Available") {
+		t.Error("First build should not have subagents section")
+	}
+
+	// Set subagents
+	cb.SetAvailableSubagents([]subagentInfo{
+		{ID: "new-agent", Description: "A new agent"},
+	})
+
+	// Second build — should include subagents
+	prompt2 := cb.GetInitialContext()
+	if !strings.Contains(prompt2, "## Subagents Available") {
+		t.Error("Second build should have subagents section after SetAvailableSubagents")
+	}
+	if !strings.Contains(prompt2, "new-agent") {
+		t.Error("Second build should contain new-agent")
+	}
+}

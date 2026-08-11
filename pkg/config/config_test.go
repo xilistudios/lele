@@ -868,6 +868,62 @@ func TestLoadConfig_SearXNGEnabled(t *testing.T) {
 	}
 }
 
+func TestAgentConfig_Description(t *testing.T) {
+	jsonData := `{
+		"agents": {
+			"defaults": { "workspace": "~/.lele/workspace", "model": "gpt-4" },
+			"list": [
+				{
+					"id": "sales",
+					"name": "Sales Bot",
+					"description": "Handles sales inquiries and product recommendations"
+				},
+				{
+					"id": "support",
+					"name": "Support Bot"
+				}
+			]
+		}
+	}`
+
+	cfg := DefaultConfig()
+	if err := json.Unmarshal([]byte(jsonData), cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(cfg.Agents.List) != 2 {
+		t.Fatalf("agents.list len = %d, want 2", len(cfg.Agents.List))
+	}
+
+	sales := cfg.Agents.List[0]
+	if sales.Description != "Handles sales inquiries and product recommendations" {
+		t.Errorf("sales.Description = %q, want %q", sales.Description, "Handles sales inquiries and product recommendations")
+	}
+
+	support := cfg.Agents.List[1]
+	if support.Description != "" {
+		t.Errorf("support.Description = %q, want empty", support.Description)
+	}
+
+	// Re-marshal and verify description is preserved
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var roundTrip Config
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+
+	if roundTrip.Agents.List[0].Description != "Handles sales inquiries and product recommendations" {
+		t.Errorf("round-trip sales.Description = %q", roundTrip.Agents.List[0].Description)
+	}
+	if roundTrip.Agents.List[1].Description != "" {
+		t.Errorf("round-trip support.Description = %q, want empty", roundTrip.Agents.List[1].Description)
+	}
+}
+
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 func boolPtr(b bool) *bool    { return &b }

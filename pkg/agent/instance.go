@@ -215,6 +215,12 @@ func NewAgentInstance(
 		isDefault = agentCfg.Default
 	}
 
+	// Resolve available subagents from config and inject into system prompt.
+	if subagents != nil && len(subagents.AllowAgents) > 0 {
+		available := resolveAvailableSubagents(agentCfg, cfg)
+		contextBuilder.SetAvailableSubagents(available)
+	}
+
 	maxIter := defaults.MaxToolIterations
 	// 0 means unlimited — loop runs until LLM stops calling tools
 
@@ -312,6 +318,52 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 		return resolve(agentCfg.Model.Fallbacks)
 	}
 	return resolve(defaults.ModelFallbacks)
+}
+
+// resolveAvailableSubagents builds the list of subagents that an agent can
+// delegate to, based on its allow_agents config and the full agent list.
+// If allow_agents contains "*", all agents (except self) are included.
+func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config) []subagentInfo {
+	if agentCfg == nil || agentCfg.Subagents == nil {
+		return nil
+	}
+	selfID := routing.NormalizeAgentID(agentCfg.ID)
+	allowList := agentCfg.Subagents.AllowAgents
+	if len(allowList) == 0 {
+		return nil
+	}
+
+	wildcard := false
+	allowedSet := make(map[string]bool, len(allowList))
+	for _, a := range allowList {
+		if a == "*" {
+			wildcard = true
+			break
+		}
+		allowedSet[routing.NormalizeAgentID(a)] = true
+	}
+
+	// Build a lookup from agent config list for descriptions.
+	descMap := make(map[string]string, len(cfg.Agents.List))
+	for i := range cfg.Agents.List {
+		ac := &cfg.Agents.List[i]
+		descMap[routing.NormalizeAgentID(ac.ID)] = ac.Description
+	}
+
+	var result []subagentInfo
+	for _, ac := range cfg.Agents.List {
+		id := routing.NormalizeAgentID(ac.ID)
+		if id == selfID {
+			continue // don't list self
+		}
+		if wildcard || allowedSet[id] {
+			result = append(result, subagentInfo{
+				ID:          id,
+				Description: ac.Description,
+			})
+		}
+	}
+	return result
 }
 
 func expandHome(path string) string {

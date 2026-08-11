@@ -20,11 +20,19 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
+// subagentInfo holds the ID and description of an available subagent for
+// inclusion in the system prompt.
+type subagentInfo struct {
+	ID          string
+	Description string
+}
+
 type ContextBuilder struct {
-	workspace    string
-	skillsLoader *skills.SkillsLoader
-	memory       *MemoryStore
-	tools        *tools.ToolRegistry
+	workspace          string
+	skillsLoader       *skills.SkillsLoader
+	memory             *MemoryStore
+	tools              *tools.ToolRegistry
+	availableSubagents []subagentInfo
 
 	// cachedSystemPrompt stores the built system prompt per session key.
 	// It is populated on the first call for a session and reused on every
@@ -62,6 +70,18 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 // SetToolsRegistry sets the tools registry for dynamic tool summary generation.
 func (cb *ContextBuilder) SetToolsRegistry(registry *tools.ToolRegistry) {
 	cb.tools = registry
+}
+
+// SetAvailableSubagents sets the list of subagents that this agent can delegate
+// tasks to. The list is rendered in the system prompt so the LLM knows which
+// agent_id values are valid for the spawn tool.
+func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
+	cb.availableSubagents = subagents
+	// Invalidate cached prompts so the next turn picks up the new list.
+	cb.ResetAllSystemPromptCaches()
+	cb.initialMu.Lock()
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
 }
 
 // GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
@@ -109,6 +129,21 @@ func (cb *ContextBuilder) GetInitialContext() string {
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
 
 %s`, skillsSummary))
+	}
+
+	// Subagents section
+	if len(cb.availableSubagents) > 0 {
+		var sb strings.Builder
+		sb.WriteString("## Subagents Available\n\n")
+		sb.WriteString("You can delegate tasks to these subagents using the `spawn` tool with the `agent_id` parameter.\n\n")
+		for _, sa := range cb.availableSubagents {
+			if sa.Description != "" {
+				sb.WriteString(fmt.Sprintf("- **%s** — %s\n", sa.ID, sa.Description))
+			} else {
+				sb.WriteString(fmt.Sprintf("- **%s**\n", sa.ID))
+			}
+		}
+		parts = append(parts, sb.String())
 	}
 
 	// Join with "---" separator
