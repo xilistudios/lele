@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-11
+
+### Added
+
+#### Agent
+- Available subagents injected into system prompt — when an agent has `subagents` config with `allow_agents`, a "Subagents Available" section lists each subagent's ID and description, letting the LLM know which `agent_id` values are valid for the `spawn` tool. Supports wildcard (`*`) and explicit lists with self-exclusion.
+- Goal subagent evaluator — `SummaryGoalJudge` and `SubagentGoalJudge` with configurable mode (`inline` or `subagent` via `LELE_GOAL_JUDGE_MODE`). Subagent judge acts as a supervisor: when it says CONTINUE it provides a specific next step. Goal loop moved to caller-side `maybeRunGoalContinuation` to prevent deadlocks.
+- Agent config `Description` field — new optional field on `AgentConfig` for human-readable agent descriptions, rendered in subagent listings.
+
+#### TUI
+- Lazy load chat messages on scroll — messages now load dynamically when scrolling up (was static). `renderStartIdx` window state with `maybeExpandRenderWindow()` expanding 50 messages backward at top.
+- Keyboard scroll in line viewport — up/down/pgup/pgdown now work in the line viewport (was mouse-only).
+- `/goal` auto-creates session from welcome screen.
+
+### Fixed
+
+#### TUI
+- Prevent panic when adding secret from modal — `resetModal(ModalSecrets)` set `formValues` to nil before accessing index 0. Save secret name to local variable before reset.
+- `/compact` loading animation — `RegisterSessionCancel` during compaction keeps loading animation active.
+- Subagent session→agent mapping uses target agent ID, not owner.
+- Flicker during goal judge evaluation gaps — `goalLoopSessions` tracking prevents UI flicker.
+
+#### Agent
+- Goal loop deadlock regression — goal loop moved to caller-side to prevent re-entrant lock acquisition.
+
 ## [0.7.0] - 2026-08-10
 
 ### Added
