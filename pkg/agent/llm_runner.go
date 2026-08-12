@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,22 @@ const transientLLMRetries = 3
 // retry attempt (5s, 15s, 30s, capped at 30s).
 func transientLLMBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+	if attempt >= len(backoffs) {
+		return backoffs[len(backoffs)-1]
+	}
+	return backoffs[attempt]
+}
+
+// maxEmptyRetries bounds how many consecutive empty LLM responses are retried
+// within a single run before giving up and falling back to the default
+// response. This prevents an infinite retry loop when a provider repeatedly
+// returns HTTP 200 with empty content (e.g. every ~119s).
+const maxEmptyRetries = 3
+
+// emptyRetryBackoff returns the wait duration before the given empty-response
+// retry attempt (1s, 2s, 3s, capped at 3s).
+func emptyRetryBackoff(attempt int) time.Duration {
+	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
 		return backoffs[len(backoffs)-1]
 	}
@@ -83,8 +100,20 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	runCtx := ctx
 	if opts.SessionKey != "" {
 		sessionCtx, cancel := context.WithCancel(ctx)
-		runCtx = sessionCtx
+		// Apply the configurable LLM loop timeout. The timeout context is a
+		// child of sessionCtx so that cancelling the session (user stop /
+		// shutdown) also cancels the loop. When the timeout expires, the loop
+		// returns a clear error instead of hanging indefinitely.
+		var timeoutCancel context.CancelFunc
+		if agent.LLMLoopTimeoutMinutes > 0 {
+			runCtx, timeoutCancel = context.WithTimeout(sessionCtx, time.Duration(agent.LLMLoopTimeoutMinutes)*time.Minute)
+		} else {
+			runCtx = sessionCtx
+		}
 		defer lr.al.registerSessionCancel(opts.SessionKey, cancel)()
+		if timeoutCancel != nil {
+			defer timeoutCancel()
+		}
 	}
 
 	// 1. Update tool contexts
@@ -137,6 +166,10 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		lr.al.toolCoordinator.markSessionSubagentsDelivered(opts.SessionKey)
 	}
 	if err != nil {
+		// Surface a clear error when the LLM loop timed out.
+		if agent.LLMLoopTimeoutMinutes > 0 && errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("LLM loop exceeded %d minute timeout", agent.LLMLoopTimeoutMinutes)
+		}
 		if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
 			logger.WarnCF("agent", "Failed to save session after LLM error", map[string]interface{}{
 				"session_key": opts.SessionKey,
@@ -409,6 +442,7 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	emptyRetries := 0
 	loopDetector := newLoopDetector()
 	model := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
 	// Resolve model alias to ensure a provider prefix is present for routing.
@@ -605,18 +639,47 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			messages = append(messages, assistantMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
-			// If response is empty, retry by prompting the model again
-			if len(strings.TrimSpace(finalContent)) == 0 && (agent.MaxIterations <= 0 || iteration < agent.MaxIterations-2) {
-				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
-					map[string]interface{}{
-						"agent_id":  agent.ID,
-						"iteration": iteration,
+			// If response is empty, retry by prompting the model again, but only
+			// up to a bounded number of consecutive empty responses. This
+			// prevents an infinite retry loop when a provider repeatedly returns
+			// HTTP 200 with empty content (e.g. every ~119s with no timeout).
+			if len(strings.TrimSpace(finalContent)) == 0 {
+				emptyRetries++
+				if emptyRetries <= maxEmptyRetries && (agent.MaxIterations <= 0 || iteration < agent.MaxIterations-2) {
+					logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
+						map[string]interface{}{
+							"agent_id":  agent.ID,
+							"iteration": iteration,
+							"retry":     emptyRetries,
+							"max":       maxEmptyRetries,
+						})
+					// Small backoff between empty-response retries.
+					wait := emptyRetryBackoff(emptyRetries - 1)
+					if lr.retryWait != nil {
+						select {
+						case <-lr.retryWait(wait):
+						case <-ctx.Done():
+							return "", iteration, ctx.Err()
+						}
+					} else {
+						select {
+						case <-time.After(wait):
+						case <-ctx.Done():
+							return "", iteration, ctx.Err()
+						}
+					}
+					messages = append(messages, providers.Message{
+						Role:    "user",
+						Content: "Your previous response was empty. Please provide a helpful response to my request.",
 					})
-				messages = append(messages, providers.Message{
-					Role:    "user",
-					Content: "Your previous response was empty. Please provide a helpful response to my request.",
-				})
-				continue
+					continue
+				}
+				// Empty-response retry budget exhausted — fall through to the
+				// plain-tool-call detection below and then break.
+			} else {
+				// Non-empty final content: reset the consecutive-empty counter so
+				// an isolated empty blip mid-loop doesn't consume the whole budget.
+				emptyRetries = 0
 			}
 
 			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
