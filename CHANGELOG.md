@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-12
+
+### Changed
+
+#### Agent
+- LLM loop timeout is now disabled by default (`agents.defaults.llm_loop_timeout_minutes` default changed from `10` to `0`). The global timeout covered the entire loop — including tool execution (builds, tests, sleeps) — and aborted legitimate long-running agent tasks mid-request. Empty-response retry is already bounded (3 attempts), so no global cap is needed. The setting remains available as an opt-in for deployments that want a hard cap.
+
+### Fixed
+
+#### TUI
+- Control-character sanitization at render boundaries — terminal control chars (`\r`, `\b`, BEL, ANSI escape sequences) embedded in external/LLM content (e.g. interactive CLI output from `exec`) were interpreted by the terminal as cursor movement/erase directives, causing duplicated footers and frame corruption. New `sanitizeDisplayText()` strips ANSI escapes and C0 controls (preserving `\t`/`\n` and UTF-8) at 4 render boundaries: tool result summaries, background exec modal output, markdown rendering, and live streaming lines. Storage is untouched.
+
 ## [0.7.2] - 2026-08-12
 
 ### Fixed
