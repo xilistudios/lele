@@ -28,25 +28,26 @@ func extractProviderFromModel(model, defaultProvider string) string {
 // AgentInstance represents a fully configured agent with its own workspace,
 // session manager, context builder, and tool registry.
 type AgentInstance struct {
-	ID             string
-	Name           string
-	Model          string
-	Fallbacks      []string
-	Workspace      string
-	MaxIterations  int
-	MaxTokens      int
-	Temperature    float64
-	ContextWindow  int
-	SupportsImages bool
-	Reasoning      *config.ReasoningConfig // Reasoning configuration for the model
-	Provider       providers.LLMProvider
-	Sessions       *session.SessionManager
-	ContextBuilder *ContextBuilder
-	Tools          *tools.ToolRegistry
-	Subagents      *config.SubagentsConfig
-	SkillsFilter   []string
-	Candidates     []providers.FallbackCandidate
-	IsDefault      bool
+	ID                    string
+	Name                  string
+	Model                 string
+	Fallbacks             []string
+	Workspace             string
+	MaxIterations         int
+	MaxTokens             int
+	Temperature           float64
+	ContextWindow         int
+	SupportsImages        bool
+	Reasoning             *config.ReasoningConfig // Reasoning configuration for the model
+	Provider              providers.LLMProvider
+	Sessions              *session.SessionManager
+	ContextBuilder        *ContextBuilder
+	Tools                 *tools.ToolRegistry
+	Subagents             *config.SubagentsConfig
+	SkillsFilter          []string
+	Candidates            []providers.FallbackCandidate
+	IsDefault             bool
+	LLMLoopTimeoutMinutes int
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -248,25 +249,26 @@ func NewAgentInstance(
 	candidates := providers.ResolveCandidates(modelCfg, providerName)
 
 	return &AgentInstance{
-		ID:             agentID,
-		Name:           agentName,
-		Model:          model,
-		Fallbacks:      fallbacks,
-		Workspace:      workspace,
-		MaxIterations:  maxIter,
-		MaxTokens:      maxTokens,
-		Temperature:    temperature,
-		ContextWindow:  getContextWindow(cfg, model, providerName),
-		SupportsImages: getSupportsImages(cfg, model, providerName),
-		Reasoning:      getReasoningConfig(cfg, model, providerName),
-		Provider:       provider,
-		Sessions:       sessionsManager,
-		ContextBuilder: contextBuilder,
-		Tools:          toolsRegistry,
-		Subagents:      subagents,
-		SkillsFilter:   skillsFilter,
-		Candidates:     candidates,
-		IsDefault:      isDefault,
+		ID:                    agentID,
+		Name:                  agentName,
+		Model:                 model,
+		Fallbacks:             fallbacks,
+		Workspace:             workspace,
+		MaxIterations:         maxIter,
+		MaxTokens:             maxTokens,
+		Temperature:           temperature,
+		ContextWindow:         getContextWindow(cfg, model, providerName),
+		SupportsImages:        getSupportsImages(cfg, model, providerName),
+		Reasoning:             getReasoningConfig(cfg, model, providerName),
+		Provider:              provider,
+		Sessions:              sessionsManager,
+		ContextBuilder:        contextBuilder,
+		Tools:                 toolsRegistry,
+		Subagents:             subagents,
+		SkillsFilter:          skillsFilter,
+		Candidates:            candidates,
+		IsDefault:             isDefault,
+		LLMLoopTimeoutMinutes: defaults.LLMLoopTimeoutMinutes,
 	}
 }
 

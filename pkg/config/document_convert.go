@@ -27,6 +27,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		SubagentTimeoutMinutes: doc.Agents.Defaults.SubagentTimeoutMinutes,
 		SubagentMaxConcurrent:  doc.Agents.Defaults.SubagentMaxConcurrent,
 		SubagentMaxRetries:     doc.Agents.Defaults.SubagentMaxRetries,
+		LLMLoopTimeoutMinutes:  doc.Agents.Defaults.LLMLoopTimeoutMinutes,
 	}
 
 	for _, agent := range doc.Agents.List {
@@ -250,6 +251,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 			"subagent_timeout_minutes": doc.Agents.Defaults.SubagentTimeoutMinutes,
 			"subagent_max_concurrent":  doc.Agents.Defaults.SubagentMaxConcurrent,
 			"subagent_max_retries":     doc.Agents.Defaults.SubagentMaxRetries,
+			"llm_loop_timeout_minutes": doc.Agents.Defaults.LLMLoopTimeoutMinutes,
 		},
 	}
 	if len(doc.Agents.List) > 0 {
@@ -513,6 +515,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		SubagentTimeoutMinutes: cfg.Agents.Defaults.SubagentTimeoutMinutes,
 		SubagentMaxConcurrent:  cfg.Agents.Defaults.SubagentMaxConcurrent,
 		SubagentMaxRetries:     cfg.Agents.Defaults.SubagentMaxRetries,
+		LLMLoopTimeoutMinutes:  cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {

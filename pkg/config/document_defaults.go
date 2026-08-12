@@ -31,6 +31,9 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 	if doc.Agents.Defaults.SubagentMaxRetries == 0 {
 		doc.Agents.Defaults.SubagentMaxRetries = defaults.Agents.Defaults.SubagentMaxRetries
 	}
+	if doc.Agents.Defaults.LLMLoopTimeoutMinutes == 0 {
+		doc.Agents.Defaults.LLMLoopTimeoutMinutes = defaults.Agents.Defaults.LLMLoopTimeoutMinutes
+	}
 
 	// Defaults for the native channel.
 	if doc.Channels.Native.Host == "" {
@@ -124,6 +127,7 @@ func defaultEditableDocument() *EditableDocument {
 				SubagentTimeoutMinutes: defaults.Agents.Defaults.SubagentTimeoutMinutes,
 				SubagentMaxConcurrent:  defaults.Agents.Defaults.SubagentMaxConcurrent,
 				SubagentMaxRetries:     defaults.Agents.Defaults.SubagentMaxRetries,
+				LLMLoopTimeoutMinutes:  defaults.Agents.Defaults.LLMLoopTimeoutMinutes,
 			},
 			List: []EditableAgentConfig{},
 		},
