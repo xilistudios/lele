@@ -959,7 +959,7 @@ func DefaultConfig() *Config {
 				MaxReadLines:           500,
 				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
 				SubagentMaxIterations:  0,  // default unlimited for subagent tasks
-				LLMLoopTimeoutMinutes:  10, // default 10 minute LLM loop timeout (0 = disabled)
+				LLMLoopTimeoutMinutes:  0,  // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
 			},
 		},
 		Session: SessionConfig{
