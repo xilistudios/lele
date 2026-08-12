@@ -42,14 +42,11 @@ func transientLLMBackoff(attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
-// maxEmptyRetries bounds how many consecutive empty LLM responses are retried
-// within a single run before giving up and falling back to the default
-// response. This prevents an infinite retry loop when a provider repeatedly
-// returns HTTP 200 with empty content (e.g. every ~119s).
-const maxEmptyRetries = 3
-
 // emptyRetryBackoff returns the wait duration before the given empty-response
-// retry attempt (1s, 2s, 3s, capped at 3s).
+// retry attempt (1s, 2s, 3s, capped at 3s). Empty responses are retried
+// indefinitely — bounded by MaxIterations (when set) and by context
+// cancellation — with the backoff capped at 3s to avoid a tight spin when a
+// provider repeatedly returns HTTP 200 with empty content (e.g. every ~119s).
 func emptyRetryBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
@@ -639,48 +636,45 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			messages = append(messages, assistantMsg)
 			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
-			// If response is empty, retry by prompting the model again, but only
-			// up to a bounded number of consecutive empty responses. This
-			// prevents an infinite retry loop when a provider repeatedly returns
-			// HTTP 200 with empty content (e.g. every ~119s with no timeout).
+			// If response is empty, retry by prompting the model again. This keeps
+			// the agent loop alive when a provider returns HTTP 200 with empty
+			// content (e.g. every ~119s with no timeout) instead of terminating
+			// the run with a fallback response. The retry loop is bounded by
+			// MaxIterations (when set) and by context cancellation (user abort /
+			// session cancel); with unlimited iterations it keeps retrying until
+			// a non-empty response arrives.
 			if len(strings.TrimSpace(finalContent)) == 0 {
 				emptyRetries++
-				if emptyRetries <= maxEmptyRetries && (agent.MaxIterations <= 0 || iteration < agent.MaxIterations-2) {
-					logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
-						map[string]interface{}{
-							"agent_id":  agent.ID,
-							"iteration": iteration,
-							"retry":     emptyRetries,
-							"max":       maxEmptyRetries,
-						})
-					// Small backoff between empty-response retries.
-					wait := emptyRetryBackoff(emptyRetries - 1)
-					if lr.retryWait != nil {
-						select {
-						case <-lr.retryWait(wait):
-						case <-ctx.Done():
-							return "", iteration, ctx.Err()
-						}
-					} else {
-						select {
-						case <-time.After(wait):
-						case <-ctx.Done():
-							return "", iteration, ctx.Err()
-						}
-					}
-					messages = append(messages, providers.Message{
-						Role:    "user",
-						Content: "Your previous response was empty. Please provide a helpful response to my request.",
+				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
+					map[string]interface{}{
+						"agent_id":  agent.ID,
+						"iteration": iteration,
+						"retry":     emptyRetries,
 					})
-					continue
+				// Small backoff between empty-response retries (capped).
+				wait := emptyRetryBackoff(emptyRetries - 1)
+				if lr.retryWait != nil {
+					select {
+					case <-lr.retryWait(wait):
+					case <-ctx.Done():
+						return "", iteration, ctx.Err()
+					}
+				} else {
+					select {
+					case <-time.After(wait):
+					case <-ctx.Done():
+						return "", iteration, ctx.Err()
+					}
 				}
-				// Empty-response retry budget exhausted — fall through to the
-				// plain-tool-call detection below and then break.
-			} else {
-				// Non-empty final content: reset the consecutive-empty counter so
-				// an isolated empty blip mid-loop doesn't consume the whole budget.
-				emptyRetries = 0
+				messages = append(messages, providers.Message{
+					Role:    "user",
+					Content: "Your previous response was empty. Please provide a helpful response to my request.",
+				})
+				continue
 			}
+			// Non-empty final content: reset the consecutive-empty counter so the
+			// backoff restarts small after a real response.
+			emptyRetries = 0
 
 			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
 			// instead of proper function calls. Some models (like DeepSeek) sometimes output tool call

@@ -2475,22 +2475,23 @@ func TestRunLLMIteration_IntraLoopCompaction(t *testing.T) {
 // Tests for bounded empty-response retry and LLM loop timeout
 // ============================================================================
 
-// TestRunAgentLoop_EmptyResponseRetryBounded verifies that when the provider
-// returns empty content for up to maxEmptyRetries times and then a real
-// response, the loop returns the real response (retry works and is bounded).
-func TestRunAgentLoop_EmptyResponseRetryBounded(t *testing.T) {
+// TestRunAgentLoop_EmptyResponseRetriedUntilRealResponse verifies that when
+// the provider returns empty content several times and then a real response,
+// the loop keeps retrying (no fixed bound) and returns the real response.
+func TestRunAgentLoop_EmptyResponseRetriedUntilRealResponse(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait // avoid real backoff sleeps
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited: only the bounded retry stops empty loops
+	agent.MaxIterations = 0 // unlimited: only a real response stops empty loops
 
+	const emptiesBeforeReal = 5
 	emptyCalls := 0
 	agent.Provider = &llmRunnerMockLLMProvider{
 		onChatCalled: func(ctx context.Context, messages []providers.Message, tools []providers.ToolDefinition, model string, opts map[string]interface{}) (*providers.LLMResponse, error) {
-			if emptyCalls < maxEmptyRetries {
+			if emptyCalls < emptiesBeforeReal {
 				emptyCalls++
 				return &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}}, nil
 			}
@@ -2513,26 +2514,26 @@ func TestRunAgentLoop_EmptyResponseRetryBounded(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 	if response != "Finally a real response" {
-		t.Errorf("Expected the real response after bounded retries, got: %q", response)
+		t.Errorf("Expected the real response after empty retries, got: %q", response)
 	}
-	// emptyCalls consumed exactly maxEmptyRetries before the real response.
-	if emptyCalls != maxEmptyRetries {
-		t.Errorf("Expected %d empty retries before the real response, got %d", maxEmptyRetries, emptyCalls)
+	// emptyCalls consumed exactly emptiesBeforeReal before the real response.
+	if emptyCalls != emptiesBeforeReal {
+		t.Errorf("Expected %d empty responses before the real response, got %d", emptiesBeforeReal, emptyCalls)
 	}
 }
 
-// TestRunAgentLoop_AlwaysEmptyTerminates verifies that when the provider
-// ALWAYS returns empty, the loop terminates (does not run forever) and falls
-// back to the DefaultResponse, with the retry budget exhausted (provider.Chat
-// called no more than maxEmptyRetries+1 times).
-func TestRunAgentLoop_AlwaysEmptyTerminates(t *testing.T) {
+// TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations verifies that when the
+// provider ALWAYS returns empty, the loop keeps retrying but is still bounded
+// by MaxIterations — it terminates with the DefaultResponse only once the
+// iteration budget is exhausted (not via a fixed empty-retry cap).
+func TestRunAgentLoop_AlwaysEmpty_BoundedByMaxIterations(t *testing.T) {
 	al, tmpDir := createLLMRunnerTestAgentLoop(t)
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited: only the bounded retry stops empty loops
+	agent.MaxIterations = 5 // finite: bounds the always-empty retry loop
 
 	provider := &llmRunnerMockLLMProvider{
 		response: &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}},
@@ -2556,9 +2557,9 @@ func TestRunAgentLoop_AlwaysEmptyTerminates(t *testing.T) {
 	if response != "Default fallback" {
 		t.Errorf("Expected default fallback response, got: %q", response)
 	}
-	// Chat called once for the initial response + maxEmptyRetries retries.
-	if provider.callCount > maxEmptyRetries+1 {
-		t.Errorf("Expected provider.Chat to be called at most %d times, got %d", maxEmptyRetries+1, provider.callCount)
+	// Chat called once per iteration until MaxIterations is exhausted.
+	if provider.callCount != agent.MaxIterations {
+		t.Errorf("Expected provider.Chat to be called %d times (once per iteration), got %d", agent.MaxIterations, provider.callCount)
 	}
 }
 
@@ -2585,8 +2586,8 @@ func TestRunAgentLoop_EmptyBlipResetsCounter(t *testing.T) {
 			case 2:
 				return &providers.LLMResponse{Content: "real", ToolCalls: []providers.ToolCall{}}, nil
 			default:
-				// After the reset, we get maxEmptyRetries consecutive empties
-				// which are retried, then fall through to default.
+				// Not reached in this test: call 2 returns the real response and
+				// terminates the loop.
 				return &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}}, nil
 			}
 		},
@@ -2626,7 +2627,7 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 	runner := newLLMRunner(al)
 	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
-	agent.MaxIterations = 0 // unlimited
+	agent.MaxIterations = 5 // finite: bounds the loop after the tool call
 
 	// Register a real tool so tool-call execution works.
 	agent.Tools.Register(&llmRunnerMockCustomTool{
@@ -2669,12 +2670,11 @@ func TestRunAgentLoop_ToolCallThenEmpty(t *testing.T) {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 	if response != "Default" {
-		t.Errorf("Expected default fallback after tool call + exhausted empty retries, got: %q", response)
+		t.Errorf("Expected default fallback after tool call + MaxIterations exhausted, got: %q", response)
 	}
-	// 1 tool-call iteration + 1 initial empty + maxEmptyRetries retries.
-	expected := 1 + 1 + maxEmptyRetries
-	if providerCallCount := calls; providerCallCount > expected {
-		t.Errorf("Expected at most %d provider calls, got %d", expected, providerCallCount)
+	// 1 tool-call iteration + (MaxIterations-1) empty iterations.
+	if calls != agent.MaxIterations {
+		t.Errorf("Expected %d provider calls (bounded by MaxIterations), got %d", agent.MaxIterations, calls)
 	}
 }
 
