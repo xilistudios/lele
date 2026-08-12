@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-12
+
+### Fixed
+
+#### Agent
+- Strip nameless tool_calls before provider submission — some OpenAI-compatible providers (e.g. Xiaomi MiMo) reject assistant messages with `tool_calls` that lack a function name. `stripNamelessToolCalls()` in `sanitizeToolMessages` removes entries where both `Name` and `Function.Name` are empty/whitespace, with debug logging for removed vs kept counts.
+- Bound empty-response retry and add configurable LLM loop timeout — when an LLM returns an empty response (0 tokens), the loop now retries up to 3 consecutive times with 1s/2s/3s backoff instead of retrying forever or stopping immediately. Counter resets on any non-empty response. New config `agents.defaults.llm_loop_timeout_minutes` (default 10, env `LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES`, `0` = disabled) caps total loop duration with a clear timeout error.
+
+#### TUI
+- Auto-scroll regression when at bottom — `updateViewport()` now captures `wasAtBottom` before rebuilding content, fixing cases where the viewport failed to auto-scroll when a new message arrived while the user was at the bottom.
+
 ## [0.7.1] - 2026-08-11
 
 ### Added
