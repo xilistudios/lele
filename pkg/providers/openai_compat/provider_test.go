@@ -984,3 +984,9 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	return http.DefaultTransport.RoundTrip(req)
 }
+func TestNewProvider_StreamingClientHasNoTotalTimeout(t *testing.T) {
+	p := NewProvider("k", "https://example.com", "")
+	if p.httpClient.Timeout != 0 {
+		t.Errorf("httpClient.Timeout = %v, want 0 (no total timeout)", p.httpClient.Timeout)
+	}
+}

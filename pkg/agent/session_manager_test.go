@@ -272,8 +272,9 @@ func TestSummarizeSessionWithError_Success(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	if includedCount != 2 {
-		t.Errorf("Expected 2 messages included in context, got %d", includedCount)
+	// 3 included: first message (index 0, always preserved) + last 2 kept for continuity
+	if includedCount != 3 {
+		t.Errorf("Expected 3 messages included in context (first + last 2), got %d", includedCount)
 	}
 }
 
@@ -455,8 +456,9 @@ func TestMaybeSummarize_TriggersWhenThresholdExceeded(t *testing.T) {
 	if excludedCount == 0 {
 		t.Error("Expected some messages to be excluded from context")
 	}
-	if includedCount != 2 {
-		t.Errorf("Expected 2 messages included in context, got %d", includedCount)
+	// 3 included: first message (index 0, always preserved) + last 2 kept for continuity
+	if includedCount != 3 {
+		t.Errorf("Expected 3 messages included in context (first + last 2), got %d", includedCount)
 	}
 
 	// Summary messages (if any) should never be excluded from context.

@@ -51,10 +51,10 @@ func TestExcludeOldMessages_NormalExclusion(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 2)
 
 	session := sm.GetOrCreate(key)
-	// Should exclude first 4 messages (6-2=4), keep last 2
-	assertExcluded(t, session.Messages, []int{0, 1, 2, 3})
-	if countExcluded(session.Messages) != 4 {
-		t.Errorf("expected 4 excluded, got %d", countExcluded(session.Messages))
+	// First message (index 0) is always preserved. Exclude indices 1,2,3, keep last 2.
+	assertExcluded(t, session.Messages, []int{1, 2, 3})
+	if countExcluded(session.Messages) != 3 {
+		t.Errorf("expected 3 excluded, got %d", countExcluded(session.Messages))
 	}
 }
 
@@ -84,10 +84,10 @@ func TestExcludeOldMessages_BoundarySplitsToolPair_Forward(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 1)
 
 	session := sm.GetOrCreate(key)
-	// Messages 0, 1, 2 should all be excluded (3 total). Only message 3 kept.
-	assertExcluded(t, session.Messages, []int{0, 1, 2})
-	if countExcluded(session.Messages) != 3 {
-		t.Errorf("expected 3 excluded, got %d", countExcluded(session.Messages))
+	// First message (index 0) is always preserved. Exclude indices 1,2. Message 3 kept.
+	assertExcluded(t, session.Messages, []int{1, 2})
+	if countExcluded(session.Messages) != 2 {
+		t.Errorf("expected 2 excluded, got %d", countExcluded(session.Messages))
 	}
 }
 
@@ -115,14 +115,15 @@ func TestExcludeOldMessages_OrphanedToolUse_MoveBack(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 1)
 
 	session := sm.GetOrCreate(key)
-	// Only message 0 should be excluded. Messages 1 and 2 are kept.
-	assertExcluded(t, session.Messages, []int{0})
-	if countExcluded(session.Messages) != 1 {
-		t.Errorf("expected 1 excluded, got %d", countExcluded(session.Messages))
+	// excludeUpTo moved back to 1, which is <= 1, so NOTHING is excluded.
+	// Index 0 is preserved.
+	assertExcluded(t, session.Messages, []int{})
+	if countExcluded(session.Messages) != 0 {
+		t.Errorf("expected 0 excluded, got %d", countExcluded(session.Messages))
 	}
 }
 
-// Test 4: keepCount=0 should exclude all messages
+// Test 4: keepCount=0 should exclude all messages except the first
 func TestExcludeOldMessages_KeepCountZero(t *testing.T) {
 	sm := NewSessionManager()
 	key := "test:zero"
@@ -134,8 +135,12 @@ func TestExcludeOldMessages_KeepCountZero(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 0)
 
 	session := sm.GetOrCreate(key)
-	if countExcluded(session.Messages) != 3 {
-		t.Errorf("expected all 3 excluded, got %d", countExcluded(session.Messages))
+	// First message preserved, indices 1,2 excluded
+	if countExcluded(session.Messages) != 2 {
+		t.Errorf("expected 2 excluded, got %d", countExcluded(session.Messages))
+	}
+	if session.Messages[0].ExcludeFromContext {
+		t.Error("first message should never be excluded")
 	}
 }
 
@@ -185,10 +190,10 @@ func TestExcludeOldMessages_MultipleToolResults(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 1)
 
 	session := sm.GetOrCreate(key)
-	// All 4 messages should be excluded, only message 4 kept
-	assertExcluded(t, session.Messages, []int{0, 1, 2, 3})
-	if countExcluded(session.Messages) != 4 {
-		t.Errorf("expected 4 excluded, got %d", countExcluded(session.Messages))
+	// First message (index 0) is always preserved. Exclude indices 1,2,3. Only message 4 kept.
+	assertExcluded(t, session.Messages, []int{1, 2, 3})
+	if countExcluded(session.Messages) != 3 {
+		t.Errorf("expected 3 excluded, got %d", countExcluded(session.Messages))
 	}
 }
 
@@ -237,9 +242,57 @@ func TestExcludeOldMessages_FullToolCycle(t *testing.T) {
 	sm.ExcludeOldMessagesFromContext(key, 4)
 
 	session := sm.GetOrCreate(key)
-	assertExcluded(t, session.Messages, []int{0, 1, 2, 3})
+	assertExcluded(t, session.Messages, []int{1, 2, 3})
+	if countExcluded(session.Messages) != 3 {
+		t.Errorf("expected 3 excluded, got %d", countExcluded(session.Messages))
+	}
+}
+
+// Test: First message is never excluded even with keepCount=0
+func TestExcludeOldMessages_FirstMessageAlwaysPreserved(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:preserve-first"
+
+	sm.AddMessage(key, "user", "original request")
+	sm.AddMessage(key, "assistant", "response 1")
+	sm.AddMessage(key, "user", "follow up")
+	sm.AddMessage(key, "assistant", "response 2")
+	sm.AddMessage(key, "user", "another question")
+
+	// keepCount=0 would normally exclude everything
+	sm.ExcludeOldMessagesFromContext(key, 0)
+
+	session := sm.GetOrCreate(key)
+	// First message must NOT be excluded
+	if session.Messages[0].ExcludeFromContext {
+		t.Error("first message should never be excluded")
+	}
+	// Remaining messages should be excluded
 	if countExcluded(session.Messages) != 4 {
-		t.Errorf("expected 4 excluded, got %d", countExcluded(session.Messages))
+		t.Errorf("expected 4 excluded (all except first), got %d", countExcluded(session.Messages))
+	}
+}
+
+// Test: If first message was previously excluded (legacy), it gets un-excluded
+func TestExcludeOldMessages_UnExcludesFirstMessage(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:unexclude-first"
+
+	sm.AddMessage(key, "user", "original request")
+	sm.AddMessage(key, "assistant", "response 1")
+	sm.AddMessage(key, "user", "follow up")
+	sm.AddMessage(key, "assistant", "response 2")
+
+	// Manually exclude the first message to simulate legacy state
+	session := sm.GetOrCreate(key)
+	session.Messages[0].ExcludeFromContext = true
+
+	// Now compact — should un-exclude msg 0
+	sm.ExcludeOldMessagesFromContext(key, 2)
+
+	session = sm.GetOrCreate(key)
+	if session.Messages[0].ExcludeFromContext {
+		t.Error("first message should be un-excluded after compaction")
 	}
 }
 

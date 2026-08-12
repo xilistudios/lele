@@ -7,12 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/common"
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
@@ -42,20 +39,7 @@ type Provider struct {
 }
 
 func NewProvider(apiKey, apiBase, proxy string) *Provider {
-	client := &http.Client{
-		Timeout: 120 * time.Second,
-	}
-
-	if proxy != "" {
-		parsed, err := url.Parse(proxy)
-		if err == nil {
-			client.Transport = &http.Transport{
-				Proxy: http.ProxyURL(parsed),
-			}
-		} else {
-			log.Printf("openai_compat: invalid proxy URL %q: %v", proxy, err)
-		}
-	}
+	client := common.NewStreamingHTTPClient(proxy)
 
 	return &Provider{
 		apiKey:     apiKey,
@@ -67,6 +51,12 @@ func NewProvider(apiKey, apiBase, proxy string) *Provider {
 func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
 	if p.apiBase == "" {
 		return nil, fmt.Errorf("API base not configured")
+	}
+
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, common.DefaultRequestTimeout)
+		defer cancel()
 	}
 
 	model = normalizeModel(model, p.apiBase)
@@ -258,7 +248,8 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 
 	}
 
-	return parseSSEStream(ctx, resp.Body, onChunk, onReasoning)
+	streamBody := common.NewIdleTimeoutReader(resp.Body, common.DefaultStreamIdleTimeout)
+	return parseSSEStream(ctx, streamBody, onChunk, onReasoning)
 }
 
 func parseResponse(body []byte) (*LLMResponse, error) {

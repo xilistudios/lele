@@ -2,11 +2,13 @@ package common
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- NewHTTPClient tests ---
@@ -46,6 +48,106 @@ func TestNewHTTPClient_InvalidProxy(t *testing.T) {
 	client := NewHTTPClient("://bad-url")
 	if client == nil {
 		t.Fatal("expected non-nil client even with invalid proxy")
+	}
+}
+
+func TestNewStreamingHTTPClient_NoTotalTimeout(t *testing.T) {
+	client := NewStreamingHTTPClient("")
+	if client.Timeout != 0 {
+		t.Errorf("timeout = %v, want 0 (no total timeout)", client.Timeout)
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	if tr.ResponseHeaderTimeout != DefaultResponseHeaderTimeout {
+		t.Errorf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, DefaultResponseHeaderTimeout)
+	}
+}
+
+func TestNewStreamingHTTPClient_WithProxy(t *testing.T) {
+	client := NewStreamingHTTPClient("http://127.0.0.1:8080")
+	if client.Timeout != 0 {
+		t.Errorf("timeout = %v, want 0 (no total timeout)", client.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("expected http.Transport with proxy, got %T", client.Transport)
+	}
+	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "api.example.com"}}
+	gotProxy, err := transport.Proxy(req)
+	if err != nil {
+		t.Fatalf("proxy function error: %v", err)
+	}
+	if gotProxy == nil || gotProxy.String() != "http://127.0.0.1:8080" {
+		t.Errorf("proxy = %v, want http://127.0.0.1:8080", gotProxy)
+	}
+}
+
+func TestIdleTimeoutReader_TimesOutWhenIdle(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewIdleTimeoutReader(pr, 50*time.Millisecond)
+
+	done := make(chan []byte, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1024)
+		_, err := r.Read(buf)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		done <- buf
+	}()
+
+	select {
+	case err := <-errCh:
+		if !strings.Contains(err.Error(), "idle timeout") {
+			t.Fatalf("error = %v, want idle timeout error", err)
+		}
+	case <-done:
+		t.Fatal("expected read to time out, but it returned data")
+	case <-time.After(2 * time.Second):
+		t.Fatal("read did not unblock within expected window")
+	}
+
+	// Clean up (Close unblocks the pipe writer).
+	_ = pw.Close()
+	_ = r.Close()
+}
+
+func TestIdleTimeoutReader_ResetsOnActivity(t *testing.T) {
+	pr, pw := io.Pipe()
+	r := NewIdleTimeoutReader(pr, 100*time.Millisecond)
+
+	// Writer goroutine: write bytes every 20ms for ~150ms total.
+	go func() {
+		for i := 0; i < 8; i++ {
+			_, _ = pw.Write([]byte{'a'})
+			time.Sleep(20 * time.Millisecond)
+		}
+		_ = pw.Close()
+	}()
+
+	payload, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v, want no idle timeout", err)
+	}
+	if len(payload) != 8 {
+		t.Errorf("read %d bytes, want 8", len(payload))
+	}
+	_ = r.Close()
+}
+
+func TestNewIdleTimeoutReader_ZeroTimeoutNoop(t *testing.T) {
+	// Use io.NopCloser to verify identity is preserved.
+	someCloser := io.NopCloser(strings.NewReader("data"))
+	r := NewIdleTimeoutReader(someCloser, 0)
+	if r != io.ReadCloser(someCloser) {
+		t.Errorf("expected the same reader to be returned unchanged for timeout<=0")
+	}
+	if r != someCloser {
+		t.Errorf("expected identity to be preserved, got a different reader")
 	}
 }
 
