@@ -143,9 +143,6 @@ func TestNewIdleTimeoutReader_ZeroTimeoutNoop(t *testing.T) {
 	// Use io.NopCloser to verify identity is preserved.
 	someCloser := io.NopCloser(strings.NewReader("data"))
 	r := NewIdleTimeoutReader(someCloser, 0)
-	if r != io.ReadCloser(someCloser) {
-		t.Errorf("expected the same reader to be returned unchanged for timeout<=0")
-	}
 	if r != someCloser {
 		t.Errorf("expected identity to be preserved, got a different reader")
 	}
