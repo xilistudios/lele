@@ -1,0 +1,18 @@
+{
+  "identifier": "desktop-remote",
+  "description": "IPC access for the local gateway origin served by the sidecar",
+  "local": false,
+  "remote": {
+    "urls": ["http://127.0.0.1:*/**", "http://localhost:*/**"]
+  },
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "app:allow-get-session",
+    "app:allow-backend-status",
+    "app:allow-restart-backend",
+    "app:allow-open-data-dir",
+    "app:allow-quit-app"
+  ]
+}

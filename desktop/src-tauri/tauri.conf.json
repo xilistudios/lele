@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lele Desktop",
+  "version": "0.1.0",
+  "identifier": "com.xilistudios.lele-desktop",
+  "build": {
+    "frontendDist": "../splash"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/lele"],
+    "category": "DeveloperTool",
+    "shortDescription": "Lele AI assistant desktop app",
+    "longDescription": "Native desktop shell for Lele: bundles the Lele gateway and web UI into a single app."
+  }
+}
