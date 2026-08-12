@@ -28,6 +28,7 @@ func (m *Model) getMarkdownRenderer(width int) *glamour.TermRenderer {
 // renderMarkdown renders markdown content for terminal display.
 // Uses glamour for full markdown rendering with fallback to simple header rendering.
 func (m *Model) renderMarkdown(content string, width int) string {
+	content = sanitizeDisplayText(content)
 	renderer := m.getMarkdownRenderer(width)
 	if renderer != nil {
 		rendered, err := renderer.Render(content)
@@ -143,6 +144,7 @@ func (m *Model) getRenderedThinking(width int) string {
 }
 
 func renderSingleLine(line string, width int) string {
+	line = sanitizeDisplayText(line)
 	// NOTE: line-by-line rendering during streaming does not preserve multi-line
 	// block context (tables, code fences); the final full render uses renderMarkdown.
 	trimmed := strings.TrimSpace(line)

@@ -800,6 +800,7 @@ func (m *Model) renderBgExecOutput() string {
 	if outputContent == "" {
 		outputContent = CommentColorStyle.Render("(no output)")
 	}
+	outputContent = sanitizeDisplayText(outputContent)
 
 	// Calculate available height for output
 	availableHeight := m.height - 8 // title + borders + hints + padding

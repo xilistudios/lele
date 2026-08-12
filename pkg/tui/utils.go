@@ -154,6 +154,7 @@ func formatToolCallArgsCompact(tc providers.ToolCall) string {
 
 // truncateToolResult returns a collapsed single-line summary of a tool result.
 func truncateToolResult(content string, maxLen int) string {
+	content = sanitizeDisplayText(content)
 	if content == "" {
 		return ""
 	}
