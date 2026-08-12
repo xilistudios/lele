@@ -49,9 +49,10 @@ var builderPool = sync.Pool{
 // Provider implements Anthropic Messages API via HTTP (without SDK).
 // It supports custom endpoints that use Anthropic's native message format.
 type Provider struct {
-	apiKey     string
-	apiBase    string
-	httpClient *http.Client
+	apiKey         string
+	apiBase        string
+	httpClient     *http.Client
+	requestTimeout time.Duration
 }
 
 // NewProvider creates a new Anthropic Messages API provider.
@@ -68,11 +69,10 @@ func NewProviderWithTimeout(apiKey, apiBase string, timeoutSeconds int) *Provide
 	}
 
 	return &Provider{
-		apiKey:  apiKey,
-		apiBase: baseURL,
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
+		apiKey:         apiKey,
+		apiBase:        baseURL,
+		httpClient:     common.NewStreamingHTTPClient(""),
+		requestTimeout: timeout,
 	}
 }
 
@@ -86,6 +86,12 @@ func (p *Provider) Chat(
 ) (*LLMResponse, error) {
 	if p.apiKey == "" {
 		return nil, fmt.Errorf("API key not configured")
+	}
+
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.requestTimeout)
+		defer cancel()
 	}
 
 	// Strip provider prefix from model name.
@@ -214,7 +220,8 @@ func (p *Provider) ChatStream(
 		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
 	}
 
-	return parseAnthropicSSEStream(ctx, resp.Body, onChunk, onReasoning)
+	streamBody := common.NewIdleTimeoutReader(resp.Body, common.DefaultStreamIdleTimeout)
+	return parseAnthropicSSEStream(ctx, streamBody, onChunk, onReasoning)
 }
 
 // GetDefaultModel returns the default model for this provider.

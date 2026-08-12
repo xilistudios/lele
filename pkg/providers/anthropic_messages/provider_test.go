@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildRequestBody(t *testing.T) {
@@ -1112,4 +1113,23 @@ func sseEvent(eventType, data string) string {
 // joinSSEEvents concatenates SSE event strings.
 func joinSSEEvents(events ...string) string {
 	return strings.Join(events, "")
+}
+func TestNewProvider_StreamingClientHasNoTotalTimeout(t *testing.T) {
+	p := NewProvider("k", "https://api.anthropic.com")
+	if p.httpClient.Timeout != 0 {
+		t.Errorf("httpClient.Timeout = %v, want 0 (no total timeout)", p.httpClient.Timeout)
+	}
+	if p.requestTimeout != defaultRequestTimeout {
+		t.Errorf("requestTimeout = %v, want %v", p.requestTimeout, defaultRequestTimeout)
+	}
+}
+
+func TestNewProviderWithTimeout_SetsRequestTimeout(t *testing.T) {
+	p := NewProviderWithTimeout("k", "https://api.anthropic.com", 30)
+	if p.requestTimeout != 30*time.Second {
+		t.Errorf("requestTimeout = %v, want %v", p.requestTimeout, 30*time.Second)
+	}
+	if p.httpClient.Timeout != 0 {
+		t.Errorf("httpClient.Timeout = %v, want 0 (no total timeout)", p.httpClient.Timeout)
+	}
 }

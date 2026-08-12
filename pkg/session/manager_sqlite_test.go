@@ -414,7 +414,7 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 	}
 	sm.Save(key)
 
-	// Exclude first 7 messages
+	// Exclude first 7 messages (index 0 preserved, indices 1-6 excluded)
 	sm.ExcludeOldMessagesFromContext(key, 3)
 	sm.Save(key)
 
@@ -429,8 +429,8 @@ func TestSQLite_SessionManager_ExcludeOldMessages(t *testing.T) {
 			excludedCount++
 		}
 	}
-	if excludedCount != 7 {
-		t.Errorf("expected 7 excluded messages, got %d", excludedCount)
+	if excludedCount != 6 {
+		t.Errorf("expected 6 excluded messages, got %d", excludedCount)
 	}
 }
 

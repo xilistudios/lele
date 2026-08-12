@@ -669,6 +669,10 @@ func isToolResultMessage(msg providers.Message) bool {
 // ExcludeOldMessagesFromContext marks the first len(messages)-keepCount messages
 // as excluded from the LLM context, preserving them in storage for the web UI.
 // If keepCount <= 0, all messages are excluded.
+//
+// The first message (index 0) is always preserved — it usually contains the
+// original user request/goal and must survive compaction. If it was previously
+// excluded (by an older version), it is un-excluded.
 func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount int) {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -714,16 +718,29 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 		}
 	}
 
-	// Ensure we don't exclude everything
-	if excludeUpTo <= 0 {
+	// Never exclude the first message (index 0) — it usually contains the
+	// original user request/goal and must survive compaction.
+	// If it was previously excluded (e.g., by an older version), un-exclude it.
+	rangeStart := 1
+	if len(session.Messages) > 0 && session.Messages[0].ExcludeFromContext {
+		session.Messages[0].ExcludeFromContext = false
+		rangeStart = 0
+	}
+
+	if excludeUpTo <= 1 {
+		if rangeStart == 0 {
+			// Only change is un-excluding msg 0 — persist that.
+			session.Updated = time.Now()
+			session.excludedRange = [2]int{0, 1}
+		}
 		return
 	}
 
-	for i := 0; i < excludeUpTo; i++ {
+	for i := 1; i < excludeUpTo; i++ {
 		session.Messages[i].ExcludeFromContext = true
 	}
 	session.Updated = time.Now()
-	session.excludedRange = [2]int{0, excludeUpTo}
+	session.excludedRange = [2]int{rangeStart, excludeUpTo}
 }
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.ensureLoaded()

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
@@ -38,30 +39,139 @@ type (
 
 const DefaultRequestTimeout = 120 * time.Second
 
+// DefaultResponseHeaderTimeout is how long to wait for the server to send
+// response headers before giving up (detects a hung/dead server).
+const DefaultResponseHeaderTimeout = DefaultRequestTimeout
+
+// DefaultStreamIdleTimeout is the maximum time allowed between streamed
+// bytes before the connection is considered stalled.
+const DefaultStreamIdleTimeout = 120 * time.Second
+
+// newTransport builds an *http.Transport cloning http.DefaultTransport and
+// applying an optional proxy. headerTimeout is the ResponseHeaderTimeout; pass
+// 0 to leave it unset.
+func newTransport(proxy string, headerTimeout time.Duration) *http.Transport {
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr := base.Clone()
+		if headerTimeout > 0 {
+			tr.ResponseHeaderTimeout = headerTimeout
+		}
+		if proxy != "" {
+			parsed, err := url.Parse(proxy)
+			if err == nil {
+				tr.Proxy = http.ProxyURL(parsed)
+			} else {
+				log.Printf("common: invalid proxy URL %q: %v", proxy, err)
+			}
+		}
+		return tr
+	}
+	// Fallback: minimal transport if DefaultTransport is not *http.Transport.
+	tr := &http.Transport{}
+	if headerTimeout > 0 {
+		tr.ResponseHeaderTimeout = headerTimeout
+	}
+	if proxy != "" {
+		parsed, err := url.Parse(proxy)
+		if err == nil {
+			tr.Proxy = http.ProxyURL(parsed)
+		}
+	}
+	return tr
+}
+
 // NewHTTPClient creates an *http.Client with an optional proxy and the default timeout.
 func NewHTTPClient(proxy string) *http.Client {
 	client := &http.Client{
 		Timeout: DefaultRequestTimeout,
 	}
 	if proxy != "" {
-		parsed, err := url.Parse(proxy)
-		if err == nil {
-			// Preserve http.DefaultTransport settings (TLS, HTTP/2, timeouts, etc.)
-			if base, ok := http.DefaultTransport.(*http.Transport); ok {
-				tr := base.Clone()
-				tr.Proxy = http.ProxyURL(parsed)
-				client.Transport = tr
-			} else {
-				// Fallback: minimal transport if DefaultTransport is not *http.Transport.
-				client.Transport = &http.Transport{
-					Proxy: http.ProxyURL(parsed),
-				}
-			}
-		} else {
-			log.Printf("common: invalid proxy URL %q: %v", proxy, err)
-		}
+		client.Transport = newTransport(proxy, 0)
 	}
 	return client
+}
+
+// NewStreamingHTTPClient creates an *http.Client tuned for long-lived
+// streaming responses: no total timeout (a reasoning model may stream for
+// minutes), but a ResponseHeaderTimeout so a hung/dead server is still
+// detected quickly.
+func NewStreamingHTTPClient(proxy string) *http.Client {
+	return &http.Client{
+		Timeout:   0,
+		Transport: newTransport(proxy, DefaultResponseHeaderTimeout),
+	}
+}
+
+// IdleTimeoutReader enforces a maximum idle time between reads. If no data
+// arrives within `timeout`, the underlying reader is closed and Read returns a
+// descriptive error. Long-lived streams can run indefinitely as long as data
+// keeps flowing, while a stalled connection is still detected.
+type IdleTimeoutReader struct {
+	r       io.ReadCloser
+	timeout time.Duration
+	mu      sync.Mutex
+	timer   *time.Timer
+	err     error
+}
+
+// NewIdleTimeoutReader wraps r with an idle timeout. If timeout <= 0, r is
+// returned unchanged (no idle timeout).
+func NewIdleTimeoutReader(r io.ReadCloser, timeout time.Duration) io.ReadCloser {
+	if timeout <= 0 {
+		return r
+	}
+	return &IdleTimeoutReader{r: r, timeout: timeout}
+}
+
+func (itr *IdleTimeoutReader) Read(p []byte) (int, error) {
+	itr.mu.Lock()
+	if itr.err != nil {
+		err := itr.err
+		itr.mu.Unlock()
+		return 0, err
+	}
+	if itr.timer == nil {
+		itr.timer = time.AfterFunc(itr.timeout, func() {
+			itr.mu.Lock()
+			if itr.err == nil {
+				itr.err = fmt.Errorf("stream read idle timeout: no data for %s", itr.timeout)
+			}
+			itr.mu.Unlock()
+			_ = itr.r.Close()
+		})
+	}
+	itr.timer.Reset(itr.timeout)
+	itr.mu.Unlock()
+
+	n, err := itr.r.Read(p)
+
+	itr.mu.Lock()
+	if itr.timer != nil {
+		itr.timer.Stop()
+	}
+	if err != nil && itr.err != nil {
+		err = itr.err
+	}
+	itr.mu.Unlock()
+
+	return n, err
+}
+
+// Close closes the underlying reader, stopping the idle timeout timer.
+func (itr *IdleTimeoutReader) Close() error {
+	itr.mu.Lock()
+	if itr.timer != nil {
+		itr.timer.Stop()
+		itr.timer = nil
+	}
+	itr.mu.Unlock()
+	err := itr.r.Close()
+	itr.mu.Lock()
+	if itr.err == nil {
+		itr.err = err
+	}
+	itr.mu.Unlock()
+	return err
 }
 
 // --- Message serialization ---
