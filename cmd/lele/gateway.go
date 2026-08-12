@@ -2,12 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/agent"
@@ -17,6 +25,7 @@ import (
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/devices"
 	"github.com/xilistudios/lele/pkg/heartbeat"
+	"github.com/xilistudios/lele/pkg/lockfile"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/server"
 	"github.com/xilistudios/lele/pkg/state"
@@ -25,33 +34,106 @@ import (
 	"github.com/xilistudios/lele/pkg/voice"
 )
 
-func gatewayCmd() {
-	args := os.Args[2:]
-	for _, arg := range args {
-		if arg == "--debug" || arg == "-d" {
-			logger.SetLevel(logger.DEBUG)
-			fmt.Println("🔍 Debug mode enabled")
-			break
+// gatewayOut is the destination for human-readable gateway output. In normal
+// (non-desktop) mode it defaults to os.Stdout. In desktop mode it is switched
+// to os.Stderr so stdout stays reserved for machine-readable LELE_READY and
+// LELE_ERROR lines.
+var gatewayOut io.Writer = os.Stdout
+
+// parseGatewayFlags extracts gateway flags from raw args.
+// Returns desktop mode (--desktop or LELE_DESKTOP=1 env), port override
+// (--port N; -1 means "not specified"), and debug flag.
+func parseGatewayFlags(args []string) (desktop bool, port int, debug bool) {
+	port = -1
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "--desktop":
+			desktop = true
+		case "--port":
+			if i+1 < len(args) {
+				if n, err := strconv.Atoi(args[i+1]); err == nil {
+					port = n
+				}
+				i++
+			}
+		case "--debug", "-d":
+			debug = true
 		}
+	}
+	if os.Getenv("LELE_DESKTOP") == "1" {
+		desktop = true
+	}
+	return desktop, port, debug
+}
+
+// emitDesktopError writes a machine-readable error line to stdout. It is only
+// used in desktop mode; the JSON is built with encoding/json so the error
+// field is properly escaped.
+func emitDesktopError(code string, extra map[string]interface{}) {
+	payload := make(map[string]interface{}, len(extra)+1)
+	for k, v := range extra {
+		payload[k] = v
+	}
+	payload["code"] = code
+	data, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stdout, "LELE_ERROR {\"code\":%q}\n", code)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "LELE_ERROR %s\n", data)
+}
+
+func gatewayCmd() {
+	desktop, portOverride, debug := parseGatewayFlags(os.Args[2:])
+	if debug {
+		logger.SetLevel(logger.DEBUG)
+		fmt.Fprintln(gatewayOut, "🔍 Debug mode enabled")
+	}
+	if desktop {
+		gatewayOut = os.Stderr
 	}
 
 	cfg, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Desktop mode serves the web UI and API exclusively through the native
+	// channel, so it must be enabled regardless of the user's config.
+	if desktop {
+		cfg.Channels.Native.Enabled = true
 	}
 
 	setupFileLogging(cfg)
 
+	// In desktop mode a single gateway instance must be running; a lockfile
+	// guards against a second instance being launched while the first lives.
+	if desktop {
+		lockPath := filepath.Join(getLeleDir(), "gateway.lock")
+		lock, err := lockfile.Acquire(lockPath)
+		if err != nil {
+			var arErr *lockfile.AlreadyRunningError
+			if errors.As(err, &arErr) {
+				emitDesktopError("already_running", map[string]interface{}{"pid": arErr.PID})
+				os.Exit(1)
+			}
+			emitDesktopError("lock_failed", map[string]interface{}{"error": err.Error()})
+			os.Exit(1)
+		}
+		defer lock.Release()
+	}
+
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
-	fmt.Println("\n📦 Agent Status:")
+	fmt.Fprintln(gatewayOut, "\n📦 Agent Status:")
 	startupInfo := agentLoop.GetStartupInfo()
 	toolsInfo := startupInfo["tools"].(map[string]interface{})
 	skillsInfo := startupInfo["skills"].(map[string]interface{})
-	fmt.Printf("  • Tools: %d loaded\n", toolsInfo["count"])
-	fmt.Printf("  • Skills: %d/%d available\n",
+	fmt.Fprintf(gatewayOut, "  • Tools: %d loaded\n", toolsInfo["count"])
+	fmt.Fprintf(gatewayOut, "  • Skills: %d/%d available\n",
 		skillsInfo["available"],
 		skillsInfo["total"])
 
@@ -88,7 +170,7 @@ func gatewayCmd() {
 
 	channelManager, err := channels.NewManager(cfg, msgBus, agentLoop.GetProvidable(), approvalManager)
 	if err != nil {
-		fmt.Printf("Error creating channel manager: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error creating channel manager: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -136,14 +218,28 @@ func gatewayCmd() {
 
 	enabledChannels := channelManager.GetEnabledChannels()
 	if len(enabledChannels) > 0 {
-		fmt.Printf("✓ Channels enabled: %s\n", enabledChannels)
+		fmt.Fprintf(gatewayOut, "✓ Channels enabled: %s\n", enabledChannels)
 	} else {
-		fmt.Println("⚠ Warning: No channels enabled")
+		fmt.Fprintln(gatewayOut, "⚠ Warning: No channels enabled")
 	}
 
 	// --- Unified Server Setup ---
 	serverHost := cfg.EffectiveServerHost()
 	serverPort := cfg.EffectiveServerPort()
+
+	if desktop {
+		// In desktop mode the server must only be reachable from the local
+		// machine (the Tauri shell), regardless of the configured host.
+		serverHost = "127.0.0.1"
+		if portOverride >= 0 {
+			serverPort = portOverride
+		} else {
+			// Dynamic port by default so multiple desktop sessions never clash.
+			serverPort = 0
+		}
+	} else if portOverride >= 0 {
+		serverPort = portOverride
+	}
 
 	srv := server.New(&server.Config{
 		Host: serverHost,
@@ -193,6 +289,25 @@ func gatewayCmd() {
 				heartbeatService.UpdateConfig(updated.Heartbeat.Interval, updated.Heartbeat.Enabled)
 				return nil
 			})
+			// In desktop mode the Tauri shell authenticates with a fixed
+			// trusted client. Register it so desktop auto-auth works.
+			if desktop {
+				token := os.Getenv("LELE_DESKTOP_TOKEN")
+				if token != "" {
+					refresh := os.Getenv("LELE_DESKTOP_REFRESH")
+					if refresh == "" {
+						sum := sha256.Sum256([]byte(token + ":refresh"))
+						refresh = hex.EncodeToString(sum[:])
+					}
+					if err := nc.RegisterDesktopClient(token, refresh); err != nil {
+						logger.ErrorCF("native", "Failed to register desktop client", map[string]interface{}{"error": err.Error()})
+					} else {
+						logger.InfoCF("native", "Desktop client registered", map[string]interface{}{"client_id": channels.DesktopClientID})
+					}
+				} else {
+					logger.WarnC("native", "Desktop mode enabled but LELE_DESKTOP_TOKEN not set; desktop auto-auth disabled")
+				}
+			}
 		}
 	}
 
@@ -203,37 +318,54 @@ func gatewayCmd() {
 		}
 	}
 
-	fmt.Printf("✓ Unified server starting on %s:%d\n", serverHost, serverPort)
-	fmt.Println("  • Web UI:      /")
-	fmt.Println("  • API:         /api/v1/*")
-	fmt.Println("  • Health:      /health, /ready")
-	fmt.Println("  • WebSocket:   /api/v1/ws")
-	if lineCh, ok := channelManager.GetChannel("line"); ok {
-		_ = lineCh
-		fmt.Println("  • LINE webhook /webhook/line")
-	}
-	fmt.Println("Press Ctrl+C to stop")
-
 	// Start unified server immediately so the Web UI and WebSocket endpoint
 	// are available while channels initialize (some channels block in Start).
+	// We bind the listener first so we can report the actual (dynamic) address.
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", serverHost, serverPort))
+	if err != nil {
+		if desktop {
+			emitDesktopError("bind_failed", map[string]interface{}{"error": err.Error()})
+			os.Exit(1)
+		}
+		fmt.Fprintf(gatewayOut, "Error binding server: %v\n", err)
+		os.Exit(1)
+	}
+	actualAddr := ln.Addr().String()
+
+	fmt.Fprintf(gatewayOut, "✓ Unified server starting on %s\n", actualAddr)
+	fmt.Fprintln(gatewayOut, "  • Web UI:      /")
+	fmt.Fprintln(gatewayOut, "  • API:         /api/v1/*")
+	fmt.Fprintln(gatewayOut, "  • Health:      /health, /ready")
+	fmt.Fprintln(gatewayOut, "  • WebSocket:   /api/v1/ws")
+	if lineCh, ok := channelManager.GetChannel("line"); ok {
+		_ = lineCh
+		fmt.Fprintln(gatewayOut, "  • LINE webhook /webhook/line")
+	}
+	fmt.Fprintln(gatewayOut, "Press Ctrl+C to stop")
+
 	go func() {
-		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.ErrorCF("server", "Unified server error", map[string]interface{}{"error": err.Error()})
 		}
 	}()
+	if desktop {
+		_, portStr, _ := net.SplitHostPort(actualAddr)
+		port, _ := strconv.Atoi(portStr)
+		fmt.Fprintf(os.Stdout, "LELE_READY {\"url\":\"http://%s\",\"port\":%d}\n", actualAddr, port)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if err := cronService.Start(); err != nil {
-		fmt.Printf("Error starting cron service: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error starting cron service: %v\n", err)
 	}
-	fmt.Println("✓ Cron service started")
+	fmt.Fprintln(gatewayOut, "✓ Cron service started")
 
 	if err := heartbeatService.Start(); err != nil {
-		fmt.Printf("Error starting heartbeat service: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error starting heartbeat service: %v\n", err)
 	}
-	fmt.Println("✓ Heartbeat service started")
+	fmt.Fprintln(gatewayOut, "✓ Heartbeat service started")
 
 	stateManager := state.NewManager(cfg.WorkspacePath())
 	deviceService := devices.NewService(devices.Config{
@@ -242,13 +374,13 @@ func gatewayCmd() {
 	}, stateManager)
 	deviceService.SetBus(msgBus)
 	if err := deviceService.Start(ctx); err != nil {
-		fmt.Printf("Error starting device service: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error starting device service: %v\n", err)
 	} else if cfg.Devices.Enabled {
-		fmt.Println("✓ Device event service started")
+		fmt.Fprintln(gatewayOut, "✓ Device event service started")
 	}
 
 	if err := channelManager.StartAll(ctx); err != nil {
-		fmt.Printf("Error starting channels: %v\n", err)
+		fmt.Fprintf(gatewayOut, "Error starting channels: %v\n", err)
 	}
 
 	configWatcher := config.NewConfigWatcher(getConfigPath())
@@ -270,10 +402,10 @@ func gatewayCmd() {
 	go agentLoop.Run(ctx)
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	fmt.Println("\nShutting down...")
+	fmt.Fprintln(gatewayOut, "\nShutting down...")
 	cancel()
 	configWatcher.Stop()
 	srv.Stop(context.Background())
@@ -282,7 +414,7 @@ func gatewayCmd() {
 	cronService.Stop()
 	agentLoop.Stop()
 	channelManager.StopAll(ctx)
-	fmt.Println("✓ Gateway stopped")
+	fmt.Fprintln(gatewayOut, "✓ Gateway stopped")
 }
 
 func setupCronTool(executor tools.JobExecutor, al *agent.AgentLoop, msgBus *bus.MessageBus, workspace string, restrict bool, execTimeout time.Duration, config *config.Config) *cron.CronService {

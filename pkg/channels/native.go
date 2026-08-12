@@ -92,6 +92,15 @@ func (n *NativeChannel) SetReloadConfig(fn func() error) {
 	n.reloadConfig = fn
 }
 
+// RegisterDesktopClient registers the built-in desktop client with the
+// underlying auth manager. See AuthManager.RegisterDesktopClient.
+func (nc *NativeChannel) RegisterDesktopClient(token, refreshToken string) error {
+	if nc == nil || nc.auth == nil {
+		return fmt.Errorf("native channel not initialized")
+	}
+	return nc.auth.RegisterDesktopClient(token, refreshToken)
+}
+
 type WSClient struct {
 	ID            string
 	Conn          *websocket.Conn

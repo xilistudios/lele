@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -22,7 +23,8 @@ type Server struct {
 	checks    map[string]health.Check
 	startTime time.Time
 	ready     bool
-	mu        sync.RWMutex
+	actualAddr string
+	mu         sync.RWMutex
 }
 
 // Config holds server configuration.
@@ -113,6 +115,7 @@ func (s *Server) SetReady(ready bool) {
 func (s *Server) Start() error {
 	s.mu.Lock()
 	s.ready = true
+	s.actualAddr = s.http.Addr
 	s.mu.Unlock()
 
 	logger.InfoCF("server", "Starting unified server", map[string]interface{}{
@@ -123,6 +126,52 @@ func (s *Server) Start() error {
 		return err
 	}
 	return nil
+}
+
+// Serve begins serving on an externally provided listener. This enables
+// dynamic port allocation (e.g., port 0); the actual bound address is
+// available via ActualAddr() once serving begins.
+func (s *Server) Serve(ln net.Listener) error {
+	s.mu.Lock()
+	s.ready = true
+	s.actualAddr = ln.Addr().String()
+	s.mu.Unlock()
+
+	actual := ln.Addr().String()
+	logger.InfoCF("server", "Starting unified server", map[string]interface{}{
+		"address": actual,
+	})
+
+	if err := s.http.Serve(ln); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// ActualAddr returns the actual bound address (e.g. "127.0.0.1:54321").
+// If the server hasn't begun serving on a dynamic listener yet, it falls back
+// to the statically configured address.
+func (s *Server) ActualAddr() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.actualAddr != "" {
+		return s.actualAddr
+	}
+	return s.http.Addr
+}
+
+// ActualPort returns the port parsed from ActualAddr(). It returns 0 if the
+// address cannot be parsed.
+func (s *Server) ActualPort() int {
+	_, portStr, err := net.SplitHostPort(s.ActualAddr())
+	if err != nil {
+		return 0
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		return 0
+	}
+	return port
 }
 
 // Stop gracefully shuts down the server.

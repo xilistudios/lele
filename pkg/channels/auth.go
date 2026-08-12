@@ -26,6 +26,11 @@ type AuthManager struct {
 	repo      *store.NativeClientRepo // SQLite store (nil = use JSON file)
 }
 
+// DesktopClientID is the fixed client ID for the built-in trusted client used
+// by the desktop app when running in desktop mode. It is exempt from the
+// MaxClients limit and never expires while the gateway runs.
+const DesktopClientID = "desktop-local"
+
 func NewAuthManager(cfg *config.NativeConfig, leleDir string) (*AuthManager, error) {
 	am := &AuthManager{
 		cfg:       cfg,
@@ -421,6 +426,50 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 	}
 
 	return client, token, refreshToken, nil
+}
+
+// RegisterDesktopClient registers a built-in trusted client used by the
+// desktop app when running in desktop mode. The client is keyed by a fixed
+// client ID ("desktop-local") so repeated registrations (sidecar restarts)
+// replace the previous entry instead of accumulating. The provided token and
+// refreshToken are stored as hashes only; the raw values never touch disk.
+// The client never expires while the gateway runs in desktop mode.
+func (am *AuthManager) RegisterDesktopClient(token, refreshToken string) error {
+	if token == "" || refreshToken == "" {
+		return fmt.Errorf("desktop token must not be empty")
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	if am.store == nil {
+		return fmt.Errorf("client store not initialized")
+	}
+
+	// The desktop client is exempt from the MaxClients limit: it is a
+	// built-in client, and the map assignment below is an upsert keyed by
+	// the fixed DesktopClientID. For an existing key the map does not grow,
+	// and for a new key at capacity we insert regardless rather than evict.
+	client := &ClientInfo{
+		ClientID:    DesktopClientID,
+		TokenHash:   hashToken(token),
+		RefreshHash: hashToken(refreshToken),
+		DeviceName:  "Lele Desktop",
+		Created:     time.Now(),
+		Expires:     time.Now().AddDate(10, 0, 0), // effectively non-expiring
+		LastSeen:    time.Now(),
+		SessionKeys: []string{DesktopClientID},
+	}
+
+	am.store.Clients[DesktopClientID] = client
+
+	if err := am.saveStoreUnlocked(); err != nil {
+		logger.ErrorCF("native", "Failed to save store after registering desktop client", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+
+	return nil
 }
 
 func (am *AuthManager) ValidateToken(token string) (*ClientInfo, bool) {
