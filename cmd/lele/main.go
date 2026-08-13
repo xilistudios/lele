@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/xilistudios/lele/pkg/skills"
 )
@@ -13,14 +14,20 @@ func main() {
 	if configDir != "" {
 		os.Setenv("LELE_CONFIG_DIR", configDir)
 	}
+
+	sessionID, remaining := parseSessionFlag(remaining)
 	os.Args = append([]string{os.Args[0]}, remaining...)
 
-	if len(os.Args) < 2 {
+	if len(remaining) < 1 {
+		if sessionID != "" {
+			tuiCmd(sessionID)
+			return
+		}
 		printHelp()
 		os.Exit(1)
 	}
 
-	command := os.Args[1]
+	command := remaining[0]
 
 	switch command {
 	case "onboard":
@@ -94,17 +101,6 @@ func main() {
 	case "update":
 		updateCmd()
 	case "tui":
-		// Parse -s flag for session ID
-		sessionID := ""
-		args := os.Args[2:]
-		for i := 0; i < len(args); i++ {
-			if args[i] == "-s" || args[i] == "--session" {
-				if i+1 < len(args) {
-					sessionID = args[i+1]
-					break
-				}
-			}
-		}
 		tuiCmd(sessionID)
 	case "version", "--version", "-v":
 		printVersion()
@@ -115,24 +111,69 @@ func main() {
 	}
 }
 
-func parseConfigDirFlag(args []string) (configDir string, remaining []string) {
+func parseSessionFlag(args []string) (sessionID string, remaining []string) {
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--config-dir" || args[i] == "-c" {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--session=") {
+			sessionID = strings.TrimPrefix(arg, "--session=")
+			remaining = append(remaining, args[:i]...)
+			remaining = append(remaining, args[i+1:]...)
+			return sessionID, remaining
+		}
+		if strings.HasPrefix(arg, "-s=") {
+			sessionID = strings.TrimPrefix(arg, "-s=")
+			remaining = append(remaining, args[:i]...)
+			remaining = append(remaining, args[i+1:]...)
+			return sessionID, remaining
+		}
+		if arg == "-s" || arg == "--session" {
 			if i+1 < len(args) {
-				configDir = args[i+1]
-				// Validate the path
-				if info, err := os.Stat(configDir); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: config directory does not exist: %s\n", configDir)
-					os.Exit(1)
-				} else if !info.IsDir() {
-					fmt.Fprintf(os.Stderr, "Error: config path is not a directory: %s\n", configDir)
-					os.Exit(1)
-				}
+				sessionID = args[i+1]
 				remaining = append(remaining, args[:i]...)
 				remaining = append(remaining, args[i+2:]...)
-				return
+				return sessionID, remaining
 			}
 		}
 	}
 	return "", args
+}
+
+func parseConfigDirFlag(args []string) (configDir string, remaining []string) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--config-dir=") {
+			configDir = strings.TrimPrefix(arg, "--config-dir=")
+			validateConfigDir(configDir)
+			remaining = append(remaining, args[:i]...)
+			remaining = append(remaining, args[i+1:]...)
+			return configDir, remaining
+		}
+		if strings.HasPrefix(arg, "-c=") {
+			configDir = strings.TrimPrefix(arg, "-c=")
+			validateConfigDir(configDir)
+			remaining = append(remaining, args[:i]...)
+			remaining = append(remaining, args[i+1:]...)
+			return configDir, remaining
+		}
+		if arg == "--config-dir" || arg == "-c" {
+			if i+1 < len(args) {
+				configDir = args[i+1]
+				validateConfigDir(configDir)
+				remaining = append(remaining, args[:i]...)
+				remaining = append(remaining, args[i+2:]...)
+				return configDir, remaining
+			}
+		}
+	}
+	return "", args
+}
+
+func validateConfigDir(configDir string) {
+	if info, err := os.Stat(configDir); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: config directory does not exist: %s\n", configDir)
+		os.Exit(1)
+	} else if !info.IsDir() {
+		fmt.Fprintf(os.Stderr, "Error: config path is not a directory: %s\n", configDir)
+		os.Exit(1)
+	}
 }

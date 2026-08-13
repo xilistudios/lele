@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -298,9 +297,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/quit":
-		m.printSessionSummary()
 		m.cancel()
-		os.Exit(0)
+		return tea.Quit
 	}
 	return nil
 }

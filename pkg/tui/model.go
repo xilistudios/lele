@@ -121,9 +121,17 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		sessions := sessionMgr.ListSessions()
 		found := false
 		for _, s := range sessions {
-			if s.Key == sid {
-				m.currentKey = sid
+			if s.Key == sid || strings.TrimPrefix(s.Key, "tui:chat:") == sid || s.Key == "tui:chat:"+sid {
+				m.currentKey = s.Key
 				m.showWelcome = false
+				switch s.Mode {
+				case "chat":
+					m.currentMode = ModeChat
+				case "group":
+					m.currentMode = ModeGroup
+				case "agent":
+					m.currentMode = ModeAgent
+				}
 				found = true
 				break
 			}
@@ -531,33 +539,18 @@ func (m *Model) getHistoryMessageCount() int {
 	return count
 }
 
-// printSessionSummary prints a summary of the session to stderr before exiting.
-func (m *Model) printSessionSummary() {
-	sessionID := m.currentKey
-	if sessionID == "" {
-		sessionID = "(none)"
+// ResumeSessionID returns the session ID suitable for resuming the current chat session from the CLI.
+// Returns an empty string if there is no active session.
+func (m *Model) ResumeSessionID() string {
+	key := m.currentKey
+	if m.parentSessionKey != "" {
+		key = m.parentSessionKey
 	}
-
-	// Count role name repetitions in history
-	userCount := 0
-	assistantCount := 0
-	if m.currentKey != "" {
-		history := m.agentLoop.GetProvidable().GetHistoryView(m.currentKey)
-		for _, msg := range history {
-			switch msg.Role {
-			case "user":
-				userCount++
-			case "assistant":
-				assistantCount++
-			}
-		}
+	if key == "" {
+		return ""
 	}
-	totalNames := userCount + assistantCount
-
-	// Calculate session duration
-	duration := time.Since(m.sessionStartTime).Seconds()
-
-	fmt.Fprintf(os.Stderr, "Session: %s\n", sessionID)
-	fmt.Fprintf(os.Stderr, "Repeticiones de nombres: %d\n", totalNames)
-	fmt.Fprintf(os.Stderr, "Segundos: %.1f\n", duration)
+	if m.showWelcome && m.getHistoryMessageCount() == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(key, "tui:chat:")
 }
