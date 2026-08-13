@@ -257,22 +257,57 @@ func (m *Model) updateViewport() {
 	}
 }
 
-// maybeExpandRenderWindow expands the lazy-load render window backwards by
-// lazyLoadBatchSize messages when the user has scrolled to the very top and
-// older unrendered messages exist. It rebuilds the viewport and compensates
-// YOffset so the content that was at the top stays visible. Returns true if
-// the window was expanded.
+// maybeExpandRenderWindow expands the lazy-load render window backwards when
+// the user has scrolled to the very top and older unrendered messages exist.
+// It handles two cases:
+//
+//  1. In-memory expansion: when renderStartIdx > 0 there are still older
+//     messages in the in-memory slice before the window. The window expands
+//     backwards by lazyLoadBatchSize.
+//  2. Eviction-boundary expansion: when renderStartIdx == 0 the window has been
+//     fully expanded within the in-memory slice, but evicted (excluded,
+//     persisted-only) messages may still exist in SQLite beyond the boundary.
+//     Those are loaded back into memory and renderStartIdx is shifted past them
+//     so subsequent scroll-ups reveal them in the usual lazyLoadBatchSize
+//     batches.
+//
+// In both cases it rebuilds the viewport and compensates YOffset so the content
+// that was at the top stays visible. Returns true if the window was expanded.
 func (m *Model) maybeExpandRenderWindow() bool {
-	if m.currentKey == "" || !m.viewport.AtTop() || m.renderStartIdx <= 0 {
+	if m.currentKey == "" || !m.viewport.AtTop() {
 		return false
 	}
+	// -1 means uninitialized (window not computed yet) — nothing to expand.
+	if m.renderStartIdx < 0 {
+		return false
+	}
+
 	oldTotal := m.viewport.totalLines()
 
-	newStart := m.renderStartIdx - lazyLoadBatchSize
-	if newStart < 0 {
-		newStart = 0
+	if m.renderStartIdx > 0 {
+		// In-memory expansion: reveal the next lazyLoadBatchSize older messages.
+		newStart := m.renderStartIdx - lazyLoadBatchSize
+		if newStart < 0 {
+			newStart = 0
+		}
+		m.renderStartIdx = newStart
+	} else {
+		// renderStartIdx == 0: fully expanded in memory. Check for evicted
+		// messages beyond the in-memory slice (still in SQLite).
+		evicted := m.agentLoop.GetProvidable().GetEvictedMessageCount(m.currentKey)
+		if evicted <= 0 {
+			return false
+		}
+		loaded := m.agentLoop.GetProvidable().LoadEvictedMessages(m.currentKey)
+		if loaded <= 0 {
+			return false
+		}
+		// The history slice grew by `loaded` messages at the FRONT. Keep the
+		// same visible content by shifting renderStartIdx past the newly
+		// loaded messages, so subsequent scroll-ups reveal them in the usual
+		// lazyLoadBatchSize batches.
+		m.renderStartIdx = loaded
 	}
-	m.renderStartIdx = newStart
 
 	// Force a base rebuild on the next updateViewport pass.
 	m.renderedBaseValid = false
@@ -361,8 +396,12 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 	// Pre-allocate result with a reasonable capacity estimate.
 	result := make([]string, 0, min(totalMsgs-startIdx, m.maxRenderedMessages)*8)
 
-	if startIdx > 0 {
-		header := CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)", startIdx))
+	// Count both in-memory messages before the window AND evicted messages
+	// not yet in memory (persisted in SQLite). Shows the header when either
+	// source has older messages to reveal by scrolling up.
+	earlierCount := startIdx + m.agentLoop.GetProvidable().GetEvictedMessageCount(m.currentKey)
+	if earlierCount > 0 {
+		header := CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)", earlierCount))
 		result = append(result, header, "")
 	}
 

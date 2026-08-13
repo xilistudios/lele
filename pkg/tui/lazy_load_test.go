@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // seedLazySession creates a session with the given number of user+assistant
@@ -185,5 +187,163 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 	}
 	if m.renderStartIdx != 120 {
 		t.Fatalf("expected renderStartIdx=120 back for A, got %d", m.renderStartIdx)
+	}
+}
+// newEvictionTestModel builds a TUI model like newTestModel but attaches a real
+// SQLite store to the session manager so eviction and lazy-load of evicted
+// messages are enabled.
+func newEvictionTestModel(t *testing.T) *Model {
+	t.Helper()
+	m := newTestModel(t)
+	s, err := store.Open(filepath.Join(t.TempDir(), "tui-evict.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	m.sessionMgr.SetStore(s)
+	return m
+}
+
+// seedEvictionSession seeds a session with the given number of user+assistant
+// pairs, excludes the older prefix from context (keeping `keep` messages), and
+// evicts the excluded messages from memory. The excluded prefix remains in
+// SQLite and can be lazy-loaded. Returns the number of messages evicted.
+func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) int {
+	t.Helper()
+
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+
+	for i := 0; i < pairs; i++ {
+		m.sessionMgr.AddMessage(key, "user", fmt.Sprintf("Evict question %d?", i))
+		m.sessionMgr.AddMessage(key, "assistant", fmt.Sprintf("Evict answer %d.", i))
+	}
+
+	if err := m.sessionMgr.Save(key); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+	m.sessionMgr.ExcludeOldMessagesFromContext(key, keep)
+	if err := m.sessionMgr.Save(key); err != nil {
+		t.Fatalf("exclude Save: %v", err)
+	}
+
+	evicted := m.sessionMgr.EvictExcludedMessages(key)
+	if evicted <= 0 {
+		t.Fatalf("EvictExcludedMessages = %d, want > 0", evicted)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount after evict = %d, want %d", got, evicted)
+	}
+	return evicted
+}
+
+// TestLazyLoad_ExpandAcrossEvictionBoundary verifies that once the in-memory
+// render window is fully expanded (renderStartIdx == 0), scrolling to the top
+// crosses the eviction boundary: it loads the evicted messages back from
+// SQLite, shifts renderStartIdx past them, and subsequent expansions reveal
+// them in the usual lazyLoadBatchSize batches.
+func TestLazyLoad_ExpandAcrossEvictionBoundary(t *testing.T) {
+	m := newEvictionTestModel(t)
+	const key = "tui:chat:evict-a"
+
+	// 12 pairs = 24 messages; keep 5 → 19 excluded/evicted.
+	evicted := seedEvictionSession(t, m, key, 12, 5)
+	if evicted != 19 {
+		t.Fatalf("expected 19 evicted, got %d", evicted)
+	}
+
+	m.currentKey = key
+	m.showWelcome = false
+	m.forceGotoBottom = true
+	m.reloadSessions()
+	renderLazyModel(t, m)
+
+	// Few in-memory messages (5) are below the render cap, so the window is
+	// fully expanded in memory.
+	if m.renderStartIdx != 0 {
+		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount before expand = %d, want %d", got, evicted)
+	}
+
+	// First expansion crosses the eviction boundary: load all evicted messages.
+	m.viewport.GotoTop()
+	if !m.maybeExpandRenderWindow() {
+		t.Fatal("expected maybeExpandRenderWindow to return true crossing the boundary")
+	}
+	if m.renderStartIdx != evicted {
+		t.Fatalf("expected renderStartIdx=%d after crossing boundary, got %d", evicted, m.renderStartIdx)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != 0 {
+		t.Fatalf("GetEvictedMessageCount after load = %d, want 0", got)
+	}
+	// renderStartIdx was shifted to `evicted`, so the same visible content
+	// (header + last 5 in-memory messages) stays at the top — no line delta,
+	// thus YOffset compensation is 0 here. The loaded messages are revealed by
+	// subsequent scroll-up expansions.
+
+	// Render and assert the header shows the loaded count.
+	m.viewport.GotoTop()
+	out := m.View()
+	wantHeader := fmt.Sprintf("↑ %d earlier messages", evicted)
+	if !strings.Contains(out, wantHeader) {
+		t.Fatalf("expected header %q in view, got:\n%s", wantHeader, out)
+	}
+
+	// Continue expanding until nothing is left to load.
+	steps := 0
+	for {
+		m.viewport.GotoTop()
+		if !m.maybeExpandRenderWindow() {
+			break
+		}
+		steps++
+		if steps > 100 {
+			t.Fatal("expansion did not terminate")
+		}
+	}
+	if m.renderStartIdx != 0 {
+		t.Fatalf("expected renderStartIdx=0 after full expansion, got %d", m.renderStartIdx)
+	}
+	// A final call with everything loaded returns false.
+	m.viewport.GotoTop()
+	if m.maybeExpandRenderWindow() {
+		t.Fatal("expected maybeExpandRenderWindow to return false when nothing left to load")
+	}
+}
+
+// TestLazyLoad_HeaderCountsEvicted verifies that BEFORE loading, when
+// renderStartIdx == 0 but evicted > 0, the rendered header already shows the
+// evicted count (so the user knows older history is available).
+func TestLazyLoad_HeaderCountsEvicted(t *testing.T) {
+	m := newEvictionTestModel(t)
+	const key = "tui:chat:evict-b"
+
+	evicted := seedEvictionSession(t, m, key, 12, 5)
+	if evicted != 19 {
+		t.Fatalf("expected 19 evicted, got %d", evicted)
+	}
+
+	m.currentKey = key
+	m.showWelcome = false
+	m.forceGotoBottom = true
+	m.reloadSessions()
+	renderLazyModel(t, m)
+
+	if m.renderStartIdx != 0 {
+		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount = %d, want %d", got, evicted)
+	}
+
+	// Render WITHOUT triggering expansion — the header must already show the
+	// evicted count even though renderStartIdx == 0.
+	m.viewport.GotoTop()
+	out := m.View()
+	wantHeader := fmt.Sprintf("↑ %d earlier messages", evicted)
+	if !strings.Contains(out, wantHeader) {
+		t.Fatalf("expected header %q in view, got:\n%s", wantHeader, out)
 	}
 }
