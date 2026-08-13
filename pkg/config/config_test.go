@@ -927,3 +927,37 @@ func TestAgentConfig_Description(t *testing.T) {
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 func boolPtr(b bool) *bool    { return &b }
+func TestConfig_EvictExcluded_Default(t *testing.T) {
+	t.Setenv("LELE_EVICT_EXCLUDED", "")
+	cfg := DefaultConfig()
+
+	if !cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be true by default")
+	}
+}
+
+func TestConfig_EvictExcluded_False(t *testing.T) {
+	t.Setenv("LELE_EVICT_EXCLUDED", "")
+	cfg := DefaultConfig()
+	cfg.Session.EvictExcludedFromMemory = false
+
+	if cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be false when Session.EvictExcludedFromMemory is false")
+	}
+}
+
+func TestConfig_EvictExcluded_EnvOverride(t *testing.T) {
+	// Config true but env forces false.
+	cfg := DefaultConfig()
+	t.Setenv("LELE_EVICT_EXCLUDED", "false")
+	if cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be false when LELE_EVICT_EXCLUDED=false")
+	}
+
+	// Config false but env forces true.
+	cfg.Session.EvictExcludedFromMemory = false
+	t.Setenv("LELE_EVICT_EXCLUDED", "true")
+	if !cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be true when LELE_EVICT_EXCLUDED=true")
+	}
+}
