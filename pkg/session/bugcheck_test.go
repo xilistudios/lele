@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/xilistudios/lele/pkg/providers"
 	"encoding/json"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // TestSQLite_GapAware_FullRewriteThenAppend_PersistsSubsequentAppend verifies

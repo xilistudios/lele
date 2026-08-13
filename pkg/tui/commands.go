@@ -39,7 +39,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")
 			}
-			count := len(s.Messages)
+			count := m.sessionMgr.GetTotalMessageCount(s.Key)
 
 			// Check if session is currently processing
 			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)

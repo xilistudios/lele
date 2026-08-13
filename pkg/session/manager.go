@@ -180,23 +180,64 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 					"expected_rows":   maxSeq - boundary + 1,
 					"loaded_rows":     len(msgJSONs),
 				})
-				// Genuine corruption above the boundary: rebuild from all
-				// persisted rows and anchor the boundary to the actual first
-				// persisted seq instead of blindly 0, preserving the invariant
-				// seq = firstInMemorySeq + sliceIndex.
+				// Genuine corruption above the boundary: rebuild from persisted rows
+				// and anchor the boundary to the first non-excluded in-context message.
 				fullRows, fErr := repo.LoadMessagesWithSeq(key)
 				if fErr != nil {
 					return nil, false
 				}
-				msgJSONs = make([]string, 0, len(fullRows))
-				for _, fr := range fullRows {
-					msgJSONs = append(msgJSONs, fr.JSON)
+				firstInContextIdx := 0
+				for firstInContextIdx < len(fullRows) && fullRows[firstInContextIdx].Excluded {
+					firstInContextIdx++
 				}
-				if len(fullRows) > 0 {
-					boundary = fullRows[0].Seq
+				if firstInContextIdx < len(fullRows) {
+					boundary = fullRows[firstInContextIdx].Seq
+					msgJSONs = make([]string, 0, len(fullRows)-firstInContextIdx)
+					for _, fr := range fullRows[firstInContextIdx:] {
+						msgJSONs = append(msgJSONs, fr.JSON)
+					}
+				} else if len(fullRows) > 0 {
+					lastIdx := len(fullRows) - 1
+					boundary = fullRows[lastIdx].Seq
+					msgJSONs = []string{fullRows[lastIdx].JSON}
 				} else {
 					boundary = 0
+					msgJSONs = nil
 				}
+				_ = repo.UpdateFirstInMemorySeq(key, boundary)
+			}
+		}
+	}
+
+	messages := make([]providers.Message, 0, len(msgJSONs))
+	for _, msgJSON := range msgJSONs {
+		var msg providers.Message
+		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
+			continue // skip corrupted messages
+		}
+		messages = append(messages, msg)
+	}
+
+	// If boundary was 0 (e.g. unmigrated session or fallback), check if the
+	// loaded messages have an excluded prefix. If so, prune the excluded prefix
+	// so only in-context messages are kept resident in memory.
+	if boundary == 0 && len(messages) > 0 {
+		hasExcluded := false
+		for _, m := range messages {
+			if m.ExcludeFromContext {
+				hasExcluded = true
+				break
+			}
+		}
+		if hasExcluded {
+			firstInContext := 0
+			for firstInContext < len(messages) && messages[firstInContext].ExcludeFromContext {
+				firstInContext++
+			}
+			if firstInContext > 0 && firstInContext < len(messages) {
+				boundary = firstInContext
+				messages = messages[firstInContext:]
+				_ = repo.UpdateFirstInMemorySeq(key, boundary)
 			}
 		}
 	}
@@ -208,19 +249,10 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 	// semantics (evictedTotal = len(evictedJSONs) - pruned).
 	evictedPersisted := 0
 	if total, tErr := repo.MessageCount(key); tErr == nil {
-		evictedPersisted = total - len(msgJSONs)
+		evictedPersisted = total - len(messages)
 		if evictedPersisted < 0 {
 			evictedPersisted = 0
 		}
-	}
-
-	messages := make([]providers.Message, 0, len(msgJSONs))
-	for _, msgJSON := range msgJSONs {
-		var msg providers.Message
-		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
-			continue // skip corrupted messages
-		}
-		messages = append(messages, msg)
 	}
 
 	session := &Session{
@@ -1432,19 +1464,19 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 // boundary durably; cold-load restores it from SQLite on restart.
 func sessionMetaFromSession(s *Session) store.SessionMeta {
 	return store.SessionMeta{
-		Key:             s.Key,
-		Name:            s.Name,
-		Mode:            s.Mode,
-		Summary:         s.Summary,
-		VerboseLevel:    s.VerboseLevel,
-		Model:           s.Model,
-		ThinkingLevel:   s.ThinkingLevel,
-		InputTokens:     s.InputTokens,
-		OutputTokens:    s.OutputTokens,
-		CompactionCount: s.CompactionCount,
+		Key:              s.Key,
+		Name:             s.Name,
+		Mode:             s.Mode,
+		Summary:          s.Summary,
+		VerboseLevel:     s.VerboseLevel,
+		Model:            s.Model,
+		ThinkingLevel:    s.ThinkingLevel,
+		InputTokens:      s.InputTokens,
+		OutputTokens:     s.OutputTokens,
+		CompactionCount:  s.CompactionCount,
 		FirstInMemorySeq: s.firstInMemorySeq,
-		CreatedAt:       s.Created,
-		UpdatedAt:       s.Updated,
+		CreatedAt:        s.Created,
+		UpdatedAt:        s.Updated,
 	}
 }
 
@@ -1492,8 +1524,6 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		return nil
 	}
 
-	meta := sessionMetaFromSession(session)
-
 	// If messages were evicted from memory (firstInMemorySeq > 0), the
 	// evicted rows still live in SQLite. A full rewrite runs ReplaceMessages
 	// (DELETE all + re-insert), which would permanently destroy those rows.
@@ -1536,6 +1566,15 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		}
 	}
 
+	// Bookkeeping must reflect that re-materialized evicted rows are persisted
+	// but still NOT resident in the in-memory slice. The in-memory messages
+	// start at absolute seq len(evictedJSONs); only the rows are renumbered,
+	// not the memory residency.
+	session.lastPersistedSeq = len(session.Messages) - 1
+	session.firstInMemorySeq = len(evictedJSONs)
+
+	meta := sessionMetaFromSession(session)
+
 	// Release lock during I/O
 	pruned := 0
 	sm.mu.Unlock()
@@ -1552,14 +1591,6 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		return fmt.Errorf("save session %q to sqlite: %w", key, err)
 	}
 
-	// Bookkeeping must reflect that re-materialized evicted rows are persisted
-	// but still NOT resident in the in-memory slice. The in-memory messages
-	// start at absolute seq len(evictedJSONs); only the rows are renumbered,
-	// not the memory residency. Resetting firstInMemorySeq/evictedTotal to 0
-	// here would break the `seq = firstInMemorySeq + sliceIndex` invariant and
-	// silently drop the next incremental append.
-	session.lastPersistedSeq = len(session.Messages) - 1
-	session.firstInMemorySeq = len(evictedJSONs)
 	session.evictedTotal = len(evictedJSONs) - pruned
 	if session.evictedTotal < 0 {
 		session.evictedTotal = 0
@@ -2031,15 +2062,13 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 		}
 	}
 
-	// Locate the first excluded message. ExcludeOldMessagesFromContext only
-	// ever excludes a single contiguous range starting at index 1 (index 0,
-	// the original request, stays in-context), so there is at most one run.
-	runStart := 1
+	// Locate the first excluded message.
+	runStart := 0
 	for runStart < len(session.Messages) && !session.Messages[runStart].ExcludeFromContext {
 		runStart++
 	}
 	if runStart >= len(session.Messages) {
-		// Nothing excluded; no-op. Index 0 is in-context.
+		// Nothing excluded; no-op.
 		return 0
 	}
 

@@ -1445,6 +1445,7 @@ func TestEvictExcluded_NoStore(t *testing.T) {
 		t.Fatalf("history length after refused eviction = %d, want 8", len(hist))
 	}
 }
+
 // TestSQLite_ColdLoad_RestoresEvictionBoundary verifies that a cold load
 // (new SessionManager over the same store) restores the eviction boundary
 // (firstInMemorySeq/evictedTotal) from SQLite metadata and does NOT re-inflate
@@ -1711,6 +1712,142 @@ func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
 	}
 	if meta.FirstInMemorySeq != 6 {
 		t.Fatalf("FirstInMemorySeq persisted = %d, want 6", meta.FirstInMemorySeq)
+	}
+}
+
+// TestSQLite_MultipleCompactions_ColdLoadContextOnly verifies that after multiple
+// rounds of compactions and new messages, cold-loading the session in a brand new
+// SessionManager loads ONLY the in-context messages into RAM (e.g. 2 messages),
+// and not the dozens of evicted messages.
+func TestSQLite_MultipleCompactions_ColdLoadContextOnly(t *testing.T) {
+	s := newTestStore(t)
+	sm1 := NewSessionManager()
+	sm1.SetStore(s)
+
+	const key = "test:multi-compaction-cold-load"
+	sm1.GetOrCreate(key)
+
+	// Round 1: 10 messages, compact keeping 2 -> 8 evicted, 2 kept.
+	for i := 0; i < 10; i++ {
+		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 1: %d", i))
+	}
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 1 save failed: %v", err)
+	}
+	sm1.ExcludeOldMessagesFromContext(key, 2)
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 1 exclude save failed: %v", err)
+	}
+	sm1.EvictExcludedMessages(key)
+	if inMem := len(sm1.GetHistory(key)); inMem != 2 {
+		t.Fatalf("round 1 in-mem = %d, want 2", inMem)
+	}
+
+	// Round 2: append 10 more messages -> 12 total in memory, compact keeping 2 -> 10 evicted, 2 kept.
+	for i := 0; i < 10; i++ {
+		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 2: %d", i))
+	}
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 2 save failed: %v", err)
+	}
+	sm1.ExcludeOldMessagesFromContext(key, 2)
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 2 exclude save failed: %v", err)
+	}
+	sm1.EvictExcludedMessages(key)
+	if inMem := len(sm1.GetHistory(key)); inMem != 2 {
+		t.Fatalf("round 2 in-mem = %d, want 2", inMem)
+	}
+
+	// Round 3: append 10 more messages -> 12 total, compact keeping 2 -> 10 evicted, 2 kept.
+	for i := 0; i < 10; i++ {
+		sm1.AddMessage(key, "user", fmt.Sprintf("Question round 3: %d", i))
+	}
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 3 save failed: %v", err)
+	}
+	sm1.ExcludeOldMessagesFromContext(key, 2)
+	if err := sm1.Save(key); err != nil {
+		t.Fatalf("round 3 exclude save failed: %v", err)
+	}
+	sm1.EvictExcludedMessages(key)
+	if inMem := len(sm1.GetHistory(key)); inMem != 2 {
+		t.Fatalf("round 3 in-mem = %d, want 2", inMem)
+	}
+
+	// Total messages in SQLite is 30, but in RAM only 2 should exist.
+	totalCount, _ := s.Sessions().MessageCount(key)
+	if totalCount != 30 {
+		t.Fatalf("SQLite total messages = %d, want 30", totalCount)
+	}
+
+	// Cold load with a new SessionManager (simulating app start).
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+
+	loadedHistory := sm2.GetHistory(key)
+	if len(loadedHistory) != 2 {
+		t.Fatalf("Cold-loaded history count = %d, want exactly 2 in-context messages", len(loadedHistory))
+	}
+	if gotEvicted := sm2.GetEvictedMessageCount(key); gotEvicted != 28 {
+		t.Fatalf("GetEvictedMessageCount = %d, want 28", gotEvicted)
+	}
+	if total := sm2.GetTotalMessageCount(key); total != 30 {
+		t.Fatalf("GetTotalMessageCount = %d, want 30", total)
+	}
+}
+
+// TestSQLite_ColdLoad_UnmigratedExcludedPruned verifies that an older session
+// stored with boundary 0 but containing excluded messages is automatically
+// pruned to in-context messages on cold load.
+func TestSQLite_ColdLoad_UnmigratedExcludedPruned(t *testing.T) {
+	s := newTestStore(t)
+	repo := s.Sessions()
+	const key = "test:unmigrated-cold-load"
+
+	now := time.Now()
+	_ = repo.UpsertSession(store.SessionMeta{
+		Key:              key,
+		Name:             "Unmigrated",
+		FirstInMemorySeq: 0, // Legacy boundary 0
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	// Insert 20 messages: first 16 excluded, last 4 in-context.
+	var rows []store.MessageRow
+	for i := 0; i < 20; i++ {
+		isExcluded := i < 16
+		rows = append(rows, store.MessageRow{
+			Seq:      i,
+			Role:     "user",
+			JSON:     fmt.Sprintf(`{"role":"user","content":"msg %d","exclude_from_context":%v}`, i, isExcluded),
+			Excluded: isExcluded,
+		})
+	}
+	if err := repo.InsertMessages(key, rows); err != nil {
+		t.Fatalf("insert messages failed: %v", err)
+	}
+
+	// Load with a new SessionManager.
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	history := sm.GetHistory(key)
+	if len(history) != 4 {
+		t.Fatalf("Cold-loaded unmigrated history count = %d, want 4 in-context messages", len(history))
+	}
+	if history[0].Content != "msg 16" {
+		t.Errorf("history[0].Content = %q, want 'msg 16'", history[0].Content)
+	}
+
+	// Boundary must have been persisted to SQLite.
+	meta, err := repo.GetSessionMeta(key)
+	if err != nil || meta == nil {
+		t.Fatalf("GetSessionMeta failed: %v", err)
+	}
+	if meta.FirstInMemorySeq != 16 {
+		t.Errorf("persisted FirstInMemorySeq = %d, want 16", meta.FirstInMemorySeq)
 	}
 }
 

@@ -221,26 +221,15 @@ Exposed through the layers:
 
 ### 4.4 TUI integration
 
-The TUI already has a lazy render window (`renderStartIdx`,
-`maybeExpandRenderWindow`, batch 50). Extend it:
+The TUI maintains strict memory boundaries: only in-context messages are
+resident in RAM. The TUI render window (`renderStartIdx`, `maybeExpandRenderWindow`,
+batch 50) operates strictly on the in-memory context messages. It does NOT
+lazy-load evicted messages from SQLite into RAM on scroll, keeping RAM
+footprint minimal even for long compacted conversations.
 
-1. When the render window reaches the top of the in-memory slice
-   (`renderStartIdx <= 0`) **and** the session reports evicted messages
-   (`evictedTotal > 0`, exposed via a new providable method
-   `GetEvictedMessageCount(sessionKey) int`), call
-   `LoadEvictedMessages` once, then re-render. The existing
-   fingerprint-based render cache makes the re-render cheap (only newly
-   loaded messages go through glamour).
-2. The "↑ N earlier messages" header (`viewport.go:365`) must count
-   `renderStartIdx + evictedNotYetLoaded` instead of just `renderStartIdx`.
-3. Scroll position compensation already exists in
-   `maybeExpandRenderWindow` (YOffset adjust) — reuse the same pattern.
-
-Batching (optional optimization): instead of loading all evicted messages at
-once, add `LoadMessagesSeqRange(sessionKey, fromSeq, toSeq)` and load in
-batches of ~50 to mirror the render window. Default implementation loads all
-at once (SQLite reads are fast; the render cache is the bottleneck, not the
-query). Batched loading can be added later without API changes.
+The "↑ N earlier messages" header (`viewport.go`) reflects unrendered messages
+within the in-memory window (`startIdx`), without inflating RAM with evicted
+history.
 
 ### 4.5 WebUI / REST integration
 
@@ -401,20 +390,15 @@ phase 2 lands.
 - Replace `len(history) <= 4` with `TotalMessageCount(...) <= 4`.
 - Tests: session with evicted history still passes the guard.
 
-### Phase 5 — TUI lazy-load on scroll
+### Phase 5 — TUI context-only rendering
 
-**Task 5.1: Expand render window through eviction boundary**
-- Files: `pkg/tui/viewport.go`, `pkg/tui/types.go`, `pkg/tui/handlers.go`
-- In `maybeExpandRenderWindow`: when `renderStartIdx <= 0` and
-  `GetEvictedMessageCount(currentKey) > 0`, call `LoadEvictedMessages`,
-  set `renderStartIdx` to the number of newly loaded messages (so the
-  window expands in the usual 50-message batches from there), invalidate
-  `renderedBaseValid`, compensate `YOffset`.
-- Header count: `renderStartIdx + remainingEvicted`.
-- Reset path: session switch already resets `renderStartIdx = -1`; ensure
-  `evictedTotal` is re-read per session.
-- Tests: TUI-level tests with a stub providable — expansion triggers load
-  exactly once, header count correct, no load when nothing evicted.
+**Task 5.1: Context-only in-memory rendering**
+- Files: `pkg/tui/viewport.go`, `pkg/tui/model.go`, `pkg/tui/commands.go`
+- `maybeExpandRenderWindow` expands strictly within in-memory messages (`renderStartIdx > 0`).
+  It does not cross the eviction boundary or load evicted messages into RAM.
+- Header count: counts only unrendered in-memory messages (`startIdx`).
+- Reset path: session switch resets `renderStartIdx = -1`.
+- Tests: verify TUI renders in-context messages only and does not load evicted messages into memory.
 
 ### Phase 6 — WebUI backend
 

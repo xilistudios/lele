@@ -189,6 +189,7 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 		t.Fatalf("expected renderStartIdx=120 back for A, got %d", m.renderStartIdx)
 	}
 }
+
 // newEvictionTestModel builds a TUI model like newTestModel but attaches a real
 // SQLite store to the session manager so eviction and lazy-load of evicted
 // messages are enabled.
@@ -237,12 +238,12 @@ func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) in
 	return evicted
 }
 
-// TestLazyLoad_ExpandAcrossEvictionBoundary verifies that once the in-memory
-// render window is fully expanded (renderStartIdx == 0), scrolling to the top
-// crosses the eviction boundary: it loads the evicted messages back from
-// SQLite, shifts renderStartIdx past them, and subsequent expansions reveal
-// them in the usual lazyLoadBatchSize batches.
-func TestLazyLoad_ExpandAcrossEvictionBoundary(t *testing.T) {
+// TestLazyLoad_EvictedMessagesNotLoadedInMemory verifies that when a session
+// has evicted messages (e.g. 19 evicted, 5 kept in context in memory), the TUI
+// only loads and renders the in-context messages. Scrolling to top does NOT
+// cross the eviction boundary, does NOT load evicted messages into RAM, and
+// does NOT show an 'earlier messages' header when all in-context messages are visible.
+func TestLazyLoad_EvictedMessagesNotLoadedInMemory(t *testing.T) {
 	m := newEvictionTestModel(t)
 	const key = "tui:chat:evict-a"
 
@@ -258,92 +259,34 @@ func TestLazyLoad_ExpandAcrossEvictionBoundary(t *testing.T) {
 	m.reloadSessions()
 	renderLazyModel(t, m)
 
-	// Few in-memory messages (5) are below the render cap, so the window is
-	// fully expanded in memory.
+	// Few in-memory messages (5) are below the render cap, so the window starts at 0.
 	if m.renderStartIdx != 0 {
 		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
 	}
 	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
-		t.Fatalf("GetEvictedMessageCount before expand = %d, want %d", got, evicted)
+		t.Fatalf("GetEvictedMessageCount before scroll = %d, want %d", got, evicted)
+	}
+	if inMemCount := len(m.sessionMgr.GetHistory(key)); inMemCount != 5 {
+		t.Fatalf("in-memory message count before scroll = %d, want 5", inMemCount)
 	}
 
-	// First expansion crosses the eviction boundary: load all evicted messages.
-	m.viewport.GotoTop()
-	if !m.maybeExpandRenderWindow() {
-		t.Fatal("expected maybeExpandRenderWindow to return true crossing the boundary")
-	}
-	if m.renderStartIdx != evicted {
-		t.Fatalf("expected renderStartIdx=%d after crossing boundary, got %d", evicted, m.renderStartIdx)
-	}
-	if got := m.sessionMgr.GetEvictedMessageCount(key); got != 0 {
-		t.Fatalf("GetEvictedMessageCount after load = %d, want 0", got)
-	}
-	// renderStartIdx was shifted to `evicted`, so the same visible content
-	// (header + last 5 in-memory messages) stays at the top — no line delta,
-	// thus YOffset compensation is 0 here. The loaded messages are revealed by
-	// subsequent scroll-up expansions.
-
-	// Render and assert the header shows the loaded count.
-	m.viewport.GotoTop()
-	out := m.View()
-	wantHeader := fmt.Sprintf("↑ %d earlier messages", evicted)
-	if !strings.Contains(out, wantHeader) {
-		t.Fatalf("expected header %q in view, got:\n%s", wantHeader, out)
-	}
-
-	// Continue expanding until nothing is left to load.
-	steps := 0
-	for {
-		m.viewport.GotoTop()
-		if !m.maybeExpandRenderWindow() {
-			break
-		}
-		steps++
-		if steps > 100 {
-			t.Fatal("expansion did not terminate")
-		}
-	}
-	if m.renderStartIdx != 0 {
-		t.Fatalf("expected renderStartIdx=0 after full expansion, got %d", m.renderStartIdx)
-	}
-	// A final call with everything loaded returns false.
+	// Scrolling to the top does not trigger lazy-loading of evicted messages into memory.
 	m.viewport.GotoTop()
 	if m.maybeExpandRenderWindow() {
-		t.Fatal("expected maybeExpandRenderWindow to return false when nothing left to load")
-	}
-}
-
-// TestLazyLoad_HeaderCountsEvicted verifies that BEFORE loading, when
-// renderStartIdx == 0 but evicted > 0, the rendered header already shows the
-// evicted count (so the user knows older history is available).
-func TestLazyLoad_HeaderCountsEvicted(t *testing.T) {
-	m := newEvictionTestModel(t)
-	const key = "tui:chat:evict-b"
-
-	evicted := seedEvictionSession(t, m, key, 12, 5)
-	if evicted != 19 {
-		t.Fatalf("expected 19 evicted, got %d", evicted)
+		t.Fatal("expected maybeExpandRenderWindow to return false (no in-memory expansion needed)")
 	}
 
-	m.currentKey = key
-	m.showWelcome = false
-	m.forceGotoBottom = true
-	m.reloadSessions()
-	renderLazyModel(t, m)
-
-	if m.renderStartIdx != 0 {
-		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
-	}
+	// Evicted messages remain evicted in SQLite and are not inflated into memory.
 	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
-		t.Fatalf("GetEvictedMessageCount = %d, want %d", got, evicted)
+		t.Fatalf("GetEvictedMessageCount after scroll = %d, want %d", got, evicted)
+	}
+	if inMemCount := len(m.sessionMgr.GetHistory(key)); inMemCount != 5 {
+		t.Fatalf("in-memory message count after scroll = %d, want 5", inMemCount)
 	}
 
-	// Render WITHOUT triggering expansion — the header must already show the
-	// evicted count even though renderStartIdx == 0.
-	m.viewport.GotoTop()
+	// Render view should NOT show an earlier messages header because all in-context messages are rendered.
 	out := m.View()
-	wantHeader := fmt.Sprintf("↑ %d earlier messages", evicted)
-	if !strings.Contains(out, wantHeader) {
-		t.Fatalf("expected header %q in view, got:\n%s", wantHeader, out)
+	if strings.Contains(out, "earlier messages") {
+		t.Fatalf("expected view not to contain earlier messages header for evicted messages, got:\n%s", out)
 	}
 }
