@@ -1417,3 +1417,28 @@ func TestSQLite_EvictExcluded_WhenDisabled(t *testing.T) {
 		t.Fatalf("EvictExcludedMessages on missing key = %d, want 0", got)
 	}
 }
+
+// TestEvictExcluded_NoStore verifies that eviction refuses to run when the
+// manager has no SQLite store. Without a store, Save is a no-op and evicting
+// would permanently drop messages that were never persisted.
+func TestEvictExcluded_NoStore(t *testing.T) {
+	sm := NewSessionManager() // no store
+
+	key := "test:evict-nostore"
+	sm.GetOrCreate(key)
+	for i := 0; i < 8; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	// Exclude a prefix so eviction would have work to do if it were allowed.
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	_ = sm.Save(key) // no-op without a store
+
+	if got := sm.EvictExcludedMessages(key); got != 0 {
+		t.Fatalf("EvictExcludedMessages without store = %d, want 0", got)
+	}
+	// All messages must still be in memory.
+	hist := sm.GetHistory(key)
+	if len(hist) != 8 {
+		t.Fatalf("history length after refused eviction = %d, want 8", len(hist))
+	}
+}

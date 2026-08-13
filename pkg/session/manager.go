@@ -1942,6 +1942,15 @@ func (sm *SessionManager) flushStreamNow(key string) {
 // Returns the number of messages evicted.
 func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	sm.ensureLoaded()
+
+	// Eviction is only safe when messages are persisted in SQLite: eviction
+	// is memory-only and relies on the store as the source of truth for
+	// lazy-load. Without a store, Save is a no-op and evicting would drop
+	// messages permanently.
+	if sm.store == nil {
+		return 0
+	}
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
