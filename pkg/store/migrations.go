@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 -- Drop the unused 'content' column from session_messages.
 -- The content is stored in the 'message' JSON blob and is never queried.
 ALTER TABLE session_messages DROP COLUMN content;
+`,
+	},
+	{
+		Version: 3,
+		DDL: `
+-- Persist the in-memory eviction boundary so cold-load can skip evicted rows.
+-- first_in_memory_seq = SQLite seq of the first message resident in memory.
+-- Rows with seq < first_in_memory_seq were evicted from RAM (still persisted).
+ALTER TABLE sessions ADD COLUMN first_in_memory_seq INTEGER NOT NULL DEFAULT 0;
 `,
 	},
 }

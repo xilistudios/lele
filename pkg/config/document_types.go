@@ -89,6 +89,7 @@ type EditableSessionConfig struct {
 	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
+	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
 }
 
 // EditableChannelsConfig represents channels in editable mode.

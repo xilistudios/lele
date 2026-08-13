@@ -199,6 +199,100 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 	return agent.Sessions.GetHistoryView(resolvedSessionKey)
 }
 
+// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite
+// back into memory, restoring full display history. Idempotent; no-op when
+// nothing was evicted. Returns the number of messages loaded.
+func (ap *agentProvidableImpl) LoadEvictedMessages(sessionKey string) int {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
+			}
+		}
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			if agent.Sessions.GetEvictedMessageCount(resolvedSessionKey) > 0 {
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
+			}
+		}
+		return 0
+	}
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0
+	}
+	return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
+}
+
+// GetEvictedMessageCount returns the number of messages that were evicted
+// from memory (excluded + persisted in SQLite but not in the in-memory slice).
+func (ap *agentProvidableImpl) GetEvictedMessageCount(sessionKey string) int {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				return agent.Sessions.GetEvictedMessageCount(resolvedSessionKey)
+			}
+		}
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			if count := agent.Sessions.GetEvictedMessageCount(resolvedSessionKey); count > 0 {
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				return count
+			}
+		}
+		return 0
+	}
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0
+	}
+	return agent.Sessions.GetEvictedMessageCount(resolvedSessionKey)
+}
+
+// GetTotalMessageCount returns the total persisted message count for a
+// session: in-memory slice length plus evicted messages.
+func (ap *agentProvidableImpl) GetTotalMessageCount(sessionKey string) int {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				return agent.Sessions.GetTotalMessageCount(resolvedSessionKey)
+			}
+		}
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			if count := agent.Sessions.GetTotalMessageCount(resolvedSessionKey); count > 0 {
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				return count
+			}
+		}
+		return 0
+	}
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return 0
+	}
+	return agent.Sessions.GetTotalMessageCount(resolvedSessionKey)
+}
+
 // ============================================================================
 // AgentProvidable Interface - Model Management
 // ============================================================================
@@ -376,8 +470,7 @@ func (ap *agentProvidableImpl) CompactSession(sessionKey string) string {
 		return "No default agent configured."
 	}
 
-	history := agent.Sessions.GetHistoryView(sessionKey)
-	if len(history) <= 4 {
+	if agent.Sessions.GetTotalMessageCount(sessionKey) <= 4 {
 		return "📭 Not enough messages to compact (need 5+)."
 	}
 

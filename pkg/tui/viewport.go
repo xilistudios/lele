@@ -259,13 +259,14 @@ func (m *Model) updateViewport() {
 
 // maybeExpandRenderWindow expands the lazy-load render window backwards by
 // lazyLoadBatchSize messages when the user has scrolled to the very top and
-// older unrendered messages exist. It rebuilds the viewport and compensates
+// older unrendered messages exist in memory. It rebuilds the viewport and compensates
 // YOffset so the content that was at the top stays visible. Returns true if
 // the window was expanded.
 func (m *Model) maybeExpandRenderWindow() bool {
 	if m.currentKey == "" || !m.viewport.AtTop() || m.renderStartIdx <= 0 {
 		return false
 	}
+
 	oldTotal := m.viewport.totalLines()
 
 	newStart := m.renderStartIdx - lazyLoadBatchSize

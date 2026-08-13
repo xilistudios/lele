@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -39,7 +38,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")
 			}
-			count := len(s.Messages)
+			count := m.sessionMgr.GetTotalMessageCount(s.Key)
 
 			// Check if session is currently processing
 			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)
@@ -298,9 +297,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/quit":
-		m.printSessionSummary()
 		m.cancel()
-		os.Exit(0)
+		return tea.Quit
 	}
 	return nil
 }

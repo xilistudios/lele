@@ -185,8 +185,7 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 		if ch.al.sessionManager == nil {
 			return "Session manager not available for compaction", true
 		}
-		history := agent.Sessions.GetHistoryView(sessionKey)
-		if len(history) <= 4 {
+		if agent.Sessions.GetTotalMessageCount(sessionKey) <= 4 {
 			return "📭 Not enough messages to compact (need 5+).", true
 		}
 		// Send feedback message before starting compaction (LLM call can take seconds)

@@ -1,6 +1,13 @@
 package tui
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/xilistudios/lele/pkg/channels"
+)
 
 func TestCalculateViewportHeight(t *testing.T) {
 	tests := []struct {
@@ -35,7 +42,7 @@ func TestCalculateViewportHeight(t *testing.T) {
 			statusHeight:  3,
 			inputHeight:   3,
 			bottomHeight:  1,
-			want:          3,
+			want:          1,
 		},
 	}
 
@@ -44,6 +51,65 @@ func TestCalculateViewportHeight(t *testing.T) {
 			got := calculateViewportHeight(tt.contentHeight, tt.statusHeight, tt.autocomplete, tt.inputHeight, tt.bottomHeight)
 			if got != tt.want {
 				t.Fatalf("calculateViewportHeight() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestView_HeightNeverExceedsTerminalHeight(t *testing.T) {
+	m := newTestModel(t)
+
+	key := "tui:chat:view-height-test"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+
+	// Add messages with long lines, tool calls, markdown
+	m.sessionMgr.AddMessage(key, "user", "Run some tools and write code")
+	m.sessionMgr.AddMessage(key, "assistant",
+		"Here is some thinking and tool execution:\n"+
+			"```go\nfunc main() {\n\tprintln(\"Hello World from a very long line of code that spans across multiple columns\")\n}\n```\n"+
+			"Now I've got the whole picture. The problem is as follows:\nRoot cause: handleChatHistory (the REST endpoint `/api/v1/chat/history`) reloads evicted messages.")
+
+	m.currentKey = key
+	m.showWelcome = false
+
+	// Add subagents to sidebar
+	var subagents []channels.SubagentTaskInfo
+	for i := 0; i < 15; i++ {
+		subagents = append(subagents, channels.SubagentTaskInfo{
+			TaskID:     fmt.Sprintf("subagent-task-%d", i),
+			Label:      fmt.Sprintf("Implement Phase %d (Task %d) of the plan", i, i*10),
+			Status:     "completed",
+			SessionKey: fmt.Sprintf("subagent-session-%d", i),
+		})
+	}
+	m.subagentsCacheKey = "native:" + key
+	m.subagentsCacheTime = time.Now()
+	m.subagentsCacheValue = subagents
+
+	sizes := []struct {
+		w, h int
+	}{
+		{80, 24},
+		{120, 30},
+		{100, 20},
+		{160, 40},
+		{70, 15},
+		{200, 50},
+	}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
+			m.width = size.w
+			m.height = size.h
+
+			out := m.View()
+			lines := strings.Split(out, "\n")
+			if len(lines) > size.h {
+				t.Fatalf("m.View() returned %d lines, want <= %d (exceeded by %d lines)", len(lines), size.h, len(lines)-size.h)
+			}
+			if len(lines) != size.h {
+				t.Fatalf("m.View() returned %d lines, want exact terminal height %d", len(lines), size.h)
 			}
 		})
 	}

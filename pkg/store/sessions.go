@@ -18,18 +18,19 @@ type SessionRepo struct {
 
 // SessionMeta holds lightweight session metadata (no messages).
 type SessionMeta struct {
-	Key             string
-	Name            string
-	Mode            string
-	Summary         string
-	VerboseLevel    string
-	Model           string
-	ThinkingLevel   string
-	InputTokens     int
-	OutputTokens    int
-	CompactionCount int
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	Key              string
+	Name             string
+	Mode             string
+	Summary          string
+	VerboseLevel     string
+	Model            string
+	ThinkingLevel    string
+	InputTokens      int
+	OutputTokens     int
+	CompactionCount  int
+	FirstInMemorySeq int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // UpsertSession inserts or updates session metadata.
@@ -37,8 +38,8 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 	if _, err := r.db.Exec(
 		`INSERT INTO sessions(key, name, mode, summary, verbose_level, model,
 		 thinking_level, input_tokens, output_tokens, compaction_count,
-		 created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 first_in_memory_seq, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		   name = excluded.name,
 		   mode = excluded.mode,
@@ -49,6 +50,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		   input_tokens = excluded.input_tokens,
 		   output_tokens = excluded.output_tokens,
 		   compaction_count = excluded.compaction_count,
+		   first_in_memory_seq = excluded.first_in_memory_seq,
 		   updated_at = excluded.updated_at`,
 		meta.Key,
 		meta.Name,
@@ -60,6 +62,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		meta.InputTokens,
 		meta.OutputTokens,
 		meta.CompactionCount,
+		meta.FirstInMemorySeq,
 		meta.CreatedAt.Format(time.RFC3339Nano),
 		meta.UpdatedAt.Format(time.RFC3339Nano),
 	); err != nil {
@@ -75,12 +78,13 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 	err := r.db.QueryRow(
 		`SELECT key, name, mode, summary, verbose_level, model,
 		 thinking_level, input_tokens, output_tokens, compaction_count,
-		 created_at, updated_at
+		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE key = ?`, key,
 	).Scan(
 		&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
 		&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
 		&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
+		&meta.FirstInMemorySeq,
 		&createdAt, &updatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -99,7 +103,7 @@ func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
 		 thinking_level, input_tokens, output_tokens, compaction_count,
-		 created_at, updated_at
+		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions ORDER BY updated_at DESC`,
 	)
 	if err != nil {
@@ -115,6 +119,7 @@ func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
 			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
+			&meta.FirstInMemorySeq,
 			&createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list sessions scan: %w", err)
@@ -141,7 +146,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
 		 thinking_level, input_tokens, output_tokens, compaction_count,
-		 created_at, updated_at
+		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE mode = ? ORDER BY updated_at DESC`, queryMode,
 	)
 	if err != nil {
@@ -157,6 +162,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
 			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
+			&meta.FirstInMemorySeq,
 			&createdAt, &updatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("list sessions by mode scan: %w", err)
@@ -404,6 +410,19 @@ func (r *SessionRepo) DeleteLastMessage(sessionKey string) (int, error) {
 	return seq, nil
 }
 
+// UpdateFirstInMemorySeq persists the in-memory eviction boundary for a
+// session without touching messages. Memory-only eviction/lazy-load call this
+// to keep the boundary durable across restarts.
+func (r *SessionRepo) UpdateFirstInMemorySeq(sessionKey string, seq int) error {
+	if _, err := r.db.Exec(
+		`UPDATE sessions SET first_in_memory_seq = ? WHERE key = ?`,
+		seq, sessionKey,
+	); err != nil {
+		return fmt.Errorf("update first_in_memory_seq session=%q: %w", sessionKey, err)
+	}
+	return nil
+}
+
 // LoadMessages returns all messages as JSON strings for a session in seq order.
 func (r *SessionRepo) LoadMessages(sessionKey string) ([]string, error) {
 	rows, err := r.db.Query(
@@ -427,6 +446,109 @@ func (r *SessionRepo) LoadMessages(sessionKey string) ([]string, error) {
 		return nil, fmt.Errorf("load messages rows session=%q: %w", sessionKey, err)
 	}
 	return messages, nil
+}
+
+// LoadMessagesBeforeSeq returns the JSON of all messages with seq strictly
+// less than beforeSeq, ordered by seq ASC. Used to lazy-load evicted
+// (excluded) messages that precede the first in-memory message.
+func (r *SessionRepo) LoadMessagesBeforeSeq(sessionKey string, beforeSeq int) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT message FROM session_messages WHERE session_key = ? AND seq < ?
+		 ORDER BY seq ASC`, sessionKey, beforeSeq,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages before seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var messages []string
+	for rows.Next() {
+		var messageJSON string
+		if err := rows.Scan(&messageJSON); err != nil {
+			return nil, fmt.Errorf("load messages before seq scan session=%q: %w", sessionKey, err)
+		}
+		messages = append(messages, messageJSON)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages before seq rows session=%q: %w", sessionKey, err)
+	}
+	return messages, nil
+}
+
+// LoadMessagesFromSeq returns the JSON of all messages with seq >= fromSeq,
+// ordered by seq ASC. Used for cold-load to skip evicted rows
+// (seq < first_in_memory_seq) so they are not re-inflated into RAM.
+func (r *SessionRepo) LoadMessagesFromSeq(sessionKey string, fromSeq int) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT message FROM session_messages WHERE session_key = ? AND seq >= ?
+		 ORDER BY seq ASC`, sessionKey, fromSeq,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages from seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var messages []string
+	for rows.Next() {
+		var messageJSON string
+		if err := rows.Scan(&messageJSON); err != nil {
+			return nil, fmt.Errorf("load messages from seq scan session=%q: %w", sessionKey, err)
+		}
+		messages = append(messages, messageJSON)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages from seq rows session=%q: %w", sessionKey, err)
+	}
+	return messages, nil
+}
+
+// MessageRowFull is a loaded message row including its seq and excluded flag.
+type MessageRowFull struct {
+	Seq      int
+	JSON     string
+	Excluded bool
+}
+
+// LoadMessagesWithSeq returns all messages for a session with their seq and
+// excluded flag, ordered by seq ASC. Used to recover firstInMemorySeq after
+// reload and for in-context-only cold loads.
+func (r *SessionRepo) LoadMessagesWithSeq(sessionKey string) ([]MessageRowFull, error) {
+	rows, err := r.db.Query(
+		`SELECT seq, message, excluded FROM session_messages WHERE session_key = ?
+		 ORDER BY seq ASC`, sessionKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages with seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var messages []MessageRowFull
+	for rows.Next() {
+		var m MessageRowFull
+		var exclInt int
+		if err := rows.Scan(&m.Seq, &m.JSON, &exclInt); err != nil {
+			return nil, fmt.Errorf("load messages with seq scan session=%q: %w", sessionKey, err)
+		}
+		m.Excluded = exclInt != 0
+		messages = append(messages, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages with seq rows session=%q: %w", sessionKey, err)
+	}
+	return messages, nil
+}
+
+// CountExcludedMessages returns the number of messages marked excluded for a session.
+func (r *SessionRepo) CountExcludedMessages(sessionKey string) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM session_messages WHERE session_key = ? AND excluded = 1`,
+		sessionKey,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count excluded messages session=%q: %w", sessionKey, err)
+	}
+	return count, nil
 }
 
 // MessageCount returns the number of messages for a session.

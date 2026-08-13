@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -43,6 +44,23 @@ type ToolLoopConfig struct {
 	Channel         string          // Origin channel for events.
 	ChatID          string          // Origin chatID for events (subagent sessionKey).
 	VisionSupported bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
+	// RetryWait optionally overrides the wait function used between
+	// empty-response retries (nil means time.After). Used by tests to
+	// avoid real sleeps.
+	RetryWait func(time.Duration) <-chan time.Time
+}
+
+// toolLoopEmptyRetryBackoff returns the wait duration before the given
+// empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
+// are retried indefinitely — bounded by MaxIterations (when set) and by
+// context cancellation — with the backoff capped at 3s to avoid a tight
+// spin when a provider repeatedly returns HTTP 200 with empty content.
+func toolLoopEmptyRetryBackoff(attempt int) time.Duration {
+	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
+	if attempt >= len(backoffs) {
+		return backoffs[len(backoffs)-1]
+	}
+	return backoffs[attempt]
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -169,6 +187,7 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 // This is the core agent logic that can be reused by both main agent and subagents.
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
+	emptyRetries := 0
 	var finalContent string
 
 	if config.SessionRecorder != nil && config.SessionKey != "" {
@@ -252,6 +271,39 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			if config.SessionRecorder != nil && config.SessionKey != "" {
 				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
 			}
+
+			// If the response is empty, retry by prompting the model again. This
+			// keeps the subagent loop alive when a provider returns HTTP 200 with
+			// empty content instead of terminating the run with a misleading
+			// "maximum iterations reached" fallback. The retry loop is bounded by
+			// MaxIterations (when set) and by context cancellation; with unlimited
+			// iterations it keeps retrying until a non-empty response arrives.
+			if len(strings.TrimSpace(finalContent)) == 0 {
+				emptyRetries++
+				logger.WarnCF("toolloop", "Empty response received, retrying with follow-up prompt",
+					map[string]any{
+						"iteration": iteration,
+						"retry":     emptyRetries,
+					})
+				wait := toolLoopEmptyRetryBackoff(emptyRetries - 1)
+				waitFn := config.RetryWait
+				if waitFn == nil {
+					waitFn = time.After
+				}
+				select {
+				case <-waitFn(wait):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				messages = append(messages, providers.Message{
+					Role:    "user",
+					Content: "Your previous response was empty. Please continue working on the task and provide your final response.",
+				})
+				continue
+			}
+			// Non-empty final content: reset the consecutive-empty counter so the
+			// backoff restarts small after a real response.
+			emptyRetries = 0
 
 			// Publish final response as stream event if bus is available
 			if config.MessageBus != nil && finalContent != "" {

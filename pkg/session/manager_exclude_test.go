@@ -339,3 +339,47 @@ func TestIsToolResultMessage(t *testing.T) {
 		})
 	}
 }
+
+// TestGetTotalMessageCount_WithEvictedHistory verifies that the compaction
+// threshold guard (GetTotalMessageCount) still sees the full message count
+// after eviction has removed excluded messages from the in-memory slice.
+// This guards against the bug where a compactable session looked empty
+// because len(history) undercounted post-eviction.
+//
+// The test simulates the post-compaction eviction state directly (the same
+// state produced by EvictExcludedMessages: in-memory slice shrunk, with the
+// gap recorded in firstInMemorySeq/evictedTotal) by setting the session
+// internals, which are accessible because this test lives in package session.
+func TestGetTotalMessageCount_WithEvictedHistory(t *testing.T) {
+	sm := NewSessionManager()
+	key := "test:total-count-evicted"
+
+	// 6 plain messages: user, assistant, user, assistant, user, assistant
+	for i := 0; i < 6; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, "msg")
+	}
+
+	session := sm.GetOrCreate(key)
+	if got := sm.GetTotalMessageCount(key); got != 6 {
+		t.Fatalf("GetTotalMessageCount before eviction = %d, want 6", got)
+	}
+
+	// Simulate eviction: drop 4 old messages from the in-memory slice and
+	// record the gap so the persisted count stays accurate.
+	session.Messages = session.Messages[:2]
+	session.firstInMemorySeq += 4
+	session.evictedTotal += 4
+
+	// In-memory history shrank to 2, but the total count must still reflect
+	// all 6 messages so the compaction guard (<= 4) passes.
+	if got := len(sm.GetHistory(key)); got != 2 {
+		t.Errorf("in-memory history after eviction = %d, want 2", got)
+	}
+	if got := sm.GetTotalMessageCount(key); got != 6 {
+		t.Errorf("GetTotalMessageCount after eviction = %d, want 6 (len(Messages)+evictedTotal)", got)
+	}
+}
