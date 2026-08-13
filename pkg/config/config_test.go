@@ -240,12 +240,13 @@ func TestDefaultConfig_Model(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_MaxTokens verifies max tokens has default value
+// TestDefaultConfig_MaxTokens verifies max tokens has a valid default value
 func TestDefaultConfig_MaxTokens(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Agents.Defaults.MaxTokens == 0 {
-		t.Error("MaxTokens should not be zero")
+	// 0 means "use provider/model fallback" (instance resolves to 8192 when unset)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 }
 
@@ -418,8 +419,9 @@ func TestConfig_Complete(t *testing.T) {
 	if cfg.Agents.Defaults.Temperature != nil {
 		t.Error("Temperature should be nil when not provided")
 	}
-	if cfg.Agents.Defaults.MaxTokens == 0 {
-		t.Error("MaxTokens should not be zero")
+	// MaxTokens: 0 means "use provider/model fallback" (valid default)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 	// MaxToolIterations: 0 means unlimited (valid default)
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {

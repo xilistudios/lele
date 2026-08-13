@@ -1346,8 +1346,8 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 	}
 
 	// JSON numbers are decoded as float64
-	if native["port"] != float64(18793) {
-		t.Errorf("port = %v, want 18793 (default)", native["port"])
+	if native["port"] != float64(18790) {
+		t.Errorf("port = %v, want 18790 (default)", native["port"])
 	}
 
 	// Verificar metadata

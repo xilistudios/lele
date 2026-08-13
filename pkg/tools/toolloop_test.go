@@ -2,8 +2,11 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/providers"
 )
@@ -26,6 +29,36 @@ func (p *captureProvider) Chat(_ context.Context, _ []providers.Message, tools [
 
 func (p *captureProvider) GetDefaultModel() string {
 	return "test-model"
+}
+
+// scriptedProvider returns a fixed sequence of responses, then fails if called
+// beyond that. Used to verify that RunToolLoop retries empty responses instead
+// of terminating early.
+type scriptedProvider struct {
+	mu        sync.Mutex
+	responses []*providers.LLMResponse
+	calls     int
+}
+
+func (p *scriptedProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.calls >= len(p.responses) {
+		return nil, fmt.Errorf("unexpected extra Chat call")
+	}
+	resp := p.responses[p.calls]
+	p.calls++
+	return resp, nil
+}
+
+func (p *scriptedProvider) GetDefaultModel() string {
+	return "test-model"
+}
+
+func (p *scriptedProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
 
 func (p *captureProvider) toolNames() []string {
@@ -120,4 +153,40 @@ func TestRunToolLoop_FiltersReadImageWithoutVision(t *testing.T) {
 			t.Fatalf("read_image should be filtered out by default (zero value), got tools: %v", names)
 		}
 	})
+}
+
+func TestRunToolLoop_EmptyResponseRetries(t *testing.T) {
+	p := &scriptedProvider{
+		responses: []*providers.LLMResponse{
+			{Content: ""},
+			{Content: ""},
+			{Content: "done"},
+		},
+	}
+
+	// RetryWait never actually sleeps — it returns a channel that is
+	// immediately ready, so the empty-response backoff adds no real delay.
+	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:      p,
+		Model:         "test-model",
+		MaxIterations: 0,
+		RetryWait: func(d time.Duration) <-chan time.Time {
+			ch := make(chan time.Time, 1)
+			ch <- time.Now()
+			return ch
+		},
+	}, []providers.Message{{Role: "user", Content: "task"}}, "", "")
+
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if result.Content != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", result.Content)
+	}
+	if strings.Contains(result.Content, "Maximum iterations reached") {
+		t.Fatalf("content should not contain the max-iterations fallback, got %q", result.Content)
+	}
+	if got := p.callCount(); got != 3 {
+		t.Fatalf("expected 3 provider calls (2 empty retries + 1 final), got %d", got)
+	}
 }

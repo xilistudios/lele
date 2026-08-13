@@ -208,7 +208,8 @@ func (m *Model) View() string {
 		}
 
 		// Center the entire welcome content block in the terminal
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, contentBuilder.String())
+		welcomeView := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, contentBuilder.String())
+		return AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(welcomeView)
 	}
 
 	// --------------------------------------------------------------------------
@@ -258,26 +259,42 @@ func (m *Model) View() string {
 	// Orange = goal in progress, Green = goal completed.
 	if m.currentKey != "" && m.agentLoop != nil {
 		if goal := m.agentLoop.GoalManager().Get(m.currentKey); goal != nil {
-			goalLabel := goal.Text
-			const maxGoalLabelLen = 40
-			if len(goalLabel) > maxGoalLabelLen {
-				goalLabel = goalLabel[:maxGoalLabelLen-3] + "..."
-			}
-			goalColor := OrangeColor
-			if goal.Status == agent.GoalDone {
-				goalColor = SecondaryColor
-			}
 			statusWidth := lipgloss.Width(statusLine)
-			remaining := (leftWidth - 2) - statusWidth
-			if remaining > 0 {
+			remaining := (leftWidth - 2) - statusWidth - 2
+			if remaining > 8 {
+				goalLabel := goal.Text
+				r := []rune(goalLabel)
+				maxLabelLen := remaining - 4 // account for "🎯 "
+				if len(r) > maxLabelLen {
+					if maxLabelLen > 3 {
+						goalLabel = string(r[:maxLabelLen-3]) + "..."
+					} else {
+						goalLabel = string(r[:maxLabelLen])
+					}
+				}
+				goalColor := OrangeColor
+				if goal.Status == agent.GoalDone {
+					goalColor = SecondaryColor
+				}
 				goalBadge := lipgloss.NewStyle().
 					Foreground(goalColor).
 					Bold(true).
 					Width(remaining).
+					MaxWidth(remaining).
 					Align(lipgloss.Right).
 					Render("🎯 " + goalLabel)
 				statusLine = lipgloss.JoinHorizontal(lipgloss.Top, statusLine, goalBadge)
 			}
+		}
+	}
+
+	// Ensure status line does not exceed available column width
+	if maxSW := leftWidth - 2; maxSW > 0 && lipgloss.Width(statusLine) > maxSW {
+		r := []rune(statusLine)
+		if maxSW > 3 && len(r) > maxSW {
+			statusLine = string(r[:maxSW-3]) + "..."
+		} else if len(r) > maxSW {
+			statusLine = string(r[:maxSW])
 		}
 	}
 
@@ -295,10 +312,24 @@ func (m *Model) View() string {
 		autocompleteView = ModalContainer.Width(leftWidth-4).Render(autoSb.String()) + "\n"
 	}
 
-	statusLineRendered := StatusLineStyle.Render(statusLine)
+	var statusLineRendered string
+	if contentHeight < 20 {
+		statusLineRendered = lipgloss.NewStyle().Foreground(CommentColor).Render(statusLine)
+	} else {
+		statusLineRendered = StatusLineStyle.Render(statusLine)
+	}
 
 	m.chatInput.SetWidth(leftWidth - 4)
-	inputBar := InputBarContainer.Width(leftWidth - 2).Render(m.chatInput.View())
+	var inputBar string
+	if contentHeight < 16 {
+		inputBar = lipgloss.NewStyle().
+			Background(InputBgColor).
+			Padding(0, 1).
+			Width(leftWidth - 2).
+			Render(m.chatInput.View())
+	} else {
+		inputBar = InputBarContainer.Width(leftWidth - 2).Render(m.chatInput.View())
+	}
 
 	// Use cached token counts — GetCurrentContextUsage is expensive (rebuilds
 	// system prompt from disk + estimates tokens over full history). The cache
@@ -311,9 +342,40 @@ func (m *Model) View() string {
 	}
 	tokensText := fmt.Sprintf("%d (%.1f%%)", currentTokens, pct)
 	modeBadge := fmt.Sprintf("[%s]", strings.ToUpper(m.currentMode.String()))
+
+	availWidth := leftWidth - 2
+	if availWidth < 10 {
+		availWidth = 10
+	}
+	tokensWidth := lipgloss.Width(tokensText)
+	availRight := tokensWidth
+	if availRight > availWidth/2 {
+		availRight = availWidth / 2
+	}
+	availLeft := availWidth - availRight
+	if availLeft < 10 {
+		availLeft = 10
+	}
+
+	leftInfoRaw := fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)
+	badgeWidth := lipgloss.Width(ModelSelectorStyle.Render(modeBadge)) + 1
+	leftTextBudget := availLeft - badgeWidth
+	if leftTextBudget < 5 {
+		leftTextBudget = 5
+	}
+	if lipgloss.Width(leftInfoRaw) > leftTextBudget {
+		r := []rune(leftInfoRaw)
+		if leftTextBudget > 3 && len(r) > leftTextBudget {
+			leftInfoRaw = string(r[:leftTextBudget-3]) + "..."
+		} else if len(r) > leftTextBudget {
+			leftInfoRaw = string(r[:leftTextBudget])
+		}
+	}
+	leftBarText := fmt.Sprintf("%s %s", ModelSelectorStyle.Render(modeBadge), leftInfoRaw)
+
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
-		BottomBarLeft.Width((leftWidth-2)/2).Render(fmt.Sprintf("%s %s · %s · %s", ModelSelectorStyle.Render(modeBadge), agentID, modelName, thinkLevel)),
-		BottomBarRight.Width((leftWidth-2)/2).Align(lipgloss.Right).Render(tokensText),
+		BottomBarLeft.Width(availLeft).MaxWidth(availLeft).Render(leftBarText),
+		BottomBarRight.Width(availRight).MaxWidth(availRight).Align(lipgloss.Right).Render(tokensText),
 	)
 
 	m.viewport.Width = leftWidth - 2
@@ -340,10 +402,15 @@ func (m *Model) View() string {
 	leftBuilder.WriteString(inputBar + "\n")
 	leftBuilder.WriteString(bottomBar)
 
-	leftPane := LeftColumnStyle.Width(leftWidth).Render(leftBuilder.String())
+	leftPane := LeftColumnStyle.Width(leftWidth).Height(contentHeight).MaxHeight(contentHeight).Render(leftBuilder.String())
 
 	// Render Right Column (Sidebar Panel)
 	var rightBuilder strings.Builder
+
+	contentWidth := rightWidth - 4
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
 
 	sessionName := m.sessionMgr.GetName(m.currentKey)
 	if sessionName == "" {
@@ -353,6 +420,13 @@ func (m *Model) View() string {
 	if m.parentSessionKey != "" {
 		sessionName = "⇗ " + sessionName
 	}
+	if r := []rune(sessionName); len(r) > contentWidth {
+		if contentWidth > 3 {
+			sessionName = string(r[:contentWidth-3]) + "..."
+		} else {
+			sessionName = string(r[:contentWidth])
+		}
+	}
 	rightBuilder.WriteString(SidebarTitle.Render(sessionName) + "\n\n")
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
@@ -361,18 +435,37 @@ func (m *Model) View() string {
 	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)) + "\n")
 	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.contextWindow"), formatNumber(contextWindow)) + "\n")
 
-	// Cumulative token counts for this session — cached above
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.compactions"), fmt.Sprintf("%d", m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey))) + "\n\n")
+	// On medium/large heights, show detailed cumulative token counts
+	if contentHeight >= 20 {
+		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)) + "\n")
+		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)) + "\n")
+		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n")
+		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.compactions"), fmt.Sprintf("%d", m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey))) + "\n")
+	}
+	rightBuilder.WriteString("\n")
 
-	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(m.workspacePath) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(m.gitBranch) + "\n\n")
+	if contentHeight >= 16 {
+		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
+		wsPath := m.workspacePath
+		if r := []rune(wsPath); len(r) > contentWidth-1 {
+			if contentWidth > 4 {
+				wsPath = "..." + string(r[len(r)-(contentWidth-4):])
+			}
+		}
+		rightBuilder.WriteString(SidebarValue.Render(wsPath) + "\n")
+		branch := m.gitBranch
+		if r := []rune(branch); len(r) > contentWidth-1 {
+			if contentWidth > 4 {
+				branch = string(r[:contentWidth-4]) + "..."
+			}
+		}
+		rightBuilder.WriteString(SidebarValue.Render(branch) + "\n\n")
+	}
 
-	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
-	rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n\n")
+	if contentHeight >= 14 {
+		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
+		rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n\n")
+	}
 
 	// Get session subagents
 	subagentQueryKey := m.currentKey
@@ -391,76 +484,78 @@ func (m *Model) View() string {
 		// Sort by appearance (most recent first)
 		sortSubagents(subagents)
 
-		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
+		currentSidebarHeight := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(rightBuilder.String()))
+		availableLines := contentHeight - currentSidebarHeight - 1 // -1 for Subagents header
 
-		contentWidth := rightWidth - 4
-		if contentWidth < 1 {
-			contentWidth = 1
-		}
+		if availableLines > 0 {
+			rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
+			currentY := currentSidebarHeight + 1
 
-		// Compute the base height once before the loop. The original code
-		// re-rendered the FULL accumulated rightBuilder string on every
-		// iteration to measure yStart, making the loop O(n²) with many
-		// subagents. Now we render only the single new line per iteration
-		// (O(1) each → O(n) total) while preserving exact click-target
-		// geometry, including any line wrapping on very narrow terminals.
-		baseHeight := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(rightBuilder.String()))
-		currentY := baseHeight
-
-		for _, sa := range subagents {
-			label := sa.Label
-			if label == "" {
-				label = sa.TaskID
+			maxItems := len(subagents)
+			hasMore := false
+			if maxItems > availableLines {
+				maxItems = availableLines - 1
+				hasMore = true
+			}
+			if maxItems < 0 {
+				maxItems = 0
 			}
 
-			// Truncate label dynamically to prevent word wrapping in the sidebar.
-			// The printed line has a layout of " [statusDot] [label] ([status])\n"
-			// Status dot is 1 char. Spacing and parentheses add another 5 chars.
-			// Status text length is len(sa.Status).
-			// RightSidebar has a left border (1), padding left (2), padding right (1), so useful width is rightWidth - 4.
-			maxLabelWidth := (rightWidth - 4) - (3 + len(sa.Status) + 3)
-			if maxLabelWidth < 5 {
-				maxLabelWidth = 5 // Keep a minimum width so it doesn't disappear completely
-			}
-			// Rune-safe truncation to avoid breaking multi-byte UTF-8 characters
-			r := []rune(label)
-			if len(r) > maxLabelWidth {
-				if maxLabelWidth < 3 {
-					label = string(r[:maxLabelWidth])
-				} else {
-					label = string(r[:maxLabelWidth-3]) + "..."
+			for i := 0; i < maxItems; i++ {
+				sa := subagents[i]
+				label := sa.Label
+				if label == "" {
+					label = sa.TaskID
 				}
+
+				// The printed line has a layout of " [statusDot] [label] ([status])\n"
+				// Truncate label so line NEVER wraps across multiple rows.
+				maxLabelWidth := contentWidth - (6 + len(sa.Status))
+				if maxLabelWidth < 4 {
+					maxLabelWidth = 4
+				}
+				r := []rune(label)
+				if len(r) > maxLabelWidth {
+					if maxLabelWidth < 3 {
+						label = string(r[:maxLabelWidth])
+					} else {
+						label = string(r[:maxLabelWidth-3]) + "..."
+					}
+				}
+
+				var statusDot string
+				switch sa.Status {
+				case "running", "needs_context", "not_done":
+					statusDot = StatusRunning.Render("●")
+				case "completed":
+					statusDot = StatusCompleted.Render("●")
+				case "failed", "cancelled":
+					statusDot = StatusFailed.Render("●")
+				default:
+					statusDot = "○"
+				}
+
+				lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
+				rightBuilder.WriteString(lineStr)
+
+				// Track this subagent item's position for click handling
+				m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
+					yStart: currentY,
+					yEnd:   currentY + 1,
+					key:    sa.SessionKey,
+				})
+				currentY++
 			}
 
-			var statusDot string
-			switch sa.Status {
-			case "running", "needs_context", "not_done":
-				statusDot = StatusRunning.Render("●")
-			case "completed":
-				statusDot = StatusCompleted.Render("●")
-			case "failed", "cancelled":
-				statusDot = StatusFailed.Render("●")
-			default:
-				statusDot = "○"
+			if hasMore {
+				remainingCount := len(subagents) - maxItems
+				moreStr := fmt.Sprintf(" +%d more", remainingCount)
+				rightBuilder.WriteString(CommentColorStyle.Render(moreStr) + "\n")
 			}
-
-			yStart := currentY - 1
-			lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
-			rightBuilder.WriteString(lineStr)
-			lineHeight := lipgloss.Height(lipgloss.NewStyle().Width(contentWidth).Render(strings.TrimRight(lineStr, "\n")))
-			yEnd := yStart + lineHeight
-
-			// Track this subagent item's position for click handling
-			m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
-				yStart: yStart,
-				yEnd:   yEnd,
-				key:    sa.SessionKey,
-			})
-			currentY += lineHeight
 		}
 	}
 
-	rightPane := RightSidebar.Width(rightWidth).Height(contentHeight).Render(rightBuilder.String())
+	rightPane := RightSidebar.Width(rightWidth).Height(contentHeight).MaxHeight(contentHeight).Render(rightBuilder.String())
 
 	mainLayout := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
@@ -515,7 +610,7 @@ func (m *Model) View() string {
 		return m.renderModal(modalTitle)
 	}
 
-	return AppContainer.Width(m.width).Height(m.height).Render(mainLayout)
+	return AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(mainLayout)
 }
 
 // calculateViewportHeight reserves every line rendered below the viewport.
@@ -527,8 +622,8 @@ func calculateViewportHeight(contentHeight, statusHeight, autocompleteHeight, in
 		otherHeight += autocompleteHeight
 	}
 	viewportHeight := contentHeight - otherHeight
-	if viewportHeight < 3 {
-		return 3
+	if viewportHeight < 1 {
+		return 1
 	}
 	return viewportHeight
 }
