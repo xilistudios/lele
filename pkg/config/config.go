@@ -310,9 +310,7 @@ type NativeConfig struct {
 }
 
 type WebConfig struct {
-	Enabled bool   `json:"enabled" env:"LELE_WEB_ENABLED"`
-	Host    string `json:"host" env:"LELE_WEB_HOST"`
-	Port    int    `json:"port" env:"LELE_WEB_PORT"`
+	Enabled bool `json:"enabled" env:"LELE_WEB_ENABLED"`
 }
 
 type WhatsAppConfig struct {
@@ -954,9 +952,9 @@ func DefaultConfig() *Config {
 			Defaults: AgentDefaults{
 				Workspace:              "",
 				RestrictToWorkspace:    true,
-				Provider:               "nanogpt",
-				Model:                  "nanogpt/qwen3-5-397b-a17b-thinking",
-				MaxTokens:              8192,
+				Provider:               "openrouter",
+				Model:                  "deepseek-v4-pro",
+				MaxTokens:              0, // 0 = use provider/model fallback (instance resolves to 8192 when unset)
 				MaxToolIterations:      0, // 0 = unlimited (timeout is the real safety guard)
 				MaxReadLines:           500,
 				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
@@ -1037,22 +1035,20 @@ func DefaultConfig() *Config {
 				AllowFrom:          FlexibleStringSlice{},
 			},
 			Native: NativeConfig{
-				Enabled:           false,
+				Enabled:           true,
 				Host:              "127.0.0.1",
-				Port:              18793,
+				Port:              18790,
 				TokenExpiryDays:   30,
 				PinExpiryMinutes:  5,
 				MaxClients:        5,
-				CORSOrigins:       []string{"http://localhost", "http://localhost:3005", "http://127.0.0.1:3005", "http://0.0.0.0:3005", "tauri://localhost", "https://tauri.localhost"},
+				CORSOrigins:       []string{"http://localhost", "http://localhost:18790", "http://127.0.0.1:18790", "http://0.0.0.0:18790", "tauri://localhost", "https://tauri.localhost"},
 				SessionExpiryDays: 30,
 				MaxUploadSizeMB:   50,
 				UploadTTLHours:    24,
 				LeleDir:           getDefaultLeleDir(),
 			},
 			Web: WebConfig{
-				Enabled: false,
-				Host:    "0.0.0.0",
-				Port:    3005,
+				Enabled: true,
 			},
 		},
 		Providers: &ProvidersConfig{
