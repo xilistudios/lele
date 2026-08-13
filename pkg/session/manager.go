@@ -1548,7 +1548,7 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		rows[i] = store.MessageRow{
 			Seq:      i,
 			Role:     evt.Role,
-			JSON:     string(msgJSON),
+			JSON:     msgJSON,
 			Excluded: true,
 		}
 	}

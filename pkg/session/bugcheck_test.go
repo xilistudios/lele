@@ -1,10 +1,10 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
-	"encoding/json"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
