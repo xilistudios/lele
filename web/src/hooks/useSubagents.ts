@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../contexts/AuthContext'
 import type { SubagentTaskInfo } from '../lib/types'
 
 export type { SubagentTaskInfo as SubagentInfo }
 
-export function useSubagents(sessionKey: string | null) {
+export function useSubagents(sessionKey: string | null, pollIntervalMs = 5000) {
   const { api } = useAuthContext()
   const [subagents, setSubagents] = useState<SubagentTaskInfo[]>([])
   const [loading, setLoading] = useState(false)
-  const hasRunningRef = useRef(false)
+  const [hasRunning, setHasRunning] = useState(false)
 
   const fetchSubagents = useCallback(async () => {
     if (!sessionKey) {
@@ -32,23 +32,20 @@ export function useSubagents(sessionKey: string | null) {
     fetchSubagents()
   }, [fetchSubagents])
 
-  // Track running state in a ref so the polling effect doesn't re-trigger
-  // on every subagents change (avoids timer churn).
+  // Track running state so the polling effect can react to it.
   useEffect(() => {
-    hasRunningRef.current = subagents.some((s) => s.status === 'running')
+    setHasRunning(subagents.some((s) => s.status === 'running'))
   }, [subagents])
 
   // Poll every 5s while any subagent is running
   useEffect(() => {
-    if (!hasRunningRef.current) return
+    if (!hasRunning) return
 
     const id = setInterval(() => {
-      if (hasRunningRef.current) {
-        fetchSubagents()
-      }
-    }, 5000)
+      fetchSubagents()
+    }, pollIntervalMs)
     return () => clearInterval(id)
-  }, [fetchSubagents])
+  }, [fetchSubagents, hasRunning, pollIntervalMs])
 
   return { subagents, loading, refresh: fetchSubagents }
 }
