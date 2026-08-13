@@ -16,11 +16,28 @@ import (
 )
 
 // parseCLIArgs extracts the pure argument parsing logic from agentCmd for testability.
-// Returns: message, sessionKey, debugMode.
+// Returns: message, sessionKey, debugMode, verboseMode.
 func parseCLIArgs(args []string) (message, sessionKey string, debug bool, verbose bool) {
 	sessionKey = "cli:default"
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--session=") {
+			sessionKey = strings.TrimPrefix(arg, "--session=")
+			continue
+		}
+		if strings.HasPrefix(arg, "-s=") {
+			sessionKey = strings.TrimPrefix(arg, "-s=")
+			continue
+		}
+		if strings.HasPrefix(arg, "--message=") {
+			message = strings.TrimPrefix(arg, "--message=")
+			continue
+		}
+		if strings.HasPrefix(arg, "-m=") {
+			message = strings.TrimPrefix(arg, "-m=")
+			continue
+		}
+		switch arg {
 		case "--debug", "-d":
 			debug = true
 		case "--verbose", "-v":

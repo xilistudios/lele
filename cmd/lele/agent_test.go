@@ -206,3 +206,21 @@ func TestParseCLIArgs_OnlyFlagsNoArgs(t *testing.T) {
 		t.Error("debug = false, want true")
 	}
 }
+
+func TestParseCLIArgs_EqualsSyntax(t *testing.T) {
+	msg, session, _, _ := parseCLIArgs([]string{"--session=574f2fc5-3e50-4415-9e7d-aa70e4d4ab36", "--message=hello"})
+	if session != "574f2fc5-3e50-4415-9e7d-aa70e4d4ab36" {
+		t.Errorf("session = %q, want %q", session, "574f2fc5-3e50-4415-9e7d-aa70e4d4ab36")
+	}
+	if msg != "hello" {
+		t.Errorf("msg = %q, want %q", msg, "hello")
+	}
+
+	msg2, session2, _, _ := parseCLIArgs([]string{"-s=test-session", "-m=world"})
+	if session2 != "test-session" {
+		t.Errorf("session = %q, want %q", session2, "test-session")
+	}
+	if msg2 != "world" {
+		t.Errorf("msg = %q, want %q", msg2, "world")
+	}
+}

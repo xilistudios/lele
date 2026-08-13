@@ -1015,7 +1015,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "ctrl+c":
-			m.printSessionSummary()
 			m.cancel()
 			return m, tea.Quit
 
