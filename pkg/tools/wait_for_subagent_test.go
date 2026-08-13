@@ -243,3 +243,62 @@ func (p *delayedSubagentProvider) SupportsTools() bool {
 func (p *delayedSubagentProvider) GetContextWindow() int {
 	return 4096
 }
+func TestWaitForSubagent_AfterContinue_ReturnsFinalResult(t *testing.T) {
+	provider := &scriptedSubagentProvider{responses: []string{
+		"STATUS: needs_context\nSUMMARY: Missing repository target\nCONTEXT_NEEDED: Which repository should I inspect?\nDETAILS:\nI need the repository path before I can continue.",
+		"STATUS: completed\nSUMMARY: Done after resume\nDETAILS:\nResumed and finished.",
+	}}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 2)
+
+	_, err := manager.Spawn(context.Background(), "Inspect the repository", "repo-inspect", "", "telegram", "chat-123", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("Spawn returned error: %v", err)
+	}
+
+	first := waitForSubagentCallback(t, resultCh)
+	if first == nil {
+		t.Fatal("Expected first callback result")
+	}
+	if !strings.Contains(first.ForLLM, "needs_context") {
+		t.Fatalf("Expected needs_context status, got: %s", first.ForLLM)
+	}
+
+	task, ok := manager.GetTask("subagent-1")
+	if !ok {
+		t.Fatal("Expected subagent task to exist")
+	}
+	if task.Status != SubagentStatusNeedsContext {
+		t.Fatalf("Expected task status %q, got %q", SubagentStatusNeedsContext, task.Status)
+	}
+
+	_, err = manager.ContinueTask(context.Background(), task.ID, "use /tmp/lele", func(ctx context.Context, result *ToolResult) {
+		resultCh <- result
+	})
+	if err != nil {
+		t.Fatalf("ContinueTask returned error: %v", err)
+	}
+
+	// wait_for_subagent must block until the resumed run completes and return
+	// the final result, NOT a stale "running" snapshot from the previous run.
+	tool := NewWaitForSubagentTool(manager)
+	waitResult := tool.Execute(context.Background(), map[string]interface{}{"task_id": task.ID})
+
+	if waitResult.IsError {
+		t.Errorf("Expected success, got error: %s", waitResult.ForLLM)
+	}
+	if !strings.Contains(waitResult.ForLLM, "completed") {
+		t.Errorf("Expected 'completed' in result, got: %s", waitResult.ForLLM)
+	}
+	if !strings.Contains(waitResult.ForLLM, "Resumed and finished") {
+		t.Errorf("Expected resumed detail in result, got: %s", waitResult.ForLLM)
+	}
+	if strings.Contains(waitResult.ForLLM, "running") {
+		t.Errorf("Expected no stale 'running' status in result, got: %s", waitResult.ForLLM)
+	}
+
+	// Drain the resumed run's async callback.
+	<-resultCh
+}
