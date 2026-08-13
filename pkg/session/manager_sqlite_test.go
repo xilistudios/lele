@@ -1365,26 +1365,29 @@ func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
 	// Evict the session from memory entirely.
 	sm.EvictSession(key)
 
-	// Reload a fresh session manager over the same store. Task 2.4: a session
-	// saved post-eviction must reload with correct slice (all 9, in order)
-	// and no dup/missing rows.
+	// Reload a fresh session manager over the same store. Per the
+	// context-only in-memory design (Phase 7), a cold load must NOT re-inflate
+	// evicted rows into RAM: it restores firstInMemorySeq (5) and loads only
+	// the non-evicted suffix (m5..m8) plus the appended m8, so SQLite rows
+	// (seqs 0-8) map to in-memory slice indices as seq = firstInMemorySeq + i.
 	sm2 := NewSessionManager()
 	sm2.SetStore(s)
 	hist := sm2.GetHistoryView(key)
-	if len(hist) != 9 {
-		t.Fatalf("reloaded len = %d, want 9", len(hist))
+	if len(hist) != 4 {
+		t.Fatalf("reloaded in-memory len = %d, want 4 (non-evicted only)", len(hist))
 	}
 	for i, msg := range hist {
-		want := fmt.Sprintf("m%d", i)
+		want := fmt.Sprintf("m%d", i+5)
 		if msg.Content != want {
 			t.Errorf("reloaded[%d].Content = %q, want %q", i, msg.Content, want)
 		}
 	}
-	// Evicted messages (1-4) reload as excluded (index 0 keeps excluded=0).
-	for i := 1; i <= 4; i++ {
-		if !hist[i].ExcludeFromContext {
-			t.Errorf("reloaded[%d] should be excluded", i)
-		}
+	// Evicted boundary restored: 5 evicted rows still in SQLite, 9 total.
+	if got := sm2.GetEvictedMessageCount(key); got != 5 {
+		t.Errorf("GetEvictedMessageCount after reload = %d, want 5", got)
+	}
+	if got := sm2.GetTotalMessageCount(key); got != 9 {
+		t.Errorf("GetTotalMessageCount after reload = %d, want 9", got)
 	}
 
 	// A save on the fresh manager is a no-op (no full rewrite) — data intact.
@@ -1441,4 +1444,281 @@ func TestEvictExcluded_NoStore(t *testing.T) {
 	if len(hist) != 8 {
 		t.Fatalf("history length after refused eviction = %d, want 8", len(hist))
 	}
+}
+// TestSQLite_ColdLoad_RestoresEvictionBoundary verifies that a cold load
+// (new SessionManager over the same store) restores the eviction boundary
+// (firstInMemorySeq/evictedTotal) from SQLite metadata and does NOT re-inflate
+// the evicted rows into RAM: only the non-evicted suffix is loaded.
+func TestSQLite_ColdLoad_RestoresEvictionBoundary(t *testing.T) {
+	s := newTestStore(t)
+
+	// Manager 1: create + persist the session, exclude a prefix, save, evict.
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:coldload-evicted"
+	sm.GetOrCreate(key)
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude all but the last 3 in-context (keep m7..m9), persist, then evict.
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	}
+
+	// Manager 2: cold load from the same store.
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+
+	// Only the non-evicted suffix is resident in RAM (this also triggers the
+	// cold load for the count assertions below).
+	hist := sm2.GetHistory(key)
+	if len(hist) != 3 {
+		t.Fatalf("in-memory len after cold load = %d, want 3", len(hist))
+	}
+	if hist[0].Content != "m7" {
+		t.Errorf("first in-memory message after cold load = %q, want %q", hist[0].Content, "m7")
+	}
+	if hist[1].Content != "m8" || hist[2].Content != "m9" {
+		t.Errorf("unexpected kept suffix after cold load: %q, %q", hist[1].Content, hist[2].Content)
+	}
+
+	// Boundary restored: 7 evicted, 10 total.
+	if got := sm2.GetEvictedMessageCount(key); got != 7 {
+		t.Fatalf("GetEvictedMessageCount after cold load = %d, want 7", got)
+	}
+	if got := sm2.GetTotalMessageCount(key); got != 10 {
+		t.Fatalf("GetTotalMessageCount after cold load = %d, want 10", got)
+	}
+
+	// The invariant seq = firstInMemorySeq + sliceIndex must hold: the first
+	// in-memory row's SQLite seq equals firstInMemorySeq (7). Verify against
+	// the persisted rows.
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(rows) != 10 {
+		t.Fatalf("SQLite rows = %d, want 10", len(rows))
+	}
+	// The first persistent row after the boundary is seq 7.
+	found := false
+	for _, r := range rows {
+		if r.Seq == 7 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a persisted row with seq 7 (firstInMemorySeq), got seqs: %v", seqsOf(rows))
+	}
+}
+
+// TestSQLite_ColdLoad_PrunedPrefixBelowBoundary is a regression test for the
+// stale-eviction-boundary guard. saveFullUnlocked physically prunes the OLDEST
+// excluded rows from SQLite for oversized sessions, leaving a gap BELOW the
+// eviction boundary. The cold-load guard must validate contiguity ABOVE the
+// boundary (via MaxSeq), not contiguity from seq 0 (via MessageCount), so a
+// pruned prefix must NOT trigger the fallback that would reset
+// firstInMemorySeq to 0 and corrupt the `seq = firstInMemorySeq + sliceIndex`
+// invariant.
+func TestSQLite_ColdLoad_PrunedPrefixBelowBoundary(t *testing.T) {
+	s := newTestStore(t)
+
+	// Manager 1: create + persist a session, exclude a prefix, save, evict.
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:pruned-prefix-restore"
+	sm.GetOrCreate(key)
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude the first 7 (m0..m6), keep m7..m9 in context; persist + evict.
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	}
+	// EvictExcludedMessages persists the boundary (FirstInMemorySeq == 7);
+	// confirm it survived in SQLite metadata.
+	meta, err := s.Sessions().GetSessionMeta(key)
+	if err != nil || meta == nil {
+		t.Fatalf("GetSessionMeta failed: %v (err=%v)", meta, err)
+	}
+	if meta.FirstInMemorySeq != 7 {
+		t.Fatalf("FirstInMemorySeq persisted = %d, want 7", meta.FirstInMemorySeq)
+	}
+
+	// Simulate the post-full-rewrite pruning of the OLDEST excluded rows
+	// (which live below the boundary) by calling the repo directly, the same
+	// method saveFullUnlocked uses. keepCount small enough that rows are
+	// actually deleted: total=10, keepCount=7 -> 3 oldest excluded rows pruned.
+	pruned, pErr := s.Sessions().PruneExcluded(key, 7)
+	if pErr != nil {
+		t.Fatalf("PruneExcluded failed: %v", pErr)
+	}
+	if pruned != 3 {
+		t.Fatalf("PruneExcluded deleted %d rows, want 3 (oldest excluded prefix)", pruned)
+	}
+
+	// rows remaining after pruning are m3..m9 (seq 3..9): m3..m6 still
+	// excluded (evicted + persisted), m7..m9 in-context. Boundary is still 7.
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(rows) != 7 {
+		t.Fatalf("SQLite rows after prune = %d, want 7", len(rows))
+	}
+
+	// Cold load via a NEW manager over the same store. With the old guard,
+	// MessageCount - boundary = 7 - 7 = 0 != 3 would falsely trigger the
+	// fallback and reset firstInMemorySeq to 0.
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+
+	hist := sm2.GetHistory(key) // triggers the cold load
+	if len(hist) != 3 {
+		t.Fatalf("in-memory len after cold load = %d, want 3", len(hist))
+	}
+	if hist[0].Content != "m7" || hist[1].Content != "m8" || hist[2].Content != "m9" {
+		t.Fatalf("unexpected kept suffix after cold load: %q, %q, %q", hist[0].Content, hist[1].Content, hist[2].Content)
+	}
+
+	// Boundary was NOT reset to 0: evicted rows still persisted = B - pruned
+	// (7 - 3 = 4), and total = 4 + in-memory 3 = 7.
+	if got := sm2.GetEvictedMessageCount(key); got != 7-pruned {
+		t.Fatalf("GetEvictedMessageCount after cold load = %d, want %d (B-pruned)", got, 7-pruned)
+	}
+	if inMem := len(sm2.GetHistory(key)); inMem != 3 {
+		t.Fatalf("GetHistory len after cold load = %d, want 3", inMem)
+	}
+	if got := sm2.GetTotalMessageCount(key); got != 7-pruned+len(hist) {
+		t.Fatalf("GetTotalMessageCount after cold load = %d, want %d", got, 7-pruned+len(hist))
+	}
+
+	// The invariant seq = firstInMemorySeq + sliceIndex must hold after an
+	// append: appending one more message via the manager and saving must
+	// insert at absolute seq = firstInMemorySeq + sliceIndex (7 + 3 = 10) and
+	// must NOT overwrite any existing row.
+	sm2.AddMessage(key, "user", "m10")
+	if err := sm2.Save(key); err != nil {
+		t.Fatalf("save after append failed: %v", err)
+	}
+	finalRows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq (final) failed: %v", err)
+	}
+	if len(finalRows) != 8 {
+		t.Fatalf("SQLite rows after append = %d, want 8 (grew by exactly 1)", len(finalRows))
+	}
+	newRow := finalRows[len(finalRows)-1]
+	// No seq was overwritten: the new row's seq must equal firstInMemorySeq +
+	// sliceIndex (7 + 3 = 10), one beyond the previous max (9). The total row
+	// count growing by exactly 1 already proves no existing row was replaced.
+	if newRow.Seq != 10 {
+		t.Fatalf("appended row seq = %d, want 10 (firstInMemorySeq+sliceIndex), json=%q", newRow.Seq, newRow.JSON)
+	}
+}
+
+// TestSQLite_ColdLoad_NoEviction_BoundaryZero is a regression test: a session
+// with no eviction reloads all messages with firstInMemorySeq == 0, i.e. the
+// legacy behavior is unchanged.
+func TestSQLite_ColdLoad_NoEviction_BoundaryZero(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:coldload-noevict"
+	sm.GetOrCreate(key)
+	for i := 0; i < 5; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+	hist := sm2.GetHistory(key)
+	if len(hist) != 5 {
+		t.Fatalf("in-memory len after cold load = %d, want 5", len(hist))
+	}
+	if got := sm2.GetEvictedMessageCount(key); got != 0 {
+		t.Fatalf("GetEvictedMessageCount = %d, want 0", got)
+	}
+	if got := sm2.GetTotalMessageCount(key); got != 5 {
+		t.Fatalf("GetTotalMessageCount = %d, want 5", got)
+	}
+	for i, msg := range hist {
+		if msg.Content != fmt.Sprintf("m%d", i) {
+			t.Errorf("hist[%d].Content = %q, want %q", i, msg.Content, fmt.Sprintf("m%d", i))
+		}
+	}
+}
+
+// TestSQLite_EvictionBoundary_PersistedOnEvict verifies that after
+// EvictExcludedMessages + save, a fresh GetSessionMeta via the store sees
+// FirstInMemorySeq == number of evicted rows.
+func TestSQLite_EvictionBoundary_PersistedOnEvict(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:boundary-persist"
+	sm.GetOrCreate(key)
+	for i := 0; i < 8; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	sm.ExcludeOldMessagesFromContext(key, 2)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+	if evicted := sm.EvictExcludedMessages(key); evicted != 6 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 6", evicted)
+	}
+	// Persist boundary explicitly (EvictExcludedMessages already did, but a
+	// save keeps the metadata consistent).
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("save after evict failed: %v", err)
+	}
+
+	meta, err := s.Sessions().GetSessionMeta(key)
+	if err != nil {
+		t.Fatalf("GetSessionMeta failed: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("session not found in SQLite")
+	}
+	if meta.FirstInMemorySeq != 6 {
+		t.Fatalf("FirstInMemorySeq persisted = %d, want 6", meta.FirstInMemorySeq)
+	}
+}
+
+// seqsOf extracts the ordered seq values from persistence rows for assertions.
+func seqsOf(rows []store.MessageRowFull) []int {
+	seqs := make([]int, 0, len(rows))
+	for _, r := range rows {
+		seqs = append(seqs, r.Seq)
+	}
+	return seqs
 }

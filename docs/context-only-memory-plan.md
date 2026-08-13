@@ -275,23 +275,38 @@ Replace the three `len(history) <= 4` compaction guards with
 eviction. (The guards exist to avoid compacting tiny sessions; eviction
 should not make a compactable session look empty.)
 
-### 4.7 Cold-load optimization (Phase 7, optional)
+### 4.7 Cold-load optimization (Phase 7, implemented)
 
-`loadFromSQLite` currently loads all messages. With eviction in place, a
-cold session reload re-inflates excluded messages into RAM until the next
-compaction. Optimize:
+`loadFromSQLite` used to load all messages. With eviction in place, a
+cold session reload re-inflated excluded/evicted messages into RAM until
+the next compaction.
 
-- `LoadMessagesFiltered(sessionKey, excluded bool)` →
-  `SELECT message FROM session_messages WHERE session_key = ? AND excluded = ?
-  ORDER BY seq ASC`
-- `loadFromSQLite` loads only `excluded = 0` messages, sets
-  `firstInMemorySeq` to the seq of the first loaded row (needs a parallel
-  `SELECT MIN(seq) ... WHERE excluded = 0` or `SELECT seq, message` variant),
-  and `evictedTotal` from `SELECT COUNT(*) WHERE excluded = 1`.
-- Exception: index-0 semantics — the first message is never excluded, so the
-  in-context load always includes it.
+**Design note — why NOT an `excluded = 0` filter:** the folded index-0
+message is intentionally evicted from RAM but keeps `excluded = 0` in
+SQLite (so lazy-load/reload can restore it in-context). An
+`excluded = 0` cold-load filter would therefore re-inflate it and break
+the contiguous-prefix model. The eviction boundary must be tracked by seq,
+not by the excluded flag.
 
-This phase is independent and can ship later.
+**Implemented approach — persisted eviction boundary:**
+- Schema v3: `sessions.first_in_memory_seq INTEGER NOT NULL DEFAULT 0`
+  stores the SQLite seq of the first message resident in memory. Rows with
+  `seq < first_in_memory_seq` were evicted from RAM (still persisted).
+- `sessionMetaFromSession` includes `FirstInMemorySeq`, so every save path
+  persists the boundary; `EvictExcludedMessages` also persists it
+  immediately via `UpdateFirstInMemorySeq`.
+- `loadFromSQLite` reads the boundary from meta, loads only
+  `seq >= boundary` rows via `LoadMessagesFromSeq`, restores
+  `firstInMemorySeq = boundary` and `evictedTotal = totalRows - loadedRows`
+  (rows pruned below the boundary are gone from SQLite and not counted).
+- Stale-boundary guard: validates contiguity AT/ABOVE the boundary via
+  `MaxSeq` (`loaded == maxSeq - boundary + 1`). Gaps BELOW the boundary
+  (from `PruneExcluded` on oversized sessions) are expected and must not
+  trigger the fallback. Genuine corruption recovers via
+  `LoadMessagesWithSeq`, anchoring the boundary to the actual first
+  persisted seq. Never panics.
+
+This phase shipped on `feat/context-only-memory`.
 
 ## 5. Phases & Atomic Tasks
 
@@ -412,15 +427,31 @@ phase 2 lands.
 - Tests: endpoint test with evicted session returns full history; counts
   stable.
 
-### Phase 7 — Cold-load optimization (optional, independent)
+### Phase 7 — Cold-load optimization (implemented)
 
-**Task 7.1: In-context-only cold load**
-- Files: `pkg/store/sessions.go` (`LoadMessagesFiltered` /
-  `LoadMessagesWithSeq`), `pkg/session/manager.go` (`loadFromSQLite`)
-- Load only `excluded = 0` rows on cold load; set `firstInMemorySeq` from
-  the MIN loaded seq; `evictedTotal` from `CountExcludedMessages`.
-- Tests: cold load of a compacted session has only in-context messages;
-  `LoadEvictedMessages` restores the rest; seq accounting survives restart.
+**Task 7.1: Store layer — persist the eviction boundary**
+- Files: `pkg/store/migrations.go` (schema v3), `pkg/store/sessions.go`
+- `sessions.first_in_memory_seq` column; `SessionMeta.FirstInMemorySeq`;
+  `LoadMessagesFromSeq(key, fromSeq)`; `UpdateFirstInMemorySeq(key, seq)`.
+- Tests: `LoadMessagesFromSeq` ranges, boundary round-trip, migration v3
+  idempotent.
+
+**Task 7.2: Session layer — restore boundary on cold load**
+- Files: `pkg/session/manager.go`
+- `sessionMetaFromSession` persists the boundary on every save path;
+  `EvictExcludedMessages` persists it immediately; `loadFromSQLite` loads
+  only `seq >= boundary` and restores `firstInMemorySeq`/`evictedTotal`.
+- Tests: `TestSQLite_ColdLoad_RestoresEvictionBoundary`,
+  `TestSQLite_ColdLoad_NoEviction_BoundaryZero`,
+  `TestSQLite_EvictionBoundary_PersistedOnEvict`.
+
+**Task 7.3: Guard hardening — pruned prefix below the boundary**
+- Files: `pkg/session/manager.go`
+- `PruneExcluded` (oversized sessions) deletes rows BELOW the boundary, so
+  the guard validates contiguity via `MaxSeq` (not `MessageCount`);
+  corruption fallback anchors the boundary to the first persisted seq via
+  `LoadMessagesWithSeq`; `evictedTotal = totalRows - loadedRows`.
+- Test: `TestSQLite_ColdLoad_PrunedPrefixBelowBoundary`.
 
 ## 6. Risks & Mitigations
 
@@ -430,7 +461,7 @@ phase 2 lands.
 | `SetHistory`/`TruncateHistory` full rewrite after eviction renumbers seqs | Allowed: full rewrite is atomic (`ReplaceMessages` in tx); after it, `firstInMemorySeq = 0`. `ensureSummaryMaterialized` uses `SetHistory` — verify in 2.4 test that append-after-eviction + materialization stays consistent |
 | Live-slice consumers (`GetHistoryView`) race with eviction/prepend | Eviction and `LoadEvictedMessages` run under `sm.mu`; the slice is only replaced (never reallocated under callers) — same contract as today. TUI render reads happen between frames; a one-frame stale view is acceptable (next tick re-renders) |
 | `resetAgentSession` backup (`loop.go:918`) restores without evicted msgs | Acceptable: `/clear` wipes the session anyway; backup only guards a failed save. Document it |
-| Index-0 special case (never excluded) complicates gap shape | Keep index 0 in memory always (one small message). Evicted set stays a contiguous prefix → single `firstInMemorySeq` suffices |
+| Index-0 special case (never excluded) complicates gap shape | Index 0 is folded into the session summary and evicted with the contiguous prefix (keeps `excluded=0` in SQLite so lazy-load restores it). Evicted set stays a contiguous prefix → single `firstInMemorySeq` suffices |
 | WebUI/TUI see fewer messages after eviction | Both get explicit lazy-load paths (phases 5-6); counters use `TotalMessageCount` |
 | Behavior change behind a flag | `EvictExcludedFromMemory` config (default on) allows instant rollback without code revert |
 | Crash between exclude-save and eviction | Eviction is memory-only and idempotent; after restart the session reloads from SQLite (all messages) and the next compaction evicts again. No persistent state depends on eviction |

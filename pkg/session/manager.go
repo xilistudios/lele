@@ -144,10 +144,74 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		return nil, false
 	}
 
-	// Load messages
-	msgJSONs, err := repo.LoadMessages(key)
+	// Restore the persisted eviction boundary. SQLite seqs are 0-based and
+	// contiguous within the non-evicted region, so the number of evicted rows
+	// equals firstInMemorySeq. EvictExcludedMessages maintains the invariant
+	// evictedTotal == firstInMemorySeq; they can only diverge transiently after
+	// a pruned full rewrite, where the pruned rows no longer exist in SQLite
+	// anyway, so treating them as equal on cold load is the correct durable
+	// boundary.
+	boundary := meta.FirstInMemorySeq
+	if boundary < 0 {
+		boundary = 0
+	}
+
+	// Load only non-evicted messages (seq >= boundary) so evicted rows are not
+	// inflated into RAM.
+	msgJSONs, err := repo.LoadMessagesFromSeq(key, boundary)
 	if err != nil {
 		return nil, false
+	}
+
+	// Validate contiguity of rows AT/ABOVE the boundary using MaxSeq, not
+	// MessageCount. MessageCount - boundary wrongly assumes rows are contiguous
+	// from seq 0, but saveFullUnlocked calls PruneExcluded for oversized
+	// sessions, physically deleting the OLDEST excluded rows and leaving a gap
+	// BELOW the boundary. Those gaps are expected and must NOT trigger the
+	// fallback. Rows at/above the boundary are valid iff the number of loaded
+	// rows equals maxSeq - boundary + 1. If MaxSeq errors, trust the boundary.
+	if boundary > 0 {
+		if maxSeq, seqErr := repo.MaxSeq(key); seqErr == nil {
+			if len(msgJSONs) != maxSeq-boundary+1 {
+				logger.WarnCF("session", "Stale eviction boundary detected; recovering from persisted rows", map[string]interface{}{
+					"session_key":     key,
+					"first_in_memory": boundary,
+					"max_seq":         maxSeq,
+					"expected_rows":   maxSeq - boundary + 1,
+					"loaded_rows":     len(msgJSONs),
+				})
+				// Genuine corruption above the boundary: rebuild from all
+				// persisted rows and anchor the boundary to the actual first
+				// persisted seq instead of blindly 0, preserving the invariant
+				// seq = firstInMemorySeq + sliceIndex.
+				fullRows, fErr := repo.LoadMessagesWithSeq(key)
+				if fErr != nil {
+					return nil, false
+				}
+				msgJSONs = make([]string, 0, len(fullRows))
+				for _, fr := range fullRows {
+					msgJSONs = append(msgJSONs, fr.JSON)
+				}
+				if len(fullRows) > 0 {
+					boundary = fullRows[0].Seq
+				} else {
+					boundary = 0
+				}
+			}
+		}
+	}
+
+	// Count rows still persisted but not resident in memory (evicted +
+	// lazy-loadable). Computed from the FINAL msgJSONs (after any fallback
+	// above); rows pruned below the boundary are no longer in SQLite and thus
+	// not counted as evicted. This matches saveFullUnlocked's post-prune
+	// semantics (evictedTotal = len(evictedJSONs) - pruned).
+	evictedPersisted := 0
+	if total, tErr := repo.MessageCount(key); tErr == nil {
+		evictedPersisted = total - len(msgJSONs)
+		if evictedPersisted < 0 {
+			evictedPersisted = 0
+		}
 	}
 
 	messages := make([]providers.Message, 0, len(msgJSONs))
@@ -173,6 +237,8 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		Created:          meta.CreatedAt,
 		Updated:          meta.UpdatedAt,
 		Messages:         messages,
+		firstInMemorySeq: boundary,
+		evictedTotal:     evictedPersisted,
 		lastPersistedSeq: len(messages) - 1, // all messages are persisted
 	}
 
@@ -1362,6 +1428,8 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 }
 
 // sessionMetaFromSession builds a SessionMeta for persistence.
+// FirstInMemorySeq is included so every save path persists the eviction
+// boundary durably; cold-load restores it from SQLite on restart.
 func sessionMetaFromSession(s *Session) store.SessionMeta {
 	return store.SessionMeta{
 		Key:             s.Key,
@@ -1374,6 +1442,7 @@ func sessionMetaFromSession(s *Session) store.SessionMeta {
 		InputTokens:     s.InputTokens,
 		OutputTokens:    s.OutputTokens,
 		CompactionCount: s.CompactionCount,
+		FirstInMemorySeq: s.firstInMemorySeq,
 		CreatedAt:       s.Created,
 		UpdatedAt:       s.Updated,
 	}
@@ -1999,6 +2068,21 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// before it. With the contiguous-prefix model this is exactly `evictUpTo`.
 	session.firstInMemorySeq += evictUpTo
 	session.evictedTotal += evictUpTo
+	// Persist the new eviction boundary to SQLite so a cold restart restores
+	// firstInMemorySeq and does not re-inflate evicted rows into RAM. The
+	// boundary is stored in session metadata (FirstInMemorySeq); subsequent
+	// Save calls also carry it via sessionMetaFromSession. Failure to persist
+	// here only affects the durability of the boundary metadata (the in-memory
+	// eviction still succeeds), so it is logged, not fatal.
+	if sm.store != nil {
+		if perr := sm.store.Sessions().UpdateFirstInMemorySeq(key, session.firstInMemorySeq); perr != nil {
+			logger.WarnCF("session", "Failed to persist eviction boundary", map[string]interface{}{
+				"session_key":     key,
+				"first_in_memory": session.firstInMemorySeq,
+				"error":           perr.Error(),
+			})
+		}
+	}
 	// Dirty flags are reset: everything in memory is already persisted; the
 	// next Save must be a no-op (NOT a full rewrite).
 	session.clearDirtyFlags()
