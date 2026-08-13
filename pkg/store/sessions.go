@@ -429,6 +429,82 @@ func (r *SessionRepo) LoadMessages(sessionKey string) ([]string, error) {
 	return messages, nil
 }
 
+// LoadMessagesBeforeSeq returns the JSON of all messages with seq strictly
+// less than beforeSeq, ordered by seq ASC. Used to lazy-load evicted
+// (excluded) messages that precede the first in-memory message.
+func (r *SessionRepo) LoadMessagesBeforeSeq(sessionKey string, beforeSeq int) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT message FROM session_messages WHERE session_key = ? AND seq < ?
+		 ORDER BY seq ASC`, sessionKey, beforeSeq,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages before seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var messages []string
+	for rows.Next() {
+		var messageJSON string
+		if err := rows.Scan(&messageJSON); err != nil {
+			return nil, fmt.Errorf("load messages before seq scan session=%q: %w", sessionKey, err)
+		}
+		messages = append(messages, messageJSON)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages before seq rows session=%q: %w", sessionKey, err)
+	}
+	return messages, nil
+}
+
+// MessageRowFull is a loaded message row including its seq and excluded flag.
+type MessageRowFull struct {
+	Seq      int
+	JSON     string
+	Excluded bool
+}
+
+// LoadMessagesWithSeq returns all messages for a session with their seq and
+// excluded flag, ordered by seq ASC. Used to recover firstInMemorySeq after
+// reload and for in-context-only cold loads.
+func (r *SessionRepo) LoadMessagesWithSeq(sessionKey string) ([]MessageRowFull, error) {
+	rows, err := r.db.Query(
+		`SELECT seq, message, excluded FROM session_messages WHERE session_key = ?
+		 ORDER BY seq ASC`, sessionKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages with seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var messages []MessageRowFull
+	for rows.Next() {
+		var m MessageRowFull
+		var exclInt int
+		if err := rows.Scan(&m.Seq, &m.JSON, &exclInt); err != nil {
+			return nil, fmt.Errorf("load messages with seq scan session=%q: %w", sessionKey, err)
+		}
+		m.Excluded = exclInt != 0
+		messages = append(messages, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages with seq rows session=%q: %w", sessionKey, err)
+	}
+	return messages, nil
+}
+
+// CountExcludedMessages returns the number of messages marked excluded for a session.
+func (r *SessionRepo) CountExcludedMessages(sessionKey string) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM session_messages WHERE session_key = ? AND excluded = 1`,
+		sessionKey,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count excluded messages session=%q: %w", sessionKey, err)
+	}
+	return count, nil
+}
+
 // MessageCount returns the number of messages for a session.
 func (r *SessionRepo) MessageCount(sessionKey string) (int, error) {
 	var count int

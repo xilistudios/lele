@@ -770,3 +770,137 @@ func TestSessionRepo_AllMessageCounts(t *testing.T) {
 		t.Errorf("sess-c count = %d, want 0", counts["sess-c"])
 	}
 }
+func TestSessionRepo_LoadMessagesBeforeSeq(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	key := "test:before-seq"
+	now := time.Now()
+	if err := repo.UpsertSession(SessionMeta{Key: key, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("UpsertSession() failed: %v", err)
+	}
+	// Insert 5 messages (seq 0..4) with mixed excluded flags.
+	messages := []MessageRow{
+		{Seq: 0, Role: "user", JSON: `{"role":"user","content":"m0"}`, Excluded: true},
+		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"m1"}`, Excluded: false},
+		{Seq: 2, Role: "user", JSON: `{"role":"user","content":"m2"}`, Excluded: true},
+		{Seq: 3, Role: "assistant", JSON: `{"role":"assistant","content":"m3"}`, Excluded: false},
+		{Seq: 4, Role: "user", JSON: `{"role":"user","content":"m4"}`, Excluded: true},
+	}
+	if err := repo.InsertMessages(key, messages); err != nil {
+		t.Fatalf("InsertMessages() failed: %v", err)
+	}
+
+	// LoadMessagesBeforeSeq(key, 3) returns exactly the JSON of seq 0,1,2 in order.
+	got, err := repo.LoadMessagesBeforeSeq(key, 3)
+	if err != nil {
+		t.Fatalf("LoadMessagesBeforeSeq(key, 3) failed: %v", err)
+	}
+	want := []string{
+		`{"role":"user","content":"m0"}`,
+		`{"role":"assistant","content":"m1"}`,
+		`{"role":"user","content":"m2"}`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoadMessagesBeforeSeq(key, 3) = %v, want %v", got, want)
+	}
+
+	// LoadMessagesBeforeSeq(key, 0) returns empty (no error).
+	empty, err := repo.LoadMessagesBeforeSeq(key, 0)
+	if err != nil {
+		t.Fatalf("LoadMessagesBeforeSeq(key, 0) failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("LoadMessagesBeforeSeq(key, 0) = %v, want empty", empty)
+	}
+
+	// LoadMessagesBeforeSeq on unknown session returns empty (no error).
+	unknown, err := repo.LoadMessagesBeforeSeq("missing", 3)
+	if err != nil {
+		t.Fatalf("LoadMessagesBeforeSeq(missing, 3) failed: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("LoadMessagesBeforeSeq(missing, 3) = %v, want empty", unknown)
+	}
+}
+
+func TestSessionRepo_LoadMessagesWithSeq(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	key := "test:with-seq"
+	now := time.Now()
+	if err := repo.UpsertSession(SessionMeta{Key: key, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("UpsertSession() failed: %v", err)
+	}
+	messages := []MessageRow{
+		{Seq: 0, Role: "user", JSON: `{"role":"user","content":"s0"}`, Excluded: true},
+		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"s1"}`, Excluded: false},
+		{Seq: 2, Role: "user", JSON: `{"role":"user","content":"s2"}`, Excluded: true},
+		{Seq: 3, Role: "assistant", JSON: `{"role":"assistant","content":"s3"}`, Excluded: false},
+	}
+	if err := repo.InsertMessages(key, messages); err != nil {
+		t.Fatalf("InsertMessages() failed: %v", err)
+	}
+
+	got, err := repo.LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq() failed: %v", err)
+	}
+	want := []MessageRowFull{
+		{Seq: 0, JSON: `{"role":"user","content":"s0"}`, Excluded: true},
+		{Seq: 1, JSON: `{"role":"assistant","content":"s1"}`, Excluded: false},
+		{Seq: 2, JSON: `{"role":"user","content":"s2"}`, Excluded: true},
+		{Seq: 3, JSON: `{"role":"assistant","content":"s3"}`, Excluded: false},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoadMessagesWithSeq() = %v, want %v", got, want)
+	}
+
+	// Empty session returns empty slice.
+	empty, err := repo.LoadMessagesWithSeq("missing")
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq(missing) failed: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("LoadMessagesWithSeq(missing) = %v, want empty", empty)
+	}
+}
+
+func TestSessionRepo_CountExcludedMessages(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Sessions()
+
+	key := "test:count-excluded"
+	now := time.Now()
+	if err := repo.UpsertSession(SessionMeta{Key: key, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("UpsertSession() failed: %v", err)
+	}
+	messages := []MessageRow{
+		{Seq: 0, Role: "user", JSON: `{"role":"user","content":"c0"}`, Excluded: true},
+		{Seq: 1, Role: "assistant", JSON: `{"role":"assistant","content":"c1"}`, Excluded: false},
+		{Seq: 2, Role: "user", JSON: `{"role":"user","content":"c2"}`, Excluded: true},
+		{Seq: 3, Role: "assistant", JSON: `{"role":"assistant","content":"c3"}`, Excluded: true},
+		{Seq: 4, Role: "user", JSON: `{"role":"user","content":"c4"}`, Excluded: false},
+	}
+	if err := repo.InsertMessages(key, messages); err != nil {
+		t.Fatalf("InsertMessages() failed: %v", err)
+	}
+
+	count, err := repo.CountExcludedMessages(key)
+	if err != nil {
+		t.Fatalf("CountExcludedMessages() failed: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("CountExcludedMessages() = %d, want 3", count)
+	}
+
+	// Empty session returns 0.
+	emptyCount, err := repo.CountExcludedMessages("missing")
+	if err != nil {
+		t.Fatalf("CountExcludedMessages(missing) failed: %v", err)
+	}
+	if emptyCount != 0 {
+		t.Errorf("CountExcludedMessages(missing) = %d, want 0", emptyCount)
+	}
+}
