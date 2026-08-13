@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -994,5 +995,425 @@ func TestSQLite_DirtyFlags_Basic(t *testing.T) {
 	sm.SetName(key, "test")
 	if session.metaDirty {
 		t.Error("after SetName+save: metaDirty should be false (already persisted)")
+	}
+}
+func TestSQLite_GapAware_IncrementalSave_SeqOffset(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:gap-incr"
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "m0")
+	sm.AddMessage(key, "assistant", "m1")
+	sm.AddMessage(key, "user", "m2")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Simulate 5 evicted messages: in-memory slice element 0 is SQLite seq 5.
+	sess := sm.sessions[key]
+	if sess == nil {
+		t.Fatal("session not in memory")
+	}
+	sess.firstInMemorySeq = 5
+
+	// Append at slice index 3; incremental save must write absolute seq 8.
+	sm.AddMessage(key, "user", "m3")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("incremental Save failed: %v", err)
+	}
+
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(rows))
+	}
+	// Original rows keep seqs 0,1,2 (full rewrite). Newly appended row is seq 8.
+	wantSeqs := []int{0, 1, 2, 8}
+	for i, want := range wantSeqs {
+		if rows[i].Seq != want {
+			t.Errorf("row %d seq = %d, want %d", i, rows[i].Seq, want)
+		}
+	}
+}
+
+func TestSQLite_GapAware_ExcludedRange_SeqOffset(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:gap-excl"
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "u0")
+	sm.AddMessage(key, "assistant", "a1")
+	sm.AddMessage(key, "user", "u2")
+	sm.AddMessage(key, "assistant", "a3")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Simulate a gap of 10 evicted messages: 10 messages with seqs 0-9 were
+	// evicted from memory (still in SQLite), and the in-memory slice now maps
+	// to absolute seqs 10-13. Re-insert the in-memory rows at their absolute
+	// seqs (as eviction would leave them), and set firstInMemorySeq = 10 (the
+	// seq of in-memory slice element 0).
+	sess := sm.sessions[key]
+	if sess == nil {
+		t.Fatal("session not in memory")
+	}
+	rows := make([]store.MessageRow, len(sess.Messages))
+	for i, m := range sess.Messages {
+		msgJSON, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal message: %v", err)
+		}
+		rows[i] = store.MessageRow{Seq: 10 + i, Role: m.Role, JSON: string(msgJSON), Excluded: m.ExcludeFromContext}
+	}
+	if err := s.Sessions().ReplaceMessages(key, rows); err != nil {
+		t.Fatalf("re-insert at absolute seqs failed: %v", err)
+	}
+	sess.firstInMemorySeq = 10
+	sess.excludedRange = [2]int{1, 3}
+	sess.Messages[1].ExcludeFromContext = true
+	sess.Messages[2].ExcludeFromContext = true
+
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("excluded-range Save failed: %v", err)
+	}
+
+	fullRows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(fullRows) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(fullRows))
+	}
+	// Slice index 1 -> seq 11, slice index 2 -> seq 12, both excluded.
+	for _, r := range fullRows {
+		switch r.Seq {
+		case 11:
+			if !r.Excluded {
+				t.Errorf("seq %d should be excluded", r.Seq)
+			}
+		case 12:
+			if !r.Excluded {
+				t.Errorf("seq %d should be excluded", r.Seq)
+			}
+		case 10, 13:
+			if r.Excluded {
+				t.Errorf("seq %d should not be excluded", r.Seq)
+			}
+		default:
+			t.Errorf("unexpected seq %d", r.Seq)
+		}
+	}
+}
+
+func TestSQLite_GapAware_FullRewrite_PreservesEvictionGap(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:gap-full"
+	sm.GetOrCreate(key)
+	sm.AddMessage(key, "user", "m0")
+	sm.AddMessage(key, "assistant", "m1")
+	sm.AddMessage(key, "user", "m2")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Simulate post-eviction state: persist evicted rows at seqs 0-6 in
+	// SQLite (outside the in-memory slice), with the in-memory slice mapping
+	// to absolute seqs 7-9. This mirrors what EvictExcludedMessages leaves
+	// behind: the evicted (excluded) rows remain persisted in SQLite.
+	sess := sm.sessions[key]
+	if sess == nil {
+		t.Fatal("session not in memory")
+	}
+	evictedRows := make([]store.MessageRow, 0, 7)
+	for i := 0; i < 7; i++ {
+		ev := providers.Message{Role: "assistant", Content: fmt.Sprintf("evicted-%d", i), ExcludeFromContext: true}
+		evJSON, _ := json.Marshal(ev)
+		evictedRows = append(evictedRows, store.MessageRow{Seq: i, Role: ev.Role, JSON: string(evJSON), Excluded: true})
+	}
+	// Re-insert the actual persisted (in-memory) messages at absolute seqs 7-9.
+	for i, m := range sess.Messages {
+		mJSON, _ := json.Marshal(m)
+		evictedRows = append(evictedRows, store.MessageRow{Seq: 7 + i, Role: m.Role, JSON: string(mJSON)})
+	}
+	if err := s.Sessions().ReplaceMessages(key, evictedRows); err != nil {
+		t.Fatalf("re-insert evicted + inbox rows failed: %v", err)
+	}
+	sess.firstInMemorySeq = 7
+	sess.evictedTotal = 7
+
+	// Force a full rewrite via SetHistory (replaces slice with 2 messages).
+	sm.SetHistory(key, []providers.Message{
+		{Role: "user", Content: "n0"},
+		{Role: "assistant", Content: "n1"},
+	})
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("full-rewrite Save failed: %v", err)
+	}
+
+	// A full rewrite re-materializes the evicted rows into SQLite but they are
+	// still NOT resident in the in-memory slice. So the eviction gap must be
+	// PRESERVED: firstInMemorySeq stays at the number of evicted rows and
+	// evictedTotal stays equal to it. Resetting them to 0 here would break the
+	// `seq = firstInMemorySeq + sliceIndex` invariant and silently drop the
+	// next incremental append.
+	if sess.firstInMemorySeq != 7 {
+		t.Errorf("after full rewrite firstInMemorySeq = %d, want 7 (gap preserved)", sess.firstInMemorySeq)
+	}
+	if sess.evictedTotal != 7 {
+		t.Errorf("after full rewrite evictedTotal = %d, want 7 (gap preserved)", sess.evictedTotal)
+	}
+	// lastPersistedSeq is slice-relative: all 2 in-memory messages persisted.
+	if sess.lastPersistedSeq != 1 {
+		t.Errorf("after full rewrite lastPersistedSeq = %d, want 1", sess.lastPersistedSeq)
+	}
+
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	// The full rewrite must KEEP the evicted (excluded) rows: re-materializing
+	// them from SQLite before ReplaceMessages means they survive at seqs 0-6,
+	// followed by the new in-context messages re-based at 7-8. Total 9 rows.
+	if len(rows) != 9 {
+		t.Fatalf("expected 9 rows (7 evicted + 2 new), got %d", len(rows))
+	}
+	// First 7 rows are the evicted excluded messages.
+	for i := 0; i < 7; i++ {
+		if rows[i].Seq != i {
+			t.Errorf("evicted row %d seq = %d, want %d", i, rows[i].Seq, i)
+		}
+		if !rows[i].Excluded {
+			t.Errorf("evicted row %d should be excluded", i)
+		}
+	}
+	// Final 2 rows are the new in-context messages, re-based.
+	if rows[7].Seq != 7 || rows[8].Seq != 8 {
+		t.Errorf("expected seqs 7,8 after rewrite, got %d,%d", rows[7].Seq, rows[8].Seq)
+	}
+}
+func TestSQLite_EvictExcluded_LoadRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:evict-load"
+	sm.GetOrCreate(key)
+	for i := 0; i < 10; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude the first 7 (keep index 0 + 2 in-context), then save, then
+	// evict. EvictExcludedMessages folds index 0 into the summary and evicts
+	// the whole contiguous [0..7) prefix so the in-memory slice stays
+	// contiguous (index 0 is NOT left dangling in memory).
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+
+	before := sm.GetTotalMessageCount(key)
+	if before != 10 {
+		t.Fatalf("GetTotalMessageCount before eviction = %d, want 10", before)
+	}
+	if got := sm.GetEvictedMessageCount(key); got != 0 {
+		t.Fatalf("GetEvictedMessageCount before eviction = %d, want 0", got)
+	}
+
+	evicted := sm.EvictExcludedMessages(key)
+	if evicted != 7 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	}
+
+	// After eviction: in-memory slice has 3 (the contiguous kept suffix
+	// m7..m9), evicted=7. Index 0 was folded into the summary.
+	hist := sm.GetHistoryView(key)
+	if len(hist) != 3 {
+		t.Fatalf("in-memory len after evict = %d, want 3", len(hist))
+	}
+	if hist[0].Content != "m7" {
+		t.Errorf("first in-memory message after evict = %q, want %q", hist[0].Content, "m7")
+	}
+	// Index 0's content must have been folded into the summary.
+	if got := sm.GetSummary(key); !strings.Contains(got, "m0") {
+		t.Errorf("summary after eviction should contain folded index-0 content, got %q", got)
+	}
+	if got := sm.GetEvictedMessageCount(key); got != 7 {
+		t.Fatalf("GetEvictedMessageCount after evict = %d, want 7", got)
+	}
+	// Total stays stable across eviction.
+	if got := sm.GetTotalMessageCount(key); got != 10 {
+		t.Fatalf("GetTotalMessageCount after evict = %d, want 10", got)
+	}
+
+	// Idempotency: a second eviction is a no-op.
+	if again := sm.EvictExcludedMessages(key); again != 0 {
+		t.Fatalf("second EvictExcludedMessages = %d, want 0", again)
+	}
+
+	// Save after eviction must NOT be a full rewrite that destroys rows; the
+	// next save is a no-op. Verify SQLite still has all 10 rows.
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("save after eviction failed: %v", err)
+	}
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq after evict-save failed: %v", err)
+	}
+	if len(rows) != 10 {
+		t.Fatalf("SQLite rows after evict-save = %d, want 10 (no data loss)", len(rows))
+	}
+
+	// Lazy-load restores exactly the evicted messages before the in-memory ones.
+	loaded := sm.LoadEvictedMessages(key)
+	if loaded != 7 {
+		t.Fatalf("LoadEvictedMessages loaded %d, want 7", loaded)
+	}
+	restored := sm.GetHistoryView(key)
+	if len(restored) != 10 {
+		t.Fatalf("restored len = %d, want 10", len(restored))
+	}
+	for i, msg := range restored {
+		if msg.Content != fmt.Sprintf("m%d", i) {
+			t.Errorf("restored[%d].Content = %q, want %q", i, msg.Content, fmt.Sprintf("m%d", i))
+		}
+		// Excluded flag must be preserved on the evicted messages.
+		if i >= 1 && i <= 6 && !msg.ExcludeFromContext {
+			t.Errorf("restored[%d] should be ExcludeFromContext", i)
+		}
+	}
+	if got := sm.GetEvictedMessageCount(key); got != 0 {
+		t.Fatalf("GetEvictedMessageCount after load = %d, want 0", got)
+	}
+	if got := sm.GetTotalMessageCount(key); got != 10 {
+		t.Fatalf("GetTotalMessageCount after load = %d, want 10", got)
+	}
+
+	// Load is idempotent when nothing is evicted.
+	if again := sm.LoadEvictedMessages(key); again != 0 {
+		t.Fatalf("second LoadEvictedMessages = %d, want 0", again)
+	}
+}
+
+func TestSQLite_ReloadAfterEviction_SeqAccounting(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:reload-evict"
+	sm.GetOrCreate(key)
+	for i := 0; i < 8; i++ {
+		role := "user"
+		if i%2 != 0 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Evict: exclude first 5 (keep 0 + 3 in-context), save, evict. Index 0 is
+	// folded into the summary; the whole contiguous [0..5) prefix is evicted.
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+	evicted := sm.EvictExcludedMessages(key)
+	if evicted != 5 {
+		t.Fatalf("evicted %d, want 5", evicted)
+	}
+
+	// Append a new message after eviction; incremental save must write an
+	// absolute seq that fits after the evicted rows (seqs 0-7 exist in
+	// SQLite; firstInMemorySeq=5, in-memory index 3 -> abs seq 8).
+	sm.AddMessage(key, "user", "m8")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("append-after-evict Save failed: %v", err)
+	}
+
+	// SQLite must have 9 rows: seqs 0-8 (evicted m0-m4 at 0-4, kept m5-m7 at
+	// 5-7, new m8 at 8).
+	rows, err := s.Sessions().LoadMessagesWithSeq(key)
+	if err != nil {
+		t.Fatalf("LoadMessagesWithSeq failed: %v", err)
+	}
+	if len(rows) != 9 {
+		t.Fatalf("SQLite rows = %d, want 9", len(rows))
+	}
+	for i, r := range rows {
+		if r.Seq != i {
+			t.Errorf("row %d: seq = %d, want %d", i, r.Seq, i)
+		}
+	}
+	if rows[8].JSON == "" {
+		t.Errorf("row 8 should contain appended m8")
+	}
+
+	// Evict the session from memory entirely.
+	sm.EvictSession(key)
+
+	// Reload a fresh session manager over the same store. Task 2.4: a session
+	// saved post-eviction must reload with correct slice (all 9, in order)
+	// and no dup/missing rows.
+	sm2 := NewSessionManager()
+	sm2.SetStore(s)
+	hist := sm2.GetHistoryView(key)
+	if len(hist) != 9 {
+		t.Fatalf("reloaded len = %d, want 9", len(hist))
+	}
+	for i, msg := range hist {
+		want := fmt.Sprintf("m%d", i)
+		if msg.Content != want {
+			t.Errorf("reloaded[%d].Content = %q, want %q", i, msg.Content, want)
+		}
+	}
+	// Evicted messages (1-4) reload as excluded (index 0 keeps excluded=0).
+	for i := 1; i <= 4; i++ {
+		if !hist[i].ExcludeFromContext {
+			t.Errorf("reloaded[%d] should be excluded", i)
+		}
+	}
+
+	// A save on the fresh manager is a no-op (no full rewrite) — data intact.
+	if err := sm2.Save(key); err != nil {
+		t.Fatalf("reload save failed: %v", err)
+	}
+	rows2, _ := s.Sessions().LoadMessagesWithSeq(key)
+	if len(rows2) != 9 {
+		t.Fatalf("rows after reload-save = %d, want 9", len(rows2))
+	}
+}
+
+func TestSQLite_EvictExcluded_WhenDisabled(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:evict-noop"
+	sm.GetOrCreate(key)
+	for i := 0; i < 6; i++ {
+		sm.AddMessage(key, "user", fmt.Sprintf("m%d", i))
+	}
+	sm.Save(key)
+
+	// Nothing excluded -> eviction is a no-op.
+	if got := sm.EvictExcludedMessages(key); got != 0 {
+		t.Fatalf("EvictExcludedMessages with no excluded = %d, want 0", got)
+	}
+	if got := sm.EvictExcludedMessages("missing:key"); got != 0 {
+		t.Fatalf("EvictExcludedMessages on missing key = %d, want 0", got)
 	}
 }

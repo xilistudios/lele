@@ -38,6 +38,14 @@ type Session struct {
 	msgsModified       bool                // existing messages modified in-place, e.g. streaming (needs UpdateMessage)
 	excludedRange      [2]int              // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
 	lastMsgDeleted     bool                // last message was removed (needs DeleteLastMessage)
+	// firstInMemorySeq is the SQLite seq of in-memory slice element 0.
+	// 0 = no eviction gap (slice index == seq, legacy behavior).
+	// > 0 = messages with seq < firstInMemorySeq were evicted from memory
+	//       (they remain in SQLite with excluded = 1).
+	firstInMemorySeq int
+	// evictedTotal is the number of messages currently persisted in SQLite but
+	// not present in the in-memory slice (evicted after compaction).
+	evictedTotal int
 	// Token tracking
 	InputTokens     int `json:"input_tokens,omitempty"`
 	OutputTokens    int `json:"output_tokens,omitempty"`
@@ -536,6 +544,93 @@ func (sm *SessionManager) GetSummary(key string) string {
 		}
 	}
 	return session.Summary
+}
+
+// GetEvictedMessageCount returns the number of messages that have been evicted
+// from memory (excluded + persisted in SQLite but not in the in-memory slice).
+// Consumers use this to decide when to lazy-load evicted history.
+func (sm *SessionManager) GetEvictedMessageCount(key string) int {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if session, ok := sm.sessions[key]; ok {
+		return session.evictedTotal
+	}
+	return 0
+}
+
+// GetTotalMessageCount returns the total number of messages for a session:
+// the in-memory slice length plus any evicted (excluded) messages still
+// persisted in SQLite. Used for compaction threshold guards and session
+// counters so eviction doesn't make a session look smaller than it is.
+func (sm *SessionManager) GetTotalMessageCount(key string) int {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if session, ok := sm.sessions[key]; ok {
+		return len(session.Messages) + session.evictedTotal
+	}
+	// Not in memory: fall back to the store count if available.
+	if sm.store != nil {
+		if n, err := sm.store.Sessions().MessageCount(key); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite back
+// into the in-memory slice, before the current first in-memory message,
+// restoring full display history. Idempotent: no-op when evictedTotal == 0.
+// Returns the number of messages loaded.
+func (sm *SessionManager) LoadEvictedMessages(key string) int {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		// Nothing in memory to prepend to; loading here would inflate a cold
+		// session. Callers invoke this only for sessions known to be active.
+		return 0
+	}
+	if session.evictedTotal == 0 || session.firstInMemorySeq <= 0 {
+		return 0
+	}
+
+	evictedJSONs, err := sm.store.Sessions().LoadMessagesBeforeSeq(key, session.firstInMemorySeq)
+	if err != nil {
+		logger.WarnCF("session", "LoadEvictedMessages store read failed", map[string]interface{}{
+			"session_key": key,
+			"error":       err.Error(),
+		})
+		return 0
+	}
+
+	loaded := make([]providers.Message, 0, len(evictedJSONs)+len(session.Messages))
+	for _, msgJSON := range evictedJSONs {
+		var msg providers.Message
+		if uerr := json.Unmarshal([]byte(msgJSON), &msg); uerr != nil {
+			continue // skip corrupted rows
+		}
+		loaded = append(loaded, msg)
+	}
+	loaded = append(loaded, session.Messages...)
+
+	session.Messages = loaded
+	session.firstInMemorySeq = 0
+	session.evictedTotal = 0
+	session.lastPersistedSeq = len(loaded) - 1
+	sm.touchSession(key)
+
+	logger.InfoCF("session", "Loaded evicted messages back into memory", map[string]interface{}{
+		"session_key": key,
+		"loaded":      len(evictedJSONs),
+		"total":       len(loaded),
+	})
+	return len(evictedJSONs)
 }
 
 func (sm *SessionManager) GetName(key string) string {
@@ -1329,14 +1424,43 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	}
 
 	meta := sessionMetaFromSession(session)
-	rows := make([]store.MessageRow, len(session.Messages))
-	for i, msg := range session.Messages {
-		msgJSON, err := json.Marshal(msg)
+
+	// If messages were evicted from memory (firstInMemorySeq > 0), the
+	// evicted rows still live in SQLite. A full rewrite runs ReplaceMessages
+	// (DELETE all + re-insert), which would permanently destroy those rows.
+	// Re-materialize them from SQLite and prepend them so the rewrite keeps
+	// the full persisted set (evicted rows keep excluded=1, so the model
+	// never sees them and the eviction gap is closed: seqs re-base from 0).
+	var evictedJSONs []string
+	var err error
+	if session.firstInMemorySeq > 0 {
+		evictedJSONs, err = sm.store.Sessions().LoadMessagesBeforeSeq(key, session.firstInMemorySeq)
 		if err != nil {
-			return fmt.Errorf("marshal message %d: %w", i, err)
+			return fmt.Errorf("re-materialize evicted messages %q: %w", key, err)
+		}
+	}
+
+	rows := make([]store.MessageRow, len(evictedJSONs)+len(session.Messages))
+	for i, msgJSON := range evictedJSONs {
+		var evt providers.Message
+		if uerr := json.Unmarshal([]byte(msgJSON), &evt); uerr != nil {
+			continue // skip corrupted rows
 		}
 		rows[i] = store.MessageRow{
 			Seq:      i,
+			Role:     evt.Role,
+			JSON:     string(msgJSON),
+			Excluded: true,
+		}
+	}
+	offset := len(evictedJSONs)
+	for i, msg := range session.Messages {
+		msgJSON, mErr := json.Marshal(msg)
+		if mErr != nil {
+			return fmt.Errorf("marshal message %d: %w", i, mErr)
+		}
+		rows[offset+i] = store.MessageRow{
+			Seq:      offset + i,
 			Role:     msg.Role,
 			JSON:     string(msgJSON),
 			Excluded: msg.ExcludeFromContext,
@@ -1344,12 +1468,13 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	}
 
 	// Release lock during I/O
+	pruned := 0
 	sm.mu.Unlock()
-	err := sm.store.Sessions().UpsertSession(meta)
+	err = sm.store.Sessions().UpsertSession(meta)
 	if err == nil {
 		err = sm.store.Sessions().ReplaceMessages(key, rows)
 		if err == nil {
-			_, _ = sm.store.Sessions().PruneExcluded(key, maxStoredMessages)
+			pruned, _ = sm.store.Sessions().PruneExcluded(key, maxStoredMessages)
 		}
 	}
 	sm.mu.Lock()
@@ -1358,9 +1483,28 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		return fmt.Errorf("save session %q to sqlite: %w", key, err)
 	}
 
+	// Bookkeeping must reflect that re-materialized evicted rows are persisted
+	// but still NOT resident in the in-memory slice. The in-memory messages
+	// start at absolute seq len(evictedJSONs); only the rows are renumbered,
+	// not the memory residency. Resetting firstInMemorySeq/evictedTotal to 0
+	// here would break the `seq = firstInMemorySeq + sliceIndex` invariant and
+	// silently drop the next incremental append.
 	session.lastPersistedSeq = len(session.Messages) - 1
+	session.firstInMemorySeq = len(evictedJSONs)
+	session.evictedTotal = len(evictedJSONs) - pruned
+	if session.evictedTotal < 0 {
+		session.evictedTotal = 0
+	}
 	session.clearDirtyFlags()
 	return nil
+}
+
+// seqForIndex returns the absolute SQLite seq for an in-memory slice index.
+// It enforces the core invariant `seq = firstInMemorySeq + sliceIndex` in one
+// place so all save paths agree on absolute seqs even after eviction created a
+// gap at the front of the in-memory slice.
+func (s *Session) seqForIndex(i int) int {
+	return s.firstInMemorySeq + i
 }
 
 // saveIncrementalUnlocked persists metadata + only new/modified messages.
@@ -1388,7 +1532,7 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 			return fmt.Errorf("marshal message %d: %w", i, mErr)
 		}
 		newRows = append(newRows, store.MessageRow{
-			Seq:      i,
+			Seq:      session.seqForIndex(i),
 			Role:     msg.Role,
 			JSON:     string(msgJSON),
 			Excluded: msg.ExcludeFromContext,
@@ -1407,12 +1551,12 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 				return fmt.Errorf("marshal message %d: %w", lastIdx, mErr)
 			}
 			updateRow = &store.MessageRow{
-				Seq:      lastIdx,
+				Seq:      session.seqForIndex(lastIdx),
 				Role:     msg.Role,
 				JSON:     string(msgJSON),
 				Excluded: msg.ExcludeFromContext,
 			}
-			updateSeq = lastIdx
+			updateSeq = session.seqForIndex(lastIdx)
 		}
 	}
 
@@ -1494,7 +1638,7 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 			return fmt.Errorf("marshal excluded message %d: %w", i, mErr)
 		}
 		rows = append(rows, store.MessageRow{
-			Seq:      i,
+			Seq:      session.seqForIndex(i),
 			Role:     msg.Role,
 			JSON:     string(msgJSON),
 			Excluded: msg.ExcludeFromContext,
@@ -1780,12 +1924,23 @@ func (sm *SessionManager) flushStreamNow(key string) {
 	sm.saveIncrementalUnlocked(key)
 }
 
-// PruneExcludedMessages removes all messages marked ExcludeFromContext from
-// the in-memory slice. These messages are already persisted to disk (via Save)
-// and are stripped before sending to the LLM, so keeping them in RAM is wasteful.
-// This should be called after summarization/compaction has completed and the
-// session has been saved.
-func (sm *SessionManager) PruneExcludedMessages(key string) {
+// EvictExcludedMessages removes all excluded messages from the in-memory
+// slice and records the eviction gap in `firstInMemorySeq`/`evictedTotal`.
+// The evicted messages remain persisted in SQLite (excluded = 1) and can be
+// reloaded on demand via LoadEvictedMessages. All excluded messages are a
+// contiguous prefix of the in-memory slice starting at index 0, so a single
+// firstInMemorySeq (= number of evicted rows) captures the gap and the
+// invariant `seq = firstInMemorySeq + sliceIndex` holds for every kept slot.
+//
+// Because index 0 (normally the original user request) is also excluded and
+// evicted, its content is folded into the session summary first so no
+// information is lost (the summary stays in context and in SQLite metadata).
+//
+// PRECONDITION: the caller must have already persisted the excluded flags
+// (Save returned nil). Eviction itself is memory-only and idempotent.
+//
+// Returns the number of messages evicted.
+func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -1794,28 +1949,90 @@ func (sm *SessionManager) PruneExcludedMessages(key string) {
 	if !ok {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
-			return
+			return 0
 		}
 	}
 
-	pruned := 0
-	kept := make([]providers.Message, 0, len(session.Messages))
-	for _, msg := range session.Messages {
-		if msg.ExcludeFromContext {
-			pruned++
+	// Locate the first excluded message. ExcludeOldMessagesFromContext only
+	// ever excludes a single contiguous range starting at index 1 (index 0,
+	// the original request, stays in-context), so there is at most one run.
+	runStart := 1
+	for runStart < len(session.Messages) && !session.Messages[runStart].ExcludeFromContext {
+		runStart++
+	}
+	if runStart >= len(session.Messages) {
+		// Nothing excluded; no-op. Index 0 is in-context.
+		return 0
+	}
+
+	// Extend the boundary over the full contiguous excluded run.
+	evictUpTo := runStart
+	for evictUpTo < len(session.Messages) && session.Messages[evictUpTo].ExcludeFromContext {
+		evictUpTo++
+	}
+
+	// Fold the leading in-context messages (just index 0, the original user
+	// request) into the summary so no context is lost when we evict the whole
+	// [0..evictUpTo) prefix to keep the in-memory slice contiguous.
+	if runStart > 0 {
+		if folded := sm.foldEvictedIntoSummary(session, session.Messages[:runStart]); folded != "" {
+			session.Summary = folded
+			session.Updated = time.Now()
+		}
+	}
+
+	// Rebuild the kept slice: the in-context suffix starting at evictUpTo.
+	kept := make([]providers.Message, len(session.Messages)-evictUpTo)
+	copy(kept, session.Messages[evictUpTo:])
+
+	session.Messages = kept
+	// Absolute seq of the first kept message: the number of rows evicted
+	// before it. With the contiguous-prefix model this is exactly `evictUpTo`.
+	session.firstInMemorySeq += evictUpTo
+	session.evictedTotal += evictUpTo
+	// Dirty flags are reset: everything in memory is already persisted; the
+	// next Save must be a no-op (NOT a full rewrite).
+	session.clearDirtyFlags()
+	session.lastPersistedSeq = len(session.Messages) - 1
+	sm.touchSession(key)
+
+	logger.InfoCF("session", "Evicted excluded messages from memory", map[string]interface{}{
+		"session_key":     key,
+		"evicted":         evictUpTo,
+		"remaining":       len(kept),
+		"evicted_total":   session.evictedTotal,
+		"first_in_memory": session.firstInMemorySeq,
+	})
+	return evictUpTo
+}
+
+// foldEvictedIntoSummary prepends the evicted messages' content to the session
+// summary (or creates one), preserving the original request text that was
+// evicted from memory. Returns the new summary, or "" if nothing was folded.
+// The evicted prefix is front-most content, so it is folded before the current
+// summary to preserve chronological order. Caller must hold sm.mu.
+func (sm *SessionManager) foldEvictedIntoSummary(session *Session, evicted []providers.Message) string {
+	parts := make([]string, 0, len(evicted))
+	for _, m := range evicted {
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
 			continue
 		}
-		kept = append(kept, msg)
+		parts = append(parts, content)
+	}
+	if len(parts) == 0 {
+		return ""
 	}
 
-	if pruned > 0 {
-		session.Messages = kept
-		logger.InfoCF("session", "Pruned excluded messages from memory", map[string]interface{}{
-			"session_key": key,
-			"pruned":      pruned,
-			"remaining":   len(kept),
-		})
+	folded := strings.Join(parts, "\n")
+	if strings.TrimSpace(session.Summary) == "" {
+		return folded
 	}
+	// Prepend only if not already present (avoid duplication across evictions).
+	if strings.Contains(session.Summary, folded) {
+		return session.Summary
+	}
+	return folded + "\n\n" + session.Summary
 }
 
 // EvictSession removes a session from the in-memory map.
