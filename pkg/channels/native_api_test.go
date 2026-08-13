@@ -98,6 +98,18 @@ func (m *nativeTestAgentLoop) GetHistoryView(sessionKey string) []providers.Mess
 	return m.histories[sessionKey]
 }
 
+func (m *nativeTestAgentLoop) LoadEvictedMessages(sessionKey string) int {
+	return 0
+}
+
+func (m *nativeTestAgentLoop) GetEvictedMessageCount(sessionKey string) int {
+	return 0
+}
+
+func (m *nativeTestAgentLoop) GetTotalMessageCount(sessionKey string) int {
+	return len(m.histories[sessionKey])
+}
+
 func (m *nativeTestAgentLoop) AddSessionMessage(sessionKey string, msg providers.Message) error {
 	m.histories[sessionKey] = append(m.histories[sessionKey], msg)
 	return nil

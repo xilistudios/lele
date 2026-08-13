@@ -318,8 +318,7 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 			MessageID: replyToMessageID,
 		})
 
-		history := agent.Sessions.GetHistoryView(sessionKey)
-		if len(history) <= 4 {
+		if agent.Sessions.GetTotalMessageCount(sessionKey) <= 4 {
 			mp.al.bus.PublishOutbound(bus.OutboundMessage{
 				Channel:   originChannel,
 				ChatID:    originChatID,
