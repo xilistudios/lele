@@ -1095,11 +1095,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "up" || msg.String() == "pgup" {
 				m.maybeExpandRenderWindow()
 			}
-			cmds = append(cmds, cmd)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
 		case "home":
 			m.viewport.GotoTop()
+			return m, nil
 		case "end":
 			m.viewport.GotoBottom()
+			return m, nil
 
 		case "enter":
 			inputVal := m.chatInput.Value()

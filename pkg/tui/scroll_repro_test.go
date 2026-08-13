@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -107,5 +109,84 @@ func TestScroll_KeyboardScrollKeepsInput(t *testing.T) {
 	if !strings.Contains(out, placeholder) {
 		t.Fatalf("BUG: input placeholder lost after keyboard scroll. YOffset=%d lines=%d",
 			m.viewport.YOffset, len(renderLines(m)))
+	}
+}
+
+// TestScroll_WithSubagentsAndToolCalls verifies that scrolling in a session
+// with active subagents and tool calls never drops the input or exceeds terminal height.
+func TestScroll_WithSubagentsAndToolCalls(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
+	m = updated.(*Model)
+
+	key := "tui:chat:subagents-scroll-test"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+
+	for i := 0; i < 20; i++ {
+		m.sessionMgr.AddMessage(key, "user", fmt.Sprintf("Execute step %d with tool command", i))
+		m.sessionMgr.AddMessage(key, "assistant",
+			fmt.Sprintf("Running tool for step %d:\nexec: command=cd /mnt/hdd1/Development/xilistudios/lele && echo 'testing step %d'\nOutput for step %d was generated successfully.", i, i, i))
+	}
+
+	m.currentKey = key
+	m.showWelcome = false
+	m.forceGotoBottom = true
+
+	// Add 10 subagents
+	var subagents []channels.SubagentTaskInfo
+	for i := 0; i < 10; i++ {
+		subagents = append(subagents, channels.SubagentTaskInfo{
+			TaskID:     fmt.Sprintf("task-%d", i),
+			Label:      fmt.Sprintf("Task %d with a very long descriptive label that could wrap", i),
+			Status:     "completed",
+			SessionKey: fmt.Sprintf("subagent-key-%d", i),
+		})
+	}
+	m.subagentsCacheKey = "native:" + key
+	m.subagentsCacheTime = time.Now()
+	m.subagentsCacheValue = subagents
+
+	m.reloadSessions()
+
+	placeholder := i18n.T("tui.placeholder")
+	placeholderPrefix := "Pregunta cualquier cosa"
+	if !strings.Contains(placeholder, placeholderPrefix) {
+		placeholderPrefix = placeholder[:min(20, len(placeholder))]
+	}
+
+	// Scroll up and down repeatedly using both mouse wheel and keys
+	for i := 0; i < 15; i++ {
+		updated, _ := m.Update(tea.MouseMsg{
+			X:      10,
+			Y:      5,
+			Action: tea.MouseActionPress,
+			Button: tea.MouseButtonWheelUp,
+		})
+		m = updated.(*Model)
+
+		out := m.View()
+		lines := strings.Split(out, "\n")
+		if len(lines) > m.height {
+			t.Fatalf("iteration %d: view exceeded height: %d lines > %d", i, len(lines), m.height)
+		}
+		if !strings.Contains(out, placeholderPrefix) {
+			t.Fatalf("iteration %d: input placeholder lost during scroll up.\nlines=%d\nout:\n%s", i, len(lines), out)
+		}
+	}
+
+	for i := 0; i < 15; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(*Model)
+
+		out := m.View()
+		lines := strings.Split(out, "\n")
+		if len(lines) > m.height {
+			t.Fatalf("iteration %d: view exceeded height: %d lines > %d", i, len(lines), m.height)
+		}
+		if !strings.Contains(out, placeholderPrefix) {
+			t.Fatalf("iteration %d: input placeholder lost during scroll down", i)
+		}
 	}
 }

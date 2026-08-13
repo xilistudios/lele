@@ -516,7 +516,6 @@ func configureWebUI(cfg *config.Config, leleDir string) {
 	fmt.Printf("\n%s\n", styleTitle.Render("=== Web UI Configuration ==="))
 
 	cfg.Channels.Web.Enabled = true
-	cfg.Channels.Web.Host = "0.0.0.0"
 	cfg.Server.Port = askInt("Server port", 8080)
 	cfg.Server.Host = "0.0.0.0"
 

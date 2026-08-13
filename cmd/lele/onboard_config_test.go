@@ -104,15 +104,10 @@ func TestNamedProviderConfig_Struct(t *testing.T) {
 func TestWebConfig_Struct(t *testing.T) {
 	cfg := config.WebConfig{
 		Enabled: true,
-		Port:    3005,
-		Host:    "0.0.0.0",
 	}
 
 	if !cfg.Enabled {
 		t.Error("Web should be enabled")
-	}
-	if cfg.Port != 3005 {
-		t.Errorf("Port = %d, want %d", cfg.Port, 3005)
 	}
 }
 
@@ -125,8 +120,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Check some defaults
-	if cfg.Agents.Defaults.MaxTokens <= 0 {
-		t.Error("MaxTokens should be positive")
+	// MaxTokens: 0 means "use provider/model fallback" (valid default)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
 		t.Error("MaxToolIterations should not be negative (0 = unlimited)")
@@ -169,8 +165,9 @@ func TestConfig_Defaults(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	// Verify defaults have reasonable values
-	if cfg.Agents.Defaults.MaxTokens <= 0 {
-		t.Error("MaxTokens should be positive")
+	// MaxTokens: 0 means "use provider/model fallback" (valid default)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
 		t.Error("MaxToolIterations should not be negative (0 = unlimited)")
@@ -221,12 +218,6 @@ func TestConfig_Channels(t *testing.T) {
 	if !cfg.Channels.Web.Enabled {
 		t.Log("Web channel disabled by default")
 	}
-	if cfg.Channels.Web.Host != "0.0.0.0" {
-		t.Errorf("Web Host = %q, want %q", cfg.Channels.Web.Host, "0.0.0.0")
-	}
-	if cfg.Channels.Web.Port != 3005 {
-		t.Errorf("Web Port = %d, want %d", cfg.Channels.Web.Port, 3005)
-	}
 
 	if !cfg.Channels.Native.Enabled {
 		t.Log("Native channel disabled by default")
@@ -234,8 +225,8 @@ func TestConfig_Channels(t *testing.T) {
 	if cfg.Channels.Native.Host != "127.0.0.1" {
 		t.Errorf("Native Host = %q, want %q", cfg.Channels.Native.Host, "127.0.0.1")
 	}
-	if cfg.Channels.Native.Port != 18793 {
-		t.Errorf("Native Port = %d, want %d", cfg.Channels.Native.Port, 18793)
+	if cfg.Channels.Native.Port != 18790 {
+		t.Errorf("Native Port = %d, want %d", cfg.Channels.Native.Port, 18790)
 	}
 }
 
@@ -402,7 +393,6 @@ func TestPrintWebUIEnabled(t *testing.T) {
 		Channels: config.ChannelsConfig{
 			Web: config.WebConfig{
 				Enabled: true,
-				Port:    3005,
 			},
 		},
 	}
