@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -251,6 +252,7 @@ type SessionConfig struct {
 	EphemeralThreshold         int                 `json:"ephemeral_threshold"`
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
+	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
 }
 
 const DefaultEphemeralThresholdSeconds = 560
@@ -966,6 +968,7 @@ func DefaultConfig() *Config {
 			Ephemeral:                  true,
 			EphemeralThreshold:         DefaultEphemeralThresholdSeconds,
 			CompactionThresholdPercent: DefaultCompactionThresholdPercent,
+			EvictExcludedFromMemory:    true,
 		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
@@ -1330,6 +1333,22 @@ func (c *Config) CompactionModel() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.Session.CompactionModel
+}
+
+// EvictExcludedFromMemory reports whether excluded (out-of-context) messages
+// should be evicted from memory after compaction and lazy-loaded on demand.
+// Defaults to true; env override LELE_EVICT_EXCLUDED (set to "true"/"1" to
+// force on, "false"/"0" to force off).
+func (c *Config) EvictExcludedFromMemory() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	enabled := c.Session.EvictExcludedFromMemory
+	if v := os.Getenv("LELE_EVICT_EXCLUDED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			enabled = b
+		}
+	}
+	return enabled
 }
 
 func (c *Config) SetSessionEphemeral(enabled bool) {

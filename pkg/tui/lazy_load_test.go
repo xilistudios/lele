@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 // seedLazySession creates a session with the given number of user+assistant
@@ -185,5 +187,106 @@ func TestLazyLoad_SessionSwitchResets(t *testing.T) {
 	}
 	if m.renderStartIdx != 120 {
 		t.Fatalf("expected renderStartIdx=120 back for A, got %d", m.renderStartIdx)
+	}
+}
+
+// newEvictionTestModel builds a TUI model like newTestModel but attaches a real
+// SQLite store to the session manager so eviction and lazy-load of evicted
+// messages are enabled.
+func newEvictionTestModel(t *testing.T) *Model {
+	t.Helper()
+	m := newTestModel(t)
+	s, err := store.Open(filepath.Join(t.TempDir(), "tui-evict.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	m.sessionMgr.SetStore(s)
+	return m
+}
+
+// seedEvictionSession seeds a session with the given number of user+assistant
+// pairs, excludes the older prefix from context (keeping `keep` messages), and
+// evicts the excluded messages from memory. The excluded prefix remains in
+// SQLite and can be lazy-loaded. Returns the number of messages evicted.
+func seedEvictionSession(t *testing.T, m *Model, key string, pairs, keep int) int {
+	t.Helper()
+
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+
+	for i := 0; i < pairs; i++ {
+		m.sessionMgr.AddMessage(key, "user", fmt.Sprintf("Evict question %d?", i))
+		m.sessionMgr.AddMessage(key, "assistant", fmt.Sprintf("Evict answer %d.", i))
+	}
+
+	if err := m.sessionMgr.Save(key); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+	m.sessionMgr.ExcludeOldMessagesFromContext(key, keep)
+	if err := m.sessionMgr.Save(key); err != nil {
+		t.Fatalf("exclude Save: %v", err)
+	}
+
+	evicted := m.sessionMgr.EvictExcludedMessages(key)
+	if evicted <= 0 {
+		t.Fatalf("EvictExcludedMessages = %d, want > 0", evicted)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount after evict = %d, want %d", got, evicted)
+	}
+	return evicted
+}
+
+// TestLazyLoad_EvictedMessagesNotLoadedInMemory verifies that when a session
+// has evicted messages (e.g. 19 evicted, 5 kept in context in memory), the TUI
+// only loads and renders the in-context messages. Scrolling to top does NOT
+// cross the eviction boundary, does NOT load evicted messages into RAM, and
+// does NOT show an 'earlier messages' header when all in-context messages are visible.
+func TestLazyLoad_EvictedMessagesNotLoadedInMemory(t *testing.T) {
+	m := newEvictionTestModel(t)
+	const key = "tui:chat:evict-a"
+
+	// 12 pairs = 24 messages; keep 5 → 19 excluded/evicted.
+	evicted := seedEvictionSession(t, m, key, 12, 5)
+	if evicted != 19 {
+		t.Fatalf("expected 19 evicted, got %d", evicted)
+	}
+
+	m.currentKey = key
+	m.showWelcome = false
+	m.forceGotoBottom = true
+	m.reloadSessions()
+	renderLazyModel(t, m)
+
+	// Few in-memory messages (5) are below the render cap, so the window starts at 0.
+	if m.renderStartIdx != 0 {
+		t.Fatalf("expected renderStartIdx=0, got %d", m.renderStartIdx)
+	}
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount before scroll = %d, want %d", got, evicted)
+	}
+	if inMemCount := len(m.sessionMgr.GetHistory(key)); inMemCount != 5 {
+		t.Fatalf("in-memory message count before scroll = %d, want 5", inMemCount)
+	}
+
+	// Scrolling to the top does not trigger lazy-loading of evicted messages into memory.
+	m.viewport.GotoTop()
+	if m.maybeExpandRenderWindow() {
+		t.Fatal("expected maybeExpandRenderWindow to return false (no in-memory expansion needed)")
+	}
+
+	// Evicted messages remain evicted in SQLite and are not inflated into memory.
+	if got := m.sessionMgr.GetEvictedMessageCount(key); got != evicted {
+		t.Fatalf("GetEvictedMessageCount after scroll = %d, want %d", got, evicted)
+	}
+	if inMemCount := len(m.sessionMgr.GetHistory(key)); inMemCount != 5 {
+		t.Fatalf("in-memory message count after scroll = %d, want 5", inMemCount)
+	}
+
+	// Render view should NOT show an earlier messages header because all in-context messages are rendered.
+	out := m.View()
+	if strings.Contains(out, "earlier messages") {
+		t.Fatalf("expected view not to contain earlier messages header for evicted messages, got:\n%s", out)
 	}
 }

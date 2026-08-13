@@ -31,6 +31,16 @@ type AgentProvidable interface {
 	// message slice on every render — copies become expensive (tens of MB) for
 	// long conversations.
 	GetHistoryView(sessionKey string) []providers.Message
+	// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite
+	// back into memory, restoring full display history. Idempotent; no-op when
+	// nothing was evicted. Returns the number of messages loaded.
+	LoadEvictedMessages(sessionKey string) int
+	// GetEvictedMessageCount returns the number of messages that were evicted
+	// from memory (excluded + persisted in SQLite but not in the in-memory slice).
+	GetEvictedMessageCount(sessionKey string) int
+	// GetTotalMessageCount returns the total persisted message count for a
+	// session: in-memory slice length plus evicted messages.
+	GetTotalMessageCount(sessionKey string) int
 	// AddSessionMessage añade un mensaje al historial persistido de una sesión
 	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión

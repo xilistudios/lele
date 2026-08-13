@@ -166,7 +166,7 @@ func (m *Model) reloadSessions() {
 		if sessionMode != m.currentMode.String() {
 			continue
 		}
-		if len(s.Messages) > 0 || s.Key == m.currentKey {
+		if len(s.Messages) > 0 || m.sessionMgr.GetTotalMessageCount(s.Key) > 0 || s.Key == m.currentKey {
 			m.visibleSessions = append(m.visibleSessions, s)
 		}
 	}

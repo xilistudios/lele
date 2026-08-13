@@ -887,6 +887,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 								"session_key": opts.SessionKey,
 								"error":       saveErr.Error(),
 							})
+						} else if lr.al.cfg().EvictExcludedFromMemory() {
+							agent.Sessions.EvictExcludedMessages(opts.SessionKey)
 						}
 						agent.Sessions.IncrementCompactionCount(opts.SessionKey)
 						logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{

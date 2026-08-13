@@ -99,6 +99,12 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		limit = 50
 	}
 
+	// Materialize evicted (out-of-context) messages so the full history is
+	// available for pagination. Idempotent no-op when nothing was evicted.
+	if n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
+		n.agentLoop.LoadEvictedMessages(sessionKey)
+	}
+
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 
 	// Build a map of tool_call_id -> tool name from assistant messages
@@ -271,6 +277,12 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 				}
 				messageCount++
 			}
+		}
+
+		// Evicted (out-of-context) messages are not in the in-memory slice but
+		// still count toward the displayed total.
+		if n.agentLoop != nil {
+			messageCount += n.agentLoop.GetEvictedMessageCount(sk)
 		}
 
 		// Skip empty sessions that were never actually used
