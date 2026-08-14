@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -274,4 +276,119 @@ func SidebarLabelValue(label, value string) string {
 	labelPart := SidebarLabel.Render(fmt.Sprintf("%-18s", label))
 	valuePart := SidebarValue.Render(value)
 	return labelPart + valuePart
+}
+
+// paintFrame renders a full-screen frame: the content is placed (centered)
+// in the terminal, then the app background is painted over the whole frame
+// and re-applied after every inner ANSI reset so no cell is left unpainted.
+//
+// Every View() exit path MUST return paintFrame(...) so the background is
+// uniform across all screens (welcome, chat, modals, detail views).
+func (m *Model) paintFrame(content string) string {
+	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	return reapplyBackground(AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(placed))
+}
+
+// reapplyBackground re-emits the correct background color after every full
+// ANSI reset in a rendered frame.
+//
+// Inner lipgloss styles terminate their text with "\x1b[0m", which cancels
+// ALL attributes — including the background set by an enclosing container.
+// Any cell printed after such a reset is therefore left unpainted and the
+// terminal's own (often translucent) background bleeds through, producing
+// visible color bands next to styled content.
+//
+// The re-emission is context-aware: lipgloss output is well formed (every
+// styled run is "OPEN … \x1b[0m" and runs nest lexically), so we track a
+// stack of background-setting sequences. After a reset we re-emit the
+// innermost still-open background — the app background at top level, and the
+// container background (input bar, modal, tool box, …) for cells inside a
+// container that owns its own background. Re-emitting the full opening
+// sequence (fg+bg) is safe: foreground is invisible on the space cells that
+// follow a reset, and raw text inside a container legitimately inherits the
+// container colors.
+func reapplyBackground(s string) string {
+	appSeq := backgroundOpenSeq(BgColor)
+	if appSeq == "" {
+		return s
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(s) + 128)
+
+	// Lipgloss output is well formed: every styled run is "OPEN … \x1b[0m"
+	// and runs nest lexically. Track the run nesting so each reset knows
+	// whether it closes a background-owning run.
+	var bgStack []string // opening seqs of open runs that set a background
+	var runHasBg []bool  // per open run, whether it set a background
+	open := func(hasBg bool, seq string) {
+		runHasBg = append(runHasBg, hasBg)
+		if hasBg {
+			bgStack = append(bgStack, seq)
+		}
+	}
+	closeRun := func() {
+		if n := len(runHasBg); n > 0 {
+			if runHasBg[n-1] {
+				bgStack = bgStack[:len(bgStack)-1]
+			}
+			runHasBg = runHasBg[:n-1]
+		}
+	}
+
+	last := 0
+	for _, loc := range ansiSeqRe.FindAllStringIndex(s, -1) {
+		sb.WriteString(s[last:loc[0]])
+		seq := s[loc[0]:loc[1]]
+		params := seq[2 : len(seq)-1] // strip "\x1b[" and "m"
+
+		switch {
+		case paramsHasBackground(params):
+			open(true, seq)
+			sb.WriteString(seq)
+		case isFullReset(params):
+			closeRun()
+			sb.WriteString(seq)
+			top := appSeq
+			if len(bgStack) > 0 {
+				top = bgStack[len(bgStack)-1]
+			}
+			sb.WriteString(top)
+		default:
+			// Foreground-only or attribute sequence: opens a run whose reset
+			// must not pop the enclosing background context.
+			open(false, seq)
+			sb.WriteString(seq)
+		}
+		last = loc[1]
+	}
+	sb.WriteString(s[last:])
+	return sb.String()
+}
+
+// ansiSeqRe matches SGR escape sequences (color/attribute changes).
+var ansiSeqRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// backgroundOpenSeq returns the opening ANSI sequence for a background color
+// under the current color profile (e.g. "\x1b[48;2;24;24;36m"), without a
+// trailing reset. Empty when the profile cannot render colors.
+func backgroundOpenSeq(c lipgloss.Color) string {
+	seq := lipgloss.NewStyle().Background(c).Render("")
+	return strings.TrimSuffix(seq, "\x1b[0m")
+}
+
+// paramsHasBackground reports whether an SGR parameter list sets a background
+// (ANSI 48 = extended background, 40-47 = basic backgrounds).
+func paramsHasBackground(params string) bool {
+	for _, p := range strings.Split(params, ";") {
+		if p == "48" || (len(p) == 2 && p[0] == '4' && p[1] >= '0' && p[1] <= '7') {
+			return true
+		}
+	}
+	return false
+}
+
+// isFullReset reports whether an SGR parameter list is a full reset.
+func isFullReset(params string) bool {
+	return params == "0" || params == "00" || params == ""
 }

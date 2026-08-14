@@ -231,7 +231,6 @@ func (ch *commandHandlerImpl) handleNewCommand(agent *AgentInstance, sessionKey 
 	// (AGENT.md, SOUL.md, ...) from disk and rebuilds its system prompt.
 	if agent.ContextBuilder != nil {
 		agent.ContextBuilder.ResetMemoryContext()
-		agent.ContextBuilder.ResetSystemPromptCache(sessionKey)
 	}
 	return "🔄 New conversation started. Context refreshed from AGENT.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md."
 }
