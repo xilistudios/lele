@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuthContext } from '../contexts/AuthContext'
-import type {
-  SecretAuditRecord,
-  SecretInput,
-  SecretMeta,
-  SecretStatus,
-} from '../lib/types'
+import type { SecretAuditRecord, SecretInput, SecretMeta, SecretStatus } from '../lib/types'
 
 export function useSecrets() {
   const { api } = useAuthContext()

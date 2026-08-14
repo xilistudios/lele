@@ -764,5 +764,77 @@ describe('Message ordering fixes', () => {
       expect(assistants[0].reasoningContent).toBe('Let me start by reading the file')
       expect(assistants[1].reasoningContent).toBe('After reading the file, I can see...')
     })
+
+    test('reconciles intermediate base history with streaming without duplicating thinking blocks', () => {
+      // Scenario: Iterations 1 & 2 have been saved by backend and returned in baseMessages (via HTTP poll).
+      // Iteration 3 is actively streaming.
+      // Expected: Base iterations 1 & 2 are NOT duplicated by streaming iterations 1 & 2.
+      // Exactly 3 assistants are returned in chronological order.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'Run the pipeline'),
+        createTestMessage('a1-base', 'assistant', 'Starting step 1...', {
+          reasoningContent: 'Reasoning for step 1',
+        }),
+        createTestMessage('t1', 'tool', 'step 1 done', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2-base', 'assistant', 'Starting step 2...', {
+          reasoningContent: 'Reasoning for step 2',
+        }),
+        createTestMessage('t2', 'tool', 'step 2 done', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-2',
+        }),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'Run the pipeline', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1-ws', 'assistant', 'Starting step 1...', {
+          streaming: false,
+          reasoningContent: 'Reasoning for step 1',
+        }),
+        createTestMessage('t1-ws', 'tool', 'step 1 done', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-1',
+        }),
+        createTestMessage('a2-ws', 'assistant', 'Starting step 2...', {
+          streaming: false,
+          reasoningContent: 'Reasoning for step 2',
+        }),
+        createTestMessage('t2-ws', 'tool', 'step 2 done', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'tc-2',
+        }),
+        createTestMessage('a3-ws', 'assistant', 'Starting step 3...', {
+          streaming: true,
+          reasoningContent: 'Reasoning for step 3',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const assistants = result.filter((m) => m.role === 'assistant')
+
+      // Exactly 3 assistants in order, no duplicates or accumulated thinking blocks
+      expect(assistants.length).toBe(3)
+      expect(assistants[0].reasoningContent).toBe('Reasoning for step 1')
+      expect(assistants[1].reasoningContent).toBe('Reasoning for step 2')
+      expect(assistants[2].reasoningContent).toBe('Reasoning for step 3')
+      expect(result.map((m) => m.id)).toEqual([
+        'u1',
+        'a1-base',
+        't1-ws',
+        'a2-base',
+        't2-ws',
+        'a3-ws',
+      ])
+    })
   })
 })
