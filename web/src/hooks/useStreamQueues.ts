@@ -73,14 +73,19 @@ export function useStreamQueues(setStreamingMessages: SetStreamingMessages) {
               : m,
           )
         }
+        const updated = current.map((m) =>
+          m.role === 'assistant' && m.sessionKey === sessionKey && m.streaming
+            ? { ...m, streaming: false }
+            : m,
+        )
         const newMsg = createAssistantMessage({
           id: messageId,
           sessionKey,
           content: chunk,
           streaming: !isDone,
         })
-        const arr = [...current]
-        arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
+        const arr = [...updated]
+        arr.splice(computeAssistantInsertIndex(updated), 0, newMsg)
         return arr
       })
     },

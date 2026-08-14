@@ -14,12 +14,19 @@ export function LogsViewer() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [meta, setMeta] = useState<{ total_lines: number; returned_lines: number; file: string } | null>(null)
+  const [meta, setMeta] = useState<{
+    total_lines: number
+    returned_lines: number
+    file: string
+  } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Fetch available dates on mount
   useEffect(() => {
-    api.logs.dates().then((res) => setDates(res.dates)).catch(() => {})
+    api.logs
+      .dates()
+      .then((res) => setDates(res.dates))
+      .catch(() => {})
   }, [api])
 
   // Fetch logs when params change
@@ -37,7 +44,9 @@ export function LogsViewer() {
     }
   }, [api, selectedLevel, selectedDate, lines])
 
-  useEffect(() => { fetchLogs() }, [fetchLogs])
+  useEffect(() => {
+    fetchLogs()
+  }, [fetchLogs])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -48,10 +57,15 @@ export function LogsViewer() {
 
   const levelColor = (level: string) => {
     switch (level) {
-      case 'ERROR': case 'FATAL': return 'text-red-400'
-      case 'WARN': return 'text-yellow-400'
-      case 'DEBUG': return 'text-gray-400'
-      default: return 'text-blue-400'
+      case 'ERROR':
+      case 'FATAL':
+        return 'text-red-400'
+      case 'WARN':
+        return 'text-yellow-400'
+      case 'DEBUG':
+        return 'text-gray-400'
+      default:
+        return 'text-blue-400'
     }
   }
 
@@ -66,7 +80,9 @@ export function LogsViewer() {
         >
           {dates.length === 0 && <option value={selectedDate}>{selectedDate}</option>}
           {dates.map((d) => (
-            <option key={d} value={d}>{d}</option>
+            <option key={d} value={d}>
+              {d}
+            </option>
           ))}
         </select>
 
@@ -100,7 +116,8 @@ export function LogsViewer() {
 
         {meta && (
           <span className="text-[10px] text-text-tertiary">
-            {t('settings.logs.showing', { returned: meta.returned_lines, total: meta.total_lines })} — {meta.file}
+            {t('settings.logs.showing', { returned: meta.returned_lines, total: meta.total_lines })}{' '}
+            — {meta.file}
           </span>
         )}
       </div>
@@ -114,7 +131,10 @@ export function LogsViewer() {
 
       {/* Log entries */}
       <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
-        <div ref={containerRef} className="max-h-[600px] overflow-y-auto p-3 font-mono text-[11px] leading-5">
+        <div
+          ref={containerRef}
+          className="max-h-[600px] overflow-y-auto p-3 font-mono text-[11px] leading-5"
+        >
           {entries.length === 0 && !loading && (
             <p className="text-text-tertiary">{t('settings.logs.empty')}</p>
           )}

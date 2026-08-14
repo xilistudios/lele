@@ -114,7 +114,9 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                       ? 'text-state-success hover:bg-state-success/10'
                       : 'text-text-tertiary hover:bg-text-tertiary/10'
                   }`}
-                  title={skill.enabled ? t('skills.disable', 'Disable') : t('skills.enable', 'Enable')}
+                  title={
+                    skill.enabled ? t('skills.disable', 'Disable') : t('skills.enable', 'Enable')
+                  }
                 >
                   {skill.enabled ? '●' : '○'}
                 </button>

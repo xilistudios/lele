@@ -122,11 +122,15 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
   ctx.ensureAssistantPlaceholder(msgId, sessionKey)
 
   ctx.setStreamingMessages((current) =>
-    current.map((m) =>
-      m.id === msgId && m.role === 'assistant'
-        ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${chunk}` }
-        : m,
-    ),
+    current.map((m) => {
+      if (m.id === msgId && m.role === 'assistant') {
+        return { ...m, reasoningContent: `${m.reasoningContent ?? ''}${chunk}`, streaming: true }
+      }
+      if (m.id !== msgId && m.role === 'assistant' && m.sessionKey === sessionKey && m.streaming) {
+        return { ...m, streaming: false }
+      }
+      return m
+    }),
   )
 }
 

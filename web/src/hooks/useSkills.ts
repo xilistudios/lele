@@ -99,7 +99,13 @@ export function useSkills(api: ApiClient) {
 
   const scanRepo = useCallback(
     async (repo: string) => {
-      setState((prev) => ({ ...prev, isScanning: true, error: null, scanResults: null, scanRepo: null }))
+      setState((prev) => ({
+        ...prev,
+        isScanning: true,
+        error: null,
+        scanResults: null,
+        scanRepo: null,
+      }))
       try {
         const response = await api.scanSkills(repo)
         setState((prev) => ({

@@ -39,10 +39,18 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
   })
 
   ctx.setStreamingMessages((current) => {
+    // When a tool starts executing, the preceding assistant for this session
+    // has completed its generation. Mark it as non-streaming.
+    const updated = current.map((m) =>
+      m.role === 'assistant' && m.streaming && m.sessionKey === toolMsg.sessionKey
+        ? { ...m, streaming: false }
+        : m,
+    )
+
     if (toolCallId) {
-      const existingIdx = current.findIndex((m) => m.role === 'tool' && m.toolCallId === toolCallId)
+      const existingIdx = updated.findIndex((m) => m.role === 'tool' && m.toolCallId === toolCallId)
       if (existingIdx >= 0) {
-        return current.map((m, i) =>
+        return updated.map((m, i) =>
           i === existingIdx ? { ...m, toolArgs: toolArgsStr, toolStatus: 'executing' as const } : m,
         )
       }
@@ -50,8 +58,8 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
     // Insert tool messages after the last assistant message AND any existing
     // tool messages that follow it, to preserve chronological order within
     // the current LLM iteration (see computeToolInsertIndex).
-    const arr = [...current]
-    arr.splice(computeToolInsertIndex(current), 0, toolMsg)
+    const arr = [...updated]
+    arr.splice(computeToolInsertIndex(updated), 0, toolMsg)
     return arr
   })
 }

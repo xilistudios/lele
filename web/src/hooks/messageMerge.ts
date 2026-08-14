@@ -194,8 +194,7 @@ function buildFilteredBase(
  *   - completed assistants left over from a previous turn once base has the
  *     full current turn (the backend merges a tool-call turn into a single
  *     assistant in HTTP history),
- *   - empty completed assistants (tool-call iteration placeholders the backend
- *     never persists) — prevents the 2→1 flicker at turn end,
+ *   - empty completed assistants with no reasoning content (placeholders),
  *   - tool messages already confirmed in base.
  */
 function filterStreamingLeftovers(
@@ -223,8 +222,8 @@ function filterStreamingLeftovers(
         // Completed but unmatched → leftover from a previous turn. Drop it.
         if (index.assistants.some((e) => e.msg.id === msg.id)) return false
       }
-      if (!msg.streaming && msg.content.trim() === '') {
-        // Empty tool-call iteration placeholder — never persisted by backend.
+      if (!msg.streaming && msg.content.trim() === '' && !msg.reasoningContent) {
+        // Empty tool-call iteration placeholder without reasoning — drop.
         return false
       }
       return true

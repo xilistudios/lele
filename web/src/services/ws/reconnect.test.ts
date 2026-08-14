@@ -7,7 +7,7 @@ describe('defaultReconnectStrategy', () => {
     expect(strategy.initialDelay).toBe(500)
     expect(strategy.maxDelay).toBe(30000)
     expect(strategy.factor).toBe(2)
-    expect(strategy.maxRetries).toBe(Infinity)
+    expect(strategy.maxRetries).toBe(Number.POSITIVE_INFINITY)
   })
 
   test('nextDelay aplica jitter dentro del rango esperado', () => {

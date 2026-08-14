@@ -225,8 +225,16 @@ export function toChatMessages(
   sessionKey: string,
 ): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
+  const seenIds = new Map<string, number>()
 
-  return history.flatMap((message) => {
+  return history.flatMap((message, index) => {
+    let msgId = message.id || createHistoryMessageId(sessionKey, index, message.role)
+    const count = seenIds.get(msgId) ?? 0
+    seenIds.set(msgId, count + 1)
+    if (count > 0) {
+      msgId = `${msgId}_${count}`
+    }
+
     let messageContent = message.content
     let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
 
@@ -241,7 +249,7 @@ export function toChatMessages(
     if (message.role === 'user') {
       return [
         createUserMessage({
-          id: message.id,
+          id: msgId,
           sessionKey,
           content: messageContent,
           attachments: parsedAttachments,
@@ -252,11 +260,15 @@ export function toChatMessages(
 
     if (message.role === 'assistant') {
       const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
-      const shouldAddAssistant = (message.content && message.content !== '') || !hasToolCalls
+      const hasReasoning = Boolean(
+        message.reasoning_content && message.reasoning_content.trim() !== '',
+      )
+      const hasContent = Boolean(messageContent && messageContent.trim() !== '')
+      const shouldAddAssistant = hasContent || hasReasoning || !hasToolCalls
       if (shouldAddAssistant) {
         return [
           createAssistantMessage({
-            id: message.id,
+            id: msgId,
             sessionKey,
             content: messageContent,
             reasoningContent: message.reasoning_content,
@@ -274,7 +286,7 @@ export function toChatMessages(
       if (message.tool_call_id?.startsWith('approval:')) {
         return [
           {
-            id: message.id,
+            id: msgId,
             role: 'assistant' as const,
             content: message.content,
             streaming: false,
@@ -294,7 +306,7 @@ export function toChatMessages(
 
       return [
         createToolMessage({
-          id: message.id,
+          id: msgId,
           sessionKey,
           toolName,
           toolArgs,
