@@ -239,10 +239,20 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string]interface{}) (*providers.LLMResponse, error) {
 	fbResult, fbErr := lc.al.fallback.Execute(opts.ctx, opts.candidates,
 		func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
+			// Strip image content if this candidate model doesn't support
+			// vision. The read_image tool is exposed based on the primary
+			// model, so messages may contain image_url ContentParts that a
+			// non-vision fallback would reject with an API error.
+			messages := opts.messages
+			candidateModel := provider + ":" + model
+			if !getSupportsImages(lc.al.cfg(), candidateModel, provider) {
+				messages = stripImageContentParts(messages)
+			}
+
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)
 			if err != nil {
 				if opts.agent.Provider != nil {
-					return opts.agent.Provider.Chat(ctx, opts.messages, opts.toolDefs, model, llmOptions)
+					return opts.agent.Provider.Chat(ctx, messages, opts.toolDefs, model, llmOptions)
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
@@ -250,7 +260,7 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 			// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
 			// Do NOT wrap with FormatProviderModel — the "provider:model" colon
 			// format is internal-only and would break the API call.
-			return providerInst.Chat(ctx, opts.messages, opts.toolDefs, model, llmOptions)
+			return providerInst.Chat(ctx, messages, opts.toolDefs, model, llmOptions)
 		},
 	)
 	if fbErr != nil {

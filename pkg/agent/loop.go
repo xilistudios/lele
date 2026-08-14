@@ -570,6 +570,15 @@ func (al *AgentLoop) Store() *store.Store {
 	return al.dbStore
 }
 
+// GetDefaultAgent returns the default agent instance (used by tests and
+// tooling that need to inspect or override the active provider).
+func (al *AgentLoop) GetDefaultAgent() *AgentInstance {
+	if al.registry == nil {
+		return nil
+	}
+	return al.registry.GetDefaultAgent()
+}
+
 // GroupManager returns the group collaboration manager (Mixture of Agents).
 func (al *AgentLoop) GroupManager() *group.GroupManager {
 	return al.groupManager

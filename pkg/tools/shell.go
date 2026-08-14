@@ -284,7 +284,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	// ── Explicit background mode ──────────────────────────────────────
 	if backgroundMode && t.backgroundManager != nil {
-		proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel)
+		_, ownerSessionKey := AgentToolContextFromCtx(ctx)
+		proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
 		go func() {
 			err := cmd.Wait()
 			exitCode := 0
@@ -327,7 +328,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 			// Auto-background: if the process has been running longer than
 			// the threshold, move it to the background.
 			if t.backgroundManager != nil && t.backgroundThreshold > 0 && time.Since(startTime) >= t.backgroundThreshold {
-				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel)
+				_, ownerSessionKey := AgentToolContextFromCtx(ctx)
+				proc := t.backgroundManager.Register(cmd, command, cwd, stdout, stderr, bgCancel, ownerSessionKey)
 				go func() {
 					err := cmd.Wait()
 					exitCode := 0
