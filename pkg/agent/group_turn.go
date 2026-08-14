@@ -67,24 +67,17 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	}
 
 	// f. Build tool definitions if tools are enabled.
+	// Vision is determined by the primary model only. When the fallback chain
+	// fails over to a non-vision model, image content is stripped per-candidate
+	// in callWithFallback (see llm_caller.go).
 	var providerToolDefs []providers.ToolDefinition
 	modelHasVision := getSupportsImages(lr.al.cfg(), agent.Model, extractProviderFromModel(agent.Model, lr.al.cfg().Agents.Defaults.Provider))
-	if modelHasVision && len(agent.Candidates) > 1 {
-		for _, c := range agent.Candidates {
-			candidateModel := c.Provider + ":" + c.Model
-			if !getSupportsImages(lr.al.cfg(), candidateModel, c.Provider) {
-				modelHasVision = false
-				break
-			}
-		}
-	}
 	if req.EnableTools {
 		providerToolDefs = agent.Tools.ToProviderDefs()
 
-		// Filter out read_image tool if ANY model in the fallback chain doesn't
-		// support vision. This prevents the scenario where the primary model (with
-		// vision) calls read_image, image content is added to messages, then the
-		// primary fails and a fallback model without vision rejects the image content.
+		// Filter out read_image tool if the primary model doesn't support
+		// vision. This prevents the model from calling read_image when the
+		// resulting image content could not be understood by the model.
 		if !modelHasVision {
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
