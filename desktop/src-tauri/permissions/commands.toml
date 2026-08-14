@@ -1,0 +1,24 @@
+[[permission]]
+identifier = "allow-get-session"
+description = "Allow calling the get_session command"
+commands.allow = ["get_session"]
+
+[[permission]]
+identifier = "allow-backend-status"
+description = "Allow calling the backend_status command"
+commands.allow = ["backend_status"]
+
+[[permission]]
+identifier = "allow-restart-backend"
+description = "Allow calling the restart_backend command"
+commands.allow = ["restart_backend"]
+
+[[permission]]
+identifier = "allow-open-data-dir"
+description = "Allow calling the open_data_dir command"
+commands.allow = ["open_data_dir"]
+
+[[permission]]
+identifier = "allow-quit-app"
+description = "Allow calling the quit_app command"
+commands.allow = ["quit_app"]

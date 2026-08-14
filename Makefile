@@ -195,3 +195,13 @@ help:
 	@echo "  Binary: $(BINARY_PATH)"
 	@echo "  Install Prefix: $(INSTALL_PREFIX)"
 	@echo "  Workspace: $(WORKSPACE_DIR)"
+## Desktop app targets
+.PHONY: desktop-sidecar desktop-build desktop-dev
+desktop-sidecar: ## Build the lele sidecar binary for the desktop app
+	bash desktop/scripts/build-sidecar.sh
+desktop-build: desktop-sidecar ## Build the desktop app (requires Tauri deps)
+	cd desktop && bun install && bun run tauri build
+desktop-dev: ## Run the desktop app in dev mode (hot reload)
+	cd desktop && PKG_CONFIG_PATH=/usr/lib64/pkgconfig:/usr/share/pkgconfig \
+		LELE_SIDECAR_BIN=$(CURDIR)/desktop/src-tauri/binaries/lele-x86_64-unknown-linux-gnu \
+		bun run dev

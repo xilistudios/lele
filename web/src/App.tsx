@@ -16,13 +16,16 @@ import { BackgroundExecsPage } from './components/pages/BackgroundExecsPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { CronPage } from './components/pages/CronPage'
+import { DesktopDisconnectOverlay } from './components/organisms/DesktopDisconnectOverlay'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SecretsPage } from './components/pages/SecretsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
 import { SkillsPage } from './components/pages/SkillsPage'
 import { AppLogicProvider, useAppLogicContext } from './contexts/AppLogicContext'
 import { AuthProvider, defaultApiUrlFromWindow, useAuthContext } from './contexts/AuthContext'
+import { useBackendStatus } from './hooks/useBackendStatus'
 import { wsDebug } from './lib/debug'
+import { isDesktop } from './lib/desktop'
 
 const defaultApiUrl = defaultApiUrlFromWindow()
 
@@ -228,10 +231,16 @@ function ChatRoute() {
 }
 
 function ProtectedLayout() {
+  const desktop = isDesktop()
+  const { disconnected, restart, restarting } = useBackendStatus(desktop)
+
   return (
     <ProtectedRoute>
       <AppLogicProvider>
         <Outlet />
+        {desktop && disconnected && (
+          <DesktopDisconnectOverlay onRestart={restart} restarting={restarting} />
+        )}
       </AppLogicProvider>
     </ProtectedRoute>
   )

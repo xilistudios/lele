@@ -776,3 +776,25 @@ pre,
   animation: modal-backdrop-out 0.2s ease-in forwards;
   background: rgba(0, 0, 0, 0.2);
 }
+/* --- Desktop (Tauri) mode --- */
+html.desktop {
+  /* native window: no overscroll bounce, no text cursor on chrome */
+  overscroll-behavior: none;
+}
+
+/* Match the global scrollbar styling but slightly wider for mouse-driven
+ * desktop windows. Track/thumb colors are inherited from the global rules. */
+html.desktop ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html.desktop body {
+  user-select: none;
+}
+
+html.desktop input,
+html.desktop textarea,
+html.desktop [contenteditable] {
+  user-select: text;
+}

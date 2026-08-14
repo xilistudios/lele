@@ -765,3 +765,131 @@ func TestAuthManager_SQLiteSetStoreReloadsClientsAfterRestart(t *testing.T) {
 		t.Errorf("run 2: expected device name 'Desktop', got '%s'", clients[0].DeviceName)
 	}
 }
+func TestRegisterDesktopClient_ValidateToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	if err := auth.RegisterDesktopClient("tok123", "ref456"); err != nil {
+		t.Fatalf("failed to register desktop client: %v", err)
+	}
+
+	client, valid := auth.ValidateToken("tok123")
+	if !valid {
+		t.Fatal("expected desktop token to be valid")
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if client.ClientID != DesktopClientID {
+		t.Errorf("expected client ID %q, got %q", DesktopClientID, client.ClientID)
+	}
+
+	if _, valid := auth.ValidateToken("wrong"); valid {
+		t.Error("expected wrong token to be rejected")
+	}
+}
+
+func TestRegisterDesktopClient_Upsert(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	if err := auth.RegisterDesktopClient("old-token", "old-refresh"); err != nil {
+		t.Fatalf("failed to register desktop client: %v", err)
+	}
+	if err := auth.RegisterDesktopClient("new-token", "new-refresh"); err != nil {
+		t.Fatalf("failed to re-register desktop client: %v", err)
+	}
+
+	if _, valid := auth.ValidateToken("old-token"); valid {
+		t.Error("expected old token to be invalid after re-registration")
+	}
+	if _, valid := auth.ValidateToken("new-token"); !valid {
+		t.Error("expected new token to be valid after re-registration")
+	}
+
+	clients := auth.ListClients()
+	if len(clients) != 1 {
+		t.Fatalf("expected exactly 1 desktop client, got %d", len(clients))
+	}
+	if clients[0].ClientID != DesktopClientID {
+		t.Errorf("expected client ID %q, got %q", DesktopClientID, clients[0].ClientID)
+	}
+}
+
+func TestRegisterDesktopClient_EmptyToken(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	if err := auth.RegisterDesktopClient("", "ref456"); err == nil {
+		t.Error("expected error when token is empty")
+	}
+	if err := auth.RegisterDesktopClient("tok123", ""); err == nil {
+		t.Error("expected error when refresh token is empty")
+	}
+}
+
+func TestRegisterDesktopClient_RefreshWorks(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	if err := auth.RegisterDesktopClient("tok123", "ref456"); err != nil {
+		t.Fatalf("failed to register desktop client: %v", err)
+	}
+
+	client, newToken, newRefreshToken, err := auth.RefreshToken("ref456")
+	if err != nil {
+		t.Fatalf("failed to refresh desktop client token: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if client.ClientID != DesktopClientID {
+		t.Errorf("expected client ID %q, got %q", DesktopClientID, client.ClientID)
+	}
+	if newToken == "" {
+		t.Error("expected non-empty new token")
+	}
+	if newRefreshToken == "" {
+		t.Error("expected non-empty new refresh token")
+	}
+
+	if _, valid := auth.ValidateToken(newToken); !valid {
+		t.Error("expected rotated token to be valid")
+	}
+}

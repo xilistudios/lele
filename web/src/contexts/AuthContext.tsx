@@ -1,5 +1,6 @@
 import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { createApiClient } from '../lib/api'
+import { bootstrapDesktopSession, createApiClient } from '../lib/api'
+import { getDesktopApiUrl } from '../lib/desktop'
 import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '../lib/storage'
 import type { AuthSession } from '../lib/types'
 
@@ -23,8 +24,12 @@ export function AuthProvider({
   children,
   defaultApiUrl,
 }: { children: ReactNode; defaultApiUrl: string }) {
-  const [apiUrl, setApiUrlState] = useState(() => loadApiUrl(defaultApiUrl))
-  const [session, setSession] = useState<AuthSession | null>(() => loadSession())
+  const [apiUrl, setApiUrlState] = useState(() => getDesktopApiUrl() ?? loadApiUrl(defaultApiUrl))
+  // Restore a persisted session first; in the desktop shell, fall back to the
+  // token injected by Tauri so the app starts authenticated without a PIN.
+  const [session, setSession] = useState<AuthSession | null>(
+    () => loadSession() ?? bootstrapDesktopSession(),
+  )
   const [isLoading, setIsLoading] = useState(false)
 
   const setApiUrl = useCallback((nextApiUrl: string) => {
@@ -50,7 +55,7 @@ export function AuthProvider({
       persistSession(null)
     })
 
-    if (session?.token && session.refresh_token) {
+    if (session?.token) {
       client.setToken(session.token, session.refresh_token, (nextSession) => {
         persistSession({
           ...session,
