@@ -285,7 +285,11 @@ func SidebarLabelValue(label, value string) string {
 // uniform across all screens (welcome, chat, modals, detail views).
 func (m *Model) paintFrame(content string) string {
 	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
-	return reapplyBackground(AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(placed))
+	// Place already pads content to exactly m.width x m.height, so Width/Height
+	// here would force a redundant re-measure/re-pad of every line (~200k ns on
+	// a 200x50 frame). MaxWidth/MaxHeight only clamp oversized content, which is
+	// a no-op for the normal (already-fitting) case.
+	return reapplyBackground(AppContainer.MaxWidth(m.width).MaxHeight(m.height).Render(placed))
 }
 
 // reapplyBackground re-emits the correct background color after every full
