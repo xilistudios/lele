@@ -2326,6 +2326,55 @@ func (sm *SessionManager) AllMessageCounts() map[string]int {
 	return counts
 }
 
+// AllTotalMessageCounts returns a map of session_key → total message count
+// for every known session, using the same semantics as GetTotalMessageCount:
+// in-memory sessions report len(Messages) + evictedTotal (no I/O); sessions
+// only present in metadata are counted via a single batched SQLite query
+// (all rows, including evicted ones). This is the batch alternative to
+// calling GetTotalMessageCount in a loop, avoiding N+1 queries when UIs
+// list all sessions.
+func (sm *SessionManager) AllTotalMessageCounts() map[string]int {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	counts := make(map[string]int, len(sm.sessionMeta))
+
+	// In-memory sessions: accurate count without I/O.
+	for key, session := range sm.sessions {
+		counts[key] = len(session.Messages) + session.evictedTotal
+	}
+
+	// Cold sessions (metadata only): one batched store query.
+	if sm.store != nil {
+		needFromStore := false
+		for key := range sm.sessionMeta {
+			if _, ok := sm.sessions[key]; !ok {
+				needFromStore = true
+				break
+			}
+		}
+		if needFromStore {
+			// Release lock for I/O (same pattern as AllMessageCounts).
+			sm.mu.RUnlock()
+			storeCounts, err := sm.store.Sessions().AllMessageCounts()
+			sm.mu.RLock()
+			if err == nil {
+				for key := range sm.sessionMeta {
+					if _, ok := sm.sessions[key]; ok {
+						continue
+					}
+					if c, ok := storeCounts[key]; ok {
+						counts[key] = c
+					}
+				}
+			}
+		}
+	}
+
+	return counts
+}
+
 // SubagentSessionInfo contains metadata about a persisted subagent session.
 type SubagentSessionInfo struct {
 	Key        string
