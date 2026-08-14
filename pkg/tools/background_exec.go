@@ -70,11 +70,39 @@ type BackgroundProcess struct {
 	StartTime  time.Time
 	EndTime    *time.Time
 	ExitCode   int
-	stdout     *threadSafeBuffer
-	stderr     *threadSafeBuffer
-	cmd        *exec.Cmd
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
+	// OwnerSessionKey is the session key that started the process. It is
+	// used to scope visibility: a session only sees (and can control) its
+	// own background processes, plus those of subagents it spawned. Empty
+	// means unowned (legacy/tests) and is visible to everyone.
+	OwnerSessionKey string
+	stdout          *threadSafeBuffer
+	stderr          *threadSafeBuffer
+	cmd             *exec.Cmd
+	cancel          context.CancelFunc
+	mu              sync.RWMutex
+}
+
+// VisibleTo reports whether the process should be visible to a caller
+// running under callerSessionKey. Rules:
+//   - Unowned processes (empty OwnerSessionKey) are visible to everyone
+//     (backward compatibility).
+//   - Callers without a session key (e.g. operator views) see everything.
+//   - A process is visible to its owning session and to any ancestor
+//     session: subagent session keys are "{parent_key}:{task_id}", so a
+//     parent session can monitor processes started by its own subagents,
+//     while sibling subagents cannot see each other's processes.
+func (p *BackgroundProcess) VisibleTo(callerSessionKey string) bool {
+	p.mu.RLock()
+	owner := p.OwnerSessionKey
+	p.mu.RUnlock()
+
+	if owner == "" || callerSessionKey == "" {
+		return true
+	}
+	if owner == callerSessionKey {
+		return true
+	}
+	return strings.HasPrefix(owner, callerSessionKey+":")
 }
 
 // Output returns combined stdout + stderr (stderr prefixed with "\nSTDERR:\n").
@@ -189,7 +217,9 @@ func (m *BackgroundProcessManager) SetMaxProcesses(max int) {
 // (format "bg-{N}"), stores it, and returns it.
 // IMPORTANT: cmd.Stdout / cmd.Stderr are assumed to already be set by the
 // caller; this method only stores references to the provided buffers.
-func (m *BackgroundProcessManager) Register(cmd *exec.Cmd, command, workingDir string, stdout, stderr *threadSafeBuffer, cancel context.CancelFunc) *BackgroundProcess {
+// ownerSessionKey identifies the session that started the process and scopes
+// its visibility (see BackgroundProcess.VisibleTo); pass "" for unowned.
+func (m *BackgroundProcessManager) Register(cmd *exec.Cmd, command, workingDir string, stdout, stderr *threadSafeBuffer, cancel context.CancelFunc, ownerSessionKey string) *BackgroundProcess {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -202,15 +232,16 @@ func (m *BackgroundProcessManager) Register(cmd *exec.Cmd, command, workingDir s
 	m.nextID++
 
 	p := &BackgroundProcess{
-		ID:         id,
-		Command:    command,
-		WorkingDir: workingDir,
-		Status:     BgExecStatusRunning,
-		StartTime:  time.Now(),
-		stdout:     stdout,
-		stderr:     stderr,
-		cmd:        cmd,
-		cancel:     cancel,
+		ID:              id,
+		Command:         command,
+		WorkingDir:      workingDir,
+		Status:          BgExecStatusRunning,
+		StartTime:       time.Now(),
+		OwnerSessionKey: ownerSessionKey,
+		stdout:          stdout,
+		stderr:          stderr,
+		cmd:             cmd,
+		cancel:          cancel,
 	}
 
 	m.processes[id] = p
@@ -261,6 +292,42 @@ func (m *BackgroundProcessManager) ListRunning() []*BackgroundProcess {
 		result = append(result, m.processes[id])
 	}
 	return result
+}
+
+// ListForSession returns all processes visible to the given session,
+// sorted by ID. See BackgroundProcess.VisibleTo for the visibility rules.
+func (m *BackgroundProcessManager) ListForSession(sessionKey string) []*BackgroundProcess {
+	all := m.List()
+	result := make([]*BackgroundProcess, 0, len(all))
+	for _, p := range all {
+		if p.VisibleTo(sessionKey) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// ListRunningForSession returns only running processes visible to the given
+// session.
+func (m *BackgroundProcessManager) ListRunningForSession(sessionKey string) []*BackgroundProcess {
+	all := m.ListRunning()
+	result := make([]*BackgroundProcess, 0, len(all))
+	for _, p := range all {
+		if p.VisibleTo(sessionKey) {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// GetForSession returns a process by ID only if it is visible to the given
+// session. Foreign processes are indistinguishable from missing ones.
+func (m *BackgroundProcessManager) GetForSession(id, sessionKey string) (*BackgroundProcess, bool) {
+	p, ok := m.Get(id)
+	if !ok || !p.VisibleTo(sessionKey) {
+		return nil, false
+	}
+	return p, true
 }
 
 // Stop stops a running process: calls cancel(), kills the process if possible,
@@ -413,12 +480,13 @@ func (t *ListBackgroundExecsTool) Parameters() map[string]interface{} {
 
 func (t *ListBackgroundExecsTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	includeCompleted, _ := args["include_completed"].(bool)
+	_, sessionKey := AgentToolContextFromCtx(ctx)
 
 	var procs []*BackgroundProcess
 	if includeCompleted {
-		procs = t.manager.List()
+		procs = t.manager.ListForSession(sessionKey)
 	} else {
-		procs = t.manager.ListRunning()
+		procs = t.manager.ListRunningForSession(sessionKey)
 	}
 
 	if len(procs) == 0 {
@@ -477,8 +545,9 @@ func (t *GetBackgroundExecOutputTool) Execute(ctx context.Context, args map[stri
 	if !ok || id == "" {
 		return ErrorResult("id is required")
 	}
+	_, sessionKey := AgentToolContextFromCtx(ctx)
 
-	p, ok := t.manager.Get(id)
+	p, ok := t.manager.GetForSession(id, sessionKey)
 	if !ok {
 		return ErrorResult(fmt.Sprintf("background process not found: %s", id))
 	}
@@ -558,8 +627,9 @@ func (t *StopBackgroundExecTool) Execute(ctx context.Context, args map[string]in
 	if !ok || id == "" {
 		return ErrorResult("id is required")
 	}
+	_, sessionKey := AgentToolContextFromCtx(ctx)
 
-	p, exists := t.manager.Get(id)
+	p, exists := t.manager.GetForSession(id, sessionKey)
 	if !exists {
 		return ErrorResult(fmt.Sprintf("background process not found: %s", id))
 	}

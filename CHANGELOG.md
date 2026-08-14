@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### Tools
+- Background exec session isolation — background shell processes are now scoped to the session that started them. `list_background_execs`, `get_background_exec_output`, and `stop_background_exec` only see processes owned by the acting session (plus those of subagents it spawned, since subagent session keys extend the parent key). Foreign processes are reported as "not found", so one session can no longer read or kill another session's background commands. Operator views (TUI `/bg`, WebUI) still see all processes.
+
 ## [0.7.4] - 2026-08-13
 
 ### Added

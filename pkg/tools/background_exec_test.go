@@ -65,7 +65,7 @@ func registerTestProcess(t *testing.T, mgr *BackgroundProcessManager, command st
 	t.Helper()
 	cmd := exec.Command("echo", "test")
 	var stdout, stderr threadSafeBuffer
-	return mgr.Register(cmd, command, "/tmp", &stdout, &stderr, func() {})
+	return mgr.Register(cmd, command, "/tmp", &stdout, &stderr, func() {}, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ func TestBackgroundProcessManager_RegisterAndGet(t *testing.T) {
 	cmd := exec.Command("echo", "hello")
 	var stdout, stderr threadSafeBuffer
 
-	proc := mgr.Register(cmd, "echo hello", "/tmp", &stdout, &stderr, func() {})
+	proc := mgr.Register(cmd, "echo hello", "/tmp", &stdout, &stderr, func() {}, "")
 
 	if proc.ID != "bg-1" {
 		t.Fatalf("expected ID 'bg-1', got %q", proc.ID)
@@ -351,7 +351,7 @@ func TestGetBackgroundExecOutputTool(t *testing.T) {
 	cmd := exec.Command("echo", "test")
 	var stdout, stderr threadSafeBuffer
 	stdout.Write([]byte("test output"))
-	mgr.Register(cmd, "echo test", "/tmp", &stdout, &stderr, func() {})
+	mgr.Register(cmd, "echo test", "/tmp", &stdout, &stderr, func() {}, "")
 
 	tool := NewGetBackgroundExecOutputTool(mgr)
 
