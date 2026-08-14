@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### Agent
+- `read_image` no longer hidden when a fallback model lacks vision — the tool was filtered out if ANY model in the fallback chain didn't support images, so a vision-capable primary model lost `read_image` just because a fallback couldn't see. The tool is now exposed based on the primary model only; when the chain fails over to a non-vision model, image content parts are stripped per-candidate in `callWithFallback` so the fallback never receives image data it would reject.
+- System prompt vision flag syncs with the session model — the flag was set once at instance creation, so switching models at runtime (`/model`, TUI picker, REST) left the tools section of the system prompt hiding/showing `read_image` based on a stale value. It is now re-derived from the session's current model at the start of each agent loop.
+
+#### Tools
+- Background exec session isolation — background shell processes are now scoped to the session that started them. `list_background_execs`, `get_background_exec_output`, and `stop_background_exec` only see processes owned by the acting session (plus those of subagents it spawned, since subagent session keys extend the parent key). Foreign processes are reported as "not found", so one session can no longer read or kill another session's background commands. Operator views (TUI `/bg`, WebUI) still see all processes.
+
 ## [0.7.4] - 2026-08-13
 
 ### Added
