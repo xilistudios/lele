@@ -54,16 +54,18 @@ pub fn get_session(state: tauri::State<'_, AppState>) -> Result<SessionInfo, Str
 #[tauri::command]
 pub fn backend_status(state: tauri::State<'_, AppState>) -> BackendStatus {
     let mut guard = state.sidecar.lock().unwrap();
-    match guard.as_mut() {
-        Some(h) if h.is_alive() => BackendStatus {
-            running: true,
-            pid: h.pid(),
-            port: h.port(),
-            uptime_secs: h.uptime_secs(),
-            url: h.url().to_string(),
-        },
-        _ => BackendStatus { running: false, pid: 0, port: 0, uptime_secs: 0, url: String::new() },
+    if let Some(h) = guard.as_mut() {
+        if h.is_alive() {
+            return BackendStatus {
+                running: true,
+                pid: h.pid(),
+                port: h.port(),
+                uptime_secs: h.uptime_secs(),
+                url: h.url().to_string(),
+            };
+        }
     }
+    BackendStatus { running: false, pid: 0, port: 0, uptime_secs: 0, url: String::new() }
 }
 
 /// Restart the backend: stop the sidecar, respawn it, and navigate the main

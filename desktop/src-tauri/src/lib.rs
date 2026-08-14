@@ -97,7 +97,7 @@ pub fn run() {
                 .title("Lele Desktop")
                 .inner_size(480.0, 360.0)
                 .resizable(false)
-                .center()?
+                .center()
                 .build()?;
 
             let bin_path = resolve_sidecar_path(&app.handle());
@@ -131,7 +131,7 @@ pub fn run() {
 /// Spawn the sidecar and, once ready, open the main window on the gateway URL.
 fn start_backend(app: tauri::AppHandle, bin_path: std::path::PathBuf, token: String) {
     match sidecar::spawn_sidecar(&bin_path, &token, READY_TIMEOUT) {
-        Ok(mut sidecar) => {
+        Ok(sidecar) => {
             let url = sidecar.url().to_string();
             {
                 let state = app.state::<AppState>();
@@ -141,7 +141,7 @@ fn start_backend(app: tauri::AppHandle, bin_path: std::path::PathBuf, token: Str
             let init_js = format!(
                 "window.__LELE_DESKTOP__ = {{ mode: \"local\", apiUrl: \"{url}\", session: {{ token: \"{token}\", refresh_token: \"\", client_id: \"desktop-local\", device_name: \"Lele Desktop\" }} }};"
             );
-            let _ = app.run_on_main_thread(move || {
+            let _ = app.clone().run_on_main_thread(move || {
                 match url.parse::<tauri::Url>() {
                     Ok(parsed) => {
                         let _ = WebviewWindowBuilder::new(&app, "main", WebviewUrl::External(parsed))
@@ -164,7 +164,7 @@ fn start_backend(app: tauri::AppHandle, bin_path: std::path::PathBuf, token: Str
             // Phase-2 polish: proper error screen. For now keep the splash open
             // with a changed title and log the cause.
             eprintln!("sidecar failed to start: {e}");
-            let _ = app.run_on_main_thread(move || {
+            let _ = app.clone().run_on_main_thread(move || {
                 if let Some(splash) = app.get_webview_window("splash") {
                     let _ = splash.set_title("Lele Desktop — backend failed");
                 }

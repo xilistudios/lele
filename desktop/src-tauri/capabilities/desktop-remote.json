@@ -9,10 +9,10 @@
   "permissions": [
     "core:default",
     "core:event:default",
-    "app:allow-get-session",
-    "app:allow-backend-status",
-    "app:allow-restart-backend",
-    "app:allow-open-data-dir",
-    "app:allow-quit-app"
+    "allow-get-session",
+    "allow-backend-status",
+    "allow-restart-backend",
+    "allow-open-data-dir",
+    "allow-quit-app"
   ]
 }
