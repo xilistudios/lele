@@ -17,12 +17,12 @@ import (
 
 // Server centralizes all HTTP routing under one http.Server.
 type Server struct {
-	cfg       *Config
-	http      *http.Server
-	mux       *http.ServeMux
-	checks    map[string]health.Check
-	startTime time.Time
-	ready     bool
+	cfg        *Config
+	http       *http.Server
+	mux        *http.ServeMux
+	checks     map[string]health.Check
+	startTime  time.Time
+	ready      bool
 	actualAddr string
 	mu         sync.RWMutex
 }

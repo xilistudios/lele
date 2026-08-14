@@ -110,8 +110,11 @@ rm -rf "${EMBED_WEB_DIR}/dist"
 mkdir -p "${EMBED_WEB_DIR}"
 cp -R "${ROOT}/web/dist" "${EMBED_WEB_DIR}/dist"
 
-# Ensure the workspace dir exists for the go:embed directive.
+# Copy the default workspace for the go:embed directive (an empty dir is not
+# embeddable and would fail the build).
+rm -rf "${EMBED_WS_DIR}"
 mkdir -p "${EMBED_WS_DIR}"
+cp -R "${ROOT}/workspace/." "${EMBED_WS_DIR}/"
 
 # --- Build metadata ----------------------------------------------------------
 VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
