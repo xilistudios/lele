@@ -11,7 +11,7 @@ import type { ChatMessage, ToolStatus } from '../lib/types'
 import type { ClientCommand } from '../services/ws/events'
 import { type MessageEventContext, dispatchMessageEvent } from './messageEventHandlers'
 import { useApprovals } from './useApprovals'
-import { chatHistoryQueryKey } from './useChatHistory'
+import { buildChatHistoryQueryKey } from './useChatHistory'
 import { useGroupState } from './useGroupState'
 import { useProcessingSessions } from './useProcessingSessions'
 import { useStreamQueues } from './useStreamQueues'
@@ -92,10 +92,12 @@ export function useMessages(
 
   const getHistoryUserCount = useCallback(
     (sessionKey: string) => {
-      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-        chatHistoryQueryKey(sessionKey),
+      const queryKey = buildChatHistoryQueryKey(
+        sessionKey,
+        parentSessionKeyRef.current ?? undefined,
       )
-      return history?.messages?.filter((m) => m.role === 'user').length ?? 0
+      const history = queryClient.getQueryData<{ messages?: ChatMessage[] }>(queryKey)
+      return history?.messages?.filter((m) => m.role === 'user' && !m.optimistic).length ?? 0
     },
     [queryClient],
   )
@@ -160,24 +162,6 @@ export function useMessages(
       setStreamingMessages((current) => [...current, userMessage])
       setPendingAttachments([])
 
-      // Optimistic cache update — rollback happens on message.error
-      const previousCache = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-        chatHistoryQueryKey(sessionKey),
-      )
-      if (previousCache) {
-        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
-          ...previousCache,
-          messages: [...(previousCache.messages ?? []), userMessage],
-        })
-      } else {
-        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
-          sessionKey,
-          messages: [userMessage],
-          rawMessages: [],
-          processing: false,
-        })
-      }
-
       wsSend('message', {
         content: normalizedContent,
         session_key: sessionKey,
@@ -185,7 +169,7 @@ export function useMessages(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
     },
-    [wsSend, getHistoryUserCount, queryClient],
+    [wsSend, getHistoryUserCount],
   )
 
   // ── Retry failed message ──────────────────────────────────────────────
@@ -197,23 +181,13 @@ export function useMessages(
 
       // Remove the failed message from streaming state
       setStreamingMessages((current) => current.filter((m) => m.id !== failedMessage.id))
-      // Remove from query cache too
-      const cached = queryClient.getQueryData<{ messages?: ChatMessage[] }>(
-        chatHistoryQueryKey(sessionKey),
-      )
-      if (cached) {
-        queryClient.setQueryData(chatHistoryQueryKey(sessionKey), {
-          ...cached,
-          messages: (cached.messages ?? []).filter((m) => m.id !== failedMessage.id),
-        })
-      }
       // Re-send
       const attachmentPaths = (failedMessage.attachments ?? [])
         .map((a) => a.path ?? '')
         .filter(Boolean)
       sendMessage(failedMessage.content, attachmentPaths, sessionKey, null)
     },
-    [queryClient, sendMessage],
+    [sendMessage],
   )
 
   // ── Cleanup helpers ──────────────────────────────────────────────────────
