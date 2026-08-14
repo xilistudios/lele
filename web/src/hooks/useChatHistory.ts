@@ -89,8 +89,10 @@ export function useChatHistory(
       if (cachedData && cachedData.messages.length > DEFAULT_LIMIT) {
         const newMessageIds = new Set(newMessages.map((m) => m.id))
         // Keep cached messages that are older than the oldest new message
-        // (i.e., messages not present in the latest batch)
-        const olderCachedMessages = cachedData.messages.filter((m) => !newMessageIds.has(m.id))
+        // (i.e., messages not present in the latest batch, excluding ephemeral optimistic messages)
+        const olderCachedMessages = cachedData.messages.filter(
+          (m) => !m.optimistic && !newMessageIds.has(m.id),
+        )
 
         // Also merge rawMessages preserving order
         const newRawIds = new Set(history.messages.map((m: { id: string }) => m.id))
@@ -169,12 +171,7 @@ export function useChatHistory(
     setIsLoadingMore(true)
 
     try {
-      const history = await api.history(
-        sessionKey,
-        parentSessionKey,
-        beforeId,
-        DEFAULT_LIMIT,
-      )
+      const history = await api.history(sessionKey, parentSessionKey, beforeId, DEFAULT_LIMIT)
       if (!history || !history.messages || history.messages.length === 0) {
         queryClient.setQueryData(queryKey, (old: typeof currentData | undefined) =>
           old ? { ...old, hasMore: false } : old,

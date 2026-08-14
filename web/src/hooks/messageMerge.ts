@@ -205,7 +205,7 @@ function filterStreamingLeftovers(
   consumedToolIds: Set<string>,
   baseHasCurrentTurn: boolean,
 ): ChatMessage[] {
-  const baseUserCount = baseMessages.filter((m) => m.role === 'user').length
+  const baseUserCount = baseMessages.filter((m) => m.role === 'user' && !m.optimistic).length
   const usedAssistantIds = new Set(index.assistants.filter((e) => e.used).map((e) => e.msg.id))
 
   return streamingMessages.filter((msg) => {

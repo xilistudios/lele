@@ -837,4 +837,115 @@ describe('Message ordering fixes', () => {
       ])
     })
   })
+
+  describe('Bug 7: Sequential user messages and multi-turn ordering', () => {
+    test('maintains chronological order when sending a second message while first is streaming', () => {
+      // Scenario:
+      // Turn 1: user sent u1, assistant a1 is actively streaming.
+      // User immediately sends u2 before a1 finishes.
+      // Base history: [] (or confirmed older messages)
+      // Streaming: [u1-opt, a1-stream, u2-opt]
+      // Expected render: [u1-opt, a1-stream, u2-opt] (NOT [u1-opt, u2-opt, a1-stream])
+
+      const baseMessages: ChatMessage[] = []
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'First question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1-ws', 'assistant', 'Answering first...', {
+          streaming: true,
+        }),
+        createTestMessage('u2-opt', 'user', 'Second question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      expect(result.map((m) => m.id)).toEqual(['u1-opt', 'a1-ws', 'u2-opt'])
+      expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    })
+
+    test('maintains chronological order when sending a second message after first completes before refetch', () => {
+      // Scenario:
+      // Turn 1: user sent u1, assistant a1 completed (streaming: false), but HTTP refetch has not landed.
+      // User sends u2.
+      // Base history: []
+      // Streaming: [u1-opt, a1-ws, u2-opt]
+      // Expected render: [u1-opt, a1-ws, u2-opt]
+
+      const baseMessages: ChatMessage[] = []
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'First question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1-ws', 'assistant', 'First answer', {
+          streaming: false,
+        }),
+        createTestMessage('u2-opt', 'user', 'Second question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      expect(result.map((m) => m.id)).toEqual(['u1-opt', 'a1-ws', 'u2-opt'])
+      expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    })
+
+    test('maintains order when a2 starts streaming in response to u2', () => {
+      // Scenario:
+      // Turn 1: u1 and a1 completed in streaming.
+      // Turn 2: u2 sent, a2 starts streaming.
+      // Streaming: [u1-opt, a1-ws, u2-opt, a2-ws]
+      // Expected render: [u1-opt, a1-ws, u2-opt, a2-ws]
+
+      const baseMessages: ChatMessage[] = []
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'First question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1-ws', 'assistant', 'First answer', {
+          streaming: false,
+        }),
+        createTestMessage('u2-opt', 'user', 'Second question', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a2-ws', 'assistant', 'Second answer...', {
+          streaming: true,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      expect(result.map((m) => m.id)).toEqual(['u1-opt', 'a1-ws', 'u2-opt', 'a2-ws'])
+      expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    })
+
+    test('handles subagent session where base has existing messages and user sends a new message', () => {
+      // Scenario:
+      // Subagent session has baseMessages from task setup: [u_task, a_task]
+      // User types a message to the subagent: u_user-opt with optimisticBaseCount = 1
+      // Expected render: [u_task, a_task, u_user-opt]
+
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u_task', 'user', 'Task instruction'),
+        createTestMessage('a_task', 'assistant', 'Task started...'),
+      ]
+
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u_user-opt', 'user', 'Please also check logs', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      expect(result.map((m) => m.id)).toEqual(['u_task', 'a_task', 'u_user-opt'])
+      expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    })
+  })
 })
