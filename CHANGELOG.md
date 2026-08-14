@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-08-14
+
 ### Fixed
 
 #### Agent
@@ -15,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Tools
 - Background exec session isolation — background shell processes are now scoped to the session that started them. `list_background_execs`, `get_background_exec_output`, and `stop_background_exec` only see processes owned by the acting session (plus those of subagents it spawned, since subagent session keys extend the parent key). Foreign processes are reported as "not found", so one session can no longer read or kill another session's background commands. Operator views (TUI `/bg`, WebUI) still see all processes.
+
+#### WebUI
+- Prevent thinking block accumulation and resolve chat blanking on scroll — streaming assistant markers are now updated when tools execute or new thinking chunks arrive, preventing duplicate thinking blocks during multi-iteration runs. The virtualized message list uses Virtuoso's native `startReached` handler with `firstItemIndex` tracking for stable pagination without viewport jumps or render range collapse. Message IDs and item keys are disambiguated to prevent Virtuoso key collision errors.
+
+### Changed
+
+#### TUI
+- ANSI background reappriting performance — replaced regexp-based ANSI scanner in `reapplyBackground` with a byte scanner, and dropped redundant `Width`/`Height` sizing in `paintFrame` (lipgloss already pads to frame dimensions, so re-measuring was a no-op). ~8% faster `paintFrame` at 200×50, −123 kB/frame, −108 allocs/frame.
+
+### Added
+
+#### TUI
+- Command approval flow test coverage — comprehensive tests for the approval request rendering, y/n key handling, view output, end-to-end flow with real `ApprovalManager`, and full E2E with a mock provider requesting `exec` of a dangerous command. New `AgentLoop.GetDefaultAgent()` accessor for test injection.
 
 ## [0.7.4] - 2026-08-13
 
