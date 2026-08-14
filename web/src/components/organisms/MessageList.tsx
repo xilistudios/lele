@@ -62,32 +62,94 @@ export function MessageList() {
     (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
   )
 
+  const prevFirstMsgIdRef = useRef<string | undefined>(visibleMessages[0]?.id)
   const prevMessagesLengthRef = useRef(visibleMessages.length)
+
+  // Track the scroll element so we can attach a reliable scroll listener
+  // for triggering loadMore (Virtuoso's startReached can miss fires after
+  // items are prepended due to scroll-position adjustment).
+  const scrollerRef = useRef<HTMLElement | null>(null)
+  const loadMoreScrollAttached = useRef(false)
 
   // Handle session change — reset tracking
   useEffect(() => {
     if (prevSessionKeyRef.current !== currentSessionKey) {
       prevSessionKeyRef.current = currentSessionKey
       setFirstItemIndex(START_INDEX)
+      prevFirstMsgIdRef.current = visibleMessages[0]?.id
       prevMessagesLengthRef.current = visibleMessages.length
       setAtBottom(true)
     }
-  }, [currentSessionKey, visibleMessages.length])
+  }, [currentSessionKey, visibleMessages])
 
   // When older messages are prepended (loadMore), shift firstItemIndex backward
   // so Virtuoso preserves scroll position without jumping or blanking the viewport.
   useEffect(() => {
-    if (
-      prevMessagesLengthRef.current > 0 &&
-      visibleMessages.length > prevMessagesLengthRef.current
-    ) {
-      const added = visibleMessages.length - prevMessagesLengthRef.current
-      if (isLoadingMore) {
+    if (prevSessionKeyRef.current === currentSessionKey) {
+      const currentFirstId = visibleMessages[0]?.id
+      if (
+        prevMessagesLengthRef.current > 0 &&
+        visibleMessages.length > prevMessagesLengthRef.current &&
+        currentFirstId !== prevFirstMsgIdRef.current &&
+        prevFirstMsgIdRef.current !== undefined
+      ) {
+        const added = visibleMessages.length - prevMessagesLengthRef.current
         setFirstItemIndex((prev) => prev - added)
       }
+      prevFirstMsgIdRef.current = currentFirstId
+      prevMessagesLengthRef.current = visibleMessages.length
     }
-    prevMessagesLengthRef.current = visibleMessages.length
-  }, [visibleMessages.length, isLoadingMore])
+  }, [visibleMessages, currentSessionKey])
+
+  // Use refs for the scroll handler so it always reads latest state
+  // without needing to reattach the listener on every render.
+  const loadMoreRef = useRef(loadMore)
+  loadMoreRef.current = loadMore
+  const hasMoreRef = useRef(hasMore)
+  hasMoreRef.current = hasMore
+  const isLoadingMoreScrollRef = useRef(isLoadingMore)
+  isLoadingMoreScrollRef.current = isLoadingMore
+
+  // Stable scroll handler — reads from refs to avoid reattachment
+  const handleLoadMoreScroll = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el || !hasMoreRef.current || isLoadingMoreScrollRef.current) return
+    // Trigger when within 100px of the top
+    if (el instanceof HTMLElement && el.scrollTop < 100) {
+      loadMoreRef.current()
+    }
+  }, [])
+
+  // Attach a scroll listener to Virtuoso's internal scroll container.
+  // This is more reliable than Virtuoso's startReached for detecting
+  // scroll-to-top after items have been prepended (loadMore).
+  const scrollerRefCallback = useCallback(
+    (el: HTMLElement | Window | null) => {
+      // Clean up previous listener
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+      // Only track HTMLElement (not Window) for scrollTop-based detection
+      const htmlEl = el instanceof HTMLElement ? el : null
+      scrollerRef.current = htmlEl
+      if (htmlEl && !loadMoreScrollAttached.current) {
+        htmlEl.addEventListener('scroll', handleLoadMoreScroll, { passive: true })
+        loadMoreScrollAttached.current = true
+      }
+    },
+    [handleLoadMoreScroll],
+  )
+
+  // Clean up scroll listener on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+    }
+  }, [handleLoadMoreScroll])
 
   const handleNavigateToSession = useCallback(
     (sessionKey: string) => {
@@ -271,6 +333,7 @@ export function MessageList() {
         atBottomStateChange={setAtBottom}
         atBottomThreshold={300}
         startReached={handleStartReached}
+        scrollerRef={scrollerRefCallback}
         components={{
           Header: () => (
             <>
@@ -280,9 +343,17 @@ export function MessageList() {
                 </div>
               )}
               {!isLoadingMore && hasMore && (
-                <p className="text-center py-2 text-xs text-text-tertiary">
-                  {t('chat.scrollUpForMore')}
-                </p>
+                <div className="flex justify-center py-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isLoadingMore) loadMore()
+                    }}
+                    className="text-xs text-text-tertiary hover:text-text-primary px-3 py-1.5 rounded-md hover:bg-surface-hover transition-colors cursor-pointer"
+                  >
+                    {t('chat.scrollUpForMore')}
+                  </button>
+                </div>
               )}
             </>
           ),
