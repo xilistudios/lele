@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -286,7 +285,11 @@ func SidebarLabelValue(label, value string) string {
 // uniform across all screens (welcome, chat, modals, detail views).
 func (m *Model) paintFrame(content string) string {
 	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
-	return reapplyBackground(AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(placed))
+	// Place already pads content to exactly m.width x m.height, so Width/Height
+	// here would force a redundant re-measure/re-pad of every line (~200k ns on
+	// a 200x50 frame). MaxWidth/MaxHeight only clamp oversized content, which is
+	// a no-op for the normal (already-fitting) case.
+	return reapplyBackground(AppContainer.MaxWidth(m.width).MaxHeight(m.height).Render(placed))
 }
 
 // reapplyBackground re-emits the correct background color after every full
@@ -337,10 +340,34 @@ func reapplyBackground(s string) string {
 	}
 
 	last := 0
-	for _, loc := range ansiSeqRe.FindAllStringIndex(s, -1) {
-		sb.WriteString(s[last:loc[0]])
-		seq := s[loc[0]:loc[1]]
-		params := seq[2 : len(seq)-1] // strip "\x1b[" and "m"
+	n := len(s)
+	for i := 0; i < n; {
+		esc := strings.IndexByte(s[i:], 0x1b)
+		if esc < 0 {
+			break
+		}
+		esc += i
+
+		// Attempt to parse an SGR sequence: ESC '[' <digits/semicolons> 'm'.
+		j := esc + 1
+		if j >= n || s[j] != '[' {
+			i = esc + 1
+			continue
+		}
+		k := j + 1
+		for k < n && (s[k] == ';' || (s[k] >= '0' && s[k] <= '9')) {
+			k++
+		}
+		if k >= n || s[k] != 'm' {
+			// Not a valid SGR sequence — skip just the ESC, matching the
+			// regex's non-match behavior on that byte.
+			i = esc + 1
+			continue
+		}
+		seq := s[esc : k+1]
+		params := s[j+1 : k] // bytes between '[' and 'm'
+
+		sb.WriteString(s[last:esc])
 
 		switch {
 		case paramsHasBackground(params):
@@ -360,14 +387,12 @@ func reapplyBackground(s string) string {
 			open(false, seq)
 			sb.WriteString(seq)
 		}
-		last = loc[1]
+		last = k + 1
+		i = k + 1
 	}
 	sb.WriteString(s[last:])
 	return sb.String()
 }
-
-// ansiSeqRe matches SGR escape sequences (color/attribute changes).
-var ansiSeqRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 // backgroundOpenSeq returns the opening ANSI sequence for a background color
 // under the current color profile (e.g. "\x1b[48;2;24;24;36m"), without a
