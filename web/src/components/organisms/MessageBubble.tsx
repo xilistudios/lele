@@ -374,9 +374,9 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl, on
               </div>
             )
           })
-        ) : (
+        ) : message.content ? (
           <MarkdownText content={message.content} />
-        )}
+        ) : null}
 
         {message.attachments?.length ? (
           <div className="flex flex-wrap gap-2">

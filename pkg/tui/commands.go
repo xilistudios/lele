@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +20,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/sessions":
 		m.resetModal(ModalSessions)
 		allSessions := m.sessionMgr.ListSessions()
+		// Batch-fetch message counts once (single SQLite query for cold
+		// sessions) instead of calling GetTotalMessageCount per session.
+		msgCounts := m.sessionMgr.AllTotalMessageCounts()
 		for _, s := range allSessions {
 			// Exclude subagent sessions from the session list — they have
 			// their own navigation via /subagents and are not top-level chats.
@@ -39,7 +41,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")
 			}
-			count := len(s.Messages)
+			count := msgCounts[s.Key]
 
 			// Check if session is currently processing
 			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)
@@ -298,9 +300,8 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/quit":
-		m.printSessionSummary()
 		m.cancel()
-		os.Exit(0)
+		return tea.Quit
 	}
 	return nil
 }

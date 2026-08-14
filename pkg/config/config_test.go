@@ -240,12 +240,13 @@ func TestDefaultConfig_Model(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_MaxTokens verifies max tokens has default value
+// TestDefaultConfig_MaxTokens verifies max tokens has a valid default value
 func TestDefaultConfig_MaxTokens(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Agents.Defaults.MaxTokens == 0 {
-		t.Error("MaxTokens should not be zero")
+	// 0 means "use provider/model fallback" (instance resolves to 8192 when unset)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 }
 
@@ -418,8 +419,9 @@ func TestConfig_Complete(t *testing.T) {
 	if cfg.Agents.Defaults.Temperature != nil {
 		t.Error("Temperature should be nil when not provided")
 	}
-	if cfg.Agents.Defaults.MaxTokens == 0 {
-		t.Error("MaxTokens should not be zero")
+	// MaxTokens: 0 means "use provider/model fallback" (valid default)
+	if cfg.Agents.Defaults.MaxTokens < 0 {
+		t.Error("MaxTokens should not be negative")
 	}
 	// MaxToolIterations: 0 means unlimited (valid default)
 	if cfg.Agents.Defaults.MaxToolIterations < 0 {
@@ -927,3 +929,37 @@ func TestAgentConfig_Description(t *testing.T) {
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 func boolPtr(b bool) *bool    { return &b }
+func TestConfig_EvictExcluded_Default(t *testing.T) {
+	t.Setenv("LELE_EVICT_EXCLUDED", "")
+	cfg := DefaultConfig()
+
+	if !cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be true by default")
+	}
+}
+
+func TestConfig_EvictExcluded_False(t *testing.T) {
+	t.Setenv("LELE_EVICT_EXCLUDED", "")
+	cfg := DefaultConfig()
+	cfg.Session.EvictExcludedFromMemory = false
+
+	if cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be false when Session.EvictExcludedFromMemory is false")
+	}
+}
+
+func TestConfig_EvictExcluded_EnvOverride(t *testing.T) {
+	// Config true but env forces false.
+	cfg := DefaultConfig()
+	t.Setenv("LELE_EVICT_EXCLUDED", "false")
+	if cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be false when LELE_EVICT_EXCLUDED=false")
+	}
+
+	// Config false but env forces true.
+	cfg.Session.EvictExcludedFromMemory = false
+	t.Setenv("LELE_EVICT_EXCLUDED", "true")
+	if !cfg.EvictExcludedFromMemory() {
+		t.Error("EvictExcludedFromMemory should be true when LELE_EVICT_EXCLUDED=true")
+	}
+}

@@ -126,7 +126,9 @@ export function InstallSkillModal({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-text-primary">{skill.name}</div>
                   {skill.description && (
-                    <p className="mt-0.5 text-xs text-text-secondary line-clamp-2">{skill.description}</p>
+                    <p className="mt-0.5 text-xs text-text-secondary line-clamp-2">
+                      {skill.description}
+                    </p>
                   )}
                   <p className="mt-1 text-[10px] text-text-tertiary">{skill.path}</p>
                 </div>
@@ -154,7 +156,9 @@ export function InstallSkillModal({
             >
               {isInstalling
                 ? t('skills.installing', 'Installing...')
-                : t('skills.installSelected', 'Install {{count}} skills', { count: selectedSkills.size })}
+                : t('skills.installSelected', 'Install {{count}} skills', {
+                    count: selectedSkills.size,
+                  })}
             </button>
           </div>
         </div>
@@ -293,7 +297,10 @@ export function InstallSkillModal({
                 }}
               />
               <p className="mt-1.5 text-xs text-text-tertiary">
-                {t('skills.githubRepoHint', 'e.g. sipeed/lele-skills — scan for multiple skills or install a single skill')}
+                {t(
+                  'skills.githubRepoHint',
+                  'e.g. sipeed/lele-skills — scan for multiple skills or install a single skill',
+                )}
               </p>
             </div>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
@@ -31,6 +31,8 @@ type RenderItem =
   | { type: 'message'; message: ChatMessage; index: number }
   | { type: 'group'; group: GroupInfo }
 
+const START_INDEX = 10000
+
 export function MessageList() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -52,8 +54,17 @@ export function MessageList() {
   } = useAppLogicContext()
 
   const virtuosoRef = useRef<VirtuosoHandle>(null)
+  const [firstItemIndex, setFirstItemIndex] = useState(START_INDEX)
   const [atBottom, setAtBottom] = useState(true)
   const prevSessionKeyRef = useRef(currentSessionKey)
+
+  const visibleMessages = messages.filter(
+    (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
+  )
+
+  const prevFirstMsgIdRef = useRef<string | undefined>(visibleMessages[0]?.id)
+  const prevMessagesLengthRef = useRef(visibleMessages.length)
+
   // Track the scroll element so we can attach a reliable scroll listener
   // for triggering loadMore (Virtuoso's startReached can miss fires after
   // items are prepended due to scroll-position adjustment).
@@ -64,9 +75,81 @@ export function MessageList() {
   useEffect(() => {
     if (prevSessionKeyRef.current !== currentSessionKey) {
       prevSessionKeyRef.current = currentSessionKey
+      setFirstItemIndex(START_INDEX)
+      prevFirstMsgIdRef.current = visibleMessages[0]?.id
+      prevMessagesLengthRef.current = visibleMessages.length
       setAtBottom(true)
     }
-  }, [currentSessionKey])
+  }, [currentSessionKey, visibleMessages])
+
+  // When older messages are prepended (loadMore), shift firstItemIndex backward
+  // so Virtuoso preserves scroll position without jumping or blanking the viewport.
+  useEffect(() => {
+    if (prevSessionKeyRef.current === currentSessionKey) {
+      const currentFirstId = visibleMessages[0]?.id
+      if (
+        prevMessagesLengthRef.current > 0 &&
+        visibleMessages.length > prevMessagesLengthRef.current &&
+        currentFirstId !== prevFirstMsgIdRef.current &&
+        prevFirstMsgIdRef.current !== undefined
+      ) {
+        const added = visibleMessages.length - prevMessagesLengthRef.current
+        setFirstItemIndex((prev) => prev - added)
+      }
+      prevFirstMsgIdRef.current = currentFirstId
+      prevMessagesLengthRef.current = visibleMessages.length
+    }
+  }, [visibleMessages, currentSessionKey])
+
+  // Use refs for the scroll handler so it always reads latest state
+  // without needing to reattach the listener on every render.
+  const loadMoreRef = useRef(loadMore)
+  loadMoreRef.current = loadMore
+  const hasMoreRef = useRef(hasMore)
+  hasMoreRef.current = hasMore
+  const isLoadingMoreScrollRef = useRef(isLoadingMore)
+  isLoadingMoreScrollRef.current = isLoadingMore
+
+  // Stable scroll handler — reads from refs to avoid reattachment
+  const handleLoadMoreScroll = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el || !hasMoreRef.current || isLoadingMoreScrollRef.current) return
+    // Trigger when within 100px of the top
+    if (el instanceof HTMLElement && el.scrollTop < 100) {
+      loadMoreRef.current()
+    }
+  }, [])
+
+  // Attach a scroll listener to Virtuoso's internal scroll container.
+  // This is more reliable than Virtuoso's startReached for detecting
+  // scroll-to-top after items have been prepended (loadMore).
+  const scrollerRefCallback = useCallback(
+    (el: HTMLElement | Window | null) => {
+      // Clean up previous listener
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+      // Only track HTMLElement (not Window) for scrollTop-based detection
+      const htmlEl = el instanceof HTMLElement ? el : null
+      scrollerRef.current = htmlEl
+      if (htmlEl && !loadMoreScrollAttached.current) {
+        htmlEl.addEventListener('scroll', handleLoadMoreScroll, { passive: true })
+        loadMoreScrollAttached.current = true
+      }
+    },
+    [handleLoadMoreScroll],
+  )
+
+  // Clean up scroll listener on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollerRef.current && loadMoreScrollAttached.current) {
+        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
+        loadMoreScrollAttached.current = false
+      }
+    }
+  }, [handleLoadMoreScroll])
 
   const handleNavigateToSession = useCallback(
     (sessionKey: string) => {
@@ -86,20 +169,17 @@ export function MessageList() {
 
   const hasActiveGroup = Array.from(groups.values()).some((g) => g.status === 'started')
 
-  const visibleMessages = messages.filter(
-    (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
-  )
-
   // ── Build a merged timeline of messages and group blocks ──
-  const renderItems: RenderItem[] = []
-
-  for (let i = 0; i < visibleMessages.length; i++) {
-    renderItems.push({ type: 'message', message: visibleMessages[i], index: i })
-  }
-
-  for (const group of groups.values()) {
-    renderItems.push({ type: 'group', group })
-  }
+  const renderItems: RenderItem[] = useMemo(() => {
+    const items: RenderItem[] = []
+    for (let i = 0; i < visibleMessages.length; i++) {
+      items.push({ type: 'message', message: visibleMessages[i], index: i })
+    }
+    for (const group of groups.values()) {
+      items.push({ type: 'group', group })
+    }
+    return items
+  }, [visibleMessages, groups])
 
   const renderItem = useCallback(
     (_index: number, item: RenderItem) => {
@@ -207,67 +287,17 @@ export function MessageList() {
     [visibleMessages, handleNavigateToSession, apiUrl, onRetry, t],
   )
 
-  const computeItemKey = useCallback(
-    (_index: number, item: RenderItem) => {
-      if (item.type === 'message') return item.message.id
-      return `group-block-${item.group.groupID}`
-    },
-    [],
-  )
-
-  const scrollToBottom = useCallback(() => {
-    virtuosoRef.current?.scrollToIndex({ index: renderItems.length - 1, behavior: 'smooth' })
-  }, [renderItems.length])
-
-  // Use refs for the scroll handler so it always reads latest state
-  // without needing to reattach the listener on every render.
-  const loadMoreRef = useRef(loadMore)
-  loadMoreRef.current = loadMore
-  const hasMoreRef = useRef(hasMore)
-  hasMoreRef.current = hasMore
-  const isLoadingMoreScrollRef = useRef(isLoadingMore)
-  isLoadingMoreScrollRef.current = isLoadingMore
-
-  // Stable scroll handler — reads from refs to avoid reattachment
-  const handleLoadMoreScroll = useCallback(() => {
-    const el = scrollerRef.current
-    if (!el || !hasMoreRef.current || isLoadingMoreScrollRef.current) return
-    // Trigger when within 80px of the top (only for HTMLElement, not Window)
-    if (el instanceof HTMLElement && el.scrollTop < 80) {
-      loadMoreRef.current()
-    }
+  const computeItemKey = useCallback((index: number, item: RenderItem) => {
+    if (item.type === 'message') return item.message.id || `msg-${index}`
+    return `group-block-${item.group.groupID}`
   }, [])
 
-  // Attach a scroll listener to Virtuoso's internal scroll container.
-  // This is more reliable than Virtuoso's startReached for detecting
-  // scroll-to-top after items have been prepended (loadMore).
-  const scrollerRefCallback = useCallback(
-    (el: HTMLElement | Window | null) => {
-      // Clean up previous listener
-      if (scrollerRef.current && loadMoreScrollAttached.current) {
-        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
-        loadMoreScrollAttached.current = false
-      }
-      // Only track HTMLElement (not Window) for scrollTop-based detection
-      const htmlEl = el instanceof HTMLElement ? el : null
-      scrollerRef.current = htmlEl
-      if (htmlEl && !loadMoreScrollAttached.current) {
-        htmlEl.addEventListener('scroll', handleLoadMoreScroll, { passive: true })
-        loadMoreScrollAttached.current = true
-      }
-    },
-    [handleLoadMoreScroll],
-  )
-
-  // Clean up scroll listener on unmount
-  useEffect(() => {
-    return () => {
-      if (scrollerRef.current && loadMoreScrollAttached.current) {
-        scrollerRef.current.removeEventListener('scroll', handleLoadMoreScroll)
-        loadMoreScrollAttached.current = false
-      }
-    }
-  }, [handleLoadMoreScroll])
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: firstItemIndex + renderItems.length - 1,
+      behavior: 'smooth',
+    })
+  }, [firstItemIndex, renderItems])
 
   // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
@@ -293,16 +323,17 @@ export function MessageList() {
       <Virtuoso
         ref={virtuosoRef}
         key={currentSessionKey ?? 'default'}
-        className="mx-auto max-w-3xl space-y-1 h-full w-full"
+        className="mx-auto max-w-3xl h-full w-full"
+        firstItemIndex={firstItemIndex}
+        initialTopMostItemIndex={Math.max(0, renderItems.length - 1)}
         data={renderItems}
         itemContent={renderItem}
         computeItemKey={computeItemKey}
-        followOutput={atBottom ? 'smooth' : false}
+        followOutput={(isAtBottom) => (isAtBottom ? 'smooth' : false)}
         atBottomStateChange={setAtBottom}
         atBottomThreshold={300}
         startReached={handleStartReached}
         scrollerRef={scrollerRefCallback}
-        initialTopMostItemIndex={Math.max(0, renderItems.length - 1)}
         components={{
           Header: () => (
             <>
@@ -312,9 +343,17 @@ export function MessageList() {
                 </div>
               )}
               {!isLoadingMore && hasMore && (
-                <p className="text-center py-2 text-xs text-text-tertiary">
-                  {t('chat.scrollUpForMore')}
-                </p>
+                <div className="flex justify-center py-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isLoadingMore) loadMore()
+                    }}
+                    className="text-xs text-text-tertiary hover:text-text-primary px-3 py-1.5 rounded-md hover:bg-surface-hover transition-colors cursor-pointer"
+                  >
+                    {t('chat.scrollUpForMore')}
+                  </button>
+                </div>
               )}
             </>
           ),
@@ -396,9 +435,18 @@ export function MessageList() {
               {typingIndicator && typingIndicator.deviceId !== session?.client_id && (
                 <div className="flex items-center gap-2 px-4 py-2 text-xs text-text-tertiary animate-pulse">
                   <span className="flex gap-0.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce"
+                      style={{ animationDelay: '0ms' }}
+                    />
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce"
+                      style={{ animationDelay: '150ms' }}
+                    />
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-bounce"
+                      style={{ animationDelay: '300ms' }}
+                    />
                   </span>
                   <span>{typingIndicator.deviceName} is typing...</span>
                 </div>
@@ -414,8 +462,21 @@ export function MessageList() {
           aria-label="Scroll to bottom"
           className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background-secondary shadow-md transition-opacity hover:bg-background-tertiary"
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 3v10m0 0l-4-4m4 4l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path
+              d="M8 3v10m0 0l-4-4m4 4l4-4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       )}

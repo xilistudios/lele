@@ -27,6 +27,7 @@ import (
 type nativeTestAgentLoop struct {
 	config             *config.Config
 	histories          map[string][]providers.Message
+	evicted            map[string][]providers.Message // messages evicted from in-memory history, loaded on demand
 	sessionAgents      map[string]string
 	sessionModels      map[string]string
 	sessionAliases     map[string]string // base -> resolved
@@ -42,6 +43,7 @@ func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 	return &nativeTestAgentLoop{
 		config:             cfg,
 		histories:          make(map[string][]providers.Message),
+		evicted:            make(map[string][]providers.Message),
 		sessionAgents:      make(map[string]string),
 		sessionModels:      make(map[string]string),
 		sessionAliases:     make(map[string]string),
@@ -96,6 +98,25 @@ func (m *nativeTestAgentLoop) GetSessionHistory(sessionKey string) []providers.M
 
 func (m *nativeTestAgentLoop) GetHistoryView(sessionKey string) []providers.Message {
 	return m.histories[sessionKey]
+}
+
+func (m *nativeTestAgentLoop) LoadEvictedMessages(sessionKey string) int {
+	evicted := m.evicted[sessionKey]
+	if len(evicted) == 0 {
+		return 0
+	}
+	// Prepend evicted messages to the FRONT of the in-memory history.
+	m.histories[sessionKey] = append(append([]providers.Message{}, evicted...), m.histories[sessionKey]...)
+	delete(m.evicted, sessionKey)
+	return len(evicted)
+}
+
+func (m *nativeTestAgentLoop) GetEvictedMessageCount(sessionKey string) int {
+	return len(m.evicted[sessionKey])
+}
+
+func (m *nativeTestAgentLoop) GetTotalMessageCount(sessionKey string) int {
+	return len(m.histories[sessionKey]) + len(m.evicted[sessionKey])
 }
 
 func (m *nativeTestAgentLoop) AddSessionMessage(sessionKey string, msg providers.Message) error {
@@ -757,6 +778,179 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 	}
 }
 
+func TestChatHistory_LoadsEvictedMessages(t *testing.T) {
+	ts := newNativeTestServer(t)
+	sessionKey := "native:" + ts.clientID + ":evicted-history"
+	ts.channel.auth.TrackSessionKey(ts.clientID, sessionKey)
+
+	// Older messages were evicted (out-of-context) after compaction; they remain
+	// in SQLite and should be materialized on demand.
+	ts.loop.evicted[sessionKey] = []providers.Message{
+		{Role: "user", Content: "Evicted-1"},
+		{Role: "assistant", Content: "Evicted-2"},
+	}
+	// Recent messages remain in the in-memory slice.
+	ts.loop.histories[sessionKey] = []providers.Message{
+		{Role: "user", Content: "Recent-1"},
+		{Role: "assistant", Content: "Recent-2"},
+	}
+
+	// 1) Full history (default limit) returns ALL messages in order (evicted first).
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	if len(payload.Messages) != 4 {
+		t.Fatalf("len(messages) = %d, want 4 (evicted + recent)", len(payload.Messages))
+	}
+	wantOrder := []string{"Evicted-1", "Evicted-2", "Recent-1", "Recent-2"}
+	for i, want := range wantOrder {
+		if payload.Messages[i].Content != want {
+			t.Fatalf("messages[%d].Content = %q, want %q", i, payload.Messages[i].Content, want)
+		}
+	}
+	if payload.HasMore {
+		t.Fatalf("has_more = true, want false for full history")
+	}
+
+	// Evicted messages were loaded into memory and cleared from the evicted pool.
+	if len(ts.loop.evicted[sessionKey]) != 0 {
+		t.Fatalf("evicted pool not cleared after load: %d remaining", len(ts.loop.evicted[sessionKey]))
+	}
+	if len(ts.loop.histories[sessionKey]) != 4 {
+		t.Fatalf("in-memory history = %d messages, want 4 after load", len(ts.loop.histories[sessionKey]))
+	}
+
+	// 2) Pagination with a small limit: oldest evicted messages are reachable
+	//    via before_id. The first page returns only the most recent messages.
+	req2, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history?limit=2", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req2.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp2.Body.Close()
+
+	var payload2 ChatHistoryResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(payload2.Messages) != 2 {
+		t.Fatalf("page1 len(messages) = %d, want 2", len(payload2.Messages))
+	}
+	if payload2.Messages[0].Content != "Recent-1" || payload2.Messages[1].Content != "Recent-2" {
+		t.Fatalf("page1 messages = [%q, %q], want [Recent-1, Recent-2]", payload2.Messages[0].Content, payload2.Messages[1].Content)
+	}
+	if !payload2.HasMore {
+		t.Fatalf("page1 has_more = false, want true (older evicted messages exist)")
+	}
+	beforeID := payload2.Messages[0].ID
+
+	// Follow the before_id cursor to reach the oldest evicted messages.
+	req3, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.QueryEscape(sessionKey)+"/history?limit=2&before_id="+url.QueryEscape(beforeID), nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req3.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp3.Body.Close()
+
+	var payload3 ChatHistoryResponse
+	if err := json.NewDecoder(resp3.Body).Decode(&payload3); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(payload3.Messages) != 2 {
+		t.Fatalf("page2 len(messages) = %d, want 2", len(payload3.Messages))
+	}
+	if payload3.Messages[0].Content != "Evicted-1" || payload3.Messages[1].Content != "Evicted-2" {
+		t.Fatalf("page2 messages = [%q, %q], want [Evicted-1, Evicted-2]", payload3.Messages[0].Content, payload3.Messages[1].Content)
+	}
+	if payload3.HasMore {
+		t.Fatalf("page2 has_more = true, want false (reached oldest)")
+	}
+}
+
+func TestChatSessions_CountIncludesEvicted(t *testing.T) {
+	ts := newNativeTestServer(t)
+	trackedSession := "native:" + ts.clientID + ":evicted-count"
+	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
+
+	// In-memory: 2 counted user/assistant messages.
+	ts.loop.histories[trackedSession] = []providers.Message{
+		{Role: "user", Content: "Recent user"},
+		{Role: "assistant", Content: "Recent assistant"},
+	}
+	// Evicted: 2 more user/assistant messages not in the in-memory slice.
+	ts.loop.evicted[trackedSession] = []providers.Message{
+		{Role: "user", Content: "Evicted user"},
+		{Role: "assistant", Content: "Evicted assistant"},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatSessionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	var found bool
+	for _, session := range payload.Sessions {
+		if session.Key == trackedSession {
+			found = true
+			if session.MessageCount != 4 {
+				t.Fatalf("message_count = %d, want 4 (in-memory 2 + evicted 2)", session.MessageCount)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected session %q in payload %#v", trackedSession, payload.Sessions)
+	}
+
+	// The evicted messages must NOT have been materialized by handleChatSessions.
+	if len(ts.loop.evicted[trackedSession]) != 2 {
+		t.Fatalf("evicted pool mutated by handleChatSessions: %d remaining, want 2", len(ts.loop.evicted[trackedSession]))
+	}
+}
+
 func TestNativeChannelChatSessionsKindFilter(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -1152,8 +1346,8 @@ func TestNativeChannelConfigUsesEditableDocument(t *testing.T) {
 	}
 
 	// JSON numbers are decoded as float64
-	if native["port"] != float64(18793) {
-		t.Errorf("port = %v, want 18793 (default)", native["port"])
+	if native["port"] != float64(18790) {
+		t.Errorf("port = %v, want 18790 (default)", native["port"])
 	}
 
 	// Verificar metadata

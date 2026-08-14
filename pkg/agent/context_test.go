@@ -637,11 +637,8 @@ func TestBuildMessages_Basic(t *testing.T) {
 	if !strings.Contains(lastMsg.Content, "Current message") {
 		t.Errorf("Expected content to contain 'Current message', got %s", lastMsg.Content)
 	}
-	if strings.Contains(lastMsg.Content, "Current Time:") {
-		t.Errorf("Expected user message to remain free of time prefix, got %s", lastMsg.Content)
-	}
-	if !strings.Contains(messages[0].Content, "Current Time:") {
-		t.Errorf("Expected system prompt to contain 'Current Time:' snapshot, got %s", messages[0].Content)
+	if strings.Contains(messages[0].Content, "Current Time:") {
+		t.Error("Expected system prompt to NOT contain 'Current Time:' (removed so the prompt stays byte-stable across turns)")
 	}
 }
 
@@ -768,31 +765,62 @@ func TestBuildMessages_WithNativeSessionInfoUsesStableChatID(t *testing.T) {
 	}
 }
 
-func TestBuildMessages_ReusesCachedSystemPromptAcrossTurns(t *testing.T) {
+func TestHarnessContext_GloballyCachedAndInvalidated(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "context-builder-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
+	originalCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original cwd: %v", err)
+	}
+
+	runDir, err := os.MkdirTemp("", "run-dir-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp run dir: %v", err)
+	}
+	defer os.RemoveAll(runDir)
+
+	if err := os.Chdir(runDir); err != nil {
+		t.Fatalf("Failed to change directory: %v", err)
+	}
+	defer func() { _ = os.Chdir(originalCwd) }()
+
+	if err := os.WriteFile(filepath.Join(runDir, "AGENTS.md"), []byte("harness-v1"), 0644); err != nil {
+		t.Fatalf("Failed to write AGENTS.md: %v", err)
+	}
+
 	cb := NewContextBuilder(tmpDir)
-	sessionKey := "native:test-client"
 
-	first := cb.BuildMessages([]providers.Message{}, "", "first message", nil, "native", "native:test-client:111", sessionKey, "")
-	secondHistory := []providers.Message{{Role: "user", Content: "first message"}}
-	second := cb.BuildMessages(secondHistory, "", "second message", nil, "native", "native:test-client:222", sessionKey, "")
+	// First build caches the harness context (contains v1).
+	first := cb.BuildSystemPromptForSession("tui:chat:1", "")
+	if !strings.Contains(first, "harness-v1") {
+		t.Fatalf("expected first build to contain harness-v1, got: %s", first)
+	}
 
-	if len(first) == 0 || len(second) == 0 {
-		t.Fatal("expected system prompt messages to be present")
+	// Rewrite AGENTS.md to v2 while the process is running.
+	if err := os.WriteFile(filepath.Join(runDir, "AGENTS.md"), []byte("harness-v2"), 0644); err != nil {
+		t.Fatalf("Failed to rewrite AGENTS.md: %v", err)
 	}
-	if first[0].Role != "system" || second[0].Role != "system" {
-		t.Fatalf("expected first messages to be system, got %q and %q", first[0].Role, second[0].Role)
+
+	// A second build (different session) must reuse the cached harness (still
+	// v1), proving the harness is cached globally, not re-read per session.
+	second := cb.BuildSystemPromptForSession("tui:chat:2", "")
+	if !strings.Contains(second, "harness-v1") {
+		t.Fatalf("expected second build to reuse cached harness-v1, got: %s", second)
 	}
-	if first[0].Content != second[0].Content {
-		t.Fatalf("expected cached system prompt to remain byte-identical across turns")
+	if strings.Contains(second, "harness-v2") {
+		t.Fatalf("expected cached harness to NOT contain harness-v2, got: %s", second)
 	}
-	if strings.Contains(second[len(second)-1].Content, "Current Time:") {
-		t.Fatalf("expected user message to remain free of time snapshot, got %q", second[len(second)-1].Content)
+
+	// ResetMemoryContext (called on /new) invalidates the harness cache.
+	cb.ResetMemoryContext()
+
+	third := cb.BuildSystemPromptForSession("tui:chat:3", "")
+	if !strings.Contains(third, "harness-v2") {
+		t.Fatalf("expected post-reset build to contain harness-v2, got: %s", third)
 	}
 }
 
@@ -1674,8 +1702,9 @@ func TestBuildMessagesAgentMode(t *testing.T) {
 	}
 }
 
-// TestBuildMessagesChatModeCacheIsolation verifies that the system prompt
-// cache correctly isolates chat-mode and agent-mode sessions.
+// TestBuildMessagesChatModeCacheIsolation verifies that chat-mode and
+// agent-mode sessions keep their prompts isolated across turns (chat stays
+// minimal, agent stays full).
 func TestBuildMessagesChatModeCacheIsolation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "cache-isolation-test-*")
 	if err != nil {
@@ -1708,7 +1737,7 @@ func TestBuildMessagesChatModeCacheIsolation(t *testing.T) {
 		t.Fatal("Chat and agent session prompts should be different")
 	}
 
-	// Re-build for same session keys — should reuse cache (byte-identical)
+	// Re-build for same session keys — mode stays isolated across turns
 	chatMsgs2 := cb.BuildMessages(
 		[]providers.Message{{Role: "user", Content: "Hello"}}, "", "Follow up", nil,
 		"", "", "chat-isolation-session", "chat",
@@ -1718,11 +1747,16 @@ func TestBuildMessagesChatModeCacheIsolation(t *testing.T) {
 		"", "", "agent-isolation-session", "agent",
 	)
 
-	if chatMsgs2[0].Content != chatPrompt {
-		t.Error("Chat session cached prompt should be byte-identical across turns")
+	// Re-building for the same session keys must keep the mode isolated:
+	// chat stays minimal, agent stays full.
+	if !strings.Contains(chatMsgs2[0].Content, "You can search the web") {
+		t.Error("Chat session prompt should remain minimal (web search) across turns")
 	}
-	if agentMsgs2[0].Content != agentPrompt {
-		t.Error("Agent session cached prompt should be byte-identical across turns")
+	if strings.Contains(chatMsgs2[0].Content, agentContent) {
+		t.Error("Chat session prompt should not contain AGENT.md content")
+	}
+	if !strings.Contains(agentMsgs2[0].Content, agentContent) {
+		t.Error("Agent session prompt should keep AGENT.md content across turns")
 	}
 }
 

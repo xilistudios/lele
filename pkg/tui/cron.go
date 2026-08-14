@@ -184,7 +184,7 @@ func (m *Model) renderCronDetail() string {
 	sb.WriteString(CommentColorStyle.Render(i18n.T("tui.cronDetailHints")))
 
 	box := ModalContainer.Width(m.width - 10).Render(sb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	return m.paintFrame(box)
 }
 
 // selectedCronJobID returns the ID of the currently selected cron job in the

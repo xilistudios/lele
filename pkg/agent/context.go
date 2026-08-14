@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
@@ -34,12 +33,14 @@ type ContextBuilder struct {
 	tools              *tools.ToolRegistry
 	availableSubagents []subagentInfo
 
-	// cachedSystemPrompt stores the built system prompt per session key.
-	// It is populated on the first call for a session and reused on every
-	// subsequent turn so that providers with prompt caching (Anthropic, etc.)
-	// see a byte-for-byte identical system message.
-	cachedSystemPrompt map[string]string
-	cacheMu            sync.RWMutex
+	// harnessContext caches the harness module context (working directory
+	// listing + AGENTS.md + skills directories). It depends only on the
+	// process working directory, so it is identical for every session and is
+	// cached once globally instead of once per session. Invalidated by
+	// ResetMemoryContext (on /new) so a fresh conversation picks up edits.
+	harnessContext      string
+	harnessContextValid bool
+	harnessMu           sync.RWMutex
 
 	// initialContext caches the result of GetInitialContext() (identity +
 	// bootstrap files + skills summary). It is constant for the lifetime of
@@ -65,10 +66,9 @@ func NewContextBuilder(workspace string) *ContextBuilder {
 	globalSkillsDir := filepath.Join(getGlobalConfigDir(), "skills")
 
 	return &ContextBuilder{
-		workspace:          workspace,
-		skillsLoader:       skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
-		memory:             NewMemoryStore(workspace),
-		cachedSystemPrompt: make(map[string]string),
+		workspace:    workspace,
+		skillsLoader: skills.NewSkillsLoader(workspace, globalSkillsDir, builtinSkillsDir),
+		memory:       NewMemoryStore(workspace),
 	}
 }
 
@@ -89,7 +89,6 @@ func (cb *ContextBuilder) SetVisionSupported(v bool) {
 	cb.initialMu.Lock()
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
-	cb.ResetAllSystemPromptCaches()
 }
 
 // SetAvailableSubagents sets the list of subagents that this agent can delegate
@@ -97,8 +96,7 @@ func (cb *ContextBuilder) SetVisionSupported(v bool) {
 // agent_id values are valid for the spawn tool.
 func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
 	cb.availableSubagents = subagents
-	// Invalidate cached prompts so the next turn picks up the new list.
-	cb.ResetAllSystemPromptCaches()
+	// Invalidate the cached initial context so the next turn picks up the new list.
 	cb.initialMu.Lock()
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
@@ -240,7 +238,7 @@ func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string
 	prompt := cb.BuildSystemPrompt()
 	isNative := channel == "native" || strings.HasPrefix(sessionKey, "tui:") || strings.HasPrefix(sessionKey, "native:")
 	if isNative {
-		if harnessCtx, err := lelecontext.BuildHarnessContext(); err == nil && harnessCtx != "" {
+		if harnessCtx := cb.getHarnessContext(); harnessCtx != "" {
 			prompt = prompt + "\n\n---\n\n" + harnessCtx
 		}
 	}
@@ -251,47 +249,43 @@ func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string
 // to force a fresh reload of memory files on next access.
 // Used when creating a new session with /new.
 func (cb *ContextBuilder) ResetMemoryContext() {
-	// Memory store reads from disk each time, so no cache to clear
-	// But we could add caching here in the future if needed
+	// Memory store reads from disk each time, so no cache to clear.
 	// The initial context cache must be invalidated here too: /new re-reads
 	// bootstrap files (AGENT.md, SOUL.md, ...) from disk so the fresh
 	// conversation reflects any edits made while the process was running.
 	cb.initialMu.Lock()
 	cb.initialContext = ""
 	cb.initialMu.Unlock()
+
+	// Same for the harness context (cwd listing + AGENTS.md): re-read it so a
+	// fresh conversation reflects any files created/removed while running.
+	cb.harnessMu.Lock()
+	cb.harnessContext = ""
+	cb.harnessContextValid = false
+	cb.harnessMu.Unlock()
 }
 
-// ResetSystemPromptCache clears the cached system prompt for the given session key,
-// forcing a fresh build on the next call. Call this on /new or ephemeral reset.
-func (cb *ContextBuilder) ResetSystemPromptCache(sessionKey string) {
-	cb.cacheMu.Lock()
-	defer cb.cacheMu.Unlock()
-	delete(cb.cachedSystemPrompt, sessionKey)
-}
-
-// ResetAllSystemPromptCaches clears every cached system prompt.
-func (cb *ContextBuilder) ResetAllSystemPromptCaches() {
-	cb.cacheMu.Lock()
-	defer cb.cacheMu.Unlock()
-	cb.cachedSystemPrompt = make(map[string]string)
-}
-
-func (cb *ContextBuilder) loadCachedSystemPrompt(sessionKey string) string {
-	if sessionKey == "" {
-		return ""
+// getHarnessContext returns the harness module context (cwd listing + AGENTS.md
+// + skills directories), caching it globally. It is identical for every session
+// in the process (depends only on os.Getwd()), so building it once and reusing
+// the cached string avoids re-reading the directory and AGENTS.md on every turn.
+func (cb *ContextBuilder) getHarnessContext() string {
+	cb.harnessMu.RLock()
+	if cb.harnessContextValid {
+		cached := cb.harnessContext
+		cb.harnessMu.RUnlock()
+		return cached
 	}
-	cb.cacheMu.RLock()
-	defer cb.cacheMu.RUnlock()
-	return cb.cachedSystemPrompt[sessionKey]
-}
+	cb.harnessMu.RUnlock()
 
-func (cb *ContextBuilder) storeCachedSystemPrompt(sessionKey, prompt string) {
-	if sessionKey == "" {
-		return
+	cb.harnessMu.Lock()
+	defer cb.harnessMu.Unlock()
+	if cb.harnessContextValid {
+		return cb.harnessContext
 	}
-	cb.cacheMu.Lock()
-	defer cb.cacheMu.Unlock()
-	cb.cachedSystemPrompt[sessionKey] = prompt
+	cb.harnessContext, _ = lelecontext.BuildHarnessContext()
+	cb.harnessContextValid = true
+	return cb.harnessContext
 }
 
 func (cb *ContextBuilder) LoadBootstrapFiles() string {
@@ -326,46 +320,26 @@ func (cb *ContextBuilder) BuildMinimalSystemPrompt() string {
 
 // BuildMessages constructs the full message list for the LLM.
 //
-// To keep prompt caching effective on providers like Anthropic, the system prompt
-// MUST be byte-for-byte identical across turns inside the same session.  We therefore
-// cache the computed system prompt per session key and reuse it on subsequent calls
-// (e.g. tool-turns).
+// The expensive parts of the system prompt (identity, bootstrap files, skills,
+// subagents, and the harness context) are cached globally by GetInitialContext
+// and getHarnessContext, so building the prompt per turn is cheap. The session
+// context (channel and chat ID) is stable per session and is appended fresh on
+// every call. There is no per-turn timestamp in the prompt, so the system
+// message is byte-identical across turns within a session (prompt-cache
+// friendly).
 func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary string, currentMessage string, attachments []bus.FileAttachment, channel, chatID, sessionKey string, mode string) []providers.Message {
 	messages := []providers.Message{}
 	renderedUserMessage := cb.BuildCurrentUserMessage(currentMessage, attachments, channel, chatID)
 
-	// --- Build the static system prompt ---
-	// On the first turn for a session we build it fresh and cache it.
-	// On every later turn we reuse the exact same string.
+	// --- Build the system prompt ---
+	// The static parts (identity + bootstrap + skills + subagents + harness)
+	// are cached globally, so this is cheap. The session context (channel +
+	// chat ID) is stable per session and is appended fresh.
 	var systemPrompt string
-	if sessionKey != "" {
-		if cached := cb.loadCachedSystemPrompt(sessionKey); cached != "" {
-			systemPrompt = cached
-			logger.DebugCF("agent", "Reusing cached system prompt",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"length":      len(systemPrompt),
-				})
-		} else {
-			if mode == "chat" {
-				systemPrompt = cb.BuildMinimalSystemPrompt()
-			} else {
-				systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
-			}
-			cb.storeCachedSystemPrompt(sessionKey, systemPrompt)
-			logger.DebugCF("agent", "Built and cached new system prompt",
-				map[string]interface{}{
-					"session_key": sessionKey,
-					"length":      len(systemPrompt),
-				})
-		}
+	if mode == "chat" {
+		systemPrompt = cb.BuildMinimalSystemPrompt()
 	} else {
-		// No session tracking — build fresh every time (safe fallback)
-		if mode == "chat" {
-			systemPrompt = cb.BuildMinimalSystemPrompt()
-		} else {
-			systemPrompt = cb.buildSystemPromptForTurn(currentMessage, channel, chatID)
-		}
+		systemPrompt = cb.buildSystemPromptForTurn(channel, chatID)
 	}
 
 	// Debug logging
@@ -412,13 +386,13 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	return messages
 }
 
-func (cb *ContextBuilder) buildSystemPromptForTurn(currentMessage, channel, chatID string) string {
+func (cb *ContextBuilder) buildSystemPromptForTurn(channel, chatID string) string {
 	systemPrompt := cb.BuildSystemPromptForSession(chatID, channel)
-	requestContext := cb.renderRequestContext(currentMessage, channel, chatID)
-	if requestContext == "" {
+	sessionContext := cb.renderSessionContext(channel, chatID)
+	if sessionContext == "" {
 		return systemPrompt
 	}
-	return systemPrompt + "\n\n" + requestContext
+	return systemPrompt + "\n\n" + sessionContext
 }
 
 func buildSummaryMessage(summary string) providers.Message {
@@ -641,17 +615,6 @@ func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history 
 
 func (cb *ContextBuilder) BuildCurrentUserMessage(currentMessage string, attachments []bus.FileAttachment, channel, chatID string) string {
 	return cb.RenderUserMessage(currentMessage, attachments)
-}
-
-func (cb *ContextBuilder) renderRequestContext(currentMessage, channel, chatID string) string {
-	parts := make([]string, 0, 2)
-	if strings.TrimSpace(currentMessage) != "" {
-		parts = append(parts, fmt.Sprintf("Current Time: %s", time.Now().Format("2006-01-02 15:04 (Monday)")))
-	}
-	if sessionContext := cb.renderSessionContext(channel, chatID); sessionContext != "" {
-		parts = append(parts, sessionContext)
-	}
-	return strings.Join(parts, "\n\n")
 }
 
 func (cb *ContextBuilder) renderSessionContext(channel, chatID string) string {

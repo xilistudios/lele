@@ -117,6 +117,17 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	lr.al.toolCoordinator.updateToolContexts(agent, opts.Channel, opts.ChatID, opts.SessionKey)
 
 	// 2. Build messages (skip history for heartbeat)
+	// Sync the system prompt's vision flag with the session's current model.
+	// The flag is initialized at instance creation, but the session model can
+	// change at runtime (/model, TUI model picker, REST). Without this sync,
+	// the tools section of the system prompt keeps hiding read_image based on
+	// a stale flag even after switching to a vision-capable model.
+	if agent.ContextBuilder != nil {
+		if sessionModel := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey); sessionModel != "" {
+			providerName := extractProviderFromModel(sessionModel, lr.al.cfg().Agents.Defaults.Provider)
+			agent.ContextBuilder.SetVisionSupported(getSupportsImages(lr.al.cfg(), sessionModel, providerName))
+		}
+	}
 	var history []providers.Message
 	var summary string
 	if !opts.NoHistory {
@@ -482,20 +493,13 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
 
-		// Filter out read_image tool if ANY model in the fallback chain doesn't
-		// support vision. This prevents the scenario where the primary model (with
-		// vision) calls read_image, image content is added to messages, then the
-		// primary fails and a fallback model without vision rejects the image content.
+		// Determine whether the current (primary) model supports vision. The
+		// read_image tool is exposed based on the primary model only. When the
+		// fallback chain fails over to a non-vision model, image content is
+		// stripped per-candidate in callWithFallback (see llm_caller.go), so a
+		// vision-capable primary model no longer loses read_image just because
+		// a fallback in the chain lacks vision.
 		modelHasVision := getSupportsImages(lr.al.cfg(), model, extractProviderFromModel(model, lr.al.cfg().Agents.Defaults.Provider))
-		if modelHasVision && len(candidates) > 1 {
-			for _, c := range candidates {
-				candidateModel := c.Provider + ":" + c.Model
-				if !getSupportsImages(lr.al.cfg(), candidateModel, c.Provider) {
-					modelHasVision = false
-					break
-				}
-			}
-		}
 		if !modelHasVision {
 			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
 			for _, def := range providerToolDefs {
@@ -887,6 +891,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 								"session_key": opts.SessionKey,
 								"error":       saveErr.Error(),
 							})
+						} else if lr.al.cfg().EvictExcludedFromMemory() {
+							agent.Sessions.EvictExcludedMessages(opts.SessionKey)
 						}
 						agent.Sessions.IncrementCompactionCount(opts.SessionKey)
 						logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{

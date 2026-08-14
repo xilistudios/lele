@@ -396,12 +396,22 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	task.Guidance = append(task.Guidance, guidance)
 	task.Status = SubagentStatusRunning
 	task.Updated = time.Now().UnixMilli()
+	// Reset the done channel so wait_for_subagent does not immediately
+	// observe the closed channel from the previous run and return stale
+	// results. Each (re)execution gets a fresh completion signal.
+	task.doneCh = make(chan struct{})
+	// Reset delivered so the resumed run's result is not suppressed by the
+	// Delivered() check in the parent agent's message processor.
+	task.delivered = false
 	// Use context.Background() to decouple from parent agent's context
 	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
 
-	go sm.runTask(taskCtx, task, callback)
+	go func() {
+		sm.runTask(taskCtx, task, callback)
+		task.SignalDone()
+	}()
 
 	return fmt.Sprintf("Continuing subagent task %s with new guidance.", taskID), nil
 }
