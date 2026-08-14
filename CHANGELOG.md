@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-08-13
+
+### Added
+
+#### Session
+- Context-only in-memory storage for compacted sessions — evicted messages are no longer held in RAM; SQLite is the single source of truth. Cold load only fetches rows at or above the persisted eviction boundary (`seq >= first_in_memory_seq`), and auto-prunes any legacy excluded prefix on reload. Eliminates RAM growth proportional to history length for long-lived sessions.
+
+#### TUI
+- Display session resume command on exit — when quitting with an active chat, prints `lele --session=<id>` so users can pick up where they left off. Handles subagent views (returns parent session) and welcome screen (no output).
+- `--session` / `-s` CLI flag for resuming sessions — supports `--session=<id>`, `-s=<id>`, `--session <id>`, and `-s <id>` at both root and subcommand level.
+
+#### Session
+- `AllTotalMessageCounts()` — batched `GROUP BY` query returns message counts for all sessions in a single SQL round-trip instead of N individual `COUNT(*)` calls. In-memory sessions use live counts; cold sessions are batched.
+
+### Fixed
+
+#### TUI
+- RAM accumulation on chat switch — `ContextBuilder.cachedSystemPrompt` stored the full system prompt (tools + bootstrap + skills + subagents + harness) per session visited, never evicted. Replaced with a global harness context cache (single entry, invalidated on `/new`); expensive base prompt was already globally cached. Also removed the per-turn `Current Time:` line from the system prompt (only dynamic part, breaking prompt-cache byte-stability).
+- Message count N+1 on reload — `reloadSessions` and `/sessions` command called `GetTotalMessageCount` per session (~400 SQLite COUNTs per TUI reload). Swapped both call sites to `AllTotalMessageCounts()`.
+- Color-band rendering — inner lipgloss `\x1b[0m` resets cancelled outer `AppContainer` background mid-line, leaving terminal bg bleeding through as olive bands to the right of content. New `paintFrame()` + context-aware `reapplyBackground()` re-emits the innermost open background after each reset. Also fixed textarea `SetWidth(80)` exceeding welcome box inner width (58) and overridden all textarea/textinput sub-styles with fg-only theme to prevent raw `\x1b[40m`/`\x1b[37m` patches.
+
+#### Agent
+- Keep agent loop alive on empty LLM responses — empty responses (0 tokens, ~119s) no longer terminate the loop. Retries indefinitely with 1s/2s/3s backoff, bounded only by `MaxIterations` (if set) and context cancellation.
+
+#### Providers
+- Streaming HTTP client uses idle timeout instead of total timeout — long-running streams (builds, tests) no longer get killed by the HTTP client's total timeout. Only prolonged silence triggers a disconnect.
+
+#### Tools
+- Reset `doneCh` and `delivered` flags on subagent resume — resuming a paused subagent previously inherited stale channel state from the original run, causing result delivery to silently fail.
+- Empty-response retry, layout overflow hardening, and config default refresh — empty tool results are retried, layout constraints prevent overflow in narrow terminals, and config defaults are refreshed after provider/model changes.
+
+#### WebUI
+- Subagent polling never starts when running state changes after mount — the polling effect dependency array was missing the running state, so a subagent that transitioned to running after the component mounted was never polled for updates.
+
 ## [0.7.3] - 2026-08-12
 
 ### Changed
