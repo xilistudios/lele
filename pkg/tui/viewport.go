@@ -104,7 +104,6 @@ func (m *Model) updateViewport() {
 		// Width or session changed — clear per-message render cache
 		if m.msgRenderCacheWidth != m.viewport.Width {
 			m.msgRenderCacheLines = nil
-			m.msgRenderCacheLines = nil
 			m.msgRenderCacheWidth = m.viewport.Width
 		}
 	}
