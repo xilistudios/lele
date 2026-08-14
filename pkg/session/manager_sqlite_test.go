@@ -1859,3 +1859,127 @@ func seqsOf(rows []store.MessageRowFull) []int {
 	}
 	return seqs
 }
+
+// TestSQLite_AllTotalMessageCounts_MatchesPerKey verifies that the batched
+// AllTotalMessageCounts returns the same per-session totals as calling
+// GetTotalMessageCount for each session individually.
+func TestSQLite_AllTotalMessageCounts_MatchesPerKey(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	// Create 3 sessions with different message counts.
+	sm.GetOrCreate("sess-a")
+	sm.AddMessage("sess-a", "user", "hello")
+	sm.AddMessage("sess-a", "assistant", "hi there")
+
+	sm.GetOrCreate("sess-b")
+	sm.AddMessage("sess-b", "user", "world")
+
+	sm.GetOrCreate("sess-c")
+	sm.AddMessage("sess-c", "user", "q1")
+	sm.AddMessage("sess-c", "assistant", "a1")
+	sm.AddMessage("sess-c", "user", "q2")
+
+	if err := sm.Save("sess-a"); err != nil {
+		t.Fatalf("save sess-a: %v", err)
+	}
+	if err := sm.Save("sess-b"); err != nil {
+		t.Fatalf("save sess-b: %v", err)
+	}
+	if err := sm.Save("sess-c"); err != nil {
+		t.Fatalf("save sess-c: %v", err)
+	}
+
+	counts := sm.AllTotalMessageCounts()
+
+	for _, key := range []string{"sess-a", "sess-b", "sess-c"} {
+		got := counts[key]
+		want := sm.GetTotalMessageCount(key)
+		if got != want {
+			t.Errorf("AllTotalMessageCounts[%q] = %d, want GetTotalMessageCount = %d", key, got, want)
+		}
+	}
+}
+
+// TestSQLite_AllTotalMessageCounts_ColdSessions verifies that sessions evicted
+// from memory (metadata only) still get their correct persisted totals via the
+// batched store query, matching GetTotalMessageCount.
+func TestSQLite_AllTotalMessageCounts_ColdSessions(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	sm.GetOrCreate("sess-a")
+	sm.AddMessage("sess-a", "user", "hello")
+	sm.AddMessage("sess-a", "assistant", "hi")
+
+	sm.GetOrCreate("sess-b")
+	sm.AddMessage("sess-b", "user", "world")
+
+	if err := sm.Save("sess-a"); err != nil {
+		t.Fatalf("save sess-a: %v", err)
+	}
+	if err := sm.Save("sess-b"); err != nil {
+		t.Fatalf("save sess-b: %v", err)
+	}
+
+	// Evict both sessions from memory. EvictSession persists before removing.
+	if !sm.EvictSession("sess-a") {
+		t.Fatal("EvictSession(sess-a) returned false")
+	}
+	if !sm.EvictSession("sess-b") {
+		t.Fatal("EvictSession(sess-b) returned false")
+	}
+
+	// Confirm they are cold (not in the in-memory map) but still known via metadata.
+	sm.mu.RLock()
+	if _, ok := sm.sessions["sess-a"]; ok {
+		t.Fatal("sess-a should be evicted from memory")
+	}
+	if _, ok := sm.sessions["sess-b"]; ok {
+		t.Fatal("sess-b should be evicted from memory")
+	}
+	sm.mu.RUnlock()
+
+	counts := sm.AllTotalMessageCounts()
+
+	if counts["sess-a"] != 2 {
+		t.Errorf("cold sess-a count = %d, want 2", counts["sess-a"])
+	}
+	if counts["sess-b"] != 1 {
+		t.Errorf("cold sess-b count = %d, want 1", counts["sess-b"])
+	}
+
+	// Batched cold-path totals must match the per-key lookup.
+	for _, key := range []string{"sess-a", "sess-b"} {
+		if got, want := counts[key], sm.GetTotalMessageCount(key); got != want {
+			t.Errorf("cold AllTotalMessageCounts[%q] = %d, want GetTotalMessageCount = %d", key, got, want)
+		}
+	}
+}
+
+// TestAllTotalMessageCounts_NoStore verifies that in-memory sessions are
+// counted correctly and nothing panics when no store is configured.
+func TestAllTotalMessageCounts_NoStore(t *testing.T) {
+	sm := NewSessionManager() // store is nil
+
+	sm.GetOrCreate("sess-a")
+	sm.AddMessage("sess-a", "user", "hello")
+	sm.AddMessage("sess-a", "assistant", "hi")
+
+	sm.GetOrCreate("sess-b")
+	sm.AddMessage("sess-b", "user", "world")
+
+	counts := sm.AllTotalMessageCounts()
+
+	if counts["sess-a"] != 2 {
+		t.Errorf("sess-a count = %d, want 2", counts["sess-a"])
+	}
+	if counts["sess-b"] != 1 {
+		t.Errorf("sess-b count = %d, want 1", counts["sess-b"])
+	}
+	if _, ok := counts["nonexistent"]; ok {
+		t.Error("nonexistent session unexpectedly appeared in counts")
+	}
+}

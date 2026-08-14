@@ -33,7 +33,9 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	ta.Placeholder = i18n.T("tui.placeholder")
 	ta.Focus()
 	ta.CharLimit = 0 // unlimited
-	ta.SetWidth(80)
+	// Welcome screen renders the input inside a 60-col box (2 cols of
+	// container padding); the chat view re-sets the width per frame.
+	ta.SetWidth(58)
 	ta.SetHeight(3)
 	ta.Prompt = " "
 	ta.ShowLineNumbers = false
@@ -65,9 +67,19 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		// TransposeCharacterBackward ctrl+t (ctrl+t → mouse toggle)
 		// UppercaseWordForward, LowercaseWordForward, CapitalizeWordForward
 	}
-	// Minimal styling — blend with the TUI theme.
+	// Minimal styling — blend with the TUI theme. Every sub-style of the
+	// bubbles defaults must be overridden: the stock defaults emit raw basic
+	// ANSI colors (\x1b[40m black background, \x1b[37m white foreground) that
+	// clash with the app background and, after paintFrame's per-reset
+	// background re-emission, show up as black patches inside the input box.
+	// All styles stay foreground-only so the enclosing container background
+	// (InputBarContainer) shows through.
 	ta.FocusedStyle.Base = lipgloss.NewStyle()
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(Foreground)
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Foreground(Foreground)
+	ta.FocusedStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(CommentColor)
+	ta.FocusedStyle.LineNumber = lipgloss.NewStyle().Foreground(CommentColor)
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(CommentColor)
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
 	ta.BlurredStyle = ta.FocusedStyle // same style when not focused (always focused anyway)
@@ -79,6 +91,12 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	ti.CharLimit = 0
 	ti.Width = 40
 	ti.Prompt = " "
+	// Theme overrides for the flat style fields (stock defaults are
+	// foreground-only but the prompt/cursor colors clash with the theme).
+	ti.PromptStyle = lipgloss.NewStyle().Foreground(CommentColor)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(Foreground)
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	ti.CompletionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	vp := newLineViewport(80, 20)
 	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
@@ -160,6 +178,10 @@ func (m *Model) reloadSessions() {
 	m.visibleSessions = nil
 	all := m.sessionMgr.ListSessions()
 
+	// Batch-fetch message counts once (single SQLite query for cold sessions)
+	// instead of calling GetTotalMessageCount per session (N+1 queries).
+	msgCounts := m.sessionMgr.AllTotalMessageCounts()
+
 	for _, s := range all {
 		// Exclude subagent sessions from the main session list — they have
 		// their own navigation via /subagents and are not top-level chats.
@@ -174,7 +196,7 @@ func (m *Model) reloadSessions() {
 		if sessionMode != m.currentMode.String() {
 			continue
 		}
-		if len(s.Messages) > 0 || m.sessionMgr.GetTotalMessageCount(s.Key) > 0 || s.Key == m.currentKey {
+		if len(s.Messages) > 0 || msgCounts[s.Key] > 0 || s.Key == m.currentKey {
 			m.visibleSessions = append(m.visibleSessions, s)
 		}
 	}

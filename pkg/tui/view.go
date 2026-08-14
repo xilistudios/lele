@@ -208,8 +208,7 @@ func (m *Model) View() string {
 		}
 
 		// Center the entire welcome content block in the terminal
-		welcomeView := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, contentBuilder.String())
-		return AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(welcomeView)
+		return m.paintFrame(contentBuilder.String())
 	}
 
 	// --------------------------------------------------------------------------
@@ -358,7 +357,8 @@ func (m *Model) View() string {
 	}
 
 	leftInfoRaw := fmt.Sprintf("%s · %s · %s", agentID, modelName, thinkLevel)
-	badgeWidth := lipgloss.Width(ModelSelectorStyle.Render(modeBadge)) + 1
+	modeBadgeRendered := ModelSelectorStyle.Render(modeBadge)
+	badgeWidth := lipgloss.Width(modeBadgeRendered) + 1
 	leftTextBudget := availLeft - badgeWidth
 	if leftTextBudget < 5 {
 		leftTextBudget = 5
@@ -371,7 +371,7 @@ func (m *Model) View() string {
 			leftInfoRaw = string(r[:leftTextBudget])
 		}
 	}
-	leftBarText := fmt.Sprintf("%s %s", ModelSelectorStyle.Render(modeBadge), leftInfoRaw)
+	leftBarText := fmt.Sprintf("%s %s", modeBadgeRendered, leftInfoRaw)
 
 	bottomBar := lipgloss.JoinHorizontal(lipgloss.Top,
 		BottomBarLeft.Width(availLeft).MaxWidth(availLeft).Render(leftBarText),
@@ -610,7 +610,7 @@ func (m *Model) View() string {
 		return m.renderModal(modalTitle)
 	}
 
-	return AppContainer.Width(m.width).Height(m.height).MaxHeight(m.height).Render(mainLayout)
+	return m.paintFrame(mainLayout)
 }
 
 // calculateViewportHeight reserves every line rendered below the viewport.
@@ -685,7 +685,7 @@ func (m *Model) renderModal(modalTitle string) string {
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	return m.paintFrame(modalView)
 }
 
 // renderFormModal renders a multi-step form modal with step indicators,
@@ -720,7 +720,7 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 		sb.WriteString("\n")
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectSuccessHint")))
 		modalView := ModalContainer.Render(sb.String())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+		return m.paintFrame(modalView)
 	}
 
 	// ── Provider-type picker: list of known presets ──
@@ -755,7 +755,7 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 		sb.WriteString("\n")
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectPickerHint")))
 		modalView := ModalContainer.Render(sb.String())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+		return m.paintFrame(modalView)
 	}
 
 	isReviewStep := m.modalMode == ModalAddProvider && m.formStepIndex == 9 && m.providerSavedInFlow
@@ -841,7 +841,7 @@ func (m *Model) renderFormModal(title string, steps []string) string {
 	}
 
 	modalView := ModalContainer.Render(sb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	return m.paintFrame(modalView)
 }
 
 // formStepNames returns the step names for the current form modal mode.
@@ -920,7 +920,7 @@ func (m *Model) renderBgExecOutput() string {
 	sb.WriteString(hintsText)
 
 	outputBox := ModalContainer.Width(m.width - 10).Render(sb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, outputBox)
+	return m.paintFrame(outputBox)
 }
 
 func (m *Model) getBouncingDots() string {
@@ -1009,5 +1009,5 @@ func (m *Model) renderSkillPicker(modalTitle string) string {
 	modalSb.WriteString("\n" + CommentColorStyle.Render("  [Space] Toggle  [Enter] Install  [Esc] Back") + "\n")
 
 	modalView := ModalContainer.Render(modalSb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	return m.paintFrame(modalView)
 }

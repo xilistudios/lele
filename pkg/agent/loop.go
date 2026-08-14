@@ -920,7 +920,6 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
 	agent.Sessions.ResetTokenCounts(sessionKey)
-	agent.ContextBuilder.ResetSystemPromptCache(sessionKey)
 	// Clear any session-specific model and thinking overrides
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)

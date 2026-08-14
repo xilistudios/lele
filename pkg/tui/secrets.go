@@ -149,7 +149,7 @@ func (m *Model) renderSecretDetail() string {
 	sb.WriteString(CommentColorStyle.Render(i18n.T("tui.secretsDetailHints")))
 
 	box := ModalContainer.Width(m.width - 10).Render(sb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	return m.paintFrame(box)
 }
 
 // findSecretMeta looks up a secret's metadata by name.
@@ -258,7 +258,7 @@ func (m *Model) renderSecretsList(modalTitle string) string {
 	sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.secretsListHints")))
 
 	modalView := ModalContainer.Render(sb.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalView)
+	return m.paintFrame(modalView)
 }
 
 // splitCSV splits a comma-separated string into trimmed, non-empty fields.
