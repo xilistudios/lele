@@ -502,8 +502,9 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		})
 	}
 
-	// Spawn the subagent
-	_, err := subagentManager.SpawnWithOptions(
+	// Spawn the subagent (asynchronous; the subagent keeps running even if the
+	// caller finishes first, and the callback publishes the result to the chat).
+	taskID, err := subagentManager.SpawnWithOptions(
 		ctx,
 		spawnConfig.Task,
 		spawnConfig.Label,
@@ -518,8 +519,53 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 		return "", fmt.Errorf("failed to spawn subagent: %w", err)
 	}
 
-	return fmt.Sprintf("Scheduled task spawned as subagent (label: %s)", spawnConfig.Label), nil
+	// Wait for the subagent to reach a terminal state so the cron job can
+	// report its REAL outcome rather than an optimistic "spawned ok".
+	// The subagent has its own execution timeout; we wait on its done channel
+	// with a generous cap so a pathological task can't hold the caller forever.
+	if task, ok := subagentManager.GetTask(taskID); ok {
+		if done := task.DoneChannel(); done != nil {
+			select {
+			case <-done:
+			case <-time.After(subagentSpawnWaitTimeout):
+			case <-ctx.Done():
+			}
+		}
+	}
+
+	task, found := subagentManager.GetTask(taskID)
+	if !found {
+		return "", fmt.Errorf("scheduled task %s not found", taskID)
+	}
+
+	switch task.Status {
+	case tools.SubagentStatusCompleted:
+		if task.Summary != "" {
+			return fmt.Sprintf("Scheduled task completed:\n%s", task.Summary), nil
+		}
+		return "Scheduled task completed", nil
+	case tools.SubagentStatusFailed:
+		msg := "scheduled task failed"
+		if task.Summary != "" {
+			msg += ": " + task.Summary
+		}
+		return "", errors.New(msg)
+	case tools.SubagentStatusCancelled:
+		return "", errors.New("scheduled task was cancelled")
+	case tools.SubagentStatusNotDone:
+		return "", errors.New("scheduled task was not completed")
+	default:
+		// still running / still waiting for context after the wait window:
+		// leave the async subagent running; the callback will publish the final
+		// result to the chat.
+		return fmt.Sprintf("Scheduled task spawned as subagent (label: %s, status: %s)", spawnConfig.Label, task.Status), nil
+	}
 }
+
+// subagentSpawnWaitTimeout caps how long a cron spawn branch will wait for its
+// subagent before falling back to the async path (where the callback delivers
+// the result when it eventually completes).
+const subagentSpawnWaitTimeout = 5 * time.Minute
 
 // spawnConfig holds parsed SYSTEM_SPAWN configuration
 type spawnConfig struct {

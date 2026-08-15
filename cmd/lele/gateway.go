@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -427,6 +428,9 @@ func setupCronTool(executor tools.JobExecutor, al *agent.AgentLoop, msgBus *bus.
 
 	cronService.SetOnJob(func(job *cron.CronJob) (string, error) {
 		result := cronTool.ExecuteJob(context.Background(), job)
+		if strings.HasPrefix(result, "Error:") {
+			return result, fmt.Errorf("%s", result)
+		}
 		return result, nil
 	})
 
