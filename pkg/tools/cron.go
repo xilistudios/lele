@@ -460,7 +460,8 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 		if isSessionScoped {
 			t.notifySession(ctx, job, effectiveSessionKey, channel, chatID, response, false)
 		}
-		return "ok"
+		// Return the real outcome so the cron service records accurate status.
+		return response
 	}
 
 	// For deliver=false, process through agent (for complex tasks).
