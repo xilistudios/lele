@@ -188,9 +188,11 @@ func (cs *CronService) checkJobs() {
 
 	cs.mu.Unlock()
 
-	// Execute jobs outside lock.
+	// Execute jobs outside lock. Run each in its own goroutine so a slow job
+	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
+	// and delay every other due job.
 	for _, jobID := range dueJobIDs {
-		cs.executeJobByID(jobID)
+		go cs.executeJobByID(jobID)
 	}
 }
 

@@ -51,6 +51,14 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
 
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
+      // Empty completed placeholders (no content, no reasoning) are NOT
+      // position-matchable: toChatMessages skips the content-less tool-call
+      // iteration in HTTP history, so a placeholder would shift the index and
+      // pair the wrong streaming assistant with a base assistant, producing a
+      // duplicate. They are dropped separately in filterStreamingLeftovers.
+      const isEmptyPlaceholder =
+        msg.streaming !== true && msg.content.trim() === '' && !msg.reasoningContent
+      if (isEmptyPlaceholder) continue
       assistants.push({ msg, isStreaming: msg.streaming === true, used: false })
     } else if (msg.role === 'tool') {
       if (msg.toolCallId) {
@@ -220,11 +228,17 @@ function buildFilteredBase(
  * Drops:
  *   - optimistic user messages once base has caught up,
  *   - assistants already matched into filteredBase (`used`),
- *   - completed assistants left over from a previous turn once base has the
- *     full current turn (the backend merges a tool-call turn into a single
- *     assistant in HTTP history),
  *   - empty completed assistants with no reasoning content (placeholders),
  *   - tool messages already confirmed in base.
+ *
+ * A completed assistant that was NOT position-matched to a base assistant is a
+ * NEW message that base hasn't caught up to yet: the backend persists each LLM
+ * iteration as a SEPARATE message (it does not merge a multi-iteration tool
+ * turn into a single assistant in HTTP history). We must keep it — otherwise
+ * the final answer of a tool turn vanishes when it finishes a moment before
+ * the HTTP poll lands, because `computeBaseHasCurrentTurn` is already true
+ * (only the user + first assistant are in base) and the old code dropped the
+ * unmatched final assistant as a "leftover from a previous turn".
  */
 function filterStreamingLeftovers(
   streamingMessages: ChatMessage[],
@@ -232,7 +246,6 @@ function filterStreamingLeftovers(
   baseMessages: ChatMessage[],
   filteredBase: ChatMessage[],
   consumedToolIds: Set<string>,
-  baseHasCurrentTurn: boolean,
 ): ChatMessage[] {
   const baseUserCount = baseMessages.filter((m) => m.role === 'user' && !m.optimistic).length
   const usedAssistantIds = new Set(index.assistants.filter((e) => e.used).map((e) => e.msg.id))
@@ -247,10 +260,6 @@ function filterStreamingLeftovers(
 
     if (msg.role === 'assistant') {
       if (usedAssistantIds.has(msg.id)) return false
-      if (!msg.streaming && baseHasCurrentTurn) {
-        // Completed but unmatched → leftover from a previous turn. Drop it.
-        if (index.assistants.some((e) => e.msg.id === msg.id)) return false
-      }
       if (!msg.streaming && msg.content.trim() === '' && !msg.reasoningContent) {
         // Empty tool-call iteration placeholder without reasoning — drop.
         return false
@@ -275,10 +284,6 @@ function filterStreamingLeftovers(
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
-/**
- * Merge canonical HTTP history with live WebSocket streaming state into a
- * single, deduplicated, chronologically-ordered message list for rendering.
- */
 /**
  * Merge canonical HTTP history with live WebSocket streaming state into a
  * single, deduplicated, chronologically-ordered message list for rendering.
@@ -315,7 +320,6 @@ export function mergeMessages(
     baseMessages,
     filteredBase,
     consumedToolIds,
-    baseHasCurrentTurn,
   )
 
   return [...filteredBase, ...filteredStreaming]
