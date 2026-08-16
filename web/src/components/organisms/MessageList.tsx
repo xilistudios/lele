@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { isCompactionSummary } from '../../lib/chatMessageBuilder'
 import { getModeTheme } from '../../lib/modeTheme'
 import type { ChatMessage, GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
 import { MarkdownText } from '../molecules/MarkdownText'
@@ -59,7 +60,10 @@ export function MessageList() {
   const prevSessionKeyRef = useRef(currentSessionKey)
 
   const visibleMessages = messages.filter(
-    (m) => !m.content.startsWith('⚠️ GUIDANCE:') && !m.content.startsWith('GUIDANCE:'),
+    (m) =>
+      !m.content.startsWith('⚠️ GUIDANCE:') &&
+      !m.content.startsWith('GUIDANCE:') &&
+      !isCompactionSummary(m),
   )
 
   const prevFirstMsgIdRef = useRef<string | undefined>(visibleMessages[0]?.id)
@@ -186,7 +190,7 @@ export function MessageList() {
       if (item.type === 'message') {
         return (
           <MessageBubble
-            key={item.message.id}
+            key={item.message.stableId ?? item.message.id}
             message={item.message}
             isLast={item.index === visibleMessages.length - 1}
             onNavigateToSession={handleNavigateToSession}
@@ -288,7 +292,7 @@ export function MessageList() {
   )
 
   const computeItemKey = useCallback((index: number, item: RenderItem) => {
-    if (item.type === 'message') return item.message.id || `msg-${index}`
+    if (item.type === 'message') return item.message.stableId ?? item.message.id ?? `msg-${index}`
     return `group-block-${item.group.groupID}`
   }, [])
 

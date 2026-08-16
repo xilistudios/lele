@@ -30,6 +30,33 @@ export function createDeterministicToolMessageId(messageId: string, toolCallId: 
 const ATTACHMENTS_HEADER = '## Attachments'
 
 /**
+ * True if a message is an internal context-compaction summary that must be
+ * hidden from the chat UI.
+ *
+ * Mirrors the TUI guard in `pkg/tui/viewport.go` (isCompactionSummary):
+ * these are synthetic "user" messages inserted by the backend when the
+ * context window is compacted, e.g.
+ *
+ *   ## Summary of Previous Conversation\n\n...
+ *   [Context compacted — summary of previous N messages]\n...
+ *
+ * They carry `exclude_from_context`, so they may also be filtered by flag,
+ * but the content-prefix guard is the authoritative signal (the flag is
+ * also set on user-excluded attachments). Showing the summary as a real
+ * user bubble is confusing — the user never sent it.
+ */
+export function isCompactionSummary(message: {
+  role: ChatMessage['role']
+  content: string
+}): boolean {
+  if (message.role !== 'user') return false
+  return (
+    message.content.startsWith('## Summary of Previous Conversation\n\n') ||
+    message.content.startsWith('[Context compacted —')
+  )
+}
+
+/**
  * Parses attachment paths from a message content string that contains
  * "## Attachments\n- /path/file.png" appended by the backend.
  * Returns the cleaned content and extracted attachment info.

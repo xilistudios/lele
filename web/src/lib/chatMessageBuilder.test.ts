@@ -8,6 +8,7 @@ import {
   createToolMessageId,
   createUserMessage,
   formatToolCallArgs,
+  isCompactionSummary,
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
 } from './chatMessageBuilder'
@@ -360,5 +361,39 @@ describe('createToolMessage', () => {
     })
 
     expect(msg.subagentSessionKey).toBe('subagent:task-1')
+  })
+})
+describe('isCompactionSummary', () => {
+  test('detects "## Summary of Previous Conversation" user messages', () => {
+    expect(
+      isCompactionSummary({
+        role: 'user',
+        content: '## Summary of Previous Conversation\n\nLong summary here.',
+      }),
+    ).toBe(true)
+  })
+
+  test('detects "[Context compacted —" user messages', () => {
+    expect(
+      isCompactionSummary({
+        role: 'user',
+        content: '[Context compacted — summary of previous 42 messages]\nfoo',
+      }),
+    ).toBe(true)
+  })
+
+  test('does not flag ordinary user messages', () => {
+    expect(isCompactionSummary({ role: 'user', content: 'Hello world' })).toBe(false)
+    expect(isCompactionSummary({ role: 'user', content: '## Summary of Previous\n\n' })).toBe(false)
+  })
+
+  test('never flags assistant or tool messages', () => {
+    expect(
+      isCompactionSummary({
+        role: 'assistant',
+        content: '## Summary of Previous Conversation\n\nx',
+      }),
+    ).toBe(false)
+    expect(isCompactionSummary({ role: 'tool', content: '[Context compacted — x]' })).toBe(false)
   })
 })

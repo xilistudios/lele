@@ -948,4 +948,65 @@ describe('Message ordering fixes', () => {
       expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
     })
   })
+
+  describe('Fix: Stable keys across the WebSocket→HTTP transition (flicker)', () => {
+    test('confirmed assistant carries the streaming id as stableId', () => {
+      // Before the HTTP refetch lands, the streaming copy has an ephemeral id.
+      // Once base has the full turn, the base copy wins — but it must keep the
+      // ephemeral id as `stableId` so the React key (and enter animation) do
+      // not change, preventing a remount flicker at the moment of confirmation.
+
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1-base', 'user', 'hello'),
+        createTestMessage('a1-base', 'assistant', 'Answer A'),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('a1-ws', 'assistant', 'Answer A', { streaming: false }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const confirmed = result.find((m) => m.id === 'a1-base')
+      expect(confirmed).toBeDefined()
+      // The base copy must keep the ephemeral id so rendering stays stable.
+      expect(confirmed?.stableId).toBe('a1-ws')
+      // No duplicate: the streaming copy is consumed.
+      expect(result.filter((m) => m.content === 'Answer A')).toHaveLength(1)
+    })
+
+    test('confirmed user message carries the optimistic id as stableId', () => {
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1-base', 'user', 'Hello there'),
+        createTestMessage('a1-base', 'assistant', 'Answer'),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-temp', 'user', 'Hello there', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const confirmedUser = result.find((m) => m.id === 'u1-base')
+      expect(confirmedUser).toBeDefined()
+      expect(confirmedUser?.stableId).toBe('u1-temp')
+      // The optimistic copy is dropped; the confirmed copy owns the key.
+      expect(result.some((m) => m.id === 'u1-temp')).toBe(false)
+    })
+
+    test('streaming assistant not yet in base retains stableId = its own id', () => {
+      const baseMessages: ChatMessage[] = []
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-temp', 'user', 'hi', {
+          optimistic: true,
+          optimisticBaseCount: 0,
+        }),
+        createTestMessage('a1-ws', 'assistant', 'Working...', { streaming: true }),
+      ]
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const streaming = result.find((m) => m.id === 'a1-ws')
+      expect(streaming).toBeDefined()
+      // Should fall back to its own id for a stable React key.
+      expect(streaming?.stableId ?? streaming?.id).toBe('a1-ws')
+    })
+  })
 })

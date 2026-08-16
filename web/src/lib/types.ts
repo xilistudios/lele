@@ -716,6 +716,18 @@ export type ChatMessage = {
   subagentSessionKey?: string
   error?: string
   excludeFromContext?: boolean
+  /**
+   * Stable logical identity that survives the WebSocket→HTTP transition.
+   *
+   * Streaming messages use ephemeral UUIDs; canonical history uses
+   * content-hash ids. When mergeMessages swaps a message from its ephemeral
+   * form to its confirmed form, it carries the ephemeral id over as
+   * `stableId` so React can key the render tree on it. This prevents the
+   * bubble from remounting (and replaying its enter animation) at the exact
+   * moment a response or sent message is confirmed — the source of the
+   * visible flicker during WebSocket updates.
+   */
+  stableId?: string
 }
 
 export type ToolStatus = {
