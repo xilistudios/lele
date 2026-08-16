@@ -37,6 +37,8 @@ type StreamingIndex = {
   toolCallIds: Set<string>
   toolSessions: Set<string>
   toolByCallId: Map<string, ChatMessage>
+  /** Optimistic user messages (content-matched against base on confirmation). */
+  optimisticUsers: Array<{ msg: ChatMessage; used: boolean }>
 }
 
 /** Index the streaming list once so the merge can run in linear time. */
@@ -45,6 +47,7 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
   const toolCallIds = new Set<string>()
   const toolSessions = new Set<string>()
   const toolByCallId = new Map<string, ChatMessage>()
+  const optimisticUsers: Array<{ msg: ChatMessage; used: boolean }> = []
 
   for (const msg of streamingMessages) {
     if (msg.role === 'assistant') {
@@ -65,10 +68,12 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
       if (msg.sessionKey) {
         toolSessions.add(msg.sessionKey)
       }
+    } else if (msg.role === 'user' && msg.optimistic) {
+      optimisticUsers.push({ msg, used: false })
     }
   }
 
-  return { assistants, toolCallIds, toolSessions, toolByCallId }
+  return { assistants, toolCallIds, toolSessions, toolByCallId, optimisticUsers }
 }
 
 // ── Turn detection ──────────────────────────────────────────────────────────
@@ -145,21 +150,45 @@ function buildFilteredBase(
   const filteredBase: ChatMessage[] = []
   let baseAssistantIdx = 0
   let streamAsstIdx = 0
+  let optimisticUserIdx = 0
 
   for (const msg of baseMessages) {
     if (msg.role === 'assistant') {
+      let stableId: string | undefined
+      let confirmedAlready = false
       if (baseAssistantIdx >= matchOffset && streamAsstIdx < index.assistants.length) {
         const entry = index.assistants[streamAsstIdx]
         if (!entry.isStreaming) {
           // Both completed → base version wins; remember the streaming copy
-          // was consumed so it gets deduped later.
+          // was consumed so it gets deduped later. Carry its stable id forward
+          // so the render key (and enter animation) survive the transition.
           entry.used = true
+          stableId = entry.msg.stableId ?? entry.msg.id
+          confirmedAlready = true
           streamAsstIdx++
         }
         // If entry.isStreaming, skip it (leave it for the append pass).
       }
       baseAssistantIdx++
-      filteredBase.push(msg)
+      filteredBase.push(confirmedAlready && stableId ? { ...msg, stableId } : msg)
+      continue
+    }
+
+    if (msg.role === 'user' && !msg.optimistic) {
+      // A confirmed user message: if it matches an optimistic user that is
+      // being dropped, carry the optimistic id forward as stableId so the
+      // sent bubble doesn't remount/re-animate when the real copy lands.
+      let stableId: string | undefined
+      for (; optimisticUserIdx < index.optimisticUsers.length; optimisticUserIdx++) {
+        const optUser = index.optimisticUsers[optimisticUserIdx]
+        if (optUser.used) continue
+        if (optUser.msg.content === msg.content) {
+          optUser.used = true
+          stableId = optUser.msg.stableId ?? optUser.msg.id
+          break
+        }
+      }
+      filteredBase.push(stableId ? { ...msg, stableId } : msg)
       continue
     }
 
