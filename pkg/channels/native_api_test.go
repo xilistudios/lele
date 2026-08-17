@@ -37,7 +37,7 @@ type nativeTestAgentLoop struct {
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
 	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
-	processing         map[string]bool                 // sessionKey -> is session processing
+	processing         map[string]bool               // sessionKey -> is session processing
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
