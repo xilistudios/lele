@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import { useAppLogicContext } from '../../contexts/AppLogicContext'
+import { useAppLogicContext, useAppStreamingContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { isCompactionSummary } from '../../lib/chatMessageBuilder'
 import { getModeTheme } from '../../lib/modeTheme'
@@ -39,7 +39,6 @@ export function MessageList() {
   const navigate = useNavigate()
   const { apiUrl, session } = useAuthContext()
   const {
-    messages,
     approvalRequest,
     approvalResult,
     onApprove,
@@ -51,19 +50,23 @@ export function MessageList() {
     isLoadingMore,
     chatMode,
     groups,
-    typingIndicator,
   } = useAppLogicContext()
+  const { messages, typingIndicator } = useAppStreamingContext()
 
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const [firstItemIndex, setFirstItemIndex] = useState(START_INDEX)
   const [atBottom, setAtBottom] = useState(true)
   const prevSessionKeyRef = useRef(currentSessionKey)
 
-  const visibleMessages = messages.filter(
-    (m) =>
-      !m.content.startsWith('⚠️ GUIDANCE:') &&
-      !m.content.startsWith('GUIDANCE:') &&
-      !isCompactionSummary(m),
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          !m.content.startsWith('⚠️ GUIDANCE:') &&
+          !m.content.startsWith('GUIDANCE:') &&
+          !isCompactionSummary(m),
+      ),
+    [messages],
   )
 
   const prevFirstMsgIdRef = useRef<string | undefined>(visibleMessages[0]?.id)
