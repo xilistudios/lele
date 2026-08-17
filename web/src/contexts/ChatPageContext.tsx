@@ -1,7 +1,7 @@
 import { type ReactNode, createContext, useContext, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ChatSession, ReasoningConfig } from '../lib/types'
-import { useAppLogicContext } from './AppLogicContext'
+import { useAppLogicContext, useAppStreamingContext } from './AppLogicContext'
 
 export type SelectOption = { value: string; label: string; reasoning?: ReasoningConfig }
 
@@ -34,16 +34,15 @@ const ChatPageContext = createContext<ChatPageContextValue | null>(null)
 export function ChatPageProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
   const {
-    messages,
-    isProcessing,
-    toolStatus,
     modelState,
     thinkLevel,
     currentAgent,
     sessions,
     currentSessionKey,
     parentSessionKey,
+    isProcessing,
   } = useAppLogicContext()
+  const { messages, toolStatus } = useAppStreamingContext()
 
   const hasConversation = messages.length > 0
   const canCancel = isProcessing || Boolean(toolStatus)

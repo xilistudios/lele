@@ -171,6 +171,14 @@ func (t *SpawnTool) Execute(ctx context.Context, args map[string]interface{}) *T
 	return toolResult
 }
 
+// ExtractSpawnTaskID extracts the raw task ID (e.g. "subagent-3") from the
+// human-readable message returned by SpawnWithOptions
+// (e.g. "Spawned subagent task subagent-3 ('...') for task: ...").
+// Returns an empty string if no task ID is found.
+func ExtractSpawnTaskID(result string) string {
+	return extractSpawnTaskID(result)
+}
+
 func extractSpawnTaskID(result string) string {
 	idx := strings.Index(result, "subagent-")
 	if idx < 0 {
