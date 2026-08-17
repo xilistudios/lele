@@ -107,6 +107,11 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 
+	processing := false
+	if n.agentLoop != nil {
+		processing = n.agentLoop.IsSessionProcessing(sessionKey)
+	}
+
 	// Build a map of tool_call_id -> tool name from assistant messages
 	// This is used to populate ToolName for tool result messages
 	toolCallIDToName := make(map[string]string)
@@ -139,6 +144,17 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		}
 		// Skip injected context messages (e.g. from read_image tool)
 		if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+			continue
+		}
+		// NEW: skip the in-progress streaming assistant message while the
+		// session is actively processing. It is delivered live over the
+		// WebSocket (streaming events + reconnect catchup); leaking it into
+		// HTTP history races with the live frontend state and causes
+		// ordering glitches and disappearing/reappearing messages. When the
+		// session is NOT processing, a leftover Streaming=true message is a
+		// crash-recovery orphan (process died mid-stream) and MUST stay
+		// visible or it would be hidden forever.
+		if msg.Streaming && processing {
 			continue
 		}
 		// Generate a stable ID from message content hash (position-independent).
@@ -221,11 +237,6 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 
 	// Check if there are more messages available
 	hasMore := resultStartIdx > 0
-
-	processing := false
-	if n.agentLoop != nil {
-		processing = n.agentLoop.IsSessionProcessing(sessionKey)
-	}
 
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
 		SessionKey: sessionKey,

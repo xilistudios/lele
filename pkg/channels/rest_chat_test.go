@@ -167,6 +167,78 @@ func TestHandleChatHistory_Pagination(t *testing.T) {
 	}
 }
 
+func TestHandleChatHistory_HidesStreamingMessageWhileProcessing(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	sessionKey := "native:" + ts.clientID
+	ts.loop.histories[sessionKey] = []providers.Message{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "partial...", Streaming: true},
+	}
+	ts.loop.processing[sessionKey] = true
+
+	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/history", nil)
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1 (streaming assistant hidden while processing)", len(payload.Messages))
+	}
+	if payload.Messages[0].Role != "user" {
+		t.Fatalf("first message role = %q, want %q", payload.Messages[0].Role, "user")
+	}
+	if !payload.Processing {
+		t.Fatal("expected processing=true while the session is processing")
+	}
+}
+
+func TestHandleChatHistory_ShowsStreamingMessageWhenIdle(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	sessionKey := "native:" + ts.clientID
+	ts.loop.histories[sessionKey] = []providers.Message{
+		{Role: "user", Content: "Hello"},
+		{Role: "assistant", Content: "partial...", Streaming: true},
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/"+url.PathEscape(sessionKey)+"/history", nil)
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Messages) != 2 {
+		t.Fatalf("got %d messages, want 2 (orphaned streaming assistant kept when idle)", len(payload.Messages))
+	}
+	if payload.Processing {
+		t.Fatal("expected processing=false while the session is idle")
+	}
+}
+
 func TestHandleChatSessions_Empty(t *testing.T) {
 	ts := newNativeTestServer(t)
 
