@@ -37,6 +37,7 @@ type nativeTestAgentLoop struct {
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
 	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
+	processing         map[string]bool                 // sessionKey -> is session processing
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -51,6 +52,7 @@ func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 		sessionNames:       make(map[string]string),
 		sessionThinkLevels: make(map[string]string),
 		sessionSubagents:   make(map[string][]SubagentTaskInfo),
+		processing:         make(map[string]bool),
 	}
 }
 
@@ -265,7 +267,7 @@ func (m *nativeTestAgentLoop) GetSubagentParentSessionKey(sessionKey string) str
 }
 
 func (m *nativeTestAgentLoop) IsSessionProcessing(sessionKey string) bool {
-	return false
+	return m.processing[sessionKey]
 }
 
 func (m *nativeTestAgentLoop) GetTokenCounts(sessionKey string) (int, int, int) {
