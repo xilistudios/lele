@@ -86,6 +86,10 @@ type CronService struct {
 	running   bool
 	stopChan  chan struct{}
 	gronx     *gronx.Gronx
+	// executing tracks job IDs currently being executed to prevent
+	// concurrent execution of the same job (e.g. a spawn cron that
+	// hasn't finished before the next tick fires).
+	executing sync.Map
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -164,9 +168,15 @@ func (cs *CronService) checkJobs() {
 	var dueJobIDs []string
 
 	// Collect jobs that are due (we need to copy them to execute outside lock)
+	// Skip jobs that are already executing to prevent subagent leaks from
+	// spawn crons that haven't finished before the next tick fires.
 	for i := range cs.store.Jobs {
 		job := &cs.store.Jobs[i]
 		if job.Enabled && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
+			if _, running := cs.executing.Load(job.ID); running {
+				log.Printf("[cron] job %s still executing, skipping", job.ID)
+				continue
+			}
 			dueJobIDs = append(dueJobIDs, job.ID)
 		}
 	}
@@ -197,6 +207,11 @@ func (cs *CronService) checkJobs() {
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
+	// Mark job as executing so checkJobs won't collect it again while
+	// we're waiting on a long-running handler (e.g. spawn subagent).
+	cs.executing.Store(jobID, true)
+	defer cs.executing.Delete(jobID)
+
 	startTime := time.Now().UnixMilli()
 
 	cs.mu.RLock()
@@ -629,6 +644,12 @@ func (cs *CronService) GetJob(jobID string) *CronJob {
 // in the job's state (last run timestamp, status, and error). Returns an error
 // if the job is not found.
 func (cs *CronService) RunJobNow(jobID string) error {
+	// Prevent concurrent execution of the same job.
+	if _, loaded := cs.executing.LoadOrStore(jobID, true); loaded {
+		return fmt.Errorf("job %s is already executing", jobID)
+	}
+	defer cs.executing.Delete(jobID)
+
 	startTime := time.Now().UnixMilli()
 
 	cs.mu.RLock()

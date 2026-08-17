@@ -1,4 +1,11 @@
-import { type MutableRefObject, type ReactNode, createContext, useContext, useRef } from 'react'
+import {
+  type MutableRefObject,
+  type ReactNode,
+  createContext,
+  useContext,
+  useMemo,
+  useRef,
+} from 'react'
 import { useAppLogic as useAppLogicHook } from '../hooks/useAppLogic'
 import { type SocketStatus, useSocket } from '../hooks/useSocket'
 import type { AuthSession, ChatMode, ClientEvent } from '../lib/types'
@@ -9,6 +16,15 @@ import { useAuthContext } from './AuthContext'
 export type { SocketStatus }
 export type SendFn = (event: ClientCommand['event'], data: Record<string, unknown>) => void
 
+type UseApp = ReturnType<typeof useAppLogicHook>
+
+/**
+ * COLD context — exposed to every consumer under the ProtectedLayout. Contains
+ * app state and handlers that change rarely (sessions, agents, sidebar, model
+ * selection, handlers). The `value` object is memoized so that cold-only
+ * consumers (Sidebar, Settings, ChatHeader, composer, ...) do NOT re-render
+ * when streaming hot state changes every tick.
+ */
 export type AppLogicContextValue = {
   // Connection & socket
   wsStatus: SocketStatus
@@ -17,60 +33,70 @@ export type AppLogicContextValue = {
 
   // State from useAppLogic
   error: string | null
-  agents: ReturnType<typeof useAppLogicHook>['agents']
-  currentAgent: ReturnType<typeof useAppLogicHook>['currentAgent']
-  diagnostics: ReturnType<typeof useAppLogicHook>['diagnostics']
-  diagnosticsOpen: ReturnType<typeof useAppLogicHook>['diagnosticsOpen']
-  sidebarOpen: ReturnType<typeof useAppLogicHook>['sidebarOpen']
+  agents: UseApp['agents']
+  currentAgent: UseApp['currentAgent']
+  diagnostics: UseApp['diagnostics']
+  diagnosticsOpen: UseApp['diagnosticsOpen']
+  sidebarOpen: UseApp['sidebarOpen']
   chatMode: ChatMode
   onSelectMode: (mode: ChatMode) => void
-  modelState: ReturnType<typeof useAppLogicHook>['modelState']
-  thinkLevel: ReturnType<typeof useAppLogicHook>['thinkLevel']
-  isProcessing: ReturnType<typeof useAppLogicHook>['isProcessing']
-  processingSessions: ReturnType<typeof useAppLogicHook>['processingSessions']
-  sessions: ReturnType<typeof useAppLogicHook>['sessions']
-  currentSessionKey: ReturnType<typeof useAppLogicHook>['currentSessionKey']
-  parentSessionKey: ReturnType<typeof useAppLogicHook>['parentSessionKey']
-  messages: ReturnType<typeof useAppLogicHook>['messages']
-  approvalRequest: ReturnType<typeof useAppLogicHook>['approvalRequest']
-  approvalResult: ReturnType<typeof useAppLogicHook>['approvalResult']
-  pendingAttachments: ReturnType<typeof useAppLogicHook>['pendingAttachments']
-  toolStatus: ReturnType<typeof useAppLogicHook>['toolStatus']
-  groups: ReturnType<typeof useAppLogicHook>['groups']
+  modelState: UseApp['modelState']
+  thinkLevel: UseApp['thinkLevel']
+  isProcessing: UseApp['isProcessing']
+  processingSessions: UseApp['processingSessions']
+  sessions: UseApp['sessions']
+  currentSessionKey: UseApp['currentSessionKey']
+  parentSessionKey: UseApp['parentSessionKey']
+  approvalRequest: UseApp['approvalRequest']
+  approvalResult: UseApp['approvalResult']
+  pendingAttachments: UseApp['pendingAttachments']
+  groups: UseApp['groups']
   groupsEnabled: boolean
-  typingIndicator: ReturnType<typeof useAppLogicHook>['typingIndicator']
-  sendTyping: ReturnType<typeof useAppLogicHook>['sendTyping']
+  sendTyping: UseApp['sendTyping']
 
   // Handlers from useAppLogic
-  handleEvent: ReturnType<typeof useAppLogicHook>['handleEvent']
-  onSend: ReturnType<typeof useAppLogicHook>['onSend']
+  handleEvent: UseApp['handleEvent']
+  onSend: UseApp['onSend']
   onRetry: (message: import('../lib/types').ChatMessage) => void
-  onApprove: ReturnType<typeof useAppLogicHook>['onApprove']
-  onCancel: ReturnType<typeof useAppLogicHook>['onCancel']
-  onSelectSession: ReturnType<typeof useAppLogicHook>['onSelectSession']
-  onCreateSession: ReturnType<typeof useAppLogicHook>['onCreateSession']
-  createSession: ReturnType<typeof useAppLogicHook>['createSession']
-  onDeleteSession: ReturnType<typeof useAppLogicHook>['onDeleteSession']
-  onClearSession: ReturnType<typeof useAppLogicHook>['onClearSession']
-  onSelectAgent: ReturnType<typeof useAppLogicHook>['onSelectAgent']
-  onSelectModel: ReturnType<typeof useAppLogicHook>['onSelectModel']
-  onSelectThinkLevel: ReturnType<typeof useAppLogicHook>['onSelectThinkLevel']
-  onUploadAttachments: ReturnType<typeof useAppLogicHook>['onUploadAttachments']
-  onAttachmentsChange: ReturnType<typeof useAppLogicHook>['onAttachmentsChange']
-  onLogout: ReturnType<typeof useAppLogicHook>['onLogout']
-  onToggleDiagnostics: ReturnType<typeof useAppLogicHook>['onToggleDiagnostics']
-  onToggleSidebar: ReturnType<typeof useAppLogicHook>['onToggleSidebar']
+  onApprove: UseApp['onApprove']
+  onCancel: UseApp['onCancel']
+  onSelectSession: UseApp['onSelectSession']
+  onCreateSession: UseApp['onCreateSession']
+  createSession: UseApp['createSession']
+  onDeleteSession: UseApp['onDeleteSession']
+  onClearSession: UseApp['onClearSession']
+  onSelectAgent: UseApp['onSelectAgent']
+  onSelectModel: UseApp['onSelectModel']
+  onSelectThinkLevel: UseApp['onSelectThinkLevel']
+  onUploadAttachments: UseApp['onUploadAttachments']
+  onAttachmentsChange: UseApp['onAttachmentsChange']
+  onLogout: UseApp['onLogout']
+  onToggleDiagnostics: UseApp['onToggleDiagnostics']
+  onToggleSidebar: UseApp['onToggleSidebar']
 
   // Pagination
-  loadMore: ReturnType<typeof useAppLogicHook>['loadMore']
-  hasMore: ReturnType<typeof useAppLogicHook>['hasMore']
-  isLoadingMore: ReturnType<typeof useAppLogicHook>['isLoadingMore']
+  loadMore: UseApp['loadMore']
+  hasMore: UseApp['hasMore']
+  isLoadingMore: UseApp['isLoadingMore']
 
   // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
 }
 
+/**
+ * HOT context — perched in a nested Provider so only the consumers that truly
+ * need per-tick streaming data (MessageList, ChatPageContext) subscribe to it.
+ * These fields change on every typewriter tick; keeping them out of the cold
+ * value prevents a re-render of the whole tree on each tick.
+ */
+export type AppStreamingContextValue = {
+  messages: UseApp['messages']
+  toolStatus: UseApp['toolStatus']
+  typingIndicator: UseApp['typingIndicator']
+}
+
 const AppLogicContext = createContext<AppLogicContextValue | null>(null)
+const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
 
 export function AppLogicProvider({ children }: { children: ReactNode }) {
   const { api, apiUrl, session, persistSession } = useAuthContext()
@@ -94,74 +120,142 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
   // Expose the event handler via ref
   eventHandlerRef.current = app.handleEvent
 
-  const value: AppLogicContextValue = {
-    // Connection & socket
-    wsStatus,
-    wsSend,
-    wsClose,
+  // ── COLD value: memoized so cold-only consumers skip re-renders when the
+  //    streaming hot state (messages/toolStatus/typingIndicator) updates.
+  const value = useMemo<AppLogicContextValue>(
+    () => ({
+      // Connection & socket
+      wsStatus,
+      wsSend,
+      wsClose,
 
-    // State from useAppLogic
-    error: app.error,
-    agents: app.agents,
-    currentAgent: app.currentAgent,
-    diagnostics: app.diagnostics,
-    diagnosticsOpen: app.diagnosticsOpen,
-    sidebarOpen: app.sidebarOpen,
-    chatMode: app.chatMode,
-    onSelectMode: app.onSelectMode,
-    modelState: app.modelState,
-    thinkLevel: app.thinkLevel,
-    isProcessing: app.isProcessing,
-    processingSessions: app.processingSessions,
-    sessions: app.sessions,
-    currentSessionKey: app.currentSessionKey,
-    parentSessionKey: app.parentSessionKey,
+      // State from useAppLogic
+      error: app.error,
+      agents: app.agents,
+      currentAgent: app.currentAgent,
+      diagnostics: app.diagnostics,
+      diagnosticsOpen: app.diagnosticsOpen,
+      sidebarOpen: app.sidebarOpen,
+      chatMode: app.chatMode,
+      onSelectMode: app.onSelectMode,
+      modelState: app.modelState,
+      thinkLevel: app.thinkLevel,
+      isProcessing: app.isProcessing,
+      processingSessions: app.processingSessions,
+      sessions: app.sessions,
+      currentSessionKey: app.currentSessionKey,
+      parentSessionKey: app.parentSessionKey,
+      approvalRequest: app.approvalRequest,
+      approvalResult: app.approvalResult,
+      pendingAttachments: app.pendingAttachments,
+      groups: app.groups,
+      groupsEnabled: app.groupsEnabled,
+      sendTyping: app.sendTyping,
+
+      // Handlers from useAppLogic
+      handleEvent: app.handleEvent,
+      onSend: app.onSend,
+      onRetry: app.retryMessage,
+      onApprove: app.onApprove,
+      onCancel: app.onCancel,
+      onSelectSession: app.onSelectSession,
+      onCreateSession: app.onCreateSession,
+      createSession: app.createSession,
+      onDeleteSession: app.onDeleteSession,
+      onClearSession: app.onClearSession,
+      onSelectAgent: app.onSelectAgent,
+      onSelectModel: app.onSelectModel,
+      onSelectThinkLevel: app.onSelectThinkLevel,
+      onUploadAttachments: app.onUploadAttachments,
+      onAttachmentsChange: app.onAttachmentsChange,
+      onLogout: app.onLogout,
+      onToggleDiagnostics: app.onToggleDiagnostics,
+      onToggleSidebar: app.onToggleSidebar,
+
+      // Pagination
+      loadMore: app.loadMore,
+      hasMore: app.hasMore,
+      isLoadingMore: app.isLoadingMore,
+
+      // Ref for internal wiring
+      eventHandlerRef,
+    }),
+    [
+      wsStatus,
+      wsSend,
+      wsClose,
+      app.error,
+      app.agents,
+      app.currentAgent,
+      app.diagnostics,
+      app.diagnosticsOpen,
+      app.sidebarOpen,
+      app.chatMode,
+      app.onSelectMode,
+      app.modelState,
+      app.thinkLevel,
+      app.isProcessing,
+      app.processingSessions,
+      app.sessions,
+      app.currentSessionKey,
+      app.parentSessionKey,
+      app.approvalRequest,
+      app.approvalResult,
+      app.pendingAttachments,
+      app.groups,
+      app.groupsEnabled,
+      app.sendTyping,
+      app.handleEvent,
+      app.onSend,
+      app.retryMessage,
+      app.onApprove,
+      app.onCancel,
+      app.onSelectSession,
+      app.onCreateSession,
+      app.createSession,
+      app.onDeleteSession,
+      app.onClearSession,
+      app.onSelectAgent,
+      app.onSelectModel,
+      app.onSelectThinkLevel,
+      app.onUploadAttachments,
+      app.onAttachmentsChange,
+      app.onLogout,
+      app.onToggleDiagnostics,
+      app.onToggleSidebar,
+      app.loadMore,
+      app.hasMore,
+      app.isLoadingMore,
+    ],
+  )
+
+  // ── HOT value: streaming fields only. Its identity changes every tick, but
+  //    only MessageList & ChatPageContext subscribe to it.
+  const streamingValue: AppStreamingContextValue = {
     messages: app.messages,
-    approvalRequest: app.approvalRequest,
-    approvalResult: app.approvalResult,
-    pendingAttachments: app.pendingAttachments,
     toolStatus: app.toolStatus,
-    groups: app.groups,
-    groupsEnabled: app.groupsEnabled,
     typingIndicator: app.typingIndicator,
-    sendTyping: app.sendTyping,
-
-    // Handlers from useAppLogic
-    handleEvent: app.handleEvent,
-    onSend: app.onSend,
-    onRetry: app.retryMessage,
-    onApprove: app.onApprove,
-    onCancel: app.onCancel,
-    onSelectSession: app.onSelectSession,
-    onCreateSession: app.onCreateSession,
-    createSession: app.createSession,
-    onDeleteSession: app.onDeleteSession,
-    onClearSession: app.onClearSession,
-    onSelectAgent: app.onSelectAgent,
-    onSelectModel: app.onSelectModel,
-    onSelectThinkLevel: app.onSelectThinkLevel,
-    onUploadAttachments: app.onUploadAttachments,
-    onAttachmentsChange: app.onAttachmentsChange,
-    onLogout: app.onLogout,
-    onToggleDiagnostics: app.onToggleDiagnostics,
-    onToggleSidebar: app.onToggleSidebar,
-
-    // Pagination
-    loadMore: app.loadMore,
-    hasMore: app.hasMore,
-    isLoadingMore: app.isLoadingMore,
-
-    // Ref for internal wiring
-    eventHandlerRef,
   }
 
-  return <AppLogicContext.Provider value={value}>{children}</AppLogicContext.Provider>
+  return (
+    <AppLogicContext.Provider value={value}>
+      <AppStreamingContext.Provider value={streamingValue}>{children}</AppStreamingContext.Provider>
+    </AppLogicContext.Provider>
+  )
 }
 
 export function useAppLogicContext(): AppLogicContextValue {
   const context = useContext(AppLogicContext)
   if (!context) {
     throw new Error('useAppLogicContext must be used within an AppLogicProvider')
+  }
+  return context
+}
+
+export function useAppStreamingContext(): AppStreamingContextValue {
+  const context = useContext(AppStreamingContext)
+  if (!context) {
+    throw new Error('useAppStreamingContext must be used within an AppLogicProvider')
   }
   return context
 }

@@ -267,6 +267,11 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 		sessionKey = sk
 	}
 
+	// If a session_key is provided, the job is inherently session-scoped.
+	if sessionKey != "" && scope == "global" {
+		scope = "session"
+	}
+
 	// Validate session scope requirements
 	if scope == "session" && sessionKey == "" {
 		return ErrorResult("session_key is required for session-scoped jobs")
@@ -377,8 +382,11 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 
 	// Determine the session key to use for processing and notification.
 	// Session-scoped jobs use their stored session key; global jobs use a
-	// synthetic key derived from the job ID.
-	isSessionScoped := job.Scope == "session" && job.Payload.SessionKey != ""
+	// synthetic key derived from the job ID.  A job is treated as
+	// session-scoped when it carries a SessionKey — the explicit scope
+	// field is a secondary indicator (legacy jobs may have scope="" but
+	// still carry a session key).
+	isSessionScoped := job.Payload.SessionKey != ""
 	effectiveSessionKey := job.Payload.SessionKey
 	if effectiveSessionKey == "" {
 		effectiveSessionKey = fmt.Sprintf("cron-%s", job.ID)

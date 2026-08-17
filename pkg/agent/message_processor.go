@@ -504,7 +504,7 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 
 	// Spawn the subagent (asynchronous; the subagent keeps running even if the
 	// caller finishes first, and the callback publishes the result to the chat).
-	taskID, err := subagentManager.SpawnWithOptions(
+	spawnResult, err := subagentManager.SpawnWithOptions(
 		ctx,
 		spawnConfig.Task,
 		spawnConfig.Label,
@@ -517,6 +517,13 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 
 	if err != nil {
 		return "", fmt.Errorf("failed to spawn subagent: %w", err)
+	}
+
+	// Extract the actual task ID (e.g. "subagent-3") from the human-readable
+	// spawn result (e.g. "Spawned subagent task subagent-3 ('...') for task: ...").
+	taskID := tools.ExtractSpawnTaskID(spawnResult)
+	if taskID == "" {
+		return spawnResult, nil // fallback: return the spawn message as-is
 	}
 
 	// Wait for the subagent to reach a terminal state so the cron job can
@@ -535,7 +542,7 @@ func (mp *messageProcessorImpl) handleSystemSpawn(ctx context.Context, content, 
 
 	task, found := subagentManager.GetTask(taskID)
 	if !found {
-		return "", fmt.Errorf("scheduled task %s not found", taskID)
+		return "", fmt.Errorf("scheduled task %s not found after spawn", taskID)
 	}
 
 	switch task.Status {

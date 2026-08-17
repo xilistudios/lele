@@ -10,11 +10,17 @@ export { computeAssistantInsertIndex }
 
 // ── Animation tuning ────────────────────────────────────────────────────────
 
-// One tick of the shared animation loop. ~60fps.
-const TICK_MS = 16
+// One tick of the shared animation loop. The tick drives a full UI update of
+// every consumer of the streaming state, so a lower frame rate dramatically
+// cuts re-render overhead. CHARS_PER_TICK is raised together so the *perceived*
+// typewriter speed (chars/sec = CHARS_PER_TICK / TICK_MS) stays constant: with
+// 4 chars per 32ms ≈ 125 chars/s, same as the old 2 per 16ms, but at ~30fps
+// instead of ~60fps. React 18 batches state updates, so slower frames don't
+// make the rendered text feel stuck.
+const TICK_MS = 32
 
 // Base characters rendered per message per tick (the typewriter pace).
-const CHARS_PER_TICK = 2
+const CHARS_PER_TICK = 4
 
 // When a message falls behind (e.g. the tab was backgrounded and ticks were
 // throttled), the per-tick budget grows proportionally so the backlog drains

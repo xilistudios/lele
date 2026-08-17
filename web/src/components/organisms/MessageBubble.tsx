@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   isDiffStatLine,
   isFileDiffRow,
@@ -54,7 +54,7 @@ type Props = {
   onRetry?: (message: ChatMessage) => void
 }
 
-export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl, onRetry }: Props) {
+function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRetry }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -419,3 +419,18 @@ export function MessageBubble({ message, isLast, onNavigateToSession, apiUrl, on
     </div>
   )
 }
+
+/**
+ * Memoized export. During streaming, the shared typewriter tick updates only
+ * the messages being appended to (those get fresh ChatMessage objects); every
+ * other visible bubble keeps the SAME object reference across ticks (the
+ * queue's `.map` returns unchanged refs for untouched messages). Shallow memo
+ * thus short-circuits re-rendering of every non-updating bubble each tick —
+ * previously ALL visible bubbles re-rendered, re-parsing Markdown and diff
+ * rows even though nothing changed for them.
+ *
+ * `onNavigateToSession`/`onRetry` are stable useCallback refs in MessageList,
+ * so they don't defeat the memo. `isLast` only flips when the message at the
+ * tail changes, which is exactly when we do want a re-render.
+ */
+export const MessageBubble = memo(MessageBubbleInner)
