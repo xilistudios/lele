@@ -723,6 +723,24 @@ func (sm *SessionManager) LoadEvictedMessages(key string) int {
 	session.lastPersistedSeq = len(loaded) - 1
 	sm.touchSession(key)
 
+	// CRITICAL: restore the invariant `seq = firstInMemorySeq + sliceIndex`.
+	// The evicted rows loaded back above may have gaps (PruneExcluded
+	// physically deletes the oldest excluded rows once a session exceeds
+	// maxStoredMessages), so slice index i no longer maps to seq i. Without a
+	// rebase, every subsequent save (saveExcludedRangeUnlocked, streaming
+	// updates, incremental appends) computes seqs via seqForIndex and writes
+	// content onto the WRONG rows — shifting JSON blobs relative to the role
+	// column and corrupting the persisted history. A full rewrite re-numbers
+	// all rows contiguously from 0, healing any gaps. saveFullUnlocked sees
+	// firstInMemorySeq == 0 and rewrites purely from the (now complete)
+	// in-memory slice.
+	if err := sm.saveFullUnlocked(key); err != nil {
+		logger.WarnCF("session", "LoadEvictedMessages rebase save failed; seqs may be misaligned until next full rewrite", map[string]interface{}{
+			"session_key": key,
+			"error":       err.Error(),
+		})
+	}
+
 	logger.InfoCF("session", "Loaded evicted messages back into memory", map[string]interface{}{
 		"session_key": key,
 		"loaded":      len(evictedJSONs),
