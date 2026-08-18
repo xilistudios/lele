@@ -323,6 +323,40 @@ func (r *SessionRepo) UpdateMessage(sessionKey string, seq int, role, messageJSO
 	return nil
 }
 
+// UpdateMessages updates a batch of existing messages in-place in a single
+// transaction (used for streaming finalization where tool_calls arrive after
+// the partial content was already persisted).
+func (r *SessionRepo) UpdateMessages(sessionKey string, messages []MessageRow) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx for update messages %q: %w", sessionKey, err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	stmt, err := tx.Prepare(
+		`UPDATE session_messages SET role = ?, message = ?, excluded = ?
+		 WHERE session_key = ? AND seq = ?`,
+	)
+	if err != nil {
+		return fmt.Errorf("prepare update messages %q: %w", sessionKey, err)
+	}
+	defer stmt.Close()
+
+	for _, m := range messages {
+		exclInt := 0
+		if m.Excluded {
+			exclInt = 1
+		}
+		if _, err := stmt.Exec(m.Role, m.JSON, exclInt, sessionKey, m.Seq); err != nil {
+			return fmt.Errorf("update message %q seq=%d: %w", sessionKey, m.Seq, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // UpdateMessagesExcluded updates the excluded flag for a range of messages.
 // Used by ExcludeOldMessagesFromContext.
 func (r *SessionRepo) UpdateMessagesExcluded(sessionKey string, fromSeq, toSeq int, excluded bool) error {

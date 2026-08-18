@@ -35,7 +35,7 @@ type Session struct {
 	lastPersistedSeq   int                 // last message seq persisted to SQLite (-1 = none)
 	metaDirty          bool                // metadata changed since last save (needs UpsertSession)
 	msgsAppended       int                 // messages appended since lastPersistedSeq (needs InsertMessage)
-	msgsModified       bool                // existing messages modified in-place, e.g. streaming (needs UpdateMessage)
+	modifiedFrom       int                 // 1 + lowest in-memory index modified in-place since last save (0 = none; needs UpdateMessage)
 	excludedRange      [2]int              // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
 	lastMsgDeleted     bool                // last message was removed (needs DeleteLastMessage)
 	// firstInMemorySeq is the SQLite seq of in-memory slice element 0.
@@ -568,7 +568,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			msg.Streaming = false
 			*lastMsg = msg
 			session.Updated = time.Now()
-			session.msgsModified = true // in-place update, not a new append
+			session.markModified(len(session.Messages) - 1) // in-place update, not a new append
 			return
 		}
 	}
@@ -1484,9 +1484,23 @@ func sessionMetaFromSession(s *Session) store.SessionMeta {
 func (s *Session) clearDirtyFlags() {
 	s.metaDirty = false
 	s.msgsAppended = 0
-	s.msgsModified = false
+	s.modifiedFrom = 0
 	s.excludedRange = [2]int{}
 	s.lastMsgDeleted = false
+}
+
+// markModified records that the in-memory message at idx was changed in-place
+// (e.g. streaming chunks or the final replacement carrying tool_calls). It
+// keeps the LOWEST modified index (stored 1-based so 0 means "none") so an
+// incremental save rewrites every stale row — not just the last message,
+// which may already have been superseded by appended tool results.
+func (s *Session) markModified(idx int) {
+	if idx < 0 {
+		return
+	}
+	if s.modifiedFrom == 0 || idx+1 < s.modifiedFrom {
+		s.modifiedFrom = idx + 1
+	}
 }
 
 // saveMetaOnlyUnlocked persists only session metadata (no message rewrite).
@@ -1639,24 +1653,35 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 		})
 	}
 
-	// Build update row for modified message (streaming)
-	var updateRow *store.MessageRow
-	var updateSeq int
-	if session.msgsModified && len(session.Messages) > 0 {
-		lastIdx := len(session.Messages) - 1
-		if lastIdx < startSeq {
-			msg := session.Messages[lastIdx]
-			msgJSON, mErr := json.Marshal(msg)
-			if mErr != nil {
-				return fmt.Errorf("marshal message %d: %w", lastIdx, mErr)
+	// Build update rows for every in-place-modified message in the already
+	// persisted region [modifiedFrom-1 .. startSeq-1]. The old code only
+	// updated the LAST message, which silently dropped the final assistant
+	// replacement (with tool_calls) whenever tool results had been appended
+	// after it — leaving a stale streaming row in SQLite.
+	var updateRows []store.MessageRow
+	if session.modifiedFrom > 0 {
+		fromIdx := session.modifiedFrom - 1
+		if fromIdx > len(session.Messages)-1 {
+			fromIdx = len(session.Messages) // index vanished (e.g. message deleted); nothing to update
+		}
+		if fromIdx < startSeq {
+			endIdx := startSeq - 1
+			if endIdx > len(session.Messages)-1 {
+				endIdx = len(session.Messages) - 1
 			}
-			updateRow = &store.MessageRow{
-				Seq:      session.seqForIndex(lastIdx),
-				Role:     msg.Role,
-				JSON:     string(msgJSON),
-				Excluded: msg.ExcludeFromContext,
+			for i := fromIdx; i <= endIdx; i++ {
+				msg := session.Messages[i]
+				msgJSON, mErr := json.Marshal(msg)
+				if mErr != nil {
+					return fmt.Errorf("marshal message %d: %w", i, mErr)
+				}
+				updateRows = append(updateRows, store.MessageRow{
+					Seq:      session.seqForIndex(i),
+					Role:     msg.Role,
+					JSON:     string(msgJSON),
+					Excluded: msg.ExcludeFromContext,
+				})
 			}
-			updateSeq = session.seqForIndex(lastIdx)
 		}
 	}
 
@@ -1666,8 +1691,8 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 	if err == nil && len(newRows) > 0 {
 		err = repo.InsertMessages(key, newRows)
 	}
-	if err == nil && updateRow != nil {
-		err = repo.UpdateMessage(key, updateSeq, updateRow.Role, updateRow.JSON, updateRow.Excluded)
+	if err == nil && len(updateRows) > 0 {
+		err = repo.UpdateMessages(key, updateRows)
 	}
 	sm.mu.Lock()
 
@@ -1676,7 +1701,13 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1
-	session.clearDirtyFlags()
+	// Only clear what this path persisted. excludedRange/lastMsgDeleted are
+	// owned by their own save paths — wiping them here (the old
+	// clearDirtyFlags()) could drop pending work when maybeFlushStream runs
+	// saveIncrementalUnlocked directly.
+	session.msgsAppended = 0
+	session.modifiedFrom = 0
+	session.metaDirty = false
 	return nil
 }
 
@@ -1707,7 +1738,12 @@ func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1
-	session.clearDirtyFlags()
+	// Only clear what this path persisted. If the deleted message was the
+	// modified one, its index now lies past the end of the slice and the
+	// incremental update loop safely skips it; otherwise a pending
+	// modification must still be persisted by a chained incremental save.
+	session.lastMsgDeleted = false
+	session.metaDirty = false
 	return nil
 }
 
@@ -1756,7 +1792,12 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 		return fmt.Errorf("excluded-range save %q: %w", key, err)
 	}
 
-	session.clearDirtyFlags()
+	// Only clear what this path persisted. Appended/modified messages outside
+	// the excluded range still need an incremental save — do NOT wipe them here
+	// (the old clearDirtyFlags() silently dropped a pending streaming
+	// finalization when compaction ran in the same Save call).
+	session.excludedRange = [2]int{}
+	session.metaDirty = false
 	return nil
 }
 
@@ -1787,16 +1828,25 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 
 	// Targeted DELETE: last message was removed
 	if session.lastMsgDeleted {
-		return sm.saveDeleteLastUnlocked(key)
+		if err := sm.saveDeleteLastUnlocked(key); err != nil {
+			return err
+		}
+		// Fall through: a pending in-place modification on an earlier
+		// message may still need persisting.
 	}
 
 	// Targeted UPDATE: excluded flag changed on a range
 	if session.excludedRange[1] > session.excludedRange[0] {
-		return sm.saveExcludedRangeUnlocked(key)
+		if err := sm.saveExcludedRangeUnlocked(key); err != nil {
+			return err
+		}
+		// Fall through: appended/modified messages outside the excluded
+		// range may still need persisting (e.g. a streaming finalization
+		// that happened in the same Save call as compaction).
 	}
 
 	// Incremental: new messages appended or existing modified
-	if session.msgsAppended > 0 || session.msgsModified {
+	if session.msgsAppended > 0 || session.modifiedFrom > 0 {
 		return sm.saveIncrementalUnlocked(key)
 	}
 
@@ -1836,7 +1886,7 @@ func (sm *SessionManager) AppendAssistantChunk(key, chunk string) {
 	msg.Content += chunk
 	session.Updated = time.Now()
 	session.hadStreamedContent = true
-	session.msgsModified = true
+	session.markModified(len(session.Messages) - 1)
 
 	sm.maybeFlushStream(key)
 }
@@ -1857,7 +1907,7 @@ func (sm *SessionManager) AppendReasoningChunk(key, chunk string) {
 	msg.ReasoningContent += chunk
 	session.Updated = time.Now()
 	session.hadStreamedContent = true
-	session.msgsModified = true
+	session.markModified(len(session.Messages) - 1)
 
 	sm.maybeFlushStream(key)
 }
