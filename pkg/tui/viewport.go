@@ -460,9 +460,9 @@ func (m *Model) buildRenderedHistory() []string {
 func (m *Model) renderApprovalPrompt() string {
 	var sb strings.Builder
 	sb.WriteString("⚠️  " + i18n.T("tui.approvalRequired") + "\n\n")
-	sb.WriteString(fmt.Sprintf("%s\n", m.pendingApprovalCmd))
+	sb.WriteString(fmt.Sprintf("%s\n", sanitizeDisplayText(m.pendingApprovalCmd)))
 	if m.pendingApprovalReason != "" {
-		sb.WriteString(fmt.Sprintf("\n%s: %s\n", i18n.T("tui.approvalReason"), m.pendingApprovalReason))
+		sb.WriteString(fmt.Sprintf("\n%s: %s\n", i18n.T("tui.approvalReason"), sanitizeDisplayText(m.pendingApprovalReason)))
 	}
 	sb.WriteString(fmt.Sprintf("\n[y] %s  [n] %s", i18n.T("tui.approvalApprove"), i18n.T("tui.approvalReject")))
 	return ApprovalBox.Render(sb.String()) + "\n\n"

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/keyring"
 )
@@ -185,6 +186,34 @@ func TestShellTool_OutputTruncation(t *testing.T) {
 	// Should have truncation message or be truncated
 	if len(result.ForLLM) > 15000 {
 		t.Errorf("Expected output to be truncated, got length: %d", len(result.ForLLM))
+	}
+}
+
+// TestShellTool_TruncationKeepsValidUTF8 ensures truncation backs off to a UTF-8
+// rune boundary so multi-byte characters are never split in the middle.
+func TestShellTool_TruncationKeepsValidUTF8(t *testing.T) {
+	tool := NewExecTool("", false)
+
+	ctx := context.Background()
+	// Emit >10000 bytes of multibyte UTF-8 ("café" = 5 bytes each). The cut at
+	// byte 10000 will likely land mid-rune; the fix must back off to a boundary.
+	args := map[string]interface{}{
+		"command": "yes 'café' | head -c 20000",
+	}
+
+	result := tool.Execute(ctx, args)
+
+	// Ensure truncation actually happened (as a sanity check of the harness).
+	if len(result.ForLLM) <= 10000 {
+		t.Errorf("Expected output to be truncated (>10000 bytes), got length: %d", len(result.ForLLM))
+	}
+
+	// ForLLM and ForUser should both be valid UTF-8 after truncation.
+	if !utf8.ValidString(result.ForLLM) {
+		t.Errorf("ForLLM output is not valid UTF-8 after truncation: %q", result.ForLLM)
+	}
+	if !utf8.ValidString(result.ForUser) {
+		t.Errorf("ForUser output is not valid UTF-8 after truncation: %q", result.ForUser)
 	}
 }
 
