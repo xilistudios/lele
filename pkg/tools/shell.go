@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
@@ -396,7 +397,12 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	maxLen := 10000
 	if len(output) > maxLen {
-		output = output[:maxLen] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-maxLen)
+		cut := maxLen
+		// Back off to a UTF-8 rune boundary so we never split a multi-byte char.
+		for cut > 0 && !utf8.RuneStart(output[cut]) {
+			cut--
+		}
+		output = output[:cut] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-cut)
 	}
 
 	// If feedback was sent and command completed, optionally send completion message

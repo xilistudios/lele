@@ -66,6 +66,16 @@ func wrapText(text string, limit int) string {
 	return strings.Join(wrappedLines, "\n")
 }
 
+// truncateRunes truncates s to at most n runes without splitting multi-byte
+// UTF-8 characters. It never adds an ellipsis; callers append their own.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
 func formatToolCallArgs(tc providers.ToolCall) string {
 	// Try structured arguments first
 	if tc.Arguments != nil {
@@ -73,12 +83,12 @@ func formatToolCallArgs(tc providers.ToolCall) string {
 		for k, v := range tc.Arguments {
 			val := fmt.Sprintf("%v", v)
 			if len(val) > 120 {
-				val = val[:120] + "…"
+				val = truncateRunes(val, 120) + "…"
 			}
 			parts = append(parts, fmt.Sprintf("%s: %s", k, val))
 		}
 		sort.Strings(parts)
-		return strings.Join(parts, "  ")
+		return sanitizeDisplayText(strings.Join(parts, "  "))
 	}
 	// Try function.arguments (JSON string)
 	if tc.Function != nil && tc.Function.Arguments != "" {
@@ -88,19 +98,19 @@ func formatToolCallArgs(tc providers.ToolCall) string {
 			for k, v := range args {
 				val := fmt.Sprintf("%v", v)
 				if len(val) > 120 {
-					val = val[:120] + "…"
+					val = truncateRunes(val, 120) + "…"
 				}
 				parts = append(parts, fmt.Sprintf("%s: %s", k, val))
 			}
 			sort.Strings(parts)
-			return strings.Join(parts, "  ")
+			return sanitizeDisplayText(strings.Join(parts, "  "))
 		}
 		// Fallback: show raw JSON
 		raw := tc.Function.Arguments
 		if len(raw) > 200 {
-			raw = raw[:200] + "…"
+			raw = truncateRunes(raw, 200) + "…"
 		}
-		return raw
+		return sanitizeDisplayText(raw)
 	}
 	return ""
 }
@@ -129,12 +139,12 @@ func formatToolCallArgsCompact(tc providers.ToolCall) string {
 			// Flatten newlines for compact display
 			val = strings.ReplaceAll(val, "\n", " ")
 			if len(val) > 80 {
-				val = val[:80] + "…"
+				val = truncateRunes(val, 80) + "…"
 			}
 			parts = append(parts, fmt.Sprintf("%s=%s", k, val))
 		}
 		sort.Strings(parts)
-		return strings.Join(parts, ", ")
+		return sanitizeDisplayText(strings.Join(parts, ", "))
 	}
 
 	args := extractToolCallArgs(tc)
@@ -145,9 +155,9 @@ func formatToolCallArgsCompact(tc providers.ToolCall) string {
 	if tc.Function != nil && tc.Function.Arguments != "" {
 		raw := tc.Function.Arguments
 		if len(raw) > 120 {
-			raw = raw[:120] + "…"
+			raw = truncateRunes(raw, 120) + "…"
 		}
-		return raw
+		return sanitizeDisplayText(raw)
 	}
 	return ""
 }
@@ -191,7 +201,7 @@ func truncateToolResult(content string, maxLen int) string {
 	// Flatten and truncate
 	summary = strings.ReplaceAll(summary, "\n", " ")
 	if len(summary) > maxLen {
-		summary = summary[:maxLen] + "…"
+		summary = truncateRunes(summary, maxLen) + "…"
 	}
 	return summary
 }

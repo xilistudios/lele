@@ -30,6 +30,13 @@ func TestSanitizeDisplayText_StripsANSI(t *testing.T) {
 		{"form feed", "a\x0cb", "ab"},
 		{"DEL", "a\x7fb", "ab"},
 		{"NUL", "a\x00b", "ab"},
+		{"C1 CSI raw byte", "hello \x9b31m", "hello \uFFFD31m"},
+		{"C1 CSI valid utf8", "hello \u009b31m", "hello 31m"},
+		{"bare ESC", "a\x1bb", "ab"},
+		{"truncated CSI at end", "hello \x1b[3", "hello "},
+		{"truncated SGR at end", "hello \x1b[31", "hello "},
+		{"unterminated OSC at end", "hello \x1b]0;title", "hello "},
+		{"C1 OSC raw byte", "a\x9d0;b", "a\uFFFD0;b"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,9 +53,10 @@ func TestSanitizeDisplayText_PreservesReadable(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"newline and tab", "a\tb\nc", "a\tb\nc"},
+		{"newline and tab", "a\tb\nc", "a    b\nc"},
 		{"utf8", "café 🦞", "café 🦞"},
 		{"plain text", "hello world", "hello world"},
+		{"invalid utf8 replaced", "bad\xff\xfe utf8", "bad\uFFFD utf8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
