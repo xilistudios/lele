@@ -24,7 +24,7 @@ func NewSecretTool(svc *keyring.Service) *SecretTool {
 func (t *SecretTool) Name() string { return "secret" }
 
 func (t *SecretTool) Description() string {
-	return "Access stored secrets by name. Use action 'list' to see available secret names and descriptions (values are never shown in the list), or 'get' with a name to retrieve a secret value for use in API calls or commands. Secret access is scoped per agent and audited."
+	return "Access stored secrets by name. Use action 'list' to see available secret names and descriptions (values are never shown in the list), or 'get' with a name to retrieve a secret value for use in API calls or commands. Secret access is scoped per agent and audited. For exec commands, use {{SECRET:name}} placeholders to inject secrets safely without exposing values in chat history."
 }
 
 func (t *SecretTool) Parameters() map[string]interface{} {
@@ -71,6 +71,16 @@ func (t *SecretTool) Execute(ctx context.Context, args map[string]interface{}) *
 	}
 }
 
+// maskSecretValue returns a masked version of a secret value showing only
+// the first 3 characters followed by "****". If the value is 3 characters
+// or shorter, only "****" is returned.
+func maskSecretValue(value string) string {
+	if len(value) <= 3 {
+		return "****"
+	}
+	return value[:3] + "****"
+}
+
 func (t *SecretTool) list(agentID string) *ToolResult {
 	secrets, err := t.svc.ListForAgent(agentID)
 	if err != nil {
@@ -95,7 +105,11 @@ func (t *SecretTool) list(agentID string) *ToolResult {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\nUse action 'get' with a name to retrieve a value.")
+	b.WriteString("\n💡 To use a secret in shell commands safely (value never exposed to chat history):\n")
+	b.WriteString("   {{SECRET:secret_name}}\n\n")
+	b.WriteString("   Examples:\n")
+	b.WriteString("   curl -H \"Authorization: Bearer {{SECRET:openai.api_key}}\" https://api.openai.com/v1/models\n")
+	b.WriteString("   curl -H \"Authorization: token {{SECRET:github.token}}\" https://api.github.com/user\n")
 
 	res := SilentResult(b.String())
 	res.Metadata = map[string]string{"sensitive": "true"}
@@ -108,8 +122,15 @@ func (t *SecretTool) get(name, agentID, sessionKey string) *ToolResult {
 		return ErrorResult(fmt.Sprintf("failed to get secret %q: %v", name, err))
 	}
 
-	res := NewToolResult(value)
-	res.Silent = true
+	masked := maskSecretValue(value)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Secret %q = %s (masked for security)\n", name, masked)
+	fmt.Fprintf(&b, "To use this secret safely in exec commands (value never exposed to chat history), use the {{SECRET:%s}} placeholder.\n", name)
+	fmt.Fprintf(&b, "Example: curl -H \"Authorization: Bearer {{SECRET:%s}}\" https://api.example.com", name)
+
+	res := NewToolResult(b.String())
+	res.ForUser = fmt.Sprintf("Secret %q: %s\n💡 Use {{SECRET:%s}} in exec commands to inject the value safely.", name, masked, name)
 	res.Metadata = map[string]string{
 		"sensitive":   "true",
 		"secret_name": name,
