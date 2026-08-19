@@ -1983,3 +1983,180 @@ func TestAllTotalMessageCounts_NoStore(t *testing.T) {
 		t.Error("nonexistent session unexpectedly appeared in counts")
 	}
 }
+
+// TestSQLite_LoadEvictedMessages_GapRebase is a regression test for the
+// seq-gap corruption bug. Reproduction steps (mirrors the live incident):
+//
+//  1. Build a session, exclude a prefix, save, evict → boundary = B, the
+//     evicted rows live in SQLite below the boundary.
+//  2. A full rewrite later calls PruneExcluded, physically deleting the
+//     OLDEST excluded rows. ExcludeOldMessagesFromContext never excludes
+//     index 0 (the original user request), so the deleted rows are seqs
+//     1..P, leaving a gap in the middle of the persisted range.
+//  3. LoadEvictedMessages (WebUI history pagination) loads the gapped evicted
+//     rows and prepends them, resetting firstInMemorySeq = 0. WITHOUT a rebase,
+//     slice index i no longer maps to SQLite seq i: the in-memory slice is
+//     contiguous but the persisted rows still carry their gapped seqs.
+//  4. The next incremental/streaming save computes seqs via seqForIndex
+//     (= firstInMemorySeq + i = i) and writes content onto the WRONG rows —
+//     shifting JSON blobs relative to the role column (the observed corruption).
+//
+// The fix: LoadEvictedMessages performs a full rewrite (saveFullUnlocked) that
+// re-numbers all rows contiguously from 0, healing the gap. This test asserts
+// that after LoadEvictedMessages the persisted rows are contiguous from seq 0
+// and that role/JSON stay aligned on every row.
+func TestSQLite_LoadEvictedMessages_GapRebase(t *testing.T) {
+	s := newTestStore(t)
+	sm := NewSessionManager()
+	sm.SetStore(s)
+
+	key := "test:gap-rebase"
+	sm.GetOrCreate(key)
+	for i := 0; i < 10; i++ {
+		role := "user"
+		if i%2 != 0 {
+			role = "assistant"
+		}
+		sm.AddMessage(key, role, fmt.Sprintf("m%d", i))
+	}
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Exclude the first 7 (m0..m6), keep m7..m9 in context; persist + evict.
+	sm.ExcludeOldMessagesFromContext(key, 3)
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("exclude Save failed: %v", err)
+	}
+	if evicted := sm.EvictExcludedMessages(key); evicted != 7 {
+		t.Fatalf("EvictExcludedMessages evicted %d, want 7", evicted)
+	}
+
+	// Simulate the post-full-rewrite pruning that physically deletes the
+	// OLDEST excluded rows, creating a gap. ExcludeOldMessagesFromContext
+	// never excludes index 0 (the original user request), so the excluded rows
+	// are m1..m6 (seq 1..6). keepCount=7 → total 10, so the 3 oldest excluded
+	// rows (seq 1,2,3 = m1,m2,m3) are deleted, leaving a gap at seq 1..3.
+	pruned, pErr := s.Sessions().PruneExcluded(key, 7)
+	if pErr != nil {
+		t.Fatalf("PruneExcluded failed: %v", pErr)
+	}
+	if pruned != 3 {
+		t.Fatalf("PruneExcluded deleted %d rows, want 3", pruned)
+	}
+
+	// loadRaw reads seq + the raw role column + JSON + excluded directly, since
+	// the observed corruption was a role-column vs JSON-role mismatch that the
+	// higher-level MessageRowFull (no Role field) cannot surface.
+	type rawRow struct {
+		Seq      int
+		Role     string
+		JSON     string
+		Excluded bool
+	}
+	loadRaw := func() []rawRow {
+		t.Helper()
+		rowsQ, qErr := s.DB().Query(
+			`SELECT seq, role, message, excluded FROM session_messages WHERE session_key = ? ORDER BY seq ASC`, key)
+		if qErr != nil {
+			t.Fatalf("raw query failed: %v", qErr)
+		}
+		defer rowsQ.Close()
+		var out []rawRow
+		for rowsQ.Next() {
+			var r rawRow
+			if sErr := rowsQ.Scan(&r.Seq, &r.Role, &r.JSON, &r.Excluded); sErr != nil {
+				t.Fatalf("raw scan failed: %v", sErr)
+			}
+			out = append(out, r)
+		}
+		return out
+	}
+
+	// Sanity: rows now occupy seq 0,4,5,6,7,8,9 — m0 (seq 0, never excluded)
+	// survives, then a gap at seq 1..3, then m4..m9. This gap below/around the
+	// eviction boundary (7) is what breaks the seq↔sliceIndex invariant on load.
+	rowsBefore := loadRaw()
+	if len(rowsBefore) != 7 {
+		t.Fatalf("rows before LoadEvictedMessages = %d, want 7", len(rowsBefore))
+	}
+	if rowsBefore[0].Seq != 0 {
+		t.Fatalf("first row seq before load = %d, want 0 (m0 survives)", rowsBefore[0].Seq)
+	}
+	if rowsBefore[1].Seq != 4 {
+		t.Fatalf("second row seq before load = %d, want 4 (gap at seq 1..3 NOT present?)", rowsBefore[1].Seq)
+	}
+
+	// Lazy-load the evicted rows back (the WebUI pagination path). This loads
+	// the 4 rows below the boundary (seq 0,4,5,6 = m0,m4,m5,m6) and prepends
+	// them. With the fix it then triggers a full rewrite (saveFullUnlocked)
+	// that re-bases all rows contiguously to seq 0..6, healing the gap.
+	loaded := sm.LoadEvictedMessages(key)
+	if loaded != 4 {
+		t.Fatalf("LoadEvictedMessages loaded %d, want 4 (rows below boundary: m0,m4,m5,m6)", loaded)
+	}
+
+	// CRITICAL ASSERTION: rows must now be contiguous from seq 0. Without the
+	// rebase they would still sit at seq 0,4,5,6,7,8,9, and the next
+	// incremental/streaming save (seqForIndex = sliceIndex) would write content
+	// onto the WRONG rows — the observed corruption.
+	rowsAfter := loadRaw()
+	if len(rowsAfter) != 7 {
+		t.Fatalf("rows after LoadEvictedMessages = %d, want 7 (no data loss)", len(rowsAfter))
+	}
+	for i, row := range rowsAfter {
+		if row.Seq != i {
+			t.Fatalf("row %d seq = %d, want %d (gap NOT healed — rebase missing)", i, row.Seq, i)
+		}
+		// Role/JSON alignment: the role column must match the role inside the
+		// JSON blob. A shifted write would make these diverge.
+		var msg providers.Message
+		if uerr := json.Unmarshal([]byte(row.JSON), &msg); uerr != nil {
+			t.Fatalf("row %d JSON unmarshal failed: %v", i, uerr)
+		}
+		if row.Role != msg.Role {
+			t.Errorf("row %d role column = %q but JSON role = %q (misaligned write)", i, row.Role, msg.Role)
+		}
+	}
+
+	// Content order must be m0,m4,m5,m6,m7,m8,m9 (the pruned m1,m2,m3 are gone
+	// for good; m0 was folded into the summary but stays as a persisted row).
+	wantContent := []string{"m0", "m4", "m5", "m6", "m7", "m8", "m9"}
+	for i, row := range rowsAfter {
+		var msg providers.Message
+		_ = json.Unmarshal([]byte(row.JSON), &msg)
+		if msg.Content != wantContent[i] {
+			t.Errorf("row %d content = %q, want %q", i, msg.Content, wantContent[i])
+		}
+	}
+
+	// Excluded flags must be preserved by the rebase: m0 (seq 0) was never
+	// excluded; m4,m5,m6 (seq 1,2,3) stay excluded; m7,m8,m9 (seq 4,5,6) stay
+	// in-context. The rebase must NOT resurrect the pruned rows.
+	wantExcluded := []bool{false, true, true, true, false, false, false}
+	for i, row := range rowsAfter {
+		if row.Excluded != wantExcluded[i] {
+			t.Errorf("row %d excluded = %v, want %v", i, row.Excluded, wantExcluded[i])
+		}
+	}
+
+	// Final proof the invariant holds: appending a new message must insert at
+	// seq 7 (firstInMemorySeq 0 + sliceIndex 7), NOT overwrite an existing row.
+	sm.AddMessage(key, "user", "m10")
+	if err := sm.Save(key); err != nil {
+		t.Fatalf("save after append failed: %v", err)
+	}
+	finalRows := loadRaw()
+	if len(finalRows) != 8 {
+		t.Fatalf("rows after append = %d, want 8 (grew by exactly 1, no overwrite)", len(finalRows))
+	}
+	last := finalRows[len(finalRows)-1]
+	if last.Seq != 7 {
+		t.Fatalf("appended row seq = %d, want 7", last.Seq)
+	}
+	var lastMsg providers.Message
+	_ = json.Unmarshal([]byte(last.JSON), &lastMsg)
+	if lastMsg.Content != "m10" || last.Role != "user" {
+		t.Errorf("appended row misaligned: role=%q content=%q, want user/m10", last.Role, lastMsg.Content)
+	}
+}
