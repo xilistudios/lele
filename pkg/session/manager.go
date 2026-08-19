@@ -38,6 +38,12 @@ type Session struct {
 	modifiedFrom       int                 // 1 + lowest in-memory index modified in-place since last save (0 = none; needs UpdateMessage)
 	excludedRange      [2]int              // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
 	lastMsgDeleted     bool                // last message was removed (needs DeleteLastMessage)
+	// deleteFromSeq is the absolute SQLite seq of the message removed by
+	// RemoveLastMessage, captured at deletion time. saveDeleteLastUnlocked
+	// uses it as a watermark (DELETE WHERE seq >= deleteFromSeq) instead of a
+	// position-based "delete max seq", which would race with concurrent
+	// appends that reuse the same seq slot. 0 = no pending delete.
+	deleteFromSeq int
 	// firstInMemorySeq is the SQLite seq of in-memory slice element 0.
 	// 0 = no eviction gap (slice index == seq, legacy behavior).
 	// > 0 = messages with seq < firstInMemorySeq were evicted from memory
@@ -46,6 +52,14 @@ type Session struct {
 	// evictedTotal is the number of messages currently persisted in SQLite but
 	// not present in the in-memory slice (evicted after compaction).
 	evictedTotal int
+	// saveEpoch is bumped on every logical mutation (content or metadata
+	// change). Save paths capture it before releasing the lock for disk I/O
+	// and compare after re-acquiring it; a mismatch means the session was
+	// mutated while the I/O was in flight, so the save is stale and its
+	// post-I/O bookkeeping must be discarded (dirty flags left set) to avoid
+	// losing the concurrent mutation. Bookkeeping-only changes (clearing dirty
+	// flags, advancing lastPersistedSeq) do NOT bump it.
+	saveEpoch uint64
 	// Token tracking
 	InputTokens     int `json:"input_tokens,omitempty"`
 	OutputTokens    int `json:"output_tokens,omitempty"`
@@ -549,6 +563,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
 		session.Name = generateSessionName(msg.Content)
+		session.bumpEpoch()
 	}
 
 	// New user message starts a new turn — clear the streamed content flag
@@ -576,6 +591,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 	session.Messages = append(session.Messages, msg)
 	session.Updated = time.Now()
 	session.msgsAppended++
+	session.bumpEpoch()
 }
 
 func (sm *SessionManager) GetHistory(key string) []providers.Message {
@@ -809,6 +825,7 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 	session.Summary = summary
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -835,6 +852,7 @@ func (sm *SessionManager) SetName(key string, name string) error {
 	session.Name = strings.TrimSpace(name)
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	return sm.saveMetaOnlyUnlocked(key)
@@ -857,6 +875,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 		session.Messages = []providers.Message{}
 		session.Updated = time.Now()
 		session.lastPersistedSeq = -1 // full rewrite: all messages removed
+		session.bumpEpoch()
 		sm.touchSession(key)
 		return
 	}
@@ -868,6 +887,7 @@ func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
 	session.Messages = session.Messages[len(session.Messages)-keepLast:]
 	session.Updated = time.Now()
 	session.lastPersistedSeq = -1 // full rewrite: kept messages re-indexed
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -943,6 +963,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 			// Only change is un-excluding msg 0 — persist that.
 			session.Updated = time.Now()
 			session.excludedRange = [2]int{0, 1}
+			session.bumpEpoch()
 		}
 		return
 	}
@@ -952,6 +973,7 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	}
 	session.Updated = time.Now()
 	session.excludedRange = [2]int{rangeStart, excludeUpTo}
+	session.bumpEpoch()
 }
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.ensureLoaded()
@@ -970,9 +992,15 @@ func (sm *SessionManager) RemoveLastMessage(key string) bool {
 		return false
 	}
 
+	// Capture the absolute seq of the message being removed BEFORE slicing.
+	// The save path uses this as a delete watermark (DELETE WHERE seq >= N)
+	// instead of "delete max seq", which would race with concurrent appends
+	// that reuse the same seq slot.
+	session.deleteFromSeq = session.seqForIndex(len(session.Messages) - 1)
 	session.Messages = session.Messages[:len(session.Messages)-1]
 	session.Updated = time.Now()
 	session.lastMsgDeleted = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 	return true
 }
@@ -1063,6 +1091,7 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	session.Messages = msgs
 	session.Updated = time.Now()
 	session.lastPersistedSeq = -1 // force full rewrite on next save
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -1117,6 +1146,7 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	session.VerboseMode = enabled
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	// Persist immediately
@@ -1173,6 +1203,7 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	session.VerboseLevel = level
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	// Persist immediately
@@ -1220,6 +1251,7 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	session.Model = model
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	// Persist immediately
@@ -1276,6 +1308,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 	session.Mode = mode
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	// Update metadata
@@ -1379,6 +1412,7 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 	session.ThinkingLevel = level
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 
 	return sm.saveMetaOnlyUnlocked(key)
@@ -1426,6 +1460,7 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 	session.OutputTokens += outputTokens
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -1447,6 +1482,7 @@ func (sm *SessionManager) ResetTokenCounts(key string) {
 	session.OutputTokens = 0
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -1474,6 +1510,7 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 	session.CompactionCount++
 	session.Updated = time.Now()
 	session.metaDirty = true
+	session.bumpEpoch()
 	sm.touchSession(key)
 }
 
@@ -1505,6 +1542,7 @@ func (s *Session) clearDirtyFlags() {
 	s.modifiedFrom = 0
 	s.excludedRange = [2]int{}
 	s.lastMsgDeleted = false
+	s.deleteFromSeq = 0
 }
 
 // markModified records that the in-memory message at idx was changed in-place
@@ -1519,6 +1557,15 @@ func (s *Session) markModified(idx int) {
 	if s.modifiedFrom == 0 || idx+1 < s.modifiedFrom {
 		s.modifiedFrom = idx + 1
 	}
+	s.bumpEpoch()
+}
+
+// bumpEpoch advances the save epoch, invalidating any in-flight save whose
+// snapshot predates this mutation. Every logical mutation (message append,
+// in-place edit, deletion, metadata change, eviction-boundary change) must
+// call this — directly or via markModified — while holding sm.mu.
+func (s *Session) bumpEpoch() {
+	s.saveEpoch++
 }
 
 // saveMetaOnlyUnlocked persists only session metadata (no message rewrite).
@@ -1533,12 +1580,20 @@ func (sm *SessionManager) saveMetaOnlyUnlocked(key string) error {
 	}
 
 	meta := sessionMetaFromSession(session)
+	epoch := session.saveEpoch
 	sm.mu.Unlock()
 	err := sm.store.Sessions().UpsertSession(meta)
 	sm.mu.Lock()
 
 	if err != nil {
 		return fmt.Errorf("save session meta %q: %w", key, err)
+	}
+	// Epoch guard: UpsertSession is idempotent, so a stale write is harmless.
+	// But if the session was mutated while the I/O was in flight, skip the
+	// bookkeeping (leave metaDirty set) so the concurrent mutation is
+	// re-persisted by the next Save.
+	if session.saveEpoch != epoch {
+		return nil
 	}
 	session.metaDirty = false
 	return nil
@@ -1598,17 +1653,11 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		}
 	}
 
-	// Bookkeeping must reflect that re-materialized evicted rows are persisted
-	// but still NOT resident in the in-memory slice. The in-memory messages
-	// start at absolute seq len(evictedJSONs); only the rows are renumbered,
-	// not the memory residency.
-	session.lastPersistedSeq = len(session.Messages) - 1
-	session.firstInMemorySeq = len(evictedJSONs)
-
 	meta := sessionMetaFromSession(session)
 
 	// Release lock during I/O
 	pruned := 0
+	epoch := session.saveEpoch
 	sm.mu.Unlock()
 	err = sm.store.Sessions().UpsertSession(meta)
 	if err == nil {
@@ -1623,6 +1672,26 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 		return fmt.Errorf("save session %q to sqlite: %w", key, err)
 	}
 
+	// Epoch guard: ReplaceMessages is destructive (DELETE all + re-insert).
+	// If the session was mutated while the I/O was in flight, the rows we
+	// wrote may be interleaved with the concurrent save's writes in any
+	// order, and the bookkeeping below (firstInMemorySeq, evictedTotal,
+	// clearDirtyFlags) would clobber the concurrent mutation's dirty state.
+	// Force a clean full rewrite from the in-memory source of truth on the
+	// next Save — that heals any I/O-ordering damage.
+	if session.saveEpoch != epoch {
+		session.lastPersistedSeq = -1
+		return nil
+	}
+
+	// Bookkeeping must reflect that re-materialized evicted rows are persisted
+	// but still NOT resident in the in-memory slice. The in-memory messages
+	// start at absolute seq len(evictedJSONs); only the rows are renumbered,
+	// not the memory residency. Set AFTER the I/O + epoch guard: if the
+	// session is mutated mid-flight, the guard above forces a rewrite via
+	// lastPersistedSeq == -1, and pre-setting these fields would defeat it.
+	session.lastPersistedSeq = len(session.Messages) - 1
+	session.firstInMemorySeq = len(evictedJSONs)
 	session.evictedTotal = len(evictedJSONs) - pruned
 	if session.evictedTotal < 0 {
 		session.evictedTotal = 0
@@ -1704,6 +1773,7 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 	}
 
 	// Single lock release for all I/O
+	epoch := session.saveEpoch
 	sm.mu.Unlock()
 	err := repo.UpsertSession(meta)
 	if err == nil && len(newRows) > 0 {
@@ -1716,6 +1786,14 @@ func (sm *SessionManager) saveIncrementalUnlocked(key string) error {
 
 	if err != nil {
 		return fmt.Errorf("incremental save %q: %w", key, err)
+	}
+
+	// Epoch guard: INSERT OR REPLACE / UPDATE are idempotent, so a stale
+	// write is harmless. But if the session was mutated while the I/O was in
+	// flight, skip the bookkeeping (leave dirty flags set) so the concurrent
+	// mutation is re-persisted by the next Save.
+	if session.saveEpoch != epoch {
+		return nil
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1
@@ -1743,16 +1821,32 @@ func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
 
 	meta := sessionMetaFromSession(session)
 	repo := sm.store.Sessions()
+	fromSeq := session.deleteFromSeq
+	epoch := session.saveEpoch
 
 	sm.mu.Unlock()
 	err := repo.UpsertSession(meta)
 	if err == nil {
-		_, err = repo.DeleteLastMessage(key)
+		// Watermark delete (seq >= fromSeq) instead of position-based
+		// DeleteLastMessage. fromSeq was captured at deletion time, so a
+		// concurrent append that reuses the same seq slot is not at risk of
+		// being deleted by a stale "delete max seq" — and the operation is
+		// idempotent (safe to retry).
+		err = repo.DeleteMessagesFrom(key, fromSeq)
 	}
 	sm.mu.Lock()
 
 	if err != nil {
 		return fmt.Errorf("delete-last save %q: %w", key, err)
+	}
+
+	// Epoch guard: the watermark delete is destructive. If the session was
+	// mutated while the I/O was in flight (e.g. a concurrent append reused
+	// the deleted seq slot), the delete may have wiped the new row. Force a
+	// clean full rewrite from the in-memory source of truth on the next Save.
+	if session.saveEpoch != epoch {
+		session.lastPersistedSeq = -1
+		return nil
 	}
 
 	session.lastPersistedSeq = len(session.Messages) - 1
@@ -1761,6 +1855,7 @@ func (sm *SessionManager) saveDeleteLastUnlocked(key string) error {
 	// incremental update loop safely skips it; otherwise a pending
 	// modification must still be persisted by a chained incremental save.
 	session.lastMsgDeleted = false
+	session.deleteFromSeq = 0
 	session.metaDirty = false
 	return nil
 }
@@ -1799,6 +1894,7 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 		})
 	}
 
+	epoch := session.saveEpoch
 	sm.mu.Unlock()
 	err := repo.UpsertSession(meta)
 	if err == nil {
@@ -1808,6 +1904,14 @@ func (sm *SessionManager) saveExcludedRangeUnlocked(key string) error {
 
 	if err != nil {
 		return fmt.Errorf("excluded-range save %q: %w", key, err)
+	}
+
+	// Epoch guard: the excluded-flag UPDATE is idempotent, so a stale write
+	// is harmless. But if the session was mutated while the I/O was in
+	// flight, skip the bookkeeping (leave excludedRange set) so the
+	// concurrent mutation is re-persisted by the next Save.
+	if session.saveEpoch != epoch {
+		return nil
 	}
 
 	// Only clear what this path persisted. Appended/modified messages outside
@@ -1848,6 +1952,14 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	if session.lastMsgDeleted {
 		if err := sm.saveDeleteLastUnlocked(key); err != nil {
 			return err
+		}
+		// saveDeleteLastUnlocked forces a full rewrite when the session was
+		// mutated while its DELETE I/O was in flight (epoch mismatch): the
+		// DELETE may have raced ahead of the concurrent INSERT, so the DB
+		// state is uncertain and only a full rewrite can re-establish it.
+		// lastPersistedSeq == -1 signals that.
+		if session.lastPersistedSeq == -1 {
+			return sm.saveFullUnlocked(key)
 		}
 		// Fall through: a pending in-place modification on an earlier
 		// message may still need persisting.
@@ -2165,6 +2277,7 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	// before it. With the contiguous-prefix model this is exactly `evictUpTo`.
 	session.firstInMemorySeq += evictUpTo
 	session.evictedTotal += evictUpTo
+	session.bumpEpoch()
 	// Persist the new eviction boundary to SQLite so a cold restart restores
 	// firstInMemorySeq and does not re-inflate evicted rows into RAM. The
 	// boundary is stored in session metadata (FirstInMemorySeq); subsequent
