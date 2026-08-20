@@ -39,12 +39,12 @@ type ToolLoopConfig struct {
 	VerboseCallback VerboseCallback
 	SessionRecorder SessionRecorder
 	SessionKey      string
-	Retry           *RetryConfig    // Retry config for LLM calls. nil = no retry.
-	ContextWindow   int             // Max tokens for context. 0 = no compaction.
-	MessageBus      *bus.MessageBus // Optional: publish real-time events to TUI.
-	Channel         string          // Origin channel for events.
-	ChatID          string          // Origin chatID for events (subagent sessionKey).
-	VisionSupported bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
+	Retry           *RetryConfig      // Retry config for LLM calls. nil = no retry.
+	ContextWindow   int               // Max tokens for context. 0 = no compaction.
+	MessageBus      *bus.MessageBus   // Optional: publish real-time events to TUI.
+	Channel         string            // Origin channel for events.
+	ChatID          string            // Origin chatID for events (subagent sessionKey).
+	VisionSupported bool              // Whether the model supports vision. When false, read_image is filtered from tool defs.
 	Redactor        *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
 	// RetryWait optionally overrides the wait function used between
 	// empty-response retries (nil means time.After). Used by tests to
