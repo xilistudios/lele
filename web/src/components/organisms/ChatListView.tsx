@@ -162,8 +162,6 @@ const ChatListItem = memo(function ChatListItem({
                     {t(`chat.kind.${session.kind}`)}
                   </span>
                 )}
-                <span>{t('chat.messageCount', { count: session.message_count })}</span>
-                <span className="h-1 w-1 rounded-full bg-text-tertiary/40" />
                 <span>{formatDateRelative(session.updated, t)}</span>
                 {isProcessing && (
                   <span className="ml-1 inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />

@@ -16,6 +16,10 @@ func (task *SubagentTask) displayLabel() string {
 
 // Delivered returns whether this task's result has been marked as delivered.
 func (task *SubagentTask) Delivered() bool {
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
 	return task.delivered
 }
 

@@ -85,16 +85,22 @@ const (
 	ModalLang
 	ModalSubagents
 	ModalBackgroundExecs
-	ModalProviders      // list of providers
-	ModalProviderDetail // provider detail (edit/delete/add model)
-	ModalAddProvider    // form to add a new provider
-	ModalAddModel       // form to add a new model to a provider
-	ModalCron           // list of cron jobs
-	ModalSecrets        // list of keyring secrets
-	ModalAddSecret      // form to add a new secret
-	ModalSkills         // list of installed skills with actions
-	ModalSkillInstall   // form to enter GitHub repo URL for scanning
-	ModalSkillPicker    // multi-select which skills to install from scanned repo
+	ModalProviders          // list of providers
+	ModalProviderDetail     // provider detail (edit/delete/add model)
+	ModalAddProvider        // form to add a new provider
+	ModalAddModel           // form to add a new model to a provider
+	ModalCron               // list of cron jobs
+	ModalSecrets            // list of keyring secrets
+	ModalAddSecret          // form to add a new secret
+	ModalSkills             // list of installed skills with actions
+	ModalSkillInstall       // form to enter GitHub repo URL for scanning
+	ModalSkillPicker        // multi-select which skills to install from scanned repo
+	ModalSettings           // top-level: Agents / System / Interface
+	ModalSettingsAgents     // agent list + defaults + add
+	ModalSettingsAgentEdit  // detail/edit for one agent (or defaults)
+	ModalSettingsSystem     // system settings list
+	ModalSettingsSystemEdit // form for a system setting group
+	ModalSettingsTUI        // TUI settings list (toggles/values)
 )
 
 type formStep int
@@ -127,6 +133,7 @@ var allCommands = []commandInfo{
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/secrets", description: "Manage secrets (keyring)"},
 	{name: "/skills", description: "Manage agent skills"},
+	{name: "/settings", description: "Open settings"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/goal", description: "Set a persistent goal (status/pause/resume/clear)"},
 	{name: "/quit", description: "Exit TUI"},
@@ -200,6 +207,12 @@ type Model struct {
 	skillsScanRepo    string                  // repo being scanned
 	skillsSelectedMap map[int]bool            // multi-select state for skill picker
 	skillsFeedback    string                  // brief feedback after install/remove/toggle
+
+	// Settings management state
+	settingsSection   string   // current section: "agents", "system", "tui"
+	settingsEditField string   // currently editing field name
+	settingsAgentID   string   // agent ID being edited
+	settingsAgentKeys []string // maps modal items to agent IDs (empty = defaults, "__add__" = new agent)
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

@@ -236,26 +236,24 @@ type HistoryToolCall struct {
 }
 
 type ChatSession struct {
-	Key          string    `json:"key"`
-	Name         string    `json:"name,omitempty"`
-	Mode         string    `json:"mode,omitempty"`
-	Kind         string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
-	Created      time.Time `json:"created"`
-	Updated      time.Time `json:"updated"`
-	MessageCount int       `json:"message_count"`
+	Key     string    `json:"key"`
+	Name    string    `json:"name,omitempty"`
+	Mode    string    `json:"mode,omitempty"`
+	Kind    string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
 }
 
 // SessionKindInfo is a lightweight summary of a persisted session used by
 // the session-history endpoint to surface system sessions (heartbeat, cron,
 // subagents) that are not tied to a native client.
 type SessionKindInfo struct {
-	Key          string
-	Name         string
-	Mode         string
-	Kind         string
-	Created      time.Time
-	Updated      time.Time
-	MessageCount int
+	Key     string
+	Name    string
+	Mode    string
+	Kind    string
+	Created time.Time
+	Updated time.Time
 }
 
 type ChatSessionsResponse struct {
@@ -348,12 +346,13 @@ type SessionSubagentsResponse struct {
 }
 
 type NativeAgentInfo struct {
-	ID        string                  `json:"id"`
-	Name      string                  `json:"name"`
-	Workspace string                  `json:"workspace"`
-	Model     string                  `json:"model"`
-	Default   bool                    `json:"default"`
-	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Workspace   string                  `json:"workspace"`
+	Model       string                  `json:"model"`
+	Default     bool                    `json:"default"`
+	Reasoning   *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type AgentsResponse struct {

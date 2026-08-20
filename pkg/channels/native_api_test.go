@@ -306,18 +306,11 @@ func (m *nativeTestAgentLoop) ListAllSessions() []SessionKindInfo {
 			continue
 		}
 		seen[key] = true
-		count := 0
-		for _, msg := range m.histories[key] {
-			if msg.Role == "user" || msg.Role == "assistant" {
-				count++
-			}
-		}
 		result = append(result, SessionKindInfo{
-			Key:          key,
-			Name:         m.sessionNames[key],
-			Mode:         m.GetSessionMode(key),
-			Kind:         classifySessionKeyKind(key),
-			MessageCount: count,
+			Key:  key,
+			Name: m.sessionNames[key],
+			Mode: m.GetSessionMode(key),
+			Kind: classifySessionKeyKind(key),
 		})
 	}
 	return result
@@ -769,9 +762,6 @@ func TestNativeChannelChatSessionsReturnsTrackedSessionKeys(t *testing.T) {
 	for _, session := range payload.Sessions {
 		if session.Key == trackedSession {
 			found = true
-			if session.MessageCount != 2 {
-				t.Fatalf("message_count = %d, want 2", session.MessageCount)
-			}
 		}
 	}
 
@@ -938,9 +928,6 @@ func TestChatSessions_CountIncludesEvicted(t *testing.T) {
 	for _, session := range payload.Sessions {
 		if session.Key == trackedSession {
 			found = true
-			if session.MessageCount != 4 {
-				t.Fatalf("message_count = %d, want 4 (in-memory 2 + evicted 2)", session.MessageCount)
-			}
 		}
 	}
 	if !found {

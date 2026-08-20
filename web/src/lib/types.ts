@@ -18,6 +18,7 @@ export type GroupsConfig = {
 export type Agent = {
   id: string
   name: string
+  description?: string
   workspace: string
   model: string
   default?: boolean
@@ -43,7 +44,6 @@ export type ChatSession = {
   kind?: SessionKind
   created: string
   updated: string
-  message_count: number
 }
 
 export type ToolInfo = {
@@ -174,6 +174,7 @@ export type EditableAgentConfig = {
   id: string
   default?: boolean
   name?: string
+  description?: string
   workspace?: string
   model?: AgentModelConfig
   skills?: string[]
@@ -937,7 +938,6 @@ export type ClientEvent =
       event: 'messages.catchup'
       data: {
         session_key: string
-        message_count: number
         catchup_count: number
         is_initial: boolean
         messages: Array<{

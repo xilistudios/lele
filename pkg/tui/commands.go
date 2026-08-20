@@ -20,9 +20,6 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/sessions":
 		m.resetModal(ModalSessions)
 		allSessions := m.sessionMgr.ListSessions()
-		// Batch-fetch message counts once (single SQLite query for cold
-		// sessions) instead of calling GetTotalMessageCount per session.
-		msgCounts := m.sessionMgr.AllTotalMessageCounts()
 		for _, s := range allSessions {
 			// Exclude subagent sessions from the session list — they have
 			// their own navigation via /subagents and are not top-level chats.
@@ -41,17 +38,12 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 			if name == "" {
 				name = i18n.T("tui.newChatDefault")
 			}
-			count := msgCounts[s.Key]
 
 			// Check if session is currently processing
 			isProcessing := m.agentLoop.GetProvidable().IsSessionProcessing(s.Key)
 
-			// Format session item with message count
+			// Format session item (with loading indicator if processing)
 			item := name
-			if count > 0 {
-				item = fmt.Sprintf("%s (%d msgs)", name, count)
-			}
-			// Prefix with loading indicator if session is currently processing
 			if isProcessing {
 				item = fmt.Sprintf("[%s] %s", i18n.T("tui.loading"), item)
 			}
@@ -192,6 +184,15 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.skillsScanRepo = ""
 		m.skillsFeedback = ""
 		m.loadSkillsList()
+		return nil
+
+	case "/settings":
+		m.resetModal(ModalSettings)
+		m.modalItems = []string{
+			i18n.T("tui.settings.agents"),
+			i18n.T("tui.settings.system"),
+			i18n.T("tui.settings.interface"),
+		}
 		return nil
 
 	case "/providers":

@@ -50,11 +50,11 @@ export const ChatHeader = memo(function ChatHeader() {
   )
 
   const currentTitle = currentSession
-    ? formatSessionTitle(currentSession.key, currentSession.name, currentSession.message_count)
+    ? formatSessionTitle(currentSession.key, currentSession.name)
     : t('chat.session')
 
   const parentTitle = parentSession
-    ? formatSessionTitle(parentSession.key, parentSession.name, parentSession.message_count)
+    ? formatSessionTitle(parentSession.key, parentSession.name)
     : ''
 
   return (

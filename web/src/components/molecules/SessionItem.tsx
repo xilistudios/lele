@@ -9,7 +9,6 @@ import { Spinner } from '../atoms/Spinner'
 type Props = {
   sessionKey: string
   sessionName?: string
-  messageCount: number
   selected?: boolean
   isProcessing?: boolean
   onSelect: () => void
@@ -21,7 +20,6 @@ type Props = {
 export function SessionItem({
   sessionKey,
   sessionName,
-  messageCount,
   selected = false,
   isProcessing = false,
   onSelect,
@@ -37,7 +35,7 @@ export function SessionItem({
       <button
         onClick={onSelect}
         type="button"
-        title={formatSessionTitle(sessionKey, sessionName, messageCount)}
+        title={formatSessionTitle(sessionKey, sessionName)}
         className={`relative flex w-full items-center justify-center rounded-md p-2 transition-colors ${
           selected
             ? getModeTheme(mode).selectedItem
@@ -79,12 +77,7 @@ export function SessionItem({
       )}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs leading-5">
-          {formatSessionTitle(sessionKey, sessionName, messageCount)}
-        </span>
-        <span className="block text-[10px] text-text-tertiary">
-          {messageCount === 1
-            ? t('chat.messageCount_one', { count: messageCount })
-            : t('chat.messageCount_other', { count: messageCount })}
+          {formatSessionTitle(sessionKey, sessionName)}
         </span>
       </span>
       <button

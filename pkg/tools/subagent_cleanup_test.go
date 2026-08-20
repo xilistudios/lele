@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -34,6 +35,7 @@ func TestCleanupTerminalTasks_EvictOutsideLock(t *testing.T) {
 		Status:           SubagentStatusCompleted,
 		Created:          time.Now().Add(-time.Hour).UnixMilli(),
 		Updated:          time.Now().Add(-time.Hour).UnixMilli(),
+		mu:               &sync.Mutex{},
 	}
 	task.InitDoneChannel()
 	sm.mu.Lock()
@@ -78,6 +80,7 @@ func TestCleanupTerminalTasks_NoCallbackWhenNothingEligible(t *testing.T) {
 		OriginSessionKey: "cli:direct",
 		Status:           SubagentStatusRunning,
 		Updated:          time.Now().Add(-time.Hour).UnixMilli(),
+		mu:               &sync.Mutex{},
 	}
 	running.InitDoneChannel()
 
@@ -87,6 +90,7 @@ func TestCleanupTerminalTasks_NoCallbackWhenNothingEligible(t *testing.T) {
 		OriginSessionKey: "cli:direct",
 		Status:           SubagentStatusCompleted,
 		Updated:          time.Now().UnixMilli(),
+		mu:               &sync.Mutex{},
 	}
 	fresh.InitDoneChannel()
 

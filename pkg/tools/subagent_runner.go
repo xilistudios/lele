@@ -310,6 +310,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		MessageBus:      sm.bus,
 		ChatID:          sessionKey,
 		VisionSupported: visionSupported,
+		Redactor:        sm.getRedactor(),
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)

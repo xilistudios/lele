@@ -190,6 +190,24 @@ func (m *Model) View() string {
 				modalTitle = i18n.T("tui.installSkill")
 			case ModalSkillPicker:
 				modalTitle = i18n.T("tui.selectSkills")
+			case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
+				ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+				modalTitle = i18n.T("tui.settings.title")
+				if m.modalMode == ModalSettingsAgents {
+					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents")
+				} else if m.modalMode == ModalSettingsAgentEdit {
+					agentLabel := i18n.T("tui.settings.agentDefaults")
+					if m.settingsAgentID != "" {
+						agentLabel = m.settingsAgentID
+					}
+					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents") + " › " + agentLabel
+				} else if m.modalMode == ModalSettingsSystem {
+					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system")
+				} else if m.modalMode == ModalSettingsSystemEdit {
+					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system") + " › " + m.systemSettingsTitle()
+				} else if m.modalMode == ModalSettingsTUI {
+					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.interface")
+				}
 			}
 
 			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
@@ -203,6 +221,24 @@ func (m *Model) View() string {
 			}
 			if m.modalMode == ModalSkillPicker {
 				return m.renderSkillPicker(modalTitle)
+			}
+			if m.modalMode == ModalSettingsTUI {
+				return m.renderTUISettings(modalTitle)
+			}
+			if m.modalMode == ModalSettingsAgents {
+				return m.renderModal(modalTitle)
+			}
+			if m.modalMode == ModalSettingsAgentEdit {
+				if m.settingsEditField != "" {
+					return m.renderAgentEditInput()
+				}
+				return m.renderModal(modalTitle)
+			}
+			if m.modalMode == ModalSettingsSystemEdit {
+				if m.settingsEditField != "" {
+					return m.renderSystemSettingsEdit(modalTitle)
+				}
+				return m.renderModal(modalTitle)
 			}
 			return m.renderModal(modalTitle)
 		}
@@ -599,6 +635,24 @@ func (m *Model) View() string {
 			modalTitle = i18n.T("tui.addModel")
 		case ModalAddSecret:
 			modalTitle = i18n.T("tui.secrets")
+		case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
+			ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+			modalTitle = i18n.T("tui.settings.title")
+			if m.modalMode == ModalSettingsAgents {
+				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents")
+			} else if m.modalMode == ModalSettingsAgentEdit {
+				agentLabel := i18n.T("tui.settings.agentDefaults")
+				if m.settingsAgentID != "" {
+					agentLabel = m.settingsAgentID
+				}
+				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents") + " › " + agentLabel
+			} else if m.modalMode == ModalSettingsSystem {
+				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system")
+			} else if m.modalMode == ModalSettingsSystemEdit {
+				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system") + " › " + m.systemSettingsTitle()
+			} else if m.modalMode == ModalSettingsTUI {
+				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.interface")
+			}
 		}
 
 		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
@@ -606,6 +660,24 @@ func (m *Model) View() string {
 		}
 		if m.modalMode == ModalSecrets {
 			return m.renderSecretsList(modalTitle)
+		}
+		if m.modalMode == ModalSettingsTUI {
+			return m.renderTUISettings(modalTitle)
+		}
+		if m.modalMode == ModalSettingsAgents {
+			return m.renderModal(modalTitle)
+		}
+		if m.modalMode == ModalSettingsAgentEdit {
+			if m.settingsEditField != "" {
+				return m.renderAgentEditInput()
+			}
+			return m.renderModal(modalTitle)
+		}
+		if m.modalMode == ModalSettingsSystemEdit {
+			if m.settingsEditField != "" {
+				return m.renderSystemSettingsEdit(modalTitle)
+			}
+			return m.renderModal(modalTitle)
 		}
 		return m.renderModal(modalTitle)
 	}
@@ -685,6 +757,105 @@ func (m *Model) renderModal(modalTitle string) string {
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())
+	return m.paintFrame(modalView)
+}
+
+// renderTUISettings renders the Interface settings modal. When an inline edit
+// is active (settingsEditField set) it shows the text input for the field;
+// otherwise it renders the list of toggleable/editable settings.
+func (m *Model) renderTUISettings(modalTitle string) string {
+	if m.settingsEditField != "" {
+		var sb strings.Builder
+		sb.WriteString(TitleStyle.Render(modalTitle) + "\n\n")
+
+		label := ""
+		switch m.settingsEditField {
+		case "maxMessages":
+			label = i18n.T("tui.settings.maxMessages")
+		case "streamThrottle":
+			label = i18n.T("tui.settings.streamThrottle")
+		}
+		m.textInput.Width = 40
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+
+		if m.formError != "" {
+			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
+		}
+		sb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.editHint")))
+
+		modalView := ModalContainer.Render(sb.String())
+		return m.paintFrame(modalView)
+	}
+	// List mode — reuse the standard scrollable modal renderer.
+	return m.renderModal(modalTitle)
+}
+
+// systemSettingsTitle returns the localized title for the active system
+// settings sub-view, or the generic System title when none is active.
+func (m *Model) systemSettingsTitle() string {
+	switch m.settingsSection {
+	case sysSubViewName(sysGroupSession):
+		return i18n.T("tui.settings.session")
+	case sysSubViewName(sysGroupTools):
+		return i18n.T("tui.settings.tools")
+	case sysSubViewName(sysGroupLogs):
+		return i18n.T("tui.settings.logs")
+	case sysSubViewName(sysGroupLanguage):
+		return i18n.T("tui.settings.language")
+	case sysSubViewName(sysGroupGoal):
+		return i18n.T("tui.settings.goal")
+	case sysSubViewName(sysGroupUpdates):
+		return i18n.T("tui.settings.updates")
+	}
+	return i18n.T("tui.settings.system")
+}
+
+// renderSystemSettingsEdit renders a system settings inline-edit view for the
+// currently editing field (settingsEditField). It shows the text input plus an
+// optional validation error.
+func (m *Model) renderSystemSettingsEdit(title string) string {
+	var sb strings.Builder
+	sb.WriteString(TitleStyle.Render(title) + "\n\n")
+
+	label := m.settingsEditField
+	m.textInput.Width = 40
+	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+
+	if m.formError != "" {
+		sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
+	}
+	sb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.editHint")))
+
+	modalView := ModalContainer.Render(sb.String())
+	return m.paintFrame(modalView)
+}
+
+// renderAgentEditInput renders the inline edit view for the currently editing
+// agent field (settingsEditField set). For delete confirmation it shows the
+// confirm prompt instead of a text input. Returns to the list once committed.
+func (m *Model) renderAgentEditInput() string {
+	title := i18n.T("tui.settings.agents")
+	if m.settingsAgentID != "" {
+		title = m.settingsAgentID
+	}
+
+	var sb strings.Builder
+	sb.WriteString(TitleStyle.Render(title) + "\n\n")
+
+	if m.settingsEditField == "confirmDelete" {
+		sb.WriteString(ModalItemActive.Render("  "+m.formError) + "\n")
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.settings.confirmDeleteHint")))
+	} else {
+		label := m.settingsEditField
+		m.textInput.Width = 40
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+		if m.formError != "" {
+			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
+		}
+		sb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.editHint")))
+	}
+
+	modalView := ModalContainer.Render(sb.String())
 	return m.paintFrame(modalView)
 }
 

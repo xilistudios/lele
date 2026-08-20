@@ -1,11 +1,12 @@
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { SortMode } from '../../hooks/useChatFilters'
 
 interface ChatSearchBarProps {
   query: string
   onQueryChange: (value: string) => void
-  sortMode: 'recent' | 'name' | 'messages'
-  onSortChange: (mode: 'recent' | 'name' | 'messages') => void
+  sortMode: SortMode
+  onSortChange: (mode: SortMode) => void
   className?: string
   inputClassName?: string
 }
@@ -34,12 +35,11 @@ export const ChatSearchBar = memo(function ChatSearchBar({
       </div>
       <select
         value={sortMode}
-        onChange={(e) => onSortChange(e.target.value as 'recent' | 'name' | 'messages')}
+        onChange={(e) => onSortChange(e.target.value as SortMode)}
         className="rounded-lg border border-border bg-background-secondary px-2 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
         aria-label={t('chat.sortBy')}
       >
         <option value="recent">{t('chat.sortRecent')}</option>
-        <option value="messages">{t('chat.sortMessages')}</option>
         <option value="name">{t('chat.sortName')}</option>
       </select>
     </div>
