@@ -240,22 +240,20 @@ type ChatSession struct {
 	Name         string    `json:"name,omitempty"`
 	Mode         string    `json:"mode,omitempty"`
 	Kind         string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
-	Created      time.Time `json:"created"`
-	Updated      time.Time `json:"updated"`
-	MessageCount int       `json:"message_count"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
 }
 
 // SessionKindInfo is a lightweight summary of a persisted session used by
 // the session-history endpoint to surface system sessions (heartbeat, cron,
 // subagents) that are not tied to a native client.
 type SessionKindInfo struct {
-	Key          string
-	Name         string
-	Mode         string
-	Kind         string
-	Created      time.Time
-	Updated      time.Time
-	MessageCount int
+	Key     string
+	Name    string
+	Mode    string
+	Kind    string
+	Created time.Time
+	Updated time.Time
 }
 
 type ChatSessionsResponse struct {

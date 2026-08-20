@@ -20,7 +20,6 @@ function makeSession(key: string, updated: string): ChatSession {
     key,
     created: '2026-01-01T00:00:00.000Z',
     updated,
-    message_count: 1,
   }
 }
 

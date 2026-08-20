@@ -70,7 +70,6 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
           ? {
               ...s,
               updated: new Date().toISOString(),
-              message_count: s.message_count + 1,
               ...(name ? { name } : {}),
               ...(mode ? { mode: mode as ChatSession['mode'] } : {}),
             }
@@ -97,7 +96,6 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
               key: defaultSessionKey,
               created: new Date().toISOString(),
               updated: new Date().toISOString(),
-              message_count: 0,
             },
           ]
 
@@ -108,8 +106,8 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
     // Keep locally-created session in the list even if not yet on the backend.
     // Subagent sessions are intentionally excluded: they are nested views
     // (parent/subagent) rather than top-level sessions, so they must not
-    // appear in the sidebar list (and adding them with message_count 0 would
-    // shadow the name derived from their messages in ChatPageContext).
+    // appear in the sidebar list (or they would shadow the name derived from
+    // their messages in ChatPageContext).
     if (
       currentSessionKeyRef.current &&
       !isSubagentSessionKey(currentSessionKeyRef.current) &&
@@ -120,7 +118,6 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
           key: currentSessionKeyRef.current,
           created: new Date().toISOString(),
           updated: new Date().toISOString(),
-          message_count: 0,
         },
         ...nextSessions,
       ]
@@ -161,7 +158,6 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
         key: sessionKey,
         created: new Date().toISOString(),
         updated: new Date().toISOString(),
-        message_count: 0,
         ...(mode ? { mode: mode as ChatSession['mode'] } : {}),
       }
 

@@ -43,7 +43,6 @@ export type ChatSession = {
   kind?: SessionKind
   created: string
   updated: string
-  message_count: number
 }
 
 export type ToolInfo = {
@@ -937,7 +936,6 @@ export type ClientEvent =
       event: 'messages.catchup'
       data: {
         session_key: string
-        message_count: number
         catchup_count: number
         is_initial: boolean
         messages: Array<{

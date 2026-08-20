@@ -270,7 +270,7 @@ export function useAppLogic(
 
       await messagesHook.sendMessage(content, attachments, sessionKey, currentAgentId)
       messagesHook.setPendingAttachments([])
-      // Optimistic update: bump message_count immediately so sidebar
+      // Optimistic update: bump updated timestamp immediately so the sidebar
       // shows the session activity instead of "New Chat"
       // Also generate a title from the first message so we don't show a UUID
       const title = content

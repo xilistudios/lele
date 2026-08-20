@@ -279,25 +279,24 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 	sessions := make([]ChatSession, 0, len(sessionKeySet))
 	for sk := range sessionKeySet {
 		history := n.agentLoop.GetSessionHistory(sk)
-		messageCount := 0
-		for _, msg := range history {
-			if msg.Role == "user" || msg.Role == "assistant" {
-				// Skip injected context messages (e.g. from read_image tool)
-				if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
-					continue
+
+		// Skip empty sessions that were never actually used. Skim history for
+		// any user/assistant message (ignoring injected context messages), or
+		// flag sessions that still hold evicted (out-of-context) messages.
+		hasMessages := n.agentLoop.GetEvictedMessageCount(sk) > 0
+		if !hasMessages {
+			for _, msg := range history {
+				if msg.Role == "user" || msg.Role == "assistant" {
+					// Skip injected context messages (e.g. from read_image tool)
+					if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+						continue
+					}
+					hasMessages = true
+					break
 				}
-				messageCount++
 			}
 		}
-
-		// Evicted (out-of-context) messages are not in the in-memory slice but
-		// still count toward the displayed total.
-		if n.agentLoop != nil {
-			messageCount += n.agentLoop.GetEvictedMessageCount(sk)
-		}
-
-		// Skip empty sessions that were never actually used
-		if messageCount == 0 {
+		if !hasMessages {
 			continue
 		}
 
@@ -321,13 +320,12 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 		}
 
 		sessions = append(sessions, ChatSession{
-			Key:          sk,
-			Name:         n.agentLoop.GetName(sk),
-			Mode:         sessionMode,
-			Kind:         kind,
-			Created:      n.agentLoop.GetCreated(sk),
-			Updated:      n.agentLoop.GetUpdated(sk),
-			MessageCount: messageCount,
+			Key:     sk,
+			Name:    n.agentLoop.GetName(sk),
+			Mode:    sessionMode,
+			Kind:    kind,
+			Created: n.agentLoop.GetCreated(sk),
+			Updated: n.agentLoop.GetUpdated(sk),
 		})
 	}
 
@@ -347,12 +345,7 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 			// System sessions (heartbeat/cron) may legitimately have zero
-			// messages; keep them so the history shows the runs happened.
-			// Only drop empty system sessions when a kind filter targets
-			// "chat" (the tracked loop already skipped empties).
-			if info.MessageCount == 0 && kindFilter == "chat" {
-				continue
-			}
+			// messages; keep them as-is so the history shows the runs happened.
 			if modeFilter != "" {
 				effectiveMode := info.Mode
 				if effectiveMode == "" {
@@ -366,13 +359,12 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 				continue
 			}
 			sessions = append(sessions, ChatSession{
-				Key:          info.Key,
-				Name:         info.Name,
-				Mode:         info.Mode,
-				Kind:         info.Kind,
-				Created:      info.Created,
-				Updated:      info.Updated,
-				MessageCount: info.MessageCount,
+				Key:     info.Key,
+				Name:    info.Name,
+				Mode:    info.Mode,
+				Kind:    info.Kind,
+				Created: info.Created,
+				Updated: info.Updated,
 			})
 		}
 	}
