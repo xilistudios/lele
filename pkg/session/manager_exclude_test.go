@@ -383,3 +383,39 @@ func TestGetTotalMessageCount_WithEvictedHistory(t *testing.T) {
 		t.Errorf("GetTotalMessageCount after eviction = %d, want 6 (len(Messages)+evictedTotal)", got)
 	}
 }
+
+// TestSessionManager_HasMessages verifies the lightweight existence check.
+// It must report true for sessions with in-memory messages, true for sessions
+// with evicted messages (even if the in-memory slice is empty), and false for
+// sessions that were never used. It must not require loading full history.
+func TestSessionManager_HasMessages(t *testing.T) {
+	sm := NewSessionManager()
+
+	// 1. Empty / never-used session → false.
+	if sm.HasMessages("nonexistent:session") {
+		t.Fatal("HasMessages() = true for a session that was never used")
+	}
+
+	// 2. Session with in-memory messages → true.
+	key := "test:has-messages"
+	sm.AddFullMessage(key, providers.Message{Role: "user", Content: "hello"})
+	sm.AddFullMessage(key, providers.Message{Role: "assistant", Content: "hi"})
+	if !sm.HasMessages(key) {
+		t.Fatalf("HasMessages(%q) = false, want true (in-memory messages)", key)
+	}
+
+	// 3. Session with only evicted messages (in-memory slice emptied) → true.
+	evictedKey := "test:only-evicted"
+	sm.AddFullMessage(evictedKey, providers.Message{Role: "user", Content: "1"})
+	sm.AddFullMessage(evictedKey, providers.Message{Role: "assistant", Content: "2"})
+	session := sm.GetOrCreate(evictedKey)
+	// Manually clear the message slice and set an eviction gap so it looks like
+	// messages were evicted out of memory.
+	session.Messages = []providers.Message{}
+	session.evictedTotal = 2
+	session.firstInMemorySeq = 2
+	session.lastPersistedSeq = 1
+	if !sm.HasMessages(evictedKey) {
+		t.Fatalf("HasMessages(%q) = false, want true (evicted messages)", evictedKey)
+	}
+}

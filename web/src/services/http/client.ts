@@ -486,6 +486,30 @@ export const createApiClient = (baseUrl: string) => {
         },
       )
     },
+    sessionsMeta: (
+      mode?: string,
+      kind?: string,
+      includeSystem?: boolean,
+      options?: { offset?: number; limit?: number },
+    ) => {
+      const params = new URLSearchParams()
+      if (mode) params.set('mode', mode)
+      if (kind) params.set('kind', kind)
+      if (includeSystem) params.set('include_system', 'true')
+      if (options?.offset !== undefined && options?.offset !== null) {
+        params.set('offset', String(options.offset))
+      }
+      if (options?.limit !== undefined && options?.limit !== null) {
+        params.set('limit', String(options.limit))
+      }
+      const query = params.toString()
+      return request<ChatSessionsResponse>(
+        query ? `${endpoints.chat.sessionsMeta}?${query}` : endpoints.chat.sessionsMeta,
+        {
+          method: 'GET',
+        },
+      )
+    },
     createSession: (sessionKey: string, mode?: string) =>
       request<CreateSessionResponse>(endpoints.chat.sessions, {
         method: 'POST',

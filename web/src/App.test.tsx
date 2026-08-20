@@ -94,10 +94,12 @@ const jsonResponse = (body: FetchResponseBody) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
-// Match the list-sessions endpoint regardless of query params (?offset=&limit=)
+// Match the list-sessions endpoints regardless of query params (?offset=&limit=).
+// Includes both the plain /api/v1/chat/sessions and the lightweight meta variant
+// /api/v1/chat/sessions/meta.
 const isSessionsEndpoint = (url: string) => {
   const path = url.split('?')[0]
-  return path.endsWith('/api/v1/chat/sessions')
+  return path.endsWith('/api/v1/chat/sessions') || path.endsWith('/api/v1/chat/sessions/meta')
 }
 
 // Return a 404 (not a thrown Error) for unhandled URLs. A thrown non-ApiError
