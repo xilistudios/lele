@@ -114,6 +114,7 @@ export function AgentsSettings() {
             agent: {
               id: string
               name?: string
+              description?: string
               default?: boolean
               workspace?: string
               model?: { primary?: string; fallbacks?: string[] }
@@ -214,6 +215,22 @@ export function AgentsSettings() {
                       id={`agents.list.${index}.name`}
                       value={agent.name || ''}
                       onChange={(v) => updateField(`agents.list.${index}.name`, v || undefined)}
+                    />
+                  </SettingsField>
+
+                  <SettingsField
+                    label={t('settings.fields.agentDescription')}
+                    description={t('settings.descriptions.agentDescription')}
+                    path={`agents.list.${index}.description`}
+                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.description`)}
+                  >
+                    <TextInput
+                      id={`agents.list.${index}.description`}
+                      value={agent.description || ''}
+                      placeholder={t('settings.placeholders.agentDescription')}
+                      onChange={(v) =>
+                        updateField(`agents.list.${index}.description`, v || undefined)
+                      }
                     />
                   </SettingsField>
 

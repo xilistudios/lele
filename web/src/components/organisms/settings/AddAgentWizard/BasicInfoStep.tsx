@@ -6,6 +6,8 @@ type Props = {
   setAgentId: (value: string) => void
   agentName: string
   setAgentName: (value: string) => void
+  agentDescription: string
+  setAgentDescription: (value: string) => void
   isDefault: boolean
   setIsDefault: (value: boolean) => void
   isValid: boolean
@@ -17,6 +19,8 @@ export function BasicInfoStep({
   setAgentId,
   agentName,
   setAgentName,
+  agentDescription,
+  setAgentDescription,
   isDefault,
   setIsDefault,
   isValid,
@@ -119,6 +123,24 @@ export function BasicInfoStep({
           className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 transition-all duration-200"
         />
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentName')}</p>
+      </div>
+
+      {/* Agent Description */}
+      <div className="space-y-2">
+        <label htmlFor="wizard-agent-description" className="text-sm font-medium text-text-primary">
+          {t('settings.fields.agentDescription')}
+        </label>
+        <textarea
+          id="wizard-agent-description"
+          value={agentDescription}
+          onChange={(e) => setAgentDescription(e.target.value)}
+          placeholder={t('settings.placeholders.agentDescription')}
+          rows={3}
+          className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 transition-all duration-200 resize-y"
+        />
+        <p className="text-xs text-text-tertiary">
+          {t('settings.descriptions.agentDescription')}
+        </p>
       </div>
 
       {/* Default checkbox */}

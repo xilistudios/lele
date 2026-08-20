@@ -310,6 +310,7 @@
       "modelThinking": "Pensamiento",
       "agentId": "ID del agente",
       "agentName": "Nombre",
+      "agentDescription": "Descripción",
       "agentDefault": "Predeterminado",
       "agentWorkspace": "Workspace",
       "agentModelPrimary": "Modelo primario",
@@ -348,6 +349,7 @@
       "compactionModel": "Modelo usado para resumir el contexto cuando crece demasiado. Deja vacío para usar el modelo actual de la sesión.",
       "maxReadLines": "Número máximo de líneas mostradas por defecto al leer archivos grandes",
       "agentName": "Nombre para mostrar de este agente",
+      "agentDescription": "Una breve descripción de lo que hace este agente",
       "agentDefault": "Este agente se usará por defecto en nuevos chats",
       "agentWorkspace": "Directorio raíz donde puede operar el agente",
       "agentModelPrimary": "Modelo principal que usará este agente",
@@ -373,6 +375,9 @@
       "groupTotalTokenBudget": "Presupuesto acumulado de tokens",
       "groupStopKeywords": "Palabras clave que disparan la convergencia",
       "groupParallel": "Ejecutar turnos en paralelo dentro de una capa"
+    },
+    "placeholders": {
+      "agentDescription": "Descripción del agente..."
     },
     "theme": {
       "dark": "Oscuro",
