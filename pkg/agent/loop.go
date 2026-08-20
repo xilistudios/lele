@@ -63,6 +63,7 @@ type AgentLoop struct {
 	groupManager       *group.GroupManager  // Mixture of Agents group collaboration
 	goalManager        *GoalManager         // Persistent goals (Hermes-style /goal)
 	keyringService     *keyring.Service     // Encrypted secret storage
+	redactor           *keyring.Redactor    // redacts secret values from tool results
 	dbStore            *store.Store         // SQLite state store (nil if not available)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
@@ -335,6 +336,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		AllowAgentDelete: cfg.Keyring.AllowAgentDelete,
 		LeleDir:          config.GetLeleDir(),
 	})
+	redactor := keyring.NewRedactor(keyringSvc)
 
 	// Open the shared SQLite state store. This provides persistent storage
 	// for sessions, cron, goals, groups, auth, native clients, and KV data.
@@ -425,6 +427,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		verboseManager:  verboseManager,
 		approvalManager: approvalManager,
 		keyringService:  keyringSvc,
+		redactor:        redactor,
 		dbStore:         dbStore,
 	}
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())

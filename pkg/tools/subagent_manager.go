@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -38,6 +39,7 @@ type SubagentManager struct {
 	sessionExists         func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
 	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
+	redactor              *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -191,6 +193,21 @@ func (sm *SubagentManager) SetSessionExistsCallback(callback func(sessionKey str
 	sm.sessionExists = callback
 }
 
+// SetRedactor attaches a redactor used to strip secret values from tool
+// results before they enter the subagent LLM context.
+func (sm *SubagentManager) SetRedactor(r *keyring.Redactor) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.redactor = r
+}
+
+// getRedactor returns the currently attached redactor, or nil if none is set.
+func (sm *SubagentManager) getRedactor() *keyring.Redactor {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.redactor
+}
+
 // RegisterTool registers a tool for subagent execution.
 func (sm *SubagentManager) RegisterTool(tool Tool) {
 	sm.mu.Lock()
@@ -318,6 +335,7 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 		Dependencies:     opts.Dependencies,
 		MaxRetries:       maxRetries,
 	}
+	subagentTask.mu = &sync.Mutex{}
 	subagentTask.InitDoneChannel()
 	sm.tasks[taskID] = subagentTask
 
@@ -399,10 +417,15 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	// Reset the done channel so wait_for_subagent does not immediately
 	// observe the closed channel from the previous run and return stale
 	// results. Each (re)execution gets a fresh completion signal.
+	if task.mu == nil {
+		task.mu = &sync.Mutex{}
+	}
+	task.mu.Lock()
 	task.doneCh = make(chan struct{})
 	// Reset delivered so the resumed run's result is not suppressed by the
 	// Delivered() check in the parent agent's message processor.
 	task.delivered = false
+	task.mu.Unlock()
 	// Use context.Background() to decouple from parent agent's context
 	taskCtx, cancel := context.WithCancel(context.Background())
 	sm.cancels[taskID] = cancel
@@ -431,10 +454,14 @@ func (sm *SubagentManager) GetTask(taskID string) (*SubagentTask, bool) {
 // Returns false if this is the first delivery.
 func (sm *SubagentManager) MarkDelivered(taskID string) bool {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 	task, ok := sm.tasks[taskID]
+	sm.mu.Unlock()
 	if !ok || task == nil {
 		return false // Task not found, allow delivery (edge case)
+	}
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
 	}
 	if task.delivered {
 		return true // Already delivered

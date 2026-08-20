@@ -133,6 +133,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		LLMOptions:      llmOptions,
 		Retry:           retryConfigPtr(),
 		VisionSupported: visionSupported,
+		Redactor:        t.manager.getRedactor(),
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)

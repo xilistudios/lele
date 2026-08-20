@@ -792,7 +792,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// This includes placeholder results for cancelled/failed tools to keep the session consistent.
 		var allContextMsgs []providers.Message
 		for _, er := range execResults {
-			contentForLLM := buildToolResultContent(er.res)
+			contentForLLM := lr.al.redactor.Redact(buildToolResultContent(er.res))
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,
