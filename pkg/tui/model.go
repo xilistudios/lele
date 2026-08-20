@@ -126,6 +126,21 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		renderStartIdx:         -1,  // uninitialized — compute default on first render
 	}
 
+	// Apply TUI config overrides. TUI defaults are hardcoded above (mouse on,
+	// 200 messages, 32ms throttle). When the "tui" section exists in the config
+	// (indicated reliably by MaxRenderedMessages > 0, since 0 is never a valid
+	// value), read all fields from it so persisted user settings win.
+	if cfg != nil {
+		if cfg.TUI.MaxRenderedMessages > 0 {
+			m.maxRenderedMessages = cfg.TUI.MaxRenderedMessages
+			// TUI section is configured → the persisted mouse state is truth.
+			m.mouseEnabled = cfg.TUI.MouseEnabled
+		}
+		if cfg.TUI.StreamThrottleMS > 0 {
+			m.streamThrottleInterval = time.Duration(cfg.TUI.StreamThrottleMS) * time.Millisecond
+		}
+	}
+
 	// Initialize a read/manage-only cron service backed by the same store the
 	// gateway uses. We intentionally do NOT call Start() so the TUI never
 	// schedules or fires jobs — it only lists, enables/disables, runs-now and

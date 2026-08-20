@@ -195,6 +195,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			case "enter":
+				// TUI settings inline edit: save value and return to list.
+				if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
+					m.handleTUISettingsInput(m.textInput.Value())
+					return m, nil
+				}
 				// Handle form-based modals first — they don't use m.modalItems.
 				if m.modalMode == ModalAddProvider {
 					// ── Success screen — any Enter/ESC closes the modal ──
@@ -715,6 +720,71 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if m.modalMode == ModalSkillPicker {
 						// Install selected skills
 						return m, m.handleSkillPickerEnter()
+					} else if m.modalMode == ModalSettings {
+						// Top-level settings menu: navigate to sub-menu based on selection.
+						// Items correspond to: Agents / System / Interface.
+						switch m.modalSelectedIdx {
+						case 0:
+							m.resetModal(ModalSettingsAgents)
+							m.settingsSection = "agents"
+							m.loadAgentsSettings()
+						case 1:
+							m.modalMode = ModalSettingsSystem
+							m.settingsSection = ""
+							m.loadSystemSettings()
+						case 2:
+							m.modalMode = ModalSettingsTUI
+							m.settingsSection = "tui"
+							m.loadTUISettings()
+						}
+						m.modalSelectedIdx = 0
+						m.modalScrollOffset = 0
+						return m, nil
+					} else if m.modalMode == ModalSettingsSystem {
+						// Navigate into the selected sub-group.
+						groupIdx := m.modalSelectedIdx
+						m.resetModal(ModalSettingsSystemEdit)
+						m.settingsSection = sysSubViewName(groupIdx)
+						switch groupIdx {
+						case sysGroupSession:
+							m.loadSessionSettings()
+						case sysGroupTools:
+							m.loadToolsSettings()
+						case sysGroupLogs:
+							m.loadLogsSettings()
+						case sysGroupLanguage:
+							m.loadLanguageSettings()
+						case sysGroupGoal:
+							m.loadGoalSettings()
+						case sysGroupUpdates:
+							m.loadUpdatesSettings()
+						}
+						return m, nil
+					} else if m.modalMode == ModalSettingsSystemEdit {
+						// System sub-view: inline edit (save) or row action.
+						if m.settingsEditField != "" {
+							m.handleSystemSettingsInput(m.textInput.Value())
+							return m, nil
+						}
+						return m, m.handleSystemSubEnter()
+					} else if m.modalMode == ModalSettingsAgents {
+						// Agent list: navigate to detail, defaults, or start
+						// the add-agent flow.
+						return m, m.handleAgentsEnter()
+					} else if m.modalMode == ModalSettingsAgentEdit {
+						// Agent detail: save inline edit or handle row action.
+						if m.settingsEditField != "" {
+							m.handleAgentSettingsInput(m.textInput.Value())
+							return m, nil
+						}
+						return m, m.handleAgentEditEnter()
+					} else if m.modalMode == ModalSettingsTUI {
+						// Interface settings: toggle mouse or enter edit mode.
+						if m.modalSelectedIdx == 0 {
+							return m, m.toggleTUIMouse()
+						}
+						m.handleTUISettingsEnter()
+						return m, nil
 					}
 					if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
 						m.modalMode = ModalNone
@@ -722,6 +792,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reloadSessions()
 				}
 			case "esc", "q":
+				// TUI settings inline edit: ESC cancels and returns to the list.
+				if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
+					m.settingsEditField = ""
+					m.formError = ""
+					m.loadTUISettings()
+					return m, nil
+				}
 				if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
 					// In output view mode: go back to list
 					if msg.String() == "q" || msg.String() == "esc" {
@@ -744,6 +821,58 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.secretsDetailName = ""
 					m.secretsReveal = false
 					m.loadSecrets()
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSettingsSystemEdit {
+					// System sub-view: ESC cancels inline edit, or if not editing
+					// goes back to the system group list.
+					if m.settingsEditField != "" {
+						m.settingsEditField = ""
+						m.formError = ""
+						m.reloadSystemSubView()
+						return m, nil
+					}
+					m.modalMode = ModalSettingsSystem
+					m.settingsSection = ""
+					m.loadSystemSettings()
+					m.modalSelectedIdx = 0
+					m.modalScrollOffset = 0
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSettingsAgentEdit {
+					// Agent detail: ESC cancels an inline edit, or if not
+					// editing goes back to the agents list.
+					if m.settingsEditField != "" {
+						m.settingsEditField = ""
+						m.formError = ""
+						m.loadAgentDetail(m.settingsAgentID)
+						return m, nil
+					}
+					// Go back to agents list
+					m.modalMode = ModalSettingsAgents
+					m.settingsAgentID = ""
+					m.loadAgentsSettings()
+					m.modalSelectedIdx = 0
+					m.modalScrollOffset = 0
+					return m, m.tickCmd()
+				}
+				if m.modalMode == ModalSettingsAgents ||
+					m.modalMode == ModalSettingsSystem ||
+					m.modalMode == ModalSettingsTUI ||
+					m.modalMode == ModalSettingsSystemEdit {
+					// Back-navigation: settings sub-menus return to the top-level
+					// settings menu (Agents / System / Interface).
+					m.modalMode = ModalSettings
+					m.settingsSection = ""
+					m.settingsEditField = ""
+					m.settingsAgentID = ""
+					m.modalItems = []string{
+						i18n.T("tui.settings.agents"),
+						i18n.T("tui.settings.system"),
+						i18n.T("tui.settings.interface"),
+					}
+					m.modalSelectedIdx = 0
+					m.modalScrollOffset = 0
 					return m, m.tickCmd()
 				}
 				if m.modalMode == ModalSkillInstall {
@@ -861,7 +990,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Forward keystrokes to textInput for form-based modals
 			// so users can type in the input fields.
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall {
+			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall ||
+				(m.modalMode == ModalSettingsTUI && m.settingsEditField != "") ||
+				(m.modalMode == ModalSettingsSystemEdit && m.settingsEditField != "") ||
+				(m.modalMode == ModalSettingsAgentEdit && m.settingsEditField != "") {
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
@@ -1061,6 +1193,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "ctrl+s":
 			cmd := m.executeCommand("/sessions")
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, nil
+
+		case "ctrl+,":
+			cmd := m.executeCommand("/settings")
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1701,6 +1840,10 @@ func (m *Model) resetModal(mode modalType) {
 	m.providerTypePickerMax = 0
 	m.connectSuccess = false
 	m.providerTypeFromPreset = false
+	m.settingsSection = ""
+	m.settingsEditField = ""
+	m.settingsAgentID = ""
+	m.settingsAgentKeys = nil
 }
 
 // isListModal returns true if the modal type is a list-selection modal
@@ -1709,6 +1852,8 @@ func isListModal(mode modalType) bool {
 	switch mode {
 	case ModalNone, ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall:
 		return false
+	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+		return true
 	default:
 		return true
 	}
