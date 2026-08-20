@@ -236,10 +236,10 @@ type HistoryToolCall struct {
 }
 
 type ChatSession struct {
-	Key          string    `json:"key"`
-	Name         string    `json:"name,omitempty"`
-	Mode         string    `json:"mode,omitempty"`
-	Kind         string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
+	Key     string    `json:"key"`
+	Name    string    `json:"name,omitempty"`
+	Mode    string    `json:"mode,omitempty"`
+	Kind    string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }
