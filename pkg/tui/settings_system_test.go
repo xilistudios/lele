@@ -35,9 +35,9 @@ func newSystemSettingsTestModel(t *testing.T) *Model {
 			},
 		},
 		Logs: config.LogsConfig{
-			Enabled: false,
-			Path:    "",
-			MaxDays: 7,
+			Enabled:  false,
+			Path:     "",
+			MaxDays:  7,
 			Rotation: "",
 		},
 		Goal: config.GoalConfig{
