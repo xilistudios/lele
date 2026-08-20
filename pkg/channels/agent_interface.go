@@ -158,6 +158,7 @@ type AgentProvidable interface {
 type AgentBasicInfo struct {
 	ID             string
 	Name           string
+	Description    string
 	Model          string
 	Workspace      string
 	MaxIterations  int

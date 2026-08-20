@@ -30,6 +30,7 @@ func extractProviderFromModel(model, defaultProvider string) string {
 type AgentInstance struct {
 	ID                    string
 	Name                  string
+	Description           string
 	Model                 string
 	Fallbacks             []string
 	Workspace             string
@@ -207,6 +208,7 @@ func NewAgentInstance(
 
 	agentID := routing.DefaultAgentID
 	agentName := ""
+	var agentDescription string
 	var subagents *config.SubagentsConfig
 	var skillsFilter []string
 	isDefault := false
@@ -214,6 +216,7 @@ func NewAgentInstance(
 	if agentCfg != nil {
 		agentID = routing.NormalizeAgentID(agentCfg.ID)
 		agentName = agentCfg.Name
+		agentDescription = agentCfg.Description
 		subagents = agentCfg.Subagents
 		skillsFilter = agentCfg.Skills
 		isDefault = agentCfg.Default
@@ -251,6 +254,7 @@ func NewAgentInstance(
 	return &AgentInstance{
 		ID:                    agentID,
 		Name:                  agentName,
+		Description:           agentDescription,
 		Model:                 model,
 		Fallbacks:             fallbacks,
 		Workspace:             workspace,
