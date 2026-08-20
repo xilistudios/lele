@@ -194,6 +194,15 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.loadSkillsList()
 		return nil
 
+	case "/settings":
+		m.resetModal(ModalSettings)
+		m.modalItems = []string{
+			i18n.T("tui.settings.agents"),
+			i18n.T("tui.settings.system"),
+			i18n.T("tui.settings.interface"),
+		}
+		return nil
+
 	case "/providers":
 		m.resetModal(ModalProviders)
 		m.providerModalKeys = nil

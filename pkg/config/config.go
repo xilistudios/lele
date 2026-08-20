@@ -146,7 +146,18 @@ type Config struct {
 	Updates   UpdatesConfig    `json:"updates"`
 	Goal      GoalConfig       `json:"goal"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
+	TUI       TUIConfig        `json:"tui,omitempty"`                      // TUI settings (mouse/rendering/stream)
 	mu        sync.RWMutex
+}
+
+// TUIConfig holds tunable settings for the TUI rendered through the
+// /settings > Interface menu. A plain bool zero-value is "false", so the
+// semantic default for MouseEnabled (true) is applied in the TUI itself;
+// the config field is only written once the user toggles it.
+type TUIConfig struct {
+	MouseEnabled        bool `json:"mouse_enabled"`
+	MaxRenderedMessages int  `json:"max_rendered_messages"`
+	StreamThrottleMS    int  `json:"stream_throttle_ms"`
 }
 
 func (c *Config) clone() *Config {
