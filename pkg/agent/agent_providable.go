@@ -879,39 +879,19 @@ func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
 	}
 
 	sessions := sm.ListSessions()
-	// Get accurate message counts in batch — sessions only in metadata
-	// (not loaded in memory) would otherwise report 0 messages, causing
-	// them to be hidden in the WebUI sidebar.
-	msgCounts := sm.AllMessageCounts()
 
 	result := make([]channels.SessionKindInfo, 0, len(sessions))
 	for _, s := range sessions {
 		if s == nil {
 			continue
 		}
-		// Use the batch-queried count (accurate for both in-memory and
-		// metadata-only sessions). Fall back to in-memory count if the
-		// batch query didn't return a result for this key.
-		count := msgCounts[s.Key]
-		if count == 0 && len(s.Messages) > 0 {
-			count = 0
-			for _, msg := range s.Messages {
-				if msg.Role == "user" || msg.Role == "assistant" {
-					if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
-						continue
-					}
-					count++
-				}
-			}
-		}
 		result = append(result, channels.SessionKindInfo{
-			Key:          s.Key,
-			Name:         s.Name,
-			Mode:         s.Mode,
-			Kind:         classifySessionKind(s.Key),
-			Created:      s.Created,
-			Updated:      s.Updated,
-			MessageCount: count,
+			Key:     s.Key,
+			Name:    s.Name,
+			Mode:    s.Mode,
+			Kind:    classifySessionKind(s.Key),
+			Created: s.Created,
+			Updated: s.Updated,
 		})
 	}
 	return result

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChatSession } from '../lib/types'
 
-export type SortMode = 'recent' | 'name' | 'messages'
+export type SortMode = 'recent' | 'name'
 
 export type TimeGroup = {
   key: string
@@ -28,10 +28,10 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
   const includeEmpty = options?.includeEmpty ?? false
 
   const filteredSessions = useMemo(() => {
-    // Defensive: drop sessions with invalid dates or zero messages (unless includeEmpty)
+    // Defensive: drop sessions with invalid dates
     let list = allSessions.filter((s) => {
       const d = safeDate(s.updated)
-      return d !== null && (includeEmpty || s.message_count > 0)
+      return d !== null
     })
 
     if (query.trim()) {
@@ -44,9 +44,6 @@ export function useChatFilters(allSessions: ChatSession[], options?: { includeEm
     switch (sortMode) {
       case 'name':
         list.sort((a, b) => (a.name ?? a.key).localeCompare(b.name ?? b.key))
-        break
-      case 'messages':
-        list.sort((a, b) => b.message_count - a.message_count)
         break
       default:
         list.sort(

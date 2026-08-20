@@ -61,7 +61,6 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
       name: deriveSessionNameFromMessages(currentSessionKey, sessionMessages),
       created: new Date(0).toISOString(),
       updated: new Date(0).toISOString(),
-      message_count: messages.filter((message) => message.sessionKey === currentSessionKey).length,
     }
   }, [currentSessionKey, messages, sessions])
 

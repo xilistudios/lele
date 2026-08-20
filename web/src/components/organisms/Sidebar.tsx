@@ -67,10 +67,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
 
   const sortedSessions = useMemo(() => {
     const visible = sessions.filter(
-      (s) =>
-        s.kind !== 'subagent' &&
-        (s.message_count > 0 || s.key === selectedKey) &&
-        (s.mode || 'agent') === chatMode,
+      (s) => s.kind !== 'subagent' && (s.mode || 'agent') === chatMode,
     )
     return [...visible].sort(
       (b, a) => new Date(a.updated).getTime() - new Date(b.updated).getTime(),
@@ -367,7 +364,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                         key={s.key}
                         sessionKey={s.key}
                         sessionName={s.name}
-                        messageCount={s.message_count}
                         selected={s.key === currentSession?.key}
                         isProcessing={processingSessions.has(s.key)}
                         onSelect={() => handleSessionSelect(s.key)}

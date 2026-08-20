@@ -302,13 +302,11 @@ describe('App', () => {
                 key: 'native:client-1:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
               {
                 key: 'native:client-1:2',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:01:00Z',
-                message_count: 1,
               },
             ],
           }),
@@ -439,13 +437,11 @@ describe('App', () => {
                 key: 'native:client-1:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
               {
                 key: 'native:client-1:2',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:01:00Z',
-                message_count: 1,
               },
             ],
           }),
@@ -646,13 +642,11 @@ describe('Routing', () => {
                 key: 'native:client-1:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
               {
                 key: 'native:client-1:2',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:01:00Z',
-                message_count: 1,
               },
             ],
           }),
@@ -920,7 +914,7 @@ describe('Routing', () => {
     expect(view.queryByText('subagent:task-1')).toBeNull()
     expect(view.queryByText('Parent response')).toBeNull()
 
-    fireEvent.click(view.getByRole('button', { name: 'Session 1 1 mensaje' }))
+    fireEvent.click(view.getByRole('button', { name: 'Session 1' }))
 
     await waitFor(() => expect(view.getByRole('heading', { name: 'Session 1' })).not.toBeNull())
     expect(view.getByText('mensaje A')).not.toBeNull()
@@ -1164,13 +1158,11 @@ describe('Auto-pairing', () => {
                 key: 'native:client-2:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
               {
                 key: 'native:client-2:2',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:01:00Z',
-                message_count: 1,
               },
             ],
           }),
@@ -1438,13 +1430,11 @@ describe('Session deletion', () => {
                 key: 'native:client-1:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
               {
                 key: 'native:client-1:2',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:01:00Z',
-                message_count: 1,
               },
             ],
           }),
@@ -1601,7 +1591,6 @@ describe('Session deletion', () => {
                 key: 'native:client-1:1',
                 created: '2026-01-01T00:00:00Z',
                 updated: '2026-01-01T00:00:00Z',
-                message_count: 1,
               },
             ],
           }),

@@ -1,10 +1,9 @@
-export const formatSessionTitle = (
-  sessionKey: string,
-  sessionName?: string,
-  messageCount?: number,
-) => {
+export const formatSessionTitle = (sessionKey: string, sessionName?: string) => {
   if (sessionName?.trim()) return sessionName
-  if (!messageCount || messageCount === 0) return 'New Chat'
+  // No session name and the key looks like an auto-generated UUID
+  // (contains hyphens and is long): this is an empty/new session.
+  const isUuidLike = sessionKey.includes('-') && sessionKey.length > 20
+  if (isUuidLike) return 'New Chat'
   const parts = sessionKey.split(':')
   return parts.length > 2 ? `Session ${parts[parts.length - 1]}` : sessionKey
 }
