@@ -203,7 +203,7 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 					status = "error"
 					resultStr = err.Error()
 				} else if toolResult != nil {
-					resultStr = buildToolResultContent(toolResult)
+					resultStr = lr.al.redactor.Redact(buildToolResultContent(toolResult))
 				}
 				req.OnToolCall(tc.ID, tc.Name, argsJSON, status, resultStr)
 			}
@@ -213,7 +213,7 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			}
 
 			// Append tool result message.
-			contentForLLM := buildToolResultContent(toolResult)
+			contentForLLM := lr.al.redactor.Redact(buildToolResultContent(toolResult))
 			toolResultMsg := providers.Message{
 				Role:       "tool",
 				Content:    contentForLLM,

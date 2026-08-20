@@ -416,18 +416,26 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 				msgSb.WriteString(rendered + "\n")
 			}
 
-			// Render tool calls from assistant message (compact: tool_name: params)
-			for _, tc := range msg.ToolCalls {
-				toolName := tc.Name
-				if toolName == "" && tc.Function != nil {
-					toolName = tc.Function.Name
+			// Render tool calls from assistant message (compact: tool_name: params).
+			// Suppress them when this is the currently-executing message: the active
+			// tool call is already shown in the overlay (m.currentToolAction via the
+			// "tool.executing" event), so painting msg.ToolCalls here too produces a
+			// visible duplicate. Once the tool completes (tool.result/stream clears
+			// currentToolAction), the committed tool calls render here normally.
+			isExecutingMessage := m.currentToolAction != "" && m.processing && msg.Role == "assistant" && i == totalMsgs-1
+			if !isExecutingMessage {
+				for _, tc := range msg.ToolCalls {
+					toolName := tc.Name
+					if toolName == "" && tc.Function != nil {
+						toolName = tc.Function.Name
+					}
+					args := formatToolCallArgsCompact(tc)
+					line := toolName
+					if args != "" {
+						line += ": " + args
+					}
+					msgSb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
 				}
-				args := formatToolCallArgsCompact(tc)
-				line := toolName
-				if args != "" {
-					line += ": " + args
-				}
-				msgSb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(line) + "\n")
 			}
 			msgSb.WriteString("\n")
 		} else if msg.Role == "tool" {

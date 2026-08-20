@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"sync"
+
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
@@ -37,11 +39,16 @@ type SubagentTask struct {
 	MaxRetries       int           // maximum number of automatic retry attempts for transient failures
 	RetryCount       int           // current number of retry attempts made
 	delivered        bool          // tracks whether result was already consumed via wait_for_subagent
+	mu               *sync.Mutex   // protects doneCh and delivered from concurrent access
 }
 
 // DoneChannel returns the done channel for this task.
 // Returns nil if not initialized.
 func (task *SubagentTask) DoneChannel() <-chan struct{} {
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
 	return task.doneCh
 }
 
@@ -85,6 +92,11 @@ func (task *SubagentTask) IsTerminal() bool {
 // InitDoneChannel initializes the done channel if not already set.
 // This should be called when creating a new task.
 func (task *SubagentTask) InitDoneChannel() {
+	if task.mu == nil {
+		task.mu = &sync.Mutex{}
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
 	if task.doneCh == nil {
 		task.doneCh = make(chan struct{})
 	}
@@ -93,6 +105,10 @@ func (task *SubagentTask) InitDoneChannel() {
 // SignalDone closes the done channel to notify waiters.
 // Safe to call multiple times (uses select pattern to detect already-closed channel).
 func (task *SubagentTask) SignalDone() {
+	if task.mu != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+	}
 	if task.doneCh != nil {
 		select {
 		case <-task.doneCh:

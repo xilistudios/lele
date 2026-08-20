@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/utils"
@@ -44,6 +45,7 @@ type ToolLoopConfig struct {
 	Channel         string          // Origin channel for events.
 	ChatID          string          // Origin chatID for events (subagent sessionKey).
 	VisionSupported bool            // Whether the model supports vision. When false, read_image is filtered from tool defs.
+	Redactor        *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
 	// RetryWait optionally overrides the wait function used between
 	// empty-response retries (nil means time.After). Used by tests to
 	// avoid real sleeps.
@@ -413,6 +415,11 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			contentForLLM := toolResult.ForLLM
 			if contentForLLM == "" && toolResult.Err != nil {
 				contentForLLM = toolResult.Err.Error()
+			}
+
+			// Redact known secret values before they enter the LLM context.
+			if config.Redactor != nil {
+				contentForLLM = config.Redactor.Redact(contentForLLM)
 			}
 
 			// Truncate tool results to prevent unbounded memory growth
