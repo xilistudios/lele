@@ -500,6 +500,7 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 		HasMore:  end < total,
 	})
 }
+
 // Mirrors agent.classifySessionKind; both must stay in sync.
 func classifySessionKeyKind(sessionKey string) string {
 	if sessionKey == "" {

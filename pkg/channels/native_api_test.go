@@ -2235,6 +2235,7 @@ func TestCheckOrigin(t *testing.T) {
 		})
 	}
 }
+
 // TestNativeChannelChatSessionsMeta verifies the lightweight metadata endpoint
 // (/api/v1/chat/sessions/meta). It must NOT load full history to check for
 // messages — it only uses HasMessages/getters, and any evicted messages must

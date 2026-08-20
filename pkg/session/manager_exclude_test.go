@@ -383,6 +383,7 @@ func TestGetTotalMessageCount_WithEvictedHistory(t *testing.T) {
 		t.Errorf("GetTotalMessageCount after eviction = %d, want 6 (len(Messages)+evictedTotal)", got)
 	}
 }
+
 // TestSessionManager_HasMessages verifies the lightweight existence check.
 // It must report true for sessions with in-memory messages, true for sessions
 // with evicted messages (even if the in-memory slice is empty), and false for
