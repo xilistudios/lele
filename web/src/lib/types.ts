@@ -823,6 +823,7 @@ export type HistoryResponse = {
     reasoning_content?: string
     tool_calls?: HistoryToolCall[]
     tool_call_id?: string
+    tool_name?: string
   }>
   has_more: boolean
   groups?: GroupSnapshot[]
