@@ -68,6 +68,43 @@ describe('createApiClient', () => {
     expect(channels.channels[0]?.name).toBe('native')
   })
 
+  test('loads sessions from the lightweight meta endpoint', async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions/meta')) {
+        return new Response(
+          JSON.stringify({
+            sessions: [
+              {
+                key: 'native:client:meta',
+                created: '2026-01-01T00:00:00Z',
+                updated: '2026-01-01T00:00:00Z',
+              },
+            ],
+            total: 1,
+            has_more: false,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
+      }
+      return new Response(JSON.stringify({}), { status: 404 })
+    })
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const api = createApiClient('http://127.0.0.1:18793')
+    api.setToken('token', 'refresh_token')
+    const meta = await api.sessionsMeta()
+
+    expect(meta.sessions[0]?.key).toBe('native:client:meta')
+    expect(meta.total).toBe(1)
+    const calledUrl = String(fetchMock.mock.calls[0][0])
+    expect(calledUrl).toContain('/api/v1/chat/sessions/meta')
+  })
+
   test('loads and updates session model', async () => {
     const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)

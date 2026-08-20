@@ -12,11 +12,14 @@ const buildDefaultSessionKey = (clientId: string) => clientId
 const isSubagentSessionKey = (sessionKey: string | null | undefined) =>
   Boolean(sessionKey?.startsWith('subagent:'))
 
-const SESSIONS_PAGE_SIZE = 200
+// fetchAllSessions retrieves every session from the lightweight metadata
+// endpoint. The endpoint returns up to 200 sessions per page and does NOT load
+// the full history for each session (unlike the plain /sessions endpoint),
+// which is the primary bottleneck when a user has many chats. Without
+// pagination we would silently drop older chats once there are more than a
+// page.
+const META_PAGE_SIZE = 200
 
-// fetchAllSessions retrieves every session from the paginated backend
-// endpoint. The API returns up to 200 sessions per page; without this we
-// would silently drop older chats once the user has more than a page.
 async function fetchAllSessions(
   api: ApiClient,
   mode?: string,
@@ -26,9 +29,9 @@ async function fetchAllSessions(
   const all: ChatSession[] = []
   let offset = 0
   for (;;) {
-    const page = await api.sessions(mode, kind, includeSystem, {
+    const page = await api.sessionsMeta(mode, kind, includeSystem, {
       offset,
-      limit: SESSIONS_PAGE_SIZE,
+      limit: META_PAGE_SIZE,
     })
     all.push(...(page?.sessions ?? []))
     if (!page?.has_more || page.sessions.length === 0) break

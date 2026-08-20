@@ -120,32 +120,26 @@ export function useAppLogic(
     if (!token) return
 
     const initSession = async () => {
-      // 1. Load sessions first (critical for sidebar)
-      let sessionKey: string | null = null
-      try {
-        sessionKey = await sessionsHook.refreshSessions()
-        setError(null)
-      } catch (err) {
-        setError((err as Error).message)
-      }
+      // Load sessions and agents IN PARALLEL. The sessions list powers the
+      // sidebar and the agent list is needed to resolve the session's agent.
+      // Previously these were loaded sequentially (sessions first, then agents
+      // with retries), which serialized two network round-trips on every
+      // bootstrap.
+      const [sessionKey, agentsResult] = await Promise.all([
+        sessionsHook.refreshSessions().catch((err) => {
+          setError((err as Error).message)
+          return null
+        }),
+        api.agents().catch((err) => {
+          console.warn('[useAppLogic] Failed to load agents:', err)
+          return { agents: [] as Agent[] }
+        }),
+      ])
 
-      // 2. Load agents separately with retry (non-blocking for sessions)
-      let agentsList: Agent[] = []
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const agentsResult = await api.agents()
-          agentsList = agentsResult.agents
-          setAgents(agentsList)
-          break
-        } catch (err) {
-          console.warn(`[useAppLogic] Failed to load agents (attempt ${attempt + 1}/3):`, err)
-          if (attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 1000))
-          }
-        }
-      }
+      const agentsList = agentsResult?.agents ?? []
+      setAgents(agentsList)
 
-      // 3. Resolve agent for current session
+      // Resolve agent for current session
       if (sessionKey && !currentAgentIdRef.current) {
         try {
           const agentResult = await api.sessionAgent(sessionKey)

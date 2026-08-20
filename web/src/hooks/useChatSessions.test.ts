@@ -40,7 +40,10 @@ describe('useChatSessions', () => {
 
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (!url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')) {
+      if (
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions/meta?') &&
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')
+      ) {
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
       }
       const parsed = new URL(url)
@@ -64,14 +67,20 @@ describe('useChatSessions', () => {
       await result.current.refreshSessions()
     })
 
-    // Verify we requested a second page with offset=200 (pagination works)
+    // Verify we requested a second page with offset=200 (pagination works).
+    // The lightweight meta endpoint is used; fall back to any sessions call.
     const sessionCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes('/api/v1/chat/sessions/meta?'),
+    )
+    const allSessionCalls = fetchMock.mock.calls.filter(([input]) =>
       String(input).includes('/api/v1/chat/sessions?'),
     )
     expect(sessionCalls.length).toBeGreaterThanOrEqual(2)
     const offsets = sessionCalls.map(([input]) => new URL(String(input)).searchParams.get('offset'))
     expect(offsets).toContain('0')
     expect(offsets).toContain('200')
+    // The meta endpoint must be the one used (not the heavy /sessions).
+    expect(allSessionCalls.length).toBe(0)
 
     // State holds all pages
     expect(result.current.sessions.length).toBe(allSessions.length)
@@ -88,7 +97,10 @@ describe('useChatSessions', () => {
 
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (!url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')) {
+      if (
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions/meta?') &&
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')
+      ) {
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
       }
       const parsed = new URL(url)
@@ -113,7 +125,7 @@ describe('useChatSessions', () => {
     })
 
     const sessionCalls = fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes('/api/v1/chat/sessions?'),
+      String(input).includes('/api/v1/chat/sessions/meta?'),
     )
     expect(sessionCalls.length).toBeGreaterThanOrEqual(1)
     // Every page request must include include_system=true
@@ -129,7 +141,10 @@ describe('useChatSessions', () => {
   test('refreshSessions keeps current session when it is not on the backend yet', async () => {
     const fetchMock = mock(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (!url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')) {
+      if (
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions/meta?') &&
+        !url.startsWith('http://127.0.0.1:18793/api/v1/chat/sessions?')
+      ) {
         return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
       }
       return new Response(JSON.stringify(mockSessionsResponse([], 0)), {
