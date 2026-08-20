@@ -18,6 +18,7 @@ export type GroupsConfig = {
 export type Agent = {
   id: string
   name: string
+  description?: string
   workspace: string
   model: string
   default?: boolean
@@ -173,6 +174,7 @@ export type EditableAgentConfig = {
   id: string
   default?: boolean
   name?: string
+  description?: string
   workspace?: string
   model?: AgentModelConfig
   skills?: string[]

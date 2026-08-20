@@ -346,12 +346,13 @@ type SessionSubagentsResponse struct {
 }
 
 type NativeAgentInfo struct {
-	ID        string                  `json:"id"`
-	Name      string                  `json:"name"`
-	Workspace string                  `json:"workspace"`
-	Model     string                  `json:"model"`
-	Default   bool                    `json:"default"`
-	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Workspace   string                  `json:"workspace"`
+	Model       string                  `json:"model"`
+	Default     bool                    `json:"default"`
+	Reasoning   *config.ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type AgentsResponse struct {

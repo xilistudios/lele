@@ -312,6 +312,7 @@
       "modelThinking": "Thinking",
       "agentId": "Agent ID",
       "agentName": "Name",
+      "agentDescription": "Description",
       "agentDefault": "Default",
       "agentWorkspace": "Workspace",
       "agentModelPrimary": "Primary model",
@@ -356,6 +357,7 @@
       "compactionModel": "Model used to summarize context when it grows too large. Leave empty to use the session's current model.",
       "maxReadLines": "Maximum number of lines shown by default when reading large files",
       "agentName": "Display name for this agent",
+      "agentDescription": "A brief description of what this agent does",
       "agentDefault": "This agent will be used by default in new chats",
       "agentWorkspace": "Root directory where the agent can operate",
       "agentModelPrimary": "Primary model this agent will use",
@@ -381,6 +383,9 @@
       "groupTotalTokenBudget": "Cumulative token budget",
       "groupStopKeywords": "Keywords that trigger convergence",
       "groupParallel": "Run turns in parallel within a layer"
+    },
+    "placeholders": {
+      "agentDescription": "Agent description..."
     },
     "theme": {
       "dark": "Dark",

@@ -97,6 +97,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
   // Form state
   const [agentId, setAgentId] = useState('')
   const [agentName, setAgentName] = useState('')
+  const [agentDescription, setAgentDescription] = useState('')
   const [isDefault, setIsDefault] = useState(false)
   const [primaryModel, setPrimaryModel] = useState('')
   const [fallbacks, setFallbacks] = useState<string[]>([])
@@ -108,6 +109,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
     setIsSubmitting(false)
     setAgentId('')
     setAgentName('')
+    setAgentDescription('')
     setIsDefault(false)
     setPrimaryModel('')
     setFallbacks([])
@@ -131,6 +133,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
       id: agentId.trim(),
       default: isDefault || undefined,
       name: agentName.trim() || undefined,
+      description: agentDescription.trim() || undefined,
       workspace: `~/.lele/workspace-${agentId.trim()}`,
       model: primaryModel
         ? {
@@ -202,6 +205,8 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                   setAgentId={setAgentId}
                   agentName={agentName}
                   setAgentName={setAgentName}
+                  agentDescription={agentDescription}
+                  setAgentDescription={setAgentDescription}
                   isDefault={isDefault}
                   setIsDefault={setIsDefault}
                   isValid={canProceedStep1}

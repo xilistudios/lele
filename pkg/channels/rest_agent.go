@@ -22,12 +22,13 @@ func (n *NativeChannel) handleAgents(w http.ResponseWriter, r *http.Request) {
 		info, ok := n.agentLoop.GetAgentInfo(id)
 		if ok {
 			agents = append(agents, NativeAgentInfo{
-				ID:        info.ID,
-				Name:      info.Name,
-				Workspace: info.Workspace,
-				Model:     info.Model,
-				Default:   info.ID == defaultID,
-				Reasoning: info.Reasoning,
+				ID:          info.ID,
+				Name:        info.Name,
+				Description: info.Description,
+				Workspace:   info.Workspace,
+				Model:       info.Model,
+				Default:     info.ID == defaultID,
+				Reasoning:   info.Reasoning,
 			})
 		}
 	}
@@ -49,11 +50,12 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, NativeAgentInfo{
-		ID:        info.ID,
-		Name:      info.Name,
-		Workspace: info.Workspace,
-		Model:     info.Model,
-		Default:   info.ID == n.agentLoop.GetDefaultAgentID(),
+		ID:          info.ID,
+		Name:        info.Name,
+		Description: info.Description,
+		Workspace:   info.Workspace,
+		Model:       info.Model,
+		Default:     info.ID == n.agentLoop.GetDefaultAgentID(),
 	})
 }
 

@@ -124,6 +124,7 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 	return channels.AgentBasicInfo{
 		ID:             agent.ID,
 		Name:           agent.Name,
+		Description:    agent.Description,
 		Model:          agent.Model,
 		Workspace:      agent.Workspace,
 		MaxIterations:  agent.MaxIterations,
