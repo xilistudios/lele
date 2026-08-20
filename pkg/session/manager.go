@@ -658,6 +658,30 @@ func (sm *SessionManager) GetEvictedMessageCount(key string) int {
 	return 0
 }
 
+// HasMessages returns true if the session has any persisted messages (in-memory
+// slice or evicted), WITHOUT loading/deserializing the full history. Lightweight
+// check used by the session-listing hot path (WebUI sidebar) to avoid the N+1
+// full history load that GetHistory/GetHistoryView would trigger.
+func (sm *SessionManager) HasMessages(key string) bool {
+	if key == "" {
+		return false
+	}
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	if session, ok := sm.sessions[key]; ok {
+		sm.mu.RUnlock()
+		return len(session.Messages) > 0 || session.evictedTotal > 0
+	}
+	sm.mu.RUnlock()
+	// Cold session (metadata only): query the store count without materializing.
+	if sm.store != nil {
+		if n, err := sm.store.Sessions().MessageCount(key); err == nil {
+			return n > 0
+		}
+	}
+	return false
+}
+
 // GetTotalMessageCount returns the total number of messages for a session:
 // the in-memory slice length plus any evicted (excluded) messages still
 // persisted in SQLite. Used for compaction threshold guards and session

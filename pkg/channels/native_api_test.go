@@ -121,6 +121,10 @@ func (m *nativeTestAgentLoop) GetTotalMessageCount(sessionKey string) int {
 	return len(m.histories[sessionKey]) + len(m.evicted[sessionKey])
 }
 
+func (m *nativeTestAgentLoop) HasMessages(sessionKey string) bool {
+	return len(m.histories[sessionKey]) > 0 || len(m.evicted[sessionKey]) > 0
+}
+
 func (m *nativeTestAgentLoop) AddSessionMessage(sessionKey string, msg providers.Message) error {
 	m.histories[sessionKey] = append(m.histories[sessionKey], msg)
 	return nil
@@ -2229,5 +2233,133 @@ func TestCheckOrigin(t *testing.T) {
 				t.Errorf("checkOrigin() = %v, want %v (origin=%q, host=%q)", got, tt.want, tt.origin, tt.host)
 			}
 		})
+	}
+}
+// TestNativeChannelChatSessionsMeta verifies the lightweight metadata endpoint
+// (/api/v1/chat/sessions/meta). It must NOT load full history to check for
+// messages — it only uses HasMessages/getters, and any evicted messages must
+// stay in the evicted pool (not materialized).
+func TestNativeChannelChatSessionsMeta(t *testing.T) {
+	ts := newNativeTestServer(t)
+	trackedSession := "native:" + ts.clientID + ":meta"
+	emptySession := "native:" + ts.clientID + ":empty"
+	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
+	ts.channel.auth.TrackSessionKey(ts.clientID, emptySession)
+
+	// trackedSession: has messages (and evicted ones).
+	ts.loop.histories[trackedSession] = []providers.Message{
+		{Role: "user", Content: "Recent user"},
+		{Role: "assistant", Content: "Recent assistant"},
+	}
+	ts.loop.evicted[trackedSession] = []providers.Message{
+		{Role: "user", Content: "Evicted user"},
+	}
+	// emptySession: tracked but never used → must be skipped.
+	ts.loop.histories[emptySession] = nil
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload ChatSessionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+
+	var foundTracked, foundEmpty bool
+	for _, session := range payload.Sessions {
+		if session.Key == trackedSession {
+			foundTracked = true
+		}
+		if session.Key == emptySession {
+			foundEmpty = true
+		}
+	}
+	if !foundTracked {
+		t.Fatalf("expected session %q in payload %#v", trackedSession, payload.Sessions)
+	}
+	if foundEmpty {
+		t.Fatalf("empty session %q should not appear in payload %#v", emptySession, payload.Sessions)
+	}
+
+	// The meta endpoint must NOT materialize evicted history.
+	if len(ts.loop.evicted[trackedSession]) != 1 {
+		t.Fatalf("evicted pool mutated by handleChatSessionsMeta: %d remaining, want 1", len(ts.loop.evicted[trackedSession]))
+	}
+}
+
+// TestNativeChannelChatSessionsMetaKindFilter verifies mode/kind filtering on
+// the lightweight endpoint and its pagination behavior.
+func TestNativeChannelChatSessionsMetaKindFilter(t *testing.T) {
+	ts := newNativeTestServer(t)
+	trackedSession := "native:" + ts.clientID + ":meta-kind"
+	ts.channel.auth.TrackSessionKey(ts.clientID, trackedSession)
+	ts.loop.histories[trackedSession] = []providers.Message{
+		{Role: "user", Content: "Hello"},
+	}
+
+	// kind=chat filter should include it.
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta?kind=chat", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	var payload ChatSessionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	var found bool
+	for _, session := range payload.Sessions {
+		if session.Key == trackedSession {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("kind=chat filter should include %q, got %#v", trackedSession, payload.Sessions)
+	}
+
+	// kind=heartbeat filter should exclude it.
+	req2, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/sessions/meta?kind=heartbeat", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	req2.Header.Set("Authorization", "Bearer "+ts.token)
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp2.Body.Close()
+
+	var payload2 ChatSessionsResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	found = false
+	for _, session := range payload2.Sessions {
+		if session.Key == trackedSession {
+			found = true
+		}
+	}
+	if found {
+		t.Fatalf("kind=heartbeat filter should NOT include %q, got %#v", trackedSession, payload2.Sessions)
 	}
 }

@@ -278,25 +278,10 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 
 	sessions := make([]ChatSession, 0, len(sessionKeySet))
 	for sk := range sessionKeySet {
-		history := n.agentLoop.GetSessionHistory(sk)
-
-		// Skip empty sessions that were never actually used. Skim history for
-		// any user/assistant message (ignoring injected context messages), or
-		// flag sessions that still hold evicted (out-of-context) messages.
-		hasMessages := n.agentLoop.GetEvictedMessageCount(sk) > 0
-		if !hasMessages {
-			for _, msg := range history {
-				if msg.Role == "user" || msg.Role == "assistant" {
-					// Skip injected context messages (e.g. from read_image tool)
-					if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
-						continue
-					}
-					hasMessages = true
-					break
-				}
-			}
-		}
-		if !hasMessages {
+		// Lightweight existence check: never loads full history for the
+		// message-presence test. HasMessages() checks in-memory lengths and a
+		// cold SQLite count, avoiding the N+1 GetSessionHistory call.
+		if !n.agentLoop.HasMessages(sk) {
 			continue
 		}
 
@@ -390,7 +375,131 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// classifySessionKeyKind derives the session kind from the session key.
+// handleChatSessionsMeta returns lightweight session metadata WITHOUT loading
+// the full history for every session. This is the fast path used by the
+// WebUI sidebar: it avoids the N+1 query problem where handleChatSessions
+// called GetSessionHistory(sk) for each session key just to check for
+// messages. Uses HasMessages() which only checks in-memory lengths + a cold
+// SQLite count, never materializing history.
+func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Request) {
+	clientID := getClientID(r)
+	_, ok := n.auth.GetClient(clientID)
+	if !ok {
+		writeJSON(w, http.StatusOK, ChatSessionsResponse{Sessions: []ChatSession{}})
+		return
+	}
+
+	offset, limit := parsePagination(r)
+	modeFilter := r.URL.Query().Get("mode")
+	kindFilter := r.URL.Query().Get("kind")
+	includeSystem := r.URL.Query().Get("include_system") == "true"
+
+	// Collect session keys from ALL native clients (unified view).
+	allClients := n.auth.ListClients()
+	sessionKeySet := make(map[string]bool)
+	for _, c := range allClients {
+		for _, sk := range c.SessionKeys {
+			sessionKeySet[sk] = true
+		}
+	}
+
+	sessions := make([]ChatSession, 0, len(sessionKeySet))
+	for sk := range sessionKeySet {
+		// Lightweight existence check: never loads full history. A session
+		// that has no messages (user/assistant or evicted) is skipped.
+		hasMessages := n.agentLoop.HasMessages(sk)
+		if !hasMessages && n.agentLoop.GetEvictedMessageCount(sk) > 0 {
+			hasMessages = true
+		}
+		if !hasMessages {
+			continue
+		}
+
+		sessionMode := n.agentLoop.GetSessionMode(sk)
+		kind := classifySessionKeyKind(sk)
+
+		if modeFilter != "" {
+			effectiveMode := sessionMode
+			if effectiveMode == "" {
+				effectiveMode = "agent"
+			}
+			if effectiveMode != modeFilter {
+				continue
+			}
+		}
+		if kindFilter != "" && kind != kindFilter {
+			continue
+		}
+
+		sessions = append(sessions, ChatSession{
+			Key:     sk,
+			Name:    n.agentLoop.GetName(sk),
+			Mode:    sessionMode,
+			Kind:    kind,
+			Created: n.agentLoop.GetCreated(sk),
+			Updated: n.agentLoop.GetUpdated(sk),
+		})
+	}
+
+	// Merge in every persisted session from the shared session manager
+	// (heartbeat, cron, subagents, etc.) so the session-history UI can see
+	// sessions that are not tracked by any native client. Duplicate keys are
+	// skipped (the tracked entry above wins). System sessions may have zero
+	// messages (heartbeat/cron runs) and are kept as-is.
+	mergeAllSessions := n.agentLoop != nil && (kindFilter != "" || includeSystem)
+	if mergeAllSessions {
+		allSessions := n.agentLoop.ListAllSessions()
+		seen := make(map[string]bool, len(sessions))
+		for _, s := range sessions {
+			seen[s.Key] = true
+		}
+		for _, info := range allSessions {
+			if seen[info.Key] {
+				continue
+			}
+			if modeFilter != "" {
+				effectiveMode := info.Mode
+				if effectiveMode == "" {
+					effectiveMode = "agent"
+				}
+				if effectiveMode != modeFilter {
+					continue
+				}
+			}
+			if kindFilter != "" && info.Kind != kindFilter {
+				continue
+			}
+			sessions = append(sessions, ChatSession{
+				Key:     info.Key,
+				Name:    info.Name,
+				Mode:    info.Mode,
+				Kind:    info.Kind,
+				Created: info.Created,
+				Updated: info.Updated,
+			})
+		}
+	}
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].Updated.After(sessions[j].Updated)
+	})
+
+	total := len(sessions)
+	start := offset
+	if start > total {
+		start = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, ChatSessionsResponse{
+		Sessions: sessions[start:end],
+		Total:    total,
+		HasMore:  end < total,
+	})
+}
 // Mirrors agent.classifySessionKind; both must stay in sync.
 func classifySessionKeyKind(sessionKey string) string {
 	if sessionKey == "" {

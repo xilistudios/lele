@@ -41,6 +41,11 @@ type AgentProvidable interface {
 	// GetTotalMessageCount returns the total persisted message count for a
 	// session: in-memory slice length plus evicted messages.
 	GetTotalMessageCount(sessionKey string) int
+	// HasMessages returns true if a session has any user/assistant messages,
+	// WITHOUT materializing its full history. Lightweight metadata check used
+	// by the session-listing hot path (WebUI sidebar) to avoid the N+1 full
+	// history load performed by GetSessionHistory.
+	HasMessages(sessionKey string) bool
 	// AddSessionMessage añade un mensaje al historial persistido de una sesión
 	AddSessionMessage(sessionKey string, msg providers.Message) error
 	// GetSessionModel devuelve el modelo efectivo de una sesión

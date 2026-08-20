@@ -34,6 +34,7 @@ export const endpoints = {
       return `/api/v1/chat/sessions/${sessionKey}/history`
     },
     sessions: '/api/v1/chat/sessions',
+    sessionsMeta: '/api/v1/chat/sessions/meta',
     session: (
       sessionKey: string,
       subresource?: 'model' | 'name' | 'agent' | 'thinking' | 'context' | 'summary' | 'subagents',

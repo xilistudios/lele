@@ -294,6 +294,39 @@ func (ap *agentProvidableImpl) GetTotalMessageCount(sessionKey string) int {
 	return agent.Sessions.GetTotalMessageCount(resolvedSessionKey)
 }
 
+// HasMessages returns true if the session has any user/assistant messages,
+// WITHOUT materializing the full history. It prefers the lightweight session
+// manager check (in-memory length + evicted count + a cold SQLite count)
+// over loading the whole history like GetSessionHistory does.
+func (ap *agentProvidableImpl) HasMessages(sessionKey string) bool {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				return agent.Sessions.HasMessages(resolvedSessionKey)
+			}
+		}
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			if agent.Sessions.HasMessages(resolvedSessionKey) {
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				return true
+			}
+		}
+		return false
+	}
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return false
+	}
+	return agent.Sessions.HasMessages(resolvedSessionKey)
+}
+
 // ============================================================================
 // AgentProvidable Interface - Model Management
 // ============================================================================
