@@ -8,7 +8,7 @@ import (
 func TestBuiltinsSorted(t *testing.T) {
 	names := Builtins()
 
-	want := []string{"blood-moon", "catppuccin", "dracula", "dracula-pro", "github-dark", "gruvbox", "monokai", "nord", "one-dark", "rose-pine", "solarized-light", "tokyo-night"}
+	want := []string{"blood-moon", "catppuccin", "dracula", "dracula-pro", "github-dark", "gruvbox", "matrix-red", "monokai", "nord", "one-dark", "rose-pine", "solarized-light", "tokyo-night"}
 	if !reflect.DeepEqual(names, want) {
 		t.Errorf("Builtins() = %v, want %v", names, want)
 	}

@@ -16,6 +16,7 @@ var builtins = map[string]Theme{
 	"rose-pine":       rosePineTheme,
 	"dracula-pro":     draculaProTheme,
 	"blood-moon":      bloodMoonTheme,
+	"matrix-red":       matrixRedTheme,
 }
 
 // Builtins returns the sorted list of built-in theme names.
@@ -179,4 +180,18 @@ var bloodMoonTheme = Theme{
 	Foreground:          "#FFCDD2",
 	SelectionBackground: "#4A1515",
 	Yellow:              "#FFB74D",
+}
+
+var matrixRedTheme = Theme{
+	Background:          "#000000",
+	InputBackground:     "#0A0000",
+	Primary:             "#FF0000",
+	Secondary:           "#CC0000",
+	Accent:              "#FF3333",
+	Purple:              "#990000",
+	Orange:              "#FF6633",
+	Comment:             "#660000",
+	Foreground:          "#FF4444",
+	SelectionBackground: "#330000",
+	Yellow:              "#FFAA00",
 }
