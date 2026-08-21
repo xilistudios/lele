@@ -13,17 +13,17 @@ import (
 // Colors may be hex like "#181824", short hex like "#ff0", or numeric
 // ANSI-256 values like "39" or "240".
 type Theme struct {
-	Background          string
-	InputBackground     string
-	Primary             string
-	Secondary           string
-	Accent              string
-	Purple              string
-	Orange              string
-	Comment             string
-	Foreground          string
-	SelectionBackground string
-	Yellow              string
+	Background          string `json:"background"`
+	InputBackground     string `json:"input_background"`
+	Primary             string `json:"primary"`
+	Secondary           string `json:"secondary"`
+	Accent              string `json:"accent"`
+	Purple              string `json:"purple"`
+	Orange              string `json:"orange"`
+	Comment             string `json:"comment"`
+	Foreground          string `json:"foreground"`
+	SelectionBackground string `json:"selection_background"`
+	Yellow              string `json:"yellow"`
 }
 
 // DraculaDefault is the default Dracula palette used as a fallback for

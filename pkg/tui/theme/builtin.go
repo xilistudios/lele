@@ -16,7 +16,7 @@ var builtins = map[string]Theme{
 	"rose-pine":       rosePineTheme,
 	"dracula-pro":     draculaProTheme,
 	"blood-moon":      bloodMoonTheme,
-	"matrix-red":       matrixRedTheme,
+	"matrix-red":      matrixRedTheme,
 }
 
 // Builtins returns the sorted list of built-in theme names.
