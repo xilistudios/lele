@@ -12,7 +12,7 @@ import (
 // to tui.json, and updates m.currentThemeName. It never returns a fatal
 // error — worst case the theme falls back to Dracula.
 func (m *Model) applyThemeByName(name string) {
-	t := theme.Get(name, nil) // custom themes loaded separately; nil here for now
+	t := theme.Get(name, m.customThemes)
 	ApplyTheme(t)
 	m.applyThemeToInputs()
 	m.invalidateRenderCache()
@@ -20,7 +20,7 @@ func (m *Model) applyThemeByName(name string) {
 
 	// Persist to tui.json
 	path := theme.DefaultPath()
-	if err := theme.Save(path, name, nil); err != nil {
+	if err := theme.Save(path, name, m.customThemes, m.installedCommunity); err != nil {
 		log.Printf("warning: could not save tui.json: %v", err)
 	}
 }
@@ -29,7 +29,7 @@ func (m *Model) applyThemeByName(name string) {
 // invalidation) WITHOUT persisting to tui.json. Used for live preview while
 // navigating the theme picker. Esc reverts via m.themePreviewName.
 func (m *Model) previewTheme(name string) {
-	t := theme.Get(name, nil)
+	t := theme.Get(name, m.customThemes)
 	ApplyTheme(t)
 	m.applyThemeToInputs()
 	m.invalidateRenderCache()

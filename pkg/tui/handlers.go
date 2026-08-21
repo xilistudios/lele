@@ -142,6 +142,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case communityIndexMsg:
+		m.communityLoading = false
+		if msg.err != "" {
+			m.communityErr = msg.err
+		} else {
+			m.communityErr = ""
+			m.communityIndex = msg.entries
+		}
+		if m.themePickerActive {
+			m.loadThemePickerItems()
+		}
+		return m, nil
+	case installThemeMsg:
+		m.communityLoading = false
+		if msg.err != "" {
+			m.communityErr = msg.err
+		} else {
+			m.communityErr = ""
+			if m.customThemes == nil {
+				m.customThemes = make(map[string]theme.Theme)
+			}
+			m.customThemes[msg.name] = msg.theme
+			m.installedCommunity = theme.AddInstalledCommunity(msg.name, m.installedCommunity)
+			m.applyThemeByName(msg.name)
+		}
+		if m.themePickerActive {
+			m.loadThemePickerItems()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Handle onboarding wizard keys. The obConnect step reuses the
 		// ModalAddProvider form modal, so its keys are delegated to the
@@ -192,11 +221,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Theme picker live preview: after navigation, preview the
 				// highlighted theme without persisting. Esc reverts.
-				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
-					item := m.modalItems[m.modalSelectedIdx]
-					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-					themeName = strings.TrimSpace(themeName)
-					m.previewTheme(themeName)
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
+					item := m.themePickerItems[m.modalSelectedIdx]
+					if item.kind == "builtin" {
+						m.previewTheme(item.name)
+					} else if item.kind == "community" && theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+						m.previewTheme(item.name)
+					}
 				}
 			case "down", "j":
 				if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
@@ -211,11 +242,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Theme picker live preview: after navigation, preview the
 				// highlighted theme without persisting. Esc reverts.
-				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
-					item := m.modalItems[m.modalSelectedIdx]
-					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-					themeName = strings.TrimSpace(themeName)
-					m.previewTheme(themeName)
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
+					item := m.themePickerItems[m.modalSelectedIdx]
+					if item.kind == "builtin" {
+						m.previewTheme(item.name)
+					} else if item.kind == "community" && theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+						m.previewTheme(item.name)
+					}
 				}
 			case "enter":
 				// TUI settings inline edit: save value and return to list.
@@ -868,24 +901,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if m.modalMode == ModalSettingsTUI {
 						// Theme picker is active — handle selection.
 						if m.themePickerActive {
-							if m.modalSelectedIdx < len(m.modalItems) {
-								// Extract theme name from the item (strip "• " or "  " prefix)
-								item := m.modalItems[m.modalSelectedIdx]
-								themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-								themeName = strings.TrimSpace(themeName)
-								m.applyThemeByName(themeName)
+							if m.modalSelectedIdx < len(m.themePickerItems) {
+								item := m.themePickerItems[m.modalSelectedIdx]
+								switch item.kind {
+								case "builtin":
+									m.applyThemeByName(item.name)
+									m.themePreviewName = ""
+									m.themePickerActive = false
+									m.loadTUISettings()
+									m.modalSelectedIdx = 0
+									return m, nil
+								case "community":
+									if theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+										// Already installed — just apply
+										m.applyThemeByName(item.name)
+										m.themePreviewName = ""
+										m.themePickerActive = false
+										m.loadTUISettings()
+										m.modalSelectedIdx = 0
+										return m, nil
+									}
+									// Not installed — download and install
+									m.communityLoading = true
+									m.loadThemePickerItems()
+									return m, m.installCommunityThemeCmd(item.name)
+								case "retry":
+									m.communityLoading = true
+									m.communityErr = ""
+									m.loadThemePickerItems()
+									return m, m.fetchCommunityIndexCmd()
+								}
 							}
-							m.themePreviewName = "" // clear preview state
-							m.themePickerActive = false
-							m.loadTUISettings()
-							m.modalSelectedIdx = 0
+							// For headers, loading, error — do nothing
 							return m, nil
 						}
 						// Interface settings: handle row action.
-						m.handleTUISettingsEnter()
-						// If theme picker was activated, just return (don't reload settings yet)
+						cmd := m.handleTUISettingsEnter()
+						// If theme picker was activated, just return with the fetch cmd
 						if m.themePickerActive {
-							return m, nil
+							return m, cmd
 						}
 						// Mouse toggle returns a cmd
 						if m.modalSelectedIdx == 1 {

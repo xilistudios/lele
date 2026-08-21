@@ -1066,6 +1066,22 @@ func (m *Model) renderModal(modalTitle string) string {
 		endIdx = len(m.modalItems)
 	}
 	for i := m.modalScrollOffset; i < endIdx; i++ {
+		// When the theme picker is active, use structured items to render
+		// section headers differently from selectable items.
+		if m.themePickerActive && i < len(m.themePickerItems) {
+			tpItem := m.themePickerItems[i]
+			if tpItem.kind == "header" {
+				// Section headers: centered, dimmed, no selection prefix
+				modalSb.WriteString(CommentColorStyle.Render(tpItem.label) + "\n")
+				continue
+			}
+			if tpItem.kind == "loading" || tpItem.kind == "error" {
+				// Status messages: dimmed, no selection prefix
+				modalSb.WriteString(CommentColorStyle.Render(tpItem.label) + "\n")
+				continue
+			}
+		}
+		// Regular selectable items
 		item := m.modalItems[i]
 		if i == m.modalSelectedIdx {
 			modalSb.WriteString(ModalItemActive.Render("> "+item) + "\n")
@@ -1077,6 +1093,11 @@ func (m *Model) renderModal(modalTitle string) string {
 	// Scroll indicator: show ↓ if there are items below
 	if endIdx < len(m.modalItems) {
 		modalSb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreBelow")) + "\n")
+	}
+
+	// Theme picker: show navigation hint at the bottom
+	if m.themePickerActive {
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.themePickerHint")) + "\n")
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())

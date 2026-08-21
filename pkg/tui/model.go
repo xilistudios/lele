@@ -115,7 +115,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 
 	// Load TUI theme from tui.json (never fatal — defaults to Dracula)
 	themePath := theme.DefaultPath()
-	themeName, _, err := theme.Load(themePath)
+	themeName, customThemes, installedCommunity, err := theme.Load(themePath)
 	if err != nil {
 		log.Printf("warning: could not load tui.json: %v", err)
 	}
@@ -123,7 +123,9 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		themeName = "dracula"
 	}
 	m.currentThemeName = themeName
-	ApplyTheme(theme.Get(themeName, nil))
+	m.customThemes = customThemes
+	m.installedCommunity = installedCommunity
+	ApplyTheme(theme.Get(themeName, customThemes))
 
 	// Apply theme colors to the input widgets (textarea + textinput). Must
 	// run after m is created since it accesses m.chatInput and m.textInput.

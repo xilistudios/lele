@@ -10,6 +10,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -153,6 +154,19 @@ type compactResultMsg struct {
 	sessionKey string
 }
 
+// communityIndexMsg is sent when the community theme index has been fetched.
+type communityIndexMsg struct {
+	entries []theme.CommunityThemeEntry
+	err     string
+}
+
+// installThemeMsg is sent when a community theme download completes.
+type installThemeMsg struct {
+	name  string
+	theme theme.Theme
+	err   string
+}
+
 // onboardStep represents the current step in the first-run onboarding wizard.
 type onboardStep int
 
@@ -195,6 +209,14 @@ type Model struct {
 	currentThemeName  string // active theme name (e.g. "dracula")
 	themePickerActive bool   // true when theme picker overlay is open
 	themePreviewName  string // saved theme name before preview navigation (Esc reverts to this)
+
+	// Community theme state
+	customThemes       map[string]theme.Theme         // user-defined + installed community themes
+	installedCommunity []string                       // names of themes installed from the community repo
+	communityIndex     []theme.CommunityThemeEntry    // cached community index from awesome-lele
+	communityLoading   bool                           // true while fetching community index
+	communityErr       string                         // error message if community fetch failed
+	themePickerItems   []themePickerItem              // structured items for the theme picker
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool
