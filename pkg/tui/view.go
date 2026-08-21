@@ -234,12 +234,18 @@ func (m *Model) View() string {
 				return m.renderModal(modalTitle)
 			}
 			if m.modalMode == ModalSettingsAgentEdit {
+				if m.settingsSelectorActive {
+					return m.renderSettingsSelector(modalTitle)
+				}
 				if m.settingsEditField != "" {
 					return m.renderAgentEditInput()
 				}
 				return m.renderModal(modalTitle)
 			}
 			if m.modalMode == ModalSettingsSystemEdit {
+				if m.settingsSelectorActive {
+					return m.renderSettingsSelector(modalTitle)
+				}
 				if m.settingsEditField != "" {
 					return m.renderSystemSettingsEdit(modalTitle)
 				}
@@ -673,12 +679,18 @@ func (m *Model) View() string {
 			return m.renderModal(modalTitle)
 		}
 		if m.modalMode == ModalSettingsAgentEdit {
+			if m.settingsSelectorActive {
+				return m.renderSettingsSelector(modalTitle)
+			}
 			if m.settingsEditField != "" {
 				return m.renderAgentEditInput()
 			}
 			return m.renderModal(modalTitle)
 		}
 		if m.modalMode == ModalSettingsSystemEdit {
+			if m.settingsSelectorActive {
+				return m.renderSettingsSelector(modalTitle)
+			}
 			if m.settingsEditField != "" {
 				return m.renderSystemSettingsEdit(modalTitle)
 			}

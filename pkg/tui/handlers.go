@@ -179,6 +179,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Settings inline selector navigation.
+			if m.settingsSelectorActive {
+				switch msg.String() {
+				case "up", "k", "down", "j":
+					m.handleSelectorNavigation(msg)
+					return m, nil
+				case "enter":
+					return m, m.handleSelectorConfirm()
+				case "esc":
+					m.handleSelectorCancel()
+					return m, nil
+				case "q":
+					return m, nil
+				}
+			}
 			// Provider-type picker navigation (up/down within the preset list).
 			if m.modalMode == ModalAddProvider && m.providerTypePicker {
 				switch msg.String() {
@@ -881,7 +896,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						return m, nil
 					} else if m.modalMode == ModalSettingsSystemEdit {
-						// System sub-view: inline edit (save) or row action.
+						// System sub-view: inline edit (save), selector confirm,
+						// or row action.
+						if m.settingsSelectorActive {
+							return m, m.handleSelectorConfirm()
+						}
 						if m.settingsEditField != "" {
 							m.handleSystemSettingsInput(m.textInput.Value())
 							return m, nil
@@ -892,7 +911,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// the add-agent flow.
 						return m, m.handleAgentsEnter()
 					} else if m.modalMode == ModalSettingsAgentEdit {
-						// Agent detail: save inline edit or handle row action.
+						// Agent detail: save inline edit, selector confirm,
+						// or handle row action.
+						if m.settingsSelectorActive {
+							return m, m.handleSelectorConfirm()
+						}
 						if m.settingsEditField != "" {
 							m.handleAgentSettingsInput(m.textInput.Value())
 							return m, nil
@@ -998,8 +1021,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.tickCmd()
 				}
 				if m.modalMode == ModalSettingsSystemEdit {
-					// System sub-view: ESC cancels inline edit, or if not editing
-					// goes back to the system group list.
+					// System sub-view: ESC cancels selector or inline edit,
+					// or if not editing goes back to the system group list.
+					if m.settingsSelectorActive {
+						m.handleSelectorCancel()
+						return m, nil
+					}
 					if m.settingsEditField != "" {
 						m.settingsEditField = ""
 						m.formError = ""
@@ -1014,8 +1041,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.tickCmd()
 				}
 				if m.modalMode == ModalSettingsAgentEdit {
-					// Agent detail: ESC cancels an inline edit, or if not
-					// editing goes back to the agents list.
+					// Agent detail: ESC cancels selector or inline edit, or
+					// if not editing goes back to the agents list.
+					if m.settingsSelectorActive {
+						m.handleSelectorCancel()
+						return m, nil
+					}
 					if m.settingsEditField != "" {
 						m.settingsEditField = ""
 						m.formError = ""
@@ -2209,6 +2240,12 @@ func (m *Model) resetModal(mode modalType) {
 	m.settingsEditField = ""
 	m.settingsAgentID = ""
 	m.settingsAgentKeys = nil
+	m.settingsSelectorActive = false
+	m.settingsSelectorItems = nil
+	m.settingsSelectorValues = nil
+	m.settingsSelectorIdx = 0
+	m.settingsSelectorField = ""
+	m.settingsSelectorOrig = ""
 }
 
 // isListModal returns true if the modal type is a list-selection modal

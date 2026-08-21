@@ -206,6 +206,7 @@
   "tui.settings.themeNotInstalled": "Instalar",
   "tui.settings.communityFetchRetry": "Tentar novamente",
   "tui.settings.editHint": "Enter para salvar, Esc para cancelar",
+  "tui.settings.selectorHint": "↑/↓ selecionar · ENTER confirmar · ESC cancelar",
   "tui.settings.invalidNumber": "Insira um número positivo válido",
   "tui.settings.session": "Sessão",
   "tui.settings.tools": "Ferramentas",

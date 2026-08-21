@@ -263,6 +263,17 @@ type Model struct {
 	settingsAgentID   string   // agent ID being edited
 	settingsAgentKeys []string // maps modal items to agent IDs (empty = defaults, "__add__" = new agent)
 
+	// Settings inline selector state — when settingsSelectorActive is true,
+	// the modal shows a scrollable list of options (like the language picker)
+	// instead of a text input. Used for fields with a known set of valid values
+	// (provider, model, rotation, judge mode, etc.).
+	settingsSelectorActive bool     // true while a selector picker is open
+	settingsSelectorItems  []string // option labels shown in the picker
+	settingsSelectorValues []string // raw values mapped 1:1 to selectorItems
+	settingsSelectorIdx    int      // currently highlighted option
+	settingsSelectorField  string   // which settingsEditField triggered the selector
+	settingsSelectorOrig   string   // original config value when selector opened (for ✓ mark)
+
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)
 	providerSelectedName string   // currently selected provider name in detail view
