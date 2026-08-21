@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
 // newSettingsTestModel builds a Model owned by a temp config dir so that
@@ -219,11 +220,104 @@ func TestLoadThemePickerItems(t *testing.T) {
 	if !foundActive {
 		t.Error("expected active theme to be marked with •")
 	}
+	// Items are either headers (── ... ──) or selectable rows (2-space or •).
+	hasHeader := false
 	for _, item := range m.modalItems {
-		if !strings.HasPrefix(item, "  ") && !strings.HasPrefix(item, "• ") {
-			t.Errorf("theme item should start with 2 spaces or •: %q", item)
+		switch {
+		case strings.HasPrefix(item, "── "):
+			hasHeader = true
+		case strings.HasPrefix(item, "  "), strings.HasPrefix(item, "• "):
+			// ok
+		default:
+			t.Errorf("theme item should be a header or start with 2 spaces/•: %q", item)
 		}
 	}
+	if !hasHeader {
+		t.Error("expected a section header in the theme picker list")
+	}
+	// Structured items should mirror the modal labels.
+	if len(m.themePickerItems) != len(m.modalItems) {
+		t.Fatalf("themePickerItems len %d != modalItems len %d", len(m.themePickerItems), len(m.modalItems))
+	}
+	for i, it := range m.themePickerItems {
+		if it.label != m.modalItems[i] {
+			t.Errorf("label mismatch at %d: %q != %q", i, it.label, m.modalItems[i])
+		}
+	}
+}
+
+// TestThemePickerStructuredSections verifies buildThemePickerItems emits the
+// built-in and community section headers plus per-kind rows.
+func TestThemePickerStructuredSections(t *testing.T) {
+	m := newSettingsTestModel(t)
+	m.currentThemeName = "dracula"
+	m.installedCommunity = []string{"dracula", "solarized"}
+	m.communityIndex = []theme.CommunityThemeEntry{
+		{Name: "solarized", Description: "S"},
+	}
+	m.loadThemePickerItems()
+
+	var kinds []string
+	for _, it := range m.themePickerItems {
+		kinds = append(kinds, it.kind)
+	}
+	// Header, builtins..., header, community entries
+	if kinds[0] != "header" {
+		t.Fatalf("expected first item to be a header, got %q", kinds[0])
+	}
+	if !containsKind(kinds, "community") {
+		t.Fatal("expected community section items")
+	}
+	// The installed marker should appear on the installed community theme.
+	foundInstalled := false
+	for _, it := range m.themePickerItems {
+		if it.kind == "community" && strings.Contains(it.label, "✓") {
+			foundInstalled = true
+		}
+	}
+	if !foundInstalled {
+		t.Error("expected an installed community theme to show ✓")
+	}
+}
+
+// TestThemePickerLoadingError verifies the loading and error branches of
+// buildThemePickerItems.
+func TestThemePickerLoadingError(t *testing.T) {
+	m := newSettingsTestModel(t)
+
+	// Loading state
+	m.communityLoading = true
+	m.loadThemePickerItems()
+	foundLoading := false
+	for _, it := range m.themePickerItems {
+		if it.kind == "loading" {
+			foundLoading = true
+		}
+	}
+	if !foundLoading {
+		t.Fatal("expected a loading item while communityLoading is true")
+	}
+
+	// Error state
+	m = newSettingsTestModel(t)
+	m.communityErr = "boom"
+	m.loadThemePickerItems()
+	var kinds []string
+	for _, it := range m.themePickerItems {
+		kinds = append(kinds, it.kind)
+	}
+	if !containsKind(kinds, "error") || !containsKind(kinds, "retry") {
+		t.Fatalf("expected error and retry kinds, got %v", kinds)
+	}
+}
+
+func containsKind(kinds []string, kind string) bool {
+	for _, k := range kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // TestThemePickerEscRevertsPreview verifies that after previewing a different

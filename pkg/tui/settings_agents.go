@@ -191,14 +191,29 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		m.settingsEditField = "agentWorkspace"
 		m.textInput.SetValue(agent.Workspace)
 		m.textInput.Focus()
-	case agentFieldModel: // 4: Model
-		m.settingsEditField = "agentModel"
+	case agentFieldModel: // 4: Model — selector from default provider's models
+		providerName := m.cfg.Agents.Defaults.Provider
+		models := m.listProviderModels(providerName)
 		modelStr := ""
 		if agent.Model != nil {
 			modelStr = agent.Model.Primary
 		}
-		m.textInput.SetValue(modelStr)
-		m.textInput.Focus()
+		if len(models) == 0 {
+			// No models configured — fall back to text input
+			m.settingsEditField = "agentModel"
+			m.textInput.SetValue(modelStr)
+			m.textInput.Focus()
+		} else {
+			labels := make([]string, 0, len(models)+1)
+			values := make([]string, 0, len(models)+1)
+			labels = append(labels, "(default)")
+			values = append(values, "")
+			for _, model := range models {
+				labels = append(labels, model)
+				values = append(values, model)
+			}
+			m.startSettingsSelector("agentModel", modelStr, labels, values)
+		}
 	case agentFieldTemperature: // 5: Temperature
 		m.settingsEditField = "agentTemperature"
 		tempStr := ""
@@ -225,14 +240,43 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 	d := &m.cfg.Agents.Defaults
 	switch m.modalSelectedIdx {
-	case 0: // Provider
-		m.settingsEditField = "defaultProvider"
-		m.textInput.SetValue(d.Provider)
-		m.textInput.Focus()
-	case 1: // Model
-		m.settingsEditField = "defaultModel"
-		m.textInput.SetValue(d.Model)
-		m.textInput.Focus()
+	case 0: // Provider — selector from configured providers
+		providers := m.listProviders()
+		if len(providers) == 0 {
+			// No providers configured — fall back to text input
+			m.settingsEditField = "defaultProvider"
+			m.textInput.SetValue(d.Provider)
+			m.textInput.Focus()
+		} else {
+			labels := make([]string, 0, len(providers)+1)
+			values := make([]string, 0, len(providers)+1)
+			labels = append(labels, "(default)")
+			values = append(values, "")
+			for _, p := range providers {
+				labels = append(labels, p)
+				values = append(values, p)
+			}
+			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
+		}
+	case 1: // Model — selector from default provider's models
+		providerName := d.Provider
+		models := m.listProviderModels(providerName)
+		if len(models) == 0 {
+			// No models configured — fall back to text input
+			m.settingsEditField = "defaultModel"
+			m.textInput.SetValue(d.Model)
+			m.textInput.Focus()
+		} else {
+			labels := make([]string, 0, len(models)+1)
+			values := make([]string, 0, len(models)+1)
+			labels = append(labels, "(default)")
+			values = append(values, "")
+			for _, model := range models {
+				labels = append(labels, model)
+				values = append(values, model)
+			}
+			m.startSettingsSelector("defaultModel", d.Model, labels, values)
+		}
 	case 2: // MaxTokens
 		m.settingsEditField = "defaultMaxTokens"
 		m.textInput.SetValue(strconv.Itoa(d.MaxTokens))

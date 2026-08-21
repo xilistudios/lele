@@ -176,10 +176,25 @@ func (m *Model) handleSessionEnter() tea.Cmd {
 		m.settingsEditField = "compactionPercent"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.CompactionThresholdPercent))
 		m.textInput.Focus()
-	case 3: // Compaction model
-		m.settingsEditField = "compactionModel"
-		m.textInput.SetValue(m.cfg.Session.CompactionModel)
-		m.textInput.Focus()
+	case 3: // Compaction model — selector from configured providers' models
+		providerName := m.cfg.Agents.Defaults.Provider
+		models := m.listProviderModels(providerName)
+		if len(models) == 0 {
+			// No models configured — fall back to text input
+			m.settingsEditField = "compactionModel"
+			m.textInput.SetValue(m.cfg.Session.CompactionModel)
+			m.textInput.Focus()
+		} else {
+			labels := make([]string, 0, len(models)+1)
+			values := make([]string, 0, len(models)+1)
+			labels = append(labels, "(default)")
+			values = append(values, "")
+			for _, model := range models {
+				labels = append(labels, model)
+				values = append(values, model)
+			}
+			m.startSettingsSelector("compactionModel", m.cfg.Session.CompactionModel, labels, values)
+		}
 	}
 	return nil
 }
@@ -218,10 +233,10 @@ func (m *Model) handleLogsEnter() tea.Cmd {
 		m.settingsEditField = "logsMaxDays"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Logs.MaxDays))
 		m.textInput.Focus()
-	case 3: // Rotation
-		m.settingsEditField = "logsRotation"
-		m.textInput.SetValue(m.cfg.Logs.Rotation)
-		m.textInput.Focus()
+	case 3: // Rotation — selector: daily / weekly
+		labels := []string{"daily", "weekly"}
+		values := []string{"daily", "weekly"}
+		m.startSettingsSelector("logsRotation", m.cfg.Logs.Rotation, labels, values)
 	}
 	return nil
 }
@@ -243,14 +258,22 @@ func (m *Model) handleLanguageEnter() tea.Cmd {
 // handleGoalEnter handles enter on Goal settings items.
 func (m *Model) handleGoalEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Judge mode
-		m.settingsEditField = "goalJudgeMode"
-		m.textInput.SetValue(m.cfg.Goal.Judge.Mode)
-		m.textInput.Focus()
-	case 1: // Judge agent
-		m.settingsEditField = "goalJudgeAgent"
-		m.textInput.SetValue(m.cfg.Goal.Judge.Agent)
-		m.textInput.Focus()
+	case 0: // Judge mode — selector: inline / subagent
+		labels := []string{"inline", "subagent"}
+		values := []string{"inline", "subagent"}
+		m.startSettingsSelector("goalJudgeMode", m.cfg.Goal.Judge.Mode, labels, values)
+	case 1: // Judge agent — selector from configured agents
+		labels := []string{"(default)"}
+		values := []string{""}
+		for _, a := range m.cfg.Agents.List {
+			label := a.ID
+			if a.Name != "" {
+				label = fmt.Sprintf("%s (%s)", a.Name, a.ID)
+			}
+			labels = append(labels, label)
+			values = append(values, a.ID)
+		}
+		m.startSettingsSelector("goalJudgeAgent", m.cfg.Goal.Judge.Agent, labels, values)
 	}
 	return nil
 }
@@ -262,10 +285,10 @@ func (m *Model) handleUpdatesEnter() tea.Cmd {
 		m.cfg.Updates.Enabled = !m.cfg.Updates.Enabled
 		m.saveConfigToDisk()
 		m.loadUpdatesSettings()
-	case 1: // Channel
-		m.settingsEditField = "updatesChannel"
-		m.textInput.SetValue(m.cfg.Updates.Channel)
-		m.textInput.Focus()
+	case 1: // Channel — selector: stable
+		labels := []string{"stable"}
+		values := []string{"stable"}
+		m.startSettingsSelector("updatesChannel", m.cfg.Updates.Channel, labels, values)
 	}
 	return nil
 }

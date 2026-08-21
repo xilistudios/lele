@@ -142,6 +142,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case communityIndexMsg:
+		m.communityLoading = false
+		if msg.err != "" {
+			m.communityErr = msg.err
+		} else {
+			m.communityErr = ""
+			m.communityIndex = msg.entries
+		}
+		if m.themePickerActive {
+			m.loadThemePickerItems()
+		}
+		return m, nil
+	case installThemeMsg:
+		m.communityLoading = false
+		if msg.err != "" {
+			m.communityErr = msg.err
+		} else {
+			m.communityErr = ""
+			if m.customThemes == nil {
+				m.customThemes = make(map[string]theme.Theme)
+			}
+			m.customThemes[msg.name] = msg.theme
+			m.installedCommunity = theme.AddInstalledCommunity(msg.name, m.installedCommunity)
+			m.applyThemeByName(msg.name)
+		}
+		if m.themePickerActive {
+			m.loadThemePickerItems()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		// Handle onboarding wizard keys. The obConnect step reuses the
 		// ModalAddProvider form modal, so its keys are delegated to the
@@ -150,6 +179,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Settings inline selector navigation.
+			if m.settingsSelectorActive {
+				switch msg.String() {
+				case "up", "k", "down", "j":
+					m.handleSelectorNavigation(msg)
+					return m, nil
+				case "enter":
+					return m, m.handleSelectorConfirm()
+				case "esc":
+					m.handleSelectorCancel()
+					return m, nil
+				case "q":
+					return m, nil
+				}
+			}
 			// Provider-type picker navigation (up/down within the preset list).
 			if m.modalMode == ModalAddProvider && m.providerTypePicker {
 				switch msg.String() {
@@ -192,11 +236,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Theme picker live preview: after navigation, preview the
 				// highlighted theme without persisting. Esc reverts.
-				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
-					item := m.modalItems[m.modalSelectedIdx]
-					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-					themeName = strings.TrimSpace(themeName)
-					m.previewTheme(themeName)
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
+					item := m.themePickerItems[m.modalSelectedIdx]
+					if item.kind == "builtin" {
+						m.previewTheme(item.name)
+					} else if item.kind == "community" && theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+						m.previewTheme(item.name)
+					}
 				}
 			case "down", "j":
 				if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
@@ -211,11 +257,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// Theme picker live preview: after navigation, preview the
 				// highlighted theme without persisting. Esc reverts.
-				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
-					item := m.modalItems[m.modalSelectedIdx]
-					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-					themeName = strings.TrimSpace(themeName)
-					m.previewTheme(themeName)
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.themePickerItems) {
+					item := m.themePickerItems[m.modalSelectedIdx]
+					if item.kind == "builtin" {
+						m.previewTheme(item.name)
+					} else if item.kind == "community" && theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+						m.previewTheme(item.name)
+					}
 				}
 			case "enter":
 				// TUI settings inline edit: save value and return to list.
@@ -848,7 +896,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						return m, nil
 					} else if m.modalMode == ModalSettingsSystemEdit {
-						// System sub-view: inline edit (save) or row action.
+						// System sub-view: inline edit (save), selector confirm,
+						// or row action.
+						if m.settingsSelectorActive {
+							return m, m.handleSelectorConfirm()
+						}
 						if m.settingsEditField != "" {
 							m.handleSystemSettingsInput(m.textInput.Value())
 							return m, nil
@@ -859,7 +911,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// the add-agent flow.
 						return m, m.handleAgentsEnter()
 					} else if m.modalMode == ModalSettingsAgentEdit {
-						// Agent detail: save inline edit or handle row action.
+						// Agent detail: save inline edit, selector confirm,
+						// or handle row action.
+						if m.settingsSelectorActive {
+							return m, m.handleSelectorConfirm()
+						}
 						if m.settingsEditField != "" {
 							m.handleAgentSettingsInput(m.textInput.Value())
 							return m, nil
@@ -868,24 +924,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if m.modalMode == ModalSettingsTUI {
 						// Theme picker is active — handle selection.
 						if m.themePickerActive {
-							if m.modalSelectedIdx < len(m.modalItems) {
-								// Extract theme name from the item (strip "• " or "  " prefix)
-								item := m.modalItems[m.modalSelectedIdx]
-								themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
-								themeName = strings.TrimSpace(themeName)
-								m.applyThemeByName(themeName)
+							if m.modalSelectedIdx < len(m.themePickerItems) {
+								item := m.themePickerItems[m.modalSelectedIdx]
+								switch item.kind {
+								case "builtin":
+									m.applyThemeByName(item.name)
+									m.themePreviewName = ""
+									m.themePickerActive = false
+									m.loadTUISettings()
+									m.modalSelectedIdx = 0
+									return m, nil
+								case "community":
+									if theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+										// Already installed — just apply
+										m.applyThemeByName(item.name)
+										m.themePreviewName = ""
+										m.themePickerActive = false
+										m.loadTUISettings()
+										m.modalSelectedIdx = 0
+										return m, nil
+									}
+									// Not installed — download and install
+									m.communityLoading = true
+									m.loadThemePickerItems()
+									return m, m.installCommunityThemeCmd(item.name)
+								case "retry":
+									m.communityLoading = true
+									m.communityErr = ""
+									m.loadThemePickerItems()
+									return m, m.fetchCommunityIndexCmd()
+								}
 							}
-							m.themePreviewName = "" // clear preview state
-							m.themePickerActive = false
-							m.loadTUISettings()
-							m.modalSelectedIdx = 0
+							// For headers, loading, error — do nothing
 							return m, nil
 						}
 						// Interface settings: handle row action.
-						m.handleTUISettingsEnter()
-						// If theme picker was activated, just return (don't reload settings yet)
+						cmd := m.handleTUISettingsEnter()
+						// If theme picker was activated, just return with the fetch cmd
 						if m.themePickerActive {
-							return m, nil
+							return m, cmd
 						}
 						// Mouse toggle returns a cmd
 						if m.modalSelectedIdx == 1 {
@@ -944,8 +1021,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.tickCmd()
 				}
 				if m.modalMode == ModalSettingsSystemEdit {
-					// System sub-view: ESC cancels inline edit, or if not editing
-					// goes back to the system group list.
+					// System sub-view: ESC cancels selector or inline edit,
+					// or if not editing goes back to the system group list.
+					if m.settingsSelectorActive {
+						m.handleSelectorCancel()
+						return m, nil
+					}
 					if m.settingsEditField != "" {
 						m.settingsEditField = ""
 						m.formError = ""
@@ -960,8 +1041,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.tickCmd()
 				}
 				if m.modalMode == ModalSettingsAgentEdit {
-					// Agent detail: ESC cancels an inline edit, or if not
-					// editing goes back to the agents list.
+					// Agent detail: ESC cancels selector or inline edit, or
+					// if not editing goes back to the agents list.
+					if m.settingsSelectorActive {
+						m.handleSelectorCancel()
+						return m, nil
+					}
 					if m.settingsEditField != "" {
 						m.settingsEditField = ""
 						m.formError = ""
@@ -2155,6 +2240,12 @@ func (m *Model) resetModal(mode modalType) {
 	m.settingsEditField = ""
 	m.settingsAgentID = ""
 	m.settingsAgentKeys = nil
+	m.settingsSelectorActive = false
+	m.settingsSelectorItems = nil
+	m.settingsSelectorValues = nil
+	m.settingsSelectorIdx = 0
+	m.settingsSelectorField = ""
+	m.settingsSelectorOrig = ""
 }
 
 // isListModal returns true if the modal type is a list-selection modal
