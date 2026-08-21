@@ -1,9 +1,12 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -76,4 +79,53 @@ func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 		anthropicoption.WithBaseURL(baseURL),
 	)
 	return &c
+}
+func TestClaudeProvider_NewClaudeProviderWithBaseURL(t *testing.T) {
+	p := NewClaudeProviderWithBaseURL("token", "https://custom.example.com/v1")
+	if p == nil || p.delegate == nil {
+		t.Fatal("NewClaudeProviderWithBaseURL() returned nil provider/delegate")
+	}
+	if got := p.delegate.BaseURL(); got != "https://custom.example.com" {
+		t.Errorf("BaseURL() = %q, want %q", got, "https://custom.example.com")
+	}
+}
+
+func TestClaudeProvider_NewClaudeProviderWithTokenSource(t *testing.T) {
+	p := NewClaudeProviderWithTokenSource("stale", func() (string, error) { return "fresh", nil })
+	if p == nil || p.delegate == nil {
+		t.Fatal("NewClaudeProviderWithTokenSource() returned nil provider/delegate")
+	}
+	// Verifying the token source is wired: a failing token source must surface
+	// its error through Chat.
+	p2 := NewClaudeProviderWithTokenSource("stale", func() (string, error) {
+		return "", fmt.Errorf("refresh boom")
+	})
+	_, err := p2.Chat(context.Background(), nil, nil, "test-model", nil)
+	if err == nil {
+		t.Fatal("expected token source error from Chat")
+	}
+	if !strings.Contains(err.Error(), "refreshing token") {
+		t.Errorf("error = %v, want refreshing token error", err)
+	}
+}
+
+func TestClaudeProvider_NewClaudeProviderWithTokenSourceAndBaseURL(t *testing.T) {
+	p := NewClaudeProviderWithTokenSourceAndBaseURL("stale", func() (string, error) { return "fresh", nil }, "https://custom.example.com")
+	if p == nil || p.delegate == nil {
+		t.Fatal("NewClaudeProviderWithTokenSourceAndBaseURL() returned nil provider/delegate")
+	}
+	if got := p.delegate.BaseURL(); got != "https://custom.example.com" {
+		t.Errorf("BaseURL() = %q, want %q", got, "https://custom.example.com")
+	}
+}
+
+func TestClaudeProvider_Chat_TokenSourceError(t *testing.T) {
+	// Surface token source error through the delegate chain.
+	p := NewClaudeProviderWithTokenSource("stale", func() (string, error) {
+		return "", fmt.Errorf("no token")
+	})
+	_, err := p.Chat(context.Background(), nil, nil, "test-model", nil)
+	if err == nil {
+		t.Fatal("expected token source error from Chat")
+	}
 }

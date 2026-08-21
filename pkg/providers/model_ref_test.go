@@ -144,3 +144,24 @@ func TestStripProviderPrefix(t *testing.T) {
 		}
 	}
 }
+func TestModelRef_APIModel(t *testing.T) {
+	if got := (*ModelRef)(nil).APIModel(); got != "" {
+		t.Errorf("nil APIModel() = %q, want empty", got)
+	}
+	m := &ModelRef{Provider: "openrouter", Model: "deepseek/deepseek-v4-pro"}
+	if got := m.APIModel(); got != "deepseek/deepseek-v4-pro" {
+		t.Errorf("APIModel() = %q, want deepseek/deepseek-v4-pro", got)
+	}
+}
+
+func TestModelRef_String(t *testing.T) {
+	if got := (*ModelRef)(nil).String(); got != "" {
+		t.Errorf("nil String() = %q, want empty", got)
+	}
+	if got := (&ModelRef{Provider: "anthropic", Model: "claude-opus"}).String(); got != "anthropic:claude-opus" {
+		t.Errorf("String() = %q, want anthropic:claude-opus", got)
+	}
+	if got := (&ModelRef{Provider: "", Model: "claude-opus"}).String(); got != "claude-opus" {
+		t.Errorf("String() with empty provider = %q, want claude-opus", got)
+	}
+}

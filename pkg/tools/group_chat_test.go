@@ -64,10 +64,15 @@ func TestGroupChatTool_Success(t *testing.T) {
 	tool.SetContext("test", "chat")
 
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"task":         "solve X",
-		"participants": []interface{}{"a", "b"},
-		"strategy":     "round_robin",
-		"rounds":       float64(1),
+		"task":                    "solve X",
+		"participants":            []interface{}{"a", "b"},
+		"strategy":                "round_robin",
+		"rounds":                  float64(1),
+		"parallel":                true,
+		"max_turns":               float64(3),
+		"max_tokens_per_turn":     float64(512),
+		"total_token_budget":      float64(2000),
+		"stop_keywords":           []interface{}{"DONE", "", "converge"},
 	})
 
 	if result.IsError {

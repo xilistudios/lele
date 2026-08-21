@@ -326,6 +326,35 @@ func TestShellTool_SecretSubstitution_Unknown(t *testing.T) {
 	}
 }
 
+// TestShellTool_SecretSubstitution_MultipleWithError verifies the second
+// placeholder short-circuits once the first resolution failed.
+func TestShellTool_SecretSubstitution_MultipleWithError(t *testing.T) {
+	svc := newTestKeyring(t)
+	// Only "good" is resolvable; "bad" is unknown.
+	if err := svc.SetFromUI("good", "GOOD", "", nil, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool("", false)
+	tool.SetKeyringService(svc)
+
+	ctx := WithAgentToolContext(context.Background(), "tester", "s")
+	result := tool.Execute(ctx, map[string]interface{}{
+		"command": "echo {{SECRET:bad}}-{{SECRET:good}}",
+	})
+
+	if !result.IsError {
+		t.Fatalf("expected error, got success: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "bad") {
+		t.Errorf("expected error to mention failing secret, got: %s", result.ForLLM)
+	}
+	// GOOD must not be substituted into a leaked command.
+	if strings.Contains(result.ForLLM, "GOOD") {
+		t.Errorf("secret GOOD leaked into output: %s", result.ForLLM)
+	}
+}
+
 // TestShellTool_SecretSubstitution_Disabled verifies substitution can be turned off,
 // leaving the placeholder literal.
 func TestShellTool_SecretSubstitution_Disabled(t *testing.T) {

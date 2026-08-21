@@ -371,3 +371,115 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Error("expected empty disabled list after toggle")
 	}
 }
+// ---- Additional workspace config coverage for error paths & SetEnabled ----
+
+func TestWorkspaceConfigManager_SetEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewWorkspaceConfigManager(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SetEnabled("github"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg := mgr.GetConfig()
+	found := false
+	for _, e := range cfg.Enabled {
+		if e == "github" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected 'github' in enabled list after SetEnabled")
+	}
+	if !mgr.IsEnabled("github") {
+		t.Error("expected 'github' to be enabled")
+	}
+}
+
+func TestLoadWorkspaceConfig_ReadError(t *testing.T) {
+	// Make .lele a file so reading workspace.json fails with a non-not-exist error.
+	tmpDir := t.TempDir()
+	lelePath := filepath.Join(tmpDir, ".lele")
+	if err := os.WriteFile(lelePath, []byte("file"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadWorkspaceConfig(tmpDir)
+	if err == nil {
+		t.Error("expected error when .lele is a file")
+	} else if !contains(err.Error(), "failed to read workspace config") {
+		t.Errorf("expected read error, got %v", err)
+	}
+}
+
+func TestLoadWorkspaceConfig_NoSkillsKey(t *testing.T) {
+	tmpDir := t.TempDir()
+	leleDir := filepath.Join(tmpDir, ".lele")
+	if err := os.MkdirAll(leleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Config present but no "skills" key.
+	if err := os.WriteFile(filepath.Join(leleDir, "workspace.json"), []byte(`{"something_else": 1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWorkspaceConfig(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Enabled) != 0 || len(cfg.Disabled) != 0 {
+		t.Error("expected empty config when no skills key present")
+	}
+}
+
+func TestSaveWorkspaceConfig_ErrorPaths(t *testing.T) {
+	// .lele cannot be created because a file occupies the workspace path resolution.
+	// Instead, verify marshal of empty config works and no error when dir exists.
+	tmpDir := t.TempDir()
+	cfg := &WorkspaceSkillsConfig{}
+	if err := SaveWorkspaceConfig(tmpDir, cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Invalid existing JSON for preservation is best-effort (no error).
+	leleDir := filepath.Join(tmpDir, ".lele")
+	if err := os.MkdirAll(leleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leleDir, "workspace.json"), []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := &WorkspaceSkillsConfig{Enabled: []string{"github"}}
+	if err := SaveWorkspaceConfig(tmpDir, cfg2); err != nil {
+		t.Fatalf("unexpected error with invalid existing JSON: %v", err)
+	}
+}
+
+func TestWorkspaceConfigManager_SetDisabled_Persists(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, err := NewWorkspaceConfigManager(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SetDisabled("hardware"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mgr.IsEnabled("hardware") {
+		t.Error("expected 'hardware' disabled")
+	}
+}
+
+func TestSaveWorkspaceConfig_MkdirError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// A file occupies the .lele path -> MkdirAll fails.
+	if err := os.WriteFile(filepath.Join(tmpDir, ".lele"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &WorkspaceSkillsConfig{Enabled: []string{"github"}}
+	err := SaveWorkspaceConfig(tmpDir, cfg)
+	if err == nil {
+		t.Error("expected error when .lele is a file")
+	} else if !contains(err.Error(), "failed to create .lele directory") {
+		t.Errorf("expected create-dir error, got %v", err)
+	}
+}

@@ -68,3 +68,46 @@ func TestRandomProcessNameFormat(t *testing.T) {
 		}
 	}
 }
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      string
+		maxLen int
+		want   string
+	}{
+		{"empty string", "", 5, ""},
+		{"shorter than maxLen", "hello", 10, "hello"},
+		{"exactly maxLen", "hello", 5, "hello"},
+		{"basic truncation", "hello world", 8, "hello..."},
+		{"maxLen zero", "hello", 0, ""},
+		{"maxLen 1", "hello", 1, "h"},
+		{"maxLen 3 no ellipsis", "hello", 3, "hel"},
+		{"multi-byte unicode", "日本語のテキスト", 4, "日..."},
+		{"emoji truncation", "🦞🦞🦞🦞🦞", 4, "🦞..."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Truncate(tc.s, tc.maxLen); got != tc.want {
+				t.Errorf("Truncate(%q, %d) = %q, want %q", tc.s, tc.maxLen, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTruncate_RuneSafe(t *testing.T) {
+	// Ensures no mid-rune slicing produces invalid UTF-8.
+	s := "日本語のテキストです"
+	got := Truncate(s, 5)
+	if !validUTF8(got) {
+		t.Errorf("Truncate produced invalid UTF-8: %q", got)
+	}
+}
+
+func validUTF8(s string) bool {
+	for _, r := range s {
+		if r == 0xFFFD {
+			return false
+		}
+	}
+	return true
+}

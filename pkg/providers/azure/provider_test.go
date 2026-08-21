@@ -230,3 +230,9 @@ func TestProviderChat_AzureDeploymentNameEscaped(t *testing.T) {
 		t.Fatal("deployment name was interpolated without escaping — path injection possible")
 	}
 }
+func TestProvider_AzureGetDefaultModel(t *testing.T) {
+	p := NewProvider("test-key", "https://example.com", "")
+	if got := p.GetDefaultModel(); got != "" {
+		t.Errorf("GetDefaultModel() = %q, want empty", got)
+	}
+}

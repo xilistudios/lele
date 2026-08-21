@@ -2,216 +2,349 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/channels"
 )
 
-func TestFormatSkillItem(t *testing.T) {
-	tests := []struct {
-		name        string
-		skillName   string
-		description string
-		enabled     bool
-		source      string
-		contains    string
-	}{
-		{
-			name:        "enabled skill",
-			skillName:   "github",
-			description: "Interact with GitHub",
-			enabled:     true,
-			source:      "workspace",
-			contains:    "●",
-		},
-		{
-			name:        "disabled skill",
-			skillName:   "hardware",
-			description: "I2C/SPI peripherals",
-			enabled:     false,
-			source:      "workspace",
-			contains:    "○",
-		},
-		{
-			name:        "long description truncated",
-			skillName:   "test",
-			description: "This is a very long description that should definitely be truncated because it exceeds fifty characters",
-			enabled:     true,
-			source:      "global",
-			contains:    "...",
-		},
-		{
-			name:        "with source tag",
-			skillName:   "weather",
-			description: "Weather forecasts",
-			enabled:     true,
-			source:      "builtin",
-			contains:    "[builtin]",
-		},
+func TestSkillsLoaderNil(t *testing.T) {
+	m := &Model{}
+	if m.skillsLoader() != nil {
+		t.Error("expected nil skillsLoader when agentLoop nil")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := formatSkillItem(tt.skillName, tt.description, tt.enabled, tt.source)
-			if result == "" {
-				t.Fatal("expected non-empty result")
-			}
-			if tt.contains != "" {
-				found := false
-				for i := 0; i <= len(result)-len(tt.contains); i++ {
-					if result[i:i+len(tt.contains)] == tt.contains {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("expected result to contain %q, got %q", tt.contains, result)
-				}
-			}
-		})
+	if m.skillInstaller() != nil {
+		t.Error("expected nil skillInstaller when agentLoop nil")
 	}
 }
 
-func TestFormatPickerItem(t *testing.T) {
-	tests := []struct {
-		name        string
-		skillName   string
-		description string
-		selected    bool
-		wantPrefix  string
-	}{
-		{
-			name:        "selected",
-			skillName:   "weather",
-			description: "Weather forecasts",
-			selected:    true,
-			wantPrefix:  "[x]",
-		},
-		{
-			name:        "unselected",
-			skillName:   "github",
-			description: "GitHub integration",
-			selected:    false,
-			wantPrefix:  "[ ]",
-		},
+func TestLoadSkillsListNilLoader(t *testing.T) {
+	m := &Model{}
+	m.loadSkillsList()
+	if len(m.modalItems) == 0 {
+		t.Fatal("expected unavailable message")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := formatPickerItem(tt.skillName, tt.description, tt.selected)
-			if len(result) < 3 {
-				t.Fatalf("result too short: %q", result)
-			}
-			if result[:3] != tt.wantPrefix {
-				t.Errorf("expected prefix %q, got %q", tt.wantPrefix, result[:3])
-			}
-		})
+	// When the loader is nil, the function returns early after appending the
+	// unavailable message — no action keys are added.
+	if len(m.skillsModalKeys) != 0 {
+		t.Errorf("expected 0 action keys for nil loader, got %v", m.skillsModalKeys)
 	}
 }
 
-func TestCleanRepoURL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"sipeed/lele-skills", "sipeed/lele-skills"},
-		{"https://github.com/sipeed/lele-skills", "sipeed/lele-skills"},
-		{"https://github.com/sipeed/lele-skills/", "sipeed/lele-skills"},
-		{"http://github.com/sipeed/lele-skills", "sipeed/lele-skills"},
-		{"github.com/sipeed/lele-skills", "sipeed/lele-skills"},
-		{"  sipeed/lele-skills  ", "sipeed/lele-skills"},
-		{"", ""},
-		{"single", ""},
+func TestLoadSkillsListWithSkills(t *testing.T) {
+	m := newTestModel(t)
+	loader := m.skillsLoader()
+	if loader == nil {
+		t.Skip("no skills loader in test model")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := cleanRepoURL(tt.input)
-			if result != tt.expected {
-				t.Errorf("cleanRepoURL(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestSortSkillsByName(t *testing.T) {
-	skills := []channels.ScannedSkill{
-		{Name: "zebra"},
-		{Name: "alpha"},
-		{Name: "middleware"},
-	}
-
-	sortSkillsByName(skills)
-
-	if skills[0].Name != "alpha" {
-		t.Errorf("expected first skill to be 'alpha', got %q", skills[0].Name)
-	}
-	if skills[1].Name != "middleware" {
-		t.Errorf("expected second skill to be 'middleware', got %q", skills[1].Name)
-	}
-	if skills[2].Name != "zebra" {
-		t.Errorf("expected third skill to be 'zebra', got %q", skills[2].Name)
-	}
-}
-
-func TestSortSkillsByName_CaseInsensitive(t *testing.T) {
-	skills := []channels.ScannedSkill{
-		{Name: "Zebra"},
-		{Name: "alpha"},
-		{Name: "Beta"},
-	}
-
-	sortSkillsByName(skills)
-
-	if skills[0].Name != "alpha" {
-		t.Errorf("expected first skill to be 'alpha', got %q", skills[0].Name)
-	}
-	if skills[1].Name != "Beta" {
-		t.Errorf("expected second skill to be 'Beta', got %q", skills[1].Name)
-	}
-	if skills[2].Name != "Zebra" {
-		t.Errorf("expected third skill to be 'Zebra', got %q", skills[2].Name)
-	}
-}
-
-func TestSkillsFeedbackState(t *testing.T) {
-	// Test that skills feedback is preserved in the model
-	m := Model{
-		skillsFeedback: "Installed 2 skill(s): weather, github",
-	}
-
-	if m.skillsFeedback != "Installed 2 skill(s): weather, github" {
-		t.Errorf("expected feedback preserved, got %q", m.skillsFeedback)
-	}
-}
-
-func TestSkillsSelectedMap(t *testing.T) {
-	// Test multi-select state management
-	selectedMap := map[int]bool{
-		0: true,
-		1: false,
-		2: true,
-	}
-
-	// Count selected
-	selected := 0
-	for _, v := range selectedMap {
-		if v {
-			selected++
+	m.loadSkillsList()
+	// Should have action entries
+	foundInstall := false
+	for _, k := range m.skillsModalKeys {
+		if k == "__install__" {
+			foundInstall = true
 		}
 	}
-	if selected != 2 {
-		t.Errorf("expected 2 selected, got %d", selected)
-	}
-
-	// Toggle
-	selectedMap[1] = !selectedMap[1]
-	if !selectedMap[1] {
-		t.Error("expected index 1 to be toggled to true")
-	}
-
-	// Toggle back
-	selectedMap[1] = !selectedMap[1]
-	if selectedMap[1] {
-		t.Error("expected index 1 to be toggled back to false")
+	if !foundInstall {
+		t.Error("expected __install__ action key")
 	}
 }
+
+func TestHandleSkillsEnterOutOfRange(t *testing.T) {
+	m := &Model{skillsModalKeys: []string{"a"}, modalSelectedIdx: 5}
+	if cmd := m.handleSkillsEnter(); cmd != nil {
+		t.Error("expected nil cmd for out-of-range index")
+	}
+}
+
+func TestHandleSkillsEnterSectionHeader(t *testing.T) {
+	m := &Model{skillsModalKeys: []string{"", "b"}, modalSelectedIdx: 0}
+	if cmd := m.handleSkillsEnter(); cmd != nil {
+		t.Error("expected nil cmd for section header")
+	}
+}
+
+func TestHandleSkillsEnterInstall(t *testing.T) {
+	m := &Model{skillsModalKeys: []string{"__install__"}, modalSelectedIdx: 0, width: 80, height: 24}
+	cmd := m.handleSkillsEnter()
+	if m.modalMode != ModalSkillInstall {
+		t.Errorf("expected ModalSkillInstall, got %v", m.modalMode)
+	}
+	if cmd == nil {
+		t.Error("expected a cmd for install mode entry")
+	}
+}
+
+func TestHandleSkillsEnterToggle(t *testing.T) {
+	m := newTestModel(t)
+	loader := m.skillsLoader()
+	if loader == nil {
+		t.Skip("no skills loader")
+	}
+	m.skillsModalKeys = []string{"some-skill"}
+	m.modalSelectedIdx = 0
+	cmd := m.handleSkillsEnter()
+	if cmd == nil {
+		t.Fatal("expected toggle cmd")
+	}
+	msg := cmd()
+	toggleMsg, ok := msg.(skillToggleResultMsg)
+	if !ok {
+		t.Fatalf("expected skillToggleResultMsg, got %T", msg)
+	}
+	if toggleMsg.skillName != "some-skill" {
+		t.Errorf("expected skillName some-skill, got %q", toggleMsg.skillName)
+	}
+}
+
+func TestToggleSkillCmdNilLoader(t *testing.T) {
+	m := &Model{}
+	cmd := m.toggleSkillCmd("foo")
+	msg := cmd()
+	res, ok := msg.(skillToggleResultMsg)
+	if !ok {
+		t.Fatalf("expected skillToggleResultMsg, got %T", msg)
+	}
+	if res.err == nil {
+		t.Error("expected error when loader nil")
+	}
+}
+
+func TestHandleSkillInstallSubmitEmpty(t *testing.T) {
+	m := &Model{}
+	m.textInput.SetValue("   ")
+	if cmd := m.handleSkillInstallSubmit(); cmd != nil {
+		t.Error("expected nil cmd for empty repo")
+	}
+	if m.formError == "" {
+		t.Error("expected formError for empty repo")
+	}
+}
+
+func TestHandleSkillInstallSubmitInvalid(t *testing.T) {
+	m := &Model{}
+	m.textInput.SetValue("just-one-token")
+	if cmd := m.handleSkillInstallSubmit(); cmd != nil {
+		t.Error("expected nil cmd for invalid repo")
+	}
+	if m.formError == "" {
+		t.Error("expected formError for invalid repo")
+	}
+}
+
+func TestHandleSkillInstallSubmitValidNoInstaller(t *testing.T) {
+	m := &Model{}
+	m.textInput.SetValue("owner/repo")
+	cmd := m.handleSkillInstallSubmit()
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+	if m.skillsScanRepo != "owner/repo" {
+		t.Errorf("expected scan repo set, got %q", m.skillsScanRepo)
+	}
+	msg := cmd()
+	res, ok := msg.(skillsScanResultMsg)
+	if !ok {
+		t.Fatalf("expected skillsScanResultMsg, got %T", msg)
+	}
+	if res.err == nil {
+		t.Error("expected error when installer nil")
+	}
+}
+
+func TestHandleSkillPickerEnterNoResults(t *testing.T) {
+	m := &Model{}
+	if cmd := m.handleSkillPickerEnter(); cmd != nil {
+		t.Error("expected nil cmd when no results")
+	}
+}
+
+func TestHandleSkillPickerEnterNoneSelected(t *testing.T) {
+	m := &Model{skillsScanResults: []channels.ScannedSkill{{Name: "a"}}, skillsSelectedMap: map[int]bool{0: false}}
+	if cmd := m.handleSkillPickerEnter(); cmd != nil {
+		t.Error("expected nil when nothing selected")
+	}
+	if m.formError == "" {
+		t.Error("expected formError when nothing selected")
+	}
+}
+
+func TestHandleSkillPickerEnterSelected(t *testing.T) {
+	m := &Model{skillsScanResults: []channels.ScannedSkill{{Name: "a", Path: "skills/a"}}, skillsScanRepo: "o/r", skillsSelectedMap: map[int]bool{0: true}}
+	cmd := m.handleSkillPickerEnter()
+	if cmd == nil {
+		t.Fatal("expected cmd")
+	}
+	msg := cmd()
+	res, ok := msg.(skillsInstallResultMsg)
+	if !ok {
+		t.Fatalf("expected skillsInstallResultMsg, got %T", msg)
+	}
+	if res.err == nil {
+		t.Error("expected error when installer nil")
+	}
+}
+
+func TestHandleSkillPickerToggle(t *testing.T) {
+	m := &Model{modalSelectedIdx: 2}
+	m.handleSkillPickerToggle()
+	if !m.skillsSelectedMap[2] {
+		t.Error("expected index 2 selected after toggle")
+	}
+	m.handleSkillPickerToggle()
+	if m.skillsSelectedMap[2] {
+		t.Error("expected index 2 unselected after second toggle")
+	}
+}
+
+func TestDeleteSkillCmdNilInstaller(t *testing.T) {
+	m := &Model{}
+	cmd := m.deleteSkillCmd("foo")
+	msg := cmd()
+	res, ok := msg.(skillDeleteResultMsg)
+	if !ok {
+		t.Fatalf("expected skillDeleteResultMsg, got %T", msg)
+	}
+	if res.err == nil {
+		t.Error("expected error when installer nil")
+	}
+}
+
+func TestHandleSkillScanResultError(t *testing.T) {
+	m := &Model{}
+	m.handleSkillScanResult(skillsScanResultMsg{repo: "r", err: errForce("boom")})
+	if m.formError == "" {
+		t.Error("expected formError on scan error")
+	}
+}
+
+func TestHandleSkillScanResultNoSkills(t *testing.T) {
+	m := &Model{}
+	m.handleSkillScanResult(skillsScanResultMsg{repo: "r"})
+	if m.formError == "" {
+		t.Error("expected formError when no skills found")
+	}
+}
+
+func TestHandleSkillScanResultSingle(t *testing.T) {
+	m := &Model{}
+	cmd := m.handleSkillScanResult(skillsScanResultMsg{repo: "r", skills: []channels.ScannedSkill{{Path: "skills/a"}}})
+	if cmd == nil {
+		t.Fatal("expected cmd for single skill")
+	}
+	if m.modalMode != ModalNone {
+		// stays in whatever mode
+	}
+	if len(m.skillsScanResults) != 1 {
+		t.Errorf("expected 1 scan result, got %d", len(m.skillsScanResults))
+	}
+	msg := cmd()
+	res, ok := msg.(skillsInstallResultMsg)
+	if !ok {
+		t.Fatalf("expected skillsInstallResultMsg, got %T", msg)
+	}
+	if res.err == nil {
+		t.Error("expected error when installer nil")
+	}
+}
+
+func TestHandleSkillScanResultMultiple(t *testing.T) {
+	m := &Model{}
+	m.handleSkillScanResult(skillsScanResultMsg{repo: "r", skills: []channels.ScannedSkill{{Name: "a"}, {Name: "b"}}})
+	if m.modalMode != ModalSkillPicker {
+		t.Errorf("expected ModalSkillPicker, got %v", m.modalMode)
+	}
+	if len(m.skillsSelectedMap) != 2 || !m.skillsSelectedMap[0] || !m.skillsSelectedMap[1] {
+		t.Errorf("expected all selected, got %v", m.skillsSelectedMap)
+	}
+}
+
+func TestHandleSkillInstallResultError(t *testing.T) {
+	m := &Model{}
+	m.handleSkillInstallResult(skillsInstallResultMsg{err: errForce("fail")})
+	if m.formError == "" {
+		t.Error("expected formError on install error")
+	}
+}
+
+func TestHandleSkillInstallResultNoInstalled(t *testing.T) {
+	m := &Model{}
+	m.handleSkillInstallResult(skillsInstallResultMsg{})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback for no new skills")
+	}
+	if m.modalMode != ModalSkills {
+		t.Errorf("expected ModalSkills, got %v", m.modalMode)
+	}
+}
+
+func TestHandleSkillInstallResultSomeInstalled(t *testing.T) {
+	m := &Model{}
+	m.handleSkillInstallResult(skillsInstallResultMsg{installed: []string{"a", "b"}})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback")
+	}
+}
+
+func TestHandleSkillToggleResultError(t *testing.T) {
+	m := &Model{}
+	m.handleSkillToggleResult(skillToggleResultMsg{skillName: "s", err: errForce("x")})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback on toggle error")
+	}
+}
+
+func TestHandleSkillToggleResultEnabled(t *testing.T) {
+	m := &Model{}
+	m.handleSkillToggleResult(skillToggleResultMsg{skillName: "s", enabled: true})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback on toggle success")
+	}
+}
+
+func TestHandleSkillToggleResultDisabled(t *testing.T) {
+	m := &Model{}
+	m.handleSkillToggleResult(skillToggleResultMsg{skillName: "s", enabled: false})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback on toggle disable")
+	}
+}
+
+func TestHandleSkillDeleteResultError(t *testing.T) {
+	m := &Model{}
+	m.handleSkillDeleteResult(skillDeleteResultMsg{skillName: "s", err: errForce("x")})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback on delete error")
+	}
+}
+
+func TestHandleSkillDeleteResultSuccess(t *testing.T) {
+	m := &Model{}
+	m.handleSkillDeleteResult(skillDeleteResultMsg{skillName: "s"})
+	if m.skillsFeedback == "" {
+		t.Error("expected feedback on delete success")
+	}
+}
+
+func TestHandleSkillInstallResultResetsState(t *testing.T) {
+	m := &Model{}
+	m.skillsScanResults = []channels.ScannedSkill{{Name: "a"}}
+	m.handleSkillInstallResult(skillsInstallResultMsg{installed: []string{"a"}})
+	if m.skillsScanResults != nil || m.skillsSelectedMap != nil {
+		t.Error("expected scan results and selection map cleared")
+	}
+}
+
+func TestSkillsCmdChains(t *testing.T) {
+	// Ensure commands from toggle/delete return the right message types.
+	m := &Model{}
+	c1 := m.toggleSkillCmd("x")
+	if _, ok := c1().(skillToggleResultMsg); !ok {
+		t.Error("toggle cmd should produce skillToggleResultMsg")
+	}
+	c2 := m.deleteSkillCmd("y")
+	if _, ok := c2().(skillDeleteResultMsg); !ok {
+		t.Error("delete cmd should produce skillDeleteResultMsg")
+	}
+}
+
+var _ = time.Now

@@ -329,3 +329,109 @@ func TestResolveProviderSelection_UsesNamedProviderAndModelAlias(t *testing.T) {
 		t.Fatalf("model = %q, want gpt-4o-mini", got.model)
 	}
 }
+func TestResolveProviderSelectionForProvider_ClaudeAuth(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.Anthropic.AuthMethod = "oauth"
+	cfg.Providers.Anthropic.APIKey = ""
+
+	sel, err := resolveProviderSelectionForProvider(cfg, "anthropic")
+	if err != nil {
+		t.Fatalf("resolveProviderSelectionForProvider() error: %v", err)
+	}
+	if sel.providerType != providerTypeClaudeAuth {
+		t.Errorf("providerType = %v, want providerTypeClaudeAuth", sel.providerType)
+	}
+}
+
+func TestResolveProviderSelectionForProvider_Groq(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.Groq.APIKey = "groq-key"
+	sel, err := resolveProviderSelectionForProvider(cfg, "groq")
+	if err != nil {
+		t.Fatalf("resolveProviderSelectionForProvider() error: %v", err)
+	}
+	if sel.apiBase != "https://api.groq.com/openai/v1" {
+		t.Errorf("apiBase = %q, want groq default", sel.apiBase)
+	}
+	if sel.apiKey != "groq-key" {
+		t.Errorf("apiKey = %q, want groq-key", sel.apiKey)
+	}
+}
+
+func TestResolveProviderSelectionForProvider_OpenAICodexCLIToken(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.OpenAI.AuthMethod = "codex-cli"
+	cfg.Providers.OpenAI.APIKey = ""
+	sel, err := resolveProviderSelectionForProvider(cfg, "openai")
+	if err != nil {
+		t.Fatalf("resolveProviderSelectionForProvider() error: %v", err)
+	}
+	if sel.providerType != providerTypeCodexCLIToken {
+		t.Errorf("providerType = %v, want providerTypeCodexCLIToken", sel.providerType)
+	}
+}
+
+func TestResolveProviderSelectionForProvider_OpenRouter(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.OpenRouter.APIKey = "or-key"
+	cfg.Providers.OpenRouter.Proxy = "http://proxy:8080"
+	sel, err := resolveProviderSelectionForProvider(cfg, "openrouter")
+	if err != nil {
+		t.Fatalf("resolveProviderSelectionForProvider() error: %v", err)
+	}
+	if sel.apiBase != "https://openrouter.ai/api/v1" {
+		t.Errorf("apiBase = %q, want openrouter default", sel.apiBase)
+	}
+	if sel.proxy != "http://proxy:8080" {
+		t.Errorf("proxy = %q, want http://proxy:8080", sel.proxy)
+	}
+}
+
+func TestCreateProviderForCandidate_HTTPCompat(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.DeepSeek.APIKey = "ds-key"
+	cfg.Providers.DeepSeek.APIBase = "https://api.deepseek.com/v1"
+	cfg.Agents.Defaults.Provider = "deepseek"
+
+	p, err := CreateProviderForCandidate(cfg, "deepseek")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate() error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("CreateProviderForCandidate() returned nil provider")
+	}
+}
+
+func TestCreateProviderForCandidate_NamedProvider(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"myname": {
+			ProviderConfig: config.ProviderConfig{
+				APIKey:  "nk",
+				APIBase: "https://named.example.com/v1",
+			},
+		},
+	}
+	p, err := CreateProviderForCandidate(cfg, "myname")
+	if err != nil {
+		t.Fatalf("CreateProviderForCandidate(named) error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected non-nil provider for named provider")
+	}
+}
+
+func TestCreateProvider_HTTPCompatDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "openrouter"
+	cfg.Agents.Defaults.Model = "openrouter:auto"
+	cfg.Providers.OpenRouter.APIKey = "or-key"
+
+	p, err := CreateProvider(cfg)
+	if err != nil {
+		t.Fatalf("CreateProvider() error: %v", err)
+	}
+	if p == nil {
+		t.Fatal("CreateProvider() returned nil provider")
+	}
+}

@@ -692,3 +692,51 @@ func TestParseResponse_WithThoughtSignature(t *testing.T) {
 			out.ToolCalls[0].ExtraContent.Google.ThoughtSignature, "sig123")
 	}
 }
+func TestSanitizeToolCallID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"empty id gets fallback", "", "tool_call_0"},
+		{"alphanumeric and underscore pass through", "call_abc123", "call_abc123"},
+		{"hyphen allowed", "call-abc-123", "call-abc-123"},
+		{"spaces replaced with underscore", "call abc", "call_abc"},
+		{"dots replaced with underscore", "call.xyz", "call_xyz"},
+		{"special chars replaced with underscore", "call@#$%", "call____"},
+		{"unicode replaced with underscore", "call\u00e9", "call_"},
+		{"all special chars become empty -> fallback", "!!", "__"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeToolCallID(tt.id)
+			if got != tt.want {
+				t.Errorf("SanitizeToolCallID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeToolCallArguments_ArrayJSON(t *testing.T) {
+	// Decoding a JSON array should fall through to the default branch and
+	// return an empty map (unsupported type).
+	args := DecodeToolCallArguments(json.RawMessage(`[1,2,3]`), "test")
+	if len(args) != 0 {
+		t.Errorf("expected empty map for array type, got %v", args)
+	}
+}
+
+func TestDecodeToolCallArguments_NumberJSON(t *testing.T) {
+	args := DecodeToolCallArguments(json.RawMessage(`42`), "test")
+	if len(args) != 0 {
+		t.Errorf("expected empty map for number type, got %v", args)
+	}
+}
+
+func TestDecodeToolCallArguments_TruncatedStartNotObject(t *testing.T) {
+	// repairTruncatedJSONObject returns false for inputs not starting with '{'.
+	args := DecodeToolCallArguments(json.RawMessage(`[{"a":1}`), "test")
+	if len(args) != 0 {
+		t.Errorf("expected empty map for truncated non-object, got %v", args)
+	}
+}

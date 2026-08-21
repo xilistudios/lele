@@ -1,7 +1,9 @@
 package anthropicprovider
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -289,3 +291,45 @@ func createAnthropicTestClient(baseURL, token string) *anthropic.Client {
 	)
 	return &c
 }
+func TestProvider_NewProviderWithTokenSource(t *testing.T) {
+	// NewProviderWithTokenSource derives from NewProviderWithTokenSourceAndBaseURL
+	// with an empty base URL. Since it has no token source error, Chat should use
+	// the token source's returned value. We only verify construction plus that the
+	// delegate's tokenSource is wired up.
+	p := NewProviderWithTokenSource("stale-token", func() (string, error) {
+		return "refreshed", nil
+	})
+	if p == nil {
+		t.Fatal("NewProviderWithTokenSource() returned nil")
+	}
+	if p.tokenSource == nil {
+		t.Fatal("expected tokenSource to be set")
+	}
+	got, err := p.tokenSource()
+	if err != nil {
+		t.Fatalf("tokenSource() error: %v", err)
+	}
+	if got != "refreshed" {
+		t.Errorf("tokenSource() = %q, want refreshed", got)
+	}
+	// Verify default base URL is used.
+	if p.baseURL != defaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", p.baseURL, defaultBaseURL)
+	}
+}
+
+func TestProvider_NewProviderWithTokenSource_ErrorPropagates(t *testing.T) {
+	// Exercise the error path at the start of Chat when tokenSource is set and fails.
+	p := NewProviderWithTokenSource("stale-token", func() (string, error) {
+		return "", errTestRefresh
+	})
+	_, err := p.Chat(context.Background(), nil, nil, "claude-sonnet-4-5-20250929", nil)
+	if err == nil {
+		t.Fatal("expected token refresh error from Chat")
+	}
+	if !strings.Contains(err.Error(), "refreshing token") {
+		t.Errorf("error = %v, want refreshing token error", err)
+	}
+}
+
+var errTestRefresh = fmt.Errorf("refresh boom")
