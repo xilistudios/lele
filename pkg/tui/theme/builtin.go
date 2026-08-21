@@ -15,6 +15,7 @@ var builtins = map[string]Theme{
 	"github-dark":     githubDarkTheme,
 	"rose-pine":       rosePineTheme,
 	"dracula-pro":     draculaProTheme,
+	"blood-moon":      bloodMoonTheme,
 }
 
 // Builtins returns the sorted list of built-in theme names.
@@ -164,4 +165,18 @@ var draculaProTheme = Theme{
 	Foreground:          "#F8F8F2",
 	SelectionBackground: "#44475A",
 	Yellow:              "#F1FA8C",
+}
+
+var bloodMoonTheme = Theme{
+	Background:          "#1A0A0A",
+	InputBackground:     "#2A1010",
+	Primary:             "#E53935",
+	Secondary:           "#EF9A9A",
+	Accent:              "#EF5350",
+	Purple:              "#AB47BC",
+	Orange:              "#FF7043",
+	Comment:             "#7F1D1D",
+	Foreground:          "#FFCDD2",
+	SelectionBackground: "#4A1515",
+	Yellow:              "#FFB74D",
 }
