@@ -211,12 +211,12 @@ type Model struct {
 	themePreviewName  string // saved theme name before preview navigation (Esc reverts to this)
 
 	// Community theme state
-	customThemes       map[string]theme.Theme         // user-defined + installed community themes
-	installedCommunity []string                       // names of themes installed from the community repo
-	communityIndex     []theme.CommunityThemeEntry    // cached community index from awesome-lele
-	communityLoading   bool                           // true while fetching community index
-	communityErr       string                         // error message if community fetch failed
-	themePickerItems   []themePickerItem              // structured items for the theme picker
+	customThemes       map[string]theme.Theme      // user-defined + installed community themes
+	installedCommunity []string                    // names of themes installed from the community repo
+	communityIndex     []theme.CommunityThemeEntry // cached community index from awesome-lele
+	communityLoading   bool                        // true while fetching community index
+	communityErr       string                      // error message if community fetch failed
+	themePickerItems   []themePickerItem           // structured items for the theme picker
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool

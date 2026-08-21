@@ -10,8 +10,8 @@ import (
 
 // tuiConfigFile is the on-disk representation of the TUI theme config.
 type tuiConfigFile struct {
-	Theme             string           `json:"theme"`
-	CustomThemes      map[string]Theme `json:"custom_themes,omitempty"`
+	Theme              string           `json:"theme"`
+	CustomThemes       map[string]Theme `json:"custom_themes,omitempty"`
 	InstalledCommunity []string         `json:"installed_community,omitempty"`
 }
 
@@ -84,6 +84,7 @@ func Save(path, name string, custom map[string]Theme, installed []string) error 
 
 	return os.Rename(tmp, path)
 }
+
 // IsInstalledCommunity reports whether name is in the installed community list.
 func IsInstalledCommunity(name string, installed []string) bool {
 	for _, n := range installed {
