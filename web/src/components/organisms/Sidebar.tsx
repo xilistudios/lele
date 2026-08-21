@@ -165,34 +165,47 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
           className={`flex items-center px-4 py-3 ${collapsed ? 'justify-center' : 'justify-between'}`}
         >
           {!collapsed && <Logo collapsed={collapsed} />}
-          {collapsed && (
-            <div className="hidden md:flex group relative items-center justify-center">
+          <div className="hidden md:flex items-center gap-1">
+            <div className="group relative flex items-center justify-center">
               <IconButton
-                onClick={onToggleSidebar}
-                ariaLabel={t('sidebar.expand')}
+                onClick={() => openPanel(true)}
+                ariaLabel={t('chat.search')}
                 className="flex items-center justify-center h-8 w-8"
               >
-                <SidebarToggleIcon size={16} />
+                <SearchIcon size={16} />
               </IconButton>
               <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
-                {t('sidebar.expand')}
+                {t('chat.search')}
               </span>
             </div>
-          )}
-          {!collapsed && (
-            <div className="hidden md:flex group relative items-center justify-center">
-              <IconButton
-                onClick={onToggleSidebar}
-                ariaLabel={t('sidebar.collapse')}
-                className="flex items-center justify-center h-8 w-8"
-              >
-                <SidebarToggleIcon size={16} />
-              </IconButton>
-              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
-                {t('sidebar.collapse')}
-              </span>
-            </div>
-          )}
+            {collapsed ? (
+              <div className="group relative flex items-center justify-center">
+                <IconButton
+                  onClick={onToggleSidebar}
+                  ariaLabel={t('sidebar.expand')}
+                  className="flex items-center justify-center h-8 w-8"
+                >
+                  <SidebarToggleIcon size={16} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('sidebar.expand')}
+                </span>
+              </div>
+            ) : (
+              <div className="group relative flex items-center justify-center">
+                <IconButton
+                  onClick={onToggleSidebar}
+                  ariaLabel={t('sidebar.collapse')}
+                  className="flex items-center justify-center h-8 w-8"
+                >
+                  <SidebarToggleIcon size={16} />
+                </IconButton>
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
+                  {t('sidebar.collapse')}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         <div
@@ -213,19 +226,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   {t('chat.newChat')}
                 </span>
               </div>
-              <div className="group relative flex items-center justify-center">
-                <IconButton
-                  onClick={() => openPanel(true)}
-                  ariaLabel={t('chat.search')}
-                  variant="nav"
-                  className="flex items-center justify-center h-8 w-8"
-                >
-                  <SearchIcon size={16} />
-                </IconButton>
-                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-surface-hover text-xs font-medium text-text-secondary transition-opacity duration-100 pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100">
-                  {t('chat.search')}
-                </span>
-              </div>
             </>
           ) : (
             <>
@@ -239,17 +239,6 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   <PlusCircleIcon size={24} />
                 </div>
                 <span className="leading-none">{t('chat.newChat')}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => openPanel(true)}
-                aria-label={t('chat.search')}
-                className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-              >
-                <div className="h-8 w-8 flex items-center justify-center">
-                  <SearchIcon size={16} />
-                </div>
-                <span>{t('chat.search')}</span>
               </button>
             </>
           )}
