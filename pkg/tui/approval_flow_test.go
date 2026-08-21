@@ -216,7 +216,10 @@ func newTestModelWithDenyPatterns(t *testing.T) *Model {
 		t.Fatal("session manager not initialized")
 	}
 
-	return NewModel(cfg, al, sessionMgr)
+	m := NewModel(cfg, al, sessionMgr)
+	// Onboarding wizard disabled for feature tests (see newTestModel).
+	m.onboardingActive = false
+	return m
 }
 
 func joinPath(dir, name string) string {

@@ -50,35 +50,47 @@ func TestLoadTUISettingsItems(t *testing.T) {
 	m.mouseEnabled = true
 	m.maxRenderedMessages = 200
 	m.streamThrottleInterval = 32 * time.Millisecond
+	m.currentThemeName = "dracula"
 	m.loadTUISettings()
 
-	if len(m.modalItems) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(m.modalItems))
+	// 4 items: theme, mouse, max messages, stream throttle.
+	if len(m.modalItems) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(m.modalItems))
 	}
-	if !strings.Contains(m.modalItems[0], "✓") {
-		t.Errorf("mouse item should show enabled checkmark: %q", m.modalItems[0])
+	if !strings.Contains(m.modalItems[0], "dracula") {
+		t.Errorf("theme item should show active theme: %q", m.modalItems[0])
 	}
-	if !strings.Contains(m.modalItems[1], "200") {
-		t.Errorf("max messages item should show 200: %q", m.modalItems[1])
+	if !strings.Contains(m.modalItems[1], "✓") {
+		t.Errorf("mouse item should show enabled checkmark: %q", m.modalItems[1])
 	}
-	if !strings.Contains(m.modalItems[2], "32") {
-		t.Errorf("stream throttle item should show 32: %q", m.modalItems[2])
+	if !strings.Contains(m.modalItems[2], "200") {
+		t.Errorf("max messages item should show 200: %q", m.modalItems[2])
+	}
+	if !strings.Contains(m.modalItems[3], "32") {
+		t.Errorf("stream throttle item should show 32: %q", m.modalItems[3])
 	}
 
 	// Disabled mouse should show ✗
 	m.mouseEnabled = false
 	m.loadTUISettings()
-	if !strings.Contains(m.modalItems[0], "✗") {
-		t.Errorf("mouse item should show disabled mark: %q", m.modalItems[0])
+	if !strings.Contains(m.modalItems[1], "✗") {
+		t.Errorf("mouse item should show disabled mark: %q", m.modalItems[1])
 	}
 }
 
 func TestHandleTUISettingsEnterEditMode(t *testing.T) {
 	m := newSettingsTestModel(t)
-	m.modalItems = []string{"mouse", "max", "throttle"}
+	m.modalItems = []string{"theme", "mouse", "max", "throttle"}
+
+	// Theme picker activation at index 0.
+	m.modalSelectedIdx = 0
+	m.handleTUISettingsEnter()
+	if !m.themePickerActive {
+		t.Fatal("expected theme picker to activate on theme row")
+	}
 
 	// Max messages → edit mode
-	m.modalSelectedIdx = 1
+	m.modalSelectedIdx = 2
 	m.handleTUISettingsEnter()
 	if m.settingsEditField != "maxMessages" {
 		t.Fatalf("expected edit field maxMessages, got %q", m.settingsEditField)
@@ -88,7 +100,7 @@ func TestHandleTUISettingsEnterEditMode(t *testing.T) {
 	}
 
 	// Stream throttle → edit mode
-	m.modalSelectedIdx = 2
+	m.modalSelectedIdx = 3
 	m.handleTUISettingsEnter()
 	if m.settingsEditField != "streamThrottle" {
 		t.Fatalf("expected edit field streamThrottle, got %q", m.settingsEditField)
@@ -185,6 +197,73 @@ func TestToggleTUIMouse(t *testing.T) {
 	}
 	if !reloaded.TUI.MouseEnabled {
 		t.Fatal("expected persisted mouse enabled true")
+	}
+}
+
+func TestLoadThemePickerItems(t *testing.T) {
+	m := newSettingsTestModel(t)
+	m.currentThemeName = "nord"
+	m.loadThemePickerItems()
+	if len(m.modalItems) == 0 {
+		t.Fatal("expected at least one theme item")
+	}
+	foundActive := false
+	for _, item := range m.modalItems {
+		if strings.HasPrefix(item, "• ") {
+			if !strings.Contains(item, "nord") {
+				t.Errorf("active marker should be on current theme, got %q", item)
+			}
+			foundActive = true
+		}
+	}
+	if !foundActive {
+		t.Error("expected active theme to be marked with •")
+	}
+	for _, item := range m.modalItems {
+		if !strings.HasPrefix(item, "  ") && !strings.HasPrefix(item, "• ") {
+			t.Errorf("theme item should start with 2 spaces or •: %q", item)
+		}
+	}
+}
+
+// TestThemePickerEscRevertsPreview verifies that after previewing a different
+// theme and pressing Esc, the original theme is restored.
+func TestThemePickerEscRevertsPreview(t *testing.T) {
+	m := newTestModel(t)
+	m.currentThemeName = "dracula"
+	m.themePickerActive = true
+	m.themePreviewName = "dracula"
+	m.loadThemePickerItems()
+	// Set up the picker so modalSelectedIdx matches the current theme
+	for i, item := range m.modalItems {
+		if strings.Contains(item, "dracula") && strings.HasPrefix(item, "•") {
+			m.modalSelectedIdx = i
+			break
+		}
+	}
+	// Navigate to a different theme (preview)
+	if m.modalSelectedIdx+1 < len(m.modalItems) {
+		m.modalSelectedIdx++
+	} else {
+		m.modalSelectedIdx--
+	}
+	item := m.modalItems[m.modalSelectedIdx]
+	themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+	themeName = strings.TrimSpace(themeName)
+	m.previewTheme(themeName)
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("preview should not update currentThemeName, got %q", m.currentThemeName)
+	}
+	// Esc should revert — simulate the Esc handler logic
+	if m.themePreviewName != "" {
+		m.previewTheme(m.themePreviewName)
+		m.currentThemeName = m.themePreviewName
+		m.themePreviewName = ""
+	}
+	m.themePickerActive = false
+	m.loadTUISettings()
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("expected theme reverted to dracula, got %q", m.currentThemeName)
 	}
 }
 

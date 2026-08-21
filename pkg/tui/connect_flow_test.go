@@ -17,10 +17,16 @@ import (
 // ready to exercise modal flows like /connect.
 func newTestModel(t *testing.T) *Model {
 	t.Helper()
+	return newTestModelWithConfig(t, testModelConfig(t), true)
+}
+
+// testModelConfig returns a config backed by a temp workspace that is NOT yet
+// configured (no usable provider) — i.e. a "fresh first run".
+func testModelConfig(t *testing.T) *config.Config {
+	t.Helper()
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)
-
-	cfg := &config.Config{
+	return &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
 				Workspace:         tmpDir,
@@ -31,11 +37,21 @@ func newTestModel(t *testing.T) *Model {
 		},
 		Providers: &config.ProvidersConfig{},
 	}
+}
+
+// newTestModelWithConfig builds a TUI Model around the given config with a real
+// agent loop. When disableOnboarding is true, the onboarding wizard is switched
+// off so feature/key-handling tests exercise their normal flows; when false the
+// wizard is left exactly as NewModel decides (so the first-run trigger logic is
+// tested naturally).
+func newTestModelWithConfig(t *testing.T, cfg *config.Config, disableOnboarding bool) *Model {
+	t.Helper()
+	tmpDir := t.TempDir()
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 	// Save an initial config file so saveConfigToDisk works during the flow.
 	if err := config.SaveConfig(filepath.Join(tmpDir, "config.json"), cfg); err != nil {
 		t.Fatalf("saving initial config: %v", err)
 	}
-	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	msgBus := bus.NewMessageBus()
 	al := agent.NewAgentLoop(cfg, msgBus)
@@ -48,7 +64,43 @@ func newTestModel(t *testing.T) *Model {
 		t.Fatal("session manager not initialized")
 	}
 
-	return NewModel(cfg, al, sessionMgr)
+	m := NewModel(cfg, al, sessionMgr)
+	if disableOnboarding {
+		// Phase 2 onboarding wizard: disabled so feature/key-handling tests
+		// exercise their normal modal/approval/connect flows (an unconfigured
+		// test config would otherwise activate the wizard and hijack every
+		// key press).
+		m.onboardingActive = false
+		m.obSkipConfirm = false
+	}
+	return m
+}
+
+// newOnboardingTestModel builds a model with the fresh-config first-run trigger
+// left intact (no usable provider) so onboarding activates naturally, exactly
+// as a brand-new user would experience. It also configures a friendly terminal
+// size for rendering the wizard.
+func newOnboardingTestModel(t *testing.T) *Model {
+	t.Helper()
+	m := newTestModelWithConfig(t, testModelConfig(t), false)
+	m.width = 80
+	m.height = 40
+	return m
+}
+
+// newConfiguredOnboardingTestModel builds a model whose config already has a
+// usable provider, so onboarding should NOT be triggered by NewModel.
+func newConfiguredOnboardingTestModel(t *testing.T) *Model {
+	t.Helper()
+	cfg := testModelConfig(t)
+	cfg.Providers.Named = map[string]config.NamedProviderConfig{
+		"openai": {
+			Type:           "openai",
+			ProviderConfig: config.ProviderConfig{APIKey: "sk-xxx"},
+			Models:         map[string]config.ProviderModelConfig{"gpt-4o": {Model: "gpt-4o"}},
+		},
+	}
+	return newTestModelWithConfig(t, cfg, false)
 }
 
 // sendKeys delivers the given key presses to the model and returns the updated

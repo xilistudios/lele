@@ -5,271 +5,426 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
 var (
 	// BgColor and other Dracula / Terminal-based premium color palette colors.
-	BgColor        = lipgloss.Color("#181824") // Very dark gray-blue background
-	InputBgColor   = lipgloss.Color("#212130") // Slightly lighter input background
-	PrimaryColor   = lipgloss.Color("#FF5555") // Dracula Red
-	SecondaryColor = lipgloss.Color("#50FA7B") // Dracula Green
-	AccentColor    = lipgloss.Color("#8BE9FD") // Dracula Cyan
-	PurpleColor    = lipgloss.Color("#BD93F9") // Dracula Purple
-	OrangeColor    = lipgloss.Color("#FFB86C") // Dracula Orange
-	CommentColor   = lipgloss.Color("#6272A4") // Dracula Comment / Muted gray
-	Foreground     = lipgloss.Color("#F8F8F2") // Dracula Foreground
-	SelectionBg    = lipgloss.Color("#44475A") // Dracula Selection background
-	YellowColor    = lipgloss.Color("#F1FA8C") // Dracula Yellow
+	BgColor        lipgloss.Color
+	InputBgColor   lipgloss.Color
+	PrimaryColor   lipgloss.Color
+	SecondaryColor lipgloss.Color
+	AccentColor    lipgloss.Color
+	PurpleColor    lipgloss.Color
+	OrangeColor    lipgloss.Color
+	CommentColor   lipgloss.Color
+	Foreground     lipgloss.Color
+	SelectionBg    lipgloss.Color
+	YellowColor    lipgloss.Color
 
 	// AppContainer is the main container style.
-	AppContainer = lipgloss.NewStyle().
-			Background(BgColor).
-			Foreground(Foreground)
+	AppContainer lipgloss.Style
 
-	StatusRunning   = lipgloss.NewStyle().Foreground(YellowColor)
-	StatusCompleted = lipgloss.NewStyle().Foreground(SecondaryColor)
-	StatusFailed    = lipgloss.NewStyle().Foreground(PrimaryColor)
+	StatusRunning   lipgloss.Style
+	StatusCompleted lipgloss.Style
+	StatusFailed    lipgloss.Style
 
 	// BouncingDot is the styled dot used by the loading animation. It is a
 	// package-level style because the animation runs ~10 times per second and
 	// allocating a new lipgloss style per dot per frame was measurable overhead.
-	BouncingDot     = lipgloss.NewStyle().Foreground(SecondaryColor)
+	BouncingDot     lipgloss.Style
+	bouncingDotChar string
+
+	// RightSidebar styles for the right column.
+	RightSidebar lipgloss.Style
+
+	SidebarTitle  lipgloss.Style
+	SidebarHeader lipgloss.Style
+	SidebarValue  lipgloss.Style
+	SidebarLabel  lipgloss.Style
+
+	SidebarConnectedDot lipgloss.Style
+	SidebarDisabledDot  lipgloss.Style
+
+	// LeftColumnStyle is the left chat column layout.
+	LeftColumnStyle lipgloss.Style
+
+	// HeaderStyle is the top header style.
+	HeaderStyle lipgloss.Style
+
+	// ViewportStyle is the chat history viewport.
+	ViewportStyle lipgloss.Style
+
+	// InputBarContainer is the text input box (full-width bar, no borders, highlighted background).
+	InputBarContainer lipgloss.Style
+
+	// StatusLineStyle is the active status / duration line.
+	StatusLineStyle lipgloss.Style
+
+	// BottomBarLeft is the left side of the bottom bar.
+	BottomBarLeft lipgloss.Style
+
+	BottomBarRight lipgloss.Style
+
+	// UserRoleStyle styles user messages.
+	UserRoleStyle lipgloss.Style
+
+	UserMessageStyle lipgloss.Style
+
+	AssistantRoleStyle lipgloss.Style
+
+	AssistantMessageStyle lipgloss.Style
+
+	SystemRoleStyle lipgloss.Style
+
+	SystemMessageStyle lipgloss.Style
+
+	ThinkingLabelStyle lipgloss.Style
+
+	ThinkingContentStyle lipgloss.Style
+
+	// ToolCallLabel styles tool call labels.
+	ToolCallLabel lipgloss.Style
+
+	ToolCallName lipgloss.Style
+
+	ToolCallBox lipgloss.Style
+
+	ToolResultLabel lipgloss.Style
+
+	ToolResultBox lipgloss.Style
+
+	// SubagentProgressLabel displays real-time subagent progress in parent chat.
+	SubagentProgressLabel lipgloss.Style
+
+	SubagentProgressStyle lipgloss.Style
+
+	// WelcomeLogo is the welcome page logo style.
+	WelcomeLogo lipgloss.Style
+
+	WelcomeTip lipgloss.Style
+
+	// ModalContainer styles modals and command autocompletes.
+	ModalContainer lipgloss.Style
+
+	ModalItemActive   lipgloss.Style
+	ModalItemInactive lipgloss.Style
+
+	HelpStyle         lipgloss.Style
+	CommentColorStyle lipgloss.Style
+	TitleStyle        lipgloss.Style
+
+	// ModelSelectorStyle is the model selector on the welcome screen.
+	ModelSelectorStyle lipgloss.Style
+
+	ModelSelectorLabel lipgloss.Style
+
+	// ApprovalBox styles the pending command approval prompt in the viewport.
+	ApprovalBox lipgloss.Style
+
+	// ApprovalApproved styles the "approved" result message.
+	ApprovalApproved lipgloss.Style
+
+	// SuccessStyle styles success confirmation messages in modals.
+	SuccessStyle lipgloss.Style
+
+	// ApprovalRejected styles the "rejected" result message.
+	ApprovalRejected lipgloss.Style
+
+	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
+	GroupTurnHeader lipgloss.Style
+
+	// GroupTurnBorder renders the left border for group turn content.
+	GroupTurnBorder lipgloss.Style
+
+	// GroupLayerSeparator renders layer separator lines.
+	GroupLayerSeparator lipgloss.Style
+
+	// GroupSynthesisLabel renders the synthesis section label.
+	GroupSynthesisLabel lipgloss.Style
+
+	// GroupSynthesisBorder renders the border around the final synthesis.
+	GroupSynthesisBorder lipgloss.Style
+)
+
+// init initializes the package with the Dracula default theme at startup.
+func init() {
+	rebuildStyles(theme.DraculaDefault)
+}
+
+// ApplyTheme re-applies the given theme to all package-level styles. It is
+// the public API for live theme switching.
+func ApplyTheme(t theme.Theme) {
+	rebuildStyles(t)
+}
+
+// rebuildStyles (re)assigns every package-level color and style var from the
+// given theme. The style expressions mirror the previous inline initializers.
+func rebuildStyles(t theme.Theme) {
+	BgColor = lipgloss.Color(t.Background)
+	InputBgColor = lipgloss.Color(t.InputBackground)
+	PrimaryColor = lipgloss.Color(t.Primary)
+	SecondaryColor = lipgloss.Color(t.Secondary)
+	AccentColor = lipgloss.Color(t.Accent)
+	PurpleColor = lipgloss.Color(t.Purple)
+	OrangeColor = lipgloss.Color(t.Orange)
+	CommentColor = lipgloss.Color(t.Comment)
+	Foreground = lipgloss.Color(t.Foreground)
+	SelectionBg = lipgloss.Color(t.SelectionBackground)
+	YellowColor = lipgloss.Color(t.Yellow)
+
+	// AppContainer is the main container style.
+	AppContainer = lipgloss.NewStyle().
+		Background(BgColor).
+		Foreground(Foreground)
+
+	StatusRunning = lipgloss.NewStyle().Foreground(YellowColor)
+	StatusCompleted = lipgloss.NewStyle().Foreground(SecondaryColor)
+	StatusFailed = lipgloss.NewStyle().Foreground(PrimaryColor)
+
+	// BouncingDot is the styled dot used by the loading animation. It is a
+	// package-level style because the animation runs ~10 times per second and
+	// allocating a new lipgloss style per dot per frame was measurable overhead.
+	BouncingDot = lipgloss.NewStyle().Foreground(SecondaryColor)
 	bouncingDotChar = BouncingDot.Render("●")
 
 	// RightSidebar styles for the right column.
 	RightSidebar = lipgloss.NewStyle().
-			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-			BorderForeground(CommentColor).
-			PaddingLeft(2).
-			PaddingRight(1)
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(CommentColor).
+		PaddingLeft(2).
+		PaddingRight(1)
 
 	SidebarTitle = lipgloss.NewStyle().
-			Foreground(Foreground).
-			Bold(true).
-			MarginBottom(1)
+		Foreground(Foreground).
+		Bold(true).
+		MarginBottom(1)
 
 	SidebarHeader = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			Bold(true).
-			MarginTop(1).
-			MarginBottom(0)
+		Foreground(CommentColor).
+		Bold(true).
+		MarginTop(1).
+		MarginBottom(0)
 
 	SidebarValue = lipgloss.NewStyle().
-			Foreground(Foreground).
-			PaddingLeft(1)
+		Foreground(Foreground).
+		PaddingLeft(1)
 
 	SidebarLabel = lipgloss.NewStyle().
-			Foreground(SecondaryColor)
+		Foreground(SecondaryColor)
 
 	SidebarConnectedDot = lipgloss.NewStyle().
-				Foreground(SecondaryColor)
+		Foreground(SecondaryColor)
 
 	SidebarDisabledDot = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FF5555"))
+		Foreground(PrimaryColor)
 
 	// LeftColumnStyle is the left chat column layout.
 	LeftColumnStyle = lipgloss.NewStyle().
-			PaddingRight(1)
+		PaddingRight(1)
 
 	// HeaderStyle is the top header style.
 	HeaderStyle = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			MarginBottom(1)
+		Foreground(CommentColor).
+		MarginBottom(1)
 
 	// ViewportStyle is the chat history viewport.
 	ViewportStyle = lipgloss.NewStyle()
 
 	// InputBarContainer is the text input box (full-width bar, no borders, highlighted background).
 	InputBarContainer = lipgloss.NewStyle().
-				Background(InputBgColor).
-				Padding(0, 1).
-				MarginTop(1).
-				MarginBottom(1)
+		Background(InputBgColor).
+		Padding(0, 1).
+		MarginTop(1).
+		MarginBottom(1)
 
 	// StatusLineStyle is the active status / duration line.
 	StatusLineStyle = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			MarginTop(1).
-			MarginBottom(1)
+		Foreground(CommentColor).
+		MarginTop(1).
+		MarginBottom(1)
 
 	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft = lipgloss.NewStyle().
-			Foreground(CommentColor)
+		Foreground(CommentColor)
 
 	BottomBarRight = lipgloss.NewStyle().
-			Foreground(CommentColor)
+		Foreground(CommentColor)
 
 	// UserRoleStyle styles user messages.
 	UserRoleStyle = lipgloss.NewStyle().
-			Foreground(AccentColor).
-			Bold(true)
+		Foreground(AccentColor).
+		Bold(true)
 
 	UserMessageStyle = lipgloss.NewStyle().
-				Foreground(Foreground)
+		Foreground(Foreground)
 
 	AssistantRoleStyle = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Bold(true)
+		Foreground(SecondaryColor).
+		Bold(true)
 
 	AssistantMessageStyle = lipgloss.NewStyle().
-				Foreground(Foreground)
+		Foreground(Foreground)
 
 	SystemRoleStyle = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			Bold(true)
+		Foreground(CommentColor).
+		Bold(true)
 
 	SystemMessageStyle = lipgloss.NewStyle().
-				Foreground(CommentColor).
-				Italic(true)
+		Foreground(CommentColor).
+		Italic(true)
 
 	ThinkingLabelStyle = lipgloss.NewStyle().
-				Foreground(OrangeColor).
-				Bold(true)
+		Foreground(OrangeColor).
+		Bold(true)
 
 	ThinkingContentStyle = lipgloss.NewStyle().
-				Foreground(CommentColor).
-				Italic(true).
-				PaddingLeft(2).
-				Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-				BorderForeground(CommentColor)
+		Foreground(CommentColor).
+		Italic(true).
+		PaddingLeft(2).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(CommentColor)
 
 	// ToolCallLabel styles tool call labels.
 	ToolCallLabel = lipgloss.NewStyle().
-			Foreground(OrangeColor).
-			Bold(true)
+		Foreground(OrangeColor).
+		Bold(true)
 
 	ToolCallName = lipgloss.NewStyle().
-			Foreground(PurpleColor).
-			Bold(true)
+		Foreground(PurpleColor).
+		Bold(true)
 
 	ToolCallBox = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			Background(InputBgColor).
-			Padding(0, 1).
-			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-			BorderForeground(OrangeColor)
+		Foreground(CommentColor).
+		Background(InputBgColor).
+		Padding(0, 1).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(OrangeColor)
 
 	ToolResultLabel = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true)
+		Foreground(SecondaryColor).
+		Bold(true)
 
 	ToolResultBox = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			Background(InputBgColor).
-			Padding(0, 1).
-			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-			BorderForeground(SecondaryColor)
+		Foreground(CommentColor).
+		Background(InputBgColor).
+		Padding(0, 1).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(SecondaryColor)
 
 	// SubagentProgressLabel displays real-time subagent progress in parent chat.
 	SubagentProgressLabel = lipgloss.NewStyle().
-				Foreground(OrangeColor).
-				Bold(true)
+		Foreground(OrangeColor).
+		Bold(true)
 
 	SubagentProgressStyle = lipgloss.NewStyle().
-				Foreground(OrangeColor).
-				Italic(true)
+		Foreground(OrangeColor).
+		Italic(true)
 
 	// WelcomeLogo is the welcome page logo style.
 	WelcomeLogo = lipgloss.NewStyle().
-			Foreground(PrimaryColor).
-			Bold(true)
+		Foreground(PrimaryColor).
+		Bold(true)
 
 	WelcomeTip = lipgloss.NewStyle().
-			Foreground(CommentColor).
-			Italic(true).
-			Align(lipgloss.Center)
+		Foreground(CommentColor).
+		Italic(true).
+		Align(lipgloss.Center)
 
 	// ModalContainer styles modals and command autocompletes.
 	ModalContainer = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(PurpleColor).
-			Background(InputBgColor).
-			Padding(1, 2)
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(PurpleColor).
+		Background(InputBgColor).
+		Padding(1, 2)
 
 	ModalItemActive = lipgloss.NewStyle().
-			Background(SelectionBg).
-			Foreground(SecondaryColor).
-			Bold(true).
-			Padding(0, 1)
+		Background(SelectionBg).
+		Foreground(SecondaryColor).
+		Bold(true).
+		Padding(0, 1)
 
 	ModalItemInactive = lipgloss.NewStyle().
-				Foreground(Foreground).
-				Padding(0, 1)
+		Foreground(Foreground).
+		Padding(0, 1)
 
 	HelpStyle = lipgloss.NewStyle().
-			Foreground(CommentColor)
+		Foreground(CommentColor)
 
 	CommentColorStyle = lipgloss.NewStyle().
-				Foreground(CommentColor).
-				Italic(true)
+		Foreground(CommentColor).
+		Italic(true)
 
 	TitleStyle = lipgloss.NewStyle().
-			Foreground(PurpleColor).
-			Bold(true)
+		Foreground(PurpleColor).
+		Bold(true)
 
 	// ModelSelectorStyle is the model selector on the welcome screen.
 	ModelSelectorStyle = lipgloss.NewStyle().
-				Foreground(AccentColor).
-				Background(SelectionBg).
-				Bold(true).
-				Padding(0, 1)
+		Foreground(AccentColor).
+		Background(SelectionBg).
+		Bold(true).
+		Padding(0, 1)
 
 	ModelSelectorLabel = lipgloss.NewStyle().
-				Foreground(CommentColor)
+		Foreground(CommentColor)
 
 	// ApprovalBox styles the pending command approval prompt in the viewport.
 	ApprovalBox = lipgloss.NewStyle().
-			Foreground(YellowColor).
-			Border(lipgloss.NormalBorder()).
-			BorderForeground(YellowColor).
-			Background(InputBgColor).
-			Padding(1, 2)
+		Foreground(YellowColor).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(YellowColor).
+		Background(InputBgColor).
+		Padding(1, 2)
 
 	// ApprovalApproved styles the "approved" result message.
 	ApprovalApproved = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Bold(true)
+		Foreground(SecondaryColor).
+		Bold(true)
 
 	// SuccessStyle styles success confirmation messages in modals.
 	SuccessStyle = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true)
+		Foreground(SecondaryColor).
+		Bold(true)
 
 	// ApprovalRejected styles the "rejected" result message.
 	ApprovalRejected = lipgloss.NewStyle().
-				Foreground(PrimaryColor).
-				Bold(true)
+		Foreground(PrimaryColor).
+		Bold(true)
 
-		// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
+	// GroupTurnHeader renders the turn header line (┌ [label · Layer N · role]).
 	GroupTurnHeader = lipgloss.NewStyle().
-			Foreground(PurpleColor).
-			Bold(true)
+		Foreground(PurpleColor).
+		Bold(true)
 
 	// GroupTurnBorder renders the left border for group turn content.
 	GroupTurnBorder = lipgloss.NewStyle().
-			Foreground(PurpleColor).
-			PaddingLeft(1).
-			Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-			BorderForeground(PurpleColor)
+		Foreground(PurpleColor).
+		PaddingLeft(1).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(PurpleColor)
 
 	// GroupLayerSeparator renders layer separator lines.
 	GroupLayerSeparator = lipgloss.NewStyle().
-				Foreground(PurpleColor).
-				Bold(true).
-				Align(lipgloss.Center)
+		Foreground(PurpleColor).
+		Bold(true).
+		Align(lipgloss.Center)
 
 	// GroupSynthesisLabel renders the synthesis section label.
 	GroupSynthesisLabel = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Bold(true)
+		Foreground(SecondaryColor).
+		Bold(true)
 
 	// GroupSynthesisBorder renders the border around the final synthesis.
 	GroupSynthesisBorder = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				PaddingLeft(1).
-				Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-				BorderForeground(SecondaryColor)
-)
+		Foreground(SecondaryColor).
+		PaddingLeft(1).
+		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
+		BorderForeground(SecondaryColor)
+
+	// SelectionStyle is the highlight applied to selected text in the viewport.
+	SelectionStyle = lipgloss.NewStyle().Background(SelectionBg)
+}
 
 func SidebarLabelValue(label, value string) string {
 	labelPart := SidebarLabel.Render(fmt.Sprintf("%-18s", label))

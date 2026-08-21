@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,12 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *session.SessionManager, initialSessionID ...string) *Model {
@@ -73,16 +74,8 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	// clash with the app background and, after paintFrame's per-reset
 	// background re-emission, show up as black patches inside the input box.
 	// All styles stay foreground-only so the enclosing container background
-	// (InputBarContainer) shows through.
-	ta.FocusedStyle.Base = lipgloss.NewStyle()
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(Foreground)
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Foreground(Foreground)
-	ta.FocusedStyle.CursorLineNumber = lipgloss.NewStyle().Foreground(CommentColor)
-	ta.FocusedStyle.LineNumber = lipgloss.NewStyle().Foreground(CommentColor)
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(CommentColor)
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
-	ta.BlurredStyle = ta.FocusedStyle // same style when not focused (always focused anyway)
+	// (InputBarContainer) shows through. The styles are applied by
+	// m.applyThemeToInputs() (set on the created Model below).
 
 	// Single-line input for modal forms (AddProvider, AddModel)
 	ti := textinput.New()
@@ -91,12 +84,6 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 	ti.CharLimit = 0
 	ti.Width = 40
 	ti.Prompt = " "
-	// Theme overrides for the flat style fields (stock defaults are
-	// foreground-only but the prompt/cursor colors clash with the theme).
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(CommentColor)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(Foreground)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	ti.CompletionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	vp := newLineViewport(80, 20)
 	vp.SetContent(i18n.T("tui.selectOrCreateChat"))
@@ -125,6 +112,22 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		maxRenderedMessages:    200, // render at most 200 messages to bound memory usage
 		renderStartIdx:         -1,  // uninitialized — compute default on first render
 	}
+
+	// Load TUI theme from tui.json (never fatal — defaults to Dracula)
+	themePath := theme.DefaultPath()
+	themeName, _, err := theme.Load(themePath)
+	if err != nil {
+		log.Printf("warning: could not load tui.json: %v", err)
+	}
+	if themeName == "" {
+		themeName = "dracula"
+	}
+	m.currentThemeName = themeName
+	ApplyTheme(theme.Get(themeName, nil))
+
+	// Apply theme colors to the input widgets (textarea + textinput). Must
+	// run after m is created since it accesses m.chatInput and m.textInput.
+	m.applyThemeToInputs()
 
 	// Apply TUI config overrides. TUI defaults are hardcoded above (mouse on,
 	// 200 messages, 32ms throttle). When the "tui" section exists in the config
@@ -172,6 +175,16 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		if !found {
 			fmt.Fprintf(os.Stderr, "Session %q not found, starting new session\n", sid)
 		}
+	}
+
+	// Detect first-run: no usable provider → activate onboarding wizard.
+	// Only activate on a true first-run (no session resumed). If the user
+	// resumed into an existing chat, stay in that chat view — onboarding is
+	// meant for brand-new users (and must not hijack a resumed session's keys).
+	if cfg != nil && !cfg.HasUsableProvider() && !cfg.TUI.OnboardingCompleted && m.currentKey == "" {
+		m.onboardingActive = true
+		m.onboardingStep = obWelcome
+		m.showWelcome = true
 	}
 
 	return m

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### TUI
+- Color themes — six built-in themes (dracula, nord, catppuccin, gruvbox, tokyo-night, solarized-light) selectable from Settings → Interface or during first-run onboarding. Themes apply live (no restart). Selection is persisted in `~/.lele/tui.json`; custom partial themes are supported with Dracula fallbacks.
+
 ## [0.7.5] - 2026-08-14
 
 ### Fixed

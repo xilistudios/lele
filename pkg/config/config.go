@@ -158,6 +158,7 @@ type TUIConfig struct {
 	MouseEnabled        bool `json:"mouse_enabled"`
 	MaxRenderedMessages int  `json:"max_rendered_messages"`
 	StreamThrottleMS    int  `json:"stream_throttle_ms"`
+	OnboardingCompleted bool `json:"onboarding_completed,omitempty"` // true once the user has completed or skipped the onboarding wizard
 }
 
 func (c *Config) clone() *Config {
@@ -731,6 +732,22 @@ func (p *ProvidersConfig) ListNamed() map[string]NamedProviderConfig {
 		result[name] = cfg
 	}
 	return result
+}
+
+// HasUsableProvider returns true if the config has at least one named provider
+// with an API key (or is a local type like ollama) AND at least one model configured.
+func (c *Config) HasUsableProvider() bool {
+	if c.Providers == nil || len(c.Providers.Named) == 0 {
+		return false
+	}
+	for _, p := range c.Providers.Named {
+		hasKey := p.APIKey != ""
+		isLocal := p.Type == "ollama" // local providers don't need API keys
+		if (hasKey || isLocal) && len(p.Models) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *ProvidersConfig) resolveModelAliasInProvider(provider, model string, preferExact bool) (string, bool) {
