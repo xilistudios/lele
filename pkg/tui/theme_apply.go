@@ -25,6 +25,16 @@ func (m *Model) applyThemeByName(name string) {
 	}
 }
 
+// previewTheme applies a theme live (colors + styles + inputs + cache
+// invalidation) WITHOUT persisting to tui.json. Used for live preview while
+// navigating the theme picker. Esc reverts via m.themePreviewName.
+func (m *Model) previewTheme(name string) {
+	t := theme.Get(name, nil)
+	ApplyTheme(t)
+	m.applyThemeToInputs()
+	m.invalidateRenderCache()
+}
+
 // applyThemeToInputs re-applies foreground-only theme colors to the bubbles
 // widgets (textarea + textinput). Must be called at init and on every theme
 // change. All styles stay foreground-only so the enclosing container

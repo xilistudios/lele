@@ -10,6 +10,11 @@ var builtins = map[string]Theme{
 	"gruvbox":         gruvboxTheme,
 	"tokyo-night":     tokyoNightTheme,
 	"solarized-light": solarizedLightTheme,
+	"one-dark":        oneDarkTheme,
+	"monokai":         monokaiTheme,
+	"github-dark":     githubDarkTheme,
+	"rose-pine":       rosePineTheme,
+	"dracula-pro":     draculaProTheme,
 }
 
 // Builtins returns the sorted list of built-in theme names.
@@ -90,4 +95,73 @@ var solarizedLightTheme = Theme{
 	Foreground:          "#657B83",
 	SelectionBackground: "#EEE8D5",
 	Yellow:              "#B58900",
+}
+var oneDarkTheme = Theme{
+	Background:          "#282C34",
+	InputBackground:     "#21252B",
+	Primary:             "#E06C75",
+	Secondary:           "#98C379",
+	Accent:              "#61AFEF",
+	Purple:              "#C678DD",
+	Orange:              "#D19A66",
+	Comment:             "#5C6370",
+	Foreground:          "#ABB2BF",
+	SelectionBackground: "#3E4451",
+	Yellow:              "#E5C07B",
+}
+
+var monokaiTheme = Theme{
+	Background:          "#2D2A2E",
+	InputBackground:     "#221F22",
+	Primary:             "#FF6188",
+	Secondary:           "#A9DC76",
+	Accent:              "#78DCE8",
+	Purple:              "#AB9DF2",
+	Orange:              "#FC9867",
+	Comment:             "#727072",
+	Foreground:          "#FCFCFA",
+	SelectionBackground: "#403E41",
+	Yellow:              "#FFD866",
+}
+
+var githubDarkTheme = Theme{
+	Background:          "#0D1117",
+	InputBackground:     "#161B22",
+	Primary:             "#FF7B72",
+	Secondary:           "#3FB950",
+	Accent:              "#58A6FF",
+	Purple:              "#BC8CFF",
+	Orange:              "#F0883E",
+	Comment:             "#8B949E",
+	Foreground:          "#C9D1D9",
+	SelectionBackground: "#1F6FEB",
+	Yellow:              "#E3B341",
+}
+
+var rosePineTheme = Theme{
+	Background:          "#191724",
+	InputBackground:     "#1F1D2E",
+	Primary:             "#EBBCBA",
+	Secondary:           "#31748F",
+	Accent:              "#9CCFD8",
+	Purple:              "#C4A7E7",
+	Orange:              "#EB6F92",
+	Comment:             "#6E6A86",
+	Foreground:          "#E0DEF4",
+	SelectionBackground: "#26233A",
+	Yellow:              "#F6C177",
+}
+
+var draculaProTheme = Theme{
+	Background:          "#21222C",
+	InputBackground:     "#282A36",
+	Primary:             "#FF5555",
+	Secondary:           "#50FA7B",
+	Accent:              "#8BE9FD",
+	Purple:              "#BD93F9",
+	Orange:              "#FFB86C",
+	Comment:             "#6272A4",
+	Foreground:          "#F8F8F2",
+	SelectionBackground: "#44475A",
+	Yellow:              "#F1FA8C",
 }

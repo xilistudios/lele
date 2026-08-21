@@ -192,8 +192,9 @@ type Model struct {
 	obMaskedKey        string      // masked API key for display
 
 	// Theme state
-	currentThemeName string // active theme name (e.g. "dracula")
-	themePickerActive bool  // true when theme picker overlay is open
+	currentThemeName  string // active theme name (e.g. "dracula")
+	themePickerActive bool   // true when theme picker overlay is open
+	themePreviewName  string // saved theme name before preview navigation (Esc reverts to this)
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool

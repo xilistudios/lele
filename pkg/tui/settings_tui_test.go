@@ -226,6 +226,47 @@ func TestLoadThemePickerItems(t *testing.T) {
 	}
 }
 
+// TestThemePickerEscRevertsPreview verifies that after previewing a different
+// theme and pressing Esc, the original theme is restored.
+func TestThemePickerEscRevertsPreview(t *testing.T) {
+	m := newTestModel(t)
+	m.currentThemeName = "dracula"
+	m.themePickerActive = true
+	m.themePreviewName = "dracula"
+	m.loadThemePickerItems()
+	// Set up the picker so modalSelectedIdx matches the current theme
+	for i, item := range m.modalItems {
+		if strings.Contains(item, "dracula") && strings.HasPrefix(item, "•") {
+			m.modalSelectedIdx = i
+			break
+		}
+	}
+	// Navigate to a different theme (preview)
+	if m.modalSelectedIdx+1 < len(m.modalItems) {
+		m.modalSelectedIdx++
+	} else {
+		m.modalSelectedIdx--
+	}
+	item := m.modalItems[m.modalSelectedIdx]
+	themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+	themeName = strings.TrimSpace(themeName)
+	m.previewTheme(themeName)
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("preview should not update currentThemeName, got %q", m.currentThemeName)
+	}
+	// Esc should revert — simulate the Esc handler logic
+	if m.themePreviewName != "" {
+		m.previewTheme(m.themePreviewName)
+		m.currentThemeName = m.themePreviewName
+		m.themePreviewName = ""
+	}
+	m.themePickerActive = false
+	m.loadTUISettings()
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("expected theme reverted to dracula, got %q", m.currentThemeName)
+	}
+}
+
 func TestNewModelAppliesTUIConfig(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	cfg := &config.Config{

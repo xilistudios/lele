@@ -190,6 +190,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.modalScrollOffset = m.modalSelectedIdx
 					}
 				}
+				// Theme picker live preview: after navigation, preview the
+				// highlighted theme without persisting. Esc reverts.
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
+					item := m.modalItems[m.modalSelectedIdx]
+					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+					themeName = strings.TrimSpace(themeName)
+					m.previewTheme(themeName)
+				}
 			case "down", "j":
 				if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
 					m.modalSelectedIdx++
@@ -200,6 +208,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.modalSelectedIdx >= m.modalScrollOffset+maxVisible {
 						m.modalScrollOffset = m.modalSelectedIdx - maxVisible + 1
 					}
+				}
+				// Theme picker live preview: after navigation, preview the
+				// highlighted theme without persisting. Esc reverts.
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive && m.modalSelectedIdx < len(m.modalItems) {
+					item := m.modalItems[m.modalSelectedIdx]
+					themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+					themeName = strings.TrimSpace(themeName)
+					m.previewTheme(themeName)
 				}
 			case "enter":
 				// TUI settings inline edit: save value and return to list.
@@ -859,6 +875,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								themeName = strings.TrimSpace(themeName)
 								m.applyThemeByName(themeName)
 							}
+							m.themePreviewName = "" // clear preview state
 							m.themePickerActive = false
 							m.loadTUISettings()
 							m.modalSelectedIdx = 0
@@ -884,6 +901,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q":
 				// Theme picker: ESC cancels and returns to the settings list.
 				if m.modalMode == ModalSettingsTUI && m.themePickerActive {
+					// Revert to the original theme if a preview was active
+					if m.themePreviewName != "" {
+						m.previewTheme(m.themePreviewName)
+						m.currentThemeName = m.themePreviewName
+						m.themePreviewName = ""
+					}
 					m.themePickerActive = false
 					m.loadTUISettings()
 					m.modalSelectedIdx = 0
@@ -1898,6 +1921,7 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			i18n.SetLanguage(lang)
 			m.cfg.Language = lang
 			m.onboardingStep = obTheme
+			m.themePreviewName = m.currentThemeName // save for Esc revert
 			// Pre-select the current theme in the picker
 			names := theme.Builtins()
 			m.modalSelectedIdx = 0
@@ -1919,16 +1943,27 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.modalSelectedIdx > 0 {
 				m.modalSelectedIdx--
 			}
+			// Live preview
+			m.previewTheme(names[m.modalSelectedIdx])
 		case "down", "j":
 			if m.modalSelectedIdx < len(names)-1 {
 				m.modalSelectedIdx++
 			}
+			// Live preview
+			m.previewTheme(names[m.modalSelectedIdx])
 		case "enter":
 			name := names[m.modalSelectedIdx]
-			m.applyThemeByName(name)
+			m.applyThemeByName(name) // persist
+			m.themePreviewName = ""
 			m.onboardingStep = obProviderPicker
 			m.modalSelectedIdx = 0
 		case "esc":
+			// Revert to the saved theme
+			if m.themePreviewName != "" {
+				m.previewTheme(m.themePreviewName)
+				m.currentThemeName = m.themePreviewName
+				m.themePreviewName = ""
+			}
 			m.onboardingStep = obLanguage
 			m.modalSelectedIdx = 0
 		}

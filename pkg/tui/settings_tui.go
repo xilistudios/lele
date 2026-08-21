@@ -59,6 +59,7 @@ func (m *Model) handleTUISettingsEnter() {
 	switch m.modalSelectedIdx {
 	case 0: // Theme — open picker
 		m.themePickerActive = true
+		m.themePreviewName = m.currentThemeName // save for Esc revert
 		m.modalSelectedIdx = 0
 		m.loadThemePickerItems()
 	case 1: // Mouse toggle
