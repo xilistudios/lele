@@ -12,7 +12,9 @@
     "lint:fix": "biome check --apply src/",
     "format": "biome format src/",
     "format:fix": "biome format --write src/",
-    "check": "biome check --apply src/ && tsc --noEmit"
+    "check": "biome check --apply src/ && tsc --noEmit",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",
@@ -31,6 +33,9 @@
     "@farmfe/core": "^1.6.13",
     "@farmfe/js-plugin-postcss": "^1.1.0",
     "@farmfe/plugin-react": "^1.2.6",
+    "@storybook/addon-themes": "^10.5.10",
+    "@storybook/react": "^10.5.10",
+    "@storybook/react-vite": "^10.5.10",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@types/bun": "latest",
@@ -41,7 +46,9 @@
     "jsdom": "^25.0.1",
     "postcss": "^8.4.49",
     "react-refresh": "^0.18.0",
+    "storybook": "^10.5.10",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vite": "^8.2.2"
   }
 }

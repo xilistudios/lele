@@ -60,4 +60,5 @@ web/node_modules/
 web/dist/
 web/.vite/
 web/.bun/
+web/storybook-static/
 .zed
