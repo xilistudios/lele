@@ -303,4 +303,99 @@ func TestWelcomeView_ModalOverlaySubagentsEmpty(t *testing.T) {
 	if !strings.Contains(out, i18n.T("tui.selectSubagent")) {
 		t.Errorf("expected subagents title, got:\n%s", out)
 	}
+}// ── Additional welcome-screen branch coverage ──────────────────────────
+
+// TestWelcomeView_CurrentKeySet uses an active current key so the welcome
+// screen reads session agent/model (instead of default/pending).
+func TestWelcomeView_CurrentKeySet(t *testing.T) {
+	m := newTestModel(t)
+	m.currentKey = "tui:chat:wk-cur"
+	m.sessionMgr.GetOrCreate(m.currentKey)
+	_ = m.sessionMgr.SetMode(m.currentKey, "agent")
+	m.currentMode = ModeAgent
+	m.showWelcome = true
+	m.width = 120
+	m.height = 40
+	forceTrueColor(t)
+	out := m.View()
+	if out == "" {
+		t.Fatal("expected non-empty welcome view with current key")
+	}
+}
+
+// TestWelcomeView_ModeChatTabGroupsEnabled renders the ModeChat tab highlight
+// when groups are enabled.
+func TestWelcomeView_ModeChatTabGroupsEnabled(t *testing.T) {
+	cfg := testModelConfig(t)
+	cfg.Groups.Enabled = true
+	cfg.Groups.List = []config.GroupProfile{{ID: "g", Strategy: "moa", Participants: []string{"a"}}}
+	m := newTestModelWithConfig(t, cfg, true)
+	m.showWelcome = true
+	m.currentMode = ModeChat
+	m.width = 120
+	m.height = 40
+	forceTrueColor(t)
+	out := m.View()
+	if !strings.Contains(out, i18n.T("tui.modeGroup")) {
+		t.Errorf("expected group tab present, got:\n%s", out)
+	}
+}
+
+// TestWelcomeView_ModeChatTabGroupsDisabled renders ModeChat tab when groups
+// are disabled.
+func TestWelcomeView_ModeChatTabGroupsDisabled(t *testing.T) {
+	m := welcomeViewModel(t)
+	m.currentMode = ModeChat
+	out := m.View()
+	if !strings.Contains(out, i18n.T("tui.modeAgent")) {
+		t.Errorf("expected agent tab present, got:\n%s", out)
+	}
+}
+
+// TestWelcomeView_ModalAddProviderOnWelcome renders the add-provider form
+// modal over the welcome screen (form modal branch on non-session screen).
+func TestWelcomeView_ModalAddProviderOnWelcome(t *testing.T) {
+	m := welcomeViewModel(t)
+	m.modalMode = ModalAddProvider
+	m.formStepIndex = 0
+	m.formValues = make([]string, 10)
+	m.formValues[0] = "openai"
+	out := m.View()
+	if !strings.Contains(out, i18n.T("tui.addProvider")) {
+		t.Errorf("expected add-provider title, got:\n%s", out)
+	}
+}
+
+// TestWelcomeView_ModalSkillInstallFormOnWelcome renders skill-install form on
+// welcome screen with an active repo input value.
+func TestWelcomeView_ModalSkillInstallFormOnWelcome(t *testing.T) {
+	m := welcomeViewModel(t)
+	m.modalMode = ModalSkillInstall
+	m.formStepIndex = 0
+	m.textInput.SetValue("owner/repo")
+	out := m.View()
+	if !strings.Contains(out, i18n.T("tui.installSkill")) {
+		t.Errorf("expected install-skill title, got:\n%s", out)
+	}
+}
+
+// TestWelcomeView_ModalBgExecsOnWelcome renders background-execs modal overlay
+// on the welcome screen.
+func TestWelcomeView_ModalBgExecsOnWelcome(t *testing.T) {
+	m := welcomeViewModel(t)
+	m.modalMode = ModalBackgroundExecs
+	m.modalItems = []string{"p1  echo hello  running"}
+	out := m.View()
+	if !strings.Contains(out, i18n.T("tui.backgroundProcesses")) {
+		t.Errorf("expected bg execs title, got:\n%s", out)
+	}
+
+	// bgExecViewMode path on welcome early-returns full output.
+	m2 := welcomeViewModel(t)
+	m2.modalMode = ModalBackgroundExecs
+	m2.bgExecViewMode = true
+	out2 := m2.View()
+	if out2 == "" {
+		t.Fatal("expected non-empty bg exec output on welcome")
+	}
 }
