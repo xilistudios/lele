@@ -220,21 +220,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return nil
 
 	case "/connect":
-		m.resetModal(ModalAddProvider)
-		m.providerEditMode = false
-		m.providerSelectedName = ""
-		m.providerSavedInFlow = false
-		m.formStepIndex = 0
-		m.formValues = make([]string, 10) // 0-3: provider, 4-8: model, 9: review
-		m.formError = ""
-		m.formConfirmMode = false
-		m.providerTypePicker = false
-		m.providerTypePickerIdx = 0
-		m.providerTypePickerMax = 0
-		m.connectSuccess = false
-		m.providerTypeFromPreset = false
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "Provider name (e.g. openai)"
+		m.startConnectFlow(nil)
 		return nil
 
 	case "/add-model":
@@ -305,6 +291,54 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		return tea.Quit
 	}
 	return nil
+}
+
+// startConnectFlow initializes the /connect modal wizard. If preset is
+// non-nil it pre-fills the provider name, type and API base URL, skipping the
+// name and type steps so the user lands directly on the API Key (or, for local
+// providers like ollama with no key, on the API Base which is already
+// pre-filled). When preset is nil the flow starts from step 0 (provider name).
+func (m *Model) startConnectFlow(preset *providerPreset) {
+	m.resetModal(ModalAddProvider)
+	m.providerEditMode = false
+	m.providerSelectedName = ""
+	m.providerSavedInFlow = false
+	m.formError = ""
+	m.formConfirmMode = false
+	m.providerTypePicker = false
+	m.providerTypePickerIdx = 0
+	m.providerTypePickerMax = 0
+	m.connectSuccess = false
+	m.providerTypeFromPreset = false
+	m.formValues = make([]string, 10) // 0-3: provider, 4-8: model, 9: review
+
+	if preset != nil {
+		// Pre-fill from the chosen preset.
+		m.formValues[0] = preset.label   // provider name
+		m.formValues[1] = preset.typ     // provider type
+		m.formValues[3] = preset.apiBase // API base URL
+		m.providerTypeFromPreset = true
+		m.formStepIndex = 2 // skip to API Key step
+		m.providerSelectedName = strings.ToLower(strings.TrimSpace(preset.label))
+		// For local providers (ollama) the API key is optional, so skip to the
+		// API Base step (which is already pre-filled from the preset).
+		if preset.typ == "ollama" {
+			m.formStepIndex = 3
+		}
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "API Key"
+		if preset.keyHint != "" {
+			m.textInput.Placeholder = "API Key (" + preset.keyHint + ")"
+		}
+		if preset.typ == "ollama" {
+			m.textInput.SetValue(preset.apiBase)
+			m.textInput.Placeholder = "API Base URL (default for this provider)"
+		}
+	} else {
+		m.formStepIndex = 0
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "Provider name (e.g. openai)"
+	}
 }
 
 // isGoalSetCommand reports whether the /goal arguments set a new goal

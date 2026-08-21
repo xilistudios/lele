@@ -95,6 +95,8 @@ func TestApproval_E2EExecDangerousCommand(t *testing.T) {
 	}
 
 	m := NewModel(cfg, al, sessionMgr)
+	// Onboarding wizard disabled for feature tests (see newTestModel).
+	m.onboardingActive = false
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
 	m = updated.(*Model)
 

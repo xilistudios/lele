@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
 // sgrMouseEscapeRe matches complete SGR mouse escape sequences:
@@ -142,6 +143,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle onboarding wizard keys. The obConnect step reuses the
+		// ModalAddProvider form modal, so its keys are delegated to the
+		// normal modal handler below (it must NOT be intercepted here).
+		if m.onboardingActive && m.onboardingStep != obConnect {
+			return m.handleOnboardingKey(msg)
+		}
 		if m.modalMode != ModalNone {
 			// Provider-type picker navigation (up/down within the preset list).
 			if m.modalMode == ModalAddProvider && m.providerTypePicker {
@@ -250,6 +257,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// Form-based modal: validate and advance steps
 					val := strings.TrimSpace(m.textInput.Value())
+					// If the input is empty but a default was already
+					// pre-filled for this step (e.g. onboarding pre-fills the
+					// model steps from the chosen preset), accept the default
+					// so pressing Enter through the flow works.
+					if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
+						val = m.formValues[m.formStepIndex]
+					}
 					// API Key (step 2) is optional — local providers (ollama)
 					// and custom endpoints may not require authentication.
 					// The review step (9) has no input — any Enter confirms.
@@ -300,9 +314,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 						if m.formStepIndex == 2 {
-							// API key — optional for presets/local providers.
-							// Always advance; a blank key is allowed for local
-							// (e.g. ollama) and custom providers.
+							// API key — optional for local providers (e.g. ollama).
+							// Non-local providers require a non-empty key during onboarding
+							// to ensure HasUsableProvider() returns true after saving.
+							providerType := strings.ToLower(strings.TrimSpace(m.formValues[1]))
+							isLocal := providerType == "ollama"
+							if strings.TrimSpace(val) == "" && !isLocal {
+								m.formError = "API key is required for this provider"
+								return m, nil
+							}
 							m.formValues[2] = val
 							m.formStepIndex = 3
 							m.textInput.SetValue("")
@@ -322,6 +342,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						if m.formStepIndex >= 3 {
 							// Last provider step — save provider
+							name := m.formValues[0]
+							pnameKey := strings.ToLower(strings.TrimSpace(name))
+							// On a first run the in-memory config may already
+							// contain an empty placeholder for every known
+							// provider name (ensureNamedDefaults adds openai,
+							// anthropic, … with no key/model). During
+							// onboarding a preset pre-fills one of those
+							// names, so replace the empty placeholder instead
+							// of failing with "already exists".
+							if m.onboardingActive && m.cfg != nil && m.cfg.Providers != nil && m.cfg.Providers.Named != nil {
+								if existing, ok := m.cfg.Providers.Named[pnameKey]; ok && existing.APIKey == "" && len(existing.Models) == 0 {
+									delete(m.cfg.Providers.Named, pnameKey)
+								}
+							}
 							if err := m.addProvider(m.formValues[0], m.formValues[1], m.formValues[2], m.formValues[3]); err != nil {
 								m.formError = err.Error()
 								return m, nil
@@ -334,6 +368,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
 							if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
 								m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
+							}
+							// Pre-fill model defaults from the preset chosen
+							// during onboarding so the user can just press
+							// Enter through (still editable).
+							if m.onboardingActive && m.obSelectedPreset >= 0 && m.obSelectedPreset < len(providerPresets) {
+								preset := &providerPresets[m.obSelectedPreset]
+								if m.formValues[4] == "" && preset.defaultModelAlias != "" {
+									m.formValues[4] = preset.defaultModelAlias // model alias
+								}
+								if m.formValues[5] == "" && preset.defaultModel != "" {
+									m.formValues[5] = preset.defaultModel // actual model name
+								}
+								// Pre-fill the integer/vision steps too so a
+								// straight Enter run works end to end.
+								if m.formValues[6] == "" {
+									m.formValues[6] = "128000"
+								}
+								if m.formValues[7] == "" {
+									m.formValues[7] = "4096"
+								}
+								if m.formValues[8] == "" {
+									m.formValues[8] = "no"
+								}
 							}
 							return m, nil
 						}
@@ -398,6 +455,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err := m.addModelToProvider(m.providerSelectedName, m.formValues[4], m.formValues[5], ctxWin, maxTok, vision); err != nil {
 						m.formError = err.Error()
 						return m, nil
+					}
+					// If onboarding, route back to the verify step instead of
+					// staying in (or closing) the connect modal. The provider
+					// and model are already saved above.
+					if m.onboardingActive {
+						m.modalMode = ModalNone
+						m.connectSuccess = false
+						m.providerSavedInFlow = false
+						m.formStepIndex = 0
+						m.formValues = nil
+						m.onboardingStep = obVerify
+						m.obVerifying = true
+						m.obFinalizeSetup()                                  // set defaults + persist
+						return m, tea.Batch(m.obVerifyKeyCmd(), m.tickCmd()) // start async validation + spinner
 					}
 					// Show the success screen instead of closing abruptly.
 					m.connectSuccess = true
@@ -779,11 +850,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						return m, m.handleAgentEditEnter()
 					} else if m.modalMode == ModalSettingsTUI {
-						// Interface settings: toggle mouse or enter edit mode.
-						if m.modalSelectedIdx == 0 {
+						// Theme picker is active — handle selection.
+						if m.themePickerActive {
+							if m.modalSelectedIdx < len(m.modalItems) {
+								// Extract theme name from the item (strip "• " or "  " prefix)
+								item := m.modalItems[m.modalSelectedIdx]
+								themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+								themeName = strings.TrimSpace(themeName)
+								m.applyThemeByName(themeName)
+							}
+							m.themePickerActive = false
+							m.loadTUISettings()
+							m.modalSelectedIdx = 0
+							return m, nil
+						}
+						// Interface settings: handle row action.
+						m.handleTUISettingsEnter()
+						// If theme picker was activated, just return (don't reload settings yet)
+						if m.themePickerActive {
+							return m, nil
+						}
+						// Mouse toggle returns a cmd
+						if m.modalSelectedIdx == 1 {
 							return m, m.toggleTUIMouse()
 						}
-						m.handleTUISettingsEnter()
 						return m, nil
 					}
 					if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
@@ -792,6 +882,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reloadSessions()
 				}
 			case "esc", "q":
+				// Theme picker: ESC cancels and returns to the settings list.
+				if m.modalMode == ModalSettingsTUI && m.themePickerActive {
+					m.themePickerActive = false
+					m.loadTUISettings()
+					m.modalSelectedIdx = 0
+					return m, nil
+				}
 				// TUI settings inline edit: ESC cancels and returns to the list.
 				if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
 					m.settingsEditField = ""
@@ -896,6 +993,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.providerSavedInFlow = false
 					m.connectSuccess = false
 					m.providerTypePicker = false
+					// During onboarding, ESC leaves the connect flow and heads
+					// back to the provider picker (it never exits the wizard).
+					if m.onboardingActive && m.onboardingStep == obConnect {
+						m.modalMode = ModalNone
+						m.formValues = nil
+						m.formStepIndex = 0
+						m.onboardingStep = obProviderPicker
+						m.modalSelectedIdx = 0
+						return m, nil
+					}
 				}
 				m.modalMode = ModalNone
 			case "s":
@@ -1348,6 +1455,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tickPending = false
 		// Clear selection feedback after timeout
 		m.clearSelectionFeedback()
+		// Onboarding verify spinner — animate while we wait for the async
+		// key validation result.
+		if m.obVerifying {
+			m.animationTick++
+			cmds = append(cmds, m.tickCmd())
+		}
 		// Refresh background exec output if viewing a process
 		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode && m.bgExecViewID != "" {
 			output, status, _, _ := m.agentLoop.GetProvidable().GetBackgroundExecOutput(m.bgExecViewID, 5000)
@@ -1640,6 +1753,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case skillDeleteResultMsg:
 		return m, m.handleSkillDeleteResult(msg)
 
+	case obVerifyResultMsg:
+		m.obVerifying = false
+		if !msg.success {
+			m.obVerifyFailed = true
+		}
+		m.onboardingStep = obDone
+		m.obFinalizeSetup()
+		return m, nil
+
 	case streamThrottleMsg:
 		m.streamThrottleActive = false
 		if m.streamPendingUpdate {
@@ -1720,6 +1842,160 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// handleOnboardingKey handles key presses while the first-run onboarding
+// wizard is active. Esc never quits the app here — it only opens the skip
+// confirmation or steps back to the previous wizard step.
+func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.onboardingStep {
+	case obWelcome:
+		if m.obSkipConfirm {
+			// Skip confirmation dialog
+			switch msg.String() {
+			case "up", "k":
+				m.obSelectedPreset = 0 // toggle selection
+			case "down", "j":
+				m.obSelectedPreset = 1
+			case "enter":
+				if m.obSelectedPreset == 0 {
+					// "Yes, skip" — exit onboarding
+					m.onboardingActive = false
+					m.obSkipConfirm = false
+					m.cfg.TUI.OnboardingCompleted = true
+					m.saveConfigToDisk()
+				} else {
+					// "No, continue" — dismiss confirmation
+					m.obSkipConfirm = false
+				}
+			case "esc":
+				m.obSkipConfirm = false
+			}
+			return m, nil
+		}
+		switch msg.String() {
+		case "enter":
+			m.onboardingStep = obLanguage
+			m.modalSelectedIdx = 0
+		case "esc":
+			m.obSkipConfirm = true
+			m.obSelectedPreset = 1 // default to "No, continue"
+		}
+
+	case obLanguage:
+		langs := []string{"en", "es", "pt"}
+		switch msg.String() {
+		case "up", "k":
+			if m.modalSelectedIdx > 0 {
+				m.modalSelectedIdx--
+			}
+		case "down", "j":
+			if m.modalSelectedIdx < len(langs)-1 {
+				m.modalSelectedIdx++
+			}
+		case "enter":
+			lang := langs[m.modalSelectedIdx]
+			i18n.SetLanguage(lang)
+			m.cfg.Language = lang
+			m.onboardingStep = obTheme
+			// Pre-select the current theme in the picker
+			names := theme.Builtins()
+			m.modalSelectedIdx = 0
+			for i, n := range names {
+				if n == m.currentThemeName {
+					m.modalSelectedIdx = i
+					break
+				}
+			}
+		case "esc":
+			m.onboardingStep = obWelcome
+			m.obSkipConfirm = false
+		}
+
+	case obTheme:
+		names := theme.Builtins()
+		switch msg.String() {
+		case "up", "k":
+			if m.modalSelectedIdx > 0 {
+				m.modalSelectedIdx--
+			}
+		case "down", "j":
+			if m.modalSelectedIdx < len(names)-1 {
+				m.modalSelectedIdx++
+			}
+		case "enter":
+			name := names[m.modalSelectedIdx]
+			m.applyThemeByName(name)
+			m.onboardingStep = obProviderPicker
+			m.modalSelectedIdx = 0
+		case "esc":
+			m.onboardingStep = obLanguage
+			m.modalSelectedIdx = 0
+		}
+
+	case obProviderPicker:
+		// Total items: len(providerPresets) + 2 (other/custom + skip)
+		totalItems := len(providerPresets) + 2
+		switch msg.String() {
+		case "up", "k":
+			if m.modalSelectedIdx > 0 {
+				m.modalSelectedIdx--
+			}
+		case "down", "j":
+			if m.modalSelectedIdx < totalItems-1 {
+				m.modalSelectedIdx++
+			}
+		case "enter":
+			if m.modalSelectedIdx < len(providerPresets) {
+				// Selected a preset — pre-fill the connect flow.
+				m.obSelectedPreset = m.modalSelectedIdx
+				m.onboardingStep = obConnect
+				m.startConnectFlow(&providerPresets[m.modalSelectedIdx])
+			} else if m.modalSelectedIdx == len(providerPresets) {
+				// "Other / custom" — set a sentinel, no pre-fill.
+				m.obSelectedPreset = -1
+				m.onboardingStep = obConnect
+				m.startConnectFlow(nil)
+			} else {
+				// "Skip for now" — exit onboarding
+				m.onboardingActive = false
+				m.cfg.TUI.OnboardingCompleted = true
+				m.saveConfigToDisk()
+			}
+			m.modalSelectedIdx = 0
+		case "esc":
+			m.onboardingStep = obTheme
+			// Restore theme selection index
+			names := theme.Builtins()
+			m.modalSelectedIdx = 0
+			for i, n := range names {
+				if n == m.currentThemeName {
+					m.modalSelectedIdx = i
+					break
+				}
+			}
+		}
+
+	case obVerify:
+		// During verification, only Esc to skip ahead to the done screen.
+		if msg.String() == "esc" {
+			m.onboardingStep = obDone
+			m.obVerifying = false
+			m.obFinalizeSetup() // set defaults + persist before showing done
+		}
+
+	case obDone:
+		if msg.String() == "enter" {
+			// Clear onboarding, return to the welcome screen so the user
+			// can start chatting from the normal entry point.
+			m.onboardingActive = false
+			m.showWelcome = true
+			m.obVerifying = false
+			m.obVerifyFailed = false
+			m.chatInput.Focus()
+		}
+	}
+	return m, nil
 }
 
 // isEscapeSequenceFragment detects and consumes fragments of CSI escape
