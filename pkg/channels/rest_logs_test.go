@@ -154,4 +154,36 @@ func TestHandleLogs_DatesNoDir_Empty(t *testing.T) {
 	if len(body.Dates) != 0 {
 		t.Errorf("expected empty dates, got %v", body.Dates)
 	}
+}// TestHandleLogs_LinesEdge runs the lines=0 (n<1) and lines>500 (clamp)
+// branches in handleLogs.
+func TestHandleLogs_LinesEdge(t *testing.T) {
+	dir := t.TempDir()
+	logger.SetLogsPath(dir)
+	t.Cleanup(func() { logger.SetLogsPath("") })
+
+	date := "2026-01-06"
+	writeLogFile(t, filepath.Join(dir, fmt.Sprintf("info-%s.log", date)), []string{
+		`{"level":"info","message":"line1","time":"2026-01-06T00:00:00Z"}`,
+	})
+
+	ts := newNativeTestServer(t)
+
+	// lines=0 -> 400 (n<1 branch).
+	resp := doSecretsRequest(t, ts, http.MethodGet, "/api/v1/logs?lines=0", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("lines=0 status = %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// lines=999 -> clamped to 500, returns 200.
+	resp = doSecretsRequest(t, ts, http.MethodGet, fmt.Sprintf("/api/v1/logs?date=%s&lines=999", date), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("lines=999 status = %d, want 200", resp.StatusCode)
+	}
+	var body LogsResponse
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	resp.Body.Close()
+	if body.TotalLines != 1 {
+		t.Errorf("TotalLines = %d, want 1", body.TotalLines)
+	}
 }

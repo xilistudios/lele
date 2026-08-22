@@ -233,6 +233,31 @@ func TestWhatsAppHandleIncomingMessage(t *testing.T) {
 			t.Errorf("content = %q, want empty", inbound.Content)
 		}
 	})
+
+	t.Run("attachments edge cases", func(t *testing.T) {
+		// A non-map item (string) in the attachments array is skipped; a map
+		// with an empty path is also skipped.
+		msg := map[string]interface{}{
+			"from":    "edge",
+			"content": "edge cases",
+			"attachments": []interface{}{
+				"not-a-map",
+				map[string]interface{}{"name": "empty-path.pdf"},
+				map[string]interface{}{"path": "/ok.pdf", "name": "ok.pdf", "kind": "file"},
+			},
+		}
+		ch.handleIncomingMessage(msg)
+		inbound, ok := msgBus.ConsumeInbound(ctx)
+		if !ok {
+			t.Fatal("no message published")
+		}
+		if len(inbound.Attachments) != 1 {
+			t.Fatalf("expected 1 valid attachment, got %d", len(inbound.Attachments))
+		}
+		if inbound.Attachments[0].Path != "/ok.pdf" {
+			t.Errorf("attachment path = %q", inbound.Attachments[0].Path)
+		}
+	})
 }
 
 func TestWhatsAppSend_WithMockServer(t *testing.T) {

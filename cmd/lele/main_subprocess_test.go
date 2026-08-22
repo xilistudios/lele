@@ -13,9 +13,27 @@ import (
 // (no os.Exit), such as "version".
 func TestMain(m *testing.M) {
 	if sub := os.Getenv("LELE_TEST_MAIN"); sub != "" {
-		args := strings.Split(sub, "\x00")
+		args := strings.Split(sub, string(recordSep))
 		os.Args = append([]string{os.Args[0]}, args...)
 		main()
+		os.Exit(0)
+	}
+	// Special subprocess routing for commands not reachable through main()'s
+	// top-level dispatch (e.g. webServeCmd, which is invoked directly in the
+	// live deployment). This keeps child coverage merged via the standard
+	// re-exec + GOCOVERDIR mechanism used by LELE_TEST_MAIN.
+	if os.Getenv("LELE_TEST_WEB") == "1" {
+		webServeCmd(webServerOptions{Host: "127.0.0.1", Port: 0})
+		os.Exit(0)
+	}
+	// TUI subprocess route: run tuiCmd with a session id. Pointed at a missing
+	// config dir, loadConfig fails and tuiCmd prints an error then os.Exit(1).
+	// The child flushes its atomic coverage counters on exit, so the merged
+	// profile captures tuiCmd's setup/error path (the bubbletea program itself
+	// cannot run without a TTY).
+	if os.Getenv("LELE_TEST_TUI") != "" {
+		os.Setenv("LELE_CONFIG_DIR", "/tmp/lele_tui_nonexistent_v5")
+		tuiCmd(os.Getenv("LELE_TEST_TUI"))
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
@@ -27,7 +45,7 @@ func TestMain(m *testing.M) {
 func runMainSubprocess(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainPlaceholder")
-	cmd.Env = append(os.Environ(), "LELE_TEST_MAIN="+strings.Join(args, "\x00"))
+	cmd.Env = append(os.Environ(), "LELE_TEST_MAIN="+strings.Join(args, string(recordSep)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("subprocess failed: %v\noutput: %s", err, out)

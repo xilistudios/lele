@@ -181,3 +181,56 @@ func TestSecretsAPI_CreateValidation(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+func TestSecretsAPI_DeleteNotFound(t *testing.T) {
+	ts := newSecretsTestServer(t)
+
+	resp := doSecretsRequest(t, ts, http.MethodDelete, "/api/v1/secrets/does-not-exist", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("delete-missing status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+	resp.Body.Close()
+}
+
+func TestSecretsAPI_CreateInvalidBody(t *testing.T) {
+	ts := newSecretsTestServer(t)
+
+	req, err := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/secrets", bytes.NewBufferString("{not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid-body status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestSecretsAPI_KeyringUnavailable(t *testing.T) {
+	// newNativeTestServer does not attach a keyring service.
+	ts := newNativeTestServer(t)
+
+	// List, get, create, delete and status all depend on keyring availability.
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   interface{}
+	}{
+		{http.MethodGet, "/api/v1/secrets", nil},
+		{http.MethodGet, "/api/v1/secrets/foo", nil},
+		{http.MethodPost, "/api/v1/secrets", secretInput{Name: "x", Value: "y"}},
+		{http.MethodDelete, "/api/v1/secrets/foo", nil},
+		{http.MethodGet, "/api/v1/secrets/status", nil},
+		{http.MethodGet, "/api/v1/secrets/audit", nil},
+	} {
+		resp := doSecretsRequest(t, ts, tc.method, tc.path, tc.body)
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("%s %s status = %d, want 503", tc.method, tc.path, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+}

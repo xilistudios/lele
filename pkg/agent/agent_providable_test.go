@@ -207,6 +207,114 @@ func TestLoadEvictedMessages_Subagent(t *testing.T) {
 	}
 }
 
+// Mimics routing.IsSubagentSessionKey so the providable methods enter their
+// subagent branch without a cached mapping, forcing the self-healing scan loop.
+func TestSubagentHelpers_SelfHealingScan(t *testing.T) {
+	al := newCovTestLoop(t)
+	ap := al.providable
+	// Raw subagent key (no cached subagent mapping) -> forces the scan loop.
+	subKey := "subagent:scan-task"
+
+	// Healthy branch (agent found in scan, mapping cached).
+	coder, _ := al.registry.GetAgent("coder")
+	coder.Sessions.AddMessage(subKey, "user", "sub msg")
+
+	if hist := ap.GetHistoryView(subKey); len(hist) != 1 {
+		t.Fatalf("GetHistoryView scan len = %d", len(hist))
+	}
+	if !ap.HasMessages(subKey) {
+		t.Error("HasMessages scan expected true")
+	}
+	if got := ap.GetTotalMessageCount(subKey); got != 1 {
+		t.Errorf("GetTotalMessageCount scan = %d", got)
+	}
+	if got := ap.GetEvictedMessageCount(subKey); got != 0 {
+		t.Errorf("GetEvictedMessageCount scan = %d", got)
+	}
+	if got := ap.LoadEvictedMessages(subKey); got != 0 {
+		t.Errorf("LoadEvictedMessages scan = %d", got)
+	}
+	// The scan should have cached the mapping for future O(1) lookups.
+	if id, ok := al.subagentSessionAgent.Load(subKey); !ok || id.(string) != "coder" {
+		t.Errorf("expected mapping cached to coder, got %v/%v", id, ok)
+	}
+}
+
+func TestSubagentHelpers_ScanMiss(t *testing.T) {
+	al := newCovTestLoop(t)
+	ap := al.providable
+	subKey := "subagent:no-session"
+
+	// No agent has this session -> every method returns empty/false.
+	if hist := ap.GetHistoryView(subKey); len(hist) != 0 {
+		t.Fatalf("GetHistoryView miss len = %d", len(hist))
+	}
+	if ap.HasMessages(subKey) {
+		t.Error("HasMessages miss expected false")
+	}
+	if got := ap.GetTotalMessageCount(subKey); got != 0 {
+		t.Errorf("GetTotalMessageCount miss = %d", got)
+	}
+	if got := ap.GetEvictedMessageCount(subKey); got != 0 {
+		t.Errorf("GetEvictedMessageCount miss = %d", got)
+	}
+	if got := ap.LoadEvictedMessages(subKey); got != 0 {
+		t.Errorf("LoadEvictedMessages miss = %d", got)
+	}
+}
+
+// Exercises the "cached mapping present but agent no longer in registry"
+// branch of the subagent helpers.
+func TestSubagentHelpers_StaleCachedAgent(t *testing.T) {
+	al := newCovTestLoop(t)
+	ap := al.providable
+	subKey := "subagent:task-stale"
+	al.subagentSessionAgent.Store(subKey, "gone")
+
+	// Registry has no "gone" agent; mapping is stale -> scan finds nothing.
+	if hist := ap.GetHistoryView(subKey); len(hist) != 0 {
+		t.Fatalf("GetHistoryView stale len = %d", len(hist))
+	}
+	if ap.HasMessages(subKey) {
+		t.Error("HasMessages stale expected false")
+	}
+	if got := ap.GetTotalMessageCount(subKey); got != 0 {
+		t.Errorf("GetTotalMessageCount stale = %d", got)
+	}
+	if got := ap.GetEvictedMessageCount(subKey); got != 0 {
+		t.Errorf("GetEvictedMessageCount stale = %d", got)
+	}
+	if got := ap.LoadEvictedMessages(subKey); got != 0 {
+		t.Errorf("LoadEvictedMessages stale = %d", got)
+	}
+}
+
+// Exercises the registry empty / agent-nil path of the subagent helpers via a
+// cached mapping to an agent that has been removed from the registry.
+func TestSubagentHelpers_NoRegistryAgents(t *testing.T) {
+	al := newCovTestLoop(t)
+	ap := al.providable
+	subKey := "subagent:task-noreg"
+	al.subagentSessionAgent.Store(subKey, "main")
+	al.registry.agents = nil
+
+	if hist := ap.GetHistoryView(subKey); len(hist) != 0 {
+		t.Fatalf("GetHistoryView noreg len = %d", len(hist))
+	}
+	if ap.HasMessages(subKey) {
+		t.Error("HasMessages noreg expected false")
+	}
+	if got := ap.GetTotalMessageCount(subKey); got != 0 {
+		t.Errorf("GetTotalMessageCount noreg = %d", got)
+	}
+	if got := ap.GetEvictedMessageCount(subKey); got != 0 {
+		t.Errorf("GetEvictedMessageCount noreg = %d", got)
+	}
+	if got := ap.LoadEvictedMessages(subKey); got != 0 {
+		t.Errorf("LoadEvictedMessages noreg = %d", got)
+	}
+}
+
 // ============================================================================
 // Model management
 // ============================================================================

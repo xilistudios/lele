@@ -274,6 +274,9 @@ func TestRunToolLoop_publishesBusEvents(t *testing.T) {
 		t.Fatalf("RunToolLoop: %v", err)
 	}
 
+	// Give the subscriber goroutine time to drain pending messages
+	// before cancelling the context (which would drop them).
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	<-done
 
