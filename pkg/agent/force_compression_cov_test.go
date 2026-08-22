@@ -1,4 +1,3 @@
-// Lele - coverage tests for forceCompression and related session-manager flows.
 package agent
 
 import (

@@ -75,7 +75,7 @@ func TestFormatToolCallArgsJSONFunctionRaw(t *testing.T) {
 			Arguments: "{invalid json",
 		},
 	}
-	out := formatToolCallArgs(protocoltypes.ToolCall(tc))
+	out := formatToolCallArgs(tc)
 	if out == "" {
 		t.Error("expected raw JSON fallback output")
 	}
@@ -85,7 +85,7 @@ func TestExtractToolCallArgsStructured(t *testing.T) {
 	tc := protocoltypes.ToolCall{
 		Arguments: map[string]interface{}{"a": "b"},
 	}
-	got := extractToolCallArgs(protocoltypes.ToolCall(tc))
+	got := extractToolCallArgs(tc)
 	if got == nil || got["a"] != "b" {
 		t.Errorf("extractToolCallArgs structured = %v", got)
 	}
@@ -95,7 +95,7 @@ func TestExtractToolCallArgsJSON(t *testing.T) {
 	tc := protocoltypes.ToolCall{
 		Function: &protocoltypes.FunctionCall{Arguments: `{"x": 1}`},
 	}
-	got := extractToolCallArgs(protocoltypes.ToolCall(tc))
+	got := extractToolCallArgs(tc)
 	if got == nil || got["x"] != float64(1) {
 		t.Errorf("extractToolCallArgs json = %v", got)
 	}
@@ -105,7 +105,7 @@ func TestFormatToolCallArgsCompactFunctionRawFallback(t *testing.T) {
 	tc := protocoltypes.ToolCall{
 		Function: &protocoltypes.FunctionCall{Arguments: "{not json"},
 	}
-	out := formatToolCallArgsCompact(protocoltypes.ToolCall(tc))
+	out := formatToolCallArgsCompact(tc)
 	if out == "" {
 		t.Error("expected compact raw fallback output")
 	}

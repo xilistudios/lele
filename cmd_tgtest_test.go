@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/mymmrac/telego"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/mymmrac/telego"
 )
 
 func main() {

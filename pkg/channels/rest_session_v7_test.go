@@ -301,11 +301,11 @@ func TestHandleSessionGet_WithDataV7(t *testing.T) {
 }
 
 func newTestError(msg string) error {
-	return &testError{msg: msg}
+	return &sessionTestError{msg: msg}
 }
 
-type testError struct {
+type sessionTestError struct {
 	msg string
 }
 
-func (e *testError) Error() string { return e.msg }
+func (e *sessionTestError) Error() string { return e.msg }

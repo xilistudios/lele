@@ -15,7 +15,8 @@ import (
 func timeMin() time.Duration { return time.Minute }
 
 func testCtx() context.Context {
-	ctx, _ := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	_ = cancel // leaked intentionally for test brevity
 	return ctx
 }
 

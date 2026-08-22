@@ -201,8 +201,8 @@ func TestRenderCronDetailComplete(t *testing.T) {
 	if m.cronService == nil {
 		t.Skip("cron service not initialized")
 	}
-	next := int64(time.Now().UnixMilli() + 3600000)
-	last := int64(time.Now().UnixMilli() - 60000)
+	next := time.Now().UnixMilli() + 3600000
+	last := time.Now().UnixMilli() - 60000
 	job, err := m.cronService.AddJobWithOptions("detail-job", cron.CronSchedule{Kind: "cron", Expr: "0 9 * * *", TZ: "UTC"}, "hello msg", true, "chan", "to", "session", "sess-key")
 	if err != nil {
 		t.Fatalf("add job: %v", err)

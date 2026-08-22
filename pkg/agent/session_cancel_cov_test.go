@@ -1,4 +1,3 @@
-// Lele - coverage tests for session cancel registration and cancellation.
 package agent
 
 import (

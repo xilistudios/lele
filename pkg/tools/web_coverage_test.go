@@ -51,12 +51,12 @@ func TestWebSearchTool_Execute_ProviderError(t *testing.T) {
 type failingSearchProvider struct{}
 
 func (f *failingSearchProvider) Search(ctx context.Context, query string, count int) (string, error) {
-	return "", &searchErr{}
+	return "", &searchError{}
 }
 
-type searchErr struct{}
+type searchError struct{}
 
-func (s *searchErr) Error() string { return "search boom" }
+func (s *searchError) Error() string { return "search boom" }
 
 // TestWebSearchTool_Execute_SuccessAndCount verifies the WebSearchTool success
 // path and count override logic.

@@ -19,7 +19,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func newInterceptClient(fn roundTripFunc) *http.Client {
-	return &http.Client{Transport: roundTripFunc(fn)}
+	return &http.Client{Transport: fn}
 }
 
 // cannedResponse builds an http.Response for the interceptor transport.

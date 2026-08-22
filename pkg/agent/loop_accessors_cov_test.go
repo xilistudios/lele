@@ -183,11 +183,11 @@ func TestPublishSubagentAsyncResult_VerboseBasic(t *testing.T) {
 
 func TestPublishSubagentAsyncResult_ErrorOnly(t *testing.T) {
 	al := newTestAgentLoop(t)
-	result := &tools.ToolResult{ForLLM: "", Err: &errStringImpl{"boom"}}
+	result := &tools.ToolResult{ForLLM: "", Err: &errStringError{"boom"}}
 	publishSubagentAsyncResult(al, "native:e", "native", "chat1", "task-3", result)
 }
 
-// errStringImpl is a minimal error so ToolResult.Err path is exercised.
-type errStringImpl struct{ msg string }
+// errStringError is a minimal error so ToolResult.Err path is exercised.
+type errStringError struct{ msg string }
 
-func (e *errStringImpl) Error() string { return e.msg }
+func (e *errStringError) Error() string { return e.msg }

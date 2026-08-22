@@ -370,11 +370,11 @@ func (*errToolEmptyForLLM) Execute(ctx context.Context, args map[string]interfac
 	return (&ToolResult{ForLLM: ""}).WithError(errBadThing())
 }
 
-func errBadThing() error { return &toolLoopErr{} }
+func errBadThing() error { return &toolLoopError{} }
 
-type toolLoopErr struct{}
+type toolLoopError struct{}
 
-func (t *toolLoopErr) Error() string { return "tool failed badly" }
+func (t *toolLoopError) Error() string { return "tool failed badly" }
 
 // TestRunToolLoop_truncation verifies large tool results are truncated.
 func TestRunToolLoop_truncation(t *testing.T) {
