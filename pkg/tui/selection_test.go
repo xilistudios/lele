@@ -109,9 +109,9 @@ func TestUpdateSelectionClamping(t *testing.T) {
 
 func TestNormalizeSelection(t *testing.T) {
 	tests := []struct {
-		name                       string
-		sx, sy, ex, ey             int
-		wsy, wsx, wey, wex         int
+		name               string
+		sx, sy, ex, ey     int
+		wsy, wsx, wey, wex int
 	}{
 		{"normal top-left", 2, 1, 5, 4, 1, 2, 4, 5},
 		{"reversed y", 5, 4, 2, 1, 1, 2, 4, 5},
@@ -177,9 +177,9 @@ func TestExtractSelectionText(t *testing.T) {
 	m.selEndY = 10
 
 	tests := []struct {
-		name                          string
+		name                       string
 		startY, startX, endY, endX int
-		want                          string
+		want                       string
 	}{
 		{"out of bounds startY", 9, 0, 9, 5, ""},
 		{"endY beyond clamped", 1, 0, 9, 9, "second line\nthird  line"},

@@ -56,7 +56,7 @@ func TestRelease_CloseTruncateError_v4(t *testing.T) {
 	if err := l.Release(); err == nil {
 		t.Fatal("Release() = nil, want error for already-closed file handle")
 	}
-}// TestProcessAlive_EPERM covers the EPERM branch in processAlive: when a
+} // TestProcessAlive_EPERM covers the EPERM branch in processAlive: when a
 // process exists but belongs to another user (or is otherwise not usable by
 // us), the signal-0 probe returns permission denied and processAlive must
 // report the process is alive (true). PID 1 is normally the init process

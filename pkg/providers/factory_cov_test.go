@@ -61,9 +61,9 @@ func TestSelectionFromNamedProvider(t *testing.T) {
 
 	t.Run("model alias map replaces model and enables web search", func(t *testing.T) {
 		named := config.NamedProviderConfig{
-			Type: "openai",
+			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIKey: "key", APIBase: "https://ex.com/v1"},
-			Models:          map[string]config.ProviderModelConfig{"fast": {Model: "  gpt-4o-mini  "}},
+			Models:         map[string]config.ProviderModelConfig{"fast": {Model: "  gpt-4o-mini  "}},
 		}
 		sel, err := selectionFromNamedProvider(cfg, "myp", "fast", named)
 		if err != nil {
@@ -77,7 +77,7 @@ func TestSelectionFromNamedProvider(t *testing.T) {
 	t.Run("model alias matched by suffix against values", func(t *testing.T) {
 		named := config.NamedProviderConfig{
 			ProviderConfig: config.ProviderConfig{APIKey: "k", APIBase: "http://local:8080/v1"},
-			Models:          map[string]config.ProviderModelConfig{"foo": {Model: "org/canonical"}},
+			Models:         map[string]config.ProviderModelConfig{"foo": {Model: "org/canonical"}},
 		}
 		sel, err := selectionFromNamedProvider(cfg, "p", "canonical", named)
 		if err != nil {

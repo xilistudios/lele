@@ -287,4 +287,3 @@ func TestObFinalizeSetupSkipsDialableDefault(t *testing.T) {
 		t.Errorf("expected existing provider kept, got %q", m.cfg.Agents.Defaults.Provider)
 	}
 }
-

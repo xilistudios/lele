@@ -424,9 +424,9 @@ func TestConfigureProvider_ConfigureModels(t *testing.T) {
 		"y",
 		"gpt4",
 		"gpt-4o",
-		"",    // vision? default yes
-		"n",   // configure context window? no
-		"n",   // add another? no
+		"",  // vision? default yes
+		"n", // configure context window? no
+		"n", // add another? no
 	)
 	p.close()
 	_ = captureStdout(t)
@@ -513,7 +513,7 @@ func TestSelectModel_WithModelsEnterManual(t *testing.T) {
 	}
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIKey: "k", APIBase: "b"},
 			Models:         map[string]config.ProviderModelConfig{"gpt4": {Model: "gpt-4o"}},
 		},
@@ -535,7 +535,7 @@ func TestSelectModel_ChooseFirst(t *testing.T) {
 	}
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIKey: "k", APIBase: "b"},
 			Models:         map[string]config.ProviderModelConfig{"gpt4": {Model: "gpt-4o"}},
 		},
@@ -626,15 +626,15 @@ func TestConfigureAdditionalAgents_OneAgentWithSkills(t *testing.T) {
 
 	p := newStdinPipe(t)
 	p.feedLines(
-		"y",      // add additional agents
-		"Helper", // name
-		"",       // id default
-		"",       // model default
-		"0.6",    // temp
-		"y",      // add skills?
+		"y",       // add additional agents
+		"Helper",  // name
+		"",        // id default
+		"",        // model default
+		"0.6",     // temp
+		"y",       // add skills?
 		"weather", // skill
-		"n",      // another skill?
-		"n",      // add another agent?
+		"n",       // another skill?
+		"n",       // add another agent?
 	)
 	p.close()
 	_ = captureStdout(t)

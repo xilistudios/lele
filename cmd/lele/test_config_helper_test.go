@@ -21,7 +21,7 @@ func defaultTestConfig() (*config.Config, error) {
 		cfg.Agents.Defaults.Model = "test:model"
 	}
 	return cfg, nil
-}// saveTestConfig writes a config to a given path using the config package.
+} // saveTestConfig writes a config to a given path using the config package.
 func saveTestConfig(path string, cfg *config.Config) error {
 	return config.SaveConfig(path, cfg)
 }

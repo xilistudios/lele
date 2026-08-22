@@ -148,11 +148,11 @@ func TestCron_parseEpochMillis(t *testing.T) {
 	}{
 		{"1754500000000", 1754500000000}, // valid decimal
 		{"0", 0},
-		{"", 0},         // empty → 0
-		{"abc", 0},      // non-numeric → 0
-		{"12.5", 0},     // float → parse failure → 0
-		{"-123", -123},  // valid negative
-		{"1e3", 0},      // exponent not accepted by ParseInt → 0
+		{"", 0},                        // empty → 0
+		{"abc", 0},                     // non-numeric → 0
+		{"12.5", 0},                    // float → parse failure → 0
+		{"-123", -123},                 // valid negative
+		{"1e3", 0},                     // exponent not accepted by ParseInt → 0
 		{"99999999999999999999999", 0}, // overflow → 0
 	}
 	for _, c := range cases {

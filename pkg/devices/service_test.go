@@ -182,9 +182,9 @@ func TestService_UpdateConfig(t *testing.T) {
 
 func TestParseLastChannel(t *testing.T) {
 	tests := []struct {
-		in       string
-		wantP    string
-		wantU    string
+		in    string
+		wantP string
+		wantU string
 	}{
 		{"telegram:123", "telegram", "123"},
 		{"", "", ""},

@@ -102,7 +102,7 @@ func TestHandleAgentEditEnterDefaultsProviderSelector(t *testing.T) {
 	cfg := testModelConfig(t)
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIKey: "k"},
 			Models: map[string]config.ProviderModelConfig{
 				"gpt-4o": {Model: "gpt-4o"},

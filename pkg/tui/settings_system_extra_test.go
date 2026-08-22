@@ -8,7 +8,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 )
 
-
 // exercising the pure system-settings handlers that only touch cfg/textInput.
 func newCompactSystemModel(t *testing.T) *Model {
 	t.Helper()
@@ -16,11 +15,11 @@ func newCompactSystemModel(t *testing.T) *Model {
 	ti.Focus()
 	return &Model{
 		cfg: &config.Config{
-			Session: config.SessionConfig{},
-			Tools:   config.ToolsConfig{Exec: config.ExecConfig{}},
-			Logs:    config.LogsConfig{},
-			Goal:    config.GoalConfig{Judge: config.GoalJudgeConfig{}},
-			Updates: config.UpdatesConfig{},
+			Session:   config.SessionConfig{},
+			Tools:     config.ToolsConfig{Exec: config.ExecConfig{}},
+			Logs:      config.LogsConfig{},
+			Goal:      config.GoalConfig{Judge: config.GoalJudgeConfig{}},
+			Updates:   config.UpdatesConfig{},
 			Providers: &config.ProvidersConfig{},
 		},
 		textInput: ti,
@@ -359,4 +358,3 @@ func TestSetLanguageMarkingAfterHandle(t *testing.T) {
 		t.Fatalf("expected 3 language items")
 	}
 }
-

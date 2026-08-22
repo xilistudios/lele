@@ -229,7 +229,7 @@ func TestHandleProviderModels_UpstreamError(t *testing.T) {
 	cfg := ts.channel.agentLoop.GetConfigSnapshot()
 	// .invalid TLD is guaranteed to not resolve -> client.Do returns an error.
 	cfg.Providers.Named["dead-upstream"] = config.NamedProviderConfig{
-		Type:           "openai",
+		Type: "openai",
 		ProviderConfig: config.ProviderConfig{
 			APIKey:  "k",
 			APIBase: "https://upstream.invalid/v1",
@@ -241,7 +241,7 @@ func TestHandleProviderModels_UpstreamError(t *testing.T) {
 			t.Errorf("upstream status = %d, want 502", resp.StatusCode)
 		}
 	}
-}// TestHandleSkillWorkspaceConfig covers the workspace-config endpoint with a
+} // TestHandleSkillWorkspaceConfig covers the workspace-config endpoint with a
 // nil config manager (returns empty sets).
 func TestHandleSkillWorkspaceConfig(t *testing.T) {
 	ts := newNativeTestServer(t)

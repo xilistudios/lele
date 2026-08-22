@@ -36,10 +36,10 @@ func TestIsAllowedProviderURL(t *testing.T) {
 
 func TestParsePagination(t *testing.T) {
 	cases := []struct {
-		name         string
-		query        string
-		wantOffset   int
-		wantLimit    int
+		name       string
+		query      string
+		wantOffset int
+		wantLimit  int
 	}{
 		{"no params", "", 0, 50},
 		{"both set", "offset=10&limit=30", 10, 30},

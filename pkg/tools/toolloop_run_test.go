@@ -515,11 +515,11 @@ func TestRunToolLoop_redactsAndTruncates(t *testing.T) {
 	red := keyring.NewRedactor(nil)
 
 	_, err := RunToolLoop(context.Background(), ToolLoopConfig{
-		Provider:        p,
-		Model:           "test-model",
-		Tools:           reg,
-		MaxIterations:   3,
-		Redactor:        red,
+		Provider:      p,
+		Model:         "test-model",
+		Tools:         reg,
+		MaxIterations: 3,
+		Redactor:      red,
 		RetryWait: func(d time.Duration) <-chan time.Time {
 			ch := make(chan time.Time, 1)
 			ch <- time.Now()

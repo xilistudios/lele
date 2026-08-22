@@ -59,12 +59,12 @@ func TestDispatchOutboundMessage_EventBranches(t *testing.T) {
 	for _, tc := range table {
 		t.Run(tc.name, func(t *testing.T) {
 			n.dispatchOutboundMessage(bus.OutboundMessage{
-				Channel:    "native",
-				ChatID:     sessionKey,
-				Event:      tc.event,
-				Content:    tc.content,
-				Metadata:   tc.md,
-				MessageID:  "mid-1",
+				Channel:        "native",
+				ChatID:         sessionKey,
+				Event:          tc.event,
+				Content:        tc.content,
+				Metadata:       tc.md,
+				MessageID:      "mid-1",
 				IsIntermediate: true,
 			})
 			select {
@@ -126,10 +126,10 @@ func TestDispatchOutboundMessage_ApprovalFallbackBroadcast(t *testing.T) {
 	n.wsClients[ghost.ID] = ghost
 
 	n.dispatchOutboundMessage(bus.OutboundMessage{
-		Channel:   "native",
-		ChatID:    "ghost-session",
-		Event:     "approval.request",
-		Metadata:  map[string]string{"id": "x", "command": "ls", "reason": "r"},
+		Channel:  "native",
+		ChatID:   "ghost-session",
+		Event:    "approval.request",
+		Metadata: map[string]string{"id": "x", "command": "ls", "reason": "r"},
 	})
 	_ = ghost
 }
@@ -144,10 +144,10 @@ func TestDispatchOutboundMessage_EmptyContentNoAttachments(t *testing.T) {
 	n.wsClients[client.ID] = client
 
 	n.dispatchOutboundMessage(bus.OutboundMessage{
-		Channel:  "native",
-		ChatID:   sessionKey,
-		Event:    "message",
-		Content:  "",
+		Channel:   "native",
+		ChatID:    sessionKey,
+		Event:     "message",
+		Content:   "",
 		MessageID: "m2",
 	})
 	// Should not panic.

@@ -81,7 +81,7 @@ func TestDownloadFile_Success(t *testing.T) {
 	defer server.Close()
 
 	got := DownloadFile(server.URL, "audio.mp3", DownloadOptions{
-		Timeout:  5 * time.Second,
+		Timeout: 5 * time.Second,
 		ExtraHeaders: map[string]string{
 			"X-Test":        "val",
 			"Authorization": "Bearer abc",

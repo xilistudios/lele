@@ -147,10 +147,10 @@ func TestCronTool_AddJob(t *testing.T) {
 
 	// both every_seconds and a command
 	res = tool.Execute(context.Background(), map[string]interface{}{
-		"action":       "add",
-		"message":      "Backup",
+		"action":        "add",
+		"message":       "Backup",
 		"every_seconds": float64(3600),
-		"command":      "echo hi",
+		"command":       "echo hi",
 	})
 	if res.IsError {
 		t.Fatalf("add every_seconds+command failed: %s", res.ForLLM)
@@ -168,8 +168,8 @@ func TestCronTool_AddJob(t *testing.T) {
 
 	// spawn config
 	res = tool.Execute(context.Background(), map[string]interface{}{
-		"action":  "add",
-		"message": "Spawn task",
+		"action":        "add",
+		"message":       "Spawn task",
 		"every_seconds": float64(60),
 		"spawn": map[string]interface{}{
 			"task":     "do something",
@@ -220,10 +220,10 @@ func TestCronTool_AddJobErrors(t *testing.T) {
 
 	// Session scope but no session key.
 	res = tool.Execute(context.Background(), map[string]interface{}{
-		"action":       "add",
-		"message":      "msg",
+		"action":        "add",
+		"message":       "msg",
 		"every_seconds": float64(60),
-		"scope":        "session",
+		"scope":         "session",
 	})
 	if !res.IsError || !strings.Contains(res.ForLLM, "session_key is required") {
 		t.Errorf("expected session-key-required error got %+v", res)
@@ -272,10 +272,10 @@ func TestCronTool_ListJobs(t *testing.T) {
 	// Add a session-scoped job to cover scope info line.
 	tool.SetSessionContext("native", "chat-1", "sk-1")
 	_ = tool.Execute(context.Background(), map[string]interface{}{
-		"action":  "add",
-		"message": "session job",
+		"action":        "add",
+		"message":       "session job",
 		"every_seconds": float64(60),
-		"scope":   "session",
+		"scope":         "session",
 	})
 	res = tool.Execute(context.Background(), map[string]interface{}{"action": "list"})
 	if !strings.Contains(res.ForLLM, "session:") {
@@ -296,8 +296,8 @@ func TestCronTool_RemoveAndEnable(t *testing.T) {
 
 	// add a job to manipulate.
 	addRes := tool.Execute(context.Background(), map[string]interface{}{
-		"action":  "add",
-		"message": "to-remove",
+		"action":        "add",
+		"message":       "to-remove",
 		"every_seconds": float64(60),
 	})
 	if addRes.IsError {

@@ -38,7 +38,7 @@ func TestHandleLogs_Dates(t *testing.T) {
 	writeLogFile(t, filepath.Join(dir, "info-2026-01-01.log"), []string{`{"level":"info","message":"a"}`})
 	writeLogFile(t, filepath.Join(dir, "info-2026-01-02.log"), []string{`{"level":"info","message":"b"}`})
 	writeLogFile(t, filepath.Join(dir, "error-2026-01-03.log"), []string{`{"level":"error","message":"c"}`}) // ignored
-	writeLogFile(t, filepath.Join(dir, "random.txt"), []string{"x"})                                       // ignored
+	writeLogFile(t, filepath.Join(dir, "random.txt"), []string{"x"})                                         // ignored
 
 	ts := newNativeTestServer(t)
 	resp := doSecretsRequest(t, ts, http.MethodGet, "/api/v1/logs/dates", nil)
@@ -154,7 +154,7 @@ func TestHandleLogs_DatesNoDir_Empty(t *testing.T) {
 	if len(body.Dates) != 0 {
 		t.Errorf("expected empty dates, got %v", body.Dates)
 	}
-}// TestHandleLogs_LinesEdge runs the lines=0 (n<1) and lines>500 (clamp)
+} // TestHandleLogs_LinesEdge runs the lines=0 (n<1) and lines>500 (clamp)
 // branches in handleLogs.
 func TestHandleLogs_LinesEdge(t *testing.T) {
 	dir := t.TempDir()

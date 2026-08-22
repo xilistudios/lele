@@ -252,9 +252,9 @@ func TestDingTalk_Send_InvalidWebhookType(t *testing.T) {
 
 func TestParseSlackChatID_v6(t *testing.T) {
 	cases := []struct {
-		in         string
-		channelID  string
-		threadTS   string
+		in        string
+		channelID string
+		threadTS  string
 	}{
 		{"C123", "C123", ""},
 		{"C123/ts-abc", "C123", "ts-abc"},

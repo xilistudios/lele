@@ -204,8 +204,8 @@ func TestLINE_ProcessEvent_GroupMentionRequired(t *testing.T) {
 
 	// Group message without mention → ignored.
 	ch.processEvent(lineEvent{
-		Type:   "message",
-		Source: lineSource{Type: "group", GroupID: "G1", UserID: "U1"},
+		Type:    "message",
+		Source:  lineSource{Type: "group", GroupID: "G1", UserID: "U1"},
 		Message: mustMarshal(lineMessage{ID: "m1", Type: "text", Text: "no mention"}),
 	})
 	if len(buf) != 0 {

@@ -209,16 +209,16 @@ func (m *covCoordinatorStub) continueSubagentTask(ctx context.Context, ses, id, 
 	return m.resp, m.err
 }
 func (m *covCoordinatorStub) updateToolContexts(a *AgentInstance, c, ci, s string) {}
-func (m *covCoordinatorStub) stopAllSubagents() int                               { return 0 }
-func (m *covCoordinatorStub) stopSessionSubagents(s string) int                   { return 0 }
-func (m *covCoordinatorStub) cancelAll() int                                      { return 0 }
-func (m *covCoordinatorStub) cancelSession(s string)                              {}
-func (m *covCoordinatorStub) markSessionSubagentsDelivered(s string)              {}
-func (m *covCoordinatorStub) markSubagentDelivered(id string) bool                { return false }
-func (m *covCoordinatorStub) GetStartupInfo() map[string]interface{}              { return nil }
-func (m *covCoordinatorStub) RegisterTool(t tools.Tool)                           {}
-func (m *covCoordinatorStub) GetSubagents() map[string]*tools.SubagentManager     { return nil }
-func (m *covCoordinatorStub) getBackgroundExecs(c bool) []BackgroundExecInfo      { return nil }
+func (m *covCoordinatorStub) stopAllSubagents() int                                { return 0 }
+func (m *covCoordinatorStub) stopSessionSubagents(s string) int                    { return 0 }
+func (m *covCoordinatorStub) cancelAll() int                                       { return 0 }
+func (m *covCoordinatorStub) cancelSession(s string)                               {}
+func (m *covCoordinatorStub) markSessionSubagentsDelivered(s string)               {}
+func (m *covCoordinatorStub) markSubagentDelivered(id string) bool                 { return false }
+func (m *covCoordinatorStub) GetStartupInfo() map[string]interface{}               { return nil }
+func (m *covCoordinatorStub) RegisterTool(t tools.Tool)                            {}
+func (m *covCoordinatorStub) GetSubagents() map[string]*tools.SubagentManager      { return nil }
+func (m *covCoordinatorStub) getBackgroundExecs(c bool) []BackgroundExecInfo       { return nil }
 func (m *covCoordinatorStub) getBackgroundExecOutput(id string, tail int) (string, string, time.Duration, error) {
 	return "", "", 0, nil
 }

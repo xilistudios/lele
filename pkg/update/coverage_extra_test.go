@@ -89,7 +89,7 @@ func TestDownloadFile_ExplicitTotal(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: 200, Status: "200 OK", Header: http.Header{},
-			Body: &errBody{data: append([]byte(nil), body.data...), err: errors.New("boom")},
+			Body:    &errBody{data: append([]byte(nil), body.data...), err: errors.New("boom")},
 			Request: req,
 		}, nil
 	})}

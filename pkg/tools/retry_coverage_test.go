@@ -12,14 +12,14 @@ import (
 // retryProvider is a fake LLMProvider that returns a scripted sequence of
 // (response, error) outcomes for each Chat call.
 type retryProvider struct {
-	mu            chan struct{}
-	results       []*providers.LLMResponse
-	errs          []error
-	calls         int
-	lastModel     string
-	lastOptions   map[string]interface{}
-	lastMessages  []providers.Message
-	lastTools     []providers.ToolDefinition
+	mu           chan struct{}
+	results      []*providers.LLMResponse
+	errs         []error
+	calls        int
+	lastModel    string
+	lastOptions  map[string]interface{}
+	lastMessages []providers.Message
+	lastTools    []providers.ToolDefinition
 }
 
 func newRetryProvider() *retryProvider {

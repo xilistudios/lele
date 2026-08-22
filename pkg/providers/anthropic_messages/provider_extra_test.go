@@ -136,9 +136,9 @@ func TestBuildRequestBody_WithReasoningNotMap(t *testing.T) {
 		nil,
 		"test-model",
 		map[string]any{
-			"max_tokens":   1000,
-			"reasoning":    "not-a-map",
-			"temperature":  0.7,
+			"max_tokens":  1000,
+			"reasoning":   "not-a-map",
+			"temperature": 0.7,
 		},
 	)
 	if err != nil {

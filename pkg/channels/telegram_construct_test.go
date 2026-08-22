@@ -200,7 +200,7 @@ func TestTelegramSend_AttachmentWithText(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected sendDocument error for missing file")
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // telegram_transport.go sendPlainTextFallback direct coverage
 // ---------------------------------------------------------------------------
 

@@ -109,7 +109,7 @@ func TestSmartEditTool_ReadContentError(t *testing.T) {
 	tmpDir := t.TempDir()
 	tool := NewSmartEditTool(tmpDir, false)
 	result := tool.Execute(context.Background(), map[string]interface{}{
-		"path":    ".",
+		"path":     ".",
 		"oldValue": "x",
 		"newValue": "y",
 	})

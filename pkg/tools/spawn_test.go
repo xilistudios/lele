@@ -105,7 +105,7 @@ func TestSpawnTool_Execute_ContinueTask_NotFound(t *testing.T) {
 	manager := NewSubagentManager(nil, "test-model", "/tmp/test", nil, 20)
 	tool := NewSpawnTool(manager)
 	res := tool.Execute(context.Background(), map[string]interface{}{
-		"task_id": "subagent-999",
+		"task_id":  "subagent-999",
 		"guidance": "continue please",
 	})
 	if res == nil || !res.IsError {

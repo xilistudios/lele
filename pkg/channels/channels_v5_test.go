@@ -422,11 +422,11 @@ type collectChannel struct {
 	out chan bus.OutboundMessage
 }
 
-func (c *collectChannel) Name() string                 { return "collect" }
+func (c *collectChannel) Name() string                    { return "collect" }
 func (c *collectChannel) Start(ctx context.Context) error { return nil }
 func (c *collectChannel) Stop(ctx context.Context) error  { return nil }
-func (c *collectChannel) IsRunning() bool                  { return true }
-func (c *collectChannel) IsAllowed(senderID string) bool   { return true }
+func (c *collectChannel) IsRunning() bool                 { return true }
+func (c *collectChannel) IsAllowed(senderID string) bool  { return true }
 func (c *collectChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	select {
 	case c.out <- msg:
@@ -447,7 +447,7 @@ func authenticatedRequest(t *testing.T, ts *nativeTestServer, path string) *http
 
 func mkBody(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // dingtalk.go — Stop (no network)
 // ---------------------------------------------------------------------------
 
@@ -505,7 +505,7 @@ func TestOneBot_handleRawEvent_Dispatch(t *testing.T) {
 	// handleMetaEvent and handleNoticeEvent are directly callable no-ops.
 	ch.handleMetaEvent(&oneBotRawEvent{})
 	ch.handleNoticeEvent(&oneBotRawEvent{})
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // onebot.go — connect/listen/pinger with a real websocket server
 // ---------------------------------------------------------------------------
 
@@ -605,7 +605,7 @@ func TestOneBot_sendAPIRequest_NotConnected(t *testing.T) {
 	if _, err := ch.sendAPIRequest("get_status", nil, time.Second); err == nil {
 		t.Error("expected error when not connected")
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // native.go — handleBackgroundExecStream error path
 // ---------------------------------------------------------------------------
 
@@ -633,7 +633,7 @@ func TestBackgroundExecStream_NotFound(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "not implemented") {
 		t.Errorf("expected error payload, got %q", rec.Body.String())
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // websocket.go — handleWSMessage / handleWSClientMessage branches
 // ---------------------------------------------------------------------------
 
@@ -721,7 +721,7 @@ func TestHandleWSMessage_UnknownEventVersionZero(t *testing.T) {
 
 	// version 0 → treated as not set, accepts.
 	ts.channel.handleWSMessage(client, WSMessage{Version: 0, Event: "typing", Data: mustMarshal(map[string]string{"session_key": "agent:main:main"})})
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // onebot.go — Stop / fetchSelfID / reconnectLoop
 // ---------------------------------------------------------------------------
 
@@ -792,7 +792,7 @@ func TestQQ_Stop(t *testing.T) {
 	if ch.IsRunning() {
 		t.Error("should not be running after Stop")
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // onebot.go — Start success path with a live websocket server
 // ---------------------------------------------------------------------------
 
@@ -866,7 +866,7 @@ func TestOneBot_Start_NoReconnectFail(t *testing.T) {
 	if err := ch.Start(context.Background()); err == nil {
 		t.Error("expected error when connect fails and reconnect disabled")
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // rest_agent.go — file read/save edge cases
 // ---------------------------------------------------------------------------
 

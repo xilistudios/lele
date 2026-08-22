@@ -14,8 +14,8 @@ import (
 // ===========================================================================
 
 type controllerErrorExecutor struct {
-	failOn   string // speaker whose execution should error
-	calls    []string
+	failOn string // speaker whose execution should error
+	calls  []string
 }
 
 func (e *controllerErrorExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {

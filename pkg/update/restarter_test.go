@@ -87,8 +87,8 @@ func TestDetectSupervisor_SystemdUser(t *testing.T) {
 
 func TestDetectSupervisor_SystemdSystem(t *testing.T) {
 	setupFakeSystemctl(t, map[string]string{
-		"INVOCATION_ID":   "inv-sys",
-		"FAKE_INVOCATION_USER": "other",
+		"INVOCATION_ID":          "inv-sys",
+		"FAKE_INVOCATION_USER":   "other",
 		"FAKE_INVOCATION_SYSTEM": "inv-sys",
 		// ensure user scope does NOT match so it falls to system scope
 		"FAKE_ACTIVE_USER": "",
@@ -138,8 +138,8 @@ func TestFindUnit_ByInvocation(t *testing.T) {
 
 func TestFindUnit_ByActiveState(t *testing.T) {
 	setupFakeSystemctl(t, map[string]string{
-		"INVOCATION_ID":      "",
-		"FAKE_ACTIVE_USER":   "lele-gateway.service",
+		"INVOCATION_ID":    "",
+		"FAKE_ACTIVE_USER": "lele-gateway.service",
 	})
 	r := NewRestarter()
 	unit, ok := r.findUnit(true)

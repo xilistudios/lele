@@ -140,7 +140,7 @@ func TestWelcomeView_InitializingWhenNoSize(t *testing.T) {
 	if got := m.View(); !strings.Contains(got, i18n.T("tui.initializing")) {
 		t.Errorf("expected initializing message, got:\n%s", got)
 	}
-}// ── Welcome-screen modal overlay branches ───────────────────────────────
+} // ── Welcome-screen modal overlay branches ───────────────────────────────
 
 // TestWelcomeView_ModalOverlaySettingsAgents drives View() when a settings
 // modal is open on the welcome screen, exercising the modal title switch and
@@ -303,7 +303,7 @@ func TestWelcomeView_ModalOverlaySubagentsEmpty(t *testing.T) {
 	if !strings.Contains(out, i18n.T("tui.selectSubagent")) {
 		t.Errorf("expected subagents title, got:\n%s", out)
 	}
-}// ── Additional welcome-screen branch coverage ──────────────────────────
+} // ── Additional welcome-screen branch coverage ──────────────────────────
 
 // TestWelcomeView_CurrentKeySet uses an active current key so the welcome
 // screen reads session agent/model (instead of default/pending).

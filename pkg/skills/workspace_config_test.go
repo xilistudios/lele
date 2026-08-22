@@ -371,6 +371,7 @@ func TestWorkspaceConfigManager(t *testing.T) {
 		t.Error("expected empty disabled list after toggle")
 	}
 }
+
 // ---- Additional workspace config coverage for error paths & SetEnabled ----
 
 func TestWorkspaceConfigManager_SetEnabled(t *testing.T) {

@@ -17,8 +17,8 @@ func TestMaybeGeneratePIN_Success(t *testing.T) {
 	leleDir := t.TempDir()
 	p := newStdinPipe(t)
 	p.feedLines(
-		"y",        // Generate pairing PIN? yes
-		"TestDev",  // Device name
+		"y",       // Generate pairing PIN? yes
+		"TestDev", // Device name
 	)
 	p.close()
 	_ = captureStdout(t)

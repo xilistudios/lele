@@ -160,9 +160,9 @@ func TestChatStream_ReasoningConfigItsitoRequestBody(t *testing.T) {
 		"o1",
 		map[string]interface{}{
 			"reasoning": map[string]interface{}{
-				"effort":   "high",
-				"enabled":  true,
-				"summary":  "sum",
+				"effort":     "high",
+				"enabled":    true,
+				"summary":    "sum",
 				"max_tokens": 100,
 			},
 		},

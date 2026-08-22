@@ -1,6 +1,8 @@
 package agent
+
 import "testing"
-func TestDbg(t *testing.T){
+
+func TestDbg(t *testing.T) {
 	al := newCovTestLoop(t)
 	subKey := "subagent:scan-task"
 	coder, _ := al.registry.GetAgent("coder")

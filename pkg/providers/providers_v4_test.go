@@ -106,7 +106,7 @@ func TestNormalizeToolCall_EmptyEverything(t *testing.T) {
 	if got.Function.Arguments == "" {
 		t.Error("Function.Arguments should be serialized from parsed Arguments")
 	}
-}// TestSelectionFromNamedProvider_UncoveredBranches covers additional branches
+} // TestSelectionFromNamedProvider_UncoveredBranches covers additional branches
 // in selectionFromNamedProvider that were not yet exercised:
 //   - anthropic named with oauth/token AuthMethod and empty API base -> ClaudeAuth + default base
 //   - claude-cli named type with empty workspace path -> workspace "."

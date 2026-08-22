@@ -27,11 +27,11 @@ func TestConfigureProviders_ShowAllAndExitV4(t *testing.T) {
 		// continuation. Pick provider #1 (Anthropic), which is a non-local
 		// provider requiring API key.
 		"1\n",
-		"sk-test\n", // API key
+		"sk-test\n",        // API key
 		"localhost:1111\n", // API base (local -> validates true)
-		"n\n", // proxy?
-		"n\n", // model aliases?
-		"n\n", // configure another provider?
+		"n\n",              // proxy?
+		"n\n",              // model aliases?
+		"n\n",              // configure another provider?
 	)
 	p.close()
 	out := runCmd(func() { configureProviders(cfg) })

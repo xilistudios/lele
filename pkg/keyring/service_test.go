@@ -119,11 +119,11 @@ func TestEnsureOpen_StoreOpenError(t *testing.T) {
 func TestSetFromAgent_WhenEnabled(t *testing.T) {
 	dir := t.TempDir()
 	cfg := ServiceConfig{
-		Enabled:        true,
-		VaultPath:      filepath.Join(dir, "keyring.enc"),
-		Backend:        BackendFile,
-		LeleDir:        dir,
-		AllowAgentSet:  true,
+		Enabled:          true,
+		VaultPath:        filepath.Join(dir, "keyring.enc"),
+		Backend:          BackendFile,
+		LeleDir:          dir,
+		AllowAgentSet:    true,
 		AllowAgentDelete: true,
 	}
 	svc := NewService(cfg)

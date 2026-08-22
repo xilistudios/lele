@@ -89,16 +89,16 @@ func TestServiceBackend_DefaultProvider(t *testing.T) {
 // brokenStore fails on every operation.
 type brokenStore struct{}
 
-func (b *brokenStore) Open([]byte) error                  { return errors.New("open failed") }
-func (b *brokenStore) Close() error                       { return nil }
-func (b *brokenStore) IsOpen() bool                       { return true }
-func (b *brokenStore) Set(*Secret) error                  { return errors.New("set failed") }
-func (b *brokenStore) Get(string) (*Secret, bool)         { return nil, false }
-func (b *brokenStore) Delete(string) bool                 { return true }
-func (b *brokenStore) List() []SecretMeta                 { return nil }
-func (b *brokenStore) Search(string) []SecretMeta         { return nil }
-func (b *brokenStore) Flush() error                       { return errors.New("flush failed") }
-func (b *brokenStore) Backend() string                    { return "broken" }
+func (b *brokenStore) Open([]byte) error          { return errors.New("open failed") }
+func (b *brokenStore) Close() error               { return nil }
+func (b *brokenStore) IsOpen() bool               { return true }
+func (b *brokenStore) Set(*Secret) error          { return errors.New("set failed") }
+func (b *brokenStore) Get(string) (*Secret, bool) { return nil, false }
+func (b *brokenStore) Delete(string) bool         { return true }
+func (b *brokenStore) List() []SecretMeta         { return nil }
+func (b *brokenStore) Search(string) []SecretMeta { return nil }
+func (b *brokenStore) Flush() error               { return errors.New("flush failed") }
+func (b *brokenStore) Backend() string            { return "broken" }
 
 // failingSetStore succeeds on Open but errors on Set/Flush.
 type failingSetStore struct{ *FileStore }

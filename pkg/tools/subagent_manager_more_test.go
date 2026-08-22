@@ -118,8 +118,8 @@ func TestSubagentManager_MarkDelivered(t *testing.T) {
 	}
 
 	task := &SubagentTask{
-		ID:  "subagent-1",
-		mu:  &sync.Mutex{},
+		ID: "subagent-1",
+		mu: &sync.Mutex{},
 	}
 	task.InitDoneChannel()
 	sm.mu.Lock()

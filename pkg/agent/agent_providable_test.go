@@ -847,13 +847,13 @@ func TestListAllSessions(t *testing.T) {
 
 func TestClassifySessionKind(t *testing.T) {
 	cases := map[string]string{
-		"":                          "chat",
-		"heartbeat":                 "heartbeat",
-		"cron-abc":                  "cron",
-		"cron-spawn-xyz":            "cron-spawn",
-		"subagent:task":             "subagent",
-		"native:parent:subagent-1":  "subagent",
-		"native:plain-chat":         "chat",
+		"":                         "chat",
+		"heartbeat":                "heartbeat",
+		"cron-abc":                 "cron",
+		"cron-spawn-xyz":           "cron-spawn",
+		"subagent:task":            "subagent",
+		"native:parent:subagent-1": "subagent",
+		"native:plain-chat":        "chat",
 	}
 	for key, want := range cases {
 		if got := classifySessionKind(key); got != want {

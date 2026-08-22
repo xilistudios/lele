@@ -21,7 +21,7 @@ type fakeKeyProvider struct {
 
 func (f *fakeKeyProvider) GetKey() ([]byte, error) { return f.key, f.getErr }
 func (f *fakeKeyProvider) Backend() string         { return f.backend }
-func (f *fakeKeyProvider) Available() bool          { return f.available }
+func (f *fakeKeyProvider) Available() bool         { return f.available }
 
 func TestNewOSKeychainProvider(t *testing.T) {
 	p := NewOSKeychainProvider()

@@ -12,9 +12,9 @@ import (
 // setthinkLoop overrides SetThinkLevel to return false (invalid level).
 type setthinkLoop struct {
 	*overrideLoop
-	invalider   func(sessionKey, level string) bool
-	getLevel    func(sessionKey string) string
-	inprog      func(sessionKey string) *providers.Message
+	invalider func(sessionKey, level string) bool
+	getLevel  func(sessionKey string) string
+	inprog    func(sessionKey string) *providers.Message
 }
 
 // stLoop builds a wrapper that overrides the level-related methods.

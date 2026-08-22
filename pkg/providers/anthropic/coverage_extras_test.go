@@ -52,14 +52,14 @@ func TestBuildAnthropicContentBlocks_EdgeImages(t *testing.T) {
 	blocks := buildAnthropicContentBlocks(Message{
 		Role: "user",
 		ContentParts: []protocoltypes.ContentPart{
-			{Type: "text", Text: "   "}, // trimmed empty -> skipped
-			{Type: "text", Text: "real text"}, // kept
-			{Type: "image_url", ImageURL: nil}, // nil -> continue
-			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "not-a-data-url"}}, // prefix fail
-			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,"}}, // empty encoded
-			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:;base64,abcd"}}, // empty media type
+			{Type: "text", Text: "   "},                                                                      // trimmed empty -> skipped
+			{Type: "text", Text: "real text"},                                                                // kept
+			{Type: "image_url", ImageURL: nil},                                                               // nil -> continue
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "not-a-data-url"}},                    // prefix fail
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,"}},            // empty encoded
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:;base64,abcd"}},                 // empty media type
 			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;charset=utf-8,abcd"}}, // not base64 suffix
-			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,abcd"}}, // valid
+			{Type: "image_url", ImageURL: &protocoltypes.ImageURL{URL: "data:image/png;base64,abcd"}},        // valid
 		},
 	})
 	// Expect: "real text" + valid image = 2 blocks
@@ -70,11 +70,11 @@ func TestBuildAnthropicContentBlocks_EdgeImages(t *testing.T) {
 
 func TestSplitDataURL(t *testing.T) {
 	tests := []struct {
-		name        string
-		raw         string
-		media       string
-		encoded     string
-		ok          bool
+		name    string
+		raw     string
+		media   string
+		encoded string
+		ok      bool
 	}{
 		{"valid", "data:image/png;base64,abcd", "image/png", "abcd", true},
 		{"no prefix", "http://example.com/x", "", "", false},

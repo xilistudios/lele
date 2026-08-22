@@ -371,7 +371,7 @@ func TestEvictExcludedFromMemory_EnvInvalid(t *testing.T) {
 	if c.EvictExcludedFromMemory() {
 		t.Error("empty env should fall back to config false")
 	}
-}// ---- SaveConfig / Persist paths ----
+} // ---- SaveConfig / Persist paths ----
 
 func TestSaveConfig_RoundTrip(t *testing.T) {
 	dir := t.TempDir()

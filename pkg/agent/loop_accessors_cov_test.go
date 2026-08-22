@@ -144,7 +144,7 @@ func TestToolLineRegex(t *testing.T) {
 func TestPublishSubagentAsyncResult_NilGuard(t *testing.T) {
 	publishSubagentAsyncResult(nil, "s", "c", "chat", "task", nil)
 	al := newTestAgentLoop(t)
-	publishSubagentAsyncResult(al, "s", "c", "chat", "task", nil) // result nil
+	publishSubagentAsyncResult(al, "s", "c", "chat", "task", nil)                             // result nil
 	publishSubagentAsyncResult(al, "s", "c", "chat", "task", &tools.ToolResult{ForLLM: "  "}) // empty content
 }
 

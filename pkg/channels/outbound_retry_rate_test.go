@@ -47,7 +47,7 @@ type flakyChannel struct {
 	count      atomic.Int32
 }
 
-func (c *flakyChannel) Name() string               { return "flaky" }
+func (c *flakyChannel) Name() string                    { return "flaky" }
 func (c *flakyChannel) Start(ctx context.Context) error { return nil }
 func (c *flakyChannel) Stop(ctx context.Context) error  { return nil }
 func (c *flakyChannel) IsRunning() bool                 { return true }
@@ -98,7 +98,7 @@ type failingChannel struct {
 	err   error
 }
 
-func (c *failingChannel) Name() string               { return "failing" }
+func (c *failingChannel) Name() string                    { return "failing" }
 func (c *failingChannel) Start(ctx context.Context) error { return nil }
 func (c *failingChannel) Stop(ctx context.Context) error  { return nil }
 func (c *failingChannel) IsRunning() bool                 { return true }

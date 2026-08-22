@@ -110,8 +110,8 @@ func TestConfigureProvider_FillsConfigAndSwitch(t *testing.T) {
 	p := newStdinPipe(t)
 	p.feedLines(
 		"http://localhost:11434/v1\n", // API Base
-		"n\n",                          // proxy? no
-		"n\n",                          // model aliases? no
+		"n\n",                         // proxy? no
+		"n\n",                         // model aliases? no
 	)
 	p.close()
 

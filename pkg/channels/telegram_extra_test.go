@@ -702,7 +702,7 @@ func TestTelegramBuildTelegoMessage_Helper(t *testing.T) {
 	msg := sampleTelegoMessage("text", 1, 2)
 	msg.Caption = "cap"
 	_ = msg
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // telegram.go: KV persistence + setupBotHandler/wrapUpdates helpers
 // ---------------------------------------------------------------------------
 

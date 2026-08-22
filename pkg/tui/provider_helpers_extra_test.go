@@ -14,15 +14,15 @@ func buildProviderModel(t *testing.T) *Model {
 	cfg := testModelConfig(t)
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
 			ProviderConfig: config.ProviderConfig{APIKey: "sk-xxx"},
 			Models: map[string]config.ProviderModelConfig{
-				"gpt-4o": {Model: "gpt-4o", ContextWindow: 128000},
+				"gpt-4o":      {Model: "gpt-4o", ContextWindow: 128000},
 				"gpt-4o-mini": {Model: "gpt-4o-mini"},
 			},
 		},
 		"anthropic": {
-			Type: "anthropic",
+			Type:           "anthropic",
 			ProviderConfig: config.ProviderConfig{APIKey: "sk-ant"},
 			Models: map[string]config.ProviderModelConfig{
 				"claude": {Model: "claude-3"},

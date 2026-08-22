@@ -30,19 +30,19 @@ func TestOnboard_FullWithLocalV4(t *testing.T) {
 	// 9. maybeStartServices: web disabled => returns.
 	p := newStdinPipe(t)
 	p.feedLines(
-		"9\n",                // Show all providers
-		"9\n",                // select Ollama (index 8)
+		"9\n",                  // Show all providers
+		"9\n",                  // select Ollama (index 8)
 		"localhost:11434/v1\n", // API Base
-		"n\n",                // proxy?
-		"n\n",                // model aliases?
-		"n\n",                // configure another provider?
-		"test:model\n",       // default model
-		"\n",                 // max tokens default
-		"\n",                 // temperature default
-		"\n",                 // max tool iterations default
-		"n\n",                // add additional agents?
-		"n\n",                // enable Web UI?
-		"y\n",                // save configuration?
+		"n\n",                  // proxy?
+		"n\n",                  // model aliases?
+		"n\n",                  // configure another provider?
+		"test:model\n",         // default model
+		"\n",                   // max tokens default
+		"\n",                   // temperature default
+		"\n",                   // max tool iterations default
+		"n\n",                  // add additional agents?
+		"n\n",                  // enable Web UI?
+		"y\n",                  // save configuration?
 	)
 	p.close()
 	out := runCmd(func() { onboard() })

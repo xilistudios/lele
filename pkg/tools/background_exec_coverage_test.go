@@ -298,7 +298,7 @@ func TestStopBackgroundExecTool_ElapsedReportsDuration(t *testing.T) {
 	if !strings.Contains(res.ForLLM, "30s") {
 		t.Errorf("expected ~30s elapsed in result, got: %s", res.ForLLM)
 	}
-}// ---------------------------------------------------------------------------
+} // ---------------------------------------------------------------------------
 // releaseBuffers truncation
 // ---------------------------------------------------------------------------
 

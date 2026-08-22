@@ -128,9 +128,9 @@ func TestNativeChannel_removeWSClient(t *testing.T) {
 	n.removeWSClient("none")
 
 	client := &WSClient{
-		ID:        "c1",
-		SendChan:  make(chan []byte, 1),
-		closed:    false,
+		ID:             "c1",
+		SendChan:       make(chan []byte, 1),
+		closed:         false,
 		reconnectTimer: time.AfterFunc(time.Hour, func() {}),
 	}
 	n.addWSClient(client)
@@ -160,9 +160,9 @@ func TestNativeChannel_broadcastAll(t *testing.T) {
 
 	// A closed client gets cleaned up.
 	closedClient := &WSClient{
-		ID:         "c2",
-		SendChan:   make(chan []byte),
-		Conn:       nil,
+		ID:       "c2",
+		SendChan: make(chan []byte),
+		Conn:     nil,
 	}
 	closedClient.closed = true
 	n.addWSClient(closedClient)
@@ -175,11 +175,11 @@ func TestNativeChannel_broadcastAll(t *testing.T) {
 func TestNativeChannel_reconnectWSClient(t *testing.T) {
 	n, _, _ := newTestNativeChannel(t)
 	client := &WSClient{
-		ID:        "c1",
-		SessionKey: "sk",
-		SendChan:  make(chan []byte, 4),
-		pendingMsgs: []json.RawMessage{json.RawMessage(`{"a":1}`)},
-		reconnecting: true,
+		ID:             "c1",
+		SessionKey:     "sk",
+		SendChan:       make(chan []byte, 4),
+		pendingMsgs:    []json.RawMessage{json.RawMessage(`{"a":1}`)},
+		reconnecting:   true,
 		reconnectTimer: time.AfterFunc(time.Millisecond, func() {}),
 	}
 	buffered := n.reconnectWSClient(client, nil)

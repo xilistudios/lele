@@ -39,18 +39,24 @@ func configureProviderSwitch(t *testing.T, name, displayName, typeKey string) {
 }
 
 // These cover the configureProvider typeKey switch cases.
-func TestConfigureProvider_SwitchOpenAI(t *testing.T)  { configureProviderSwitch(t, "openai", "OpenAI", "openai") }
+func TestConfigureProvider_SwitchOpenAI(t *testing.T) {
+	configureProviderSwitch(t, "openai", "OpenAI", "openai")
+}
 func TestConfigureProvider_SwitchOpenRouter(t *testing.T) {
 	configureProviderSwitch(t, "openrouter", "OpenRouter", "openrouter")
 }
-func TestConfigureProvider_SwitchGroq(t *testing.T)  { configureProviderSwitch(t, "groq", "Groq", "groq") }
+func TestConfigureProvider_SwitchGroq(t *testing.T) {
+	configureProviderSwitch(t, "groq", "Groq", "groq")
+}
 func TestConfigureProvider_SwitchDeepSeek(t *testing.T) {
 	configureProviderSwitch(t, "deepseek", "DeepSeek", "deepseek")
 }
 func TestConfigureProvider_SwitchGemini(t *testing.T) {
 	configureProviderSwitch(t, "gemini", "Gemini", "gemini")
 }
-func TestConfigureProvider_SwitchZhipu(t *testing.T) { configureProviderSwitch(t, "zhipu", "Zhipu", "zhipu") }
+func TestConfigureProvider_SwitchZhipu(t *testing.T) {
+	configureProviderSwitch(t, "zhipu", "Zhipu", "zhipu")
+}
 func TestConfigureProvider_SwitchOllama(t *testing.T) {
 	configureProviderSwitch(t, "ollama", "Ollama", "ollama")
 }
@@ -60,7 +66,9 @@ func TestConfigureProvider_SwitchNvidia(t *testing.T) {
 func TestConfigureProvider_SwitchMoonshot(t *testing.T) {
 	configureProviderSwitch(t, "moonshot", "Moonshot", "moonshot")
 }
-func TestConfigureProvider_SwitchVLLM(t *testing.T) { configureProviderSwitch(t, "vllm", "VLLM", "vllm") }
+func TestConfigureProvider_SwitchVLLM(t *testing.T) {
+	configureProviderSwitch(t, "vllm", "VLLM", "vllm")
+}
 func TestConfigureProvider_SwitchShengSuanYun(t *testing.T) {
 	configureProviderSwitch(t, "shengsuanyun", "ShengSuanYun", "shengsuanyun")
 }

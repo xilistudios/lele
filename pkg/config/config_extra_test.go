@@ -522,8 +522,8 @@ func TestResolveModelAlias_EdgeCases(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Providers.Named = map[string]NamedProviderConfig{
 		"p1": {Type: "openai", Models: map[string]ProviderModelConfig{
-			"alias1": {Model: ""}, // empty model -> returns map key
-			"dot.name":   {Model: "resolved-dot"},
+			"alias1":   {Model: ""}, // empty model -> returns map key
+			"dot.name": {Model: "resolved-dot"},
 		}},
 	}
 

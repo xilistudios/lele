@@ -477,8 +477,8 @@ func TestSynthesisLocked_RoundRobinLastTurn(t *testing.T) {
 func TestSynthesisLocked_MoA_FallsBackToLastTurnWhenNoAggregatorTurn(t *testing.T) {
 	gm := NewGroupManager(mockResolve, nil, nil)
 	state := &GroupState{
-		ID:       "syn-3",
-		Strategy: "moa",
+		ID:        "syn-3",
+		Strategy:  "moa",
 		Moderator: "agg",
 		Participants: []Participant{
 			{AgentID: "p1", Role: RoleProposer},
@@ -517,46 +517,46 @@ func TestSynthesisLocked_MoA_UsesAggregatorLastTurn(t *testing.T) {
 
 func TestInstructionFor(t *testing.T) {
 	cases := []struct {
-		name    string
-		state   *GroupState
-		self    Participant
-		layer   int
+		name     string
+		state    *GroupState
+		self     Participant
+		layer    int
 		contains string
 	}{
 		{
-			name:    "aggregator role",
-			state:   &GroupState{Strategy: "moa"},
-			self:    Participant{AgentID: "agg", Role: RoleAggregator},
+			name:     "aggregator role",
+			state:    &GroupState{Strategy: "moa"},
+			self:     Participant{AgentID: "agg", Role: RoleAggregator},
 			contains: "Synthesize",
 		},
 		{
-			name:    "moderator role",
-			state:   &GroupState{Strategy: "moderator"},
-			self:    Participant{AgentID: "m", Role: RoleModerator},
+			name:     "moderator role",
+			state:    &GroupState{Strategy: "moderator"},
+			self:     Participant{AgentID: "m", Role: RoleModerator},
 			contains: "Synthesize",
 		},
 		{
-			name:    "moa proposer",
-			state:   &GroupState{Strategy: "moa"},
-			self:    Participant{AgentID: "p", Role: RoleProposer},
+			name:     "moa proposer",
+			state:    &GroupState{Strategy: "moa"},
+			self:     Participant{AgentID: "p", Role: RoleProposer},
 			contains: "Propose",
 		},
 		{
-			name:    "moa aggregator by field",
-			state:   &GroupState{Strategy: "moa", Moderator: "agg"},
-			self:    Participant{AgentID: "agg"},
+			name:     "moa aggregator by field",
+			state:    &GroupState{Strategy: "moa", Moderator: "agg"},
+			self:     Participant{AgentID: "agg"},
 			contains: "Synthesize",
 		},
 		{
-			name:    "moa non-aggregator fallback proposer",
-			state:   &GroupState{Strategy: "moa", Moderator: "agg"},
-			self:    Participant{AgentID: "other"},
+			name:     "moa non-aggregator fallback proposer",
+			state:    &GroupState{Strategy: "moa", Moderator: "agg"},
+			self:     Participant{AgentID: "other"},
 			contains: "Propose",
 		},
 		{
-			name:    "default",
-			state:   &GroupState{Strategy: "round_robin"},
-			self:    Participant{AgentID: "x"},
+			name:     "default",
+			state:    &GroupState{Strategy: "round_robin"},
+			self:     Participant{AgentID: "x"},
 			contains: "Contribute",
 		},
 	}

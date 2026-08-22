@@ -136,72 +136,72 @@ func TestBuildHarnessContext_NoUsableSkillMd(t *testing.T) {
 
 func TestParseSkillMetadata_Additional(t *testing.T) {
 	tests := []struct {
-		name         string
-		input        string
-		wantName     string
-		wantDesc     string
+		name     string
+		input    string
+		wantName string
+		wantDesc string
 	}{
 		{
-			name:         "literal block keep trailing newline (|+)",
-			input:        "---\nname: n\ndescription: |+\n  a\n  b\n---",
-			wantName:     "n",
-			wantDesc:     "a\nb\n",
+			name:     "literal block keep trailing newline (|+)",
+			input:    "---\nname: n\ndescription: |+\n  a\n  b\n---",
+			wantName: "n",
+			wantDesc: "a\nb\n",
 		},
 		{
-			name:         "literal block strip chomp (|-)",
-			input:        "---\ndescription: |-\n  a\n  b\n---",
-			wantDesc:     "a\nb",
+			name:     "literal block strip chomp (|-)",
+			input:    "---\ndescription: |-\n  a\n  b\n---",
+			wantDesc: "a\nb",
 		},
 		{
-			name:         "folded block keep newline (>+)",
-			input:        "---\ndescription: >+\n  a\n  b\n---",
-			wantDesc:     "a b\n",
+			name:     "folded block keep newline (>+)",
+			input:    "---\ndescription: >+\n  a\n  b\n---",
+			wantDesc: "a b\n",
 		},
 		{
-			name:         "folded block with blank paragraph break",
-			input:        "---\ndescription: >\n  line1\n\n  line2\n---",
-			wantDesc:     "line1\nline2",
+			name:     "folded block with blank paragraph break",
+			input:    "---\ndescription: >\n  line1\n\n  line2\n---",
+			wantDesc: "line1\nline2",
 		},
 		{
-			name:         "comment and blank lines in frontmatter",
-			input:        "---\n# a comment\n\nname: test\ndescription: desc\n---",
-			wantName:     "test",
-			wantDesc:     "desc",
+			name:     "comment and blank lines in frontmatter",
+			input:    "---\n# a comment\n\nname: test\ndescription: desc\n---",
+			wantName: "test",
+			wantDesc: "desc",
 		},
 		{
-			name:         "line without colon is skipped",
-			input:        "---\nname: test\njust a line without colon\n---",
-			wantName:     "test",
-			wantDesc:     "",
+			name:     "line without colon is skipped",
+			input:    "---\nname: test\njust a line without colon\n---",
+			wantName: "test",
+			wantDesc: "",
 		},
 		{
-			name:         "tab-indented continuation",
-			input:        "---\nname: test\ndescription: first\n\tsecond\n---",
-			wantName:     "test",
-			wantDesc:     "first second",
+			name:     "tab-indented continuation",
+			input:    "---\nname: test\ndescription: first\n\tsecond\n---",
+			wantName: "test",
+			wantDesc: "first second",
 		},
 		{
-			name:         "crlf opening delimiter",
-			input:        "---\r\nname: crlf\r\ndescription: ok\r\n---",
-			wantName:     "crlf",
-			wantDesc:     "ok",
+			name:     "crlf opening delimiter",
+			input:    "---\r\nname: crlf\r\ndescription: ok\r\n---",
+			wantName: "crlf",
+			wantDesc: "ok",
 		},
 		{
-			name:         "closing delimiter whitespace then newline",
-			input:        "---\nname: test\n---   \n",
-			wantName:     "test",
-			wantDesc:     "",
+			name:     "closing delimiter whitespace then newline",
+			input:    "---\nname: test\n---   \n",
+			wantName: "test",
+			wantDesc: "",
 		},
 		{
-			name:         "empty frontmatter body name only",
-			input:        "---\nname: x\n---",
-			wantName:     "x",
-			wantDesc:     "",
+			name:     "empty frontmatter body name only",
+			input:    "---\nname: x\n---",
+			wantName: "x",
+			wantDesc: "",
 		},
 		{
-			name:         "block scalar for folded default",
-			input:        "---\ndescription: >\n  one\n  two\n---",
-			wantDesc:     "one two",
+			name:     "block scalar for folded default",
+			input:    "---\ndescription: >\n  one\n  two\n---",
+			wantDesc: "one two",
 		},
 	}
 	for _, tt := range tests {

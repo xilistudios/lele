@@ -34,8 +34,8 @@ func TestNativeCronList(t *testing.T) {
 			t.Fatalf("status = %d", resp.StatusCode)
 		}
 		var out struct {
-			Jobs   []cron.CronJob          `json:"jobs"`
-			Status map[string]interface{}  `json:"status"`
+			Jobs   []cron.CronJob         `json:"jobs"`
+			Status map[string]interface{} `json:"status"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			t.Fatalf("decode: %v", err)
@@ -251,7 +251,7 @@ func TestNativeCronCreateErrorPaths(t *testing.T) {
 
 	t.Run("missing schedule kind", func(t *testing.T) {
 		body := map[string]interface{}{
-			"message": "hello",
+			"message":  "hello",
 			"schedule": map[string]interface{}{},
 		}
 		resp := doCronRequest(t, ts, http.MethodPost, "/api/v1/cron", body)
@@ -263,7 +263,7 @@ func TestNativeCronCreateErrorPaths(t *testing.T) {
 
 	t.Run("invalid message field", func(t *testing.T) {
 		body := map[string]interface{}{
-			"message": 12345,
+			"message":  12345,
 			"schedule": map[string]interface{}{"kind": "every", "everyMs": 60000},
 		}
 		resp := doCronRequest(t, ts, http.MethodPost, "/api/v1/cron", body)

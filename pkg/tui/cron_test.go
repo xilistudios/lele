@@ -69,9 +69,9 @@ func TestFormatCronSchedule(t *testing.T) {
 
 func TestFormatCronJobLine(t *testing.T) {
 	tests := []struct {
-		name    string
-		job     cron.CronJob
-		check   string
+		name  string
+		job   cron.CronJob
+		check string
 	}{
 		{"enabled with name", cron.CronJob{ID: "j1", Name: "backup", Enabled: true, Schedule: cron.CronSchedule{Kind: "every", EveryMS: int64Ptr(3600000)}, Payload: cron.CronPayload{Message: "run"}}, "●"},
 		{"disabled", cron.CronJob{ID: "j2", Enabled: false, Schedule: cron.CronSchedule{Kind: "every", EveryMS: int64Ptr(60000)}, Payload: cron.CronPayload{Message: "m"}}, "○"},

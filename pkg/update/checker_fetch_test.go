@@ -44,7 +44,7 @@ func releaseJSON() string {
 func TestCheckerLatestSuccess(t *testing.T) {
 	var gotPath string
 	c := &Checker{
-		Repo:   "owner/repo",
+		Repo: "owner/repo",
 		Client: newInterceptClient(func(req *http.Request) (*http.Response, error) {
 			gotPath = req.URL.Path
 			if got := req.Header.Get("Accept"); got != "application/vnd.github+json" {
@@ -73,7 +73,7 @@ func TestCheckerLatestSetsAuthToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "sekret")
 	var gotAuth string
 	c := &Checker{
-		Repo:   "o/r",
+		Repo: "o/r",
 		Client: newInterceptClient(func(req *http.Request) (*http.Response, error) {
 			gotAuth = req.Header.Get("Authorization")
 			return cannedResponse(req, http.StatusOK, releaseJSON()), nil
@@ -90,7 +90,7 @@ func TestCheckerLatestSetsAuthToken(t *testing.T) {
 func TestCheckerByTag(t *testing.T) {
 	var gotPath string
 	c := &Checker{
-		Repo:   "o/r",
+		Repo: "o/r",
 		Client: newInterceptClient(func(req *http.Request) (*http.Response, error) {
 			gotPath = req.URL.Path
 			return cannedResponse(req, http.StatusOK, releaseJSON()), nil

@@ -466,7 +466,7 @@ func TestGoalManager_SetStore_MigratesLoadedGoals(t *testing.T) {
 	if g := gm2.Get("migrate-key"); g == nil {
 		t.Fatal("expected migrated goal loadable")
 	}
-}// ============================================================================
+} // ============================================================================
 // agent_providable — subagent cache-hit fast paths (O(1) mapping pre-seeded)
 // ============================================================================
 

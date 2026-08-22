@@ -116,6 +116,7 @@ func TestAgentLoop_DirectProcessInProcess(t *testing.T) {
 
 var _ = agent.AgentLoop{}
 var _ = config.DefaultConfig
+
 // TestTUICmd_Subprocess_Cancel runs tuiCmd in a child process via the
 // LELE_TEST_TUI TestMain route, then kills it after a short wait to gather
 // tuiCmd's setup-path coverage that runs before the blocking program call.

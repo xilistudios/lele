@@ -138,6 +138,7 @@ func TestScanSkillsResponse(t *testing.T) {
 		t.Errorf("expected repo 'sipeed/lele-skills', got %q", resp.Repo)
 	}
 }
+
 // ---- Tests for scanner.go (HTTP mocked via httptest) ----
 
 func TestScanGitHubRepo_SingleSkillRepo(t *testing.T) {
@@ -494,7 +495,7 @@ func TestScanDirectories_SkipsNonSkills(t *testing.T) {
 	if skills[0].Path != "skills/weather" {
 		t.Errorf("expected prefixed path, got %q", skills[0].Path)
 	}
-}// ---- Error/edge paths for scanner + installer ----
+} // ---- Error/edge paths for scanner + installer ----
 
 // testClient returns an http.Client and mock transport pointing at the server.
 func testClient(srv *httptest.Server) *http.Client {

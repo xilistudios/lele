@@ -212,7 +212,7 @@ func TestProvidable_BackgroundExecs_WithCoordinator(t *testing.T) {
 // approvalExecTool is a minimal ExecTool-like tool that we attach to an agent's
 // registry so that the approved re-execute path (Get("exec")) succeeds.
 type approvalExecTool struct {
-	bypass bool
+	bypass   bool
 	executed bool
 }
 
@@ -771,13 +771,13 @@ func TestRunGroupTurn_WithTools(t *testing.T) {
 
 	var toolEvents []string
 	content, _, err := lr.runGroupTurn(context.Background(), group.TurnRequest{
-		GroupID:      "g-tools",
-		Speaker:      "test-agent",
-		SystemPrompt: "sys",
-		Instruction:  "do it",
-		EnableTools:  true,
+		GroupID:       "g-tools",
+		Speaker:       "test-agent",
+		SystemPrompt:  "sys",
+		Instruction:   "do it",
+		EnableTools:   true,
 		OriginChannel: "cli",
-		OriginChatID: "chat",
+		OriginChatID:  "chat",
 		OnToolCall: func(id, name, args, status, result string) {
 			toolEvents = append(toolEvents, name+"@"+status)
 		},

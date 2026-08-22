@@ -98,7 +98,7 @@ func TestExtractPartThoughtSignature(t *testing.T) {
 
 func TestSanitizeSchemaForGemini(t *testing.T) {
 	schema := map[string]any{
-		"type":                 "object",
+		"type": "object",
 		"properties": map[string]any{
 			"name": map[string]any{
 				"type":      "string",
@@ -319,7 +319,7 @@ func TestParseSSEResponse(t *testing.T) {
 			"response": map[string]any{
 				"candidates": []any{
 					map[string]any{
-						"content":     map[string]any{"parts": []any{map[string]any{"text": "partial"}}},
+						"content":      map[string]any{"parts": []any{map[string]any{"text": "partial"}}},
 						"finishReason": "MAX_TOKENS",
 					},
 				},

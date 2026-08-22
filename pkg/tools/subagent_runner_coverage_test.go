@@ -74,14 +74,14 @@ func TestResolveAgentConfig_AgentOverrides(t *testing.T) {
 	sm.SetLLMOptions(2000, 0.4)
 	sm.getAgentContext = func(agentID string) AgentContextInfo {
 		return AgentContextInfo{
-			Model:               "agent-model",
-			MaxIterations:       30,
-			MaxTokens:           4000,
-			Temperature:         0.7,
-			Context:             "some agent context",
-			Workspace:           "/agent-ws",
-			Name:                "Coder",
-			ContextWindow:       12000,
+			Model:         "agent-model",
+			MaxIterations: 30,
+			MaxTokens:     4000,
+			Temperature:   0.7,
+			Context:       "some agent context",
+			Workspace:     "/agent-ws",
+			Name:          "Coder",
+			ContextWindow: 12000,
 		}
 	}
 

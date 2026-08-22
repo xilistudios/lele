@@ -23,11 +23,11 @@ func TestInit(t *testing.T) {
 
 func TestResetStreamState(t *testing.T) {
 	m := &Model{
-		currentStream:       "s",
-		currentThinking:     "t",
-		streamRenderedLines: []string{"a"},
-		thinkingRenderedLines: []string{"b"},
-		streamRenderedJoined: "a",
+		currentStream:          "s",
+		currentThinking:        "t",
+		streamRenderedLines:    []string{"a"},
+		thinkingRenderedLines:  []string{"b"},
+		streamRenderedJoined:   "a",
 		thinkingRenderedJoined: "b",
 	}
 	m.resetStreamState()

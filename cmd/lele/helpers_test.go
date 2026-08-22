@@ -11,11 +11,11 @@ import (
 
 // stdinPipe represents a redirected stdin that can be fed input.
 type stdinPipe struct {
-	orig  *os.File
-	r     *os.File
-	w     *os.File
-	t     *testing.T
-	mutex sync.Mutex
+	orig   *os.File
+	r      *os.File
+	w      *os.File
+	t      *testing.T
+	mutex  sync.Mutex
 	closed bool
 }
 

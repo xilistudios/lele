@@ -39,8 +39,8 @@ func TestApprovalManager_CreateGetHandle(t *testing.T) {
 	}
 
 	// Override callbacks to count invocations.
-	approval.OnApproved = func() { approvedCalls++ ; approvedCalled.Do(func() {}) }
-	approval.OnRejected = func() { rejectedCalls++ ; rejectedCalled.Do(func() {}) }
+	approval.OnApproved = func() { approvedCalls++; approvedCalled.Do(func() {}) }
+	approval.OnRejected = func() { rejectedCalls++; rejectedCalled.Do(func() {}) }
 
 	// GetApproval should return the same instance.
 	got := am.GetApproval(approval.ID)

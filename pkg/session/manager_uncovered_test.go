@@ -13,7 +13,7 @@ import (
 
 func TestHasVerbosePreference(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		setup func(sm *SessionManager, key string)
 		want  bool
 	}{

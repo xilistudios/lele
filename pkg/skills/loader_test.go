@@ -178,6 +178,7 @@ func TestStripFrontmatter(t *testing.T) {
 		})
 	}
 }
+
 // ---- Additional tests for uncovered loader functions ----
 
 func TestNewSkillsLoader(t *testing.T) {

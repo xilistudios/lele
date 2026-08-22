@@ -263,7 +263,7 @@ func TestGetSessionModel_Additional(t *testing.T) {
 		t.Errorf("GetSessionModel override = %q, want test:vision-model", got)
 	}
 	_ = ap.GetSessionModelSupportsImages(key)
-}// ============================================================================
+} // ============================================================================
 // session_manager — forceCompression
 // ============================================================================
 

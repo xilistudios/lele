@@ -198,7 +198,7 @@ func TestListAvailableSkills_ConnectionError(t *testing.T) {
 		// Not strictly guaranteed; this only tests the error path is not panicking.
 		_ = err
 	}
-}// TestInstallFromGitHub_HTTPErrorBranch directly verifies the non-200 path.
+} // TestInstallFromGitHub_HTTPErrorBranch directly verifies the non-200 path.
 func TestInstallFromGitHub_HTTPErrorBranch(t *testing.T) {
 	ws := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

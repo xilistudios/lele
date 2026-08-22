@@ -298,7 +298,7 @@ func TestParseSPIArgs_validBits(t *testing.T) {
 	if bits != 16 {
 		t.Fatalf("bits = %d", bits)
 	}
-}// listSPIDevices returns an existing /dev/spidev* path for real-device tests.
+} // listSPIDevices returns an existing /dev/spidev* path for real-device tests.
 func listSPIDevices() ([]string, error) {
 	return filepath.Glob("/dev/spidev*")
 }
