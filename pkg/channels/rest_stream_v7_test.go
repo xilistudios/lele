@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -181,23 +182,29 @@ func TestHandleChatSendStream_EmptyContent(t *testing.T) {
 }
 
 // TestHandleChatSendStream_NoFlusher exercises the streaming-unsupported path
-// using a recorder wrapper that does not implement http.Flusher.
+// using a writer that does not implement http.Flusher.
 func TestHandleChatSendStream_NoFlusher(t *testing.T) {
 	ts := newNativeTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/send/stream", strings.NewReader(`{"content":"hi"}`))
 	req.Header.Set("Authorization", "Bearer "+ts.token)
-	rec := &nonFlushingRecorder{ResponseRecorder: httptest.NewRecorder()}
-	ts.channel.handleChatSendStream(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	req.Header.Set("X-Client-Id", ts.clientID)
+	w := &nonFlushingWriter{header: make(http.Header), body: &bytes.Buffer{}}
+	ts.channel.handleChatSendStream(w, req)
+	if w.status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
 	}
 }
 
-type nonFlushingRecorder struct {
-	*httptest.ResponseRecorder
+// nonFlushingWriter implements http.ResponseWriter but NOT http.Flusher.
+type nonFlushingWriter struct {
+	header http.Header
+	body   *bytes.Buffer
+	status int
 }
 
-// Flush is intentionally omitted so the recorder does not satisfy http.Flusher.
+func (w *nonFlushingWriter) Header() http.Header         { return w.header }
+func (w *nonFlushingWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+func (w *nonFlushingWriter) WriteHeader(status int)      { w.status = status }
 
 // TestHandleChatSendStream_Forbidden exercises ownership denial via a
 // subagent-style key with no parent session.
@@ -206,6 +213,7 @@ func TestHandleChatSendStream_Forbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/send/stream",
 		strings.NewReader(`{"content":"hi","session_key":"subagent:nonexistent"}`))
 	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("X-Client-Id", ts.clientID)
 	rec := httptest.NewRecorder()
 	ts.channel.handleChatSendStream(rec, req)
 	if rec.Code != http.StatusForbidden {
@@ -226,6 +234,7 @@ func TestHandleChatSendStream_ClientDisconnect(t *testing.T) {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+ts.token)
+	req.Header.Set("X-Client-Id", ts.clientID)
 	rec := httptest.NewRecorder()
 	cancel() // cancel before handler runs so the context is already Done
 

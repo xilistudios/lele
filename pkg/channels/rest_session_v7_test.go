@@ -206,6 +206,8 @@ func TestHandleSessionSubagents_NormalizesAndStripsPrefixV7(t *testing.T) {
 		{TaskID: "t1", SessionKey: full + ":subagent-1", Status: "running", Created: 1},
 		{TaskID: "t2", SessionKey: "bare-key", Status: "completed", Created: 2},
 	}
+	// Register parent session so validateSessionOwnership accepts the subagent key.
+	ts.loop.subagentParents[full+":subagent-1"] = full
 
 	req := authedRecorderReq(t, ts, http.MethodGet, "/api/v1/chat/sessions/"+bare+"/subagents", "")
 	req.SetPathValue("sessionKey", bare)
@@ -234,8 +236,9 @@ func TestHandleSessionSubagents_NormalizesAndStripsPrefixV7(t *testing.T) {
 			t1Key = s.SessionKey
 		}
 	}
-	if t1Key != full+":subagent-1" {
-		t.Fatalf("t1 session_key = %q, want %q (native: stripped)", t1Key, full+":subagent-1")
+	stripped := bare + ":subagent-1"
+	if t1Key != stripped {
+		t.Fatalf("t1 session_key = %q, want %q (native: stripped)", t1Key, stripped)
 	}
 }
 
