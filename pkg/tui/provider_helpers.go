@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // saveConfigToDisk persists the current in-memory config to disk.
@@ -169,4 +170,105 @@ func (m *Model) deleteModelFromProvider(providerName, alias string) error {
 	m.cfg.Providers.Named[key] = provider
 
 	return m.saveConfigToDisk()
+}
+
+// modelCustomValue is the sentinel value of the "(custom…)" selector option.
+// It cannot collide with a real provider/model reference (a NUL byte cannot be
+// typed in the terminal text input) and signals "open free-text input".
+const modelCustomValue = "\x00__custom__"
+
+// configSource returns the config to read selector options from: the agent
+// loop's live snapshot when available, otherwise m.cfg (unit tests run with
+// a nil agentLoop, which must not panic).
+func (m *Model) configSource() *config.Config {
+	if m.agentLoop != nil {
+		if snap := m.agentLoop.GetProvidable().GetConfigSnapshot(); snap != nil {
+			return snap
+		}
+	}
+	return m.cfg
+}
+
+// configSelectorOptions builds selector option lists from configured values:
+// "(default)" (empty value) first, then the current value when it is not
+// among the configured values (so a stale reference always stays selectable
+// and marked with ✓), then the configured values (in the order provided),
+// and finally a "(custom…)" entry (value modelCustomValue) that opens
+// free-text input. Returns nil, nil when there is nothing to offer (no
+// configured values and no current value) so callers can fall back to plain
+// text input.
+func configSelectorOptions(currentValue string, configured []string) (labels, values []string) {
+	currentValue = strings.TrimSpace(currentValue)
+	if len(configured) == 0 && currentValue == "" {
+		return nil, nil
+	}
+	labels = make([]string, 0, len(configured)+3)
+	values = make([]string, 0, len(configured)+3)
+	labels = append(labels, "(default)")
+	values = append(values, "")
+	if currentValue != "" {
+		found := false
+		for _, c := range configured {
+			if c == currentValue {
+				found = true
+				break
+			}
+		}
+		if !found {
+			labels = append(labels, currentValue)
+			values = append(values, currentValue)
+		}
+	}
+	for _, c := range configured {
+		labels = append(labels, c)
+		values = append(values, c)
+	}
+	labels = append(labels, i18n.T("tui.settings.selectorCustom"))
+	values = append(values, modelCustomValue)
+	return labels, values
+}
+
+// providerSelectorOptions returns selector options for a provider field: all
+// configured provider names (sorted), plus the current value when it is not
+// among them (e.g. a provider removed from the config), plus "(custom…)".
+func (m *Model) providerSelectorOptions(currentValue string) (labels, values []string) {
+	cfg := m.configSource()
+	if cfg == nil || cfg.Providers == nil || cfg.Providers.Named == nil {
+		return configSelectorOptions(currentValue, nil)
+	}
+	names := make([]string, 0, len(cfg.Providers.Named))
+	for name := range cfg.Providers.Named {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return configSelectorOptions(currentValue, names)
+}
+
+// modelSelectorOptions returns selector options for a model field: every
+// configured provider's models as "provider:alias" (sorted by provider name,
+// then alias), plus the current value when it is not among them, plus
+// "(custom…)".
+func (m *Model) modelSelectorOptions(currentValue string) (labels, values []string) {
+	cfg := m.configSource()
+	if cfg == nil || cfg.Providers == nil || cfg.Providers.Named == nil {
+		return configSelectorOptions(currentValue, nil)
+	}
+	providers := make([]string, 0, len(cfg.Providers.Named))
+	for name := range cfg.Providers.Named {
+		providers = append(providers, name)
+	}
+	sort.Strings(providers)
+	refs := make([]string, 0, 8)
+	for _, name := range providers {
+		provider := cfg.Providers.Named[name]
+		aliases := make([]string, 0, len(provider.Models))
+		for alias := range provider.Models {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+		for _, alias := range aliases {
+			refs = append(refs, name+":"+alias)
+		}
+	}
+	return configSelectorOptions(currentValue, refs)
 }
