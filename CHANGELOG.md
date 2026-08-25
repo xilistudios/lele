@@ -7,10 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-08-20
+
 ### Added
 
 #### TUI
-- Color themes — six built-in themes (dracula, nord, catppuccin, gruvbox, tokyo-night, solarized-light) selectable from Settings → Interface or during first-run onboarding. Themes apply live (no restart). Selection is persisted in `~/.lele/tui.json`; custom partial themes are supported with Dracula fallbacks.
+- Color themes with live preview, onboarding integration, and 12 built-in themes (#211) — user-selectable color themes (dracula, nord, catppuccin, gruvbox, tokyo-night, solarized-light, one-dark, monokai, github-dark, rose-pine, dracula-pro, blood-moon) with live preview on navigation in Settings → Interface and during first-run onboarding. Selection is persisted in `~/.lele/tui.json`; custom partial themes are supported with Dracula fallbacks. Package-level style vars are rebuilt via `ApplyTheme()` so all 11 semantic colors propagate instantly.
+- Community themes support (#212) — community themes are fetched from the [awesome-lele](https://github.com/xilistudios/awesome-lele) repo and can be installed directly from the TUI Settings → Interface → Theme picker. Two sections (Built-in + Community) with async fetch, install/uninstall, and live preview for installed themes.
+- Unified `/settings` UI for agents, system, and interface config (#206) — single settings modal with tabbed sections for agent defaults, system preferences, and interface configuration, replacing scattered config commands.
+
+#### WebUI
+- Agent description viewing and editing (#207) — dedicated UI for viewing and editing agent descriptions directly from the WebUI agent management page.
+
+#### Tools
+- Redact secret values from tool results (#205) — `secret get` now returns first 3 chars + `****` instead of plaintext value. `ForUser` message includes `SECRET` name usage hint. `secret list` includes exec placeholder examples. Raw secret values are no longer exposed in chat history, forcing agents to use `exec` with `{{SECRET:name}}` placeholders for secure injection.
+
+### Fixed
+
+#### WebUI
+- Show correct tool names in history instead of generic 'Action' label (#210) — tool call names are now resolved from the message's `tool_calls` array and displayed in the history view.
+- Optimize session/model/agent loading performance (#209) — parallelized data fetching and reduced redundant API calls for faster page loads.
+
+#### Tools
+- Subagent data race in tool coordinator (#205) — fixed a race condition in the subagent tool coordinator that could cause panics under concurrent access.
+
+### Changed
+
+#### TUI
+- Removed message count feature from TUI and WebUI (#208) — the message count display was removed from both interfaces as part of a UI simplification pass.
 
 ## [0.7.5] - 2026-08-14
 
