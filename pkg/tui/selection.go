@@ -18,7 +18,8 @@ func stripANSI(s string) string {
 }
 
 // SelectionStyle is the highlight applied to selected text in the viewport.
-var SelectionStyle = lipgloss.NewStyle().Background(lipgloss.Color("#264f78"))
+// It is populated by rebuildStyles() in style.go.
+var SelectionStyle lipgloss.Style
 
 // startSelection begins a text selection at the given screen coordinates.
 // Only starts if the click is within the viewport area (left column, within viewport height).

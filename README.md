@@ -170,6 +170,48 @@ export LELE_LANG=en  # or es, pt
 /lang en
 ```
 
+### Color Themes
+
+The TUI supports user-selectable color themes. Six built-in themes are included:
+
+- `dracula` (default)
+- `nord`
+- `catppuccin`
+- `gruvbox`
+- `tokyo-night`
+- `solarized-light`
+
+Themes can be changed at any time via **Settings → Interface** (no restart needed).
+The selected theme is persisted in a separate file:
+
+```text
+~/.lele/tui.json
+```
+
+Example `tui.json`:
+
+```json
+{
+  "theme": "nord"
+}
+```
+
+Custom partial themes can also be defined — missing fields inherit from the
+Dracula palette:
+
+```json
+{
+  "theme": "ocean",
+  "custom_themes": {
+    "ocean": {
+      "background": "#0a192f",
+      "input_background": "#112240",
+      "accent": "#64ffda"
+    }
+  }
+}
+```
+
 ## Web UI And Native Client Flow
 
 Lele now includes a local web UI plus a native client channel.

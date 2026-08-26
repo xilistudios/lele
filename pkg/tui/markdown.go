@@ -48,7 +48,7 @@ func simpleMarkdownRender(content string, width int) string {
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("39")) // Blue color for headers
+		Foreground(AccentColor)
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)

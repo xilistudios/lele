@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
 // newSettingsTestModel builds a Model owned by a temp config dir so that
@@ -50,35 +51,47 @@ func TestLoadTUISettingsItems(t *testing.T) {
 	m.mouseEnabled = true
 	m.maxRenderedMessages = 200
 	m.streamThrottleInterval = 32 * time.Millisecond
+	m.currentThemeName = "dracula"
 	m.loadTUISettings()
 
-	if len(m.modalItems) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(m.modalItems))
+	// 4 items: theme, mouse, max messages, stream throttle.
+	if len(m.modalItems) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(m.modalItems))
 	}
-	if !strings.Contains(m.modalItems[0], "✓") {
-		t.Errorf("mouse item should show enabled checkmark: %q", m.modalItems[0])
+	if !strings.Contains(m.modalItems[0], "dracula") {
+		t.Errorf("theme item should show active theme: %q", m.modalItems[0])
 	}
-	if !strings.Contains(m.modalItems[1], "200") {
-		t.Errorf("max messages item should show 200: %q", m.modalItems[1])
+	if !strings.Contains(m.modalItems[1], "✓") {
+		t.Errorf("mouse item should show enabled checkmark: %q", m.modalItems[1])
 	}
-	if !strings.Contains(m.modalItems[2], "32") {
-		t.Errorf("stream throttle item should show 32: %q", m.modalItems[2])
+	if !strings.Contains(m.modalItems[2], "200") {
+		t.Errorf("max messages item should show 200: %q", m.modalItems[2])
+	}
+	if !strings.Contains(m.modalItems[3], "32") {
+		t.Errorf("stream throttle item should show 32: %q", m.modalItems[3])
 	}
 
 	// Disabled mouse should show ✗
 	m.mouseEnabled = false
 	m.loadTUISettings()
-	if !strings.Contains(m.modalItems[0], "✗") {
-		t.Errorf("mouse item should show disabled mark: %q", m.modalItems[0])
+	if !strings.Contains(m.modalItems[1], "✗") {
+		t.Errorf("mouse item should show disabled mark: %q", m.modalItems[1])
 	}
 }
 
 func TestHandleTUISettingsEnterEditMode(t *testing.T) {
 	m := newSettingsTestModel(t)
-	m.modalItems = []string{"mouse", "max", "throttle"}
+	m.modalItems = []string{"theme", "mouse", "max", "throttle"}
+
+	// Theme picker activation at index 0.
+	m.modalSelectedIdx = 0
+	m.handleTUISettingsEnter()
+	if !m.themePickerActive {
+		t.Fatal("expected theme picker to activate on theme row")
+	}
 
 	// Max messages → edit mode
-	m.modalSelectedIdx = 1
+	m.modalSelectedIdx = 2
 	m.handleTUISettingsEnter()
 	if m.settingsEditField != "maxMessages" {
 		t.Fatalf("expected edit field maxMessages, got %q", m.settingsEditField)
@@ -88,7 +101,7 @@ func TestHandleTUISettingsEnterEditMode(t *testing.T) {
 	}
 
 	// Stream throttle → edit mode
-	m.modalSelectedIdx = 2
+	m.modalSelectedIdx = 3
 	m.handleTUISettingsEnter()
 	if m.settingsEditField != "streamThrottle" {
 		t.Fatalf("expected edit field streamThrottle, got %q", m.settingsEditField)
@@ -185,6 +198,166 @@ func TestToggleTUIMouse(t *testing.T) {
 	}
 	if !reloaded.TUI.MouseEnabled {
 		t.Fatal("expected persisted mouse enabled true")
+	}
+}
+
+func TestLoadThemePickerItems(t *testing.T) {
+	m := newSettingsTestModel(t)
+	m.currentThemeName = "nord"
+	m.loadThemePickerItems()
+	if len(m.modalItems) == 0 {
+		t.Fatal("expected at least one theme item")
+	}
+	foundActive := false
+	for _, item := range m.modalItems {
+		if strings.HasPrefix(item, "• ") {
+			if !strings.Contains(item, "nord") {
+				t.Errorf("active marker should be on current theme, got %q", item)
+			}
+			foundActive = true
+		}
+	}
+	if !foundActive {
+		t.Error("expected active theme to be marked with •")
+	}
+	// Items are either headers (── ... ──) or selectable rows (2-space or •).
+	hasHeader := false
+	for _, item := range m.modalItems {
+		switch {
+		case strings.HasPrefix(item, "── "):
+			hasHeader = true
+		case strings.HasPrefix(item, "  "), strings.HasPrefix(item, "• "):
+			// ok
+		default:
+			t.Errorf("theme item should be a header or start with 2 spaces/•: %q", item)
+		}
+	}
+	if !hasHeader {
+		t.Error("expected a section header in the theme picker list")
+	}
+	// Structured items should mirror the modal labels.
+	if len(m.themePickerItems) != len(m.modalItems) {
+		t.Fatalf("themePickerItems len %d != modalItems len %d", len(m.themePickerItems), len(m.modalItems))
+	}
+	for i, it := range m.themePickerItems {
+		if it.label != m.modalItems[i] {
+			t.Errorf("label mismatch at %d: %q != %q", i, it.label, m.modalItems[i])
+		}
+	}
+}
+
+// TestThemePickerStructuredSections verifies buildThemePickerItems emits the
+// built-in and community section headers plus per-kind rows.
+func TestThemePickerStructuredSections(t *testing.T) {
+	m := newSettingsTestModel(t)
+	m.currentThemeName = "dracula"
+	m.installedCommunity = []string{"dracula", "solarized"}
+	m.communityIndex = []theme.CommunityThemeEntry{
+		{Name: "solarized", Description: "S"},
+	}
+	m.loadThemePickerItems()
+
+	var kinds []string
+	for _, it := range m.themePickerItems {
+		kinds = append(kinds, it.kind)
+	}
+	// Header, builtins..., header, community entries
+	if kinds[0] != "header" {
+		t.Fatalf("expected first item to be a header, got %q", kinds[0])
+	}
+	if !containsKind(kinds, "community") {
+		t.Fatal("expected community section items")
+	}
+	// The installed marker should appear on the installed community theme.
+	foundInstalled := false
+	for _, it := range m.themePickerItems {
+		if it.kind == "community" && strings.Contains(it.label, "✓") {
+			foundInstalled = true
+		}
+	}
+	if !foundInstalled {
+		t.Error("expected an installed community theme to show ✓")
+	}
+}
+
+// TestThemePickerLoadingError verifies the loading and error branches of
+// buildThemePickerItems.
+func TestThemePickerLoadingError(t *testing.T) {
+	m := newSettingsTestModel(t)
+
+	// Loading state
+	m.communityLoading = true
+	m.loadThemePickerItems()
+	foundLoading := false
+	for _, it := range m.themePickerItems {
+		if it.kind == "loading" {
+			foundLoading = true
+		}
+	}
+	if !foundLoading {
+		t.Fatal("expected a loading item while communityLoading is true")
+	}
+
+	// Error state
+	m = newSettingsTestModel(t)
+	m.communityErr = "boom"
+	m.loadThemePickerItems()
+	var kinds []string
+	for _, it := range m.themePickerItems {
+		kinds = append(kinds, it.kind)
+	}
+	if !containsKind(kinds, "error") || !containsKind(kinds, "retry") {
+		t.Fatalf("expected error and retry kinds, got %v", kinds)
+	}
+}
+
+func containsKind(kinds []string, kind string) bool {
+	for _, k := range kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// TestThemePickerEscRevertsPreview verifies that after previewing a different
+// theme and pressing Esc, the original theme is restored.
+func TestThemePickerEscRevertsPreview(t *testing.T) {
+	m := newTestModel(t)
+	m.currentThemeName = "dracula"
+	m.themePickerActive = true
+	m.themePreviewName = "dracula"
+	m.loadThemePickerItems()
+	// Set up the picker so modalSelectedIdx matches the current theme
+	for i, item := range m.modalItems {
+		if strings.Contains(item, "dracula") && strings.HasPrefix(item, "•") {
+			m.modalSelectedIdx = i
+			break
+		}
+	}
+	// Navigate to a different theme (preview)
+	if m.modalSelectedIdx+1 < len(m.modalItems) {
+		m.modalSelectedIdx++
+	} else {
+		m.modalSelectedIdx--
+	}
+	item := m.modalItems[m.modalSelectedIdx]
+	themeName := strings.TrimSpace(strings.TrimPrefix(item, "•"))
+	themeName = strings.TrimSpace(themeName)
+	m.previewTheme(themeName)
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("preview should not update currentThemeName, got %q", m.currentThemeName)
+	}
+	// Esc should revert — simulate the Esc handler logic
+	if m.themePreviewName != "" {
+		m.previewTheme(m.themePreviewName)
+		m.currentThemeName = m.themePreviewName
+		m.themePreviewName = ""
+	}
+	m.themePickerActive = false
+	m.loadTUISettings()
+	if m.currentThemeName != "dracula" {
+		t.Fatalf("expected theme reverted to dracula, got %q", m.currentThemeName)
 	}
 }
 

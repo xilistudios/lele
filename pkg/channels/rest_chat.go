@@ -223,10 +223,14 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 						args = parsed
 					}
 				}
+				tcName := tc.Name
+				if tcName == "" && tc.Function != nil {
+					tcName = tc.Function.Name
+				}
 				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
 					ID:               tc.ID,
 					Type:             tc.Type,
-					Name:             tc.Name,
+					Name:             tcName,
 					Arguments:        args,
 					ThoughtSignature: tc.ThoughtSignature,
 				})

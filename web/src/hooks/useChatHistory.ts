@@ -14,6 +14,7 @@ export type HistoryMessage = Array<{
   reasoning_content?: string
   tool_calls?: HistoryToolCall[]
   tool_call_id?: string
+  tool_name?: string
   exclude_from_context?: boolean
 }>
 

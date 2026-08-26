@@ -10,6 +10,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tui/theme"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -153,6 +154,32 @@ type compactResultMsg struct {
 	sessionKey string
 }
 
+// communityIndexMsg is sent when the community theme index has been fetched.
+type communityIndexMsg struct {
+	entries []theme.CommunityThemeEntry
+	err     string
+}
+
+// installThemeMsg is sent when a community theme download completes.
+type installThemeMsg struct {
+	name  string
+	theme theme.Theme
+	err   string
+}
+
+// onboardStep represents the current step in the first-run onboarding wizard.
+type onboardStep int
+
+const (
+	obWelcome        onboardStep = iota // welcome screen
+	obLanguage                          // language picker
+	obTheme                             // theme picker
+	obProviderPicker                    // provider preset selection
+	obConnect                           // guided connect (reuses /connect flow)
+	obVerify                            // async key validation + set defaults
+	obDone                              // success screen with tips
+)
+
 type Model struct {
 	agentLoop  *agent.AgentLoop
 	sessionMgr *session.SessionManager
@@ -165,9 +192,31 @@ type Model struct {
 	selectedSessionIdx int
 	visibleSessions    []*session.Session
 	currentKey         string
-	currentMode        chatMode // current mode filter: Agent (default), Chat, or Group
-	groupProfileIdx    int      // selected profile index in Group mode welcome screen
-	showWelcome        bool     // true when showing the welcome/new-chat screen
+	currentMode        chatMode    // current mode filter: Agent (default), Chat, or Group
+	groupProfileIdx    int         // selected profile index in Group mode welcome screen
+	showWelcome        bool        // true when showing the welcome/new-chat screen
+	onboardingActive   bool        // true when onboarding wizard is running
+	onboardingStep     onboardStep // current wizard step
+	obSelectedPreset   int         // index into providerPresets for the chosen provider
+	obSkipConfirm      bool        // true when "skip setup?" confirmation is showing
+	obVerifying        bool        // true while async key validation is running
+	obVerifyFailed     bool        // true if validation returned a warning
+	obProviderName     string      // name of the provider that was just configured (for success screen)
+	obModelName        string      // model alias that was just configured
+	obMaskedKey        string      // masked API key for display
+
+	// Theme state
+	currentThemeName  string // active theme name (e.g. "dracula")
+	themePickerActive bool   // true when theme picker overlay is open
+	themePreviewName  string // saved theme name before preview navigation (Esc reverts to this)
+
+	// Community theme state
+	customThemes       map[string]theme.Theme      // user-defined + installed community themes
+	installedCommunity []string                    // names of themes installed from the community repo
+	communityIndex     []theme.CommunityThemeEntry // cached community index from awesome-lele
+	communityLoading   bool                        // true while fetching community index
+	communityErr       string                      // error message if community fetch failed
+	themePickerItems   []themePickerItem           // structured items for the theme picker
 
 	// Autocomplete dropdown menu state
 	showAutocomplete  bool
@@ -213,6 +262,17 @@ type Model struct {
 	settingsEditField string   // currently editing field name
 	settingsAgentID   string   // agent ID being edited
 	settingsAgentKeys []string // maps modal items to agent IDs (empty = defaults, "__add__" = new agent)
+
+	// Settings inline selector state — when settingsSelectorActive is true,
+	// the modal shows a scrollable list of options (like the language picker)
+	// instead of a text input. Used for fields with a known set of valid values
+	// (provider, model, rotation, judge mode, etc.).
+	settingsSelectorActive bool     // true while a selector picker is open
+	settingsSelectorItems  []string // option labels shown in the picker
+	settingsSelectorValues []string // raw values mapped 1:1 to selectorItems
+	settingsSelectorIdx    int      // currently highlighted option
+	settingsSelectorField  string   // which settingsEditField triggered the selector
+	settingsSelectorOrig   string   // original config value when selector opened (for ✓ mark)
 
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)

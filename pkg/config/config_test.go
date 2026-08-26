@@ -963,3 +963,43 @@ func TestConfig_EvictExcluded_EnvOverride(t *testing.T) {
 		t.Error("EvictExcludedFromMemory should be true when LELE_EVICT_EXCLUDED=true")
 	}
 }
+
+// TestHasUsableProvider covers the config-level "is there a usable provider?"
+// check used by the TUI to decide whether to trigger first-run onboarding.
+func TestHasUsableProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      *Config
+		expected bool
+	}{
+		{"nil providers", &Config{Providers: nil}, false},
+		{"empty named", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{}}}, false},
+		{"provider with key but no models", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"openai": {ProviderConfig: ProviderConfig{APIKey: "sk-xxx"}, Models: map[string]ProviderModelConfig{}},
+		}}}, false},
+		{"provider with models but no key", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"openai": {ProviderConfig: ProviderConfig{}, Models: map[string]ProviderModelConfig{"gpt": {}}},
+		}}}, false},
+		{"provider with key and models", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"openai": {ProviderConfig: ProviderConfig{APIKey: "sk-xxx"}, Models: map[string]ProviderModelConfig{"gpt": {}}},
+		}}}, true},
+		{"ollama without key but with models", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"ollama": {Type: "ollama", ProviderConfig: ProviderConfig{}, Models: map[string]ProviderModelConfig{"llama": {}}},
+		}}}, true},
+		{"ollama without models", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"ollama": {Type: "ollama", ProviderConfig: ProviderConfig{}, Models: map[string]ProviderModelConfig{}},
+		}}}, false},
+		{"multiple providers, one valid", &Config{Providers: &ProvidersConfig{Named: map[string]NamedProviderConfig{
+			"empty":  {ProviderConfig: ProviderConfig{}, Models: map[string]ProviderModelConfig{}},
+			"openai": {ProviderConfig: ProviderConfig{APIKey: "sk-xxx"}, Models: map[string]ProviderModelConfig{"gpt": {}}},
+		}}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.HasUsableProvider()
+			if got != tt.expected {
+				t.Errorf("HasUsableProvider() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
