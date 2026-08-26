@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { useCallback, useEffect, useState } from 'react'
+import { ApiError } from '../services/http/errors'
 import type { ConfigError, ConfigMetadata, EditableConfig } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
 
@@ -153,7 +154,13 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
       setSaveState('idle')
       return true
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Validation failed')
+      // Extract validation errors from ApiError (e.g. 422 responses)
+      if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors)
+        setSaveError(err.message)
+      } else {
+        setSaveError(err instanceof Error ? err.message : 'Validation failed')
+      }
       setSaveState('error')
       return false
     }
@@ -177,7 +184,13 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
       setSaveState('saved')
       return true
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Save failed')
+      // Extract validation errors from ApiError (e.g. 422 responses)
+      if (err instanceof ApiError && err.validationErrors && err.validationErrors.length > 0) {
+        setValidationErrors(err.validationErrors)
+        setSaveError(err.message)
+      } else {
+        setSaveError(err instanceof Error ? err.message : 'Save failed')
+      }
       setSaveState('error')
       return false
     }
