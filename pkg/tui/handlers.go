@@ -909,6 +909,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else if m.modalMode == ModalSettingsAgents {
 						// Agent list: navigate to detail, defaults, or start
 						// the add-agent flow.
+						if m.settingsEditField != "" {
+							m.handleAgentSettingsInput(m.textInput.Value())
+							return m, nil
+						}
 						return m, m.handleAgentsEnter()
 					} else if m.modalMode == ModalSettingsAgentEdit {
 						// Agent detail: save inline edit, selector confirm,
@@ -1208,7 +1212,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall ||
 				(m.modalMode == ModalSettingsTUI && m.settingsEditField != "") ||
 				(m.modalMode == ModalSettingsSystemEdit && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsAgentEdit && m.settingsEditField != "") {
+				(m.modalMode == ModalSettingsAgentEdit && m.settingsEditField != "") ||
+				(m.modalMode == ModalSettingsAgents && m.settingsEditField != "") {
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
