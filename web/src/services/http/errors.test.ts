@@ -64,4 +64,52 @@ describe('parseApiError', () => {
     expect(error.message).toBe('Unauthorized')
     expect(error.status).toBe(401)
   })
+
+  test('extrae validation errors de un 422', async () => {
+    const body = {
+      errors: [
+        { path: 'agents.defaults.model', message: 'Model is required', code: 'required' },
+        { path: 'gateway.port', message: 'Port must be > 0', code: 'invalid' },
+      ],
+    }
+    const response = new Response(JSON.stringify(body), {
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const error = await parseApiError(response)
+    expect(error.status).toBe(422)
+    expect(error.validationErrors).toHaveLength(2)
+    expect(error.validationErrors![0].path).toBe('agents.defaults.model')
+    expect(error.validationErrors![0].message).toBe('Model is required')
+    expect(error.validationErrors![1].path).toBe('gateway.port')
+    // Message should be the joined validation error messages
+    expect(error.message).toBe('Model is required; Port must be > 0')
+  })
+
+  test('usa message del body si existe junto con validation errors', async () => {
+    const body = {
+      message: 'Config validation failed',
+      errors: [{ path: 'gateway.port', message: 'Port must be > 0', code: 'invalid' }],
+    }
+    const response = new Response(JSON.stringify(body), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const error = await parseApiError(response)
+    expect(error.message).toBe('Config validation failed')
+    expect(error.validationErrors).toHaveLength(1)
+  })
+
+  test('crea ApiError con validation errors', () => {
+    const errors = [
+      { path: 'gateway.port', message: 'Port must be > 0', code: 'invalid' },
+    ]
+    const error = new ApiError('Validation failed', 422, 'validation_error', errors)
+    expect(error.message).toBe('Validation failed')
+    expect(error.status).toBe(422)
+    expect(error.validationErrors).toEqual(errors)
+  })
 })

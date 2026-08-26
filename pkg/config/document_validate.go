@@ -61,10 +61,10 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		})
 	}
 
-	if doc.Agents.Defaults.MaxToolIterations <= 0 {
+	if doc.Agents.Defaults.MaxToolIterations < 0 {
 		errors = append(errors, ValidationError{
 			Path:    "agents.defaults.max_tool_iterations",
-			Message: "max_tool_iterations must be greater than 0",
+			Message: "max_tool_iterations must be 0 (unlimited) or greater",
 			Code:    "invalid_range",
 		})
 	}
