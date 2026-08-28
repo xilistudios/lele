@@ -13,33 +13,37 @@ import (
 )
 
 type SubagentManager struct {
-	tasks                 map[string]*SubagentTask
-	cancels               map[string]context.CancelFunc
-	mu                    sync.RWMutex
-	provider              providers.LLMProvider
-	defaultModel          string
-	bus                   *bus.MessageBus
-	workspace             string
-	tools                 *ToolRegistry
-	getAgentContext       func(agentID string) AgentContextInfo
-	modelOverrideResolver func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
-	visionChecker         func(model string) bool                                 // reports whether a model supports vision
-	maxIterations         int
-	maxTokens             int
-	temperature           float64
-	hasMaxTokens          bool
-	hasTemperature        bool
-	timeout               time.Duration // 0 means no timeout
-	retentionPeriod       time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
-	nextID                int
-	sessionRecorder       SessionRecorder
-	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
-	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
-	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
-	sessionExists         func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
-	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
-	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
-	redactor              *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
+	tasks                      map[string]*SubagentTask
+	cancels                    map[string]context.CancelFunc
+	mu                         sync.RWMutex
+	provider                   providers.LLMProvider
+	defaultModel               string
+	bus                        *bus.MessageBus
+	workspace                  string
+	tools                      *ToolRegistry
+	getAgentContext            func(agentID string) AgentContextInfo
+	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
+	visionChecker              func(model string) bool                                 // reports whether a model supports vision
+	maxIterations              int
+	maxTokens                  int
+	temperature                float64
+	hasMaxTokens               bool
+	hasTemperature             bool
+	timeout                    time.Duration // 0 means no timeout
+	retentionPeriod            time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
+	nextID                     int
+	sessionRecorder            SessionRecorder
+	sessionKeyCallback         func(sessionKey, agentID string)                          // called when subagent session key is created
+	registerSessionCancel      func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
+	sessionEvictCallback       func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
+	sessionExists              func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
+	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
+	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
+	redactor                   *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
+	sessionCompactor           SessionCompactor                                          // syncs loop compaction to the persisted subagent session
+	compactionThresholdPercent int                                                       // proactive compaction threshold percent (0 = default 75%)
+	compactionModel            string                                                    // dedicated compaction model (empty = agent model)
+	evictExcludedFromMemory    bool                                                      // evict excluded messages from in-memory session cache on compaction sync
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -152,6 +156,27 @@ func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionRecorder = rec
+}
+
+// SetSessionCompactor attaches a session compactor used to sync loop
+// compaction results (proactive and reactive) to the subagent's persisted
+// session. Implemented by *session.Manager.
+func (sm *SubagentManager) SetSessionCompactor(sc SessionCompactor) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionCompactor = sc
+}
+
+// SetCompactionConfig configures the subagent loop's context-compaction
+// behavior: threshold percent of the context window (0 = default 75%),
+// optional dedicated compaction model, and whether synced compaction evicts
+// excluded messages from the in-memory session cache.
+func (sm *SubagentManager) SetCompactionConfig(thresholdPercent int, compactionModel string, evictExcluded bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.compactionThresholdPercent = thresholdPercent
+	sm.compactionModel = compactionModel
+	sm.evictExcludedFromMemory = evictExcluded
 }
 
 // SetSessionKeyCallback sets a callback function that is called whenever a

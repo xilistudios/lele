@@ -270,6 +270,10 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	sm.mu.RLock()
 	tools := sm.tools
 	recorder := sm.sessionRecorder
+	sessionCompactor := sm.sessionCompactor
+	compactionThreshold := sm.compactionThresholdPercent
+	compactionModel := sm.compactionModel
+	evictExcluded := sm.evictExcludedFromMemory
 	sm.mu.RUnlock()
 
 	// Build subagent session key: {origin_session_key}:{task_id}
@@ -311,6 +315,11 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		ChatID:          sessionKey,
 		VisionSupported: visionSupported,
 		Redactor:        sm.getRedactor(),
+
+		CompactionModel:            compactionModel,
+		CompactionThresholdPercent: compactionThreshold,
+		SessionCompactor:           sessionCompactor,
+		EvictExcludedFromMemory:    evictExcluded,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)
