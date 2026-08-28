@@ -39,10 +39,13 @@ var contextOverflowPatterns = []overflowPatternGroup{
 	{name: "gemini_input_token_count", patterns: []string{"input token count"}},
 	{name: "gemini_exceeds_max_number_of_tokens", patterns: []string{"exceeds the maximum number of tokens"}},
 
-	// Bedrock / AWS.
+	// Bedrock / AWS. "InvalidParameter: Total tokens ..." variants are
+	// emitted by Bedrock's Converse API (and its test doubles) for both
+	// message-token and image+text token overflow.
 	{name: "bedrock_input_too_long", patterns: []string{"input is too long"}},
 	{name: "bedrock_too_many_input_tokens", patterns: []string{"too many input tokens"}},
 	{name: "bedrock_validationexception_tokens", patterns: []string{"validationexception", "tokens"}, requireAll: true},
+	{name: "bedrock_invalidparameter_total_tokens", patterns: []string{"invalidparameter", "tokens"}, requireAll: true},
 
 	// Mistral: "too long" alone is too ambiguous, so it must be combined
 	// with "tokens" or "context" to be considered an overflow.

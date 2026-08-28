@@ -76,6 +76,8 @@ func TestContextOverflowSummary_Groups(t *testing.T) {
 		{"bedrock long", errors.New("Input is too long"), "bedrock_input_too_long"},
 		{"bedrock tokens", errors.New("too many input tokens"), "bedrock_too_many_input_tokens"},
 		{"bedrock validation", errors.New("ValidationException: too many tokens"), "bedrock_validationexception_tokens"},
+		{"bedrock invalidparameter total tokens", errors.New("InvalidParameter: Total tokens of image and text exceed max message tokens"), "bedrock_invalidparameter_total_tokens"},
+		{"bedrock invalidparameter message tokens", errors.New("InvalidParameter: Total tokens exceed max message tokens"), "bedrock_invalidparameter_total_tokens"},
 		{"mistral tokens", errors.New("too long: 50000 tokens"), "mistral_too_long_tokens"},
 		{"mistral context", errors.New("too long for the context"), "mistral_too_long_context"},
 		{"generic window", errors.New("context window exceeded"), "generic_context_window"},
