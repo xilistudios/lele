@@ -175,6 +175,23 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		Content: "[The context was compacted to save space. You were in the middle of a multi-step task. Review the summary above and the recent tool results below, then CONTINUE executing the task using the available tools. Do not stop or ask for confirmation — resume where you left off.]",
 	}
 
+	// Trim the tail to a safe boundary. The kept tail must not start with a
+	// tool message whose assistant tool_calls message was summarized away,
+	// nor with an assistant tool_calls message whose tool results were cut
+	// off — providers reject both sequences. See safeTailBoundary for the
+	// boundary rules.
+	if bi := safeTailBoundary(tail); bi > 0 {
+		tail = tail[bi:]
+	} else if bi < 0 {
+		// No safe boundary exists in the tail (e.g. it is all orphaned tool
+		// results). Compacting would produce an invalid message sequence, so
+		// skip compaction entirely for this round.
+		logger.WarnCF("toolloop", "Compaction skipped: no safe tail boundary", map[string]any{
+			"tail_len": len(tail),
+		})
+		return messages, false
+	}
+
 	compacted := append([]providers.Message{systemMsg, summaryMsg, continueMsg}, tail...)
 	logger.InfoCF("toolloop", "Context compacted", map[string]any{
 		"before_messages": len(messages),
@@ -183,6 +200,54 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		"after_tokens":    EstimateLoopTokens(compacted),
 	})
 	return compacted, true
+}
+
+// safeTailBoundary returns the index of the first safe boundary in the given
+// tail slice, or -1 if none exists. A boundary at index i means the slice may
+// start at i without producing an invalid assistant/tool sequence:
+//
+//   - The message at i must not be a tool result (role "tool"): its assistant
+//     tool_calls message would precede the boundary and be summarized away.
+//   - The remaining slice tail[i:] must be self-consistent: every tool result
+//     must be preceded (within the remaining slice) by the assistant message
+//     carrying the matching tool_calls ID, and every assistant tool_calls
+//     message must have all of its results present in the remaining slice.
+//
+// The first (smallest) safe boundary is returned so the tail keeps as much
+// recent context as possible. Tails are short (keepLast is typically 6), so
+// the O(n²) self-consistency rescan is negligible.
+func safeTailBoundary(tail []providers.Message) int {
+	// isSelfConsistent reports whether every tool result in msgs is preceded
+	// by its assistant tool_calls message and every tool call is answered.
+	isSelfConsistent := func(msgs []providers.Message) bool {
+		pending := map[string]bool{}
+		for _, m := range msgs {
+			switch m.Role {
+			case "assistant":
+				for _, tc := range m.ToolCalls {
+					if tc.ID != "" {
+						pending[tc.ID] = true
+					}
+				}
+			case "tool":
+				if !pending[m.ToolCallID] {
+					return false // orphaned result: assistant was trimmed
+				}
+				delete(pending, m.ToolCallID)
+			}
+		}
+		return len(pending) == 0 // false when calls lack their results
+	}
+
+	for i := 0; i < len(tail); i++ {
+		if tail[i].Role == "tool" {
+			continue
+		}
+		if isSelfConsistent(tail[i:]) {
+			return i
+		}
+	}
+	return -1
 }
 
 // RunToolLoop executes the LLM + tool call iteration loop.
