@@ -11,7 +11,7 @@ import (
 // okProvider is a minimal LLMProvider whose Chat call returns a fixed summary
 // response. It is used as the compaction summarizer in boundary tests.
 type okProvider struct {
-	mu   sync.Mutex
+	mu    sync.Mutex
 	calls int
 }
 

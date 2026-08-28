@@ -29,6 +29,16 @@ type SessionRecorder interface {
 	Save(sessionKey string) error
 }
 
+// SessionCompactor applies a loop-compaction result to the persisted session
+// of a subagent. It is implemented by *session.Manager (CompactSession) and
+// keeps the persisted summary/exclusion state in sync with the in-memory
+// compacted message list, so compaction survives restarts and the persisted
+// session does not grow unbounded. Optional: when nil, compaction still runs
+// in memory but is not persisted.
+type SessionCompactor interface {
+	CompactSession(key string, summary string, keepCount int, evict bool) error
+}
+
 // ToolLoopConfig configures the tool execution loop.
 type ToolLoopConfig struct {
 	Provider        providers.LLMProvider
@@ -56,6 +66,30 @@ type ToolLoopConfig struct {
 	// CompactionThresholdPercent overrides the default proactive compaction
 	// threshold (75% of ContextWindow). Values outside (0,100] fall back to 75.
 	CompactionThresholdPercent int
+	// SessionCompactor optionally syncs compaction results to the persisted
+	// session (implemented by *session.Manager). nil = in-memory only.
+	SessionCompactor SessionCompactor
+	// EvictExcludedFromMemory controls whether session-synced compaction also
+	// evicts excluded messages from the in-memory session cache.
+	EvictExcludedFromMemory bool
+}
+
+// syncCompactionToSession persists a loop-compaction result to the subagent's
+// session via the optional SessionCompactor. The summary is the second
+// message of the compacted list ("[Context compacted — summary of ...]");
+// keepCount=6 matches the loop's keepLast so the persisted exclusion window
+// mirrors the in-memory one. Failures are logged and swallowed: compaction
+// is an optimization, and a persistence error must not kill a running task.
+func syncCompactionToSession(config ToolLoopConfig, summary string) {
+	if config.SessionCompactor == nil || config.SessionKey == "" || summary == "" {
+		return
+	}
+	if err := config.SessionCompactor.CompactSession(config.SessionKey, summary, 6, config.EvictExcludedFromMemory); err != nil {
+		logger.WarnCF("toolloop", "Failed to sync compaction to session", map[string]any{
+			"session_key": config.SessionKey,
+			"error":       err.Error(),
+		})
+	}
 }
 
 // maxReactiveCompactions is the maximum number of reactive compaction attempts
@@ -365,6 +399,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 							},
 						})
 					}
+					syncCompactionToSession(config, compacted[1].Content)
 					continue
 				}
 				// Compaction could not reduce the context (e.g. nothing left
@@ -602,6 +637,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 							},
 						})
 					}
+					syncCompactionToSession(config, compacted[1].Content)
 				}
 			}
 		}
