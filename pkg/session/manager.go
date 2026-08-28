@@ -999,6 +999,26 @@ func (sm *SessionManager) ExcludeOldMessagesFromContext(key string, keepCount in
 	session.excludedRange = [2]int{rangeStart, excludeUpTo}
 	session.bumpEpoch()
 }
+
+// CompactSession applies a loop-compaction result to the persisted session:
+// it stores the summary produced by the tool-loop compactor, marks all but
+// the last keepCount messages as excluded from context, persists the change,
+// and optionally evicts excluded messages from memory when evict is true.
+// It returns an error only if persistence fails; state mutations are applied
+// before the save attempt so callers can decide whether to continue.
+func (sm *SessionManager) CompactSession(key string, summary string, keepCount int, evict bool) error {
+	sm.SetSummary(key, summary)
+	sm.ExcludeOldMessagesFromContext(key, keepCount)
+	err := sm.Save(key)
+	if err != nil {
+		return err
+	}
+	if evict {
+		sm.EvictExcludedMessages(key)
+	}
+	sm.IncrementCompactionCount(key)
+	return nil
+}
 func (sm *SessionManager) RemoveLastMessage(key string) bool {
 	sm.ensureLoaded()
 	sm.mu.Lock()
