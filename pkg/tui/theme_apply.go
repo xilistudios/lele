@@ -41,6 +41,14 @@ func (m *Model) previewTheme(name string) {
 // background shows through (bubbles stock defaults emit raw ANSI backgrounds
 // that break reapplyBackground).
 func (m *Model) applyThemeToInputs() {
+	// Preserve the current focus state across the style rebind. bubbles
+	// caches an internal pointer to the style struct at Focus()/Blur()
+	// time, so after replacing the style values we must re-apply the same
+	// focus state to rebind the internal pointer to the fresh styles
+	// (Blur rebinds to &m.BlurredStyle, which is required for the new
+	// theme values to render when blurred).
+	chatWasFocused := m.chatInput.Focused()
+
 	// Textarea styles
 	m.chatInput.FocusedStyle.Base = lipgloss.NewStyle()
 	m.chatInput.FocusedStyle.Text = lipgloss.NewStyle().Foreground(Foreground)
@@ -52,12 +60,13 @@ func (m *Model) applyThemeToInputs() {
 	m.chatInput.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
 	m.chatInput.BlurredStyle = m.chatInput.FocusedStyle
 
-	// Re-bind the textarea's internal style pointer. bubbles caches the
-	// internal pointer to the style struct at Focus() time, and copying the
-	// value into the Model struct keeps that stale pointer. Re-focusing makes
-	// the internal pointer point at m.chatInput.FocusedStyle again, so the
-	// freshly applied styles actually render.
-	m.chatInput.Focus()
+	// Re-bind the textarea's internal style pointer (see note above),
+	// restoring the focus state the input had before the rebind.
+	if chatWasFocused {
+		m.chatInput.Focus()
+	} else {
+		m.chatInput.Blur()
+	}
 
 	// Textinput styles
 	m.textInput.PromptStyle = lipgloss.NewStyle().Foreground(CommentColor)
