@@ -50,7 +50,19 @@ type ToolLoopConfig struct {
 	// empty-response retries (nil means time.After). Used by tests to
 	// avoid real sleeps.
 	RetryWait func(time.Duration) <-chan time.Time
+	// CompactionModel optionally overrides the model used for summarization
+	// during context compaction (proactive and reactive). Empty = use Model.
+	CompactionModel string
+	// CompactionThresholdPercent overrides the default proactive compaction
+	// threshold (75% of ContextWindow). Values outside (0,100] fall back to 75.
+	CompactionThresholdPercent int
 }
+
+// maxReactiveCompactions is the maximum number of reactive compaction attempts
+// (context-overflow recovery) allowed between successful LLM responses. It
+// prevents infinite compact-fail loops when even the compacted context exceeds
+// the model's window.
+const maxReactiveCompactions = 3
 
 // toolLoopEmptyRetryBackoff returns the wait duration before the given
 // empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
@@ -255,6 +267,7 @@ func safeTailBoundary(tail []providers.Message) int {
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
 	emptyRetries := 0
+	reactiveCompactions := 0
 	var finalContent string
 
 	if config.SessionRecorder != nil && config.SessionKey != "" {
@@ -306,12 +319,58 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		apiModel := providers.StripProviderPrefix(config.Model)
 		var response *providers.LLMResponse
 		var err error
-		if config.Retry != nil {
-			response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
-		} else {
-			response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
-		}
-		if err != nil {
+		for {
+			if config.Retry != nil {
+				response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
+			} else {
+				response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
+			}
+			if err == nil {
+				// Success resets the reactive compaction budget so a later
+				// overflow in the same run gets a fresh set of attempts.
+				reactiveCompactions = 0
+				break
+			}
+			// Reactive compaction: when the API rejects the prompt because it
+			// exceeds the model's context window, summarize old messages and
+			// retry instead of failing the whole subagent task. Mirrors the
+			// main agent loop's executeWithRetry behavior (pkg/agent/llm_caller.go).
+			// The budget (3 attempts per successful response) prevents infinite
+			// compact-fail loops when even the compacted context is too large.
+			if config.ContextWindow > 0 &&
+				reactiveCompactions < maxReactiveCompactions &&
+				providers.IsContextOverflowError(err) {
+				reactiveCompactions++
+				logger.WarnCF("toolloop", "Context overflow detected, attempting reactive compaction",
+					map[string]any{
+						"iteration":    iteration,
+						"attempt":      reactiveCompactions,
+						"max_attempts": maxReactiveCompactions,
+						"error":        err.Error(),
+					})
+				compactModel := config.Model
+				if config.CompactionModel != "" {
+					compactModel = config.CompactionModel
+				}
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
+					messages = compacted
+					if config.MessageBus != nil {
+						config.MessageBus.PublishOutbound(bus.OutboundMessage{
+							Event:   "tool.result",
+							ChatID:  config.ChatID,
+							Content: "",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": "Context overflow — compacted and retrying",
+							},
+						})
+					}
+					continue
+				}
+				// Compaction could not reduce the context (e.g. nothing left
+				// to summarize or the summarizer failed) — fall through to
+				// returning the error.
+			}
 			logger.ErrorCF("toolloop", "LLM call failed",
 				map[string]any{
 					"iteration": iteration,
@@ -508,11 +567,16 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 		}
 
-		// 8. Context compaction — if context window is configured and we exceed 75%,
-		// summarize old messages to prevent hitting the model's token limit.
+		// 8. Context compaction — if context window is configured and we exceed
+		// the configured threshold percent (default 75%), summarize old messages
+		// to prevent hitting the model's token limit.
 		if config.ContextWindow > 0 {
 			tokens := EstimateLoopTokens(messages)
-			threshold := config.ContextWindow * 75 / 100
+			thresholdPercent := config.CompactionThresholdPercent
+			if thresholdPercent <= 0 || thresholdPercent > 100 {
+				thresholdPercent = 75
+			}
+			threshold := config.ContextWindow * thresholdPercent / 100
 			if tokens > threshold {
 				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
 					"tokens":         tokens,
@@ -521,8 +585,23 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"iteration":      iteration,
 				})
 				// Keep last 6 messages (3 tool call/result pairs) for continuity
-				if compacted, ok := CompactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {
+				compactModel := config.Model
+				if config.CompactionModel != "" {
+					compactModel = config.CompactionModel
+				}
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
 					messages = compacted
+					if config.MessageBus != nil {
+						config.MessageBus.PublishOutbound(bus.OutboundMessage{
+							Event:   "tool.result",
+							ChatID:  config.ChatID,
+							Content: "",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, EstimateLoopTokens(compacted)),
+							},
+						})
+					}
 				}
 			}
 		}
