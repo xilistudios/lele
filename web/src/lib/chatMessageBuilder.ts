@@ -1,4 +1,5 @@
 import type { Attachment, ChatMessage, HistoryToolCall, ToolMessageStatus } from './types'
+import { lookupStableId } from '../hooks/stableIdRegistry'
 
 // ---------------------------------------------------------------------------
 // ID generators
@@ -160,6 +161,8 @@ interface BaseMessageProps {
   createdAt?: string
   attachments?: Attachment[]
   excludeFromContext?: boolean
+  /** Durable render-key identity carried over from the streaming copy. */
+  stableId?: string
 }
 
 interface UserMessageProps extends BaseMessageProps {
@@ -195,6 +198,7 @@ export function createUserMessage(props: UserMessageProps): ChatMessage {
     optimistic: props.optimistic,
     optimisticBaseCount: props.optimisticBaseCount,
     excludeFromContext: props.excludeFromContext,
+    stableId: props.stableId,
   }
 }
 
@@ -209,6 +213,7 @@ export function createAssistantMessage(props: AssistantMessageProps): ChatMessag
     sessionKey: props.sessionKey,
     attachments: props.attachments,
     excludeFromContext: props.excludeFromContext,
+    stableId: props.stableId,
   }
 }
 
@@ -253,17 +258,37 @@ export function toChatMessages(
 ): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
   const seenIds = new Map<string, number>()
+  // Signature (role|content|tool_call_id) of the first message seen under each
+  // id, used to detect exact duplicates below.
+  const seenSignatures = new Map<string, string>()
 
   return history.flatMap((message, index) => {
     let msgId = message.id || createHistoryMessageId(sessionKey, index, message.role)
+    const signature = `${message.role}|${message.content}|${message.tool_call_id ?? ''}`
     const count = seenIds.get(msgId) ?? 0
     seenIds.set(msgId, count + 1)
     if (count > 0) {
+      // Exact duplicate (same id, role and content): the backend re-emitted
+      // the same message. Suffixing it renders a visible duplicate bubble that
+      // later disappears or swaps position when the list is rebuilt (flicker).
+      // Drop it and keep the first occurrence instead.
+      if (seenSignatures.get(msgId) === signature) {
+        return []
+      }
+      // Different content under the same id: keep both, disambiguate by suffix.
       msgId = `${msgId}_${count}`
+    } else {
+      seenSignatures.set(msgId, signature)
     }
 
     let messageContent = message.content
     let parsedAttachments: undefined | ReturnType<typeof parseAttachmentsFromContent>['attachments']
+
+    // Re-attach a durable stableId recorded when the streaming (ephemeral)
+    // copy of this message was confirmed into history. This keeps React
+    // render keys identical across the WebSocket→HTTP transition and across
+    // subsequent refetches (prevents remount flicker). See stableIdRegistry.ts.
+    const stableId = lookupStableId(message.role, messageContent)
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)
@@ -281,6 +306,7 @@ export function toChatMessages(
           content: messageContent,
           attachments: parsedAttachments,
           excludeFromContext: message.exclude_from_context,
+          stableId,
         }),
       ]
     }
@@ -302,6 +328,7 @@ export function toChatMessages(
             streaming: false,
             attachments: parsedAttachments,
             excludeFromContext: message.exclude_from_context,
+            stableId,
           }),
         ]
       }
