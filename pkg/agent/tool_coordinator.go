@@ -580,6 +580,15 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		"stop_background_exec",
 	))
 	subagentManager.SetSessionRecorder(agent.Sessions)
+	// Sync subagent loop compaction to the persisted session: summary +
+	// excluded-message state survive restarts, and the persisted session
+	// does not grow unbounded across long-running tasks.
+	subagentManager.SetSessionCompactor(agent.Sessions)
+	subagentManager.SetCompactionConfig(
+		cfg.SessionCompactionThresholdPercent(),
+		cfg.CompactionModel(),
+		cfg.EvictExcludedFromMemory(),
+	)
 
 	// Evict subagent sessions from memory when their terminal tasks are cleaned up,
 	// freeing RAM. The session data remains on disk.

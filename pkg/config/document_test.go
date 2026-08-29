@@ -302,9 +302,10 @@ func TestValidateEditableDocument_MissingRequired(t *testing.T) {
 		t.Error("expected validation errors")
 	}
 
-	// There should be errors for workspace, provider, model, max_tokens, and max_tool_iterations.
-	if len(errors) < 5 {
-		t.Errorf("expected at least 5 validation errors, got %d", len(errors))
+	// There should be errors for workspace, provider, model, and max_tokens.
+	// max_tool_iterations=0 is valid (means unlimited).
+	if len(errors) < 4 {
+		t.Errorf("expected at least 4 validation errors, got %d", len(errors))
 	}
 }
 

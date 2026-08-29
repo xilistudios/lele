@@ -296,9 +296,11 @@ func (lc *llmCaller) executeWithRetry(
 		}
 
 		errMsg := strings.ToLower(err.Error())
-		isContextError := strings.Contains(errMsg, "token") ||
-			strings.Contains(errMsg, "invalidparameter") ||
-			strings.Contains(errMsg, "length")
+		// Use the shared data-driven classifier (pkg/providers/context_overflow.go)
+		// instead of a broad substring heuristic: "token"/"length" also match
+		// unrelated errors (e.g. max_tokens generation limits), which would
+		// trigger needless session summarization.
+		isContextError := providers.IsContextOverflowError(err)
 		isNetworkTimeout := strings.Contains(errMsg, "context deadline exceeded") ||
 			strings.Contains(errMsg, "timeout") ||
 			strings.Contains(errMsg, "client.timeout")

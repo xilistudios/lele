@@ -424,6 +424,16 @@ func setupCronTool(executor tools.JobExecutor, al *agent.AgentLoop, msgBus *bus.
 	cronService := cron.NewCronService(cronStorePath, nil)
 
 	cronTool := tools.NewCronTool(cronService, executor, msgBus, workspace, restrict, execTimeout, config)
+	// Let ExecuteJob detect when a job's `to` field designates an existing
+	// session so notifications land in that chat instead of a synthetic
+	// cron-<jobID> session.
+	cronTool.SetSessionExistsCallback(func(sessionKey string) bool {
+		sm := al.SessionManager()
+		if sm == nil {
+			return false
+		}
+		return sm.SessionExists(sessionKey)
+	})
 	al.RegisterTool(cronTool)
 
 	cronService.SetOnJob(func(job *cron.CronJob) (string, error) {
