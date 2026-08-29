@@ -51,6 +51,8 @@ export function useAppLogic(
   })
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => loadSidebarOpen())
+  // Mobile drawer state — independent from desktop collapse. Always starts closed.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
     return (localStorage.getItem('lele_chat_mode') as ChatMode) || 'agent'
   })
@@ -478,6 +480,14 @@ export function useAppLogic(
     })
   }, [])
 
+  const handleOpenMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(true)
+  }, [])
+
+  const handleCloseMobileSidebar = useCallback(() => {
+    setMobileSidebarOpen(false)
+  }, [])
+
   useEffect(() => {
     saveSidebarOpen(sidebarOpen)
   }, [sidebarOpen])
@@ -553,6 +563,7 @@ export function useAppLogic(
     diagnostics,
     diagnosticsOpen,
     sidebarOpen,
+    mobileSidebarOpen,
     chatMode,
     modelState,
     thinkLevel,
@@ -587,6 +598,8 @@ export function useAppLogic(
     onLogout: handleLogout,
     onToggleDiagnostics: handleToggleDiagnostics,
     onToggleSidebar: handleToggleSidebar,
+    onOpenMobileSidebar: handleOpenMobileSidebar,
+    onCloseMobileSidebar: handleCloseMobileSidebar,
     onSelectMode: selectMode,
     loadMore: chatHistory.loadMore,
     hasMore: chatHistory.hasMore,

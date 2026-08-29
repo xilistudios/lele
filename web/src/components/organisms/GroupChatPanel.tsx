@@ -257,7 +257,7 @@ export const GroupChatPanel = memo(function GroupChatPanel({
 
       {/* Panel */}
       <div
-        className={`fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] bg-background-primary border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`glass-effect fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] border-l border-glass-border bg-background-primary shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

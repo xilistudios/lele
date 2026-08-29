@@ -20,10 +20,10 @@ function formatElapsed(ms: number): string {
 
 function StatusBadge({ status }: { status: BackgroundExecInfo['status'] }) {
   const colors: Record<string, string> = {
-    running: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    completed: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-    stopped: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-    failed: 'bg-red-500/20 text-red-400 border-red-500/30',
+    running: 'bg-state-warning-light text-state-warning border-state-warning',
+    completed: 'bg-state-success-light text-state-success border-state-success',
+    stopped: 'bg-surface-muted text-text-tertiary border-border',
+    failed: 'bg-state-error-light text-state-error border-state-error',
   }
 
   return (
@@ -31,7 +31,7 @@ function StatusBadge({ status }: { status: BackgroundExecInfo['status'] }) {
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${colors[status] ?? colors.stopped}`}
     >
       {status === 'running' && (
-        <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+        <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-state-warning" />
       )}
       {status}
     </span>
@@ -60,11 +60,11 @@ function ProcessOutput({ processId }: { processId: string }) {
         <span>
           {t('backgroundExecs.elapsed')}: {formatElapsed(elapsedMs)}
         </span>
-        {done && <span className="text-emerald-400">✓</span>}
+        {done && <span className="text-state-success">✓</span>}
       </div>
       <div
         ref={outputRef}
-        className="max-h-80 overflow-y-auto rounded-lg border border-border bg-gray-950 p-3 font-mono text-xs text-gray-300 whitespace-pre-wrap break-all"
+        className="max-h-80 overflow-y-auto rounded-lg border border-border bg-background-primary p-3 font-mono text-xs text-text-secondary whitespace-pre-wrap break-all"
       >
         {output || (
           <span className="text-text-tertiary italic">{t('common.loading', 'Loading...')}</span>
@@ -92,7 +92,7 @@ function ProcessCard({
       className={`rounded-xl border transition-colors ${
         expanded
           ? 'border-interaction-primary/40 bg-background-secondary'
-          : 'border-border bg-background-secondary/50 hover:bg-background-secondary'
+          : 'border-border bg-background-secondary hover:bg-background-secondary'
       }`}
     >
       <button
@@ -124,7 +124,7 @@ function ProcessCard({
                 e.stopPropagation()
                 onStop()
               }}
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20"
+              className="rounded-lg border border-state-error bg-state-error-light px-3 py-1 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light"
             >
               {t('backgroundExecs.stop', 'Stop')}
             </button>
@@ -156,7 +156,8 @@ function ProcessCard({
 
 export function BackgroundExecsPage() {
   const { t } = useTranslation()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
   const { processes, loading, refresh, stopProcess } = useBackgroundExecs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -175,16 +176,16 @@ export function BackgroundExecsPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border px-6 py-4 shrink-0 bg-background-secondary/30">
+        <header className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background-secondary">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => onToggleSidebar()}
+              onClick={() => onOpenMobileSidebar()}
               className="flex md:hidden p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors"
               title={t('chat.toggleSidebar')}
             >

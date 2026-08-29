@@ -59,13 +59,13 @@ export function LogsViewer() {
     switch (level) {
       case 'ERROR':
       case 'FATAL':
-        return 'text-red-400'
+        return 'text-state-error'
       case 'WARN':
-        return 'text-yellow-400'
+        return 'text-state-warning'
       case 'DEBUG':
-        return 'text-gray-400'
+        return 'text-text-tertiary'
       default:
-        return 'text-blue-400'
+        return 'text-state-info'
     }
   }
 
@@ -124,7 +124,7 @@ export function LogsViewer() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+        <div className="rounded-md border border-state-error bg-state-error-light px-3 py-2 text-xs text-state-error">
           {error}
         </div>
       )}

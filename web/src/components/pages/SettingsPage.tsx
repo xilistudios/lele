@@ -51,7 +51,8 @@ const VALID_TABS: SettingsTab[] = [
 export function SettingsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
   const navigate = useNavigate()
   const { tab: tabParam } = useParams<{ tab?: string }>()
 
@@ -123,13 +124,13 @@ export function SettingsPage() {
       <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
-          mobileOpen={sidebarOpen}
-          onClose={() => onToggleSidebar()}
+          mobileOpen={mobileSidebarOpen}
+          onClose={() => onCloseMobileSidebar()}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
             configPath={settingsState.metadata?.config_path}
-            onToggleSidebar={onToggleSidebar}
+            onOpenMobileSidebar={onOpenMobileSidebar}
           />
 
           <div className="flex flex-col md:flex-row flex-1 overflow-hidden">

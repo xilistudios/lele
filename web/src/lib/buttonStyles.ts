@@ -1,5 +1,5 @@
 export const BUTTON_BASE =
-  'inline-flex items-center justify-center rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-cta-primary/50 focus:ring-offset-2 focus:ring-offset-background-primary'
+  'inline-flex items-center justify-center rounded-md font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-accent-primary)_50%,transparent)] focus:ring-offset-2 focus:ring-offset-background-primary'
 
 export const BUTTON_SIZES = {
   sm: 'px-2 py-1 text-xs',
@@ -8,7 +8,7 @@ export const BUTTON_SIZES = {
 } as const
 
 export const BUTTON_VARIANTS = {
-  primary: 'bg-cta-primary text-text-on-accent hover:bg-cta-hover',
+  primary: 'bg-accent-primary text-text-on-accent hover:bg-accent-hover',
   secondary:
     'border border-border bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
   danger: 'bg-red-600 text-white hover:bg-red-500',
@@ -23,7 +23,7 @@ export const BUTTON_VARIANTS = {
 export const BUTTON_DISABLED = 'disabled:opacity-40 disabled:cursor-not-allowed'
 
 export const BUTTON_FOCUS =
-  'focus:outline-none focus:ring-2 focus:ring-cta-primary/50 focus:ring-offset-2 focus:ring-offset-background-primary'
+  'focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-accent-primary)_50%,transparent)] focus:ring-offset-2 focus:ring-offset-background-primary'
 
 export function getButtonClasses({
   variant = 'primary',

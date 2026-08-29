@@ -173,9 +173,9 @@ export function ChatComposer() {
                 key={attachment}
                 className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-lg border border-border bg-background-secondary p-2 transition-all hover:border-border-light shadow-sm pr-8"
               >
-                <div className="h-12 w-10 bg-cta-primary/10 text-cta-primary rounded-md flex flex-col items-center justify-center border border-cta-primary/15 flex-shrink-0 select-none">
+                <div className="h-12 w-10 bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] text-accent-primary rounded-md flex flex-col items-center justify-center border border-[color-mix(in_srgb,var(--color-accent-primary)_15%,transparent)] flex-shrink-0 select-none">
                   <svg
-                    className="h-4 w-4 text-cta-primary mb-0.5"
+                    className="h-4 w-4 text-accent-primary mb-0.5"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -213,7 +213,7 @@ export function ChatComposer() {
           })}
         </div>
       )}
-      <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border-light">
+      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-150 focus-within:border-border-light focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
         <textarea
           ref={textareaRef}
@@ -282,10 +282,10 @@ export function ChatComposer() {
             type={canCancel ? 'button' : 'submit'}
             disabled={false}
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
               canCancel
                 ? 'bg-state-error-light text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
-                : 'bg-cta-primary text-text-on-accent hover:bg-cta-hover'
+                : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
             }`}
             onClick={canCancel ? onCancel : undefined}
           >

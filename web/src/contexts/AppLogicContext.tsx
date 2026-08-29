@@ -38,6 +38,7 @@ export type AppLogicContextValue = {
   diagnostics: UseApp['diagnostics']
   diagnosticsOpen: UseApp['diagnosticsOpen']
   sidebarOpen: UseApp['sidebarOpen']
+  mobileSidebarOpen: UseApp['mobileSidebarOpen']
   chatMode: ChatMode
   onSelectMode: (mode: ChatMode) => void
   modelState: UseApp['modelState']
@@ -73,6 +74,8 @@ export type AppLogicContextValue = {
   onLogout: UseApp['onLogout']
   onToggleDiagnostics: UseApp['onToggleDiagnostics']
   onToggleSidebar: UseApp['onToggleSidebar']
+  onOpenMobileSidebar: UseApp['onOpenMobileSidebar']
+  onCloseMobileSidebar: UseApp['onCloseMobileSidebar']
 
   // Pagination
   loadMore: UseApp['loadMore']
@@ -136,6 +139,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       diagnostics: app.diagnostics,
       diagnosticsOpen: app.diagnosticsOpen,
       sidebarOpen: app.sidebarOpen,
+      mobileSidebarOpen: app.mobileSidebarOpen,
       chatMode: app.chatMode,
       onSelectMode: app.onSelectMode,
       modelState: app.modelState,
@@ -171,6 +175,8 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       onLogout: app.onLogout,
       onToggleDiagnostics: app.onToggleDiagnostics,
       onToggleSidebar: app.onToggleSidebar,
+      onOpenMobileSidebar: app.onOpenMobileSidebar,
+      onCloseMobileSidebar: app.onCloseMobileSidebar,
 
       // Pagination
       loadMore: app.loadMore,
@@ -190,6 +196,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.diagnostics,
       app.diagnosticsOpen,
       app.sidebarOpen,
+      app.mobileSidebarOpen,
       app.chatMode,
       app.onSelectMode,
       app.modelState,
@@ -223,6 +230,8 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.onLogout,
       app.onToggleDiagnostics,
       app.onToggleSidebar,
+      app.onOpenMobileSidebar,
+      app.onCloseMobileSidebar,
       app.loadMore,
       app.hasMore,
       app.isLoadingMore,

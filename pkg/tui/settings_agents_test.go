@@ -320,3 +320,275 @@ func TestHandleDefaultsFieldEdit(t *testing.T) {
 		t.Fatalf("expected edit field cleared, got %q", m.settingsEditField)
 	}
 }
+
+func TestLoadAgentDetailSubagentsSplit(t *testing.T) {
+	m := newAgentsTestModel(t)
+	// Give coder a subagent allow-list and max concurrent.
+	ag := m.findAgent("coder")
+	ag.Subagents = &config.SubagentsConfig{
+		AllowAgents:   []string{"writer"},
+		MaxConcurrent: 3,
+	}
+	m.loadAgentDetail("coder")
+
+	// 11 rows: 9 fields + set-as-default + delete
+	if len(m.modalItems) != 11 {
+		t.Fatalf("expected 11 rows, got %d: %v", len(m.modalItems), m.modalItems)
+	}
+	if !strings.Contains(m.modalItems[7], "writer") {
+		t.Errorf("subagents allow row should list writer: %q", m.modalItems[7])
+	}
+	if !strings.Contains(m.modalItems[8], "3") {
+		t.Errorf("subagents maxconcurrent row should show 3: %q", m.modalItems[8])
+	}
+}
+
+func TestHandleAgentEditEnterSubagentsAllowOpensPicker(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "coder"
+	m.loadAgentDetail("coder")
+
+	m.modalSelectedIdx = agentFieldSubagentsAllow // 7
+	m.handleAgentEditEnter()
+
+	if !m.subagentPickerActive {
+		t.Fatal("expected subagent picker to be active")
+	}
+	// Picker should list all agents except self (coder). Only writer remains.
+	if len(m.subagentPickerItems) != 1 {
+		t.Fatalf("expected 1 picker item (writer), got %d: %v", len(m.subagentPickerItems), m.subagentPickerItems)
+	}
+	if m.subagentPickerItems[0] != "writer" {
+		t.Errorf("expected writer in picker, got %q", m.subagentPickerItems[0])
+	}
+	// Self must not appear.
+	for _, id := range m.subagentPickerItems {
+		if id == "coder" {
+			t.Fatal("current agent must not be listed as its own subagent")
+		}
+	}
+	// No allow-list configured → writer unchecked.
+	if m.subagentPickerSelected[0] {
+		t.Error("writer should be unchecked when no allow-list is set")
+	}
+}
+
+func TestStartSubagentPickerPreselectsAllowed(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	ag.Subagents = &config.SubagentsConfig{AllowAgents: []string{"writer"}}
+	m.settingsAgentID = "coder"
+
+	m.startSubagentPicker(ag)
+
+	if len(m.subagentPickerItems) != 1 {
+		t.Fatalf("expected 1 picker item, got %d", len(m.subagentPickerItems))
+	}
+	if !m.subagentPickerSelected[0] {
+		t.Error("writer should be pre-selected because it is in AllowAgents")
+	}
+}
+
+func TestToggleSubagentPicker(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	m.settingsAgentID = "coder"
+	m.startSubagentPicker(ag)
+
+	// Initially unchecked.
+	if m.subagentPickerSelected[0] {
+		t.Fatal("expected initially unchecked")
+	}
+	m.toggleSubagentPicker()
+	if !m.subagentPickerSelected[0] {
+		t.Fatal("expected toggled to checked")
+	}
+	m.toggleSubagentPicker()
+	if m.subagentPickerSelected[0] {
+		t.Fatal("expected toggled back to unchecked")
+	}
+}
+
+func TestSaveSubagentPickerSetsAllowAgents(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	m.settingsAgentID = "coder"
+	m.startSubagentPicker(ag)
+
+	// Select writer.
+	m.subagentPickerSelected[0] = true
+	m.saveSubagentPicker()
+
+	if m.subagentPickerActive {
+		t.Fatal("picker should be closed after save")
+	}
+	ag = m.findAgent("coder")
+	if ag.Subagents == nil {
+		t.Fatal("expected Subagents to be created")
+	}
+	if len(ag.Subagents.AllowAgents) != 1 || ag.Subagents.AllowAgents[0] != "writer" {
+		t.Fatalf("expected AllowAgents [writer], got %v", ag.Subagents.AllowAgents)
+	}
+}
+
+func TestSaveSubagentPickerEmptyClearsAndNils(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	ag.Subagents = &config.SubagentsConfig{AllowAgents: []string{"writer"}}
+	m.settingsAgentID = "coder"
+	m.startSubagentPicker(ag)
+
+	// Deselect everything (writer currently selected → toggle off).
+	m.subagentPickerSelected[0] = false
+	m.saveSubagentPicker()
+
+	ag = m.findAgent("coder")
+	// With no other meaningful fields, Subagents should be nil to keep config clean.
+	if ag.Subagents != nil {
+		t.Fatalf("expected Subagents to be nil when empty, got %+v", ag.Subagents)
+	}
+}
+
+func TestSaveSubagentPickerEmptyKeepsMaxConcurrent(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	ag.Subagents = &config.SubagentsConfig{AllowAgents: []string{"writer"}, MaxConcurrent: 5}
+	m.settingsAgentID = "coder"
+	m.startSubagentPicker(ag)
+
+	m.subagentPickerSelected[0] = false
+	m.saveSubagentPicker()
+
+	ag = m.findAgent("coder")
+	if ag.Subagents == nil {
+		t.Fatal("expected Subagents to remain (has MaxConcurrent)")
+	}
+	if len(ag.Subagents.AllowAgents) != 0 {
+		t.Errorf("expected empty AllowAgents, got %v", ag.Subagents.AllowAgents)
+	}
+	if ag.Subagents.MaxConcurrent != 5 {
+		t.Errorf("expected MaxConcurrent preserved, got %d", ag.Subagents.MaxConcurrent)
+	}
+}
+
+func TestCancelSubagentPicker(t *testing.T) {
+	m := newAgentsTestModel(t)
+	ag := m.findAgent("coder")
+	m.settingsAgentID = "coder"
+	m.startSubagentPicker(ag)
+	m.subagentPickerSelected[0] = true
+
+	m.cancelSubagentPicker()
+
+	if m.subagentPickerActive {
+		t.Fatal("picker should be inactive after cancel")
+	}
+	if m.subagentPickerItems != nil || m.subagentPickerLabels != nil || m.subagentPickerSelected != nil {
+		t.Fatal("picker state should be cleared after cancel")
+	}
+	// Cancel must not mutate the config.
+	ag = m.findAgent("coder")
+	if ag.Subagents != nil {
+		t.Fatal("cancel must not create Subagents")
+	}
+}
+
+func TestHandleAgentEditEnterSubagentsMaxConcurrent(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "coder"
+	m.loadAgentDetail("coder")
+
+	m.modalSelectedIdx = agentFieldSubagentsMaxConcurrent // 8
+	m.handleAgentEditEnter()
+	if m.settingsEditField != "agentSubagentsMaxConcurrent" {
+		t.Fatalf("expected agentSubagentsMaxConcurrent, got %q", m.settingsEditField)
+	}
+}
+
+func TestHandleAgentSettingsInputSubagentsMaxConcurrent(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "writer"
+	m.settingsEditField = "agentSubagentsMaxConcurrent"
+	m.handleAgentSettingsInput("4")
+
+	ag := m.findAgent("writer")
+	if ag.Subagents == nil {
+		t.Fatal("expected Subagents to be created")
+	}
+	if ag.Subagents.MaxConcurrent != 4 {
+		t.Fatalf("expected MaxConcurrent 4, got %d", ag.Subagents.MaxConcurrent)
+	}
+}
+
+func TestHandleAgentSettingsInputSubagentsMaxConcurrentInvalid(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "writer"
+	m.settingsEditField = "agentSubagentsMaxConcurrent"
+	m.handleAgentSettingsInput("abc")
+	if m.formError == "" {
+		t.Fatal("expected invalid-number error")
+	}
+	ag := m.findAgent("writer")
+	if ag.Subagents != nil {
+		t.Fatal("invalid input must not create Subagents")
+	}
+}
+
+func TestHandleAgentEditEnterModelAlwaysSelector(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "coder"
+	m.loadAgentDetail("coder")
+
+	m.modalSelectedIdx = agentFieldModel // 4
+	m.handleAgentEditEnter()
+
+	// Even with no models configured, the selector must open (never text input).
+	if !m.settingsSelectorActive {
+		t.Fatal("expected model selector to be active")
+	}
+	if m.settingsSelectorField != "agentModel" {
+		t.Fatalf("expected selector field agentModel, got %q", m.settingsSelectorField)
+	}
+	// Options: (default), (custom...) — with no models just those two.
+	if len(m.settingsSelectorValues) != 2 {
+		t.Fatalf("expected 2 selector values, got %d: %v", len(m.settingsSelectorValues), m.settingsSelectorValues)
+	}
+	if m.settingsSelectorValues[0] != "" || m.settingsSelectorValues[1] != "__custom__" {
+		t.Fatalf("unexpected selector values: %v", m.settingsSelectorValues)
+	}
+}
+
+func TestHandleSelectorConfirmCustomOpensTextInput(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "coder"
+	m.loadAgentDetail("coder")
+
+	m.modalSelectedIdx = agentFieldModel
+	m.handleAgentEditEnter()
+	// Select the last option "(custom...)".
+	m.settingsSelectorIdx = len(m.settingsSelectorValues) - 1
+	m.handleSelectorConfirm()
+
+	if m.settingsSelectorActive {
+		t.Fatal("selector should be closed after picking custom")
+	}
+	if m.settingsEditField != "agentModel" {
+		t.Fatalf("expected agentModel text input, got %q", m.settingsEditField)
+	}
+}
+
+func TestHandleDefaultsEditEnterModelAlwaysSelector(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = ""
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = 1 // Model
+	m.handleDefaultsEditEnter()
+
+	if !m.settingsSelectorActive {
+		t.Fatal("expected defaults model selector to be active")
+	}
+	if m.settingsSelectorField != "defaultModel" {
+		t.Fatalf("expected selector field defaultModel, got %q", m.settingsSelectorField)
+	}
+}

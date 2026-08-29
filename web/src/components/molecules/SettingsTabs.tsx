@@ -45,10 +45,10 @@ export function SettingsTabs({ activeTab, onTabChange }: Props) {
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             type="button"
-            className={`rounded-md px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
+            className={`rounded-md border px-3 py-1.5 md:py-2.5 text-center md:text-left text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
               activeTab === tab.id
-                ? 'bg-accent-primary text-text-on-accent shadow-sm'
-                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                ? 'border-[color-mix(in_srgb,var(--color-accent-primary)_30%,transparent)] bg-surface-selected text-accent-primary'
+                : 'border-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
             {tab.label}

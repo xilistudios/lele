@@ -20,7 +20,7 @@ export function DesktopDisconnectOverlay({ onRestart, restarting }: Props) {
           type="button"
           onClick={onRestart}
           disabled={restarting}
-          className="mt-6 rounded-lg bg-brand-rosa px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-rosa/90 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+          className="mt-6 rounded-lg bg-accent-primary px-6 py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
         >
           {restarting ? 'Restarting…' : 'Restart backend'}
         </button>

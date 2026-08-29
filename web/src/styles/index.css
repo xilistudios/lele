@@ -54,9 +54,10 @@
   --color-secondary-aqua: #a7e7e7;
 
   /* CTA Colors */
-  --color-cta-primary: #c24a17;
-  --color-cta-hover: #d4551e;
-  --color-cta-active: #a83d14;
+  /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
+  --color-cta-primary: #e83e8c;
+  --color-cta-hover: #f0529a;
+  --color-cta-active: #d02a7c;
   --color-cta-secondary: #ffc107;
   --color-cta-secondary-hover: #ffd233;
 
@@ -66,7 +67,7 @@
   --color-interaction-active: #139da1;
 
   /* Borders */
-  --color-border-default: rgba(59, 65, 72, 0.25);
+  --color-border-default: rgba(59, 65, 72, 0.16);
   --color-border-light: rgba(59, 65, 72, 0.4);
   --color-border-strong: rgba(59, 65, 72, 0.6);
   --color-border-focus: #17b3b8;
@@ -120,6 +121,11 @@
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+
+  /* Elevation — dark theme: very subtle black shadows */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* System preference: light (when no data-theme is set) */
@@ -150,9 +156,10 @@
     --color-secondary-rosa-pastel: #f472b6;
     --color-secondary-aqua: #6dd5d5;
 
-    --color-cta-primary: #c24a17;
-    --color-cta-hover: #d4551e;
-    --color-cta-active: #a83d14;
+    /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
+    --color-cta-primary: #e83e8c;
+    --color-cta-hover: #f0529a;
+    --color-cta-active: #d02a7c;
     --color-cta-secondary: #d4a000;
     --color-cta-secondary-hover: #e6b800;
 
@@ -160,7 +167,7 @@
     --color-interaction-hover: #17b3b8;
     --color-interaction-active: #0b8588;
 
-    --color-border-default: rgba(0, 0, 0, 0.1);
+    --color-border-default: rgba(0, 0, 0, 0.07);
     --color-border-light: rgba(0, 0, 0, 0.15);
     --color-border-strong: rgba(0, 0, 0, 0.25);
     --color-border-focus: #17b3b8;
@@ -186,6 +193,11 @@
 
     --color-glass: rgba(255, 255, 255, 0.85);
     --color-glass-border: rgba(232, 62, 140, 0.12);
+
+    /* Elevation — light theme: soft diffuse shadows */
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.06);
+    --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06);
   }
 }
 
@@ -212,76 +224,6 @@
   --color-accent-muted: rgba(232, 62, 140, 0.12);
   --color-accent-subtle: rgba(232, 62, 140, 0.06);
 
-  --color-secondary-verde: #5da82f;
-  --color-secondary-azul: #2563eb;
-  --color-secondary-rojo: #dc2626;
-  --color-secondary-rosa-pastel: #f472b6;
-  --color-secondary-aqua: #6dd5d5;
-
-  --color-cta-primary: #c24a17;
-  --color-cta-hover: #d4551e;
-  --color-cta-active: #a83d14;
-  --color-cta-secondary: #d4a000;
-  --color-cta-secondary-hover: #e6b800;
-
-  --color-interaction-primary: #0f9da1;
-  --color-interaction-hover: #17b3b8;
-  --color-interaction-active: #0b8588;
-
-  --color-border-default: rgba(0, 0, 0, 0.1);
-  --color-border-light: rgba(0, 0, 0, 0.15);
-  --color-border-strong: rgba(0, 0, 0, 0.25);
-  --color-border-focus: #17b3b8;
-
-  --color-text-primary: #1a1d23;
-  --color-text-secondary: #4a4e57;
-  --color-text-tertiary: #6b717a;
-  --color-text-muted: #9ca3af;
-  --color-text-on-surface: #1a1d23;
-  --color-text-on-accent: #ffffff;
-
-  --color-state-success: #16a34a;
-  --color-state-success-light: rgba(22, 163, 74, 0.12);
-  --color-state-warning: #ca8a04;
-  --color-state-warning-light: rgba(202, 138, 4, 0.12);
-  --color-state-error: #dc2626;
-  --color-state-error-light: rgba(220, 38, 38, 0.12);
-  --color-state-info: #2563eb;
-  --color-state-info-light: rgba(37, 99, 235, 0.12);
-
-  --color-overlay: rgba(0, 0, 0, 0.4);
-  --color-overlay-light: rgba(0, 0, 0, 0.2);
-
-  --color-glass: rgba(255, 255, 255, 0.85);
-  --color-glass-border: rgba(232, 62, 140, 0.12);
-}
-
-/* Light mode */
-[data-theme="light"] {
-  color-scheme: light;
-
-  /* 60% - Fondos claros */
-  --color-bg-primary: #f5f6f8;
-  --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eef0f3;
-  --color-bg-elevated: #e4e6ea;
-  --color-bg-hover: #d9dce2;
-
-  /* 30% - Surfaces claros */
-  --color-surface-primary: #e4e6ea;
-  --color-surface-secondary: #d9dce2;
-  --color-surface-tertiary: #ffffff;
-  --color-surface-hover: #d9dce2;
-  --color-surface-muted: #eef0f3;
-  --color-surface-selected: rgba(232, 62, 140, 0.1);
-
-  /* Accents - se mantienen (rosa Lele) */
-  --color-accent-primary: #e83e8c;
-  --color-accent-hover: #d02a7c;
-  --color-accent-active: #b81e6a;
-  --color-accent-muted: rgba(232, 62, 140, 0.12);
-  --color-accent-subtle: rgba(232, 62, 140, 0.06);
-
   /* Brand - se mantienen */
   --color-brand-rosa: #e83e8c;
   --color-brand-morado: #9d4edd;
@@ -289,32 +231,28 @@
   --color-brand-amarillo: #ffc107;
   --color-brand-naranja: #ff6b35;
 
-  /* Secondary - ajustados para light */
   --color-secondary-verde: #5da82f;
   --color-secondary-azul: #2563eb;
   --color-secondary-rojo: #dc2626;
   --color-secondary-rosa-pastel: #f472b6;
   --color-secondary-aqua: #6dd5d5;
 
-  /* CTA */
-  --color-cta-primary: #c24a17;
-  --color-cta-hover: #d4551e;
-  --color-cta-active: #a83d14;
+  /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
+  --color-cta-primary: #e83e8c;
+  --color-cta-hover: #f0529a;
+  --color-cta-active: #d02a7c;
   --color-cta-secondary: #d4a000;
   --color-cta-secondary-hover: #e6b800;
 
-  /* Interaction */
   --color-interaction-primary: #0f9da1;
   --color-interaction-hover: #17b3b8;
   --color-interaction-active: #0b8588;
 
-  /* Borders - más visibles en light */
-  --color-border-default: rgba(0, 0, 0, 0.1);
+  --color-border-default: rgba(0, 0, 0, 0.07);
   --color-border-light: rgba(0, 0, 0, 0.15);
   --color-border-strong: rgba(0, 0, 0, 0.25);
   --color-border-focus: #17b3b8;
 
-  /* Text Colors - oscuros para fondo claro */
   --color-text-primary: #1a1d23;
   --color-text-secondary: #4a4e57;
   --color-text-tertiary: #6b717a;
@@ -322,7 +260,6 @@
   --color-text-on-surface: #1a1d23;
   --color-text-on-accent: #ffffff;
 
-  /* State */
   --color-state-success: #16a34a;
   --color-state-success-light: rgba(22, 163, 74, 0.12);
   --color-state-warning: #ca8a04;
@@ -332,14 +269,18 @@
   --color-state-info: #2563eb;
   --color-state-info-light: rgba(37, 99, 235, 0.12);
 
-  /* Overlay */
   --color-overlay: rgba(0, 0, 0, 0.4);
   --color-overlay-light: rgba(0, 0, 0, 0.2);
 
-  /* Glass */
   --color-glass: rgba(255, 255, 255, 0.85);
   --color-glass-border: rgba(232, 62, 140, 0.12);
+
+  /* Elevation — light theme: soft diffuse shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06);
 }
+
 
 html,
 body,

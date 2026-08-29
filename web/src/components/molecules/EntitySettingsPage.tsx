@@ -15,7 +15,8 @@ type Props = {
 export function EntitySettingsPage({ titleKey, children }: Props) {
   const { t } = useTranslation()
   const { api } = useAuthContext()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
 
   const settingsState = useSettingsConfig(api)
 
@@ -31,18 +32,18 @@ export function EntitySettingsPage({ titleKey, children }: Props) {
       <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
-          mobileOpen={sidebarOpen}
-          onClose={() => onToggleSidebar()}
+          mobileOpen={mobileSidebarOpen}
+          onClose={() => onCloseMobileSidebar()}
         />
         <main className="flex flex-1 flex-col overflow-hidden">
           <SettingsHeader
             title={t(titleKey)}
             configPath={settingsState.metadata?.config_path}
-            onToggleSidebar={onToggleSidebar}
+            onOpenMobileSidebar={onOpenMobileSidebar}
           />
 
           <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-6">{children}</div>
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">{children}</div>
 
             <SettingsFooter
               saveState={settingsState.saveState}

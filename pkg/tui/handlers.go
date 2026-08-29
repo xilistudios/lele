@@ -179,6 +179,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Subagent multi-select picker navigation/toggle/confirm.
+			if m.subagentPickerActive {
+				switch msg.String() {
+				case "up", "k":
+					if m.subagentPickerIdx > 0 {
+						m.subagentPickerIdx--
+					}
+					return m, nil
+				case "down", "j":
+					if m.subagentPickerIdx < len(m.subagentPickerItems)-1 {
+						m.subagentPickerIdx++
+					}
+					return m, nil
+				case " ":
+					m.toggleSubagentPicker()
+					return m, nil
+				case "enter":
+					m.saveSubagentPicker()
+					return m, nil
+				case "esc":
+					m.cancelSubagentPicker()
+					m.loadAgentDetail(m.settingsAgentID)
+					return m, nil
+				case "q":
+					return m, nil
+				}
+			}
 			// Settings inline selector navigation.
 			if m.settingsSelectorActive {
 				switch msg.String() {
@@ -2251,6 +2278,11 @@ func (m *Model) resetModal(mode modalType) {
 	m.settingsSelectorIdx = 0
 	m.settingsSelectorField = ""
 	m.settingsSelectorOrig = ""
+	m.subagentPickerActive = false
+	m.subagentPickerItems = nil
+	m.subagentPickerLabels = nil
+	m.subagentPickerSelected = nil
+	m.subagentPickerIdx = 0
 }
 
 // isListModal returns true if the modal type is a list-selection modal

@@ -64,10 +64,10 @@ export function SessionItem({
       // biome-ignore lint/a11y/useSemanticElements: div needed because it contains a nested <button> (delete), which would be invalid HTML
       role="button"
       tabIndex={0}
-      className={`group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors cursor-pointer ${
+      className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors cursor-pointer ${
         selected
           ? getModeTheme(mode).selectedItem
-          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+          : 'text-text-secondary hover:bg-[color-mix(in_srgb,var(--color-surface-hover)_60%,transparent)] hover:text-text-primary'
       }`}
     >
       {isProcessing && (
