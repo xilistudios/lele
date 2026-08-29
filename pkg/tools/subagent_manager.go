@@ -13,33 +13,34 @@ import (
 )
 
 type SubagentManager struct {
-	tasks                 map[string]*SubagentTask
-	cancels               map[string]context.CancelFunc
-	mu                    sync.RWMutex
-	provider              providers.LLMProvider
-	defaultModel          string
-	bus                   *bus.MessageBus
-	workspace             string
-	tools                 *ToolRegistry
-	getAgentContext       func(agentID string) AgentContextInfo
-	modelOverrideResolver func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
-	visionChecker         func(model string) bool                                 // reports whether a model supports vision
-	maxIterations         int
-	maxTokens             int
-	temperature           float64
-	hasMaxTokens          bool
-	hasTemperature        bool
-	timeout               time.Duration // 0 means no timeout
-	retentionPeriod       time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
-	nextID                int
-	sessionRecorder       SessionRecorder
-	sessionKeyCallback    func(sessionKey, agentID string)                          // called when subagent session key is created
-	registerSessionCancel func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
-	sessionEvictCallback  func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
-	sessionExists         func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
-	maxConcurrent         int                                                       // max concurrent running tasks (0 = unlimited)
-	defaultMaxRetries     int                                                       // default max retry attempts for transient failures
-	redactor              *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
+	tasks                      map[string]*SubagentTask
+	cancels                    map[string]context.CancelFunc
+	mu                         sync.RWMutex
+	provider                   providers.LLMProvider
+	defaultModel               string
+	bus                        *bus.MessageBus
+	workspace                  string
+	tools                      *ToolRegistry
+	getAgentContext            func(agentID string) AgentContextInfo
+	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
+	visionChecker              func(model string) bool                                 // reports whether a model supports vision
+	maxIterations              int
+	maxTokens                  int
+	temperature                float64
+	hasMaxTokens               bool
+	hasTemperature             bool
+	timeout                    time.Duration // 0 means no timeout
+	retentionPeriod            time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
+	nextID                     int
+	sessionRecorder            SessionRecorder
+	sessionKeyCallback         func(sessionKey, agentID string)                          // called when subagent session key is created
+	registerSessionCancel      func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
+	sessionEvictCallback       func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
+	sessionExists              func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
+	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
+	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
+	compactionThresholdPercent int                                                       // percentage of context window triggering intra-loop compaction (0 = default)
+	redactor                   *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -79,6 +80,22 @@ func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.maxIterations = maxIterations
+}
+
+// SetCompactionThresholdPercent sets the percentage of the context window at
+// which intra-loop compaction triggers for subagent tool loops. 0 = default.
+func (sm *SubagentManager) SetCompactionThresholdPercent(p int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.compactionThresholdPercent = p
+}
+
+// getCompactionThresholdPercent returns the configured compaction threshold
+// percent (0 = use pkg/config.DefaultCompactionThresholdPercent).
+func (sm *SubagentManager) getCompactionThresholdPercent() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.compactionThresholdPercent
 }
 
 // SetTimeout sets the maximum execution time for subagent tasks.

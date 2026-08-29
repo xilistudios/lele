@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	leleconfig "github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -39,13 +40,17 @@ type ToolLoopConfig struct {
 	VerboseCallback VerboseCallback
 	SessionRecorder SessionRecorder
 	SessionKey      string
-	Retry           *RetryConfig      // Retry config for LLM calls. nil = no retry.
-	ContextWindow   int               // Max tokens for context. 0 = no compaction.
-	MessageBus      *bus.MessageBus   // Optional: publish real-time events to TUI.
-	Channel         string            // Origin channel for events.
-	ChatID          string            // Origin chatID for events (subagent sessionKey).
-	VisionSupported bool              // Whether the model supports vision. When false, read_image is filtered from tool defs.
-	Redactor        *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
+	Retry           *RetryConfig // Retry config for LLM calls. nil = no retry.
+	ContextWindow   int          // Max tokens for context. 0 = no compaction.
+	// CompactionThresholdPercent is the percentage of ContextWindow at which
+	// intra-loop compaction triggers. 0 (or out of range) = use the default
+	// (pkg/config.DefaultCompactionThresholdPercent).
+	CompactionThresholdPercent int
+	MessageBus                 *bus.MessageBus   // Optional: publish real-time events to TUI.
+	Channel                    string            // Origin channel for events.
+	ChatID                     string            // Origin chatID for events (subagent sessionKey).
+	VisionSupported            bool              // Whether the model supports vision. When false, read_image is filtered from tool defs.
+	Redactor                   *keyring.Redactor // Optional: redacts secret values from tool results before they enter context.
 	// RetryWait optionally overrides the wait function used between
 	// empty-response retries (nil means time.After). Used by tests to
 	// avoid real sleeps.
@@ -92,6 +97,15 @@ func EstimateLoopTokens(messages []providers.Message) int {
 // Everything in between is summarized via LLM and replaced with a single message.
 func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, model string, messages []providers.Message, keepLast int) ([]providers.Message, bool) {
 	if len(messages) <= keepLast+2 {
+		return messages, false
+	}
+
+	// Already compacted with nothing new added since (messages[1] is our
+	// summary message and the context is exactly the compacted shape
+	// [system, summary, continue, tail×keepLast]): re-summarizing would
+	// waste an LLM call and cannot shrink below the compacted size.
+	if len(messages) <= keepLast+3 &&
+		strings.HasPrefix(messages[1].Content, "[Context compacted") {
 		return messages, false
 	}
 
@@ -443,17 +457,23 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			}
 		}
 
-		// 8. Context compaction — if context window is configured and we exceed 75%,
-		// summarize old messages to prevent hitting the model's token limit.
+		// 8. Context compaction — if context window is configured and we exceed
+		// the configured threshold percent, summarize old messages to prevent
+		// hitting the model's token limit.
 		if config.ContextWindow > 0 {
 			tokens := EstimateLoopTokens(messages)
-			threshold := config.ContextWindow * 75 / 100
+			percent := config.CompactionThresholdPercent
+			if percent <= 0 || percent > 100 {
+				percent = leleconfig.DefaultCompactionThresholdPercent
+			}
+			threshold := config.ContextWindow * percent / 100
 			if tokens > threshold {
 				logger.InfoCF("toolloop", "Context compaction triggered", map[string]any{
-					"tokens":         tokens,
-					"threshold":      threshold,
-					"context_window": config.ContextWindow,
-					"iteration":      iteration,
+					"tokens":            tokens,
+					"threshold":         threshold,
+					"context_window":    config.ContextWindow,
+					"threshold_percent": percent,
+					"iteration":         iteration,
 				})
 				// Keep last 6 messages (3 tool call/result pairs) for continuity
 				if compacted, ok := CompactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {

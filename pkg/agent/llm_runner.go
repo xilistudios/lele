@@ -528,6 +528,12 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			providerToolDefs = filtered
 		}
 
+		// Pre-LLM compaction check: guards the request itself. A single
+		// iteration can add hundreds of thousands of tokens of tool results
+		// and context messages; without this check the request goes out
+		// oversized and fails before the post-tool check ever runs.
+		messages = lr.maybeCompactLoopContext(ctx, agent, messages, model, opts, iteration)
+
 		// Log LLM request details
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
@@ -823,87 +829,10 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			return "", iteration, execErr
 		}
 
-		// Proactive intra-loop context compaction. Mirrors the subagent
-		// RunToolLoop behavior (pkg/tools/toolloop.go step 8): when the
-		// accumulated context exceeds the configured threshold, summarize old
-		// messages so the loop can keep running instead of only compacting
-		// reactively (on LLM context error) or at the very end (maybeSummarize).
-		if contextWindow := lr.al.getSessionContextWindow(opts.SessionKey); contextWindow > 0 {
-			tokens := tools.EstimateLoopTokens(messages)
-			thresholdPercent := lr.al.cfg().SessionCompactionThresholdPercent()
-			threshold := contextWindow * thresholdPercent / 100
-			if tokens > threshold {
-				logger.InfoCF("agent", "Intra-loop context compaction triggered", map[string]interface{}{
-					"agent_id":       agent.ID,
-					"session_key":    opts.SessionKey,
-					"iteration":      iteration,
-					"tokens":         tokens,
-					"threshold":      threshold,
-					"context_window": contextWindow,
-				})
-				if opts.Channel == "native" {
-					lr.al.bus.PublishOutbound(bus.OutboundMessage{
-						Channel:  opts.Channel,
-						ChatID:   opts.ChatID,
-						Event:    "tool.executing",
-						Metadata: map[string]string{"tool": "compact", "action": "Compacting context..."},
-					})
-				}
-				compactProvider := agent.Provider
-				compactModel := model
-				if cm := lr.al.cfg().CompactionModel(); cm != "" {
-					compactModel = cm
-				}
-				// Resolve the correct provider for the compaction model (which may
-				// be the session model or a dedicated compaction_model). Without
-				// this, the default agent.Provider is used even when the model
-				// belongs to a different provider (e.g. moonshotai/kimi-k3 on an
-				// Anthropic agent), causing 404 errors.
-				if ref := providers.ParseModelRef(compactModel, ""); ref != nil && ref.Provider != "" {
-					agentRef := providers.ParseModelRef(agent.Model, "")
-					if agentRef == nil || agentRef.Provider != ref.Provider {
-						if newProv, err := providers.CreateProviderForCandidate(lr.al.cfg(), ref.Provider); err == nil {
-							compactProvider = newProv
-						}
-					}
-				}
-				if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6); ok {
-					messages = compacted
-					if opts.Channel == "native" {
-						lr.al.bus.PublishOutbound(bus.OutboundMessage{
-							Channel: opts.Channel,
-							ChatID:  opts.ChatID,
-							Event:   "tool.result",
-							Metadata: map[string]string{
-								"tool":   "compact",
-								"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, tools.EstimateLoopTokens(messages)),
-							},
-						})
-					}
-					// Sync compaction state to the session so post-turn
-					// maybeSummarize sees the reduced history and the
-					// excluded messages don't bloat the next turn's context.
-					if len(compacted) > 1 && strings.HasPrefix(compacted[1].Content, "[Context compacted") {
-						agent.Sessions.SetSummary(opts.SessionKey, compacted[1].Content)
-						agent.Sessions.ExcludeOldMessagesFromContext(opts.SessionKey, 6)
-						if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
-							logger.WarnCF("agent", "Failed to save session after intra-loop compaction", map[string]interface{}{
-								"session_key": opts.SessionKey,
-								"error":       saveErr.Error(),
-							})
-						} else if lr.al.cfg().EvictExcludedFromMemory() {
-							agent.Sessions.EvictExcludedMessages(opts.SessionKey)
-						}
-						agent.Sessions.IncrementCompactionCount(opts.SessionKey)
-						logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{
-							"session_key":   opts.SessionKey,
-							"summary_chars": len(compacted[1].Content),
-							"kept_messages": 6,
-						})
-					}
-				}
-			}
-		}
+		// Post-tool compaction check: runs after tool results and context
+		// messages are appended so oversized contexts are compacted before the
+		// next iteration's pre-LLM check.
+		messages = lr.maybeCompactLoopContext(ctx, agent, messages, model, opts, iteration)
 
 		// Check context after all tool results are processed to allow prompt cancellation
 		// before starting the next LLM iteration.
@@ -947,4 +876,101 @@ func stripImageContentParts(messages []providers.Message) []providers.Message {
 		stripped[i].ContentParts = filtered
 	}
 	return stripped
+}
+
+// maybeCompactLoopContext runs the proactive intra-loop context compaction
+// check shared by the main agent loop. It mirrors the subagent RunToolLoop
+// behavior (pkg/tools/toolloop.go step 8): when the accumulated context
+// exceeds the configured threshold, summarize old messages so the loop can
+// keep running instead of only compacting reactively (on LLM context error)
+// or at the very end (maybeSummarize).
+//
+// It is called from two places in runLLMIteration: BEFORE each LLM request
+// (a single iteration can add hundreds of thousands of tokens of tool
+// results, and without this pre-request check the request goes out
+// oversized and fails) and AFTER tool execution (the original check). It
+// takes the current messages slice and returns the (possibly compacted)
+// slice.
+func (lr *llmRunnerImpl) maybeCompactLoopContext(ctx context.Context, agent *AgentInstance, messages []providers.Message, model string, opts processOptions, iteration int) []providers.Message {
+	if contextWindow := lr.al.getSessionContextWindow(opts.SessionKey); contextWindow > 0 {
+		tokens := tools.EstimateLoopTokens(messages)
+		thresholdPercent := lr.al.cfg().SessionCompactionThresholdPercent()
+		threshold := contextWindow * thresholdPercent / 100
+		if tokens > threshold {
+			logger.InfoCF("agent", "Intra-loop context compaction triggered", map[string]interface{}{
+				"agent_id":       agent.ID,
+				"session_key":    opts.SessionKey,
+				"iteration":      iteration,
+				"tokens":         tokens,
+				"threshold":      threshold,
+				"context_window": contextWindow,
+			})
+			if opts.Channel == "native" {
+				lr.al.bus.PublishOutbound(bus.OutboundMessage{
+					Channel:  opts.Channel,
+					ChatID:   opts.ChatID,
+					Event:    "tool.executing",
+					Metadata: map[string]string{"tool": "compact", "action": "Compacting context..."},
+				})
+			}
+			compactProvider := agent.Provider
+			compactModel := model
+			if cm := lr.al.cfg().CompactionModel(); cm != "" {
+				compactModel = cm
+			}
+			// Resolve the correct provider for the compaction model (which may
+			// be the session model or a dedicated compaction_model). Without
+			// this, the default agent.Provider is used even when the model
+			// belongs to a different provider (e.g. moonshotai/kimi-k3 on an
+			// Anthropic agent), causing 404 errors.
+			if ref := providers.ParseModelRef(compactModel, ""); ref != nil && ref.Provider != "" {
+				agentRef := providers.ParseModelRef(agent.Model, "")
+				if agentRef == nil || agentRef.Provider != ref.Provider {
+					if newProv, err := providers.CreateProviderForCandidate(lr.al.cfg(), ref.Provider); err == nil {
+						compactProvider = newProv
+					}
+				}
+			}
+			if compacted, ok := tools.CompactLoopMessages(ctx, compactProvider, compactModel, messages, 6); ok {
+				messages = compacted
+				if opts.Channel == "native" {
+					lr.al.bus.PublishOutbound(bus.OutboundMessage{
+						Channel: opts.Channel,
+						ChatID:  opts.ChatID,
+						Event:   "tool.result",
+						Metadata: map[string]string{
+							"tool":   "compact",
+							"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, tools.EstimateLoopTokens(messages)),
+						},
+					})
+				}
+				// Sync compaction state to the session so post-turn
+				// maybeSummarize sees the reduced history and the
+				// excluded messages don't bloat the next turn's context.
+				if len(compacted) > 1 && strings.HasPrefix(compacted[1].Content, "[Context compacted") {
+					agent.Sessions.SetSummary(opts.SessionKey, compacted[1].Content)
+					agent.Sessions.ExcludeOldMessagesFromContext(opts.SessionKey, 6)
+					// Increment before Save so the counter is persisted in
+					// this save; incrementing after would leave the count
+					// in memory until the next Save.
+					agent.Sessions.IncrementCompactionCount(opts.SessionKey)
+					if saveErr := agent.Sessions.Save(opts.SessionKey); saveErr != nil {
+						logger.WarnCF("agent", "Failed to save session after intra-loop compaction", map[string]interface{}{
+							"session_key": opts.SessionKey,
+							"error":       saveErr.Error(),
+						})
+					} else if lr.al.cfg().EvictExcludedFromMemory() {
+						agent.Sessions.EvictExcludedMessages(opts.SessionKey)
+					}
+					logger.InfoCF("agent", "Intra-loop compaction synced to session", map[string]interface{}{
+						"session_key":   opts.SessionKey,
+						"summary_chars": len(compacted[1].Content),
+						"kept_messages": 6,
+					})
+				}
+			}
+		}
+	}
+
+	return messages
 }

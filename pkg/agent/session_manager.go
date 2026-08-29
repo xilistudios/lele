@@ -410,12 +410,14 @@ func (sm *sessionManagerImpl) forceCompression(agent *AgentInstance, sessionKey 
 	// Mark the oldest 'mid' messages as excluded from context
 	// (they remain in storage for the web UI)
 	agent.Sessions.ExcludeOldMessagesFromContext(sessionKey, len(history)-mid)
+	// Increment before Save so the counter is persisted in this save;
+	// incrementing after would leave the count in memory until the next Save.
+	agent.Sessions.IncrementCompactionCount(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		logger.WarnCF("agent", "Failed to save after forced compression", map[string]interface{}{"session_key": sessionKey, "error": err.Error()})
 	} else {
 		sm.evictExcludedAfterCompaction(agent, sessionKey)
 	}
-	agent.Sessions.IncrementCompactionCount(sessionKey)
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]interface{}{
 		"session_key":  sessionKey,
@@ -756,12 +758,13 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		agent.Sessions.SetHistory(sessionKey, historyAfter)
 	}
 
+	// Increment before Save so the counter is persisted in this save. The
+	// count applies to both paths: on save failure, still count the
+	// compaction so retry isn't triggered pointlessly.
+	agent.Sessions.IncrementCompactionCount(sessionKey)
 	if err := agent.Sessions.Save(sessionKey); err != nil {
-		// still count the compaction so retry isn't triggered pointlessly
-		agent.Sessions.IncrementCompactionCount(sessionKey)
 		return nil, fmt.Errorf("save after summarization: %w", err)
 	}
-	agent.Sessions.IncrementCompactionCount(sessionKey)
 	sm.evictExcludedAfterCompaction(agent, sessionKey)
 
 	// Calculate after stats

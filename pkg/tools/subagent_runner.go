@@ -298,19 +298,20 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:        agentProvider,
-		Model:           agentModel,
-		Tools:           tools,
-		MaxIterations:   maxIter,
-		LLMOptions:      llmOptions,
-		SessionRecorder: recorder,
-		SessionKey:      sessionKey,
-		Retry:           retryConfigPtr(),
-		ContextWindow:   agentContextWindow,
-		MessageBus:      sm.bus,
-		ChatID:          sessionKey,
-		VisionSupported: visionSupported,
-		Redactor:        sm.getRedactor(),
+		Provider:                   agentProvider,
+		Model:                      agentModel,
+		Tools:                      tools,
+		MaxIterations:              maxIter,
+		LLMOptions:                 llmOptions,
+		SessionRecorder:            recorder,
+		SessionKey:                 sessionKey,
+		Retry:                      retryConfigPtr(),
+		ContextWindow:              agentContextWindow,
+		CompactionThresholdPercent: sm.getCompactionThresholdPercent(),
+		MessageBus:                 sm.bus,
+		ChatID:                     sessionKey,
+		VisionSupported:            visionSupported,
+		Redactor:                   sm.getRedactor(),
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)
