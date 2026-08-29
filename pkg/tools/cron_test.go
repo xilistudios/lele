@@ -196,11 +196,11 @@ func TestDesignatedSessionKey(t *testing.T) {
 		channel, to, want string
 	}{
 		{"native", "native:abc", "native:abc"},
-		{"native", "uuid-1", "native:uuid-1"},   // bare key probed with prefix
-		{"", "native:abc", "native:abc"},        // empty channel defaults to native
-		{"native", "unknown", ""},               // unknown key → no designation
-		{"telegram", "1779224049", ""},          // non-native chat ID → not a session
-		{"native", "", ""},                      // empty `to` → no designation
+		{"native", "uuid-1", "native:uuid-1"}, // bare key probed with prefix
+		{"", "native:abc", "native:abc"},      // empty channel defaults to native
+		{"native", "unknown", ""},             // unknown key → no designation
+		{"telegram", "1779224049", ""},        // non-native chat ID → not a session
+		{"native", "", ""},                    // empty `to` → no designation
 		{"native", "agent:main:session", "agent:main:session"},
 	}
 	for _, c := range cases {
