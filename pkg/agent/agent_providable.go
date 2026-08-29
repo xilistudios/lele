@@ -946,6 +946,10 @@ func classifySessionKind(sessionKey string) string {
 	if strings.HasPrefix(sessionKey, "cron-spawn-") {
 		return "cron-spawn"
 	}
+	// cron jobs that spawned a subagent: native:cron-<jobID>:subagent-<N>
+	if strings.Contains(sessionKey, ":cron-") && strings.Contains(sessionKey, ":subagent-") {
+		return "cron-spawn"
+	}
 	if strings.HasPrefix(sessionKey, "cron-") {
 		return "cron"
 	}

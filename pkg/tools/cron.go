@@ -20,14 +20,15 @@ type JobExecutor interface {
 
 // CronTool provides scheduling capabilities for the agent
 type CronTool struct {
-	cronService *cron.CronService
-	executor    JobExecutor
-	msgBus      *bus.MessageBus
-	execTool    *ExecTool
-	channel     string
-	chatID      string
-	sessionKey  string
-	mu          sync.RWMutex
+	cronService   *cron.CronService
+	executor      JobExecutor
+	msgBus        *bus.MessageBus
+	execTool      *ExecTool
+	channel       string
+	chatID        string
+	sessionKey    string
+	sessionExists func(sessionKey string) bool // reports whether a session key exists; nil = no check
+	mu            sync.RWMutex
 }
 
 // NewCronTool creates a new CronTool
@@ -148,6 +149,48 @@ func (t *CronTool) SetSessionContext(channel, chatID, sessionKey string) {
 	t.channel = channel
 	t.chatID = chatID
 	t.sessionKey = sessionKey
+}
+
+// SetSessionExistsCallback sets a callback that reports whether a session key
+// already exists (in memory, metadata, or on disk). It is used by ExecuteJob
+// to decide whether a job's `to` field designates an existing session — in
+// which case the job should run in that session instead of a synthetic
+// `cron-<jobID>` session. Mirrors SubagentManager.SetSessionExistsCallback.
+func (t *CronTool) SetSessionExistsCallback(callback func(sessionKey string) bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sessionExists = callback
+}
+
+// designatedSessionKey returns the job's designated session key when the
+// payload's `to` field refers to an existing native session. For native
+// jobs, `to` may be a raw session key (UUID or prefixed) — the checker
+// probes both the raw value and the `native:`-prefixed form. Returns ""
+// when there is no designated existing session (non-native channels,
+// missing checker, or unknown key), in which case callers keep their
+// synthetic session keys.
+func (t *CronTool) designatedSessionKey(channel, to string) string {
+	if to == "" {
+		return ""
+	}
+	if channel != "" && channel != "native" {
+		// Non-native channels (telegram, etc.) use numeric chat IDs resolved
+		// by the channel itself; `to` is not a session key there.
+		return ""
+	}
+	t.mu.RLock()
+	exists := t.sessionExists
+	t.mu.RUnlock()
+	if exists == nil {
+		return ""
+	}
+	if exists(to) {
+		return to
+	}
+	if prefixed := "native:" + to; exists(prefixed) {
+		return prefixed
+	}
+	return ""
 }
 
 // Execute runs the tool with the given arguments
@@ -447,7 +490,13 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 	// If spawn config is present, generate SYSTEM_SPAWN: message
 	if job.Payload.Spawn != nil {
 		spawnMsg := formatSystemSpawnMessage(job)
-		sessionKey := fmt.Sprintf("cron-spawn-%s", job.ID)
+		// If the job designates an existing native session via `to`, use it
+		// as the spawn origin so the subagent nests under that chat (like a
+		// user-initiated spawn) instead of a synthetic cron session.
+		sessionKey := t.designatedSessionKey(channel, chatID)
+		if sessionKey == "" {
+			sessionKey = fmt.Sprintf("cron-spawn-%s", job.ID)
+		}
 
 		response, err := t.executor.ProcessDirectWithChannel(
 			ctx,
@@ -474,10 +523,16 @@ func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
 
 	// For deliver=false, process through agent (for complex tasks).
 	// Session-scoped jobs use the originating session key so the agent has
-	// full conversation context; global jobs use a synthetic key.
+	// full conversation context; global jobs use a synthetic key — unless
+	// the job designates an existing native session via `to`, in which case
+	// the message is processed in that session so the agent sees the chat's
+	// context and the response lands in the designated chat.
 	sessionKey := effectiveSessionKey
 	if !isSessionScoped {
 		sessionKey = fmt.Sprintf("cron-%s", job.ID)
+		if designated := t.designatedSessionKey(channel, chatID); designated != "" {
+			sessionKey = designated
+		}
 	}
 
 	// Call agent with job's message
