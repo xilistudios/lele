@@ -570,10 +570,7 @@ func (n *NativeChannel) sendWelcome(client *WSClient) {
 
 	groups := n.sessionGroupSnapshots(client.SessionKey)
 
-	groupsEnabled := false
-	if cfg := n.cfgSnapshot(); cfg != nil {
-		groupsEnabled = cfg.Groups.Enabled
-	}
+	groupsEnabled := n.cfgSnapshot().GroupsFeatureEnabled()
 
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
@@ -628,10 +625,7 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	groups := n.sessionGroupSnapshots(client.SessionKey)
 
-	groupsEnabled := false
-	if cfg := n.cfgSnapshot(); cfg != nil {
-		groupsEnabled = cfg.Groups.Enabled
-	}
+	groupsEnabled := n.cfgSnapshot().GroupsFeatureEnabled()
 
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,

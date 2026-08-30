@@ -9,6 +9,12 @@ import type { GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
 import { getSessionKey, isSessionMismatch } from './helpers'
 import type { MessageEventContext } from './types'
 
+/** Terminal group statuses — a group in one of these states must never be
+ *  downgraded by a later event. 'started' is the only non-terminal status. */
+function isTerminalGroupStatus(status: GroupInfo['status'] | undefined): status is 'done' | 'error' | 'stopped' {
+  return status === 'done' || status === 'error' || status === 'stopped'
+}
+
 export function handleGroupStatus(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'group.status')) return
@@ -156,15 +162,29 @@ export function handleGroupComplete(ctx: MessageEventContext, data: Record<strin
   const groupId = data.group_id as string
   const content = data.content as string
 
-  ctx.upsertGroup(groupId, (existing) => ({
-    groupID: groupId,
-    status: 'done',
-    strategy: (data.strategy as string) ?? existing?.strategy ?? '',
-    participants: existing?.participants ?? '',
-    layers: (data.layers as number) ?? existing?.layers ?? 0,
-    totalTokens: (data.total_tokens as number) ?? existing?.totalTokens ?? 0,
-    createdAt: existing?.createdAt ?? new Date().toISOString(),
-    turns: existing?.turns ?? [],
-    synthesis: content,
-  }))
+  ctx.upsertGroup(groupId, (existing) => {
+    // Backend contract (pkg/group/manager.go finalize): every group emits
+    // exactly one terminal group.status (done|error|stopped) followed by one
+    // group.complete. WSGroupCompletePayload carries NO status field, so the
+    // status already stored on the card is the only source of truth for the
+    // real outcome — preserve it instead of hardcoding 'done', otherwise an
+    // errored/stopped group would flip to "Done" and hide the failure.
+    // Fall back to 'done' only when no terminal status is known (missing
+    // snapshot or out-of-order events), per "complete without prior error is
+    // a success".
+    const status: GroupInfo['status'] = isTerminalGroupStatus(existing?.status)
+      ? existing.status
+      : 'done'
+    return {
+      groupID: groupId,
+      status,
+      strategy: (data.strategy as string) ?? existing?.strategy ?? '',
+      participants: existing?.participants ?? '',
+      layers: (data.layers as number) ?? existing?.layers ?? 0,
+      totalTokens: (data.total_tokens as number) ?? existing?.totalTokens ?? 0,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      turns: existing?.turns ?? [],
+      synthesis: content,
+    }
+  })
 }

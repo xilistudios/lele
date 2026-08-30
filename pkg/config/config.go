@@ -129,6 +129,15 @@ func (gc *GroupsConfig) ValidateGroups() error {
 	return nil
 }
 
+// GroupsFeatureEnabled is the single source of truth for whether the groups
+// feature is active. Every gating decision (tool registration, /group command,
+// GroupManager.Start, WS welcome payload) must consult this helper instead of
+// reading Groups.Enabled ad hoc, so the feature cannot be enabled on one path
+// and disabled on another (B10). Nil-safe: a nil config means disabled.
+func (c *Config) GroupsFeatureEnabled() bool {
+	return c != nil && c.Groups.Enabled
+}
+
 type Config struct {
 	Agents    AgentsConfig     `json:"agents"`
 	Bindings  []AgentBinding   `json:"bindings,omitempty"`

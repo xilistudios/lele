@@ -1865,10 +1865,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				gm.synthesis = msg.msg.Content
 				m.groupMeta[groupID] = gm
 				m.processing = false
-				if m.groupStatus == nil {
-					m.groupStatus = make(map[string]string)
-				}
-				m.groupStatus[groupID] = "done"
+				m.recordGroupCompleteStatus(groupID)
 				m.updateViewport()
 			case "":
 				// Stream finished — flush any pending throttled viewport update

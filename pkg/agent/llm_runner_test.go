@@ -499,6 +499,10 @@ func createLLMRunnerTestAgentLoop(t *testing.T) (*AgentLoop, string) {
 				Provider:          "test-provider",
 			},
 		},
+		// Groups enabled: helpers built on this loop (e.g. StopAgent tests)
+		// start real groups through the loop's GroupManager, which is
+		// feature-gated (B10).
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	msgBus := bus.NewMessageBus()

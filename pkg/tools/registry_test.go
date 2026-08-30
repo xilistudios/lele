@@ -93,3 +93,19 @@ func TestToolRegistry_GetDefinitions_SortsByToolName(t *testing.T) {
 		t.Fatalf("definition order = %v, want %v", got, want)
 	}
 }
+
+func TestToolRegistry_Unregister(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(&registryTestTool{name: "keep"})
+	r.Register(&registryTestTool{name: "drop"})
+
+	r.Unregister("drop")
+	if _, ok := r.Get("drop"); ok {
+		t.Fatal("Unregister should remove the tool")
+	}
+	if _, ok := r.Get("keep"); !ok {
+		t.Error("Unregister must not affect other tools")
+	}
+	// No-op for unknown names.
+	r.Unregister("does-not-exist")
+}

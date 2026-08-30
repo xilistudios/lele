@@ -481,6 +481,13 @@ func extractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 // handleGroupCommand dispatches /group subcommands.
 // callerAgentID is the resolved agent ID of the user issuing the command (used for spawn permission checks).
 func (ch *commandHandlerImpl) handleGroupCommand(ctx context.Context, msg bus.InboundMessage, callerAgentID, args string) string {
+	// Feature gate (B10): when groups are disabled the command must not create
+	// any state or start anything — it answers with a clear, actionable notice
+	// instead of the confusing half-working behaviour it had before.
+	if !ch.al.cfg().GroupsFeatureEnabled() {
+		return "❌ groups are disabled — enable them in config: groups.enabled = true"
+	}
+
 	args = strings.TrimSpace(args)
 	if args == "" {
 		return "Uso: /group [list|status|stop|start] [opciones]\n" +

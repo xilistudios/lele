@@ -12,20 +12,23 @@ import (
 // GroupChatTool delegates a problem to a multi-agent panel using one of
 // the supported strategies (round_robin, moa, moderator, pipeline) and
 // returns the final synthesis. It is synchronous (Start + Wait).
+//
+// The tool instance is registered ONCE per agent and shared across all
+// sessions, so it must hold no per-invocation mutable state: the origin
+// channel/chatID for group events is resolved from the invocation context
+// on every Execute call (see ToolContextFromCtx), never from instance
+// fields (B4 cross-session leak fix).
 type GroupChatTool struct {
 	manager        *group.GroupManager
-	originChannel  string
-	originChatID   string
 	allowlistCheck func(targetAgentID string) bool
 }
 
 // NewGroupChatTool creates a GroupChatTool backed by the given GroupManager.
-// Default origin is cli/direct.
+// When the invocation ctx carries no tool context, the origin defaults to
+// cli/direct (resolved in Execute).
 func NewGroupChatTool(manager *group.GroupManager) *GroupChatTool {
 	return &GroupChatTool{
-		manager:       manager,
-		originChannel: "cli",
-		originChatID:  "direct",
+		manager: manager,
 	}
 }
 
@@ -90,11 +93,18 @@ func (t *GroupChatTool) Parameters() map[string]interface{} {
 	}
 }
 
-// SetContext implements ContextualTool so the coordinator can update origin info.
-func (t *GroupChatTool) SetContext(channel, chatID string) {
-	t.originChannel = channel
-	t.originChatID = chatID
-}
+// SetContext implements ContextualTool.
+//
+// Deprecated: origen resuelto desde ctx (B4). Mantiene la interfaz
+// ContextualTool por compatibilidad.
+//
+// This method is intentionally a no-op: the tool is shared across sessions
+// and updateToolContexts calls SetContext on every turn of every session,
+// which previously raced mutable origin state and leaked group events to the
+// wrong chat. tool_coordinator.go and registry.go type-assert ContextualTool
+// dynamically, so the method is kept (as a no-op) to avoid touching them.
+// Do NOT reintroduce per-instance origin state here.
+func (t *GroupChatTool) SetContext(channel, chatID string) {}
 
 // SetAllowlistChecker registers a callback that determines whether the caller
 // may include a specific agent in the panel.
@@ -201,8 +211,19 @@ func (t *GroupChatTool) Execute(ctx context.Context, args map[string]interface{}
 	}
 
 	// --- Start the group ---
+	// Resolve the origin from the invocation ctx (registry.ExecuteWithContext
+	// stamps WithToolContext on every call). This keeps concurrent sessions
+	// isolated: each Execute uses the channel/chatID of its own caller.
+	channel, chatID := ToolContextFromCtx(ctx)
+	if channel == "" {
+		channel = "cli"
+	}
+	if chatID == "" {
+		chatID = "direct"
+	}
+
 	groupID := group.NewGroupID("tool")
-	_, err := t.manager.Start(ctx, groupID, "", task, strategy, participants, opts, t.originChannel, t.originChatID)
+	_, err := t.manager.Start(ctx, groupID, "", task, strategy, participants, opts, channel, chatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("group_chat: failed to start group: %v", err))
 	}

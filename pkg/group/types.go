@@ -39,7 +39,13 @@ type GroupToolCall struct {
 
 // Turn represents a single intervention in the shared transcript.
 type Turn struct {
-	Index     int             `json:"index"`                // sequential turn number within the group
+	// Index is the unique turn number, reserved at turn start (see
+	// GroupState.NextTurnIndex) and never renumbered afterwards. Under
+	// Parallel execution turns may be appended in completion order, so the
+	// position of a turn inside Transcript can differ from its Index. What
+	// the WS contract guarantees is uniqueness and stability: the same Index
+	// appears in group.turn, group.tool and the persisted transcript.
+	Index     int             `json:"index"`
 	Layer     int             `json:"layer"`                // MoA layer (0..L); 0 for round_robin/pipeline
 	Speaker   string          `json:"speaker"`              // AgentID of the participant who spoke
 	Label     string          `json:"label,omitempty"`      // display label of the speaker
@@ -71,6 +77,16 @@ type GroupState struct {
 	StopKeywords     []string `json:"stop_keywords,omitempty"`       // keywords that trigger convergence
 	MaxTokensPerTurn int      `json:"max_tokens_per_turn,omitempty"` // per-turn token cap (informational for the runner)
 	TotalTokenBudget int      `json:"total_token_budget,omitempty"`  // hard cap on TotalTokens; 0 = unlimited
+
+	// NextTurnIndex is the monotonic counter used to reserve a unique
+	// Turn.Index at turn start (under gm.mu), before the speaker runs. It
+	// replaces the old len(Transcript)-at-append-time calculation, which under
+	// Parallel execution could hand the same index to two concurrent turns and
+	// made the index depend on completion order. 0 is a valid first index, so
+	// a state rehydrated from an older persisted snapshot (field absent → 0)
+	// must be re-based to len(Transcript) before use; see
+	// GroupManager.prepareTurn.
+	NextTurnIndex int `json:"next_turn_index,omitempty"`
 
 	// Origin identifies the chat session that started this group, so the group
 	// can be looked up by session for history rehydration.

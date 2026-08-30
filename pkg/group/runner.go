@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -13,27 +14,45 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 )
 
+// maxGroupIterations is the safety valve on the run loop. Reaching it without
+// the strategy or a convergence rule having stopped the group is treated as an
+// error, never as a silent success.
+const maxGroupIterations = 1000
+
 // runGroup is the main loop for a managed group. It runs synchronously;
 // Start launches it in a goroutine.
+//
+// Every exit path — natural completion, Stop(), parent-context cancellation,
+// strategy error, hard-stop, iteration exhaustion and panic — funnels through
+// gm.finalize exactly once, so clients always receive precisely one terminal
+// signal pair (a terminal group.status plus one group.complete) and mg.done is
+// always closed.
 func (gm *GroupManager) runGroup(ctx context.Context, mg *managedGroup) {
 	state := mg.state
 
-	// Persist the final state once this goroutine exits (LIFO — runs after the
-	// publish/close defer below).  SaveGroup serialises mg.state which is only
-	// mutated under gm.mu, but at this point the goroutine is done writing.
+	// Persist the final state once this goroutine exits.  Registered FIRST so
+	// that LIFO defer ordering runs it LAST — after the panic-recovery defer
+	// below has already called finalize and published the terminal pair.
+	// SaveGroup serialises mg.state which is only mutated under gm.mu, but at
+	// this point the goroutine is done writing.
 	defer gm.saveStateBestEffort(mg)
+
+	// Contain a panic in the loop: turn it into the single terminal signal
+	// pair instead of tearing down the process. Registered SECOND so it runs
+	// BEFORE the state save.
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		stack := debug.Stack()
+		log.Printf("group %s: panic in run loop: %v\n%s", state.ID, r, stack)
+		gm.finalize(mg, StatusError, fmt.Errorf("group panic: %v\n%s", r, stack))
+	}()
 
 	strategy, err := NewStrategy(state.Strategy)
 	if err != nil {
-		gm.mu.Lock()
-		state.Status = StatusError
-		state.UpdatedAt = time.Now()
-		gm.mu.Unlock()
-
-		agentIDs := gm.agentIDsLocked(mg)
-		gm.publishGroupStatus(mg, "error", agentIDs)
-		mg.err = err
-		close(mg.done)
+		gm.finalize(mg, StatusError, err)
 		return
 	}
 
@@ -48,29 +67,16 @@ func (gm *GroupManager) runGroup(ctx context.Context, mg *managedGroup) {
 		ms.Decider = d
 	}
 
-	defer func() {
-		// Publish group.complete if the group finished normally (not errored early or stopped).
-		gm.mu.Lock()
-		status := state.Status
-		gm.mu.Unlock()
+	// exhausted stays true only if the loop ran out of iterations without the
+	// strategy or a convergence rule having ended the run — that is a failure,
+	// not a silent success.
+	exhausted := true
 
-		if status == StatusDone || (status == StatusError && len(state.Transcript) > 0) {
-			gm.publishGroupComplete(mg)
-		}
-		close(mg.done)
-	}()
-
-	const maxIterations = 1000
-	for i := 0; i < maxIterations; i++ {
+	for i := 0; i < maxGroupIterations; i++ {
 		// Check context cancellation.
 		select {
 		case <-ctx.Done():
-			gm.mu.Lock()
-			if state.Status == StatusRunning {
-				state.Status = StatusStopped
-				state.UpdatedAt = time.Now()
-			}
-			gm.mu.Unlock()
+			gm.finalize(mg, StatusStopped, nil)
 			return
 		default:
 		}
@@ -81,23 +87,18 @@ func (gm *GroupManager) runGroup(ctx context.Context, mg *managedGroup) {
 		gm.mu.Unlock()
 		if stop {
 			log.Printf("group %s: stopped (%s)", state.ID, reason)
+			exhausted = false
 			break
 		}
 
 		// Ask the strategy who speaks next.
 		speakers, done, err := strategy.Next(state)
 		if err != nil {
-			gm.mu.Lock()
-			state.Status = StatusError
-			state.UpdatedAt = time.Now()
-			mg.err = err
-			gm.mu.Unlock()
-
-			agentIDs := gm.agentIDsLocked(mg)
-			gm.publishGroupStatus(mg, "error", agentIDs)
+			gm.finalize(mg, StatusError, err)
 			return
 		}
 		if done {
+			exhausted = false
 			break
 		}
 
@@ -113,43 +114,19 @@ func (gm *GroupManager) runGroup(ctx context.Context, mg *managedGroup) {
 			if err := gm.executeParallel(ctx, mg, speakers, layer); err != nil {
 				if ctx.Err() != nil {
 					// Context cancelled (Stop was called) — not a real error.
-					gm.mu.Lock()
-					if state.Status == StatusRunning {
-						state.Status = StatusStopped
-						state.UpdatedAt = time.Now()
-					}
-					gm.mu.Unlock()
+					gm.finalize(mg, StatusStopped, nil)
 					return
 				}
-				gm.mu.Lock()
-				state.Status = StatusError
-				state.UpdatedAt = time.Now()
-				mg.err = err
-				gm.mu.Unlock()
-
-				agentIDs := gm.agentIDsLocked(mg)
-				gm.publishGroupStatus(mg, "error", agentIDs)
+				gm.finalize(mg, StatusError, err)
 				return
 			}
 		} else {
 			if err := gm.executeSequential(ctx, mg, speakers, layer); err != nil {
 				if ctx.Err() != nil {
-					gm.mu.Lock()
-					if state.Status == StatusRunning {
-						state.Status = StatusStopped
-						state.UpdatedAt = time.Now()
-					}
-					gm.mu.Unlock()
+					gm.finalize(mg, StatusStopped, nil)
 					return
 				}
-				gm.mu.Lock()
-				state.Status = StatusError
-				state.UpdatedAt = time.Now()
-				mg.err = err
-				gm.mu.Unlock()
-
-				agentIDs := gm.agentIDsLocked(mg)
-				gm.publishGroupStatus(mg, "error", agentIDs)
+				gm.finalize(mg, StatusError, err)
 				return
 			}
 		}
@@ -157,26 +134,22 @@ func (gm *GroupManager) runGroup(ctx context.Context, mg *managedGroup) {
 		// Re-check context after batch.
 		select {
 		case <-ctx.Done():
-			gm.mu.Lock()
-			if state.Status == StatusRunning {
-				state.Status = StatusStopped
-				state.UpdatedAt = time.Now()
-			}
-			gm.mu.Unlock()
+			gm.finalize(mg, StatusStopped, nil)
 			return
 		default:
 		}
 	}
 
-	// If still running, mark done and compute synthesis.
-	gm.mu.Lock()
-	if state.Status == StatusRunning {
-		state.Status = StatusDone
-		state.UpdatedAt = time.Now()
+	if exhausted {
+		gm.finalize(mg, StatusError,
+			fmt.Errorf("group %s: iterations exhausted after %d loops without convergence",
+				state.ID, maxGroupIterations))
+		return
 	}
-	synthesis := gm.synthesisLocked(mg)
-	mg.result = synthesis
-	gm.mu.Unlock()
+
+	// Normal completion (strategy said done, or a convergence hard-stop fired).
+	// finalize computes the synthesis and publishes the terminal pair.
+	gm.finalize(mg, StatusDone, nil)
 }
 
 // executeSequential runs speakers one by one in order.
@@ -200,7 +173,18 @@ func (gm *GroupManager) executeParallel(ctx context.Context, mg *managedGroup, s
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, speaker := range speakers {
-		g.Go(func() error {
+		g.Go(func() (err error) {
+			// A panic in a worker goroutine cannot be recovered by runGroup
+			// (different goroutine) and would kill the process before any
+			// terminal signal was emitted. Convert it into an error so the run
+			// loop finalizes exactly once.
+			defer func() {
+				if r := recover(); r != nil {
+					stack := debug.Stack()
+					log.Printf("group %s: panic in parallel turn %s: %v\n%s", mg.state.ID, speaker, r, stack)
+					err = fmt.Errorf("group panic in turn %s: %v\n%s", speaker, r, stack)
+				}
+			}()
 			return gm.executeSpeaker(gctx, mg, speaker, layer)
 		})
 	}
@@ -213,29 +197,19 @@ func (gm *GroupManager) executeParallel(ctx context.Context, mg *managedGroup, s
 func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, speaker string, layer int) error {
 	agCtx, ok := gm.resolve(speaker)
 	if !ok {
-		log.Printf("group %s: speaker %q not resolved, skipping", mg.state.ID, speaker)
-		return nil // skip unknown speakers rather than error
+		// An unresolvable speaker is a turn error, not a skip. Skipping would
+		// leave the transcript untouched, so a strategy whose Next() is derived
+		// from the transcript (round_robin, moa, moderator) would re-request the
+		// same speaker on every iteration and burn the whole loop budget — up to
+		// maxGroupIterations iterations producing a single turn — before failing.
+		// Erroring here routes the group through finalize(StatusError) at once.
+		log.Printf("group %s: speaker %q not resolvable", mg.state.ID, speaker)
+		return fmt.Errorf("group %s: participant %q not resolvable", mg.state.ID, speaker)
 	}
 
-	gm.mu.Lock()
-	state := mg.state
-	p, _ := state.ParticipantByAgent(speaker)
-	self := Participant{
-		AgentID: speaker,
-		Role:    p.Role,
-		Label:   agCtx.Name,
-	}
-	if self.Label == "" {
-		self.Label = speaker
-	}
-
-	sysPrompt := BuildTurnSystemPrompt(agCtx.SystemPrompt, self, state.Participants, state.Task)
-	transcript := RenderTranscript(state.Transcript)
-	instruction := instructionFor(state, self, layer)
-	turnIndex := len(state.Transcript)
-	label := self.Label
-	currentLayer := layer
-	gm.mu.Unlock()
+	inputs := gm.prepareTurn(mg, speaker, layer, agCtx)
+	state := inputs.state
+	self := inputs.self
 
 	// Accumulate tool calls from OnToolCall callbacks during this turn.
 	var tcMu sync.Mutex
@@ -244,9 +218,9 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 	req := TurnRequest{
 		GroupID:       state.ID,
 		Speaker:       speaker,
-		SystemPrompt:  sysPrompt,
-		Transcript:    transcript,
-		Instruction:   instruction,
+		SystemPrompt:  inputs.sysPrompt,
+		Transcript:    inputs.transcript,
+		Instruction:   inputs.instruction,
 		MaxTokens:     state.MaxTokensPerTurn,
 		EnableTools:   true,
 		OriginChannel: mg.originCh,
@@ -260,9 +234,9 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 				Metadata: map[string]string{
 					"group_id":     mg.state.ID,
 					"speaker":      speaker,
-					"label":        label,
-					"layer":        strconv.Itoa(currentLayer),
-					"turn_index":   strconv.Itoa(turnIndex),
+					"label":        inputs.label,
+					"layer":        strconv.Itoa(layer),
+					"turn_index":   strconv.Itoa(inputs.turnIndex),
 					"tool_call_id": toolCallID,
 					"tool":         toolName,
 					"status":       status,
@@ -311,9 +285,32 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 		return fmt.Errorf("turn %s: %w", speaker, err)
 	}
 
+	turn, role := gm.recordTurn(state, self, speaker, layer, inputs.turnIndex, content, tokens, &tcMu, toolCalls)
+
+	// Publish group.turn event.
+	gm.publishTurn(mg, turn, role)
+
+	return nil
+}
+
+// recordTurn appends a turn to the transcript under gm.mu and returns it with
+// the speaker's role. The unlock is deferred so a panic while building the turn
+// cannot leave the manager mutex held, which would deadlock finalize and break
+// the terminal signal guarantee.
+//
+// turnIndex is the index reserved at turn start by prepareTurn. It is never
+// recomputed here from len(Transcript): under Parallel execution the append
+// order is the completion order, so a len-based index would collide between
+// concurrent turns and would not match the turn_index already advertised to
+// the client by group.tool events for this same turn. The turn keeps its
+// reserved Index even though its position in Transcript may differ (see the
+// comment on Turn.Index).
+func (gm *GroupManager) recordTurn(state *GroupState, self Participant, speaker string, layer, turnIndex int, content string, tokens int, tcMu *sync.Mutex, toolCalls []GroupToolCall) (Turn, string) {
 	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
 	turn := Turn{
-		Index:     len(state.Transcript),
+		Index:     turnIndex,
 		Layer:     layer,
 		Speaker:   speaker,
 		Label:     self.Label,
@@ -327,16 +324,86 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 	}
 	tcMu.Unlock()
 	state.AddTurn(turn)
-	role := self.Role
-	gm.mu.Unlock()
-
-	// Publish group.turn event.
-	gm.publishTurn(mg, turn, role)
-
-	return nil
+	return turn, self.Role
 }
 
-// synthesisLocked computes the final synthesis text. Caller must hold gm.mu.
+// turnInputs is the snapshot of per-turn request data computed under gm.mu.
+type turnInputs struct {
+	state       *GroupState
+	self        Participant
+	sysPrompt   string
+	transcript  string
+	instruction string
+	turnIndex   int
+	label       string
+}
+
+// prepareTurn reads the group state, reserves this turn's unique index, and
+// renders the turn request inputs under gm.mu. The unlock is deferred so a
+// panic inside the renderers cannot leave the manager mutex held (which would
+// deadlock finalize and break the terminal signal guarantee).
+//
+// Index reservation (B5 fix): the index is taken from state.NextTurnIndex at
+// turn START — before the speaker runs — instead of being derived from
+// len(Transcript) when the turn is appended. Under Parallel execution N
+// speakers run concurrently and append in completion order, so a
+// len-at-append calculation could hand the same index to two turns (the
+// transcript length only advances under the lock, but both turns read it
+// before either appended) and the client-visible index would depend on timing.
+// Reserving here guarantees every turn — and every group.tool event emitted
+// while it runs — carries a single, unique, stable index regardless of
+// completion order.
+func (gm *GroupManager) prepareTurn(mg *managedGroup, speaker string, layer int, agCtx AgentContext) turnInputs {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	state := mg.state
+	p, _ := state.ParticipantByAgent(speaker)
+	self := Participant{
+		AgentID: speaker,
+		Role:    p.Role,
+		Label:   agCtx.Name,
+	}
+	if self.Label == "" {
+		self.Label = speaker
+	}
+
+	// Reserve the index. Defensive re-base for states not built by Start (for
+	// example a snapshot rehydrated by a future resume path where the counter
+	// field is absent/zero but the transcript is not): the counter must never
+	// collide with an index already present in the transcript.
+	if state.NextTurnIndex < len(state.Transcript) {
+		state.NextTurnIndex = len(state.Transcript)
+	}
+	idx := state.NextTurnIndex
+	state.NextTurnIndex++
+
+	return turnInputs{
+		state:       state,
+		self:        self,
+		sysPrompt:   BuildTurnSystemPrompt(agCtx.SystemPrompt, self, state.Participants, state.Task),
+		transcript:  RenderTranscript(state.Transcript),
+		instruction: instructionFor(state, self, layer),
+		turnIndex:   idx,
+		label:       self.Label,
+	}
+}
+
+// unsynthesizedPrefix marks a MoA result that no aggregator ever produced.
+const unsynthesizedPrefix = "[unsynthesized: aggregator never spoke]\n"
+
+// synthesisLocked computes the final synthesis for a group. It must be called
+// with gm.mu held (it is only reached from finalize).
+//
+// For "moa" the synthesis is the aggregator's last turn. If the aggregator never
+// spoke, the fallback below would otherwise return the last *proposer's* turn and
+// present a raw proposal as if it were the synthesis. That is a mislabelled
+// result, not an error worth killing an otherwise healthy run for, so the text is
+// returned with an explicit marker instead of being hidden. GroupManager.Start now
+// rejects a moderator outside participants, which removes the main way to reach
+// this state; the marker stays as a safety net for states built elsewhere (for
+// example a persisted group rehydrated with a Moderator that has since been
+// removed from the registry).
 func (gm *GroupManager) synthesisLocked(mg *managedGroup) string {
 	state := mg.state
 	if len(state.Transcript) == 0 {
@@ -351,6 +418,9 @@ func (gm *GroupManager) synthesisLocked(mg *managedGroup) string {
 				return state.Transcript[i].Content
 			}
 		}
+		// The aggregator never spoke: flag the fallback rather than passing it
+		// off as a synthesis.
+		return unsynthesizedPrefix + state.Transcript[len(state.Transcript)-1].Content
 	}
 
 	return state.Transcript[len(state.Transcript)-1].Content

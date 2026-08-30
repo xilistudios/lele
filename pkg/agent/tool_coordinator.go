@@ -561,13 +561,8 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 	// Group collaboration tool (Mixture of Agents): lets this agent delegate a
 	// problem to a multi-agent panel. Uses the shared GroupManager.
-	if groupManager != nil {
-		groupChatTool := tools.NewGroupChatTool(groupManager)
-		groupChatTool.SetAllowlistChecker(func(targetAgentID string) bool {
-			return registry.CanSpawnSubagent(currentAgentID, targetAgentID)
-		})
-		agent.Tools.Register(groupChatTool)
-	}
+	// Registration is gated by cfg.Groups.Enabled (B10) — see syncGroupChatTool.
+	syncGroupChatTool(agent, cfg, registry, currentAgentID, groupManager)
 
 	// Subagents get all tools except send_file (user-facing) and the
 	// subagent-management tools (prevent recursive wait/list overhead),
@@ -610,6 +605,27 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	return subagentManager
 }
 
+// syncGroupChatTool is the registration-time enforcement point for the groups
+// feature gate (B10). group_chat is only present in an agent's toolset while
+// cfg.Groups.Enabled is true; when the feature is off the tool is removed (if
+// present) so no agent can invoke groups the user never activated. It is called
+// both on first registration and on every reload, keeping toolsets consistent
+// when the flag is toggled at runtime.
+func syncGroupChatTool(agent *AgentInstance, cfg *config.Config, registry *AgentRegistry, agentID string, groupManager *group.GroupManager) {
+	if !cfg.GroupsFeatureEnabled() || groupManager == nil {
+		agent.Tools.Unregister("group_chat")
+		return
+	}
+	if _, exists := agent.Tools.Get("group_chat"); exists {
+		return // already registered with the same manager
+	}
+	groupChatTool := tools.NewGroupChatTool(groupManager)
+	groupChatTool.SetAllowlistChecker(func(targetAgentID string) bool {
+		return registry.CanSpawnSubagent(agentID, targetAgentID)
+	})
+	agent.Tools.Register(groupChatTool)
+}
+
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn, group_chat).
 // Each agent uses its own provider for subagent spawning.
 func registerSharedTools(cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) (map[string]*tools.SubagentManager, map[string]*tools.BackgroundProcessManager) {
@@ -636,6 +652,10 @@ func updateSharedToolsForAgent(cfg *config.Config, msgBus *bus.MessageBus, regis
 
 	// Check if spawn is already registered
 	if _, hasSpawn := agent.Tools.Get("spawn"); hasSpawn {
+		// Even when shared tools are already registered, re-sync the gated
+		// group_chat tool so toggling cfg.Groups.Enabled takes effect on
+		// reload without re-registering everything else (B10).
+		syncGroupChatTool(agent, cfg, registry, agentID, groupManager)
 		// Already has shared tools, return existing subagent manager if present
 		if existingSm, ok := existingSubagents[agentID]; ok {
 			return existingSm

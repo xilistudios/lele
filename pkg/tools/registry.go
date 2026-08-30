@@ -28,6 +28,15 @@ func (r *ToolRegistry) Register(tool Tool) {
 	r.tools[tool.Name()] = tool
 }
 
+// Unregister removes the tool with the given name from the registry.
+// It is a no-op if no such tool is registered. Used to keep per-feature
+// tools (e.g. group_chat) in sync with configuration on reload.
+func (r *ToolRegistry) Unregister(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.tools, name)
+}
+
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
