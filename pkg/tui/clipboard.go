@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"encoding/base64"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // copyLastAssistantMessage copies the last assistant message content to the
@@ -43,35 +45,35 @@ func copyToClipboard(text string) {
 	// Also try platform utilities as a fallback / for terminals that don't
 	// support OSC 52. Run in a goroutine so it doesn't block the UI.
 	go func() {
+		// Each utility gets a short timeout so a hanging tool (e.g. xclip
+		// without an X display) can't block this goroutine forever.
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
 		// Try xclip (X11)
-		if cmd := exec.Command("xclip", "-selection", "clipboard"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			if cmd.Run() == nil {
-				return
-			}
+		if runClipboardCmd(ctx, text, "xclip", "-selection", "clipboard") {
+			return
 		}
 		// Try xsel (X11 alternative)
-		if cmd := exec.Command("xsel", "--clipboard", "--input"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			if cmd.Run() == nil {
-				return
-			}
+		if runClipboardCmd(ctx, text, "xsel", "--clipboard", "--input") {
+			return
 		}
 		// Try wl-copy (Wayland)
-		if cmd := exec.Command("wl-copy"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			if cmd.Run() == nil {
-				return
-			}
+		if runClipboardCmd(ctx, text, "wl-copy") {
+			return
 		}
 		// Try pbcopy (macOS)
-		if cmd := exec.Command("pbcopy"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			if cmd.Run() == nil {
-				return
-			}
-		}
+		runClipboardCmd(ctx, text, "pbcopy")
 	}()
+}
+
+// runClipboardCmd runs a clipboard utility with the given arguments, feeding
+// text via stdin. It reports whether the command succeeded (including whether
+// it was found on PATH).
+func runClipboardCmd(ctx context.Context, text, name string, args ...string) bool {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run() == nil
 }
 
 // buildOSC52 constructs an OSC 52 escape sequence for copying text to the

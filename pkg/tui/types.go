@@ -396,6 +396,10 @@ type Model struct {
 	streamThrottleInterval time.Duration
 	streamRenderedLines    []string
 	thinkingRenderedLines  []string
+	// Width the stream/thinking line caches were rendered for. When the
+	// terminal width changes, the caches must be invalidated and rebuilt.
+	streamRenderCacheWidth   int
+	thinkingRenderCacheWidth int
 	// Accumulated joined string of completed rendered lines. Avoids O(n²)
 	// strings.Join on every streaming chunk — new lines are appended in O(1).
 	streamRenderedJoined   string

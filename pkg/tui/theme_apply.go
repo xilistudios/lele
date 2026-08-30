@@ -82,4 +82,13 @@ func (m *Model) invalidateRenderCache() {
 	m.msgRenderCacheWidth = 0
 	m.renderedBaseValid = false
 	m.renderedBaseKey = ""
+	// Stream/thinking line caches hold rendered lines with ANSI colors from
+	// the previous theme; clear them so active streams re-render with the
+	// new palette instead of leaving stale colors on screen.
+	m.streamRenderedLines = nil
+	m.thinkingRenderedLines = nil
+	m.streamRenderedJoined = ""
+	m.thinkingRenderedJoined = ""
+	m.streamRenderCacheWidth = 0
+	m.thinkingRenderCacheWidth = 0
 }
