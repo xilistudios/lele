@@ -42,6 +42,10 @@ func (m *Model) loadSecrets() {
 		m.modalItems = append(m.modalItems, formatSecretLine(s))
 		m.secretsModalKeys = append(m.secretsModalKeys, s.Name)
 	}
+
+	// The list may have shrunk (e.g. a secret was deleted while the cursor was
+	// on the last row) — keep the cursor within bounds.
+	m.clampModalCursor()
 }
 
 // formatSecretLine renders a single secret as a compact list line.

@@ -342,6 +342,9 @@ func (m *Model) handleSkillDeleteResult(msg skillDeleteResultMsg) tea.Cmd {
 		m.skillsFeedback = fmt.Sprintf("Removed: %s", msg.skillName)
 	}
 	m.loadSkillsList()
+	// The list may have shrunk after the delete — keep the cursor within
+	// bounds so the next Enter cannot index past the end.
+	m.clampModalCursor()
 	return m.tickCmd()
 }
 

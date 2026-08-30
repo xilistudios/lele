@@ -36,6 +36,10 @@ func (m *Model) loadCronJobs() {
 		m.modalItems = append(m.modalItems, formatCronJobLine(j))
 		m.cronModalKeys = append(m.cronModalKeys, j.ID)
 	}
+
+	// The list may have shrunk (e.g. a job was deleted while the cursor was on
+	// the last row) — keep the cursor within bounds.
+	m.clampModalCursor()
 }
 
 // formatCronJobLine renders a single cron job as a compact list line.
