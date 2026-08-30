@@ -447,6 +447,8 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 			"delay": currentDelay.String(),
 		})
 
+		c.sweepOrphanedTurnState("bot handler stopped unexpectedly")
+
 		// Clean up before reconnect
 		if cancel != nil {
 			cancel()
@@ -466,6 +468,8 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 
 	c.setRunning(false)
 
+	c.sweepOrphanedTurnState("channel stopping")
+
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -474,6 +478,74 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// sweepOrphanedTurnState clears the per-turn UI state that can no longer be
+// reported by its owner: typing indicator loops and "Thinking..." placeholders.
+//
+// It is called whenever the update-processing path is torn down — explicit
+// Stop, or a BotHandler that died and is about to reconnect — because the
+// turns that started that state will never emit their terminal turn.end again.
+//
+// reason is only for the log line.
+func (c *TelegramChannel) sweepOrphanedTurnState(reason string) {
+	stopped := countMapEntries(&c.stopThinking)
+	placeholders := countMapEntries(&c.placeholders)
+	if stopped == 0 && placeholders == 0 {
+		return
+	}
+
+	c.stopAllThinking()
+	c.clearAllPlaceholders()
+
+	logger.WarnCF("telegram", "Swept orphaned turn state", map[string]interface{}{
+		"reason":          reason,
+		"typing_loops":    stopped,
+		"thinking_bubble": placeholders,
+	})
+}
+
+func countMapEntries(m *sync.Map) int {
+	n := 0
+	m.Range(func(_, _ interface{}) bool { n++; return true })
+	return n
+}
+
+// stopAllThinking cancels every running typing-indicator loop, not just the
+// ones belonging to a single chat. Used on shutdown and before a reconnect,
+// when the turns that owned them are gone.
+func (c *TelegramChannel) stopAllThinking() {
+	c.stopThinking.Range(func(key, value interface{}) bool {
+		if cf, ok := value.(*thinkingCancel); ok && cf != nil {
+			cf.Cancel()
+		}
+		c.stopThinking.Delete(key)
+		return true
+	})
+}
+
+// clearAllPlaceholders deletes every pending "Thinking... 💭" placeholder.
+// Best-effort: an individual delete failure only logs, and each entry is
+// removed from the map regardless so a stale placeholder can never be edited
+// into a later, unrelated turn.
+func (c *TelegramChannel) clearAllPlaceholders() {
+	if c.config == nil {
+		return
+	}
+	c.placeholders.Range(func(key, value interface{}) bool {
+		chatKey, isStr := key.(string)
+		id, isInt := value.(int)
+		if isStr && isInt {
+			chatID, err := parseChatID(chatKey)
+			if err == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				c.deleteMessage(ctx, chatID, id)
+				cancel()
+			}
+		}
+		c.placeholders.Delete(key)
+		return true
+	})
 }
 
 // isDuplicate checks if a message has already been processed
