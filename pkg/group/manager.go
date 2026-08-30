@@ -122,6 +122,25 @@ func (gm *GroupManager) Start(
 		agentIDs = append(agentIDs, p.AgentID)
 	}
 
+	// A moderator/aggregator that is not among the participants could never
+	// speak, so the strategies that rely on it would silently degrade: MoA
+	// falls back to participants[0] as its aggregator and returns the last
+	// proposer's raw turn as the "synthesis". config.GroupProfile.Validate()
+	// already enforces this rule for profiles; enforce it here as well so the
+	// ad-hoc paths (group_chat tool, /group start) get the same guarantee.
+	if opts.Moderator != "" {
+		found := false
+		for _, p := range participants {
+			if p.AgentID == opts.Moderator {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", fmt.Errorf("group start: moderator %q is not in participants list", opts.Moderator)
+		}
+	}
+
 	now := time.Now()
 
 	// Derive limits: apply defaults and enforce the hard ceiling.

@@ -197,8 +197,14 @@ func (gm *GroupManager) executeParallel(ctx context.Context, mg *managedGroup, s
 func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, speaker string, layer int) error {
 	agCtx, ok := gm.resolve(speaker)
 	if !ok {
-		log.Printf("group %s: speaker %q not resolved, skipping", mg.state.ID, speaker)
-		return nil // skip unknown speakers rather than error
+		// An unresolvable speaker is a turn error, not a skip. Skipping would
+		// leave the transcript untouched, so a strategy whose Next() is derived
+		// from the transcript (round_robin, moa, moderator) would re-request the
+		// same speaker on every iteration and burn the whole loop budget — up to
+		// maxGroupIterations iterations producing a single turn — before failing.
+		// Erroring here routes the group through finalize(StatusError) at once.
+		log.Printf("group %s: speaker %q not resolvable", mg.state.ID, speaker)
+		return fmt.Errorf("group %s: participant %q not resolvable", mg.state.ID, speaker)
 	}
 
 	inputs := gm.prepareTurn(mg, speaker, layer, agCtx)
@@ -353,6 +359,22 @@ func (gm *GroupManager) prepareTurn(mg *managedGroup, speaker string, layer int,
 		label:       self.Label,
 	}
 }
+
+// unsynthesizedPrefix marks a MoA result that no aggregator ever produced.
+const unsynthesizedPrefix = "[unsynthesized: aggregator never spoke]\n"
+
+// synthesisLocked computes the final synthesis for a group. It must be called
+// with gm.mu held (it is only reached from finalize).
+//
+// For "moa" the synthesis is the aggregator's last turn. If the aggregator never
+// spoke, the fallback below would otherwise return the last *proposer's* turn and
+// present a raw proposal as if it were the synthesis. That is a mislabelled
+// result, not an error worth killing an otherwise healthy run for, so the text is
+// returned with an explicit marker instead of being hidden. GroupManager.Start now
+// rejects a moderator outside participants, which removes the main way to reach
+// this state; the marker stays as a safety net for states built elsewhere (for
+// example a persisted group rehydrated with a Moderator that has since been
+// removed from the registry).
 func (gm *GroupManager) synthesisLocked(mg *managedGroup) string {
 	state := mg.state
 	if len(state.Transcript) == 0 {
@@ -367,6 +389,9 @@ func (gm *GroupManager) synthesisLocked(mg *managedGroup) string {
 				return state.Transcript[i].Content
 			}
 		}
+		// The aggregator never spoke: flag the fallback rather than passing it
+		// off as a synthesis.
+		return unsynthesizedPrefix + state.Transcript[len(state.Transcript)-1].Content
 	}
 
 	return state.Transcript[len(state.Transcript)-1].Content
