@@ -38,7 +38,7 @@ export function useBackgroundExecs() {
       }
     }, 3000)
     return () => clearInterval(id)
-  }, [fetchProcesses])
+  }, [fetchProcesses, processes])
 
   const stopProcess = useCallback(
     async (id: string) => {

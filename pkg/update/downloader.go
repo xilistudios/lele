@@ -290,7 +290,9 @@ func extractFromTarGz(archivePath, outDir, binaryName string) (string, error) {
 			out.Close()
 			return "", err
 		}
-		out.Close()
+		if err := out.Close(); err != nil {
+			return "", fmt.Errorf("closing extracted binary: %w", err)
+		}
 		return dst, nil
 	}
 	return "", fmt.Errorf("binary %q not found in archive", binaryName)
@@ -319,9 +321,12 @@ func extractFromZip(archivePath, outDir, binaryName string) (string, error) {
 		}
 		_, err = io.Copy(out, src)
 		src.Close()
-		out.Close()
 		if err != nil {
+			out.Close()
 			return "", err
+		}
+		if err := out.Close(); err != nil {
+			return "", fmt.Errorf("closing extracted binary: %w", err)
 		}
 		return dst, nil
 	}

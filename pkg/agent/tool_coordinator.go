@@ -396,6 +396,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 
 	// File tool
 	sendFileTool := tools.NewSendFileTool()
+	sendFileTool.SetWorkspaceRestrictions(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace)
 	sendFileTool.SetSendCallback(func(channel, chatID string, payload tools.SendFilePayload) error {
 		msgBus.PublishOutbound(bus.OutboundMessage{
 			Channel:     channel,

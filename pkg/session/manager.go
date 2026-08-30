@@ -297,8 +297,8 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 }
 
 // touchSession updates the last access time for a session.
-// Caller must hold at least sm.mu (read lock is fine for map write
-// since accessTimes is only used under the write path of evictIfNeeded).
+// Caller MUST hold sm.mu (write lock). Writing to the accessTimes map
+// requires exclusive access — a read lock is NOT sufficient.
 func (sm *SessionManager) touchSession(key string) {
 	sm.accessTimes[key] = time.Now()
 }
@@ -622,10 +622,10 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 	return history
 }
 
-// GetHistoryView returns a read-only reference to the session's message slice.
-// The caller MUST NOT modify the returned slice or any messages in it.
-// This avoids a copy when the caller only needs to read the messages
-// (e.g., token estimation, status display).
+// GetHistoryView returns a defensive copy of the session's message slice.
+// The returned slice is safe to read without holding the session lock and
+// will not be affected by concurrent AppendAssistantChunk/AddFullMessage
+// calls. The caller MUST NOT modify the returned slice or any messages in it.
 // For external use where the caller may modify, use GetHistory instead.
 func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	sm.ensureLoaded()
@@ -635,12 +635,16 @@ func (sm *SessionManager) GetHistoryView(key string) []providers.Message {
 	// Try in-memory first
 	if session, ok := sm.sessions[key]; ok {
 		sm.touchSession(key)
-		return session.Messages
+		view := make([]providers.Message, len(session.Messages))
+		copy(view, session.Messages)
+		return view
 	}
 	// Try loading from disk
 	if session, ok := sm.loadSessionFromDisk(key); ok {
 		sm.touchSession(key)
-		return session.Messages
+		view := make([]providers.Message, len(session.Messages))
+		copy(view, session.Messages)
+		return view
 	}
 	return []providers.Message{}
 }
@@ -684,12 +688,13 @@ func (sm *SessionManager) HasMessages(key string) bool {
 	}
 	sm.ensureLoaded()
 	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	if session, ok := sm.sessions[key]; ok {
-		sm.mu.RUnlock()
 		return len(session.Messages) > 0 || session.evictedTotal > 0
 	}
-	sm.mu.RUnlock()
 	// Cold session (metadata only): query the store count without materializing.
+	// Safe under RLock: SessionRepo.MessageCount only touches the SQLite
+	// connection (database/sql is goroutine-safe) and never acquires sm.mu.
 	if sm.store != nil {
 		if n, err := sm.store.Sessions().MessageCount(key); err == nil {
 			return n > 0

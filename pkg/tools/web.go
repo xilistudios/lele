@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -436,7 +437,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 }
 
 type WebFetchTool struct {
-	maxChars int
+	maxChars     int
+	allowPrivate bool // test-only escape hatch for httptest servers on loopback
 }
 
 func NewWebFetchTool(maxChars int) *WebFetchTool {
@@ -491,6 +493,17 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 
 	if parsedURL.Host == "" {
 		return ErrorResult("missing domain in URL")
+	}
+
+	host := parsedURL.Hostname()
+	if !t.allowPrivate {
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsPrivate() {
+				return ErrorResult("access denied: requests to private, loopback or link-local addresses are not allowed")
+			}
+		} else if host == "localhost" || host == "0.0.0.0" || strings.HasPrefix(host, "127.") || strings.EqualFold(host, "::1") {
+			return ErrorResult("access denied: requests to localhost are not allowed")
+		}
 	}
 
 	maxChars := t.maxChars
