@@ -46,6 +46,20 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 
 	includeCompleted, _ := args["include_completed"].(bool)
 
+	// Scope to the invoking session when the session key is available in the
+	// tool context. Subagent tasks record the session that spawned them in
+	// OriginSessionKey, so we only surface tasks belonging to the caller.
+	// The agent loop injects the session key via WithAgentToolContext; the
+	// subagent toolloop only provides channel/chatID (where chatID doubles as
+	// the full subagent session key), so fall back to that. When neither is
+	// available (e.g. bare CLI invocations), list all tasks.
+	_, currentSessionKey := AgentToolContextFromCtx(ctx)
+	if currentSessionKey == "" {
+		if _, chatID := ToolContextFromCtx(ctx); chatID != "" && strings.Contains(chatID, ":") {
+			currentSessionKey = chatID
+		}
+	}
+
 	allTasks := t.manager.ListTasks()
 	if len(allTasks) == 0 {
 		return SilentResult("No subagent tasks found.")
@@ -53,6 +67,9 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 
 	var filtered []*SubagentTask
 	for _, task := range allTasks {
+		if currentSessionKey != "" && !sameSessionKey(task.OriginSessionKey, currentSessionKey) {
+			continue
+		}
 		if includeCompleted {
 			filtered = append(filtered, task)
 			continue
@@ -64,7 +81,13 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 
 	if len(filtered) == 0 {
 		if includeCompleted {
+			if currentSessionKey != "" {
+				return SilentResult("No subagent tasks found for this session. Set include_completed=true to also see finished tasks (already included).")
+			}
 			return SilentResult("No subagent tasks found.")
+		}
+		if currentSessionKey != "" {
+			return SilentResult("No active subagents in this session. Set include_completed=true to see finished tasks.")
 		}
 		return SilentResult("No active subagents. All tasks have completed. Set include_completed=true to see finished tasks.")
 	}
@@ -107,4 +130,22 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 	lines = append(lines, fmt.Sprintf("\nTotal: %d task(s)", len(filtered)))
 
 	return SilentResult(strings.Join(lines, "\n"))
+}
+
+// sameSessionKey reports whether a task's origin session key refers to the
+// given session key. OriginSessionKey is stored as "<channel>:<chatID>" (or
+// the chatID itself when it already embeds the channel prefix). The invoking
+// session key may carry extra suffixes (e.g. "native:<chatID>:subagent-N" for
+// subagent sessions), so we compare on the resolved base key: the invoking
+// key must either equal the origin key or start with "<originKey>:".
+func sameSessionKey(originSessionKey, sessionKey string) bool {
+	if originSessionKey == "" || sessionKey == "" {
+		return false
+	}
+	if originSessionKey == sessionKey {
+		return true
+	}
+	// The invoking session is a subagent/cron-spawn child of the origin
+	// session: "origin:subagent-N". Match by prefix on the origin key.
+	return strings.HasPrefix(sessionKey, originSessionKey+":")
 }

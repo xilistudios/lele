@@ -175,3 +175,116 @@ func TestListSubagentsTool_NeedsContextShown(t *testing.T) {
 		t.Errorf("Expected context request in list, got: %s", result.ForLLM)
 	}
 }
+
+func TestListSubagentsTool_SessionScoping(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 3)
+
+	// Spawn tasks from two different sessions.
+	_, err := manager.Spawn(context.Background(), "Task A", "alpha", "", "native", "session-A",
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn A failed: %v", err)
+	}
+	_, err = manager.Spawn(context.Background(), "Task B", "beta", "", "native", "session-B",
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn B failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+
+	// Without session context: all tasks visible (backwards compatibility).
+	result := tool.Execute(context.Background(), map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-1") || !strings.Contains(result.ForLLM, "subagent-2") {
+		t.Errorf("Expected both tasks without session context, got: %s", result.ForLLM)
+	}
+
+	// With session A context: only task A visible.
+	ctxA := WithAgentToolContext(context.Background(), "test-agent", "native:session-A")
+	result = tool.Execute(ctxA, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected task A with session A context, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "subagent-2") {
+		t.Errorf("Task B from another session should be hidden, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "Total: 1") {
+		t.Errorf("Expected 'Total: 1 task(s)' with session scoping, got: %s", result.ForLLM)
+	}
+
+	// With session B context: only task B visible.
+	ctxB := WithAgentToolContext(context.Background(), "test-agent", "native:session-B")
+	result = tool.Execute(ctxB, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-2") {
+		t.Errorf("Expected task B with session B context, got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Task A from another session should be hidden, got: %s", result.ForLLM)
+	}
+
+	// From an unrelated session: no tasks.
+	ctxC := WithAgentToolContext(context.Background(), "test-agent", "native:session-C")
+	result = tool.Execute(ctxC, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "No active subagents in this session") {
+		t.Errorf("Expected session-scoped empty message, got: %s", result.ForLLM)
+	}
+
+	// A subagent child session (native:session-A:subagent-1) should still see
+	// tasks of its origin session.
+	ctxChild := WithAgentToolContext(context.Background(), "test-agent", "native:session-A:subagent-1")
+	result = tool.Execute(ctxChild, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected child session to see origin session tasks, got: %s", result.ForLLM)
+	}
+
+	// Wait for tasks to complete.
+	<-resultCh
+	<-resultCh
+}
+
+func TestListSubagentsTool_SessionScopingViaChatIDFallback(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 2)
+
+	_, err := manager.Spawn(context.Background(), "Task A", "alpha", "", "native", "session-A",
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn A failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+
+	// Subagent toolloop passes channel/chatID but no agent context; chatID
+	// carries the full subagent session key.
+	ctx := WithToolContext(context.Background(), "native", "native:session-A:subagent-1")
+	result := tool.Execute(ctx, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected chatID fallback to scope to session A, got: %s", result.ForLLM)
+	}
+
+	<-resultCh
+}
+
+func TestSameSessionKey(t *testing.T) {
+	cases := []struct {
+		origin, session string
+		want            bool
+	}{
+		{"native:abc", "native:abc", true},
+		{"native:abc", "native:abc:subagent-1", true},  // child subagent session
+		{"native:abc", "native:abc:cron-1:subagent-2", true},
+		{"native:abc", "native:abd", false},
+		{"native:abc", "", false},
+		{"", "native:abc", false},
+		{"native:abc:subagent-1", "native:abc", false}, // origin is more specific
+		{"telegram:123", "telegram:123", true},
+	}
+	for _, tc := range cases {
+		if got := sameSessionKey(tc.origin, tc.session); got != tc.want {
+			t.Errorf("sameSessionKey(%q, %q) = %v, want %v", tc.origin, tc.session, got, tc.want)
+		}
+	}
+}
