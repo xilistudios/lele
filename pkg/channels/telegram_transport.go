@@ -251,17 +251,19 @@ func (c *TelegramChannel) ConsumesEvent(event string) bool {
 }
 
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
-	if !c.IsRunning() {
-		return fmt.Errorf("telegram bot not running")
-	}
-
 	// turn.end: the agent loop's guaranteed terminal signal for a turn. It is
-	// not content — it only asks for the transient "the bot is working" state
-	// to go away. Idempotent by design: the final message of a successful turn
-	// already stopped the indicator and resolved the placeholder on its way
-	// out, so this normally finds nothing to clean and sends nothing to
-	// Telegram. Handled before chat-ID parsing and rate limiting because
-	// cleanup must not depend on them.
+	// a cleanup signal, not content, so it is handled FIRST — before the
+	// running guard, chat-ID parsing and rate limiting: cleanup must not
+	// depend on any of them.
+	//
+	// Processing it even when the channel is already stopped is safe and
+	// desirable. Stop() sweeps typing state and placeholders on its way out,
+	// so finishTurn normally finds nothing to do and is an idempotent no-op
+	// that sends nothing to Telegram; and when the sweep did not catch this
+	// turn, this is precisely the last chance to clean it up. Rejecting the
+	// signal instead would leave the state behind AND log a misleading
+	// "Error sending message to channel" during shutdown. The call itself
+	// cannot fail loudly: deleteMessage is best-effort (debug log, no error).
 	if msg.Event == "turn.end" {
 		// metadata["message_id"] carries the originating user message id, so
 		// the exact "<chat>:<msg>" indicator key can be cancelled directly.
@@ -271,6 +273,10 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		}
 		c.finishTurn(msg.ChatID, turnMsgID)
 		return nil
+	}
+
+	if !c.IsRunning() {
+		return fmt.Errorf("telegram bot not running")
 	}
 
 	chatID, err := parseChatID(msg.ChatID)

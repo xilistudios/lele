@@ -447,7 +447,11 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 			"delay": currentDelay.String(),
 		})
 
-		c.sweepOrphanedTurnState("bot handler stopped unexpectedly")
+		// Handler died and its turns are gone: sweep the orphaned typing state.
+		// context.Background() is deliberate — there is no request-scoped ctx
+		// here, and the reconnect must not be gated by the parent lifetime;
+		// clearAllPlaceholders caps the work at placeholderSweepDeadline.
+		c.sweepOrphanedTurnState(context.Background(), "bot handler stopped unexpectedly")
 
 		// Clean up before reconnect
 		if cancel != nil {
@@ -468,7 +472,10 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 
 	c.setRunning(false)
 
-	c.sweepOrphanedTurnState("channel stopping")
+	// The caller's ctx is the parent so an already-cancelled/short-deadline
+	// shutdown cannot be prolonged by the sweep (the deadline cap keeps the
+	// reverse from happening too: the sweep never blocks for N timeouts).
+	c.sweepOrphanedTurnState(ctx, "channel stopping")
 
 	if c.cancel != nil {
 		c.cancel()
@@ -487,8 +494,10 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 // Stop, or a BotHandler that died and is about to reconnect — because the
 // turns that started that state will never emit their terminal turn.end again.
 //
-// reason is only for the log line.
-func (c *TelegramChannel) sweepOrphanedTurnState(reason string) {
+// ctx bounds the whole sweep: placeholder deletes are network calls, so without
+// a shared deadline Stop() could block for (number of placeholders × per-call
+// timeout). reason is only for the log line.
+func (c *TelegramChannel) sweepOrphanedTurnState(ctx context.Context, reason string) {
 	stopped := countMapEntries(&c.stopThinking)
 	placeholders := countMapEntries(&c.placeholders)
 	if stopped == 0 && placeholders == 0 {
@@ -496,7 +505,7 @@ func (c *TelegramChannel) sweepOrphanedTurnState(reason string) {
 	}
 
 	c.stopAllThinking()
-	c.clearAllPlaceholders()
+	c.clearAllPlaceholders(ctx)
 
 	logger.WarnCF("telegram", "Swept orphaned turn state", map[string]interface{}{
 		"reason":          reason,
@@ -524,23 +533,35 @@ func (c *TelegramChannel) stopAllThinking() {
 	})
 }
 
+// placeholderSweepDeadline caps the total wall time of a placeholder sweep,
+// independently of how many placeholders are pending. Once it expires the
+// remaining deletes fail fast on the context, but the entries are still
+// dropped from the map — the sweep's real job is forgetting state, the API
+// call is only a courtesy to the user's chat.
+const placeholderSweepDeadline = 5 * time.Second
+
 // clearAllPlaceholders deletes every pending "Thinking... 💭" placeholder.
 // Best-effort: an individual delete failure only logs, and each entry is
 // removed from the map regardless so a stale placeholder can never be edited
 // into a later, unrelated turn.
-func (c *TelegramChannel) clearAllPlaceholders() {
+//
+// ctx bounds the sweep as a whole: all deletes share ONE deadline derived
+// from it (placeholderSweepDeadline at most), so degraded networking cannot
+// turn shutdown into N sequential timeouts.
+func (c *TelegramChannel) clearAllPlaceholders(ctx context.Context) {
 	if c.config == nil {
 		return
 	}
+	deadline, cancel := context.WithTimeout(ctx, placeholderSweepDeadline)
+	defer cancel()
+
 	c.placeholders.Range(func(key, value interface{}) bool {
 		chatKey, isStr := key.(string)
 		id, isInt := value.(int)
 		if isStr && isInt {
 			chatID, err := parseChatID(chatKey)
 			if err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				c.deleteMessage(ctx, chatID, id)
-				cancel()
+				c.deleteMessage(deadline, chatID, id)
 			}
 		}
 		c.placeholders.Delete(key)
