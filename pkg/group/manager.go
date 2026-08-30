@@ -24,6 +24,15 @@ const DefaultGroupRounds = 2
 // MaxTurns is capped to this ceiling.
 const MaxGroupTurnsCeiling = 50
 
+// DefaultGroupRetention is how long a finished group (done | stopped | error)
+// stays tracked by the GroupManager after it terminated. While retained it is
+// still visible to List/Status/AllSnapshots, which is what lets the WebUI
+// welcome payload and "/group status <id>" show the group that just ended.
+// After the retention window elapses the group — together with its full
+// transcript — is dropped from memory (B6: without this the map grew for the
+// whole process lifetime).
+const DefaultGroupRetention = 30 * time.Minute
+
 // GroupOptions holds runtime limits for a group session.
 type GroupOptions struct {
 	Rounds           int      // MoA layers / round_robin cycles; 0 = unlimited
@@ -44,6 +53,7 @@ type managedGroup struct {
 	result     string        // final synthesis (set on completion)
 	done       chan struct{} // closed when the group finishes
 	err        error
+	finishedAt time.Time // when the group reached a terminal status (zero while running)
 
 	// finalizeOnce guards the single terminal signal pair (group.status +
 	// group.complete) and the close of done, so no exit path can emit twice.
@@ -60,6 +70,7 @@ type GroupManager struct {
 	moderatorDecider ModeratorDecider // optional; nil → defaultModeratorDecider
 	storeDir         string           // persistence directory; empty = no persistence
 	enabled          func() bool      // optional feature gate; nil → always allowed
+	retention        time.Duration    // how long finished groups stay tracked; 0 → DefaultGroupRetention
 }
 
 // NewGroupManager creates a GroupManager with the given injected dependencies.
@@ -94,6 +105,64 @@ func (gm *GroupManager) SetModeratorDecider(d ModeratorDecider) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 	gm.moderatorDecider = d
+}
+
+// SetRetention overrides how long a finished group stays tracked before the
+// lazy sweeper drops it (see DefaultGroupRetention). Values <= 0 restore the
+// default. It exists mainly so tests can exercise eviction without waiting 30
+// minutes; call it before starting groups.
+func (gm *GroupManager) SetRetention(d time.Duration) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+	gm.retention = d
+}
+
+// retentionLocked returns the effective retention window. gm.mu must be held.
+func (gm *GroupManager) retentionLocked() time.Duration {
+	if gm.retention > 0 {
+		return gm.retention
+	}
+	return DefaultGroupRetention
+}
+
+// isTerminalGroupStatus reports whether a group status ends the group's life
+// cycle (done | stopped | error).
+func isTerminalGroupStatus(status string) bool {
+	return status == StatusDone || status == StatusStopped || status == StatusError
+}
+
+// evictExpiredLocked drops finished groups whose retention window has elapsed.
+// gm.mu must be held by the caller; now is injected so the rule stays testable.
+//
+// It is deliberately called lazily from the read paths (Start/Status/List/
+// AllSnapshots) instead of running a permanent sweeper goroutine: the only
+// consumers of the map are those reads, so an expired group can never be
+// observed after eviction, and a manager that is never queried holds no extra
+// goroutine or timer.
+func (gm *GroupManager) evictExpiredLocked(now time.Time) {
+	if len(gm.groups) == 0 {
+		return
+	}
+	retention := gm.retentionLocked()
+	for id, mg := range gm.groups {
+		if !isTerminalGroupStatus(mg.state.Status) {
+			continue
+		}
+		if mg.finishedAt.IsZero() || now.Before(mg.finishedAt.Add(retention)) {
+			continue
+		}
+		// Belt and braces: finalize stamps finishedAt before it closes done (it
+		// publishes the terminal pair in between), so a group can be terminal and
+		// expired yet still mid-finalize if publishing is slow. Never drop it
+		// before done is closed — that would make a concurrent Wait report
+		// "evicted" for a group whose result is still being computed.
+		select {
+		case <-mg.done:
+		default:
+			continue
+		}
+		delete(gm.groups, id)
+	}
 }
 
 // SetEnabledHook installs a feature-gate predicate consulted by Start. When
@@ -233,6 +302,10 @@ func (gm *GroupManager) Start(
 	}
 
 	gm.mu.Lock()
+	// Lazy sweep (B6): before admitting a new group, drop finished groups whose
+	// retention window has elapsed. Start is the write path, so this also bounds
+	// the map for long-lived processes that read it rarely.
+	gm.evictExpiredLocked(now)
 	if _, exists := gm.groups[groupID]; exists {
 		gm.mu.Unlock()
 		cancel()
@@ -278,6 +351,11 @@ func (gm *GroupManager) finalize(mg *managedGroup, status string, err error) {
 		if status == StatusStopped || status == StatusError || status == StatusDone {
 			mg.state.Status = status
 			mg.state.UpdatedAt = time.Now()
+			// Stamp the terminal instant once; it anchors the retention window
+			// evaluated by evictExpiredLocked.
+			if mg.finishedAt.IsZero() {
+				mg.finishedAt = mg.state.UpdatedAt
+			}
 		}
 		if err != nil {
 			mg.err = err
@@ -309,10 +387,12 @@ func (gm *GroupManager) Stop(groupID string) bool {
 
 // Status returns an immutable snapshot of the GroupState and true if the
 // group exists. The returned pointer is a deep copy safe to read without
-// holding the manager lock.
+// holding the manager lock. A finished group stops being reported here once
+// its retention window has elapsed.
 func (gm *GroupManager) Status(groupID string) (*GroupState, bool) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
+	gm.evictExpiredLocked(time.Now())
 	mg, ok := gm.groups[groupID]
 	if !ok {
 		return nil, false
@@ -323,9 +403,16 @@ func (gm *GroupManager) Status(groupID string) (*GroupState, bool) {
 // List returns a snapshot of the GroupState for every tracked group
 // (active and finished). Each entry is a deep copy safe to read without
 // holding the manager lock.
+//
+// Retention (B6): a finished group (done | stopped | error) keeps appearing
+// here until GroupManager.retention (DefaultGroupRetention when unset) has
+// elapsed since it closed — that grace window is what lets the WebSocket
+// welcome payload and "/group list" still show a just-terminated group — and
+// is then dropped from memory. Running groups are never evicted.
 func (gm *GroupManager) List() []*GroupState {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
+	gm.evictExpiredLocked(time.Now())
 	out := make([]*GroupState, 0, len(gm.groups))
 	for _, mg := range gm.groups {
 		out = append(out, mg.state.Snapshot())
@@ -335,10 +422,12 @@ func (gm *GroupManager) List() []*GroupState {
 
 // AllSnapshots returns a GroupSnapshot for every tracked group (active and
 // finished). The caller gets a snapshot-safe copy; it does not share backing
-// arrays with the live state.
+// arrays with the live state. The same retention rule as List applies, so
+// expired finished groups are absent here too.
 func (gm *GroupManager) AllSnapshots() []GroupSnapshot {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
+	gm.evictExpiredLocked(time.Now())
 	out := make([]GroupSnapshot, 0, len(gm.groups))
 	for _, mg := range gm.groups {
 		out = append(out, BuildSnapshot(mg.state, mg.result))
@@ -348,12 +437,21 @@ func (gm *GroupManager) AllSnapshots() []GroupSnapshot {
 
 // Wait blocks until the group finishes and returns the final synthesis.
 // Returns an error if the group ended with an error.
+//
+// Retention: waiting on a group that finished but is still inside its
+// retention window keeps working (the lifecycle tests rely on it); once the
+// window has elapsed the group is swept here like everywhere else and Wait
+// fails fast with "not found or evicted" instead of returning state nobody can
+// see any more. Every real caller (the group_chat tool, /group flows) waits
+// inline right after Start, long before retention can elapse, so no live flow
+// can hit that error.
 func (gm *GroupManager) Wait(groupID string) (string, error) {
 	gm.mu.Lock()
+	gm.evictExpiredLocked(time.Now())
 	mg, ok := gm.groups[groupID]
 	gm.mu.Unlock()
 	if !ok {
-		return "", fmt.Errorf("group wait: group %q not found", groupID)
+		return "", fmt.Errorf("group wait: group %q not found or evicted", groupID)
 	}
 
 	<-mg.done

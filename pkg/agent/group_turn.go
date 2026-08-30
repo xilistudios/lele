@@ -77,7 +77,20 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	semCh := sem.(chan struct{})
 	select {
 	case semCh <- struct{}{}:
-		defer func() { <-semCh }()
+		// Release the token, then drop the map entry if nobody else holds or
+		// waits on it (B6). Without the Delete, every (group, speaker) pair
+		// ever seen left a channel in the sync.Map for the lifetime of the
+		// process. Concurrent turns for the same key do not exist by design
+		// (one speaker per turn; Parallel means distinct speakers, hence
+		// distinct keys), and the len check keeps the cleanup safe even if a
+		// second holder queues up: it only deletes an idle channel, while a
+		// racing LoadOrStore simply creates a fresh one.
+		defer func() {
+			<-semCh
+			if len(semCh) == 0 {
+				lr.al.sessionProcessing.Delete(sessionKey)
+			}
+		}()
 	case <-ctx.Done():
 		return "", 0, ctx.Err()
 	}
