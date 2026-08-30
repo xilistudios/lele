@@ -339,6 +339,9 @@ func (m *Model) startConnectFlow(preset *providerPreset) {
 		m.textInput.SetValue("")
 		m.textInput.Placeholder = "Provider name (e.g. openai)"
 	}
+	// Audit M2: the preset path lands directly on the API-key step (2), so
+	// sync the echo mode before the first frame renders the widget.
+	m.syncTextInputEcho()
 }
 
 // isGoalSetCommand reports whether the /goal arguments set a new goal

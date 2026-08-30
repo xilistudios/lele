@@ -218,6 +218,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Audit M2: universal sync point for every keystroke while a modal
+			// is open. The forwarding block below also syncs, but transitions
+			// that END on a secret step (ESC-close, Enter-advance, success
+			// screen) return before reaching it — syncing at the top of the
+			// block guarantees the last processed event always leaves the
+			// echo mode consistent with the state it ended in.
+			m.syncTextInputEcho()
 			// Subagent multi-select picker navigation/toggle/confirm.
 			if m.subagentPickerActive {
 				switch msg.String() {
@@ -1289,11 +1296,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Forward keystrokes to textInput for form-based modals
 			// so users can type in the input fields.
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall ||
-				(m.modalMode == ModalSettingsTUI && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsSystemEdit && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsAgentEdit && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsAgents && m.settingsEditField != "") {
+			if isFormModal(m.modalMode, m.settingsEditField != "") {
+				// Audit M2: re-derive echo mode from modalMode+formStepIndex
+				// before forwarding — single choke point, self-heals across
+				// every step transition.
+				m.syncTextInputEcho()
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
@@ -2342,6 +2349,9 @@ func (m *Model) resetModal(mode modalType) {
 	m.subagentPickerLabels = nil
 	m.subagentPickerSelected = nil
 	m.subagentPickerIdx = 0
+	// Audit M2: a fresh modal is never on a secret step (formStepIndex was
+	// just reset to 0), so this also clears any stale password echo.
+	m.syncTextInputEcho()
 }
 
 // isFormModal returns true if the modal type is a form-based modal (or a

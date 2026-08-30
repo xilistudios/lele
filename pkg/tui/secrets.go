@@ -208,6 +208,9 @@ func (m *Model) startAddSecret() {
 	m.formConfirmMode = false
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Secret name (e.g. openai.api_key)"
+	// Audit M2: sync echo before the first frame renders the widget (the
+	// forwarding block only runs on the next keystroke).
+	m.syncTextInputEcho()
 }
 
 // maskSecretValue renders a partially masked secret value for display.

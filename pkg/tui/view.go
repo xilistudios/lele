@@ -17,6 +17,13 @@ func (m *Model) View() string {
 		return i18n.T("tui.initializing")
 	}
 
+	// Audit M2: universal render-side sync — bubbletea always calls View()
+	// after Update(), so re-deriving the echo mode here guarantees every
+	// renderer that paints m.textInput.View() (form modals, settings edit
+	// fields) shows the correct mode even when an Enter/ESC transition
+	// returned before the Update-side sync could run.
+	m.syncTextInputEcho()
+
 	// --------------------------------------------------------------------------
 	// WELCOME HOME SCREEN LAYOUT
 	// --------------------------------------------------------------------------
@@ -1309,9 +1316,11 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			if i < len(m.formValues) {
 				val = m.formValues[i]
 			}
-			// Mask API key for display
-			if i == 2 && len(val) > 8 {
-				val = val[:4] + "..." + val[len(val)-4:]
+			// Mask secrets (API key) for display — audit M2. Uses the same
+			// predicate as the completed-step list so every secret step is
+			// covered for both form modals.
+			if m.isSecretFormValue(i) {
+				val = maskSecretDisplay(val)
 			}
 			// Add a section header before model steps
 			if i == 4 {
@@ -1326,6 +1335,10 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			if i < len(m.formValues) {
 				val = m.formValues[i]
 			}
+			// Audit M2: never render a collected secret in clear text.
+			if m.isSecretFormValue(i) {
+				val = maskSecretDisplay(val)
+			}
 			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  ✓ %s: %s", step, val)) + "\n")
 		} else if i == m.formStepIndex {
 			if isReviewStep {
@@ -1333,6 +1346,12 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			} else {
 				// Current step: highlighted with input indicator
 				val := m.textInput.Value()
+				// Audit M2: mask before display — the widget echoes dots but
+				// this line prints the raw value. Empty wins the "…"
+				// placeholder (masking "" would stay "").
+				if m.isSecretInputStep() {
+					val = maskSecretDisplay(val)
+				}
 				if val == "" {
 					val = "…"
 				}
