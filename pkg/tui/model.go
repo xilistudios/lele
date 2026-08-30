@@ -160,7 +160,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		found := false
 		for _, s := range sessions {
 			if s.Key == sid || strings.TrimPrefix(s.Key, "tui:chat:") == sid || s.Key == "tui:chat:"+sid {
-				m.currentKey = s.Key
+				m.setCurrentChatKey(s.Key)
 				m.showWelcome = false
 				switch s.Mode {
 				case "chat":
@@ -258,12 +258,12 @@ func (m *Model) reloadSessions() {
 			// Only override currentKey if it's truly empty (not when returning
 			// from a subagent back to a parent chat with valid history)
 			if m.currentKey == "" {
-				m.currentKey = m.visibleSessions[0].Key
+				m.setCurrentChatKey(m.visibleSessions[0].Key)
 			}
 		}
 	} else if len(m.visibleSessions) > 0 {
 		m.selectedSessionIdx = 0
-		m.currentKey = m.visibleSessions[0].Key
+		m.setCurrentChatKey(m.visibleSessions[0].Key)
 		m.showWelcome = false
 	}
 
@@ -359,7 +359,7 @@ func (m *Model) createNewChat() {
 		m.agentLoop.GetProvidable().SetThinkLevel(newKey, m.pendingThink)
 	}
 
-	m.currentKey = newKey
+	m.setCurrentChatKey(newKey)
 	m.forceGotoBottom = true
 }
 
@@ -408,6 +408,50 @@ func (m *Model) resetStreamState() {
 	m.thinkingRenderedJoined = ""
 }
 
+// setCurrentChatKey switches the visible session. It is the single choke point
+// for currentKey assignments: if the outgoing session has a live visible
+// approval prompt, it is stashed in pendingApprovals (instead of being
+// silently abandoned by clearStreamingState) so it can be restored when the
+// user navigates back to that session.
+func (m *Model) setCurrentChatKey(newKey string) {
+	if newKey == m.currentKey {
+		return
+	}
+	if m.pendingApprovalID != "" {
+		if m.pendingApprovals == nil {
+			m.pendingApprovals = make(map[string]pendingApprovalSnapshot)
+		}
+		m.pendingApprovals[m.currentKey] = pendingApprovalSnapshot{
+			id:     m.pendingApprovalID,
+			cmd:    m.pendingApprovalCmd,
+			reason: m.pendingApprovalReason,
+		}
+	}
+	m.currentKey = newKey
+}
+
+// queueApprovalForCurrentChat surfaces an approval.request that belongs to the
+// session on screen: set the visible prompt fields and drop any stale snapshot
+// for the same key (e.g. an earlier prompt for this session that was already
+// answered or superseded) so it cannot be resurrected on the next switch.
+func (m *Model) queueApprovalForCurrentChat(id, cmd, reason string) {
+	delete(m.pendingApprovals, m.currentKey)
+	m.pendingApprovalID = id
+	m.pendingApprovalCmd = cmd
+	m.pendingApprovalReason = reason
+	m.approvalResult = ""
+}
+
+// stashApprovalForSession parks an approval.request raised while its session
+// is in the background, keyed by that session, so switching to it later
+// restores the prompt (clearStreamingState) instead of the event being lost.
+func (m *Model) stashApprovalForSession(chatID, id, cmd, reason string) {
+	if m.pendingApprovals == nil {
+		m.pendingApprovals = make(map[string]pendingApprovalSnapshot)
+	}
+	m.pendingApprovals[chatID] = pendingApprovalSnapshot{id: id, cmd: cmd, reason: reason}
+}
+
 // clearStreamingState resets all streaming/processing state.
 // Called when switching sessions to avoid stale content leaking into the new session.
 // It preserves m.processing when the target session has an active LLM loop,
@@ -445,6 +489,16 @@ func (m *Model) clearStreamingState() {
 	m.pendingApprovalCmd = ""
 	m.pendingApprovalReason = ""
 	m.approvalResult = ""
+
+	// ...then restore an approval that belongs to the session we just switched
+	// TO, if one was stashed (either abandoned via setCurrentChatKey or queued
+	// by the outbound listener while the session was in the background).
+	if snap, ok := m.pendingApprovals[m.currentKey]; ok {
+		m.pendingApprovalID = snap.id
+		m.pendingApprovalCmd = snap.cmd
+		m.pendingApprovalReason = snap.reason
+		delete(m.pendingApprovals, m.currentKey)
+	}
 	if !m.hasRunningSubagents() && !isActive {
 		m.subagentProgress = make(map[string]string)
 	}

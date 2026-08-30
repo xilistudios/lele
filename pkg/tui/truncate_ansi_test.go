@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -229,6 +231,13 @@ func TestSidebarSessionNameTruncate(t *testing.T) {
 // contains a broken escape sequence and that no line collapses below the
 // visible-width floor that the rune-slicing bug produced.
 func TestViewRealPathStatusLineCells(t *testing.T) {
+	// Force truecolor so getBouncingDots emits the ~22-bytes-per-cell ANSI
+	// that triggers the rune-slicing collapse; without this the test profile
+	// is Ascii and the bug is invisible.
+	prev := lipgloss.DefaultProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
 	m := newTestModel(t)
 	// Pin the locale AFTER NewModel (it re-inits i18n from cfg.GetLanguage()
 	// and the host LANG may select es/pt), so the English content assertions

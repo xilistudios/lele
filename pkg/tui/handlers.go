@@ -732,7 +732,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.renderedBaseKey = ""
 						} else if m.modalMode == ModalSessions {
 							if m.modalSelectedIdx < len(m.modalSessionKeys) {
-								m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
+								m.setCurrentChatKey(m.modalSessionKeys[m.modalSelectedIdx])
 								m.showWelcome = false
 								m.clearStreamingState()
 								// Sync pendingModel to the target session's model so
@@ -745,7 +745,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								if m.parentSessionKey == "" {
 									m.parentSessionKey = m.currentKey
 								}
-								m.currentKey = m.modalSubagentKeys[m.modalSelectedIdx]
+								m.setCurrentChatKey(m.modalSubagentKeys[m.modalSelectedIdx])
 								m.showWelcome = false
 								m.clearStreamingState()
 							}
@@ -1453,7 +1453,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+b":
 			// Go back to parent chat if currently viewing a subagent session.
 			if m.parentSessionKey != "" {
-				m.currentKey = m.parentSessionKey
+				m.setCurrentChatKey(m.parentSessionKey)
 				m.parentSessionKey = ""
 				m.clearStreamingState()
 				m.reloadSessions()
@@ -1629,7 +1629,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.parentSessionKey == "" {
 							m.parentSessionKey = m.currentKey
 						}
-						m.currentKey = target.key
+						m.setCurrentChatKey(target.key)
 						m.showWelcome = false
 						m.clearStreamingState()
 						m.reloadSessions()
@@ -1676,6 +1676,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case outboundMsg:
+		// Approval prompts must never be dropped by the currentKey gate below:
+		// the blocked agent waits on ApprovalManager's full timeout otherwise.
+		// Requests for the visible session surface immediately; requests for
+		// background sessions are stashed and restored on switch.
+		if msg.msg.Event == "approval.request" {
+			id := msg.msg.Metadata["id"]
+			command := msg.msg.Metadata["command"]
+			reason := msg.msg.Metadata["reason"]
+			if msg.msg.ChatID == m.currentKey {
+				m.queueApprovalForCurrentChat(id, command, reason)
+			} else {
+				m.stashApprovalForSession(msg.msg.ChatID, id, command, reason)
+			}
+			m.updateViewport()
+			break
+		}
 		if msg.msg.ChatID == m.currentKey {
 			switch msg.msg.Event {
 			case "subagent.result":
@@ -1692,14 +1708,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.invalidateSubagentsCache() // subagent status changed
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())
-			case "approval.request":
-				// Command approval requested by the agent — store the pending
-				// approval and update the viewport to show the prompt.
-				m.pendingApprovalID = msg.msg.Metadata["id"]
-				m.pendingApprovalCmd = msg.msg.Metadata["command"]
-				m.pendingApprovalReason = msg.msg.Metadata["reason"]
-				m.approvalResult = ""
-				m.updateViewport()
 			case "message.stream":
 				// Clear pending user message on first stream chunk — by the time
 				// the LLM starts streaming, the user message is already in history.

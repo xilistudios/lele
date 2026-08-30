@@ -495,4 +495,20 @@ type Model struct {
 	pendingApprovalCmd    string
 	pendingApprovalReason string
 	approvalResult        string // brief feedback after user decision ("✅ ..." or "❌ ...")
+
+	// pendingApprovals stashes approval prompts that belong to sessions other
+	// than the one currently on screen (background/subagent sessions) as well
+	// as prompts abandoned by a session switch, keyed by session key. They are
+	// restored when the user navigates back to the owning session, so an
+	// approval is never silently dropped (the blocked agent would otherwise
+	// sit in WaitForResponse until the ApprovalManager timeout).
+	pendingApprovals map[string]pendingApprovalSnapshot
+}
+
+// pendingApprovalSnapshot is a frozen approval prompt (id/command/reason)
+// stored per session while it is not the visible one.
+type pendingApprovalSnapshot struct {
+	id     string
+	cmd    string
+	reason string
 }
