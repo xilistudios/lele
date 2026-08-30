@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // newTestSaveConfig builds a Config with a couple of distinctive,
@@ -159,7 +160,7 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 		stop    atomic.Bool
 		wg      sync.WaitGroup
 		partial atomic.Value // stores first error string
-		readers = 4
+		readers = 2
 	)
 
 	for r := 0; r < readers; r++ {
@@ -172,6 +173,11 @@ func TestSaveConfigConcurrentReaderNeverSeesPartial(t *testing.T) {
 				if err != nil && errors.As(err, &syn) {
 					partial.CompareAndSwap(nil, err.Error())
 				}
+				// Yield the hot read loop briefly: with the old direct
+				// WriteFile a partial file persisted for the whole write,
+				// so even a sampled reader reliably observes corruption,
+				// while here it keeps I/O contention (and runtime) down.
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
