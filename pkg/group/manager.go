@@ -43,6 +43,10 @@ type managedGroup struct {
 	result     string        // final synthesis (set on completion)
 	done       chan struct{} // closed when the group finishes
 	err        error
+
+	// finalizeOnce guards the single terminal signal pair (group.status +
+	// group.complete) and the close of done, so no exit path can emit twice.
+	finalizeOnce sync.Once
 }
 
 // GroupManager manages the lifecycle of active group conversations.
@@ -201,28 +205,53 @@ func (gm *GroupManager) Start(
 	return groupID, nil
 }
 
-// Stop cancels the context of an active group and marks it stopped.
-// Returns true if the group was found and stopped.
+// finalize is the single terminal exit path for a group. Exactly one call per
+// managedGroup takes effect (guarded by finalizeOnce), and it always emits the
+// same pair of client-facing signals: one terminal group.status followed by one
+// group.complete, then closes mg.done to release Wait.
+//
+// status must be one of the terminal statuses (done | stopped | error); err is
+// recorded when non-nil and is what Wait returns. The synthesis is computed
+// here (not by the caller) so every path — including early errors and panics
+// that never reached the post-loop code — reports a consistent result.
+//
+// Callers must NOT hold gm.mu.
+func (gm *GroupManager) finalize(mg *managedGroup, status string, err error) {
+	mg.finalizeOnce.Do(func() {
+		// Close done unconditionally, even if a publisher panics, so Wait can
+		// never hang on a half-completed finalize.
+		defer close(mg.done)
+
+		gm.mu.Lock()
+		if status == StatusStopped || status == StatusError || status == StatusDone {
+			mg.state.Status = status
+			mg.state.UpdatedAt = time.Now()
+		}
+		if err != nil {
+			mg.err = err
+		}
+		mg.result = gm.synthesisLocked(mg)
+		agentIDs := gm.agentIDs(mg)
+		gm.mu.Unlock()
+
+		gm.publishGroupStatus(mg, status, agentIDs)
+		gm.publishGroupComplete(mg)
+	})
+}
+
+// Stop requests that an active group stop. It only cancels the group's context
+// and returns; the run loop observes the cancellation and emits the terminal
+// signal pair (group.status=stopped + group.complete) through finalize.
+// Returns true if the group was found.
 func (gm *GroupManager) Stop(groupID string) bool {
 	gm.mu.Lock()
 	mg, ok := gm.groups[groupID]
+	gm.mu.Unlock()
 	if !ok {
-		gm.mu.Unlock()
 		return false
 	}
-	gm.mu.Unlock()
 
 	mg.cancel()
-
-	gm.mu.Lock()
-	if mg.state.Status == StatusRunning {
-		mg.state.Status = StatusStopped
-		mg.state.UpdatedAt = time.Now()
-	}
-	agentIDs := gm.agentIDsLocked(mg)
-	gm.mu.Unlock()
-
-	gm.publishGroupStatus(mg, "stopped", agentIDs)
 	return true
 }
 
@@ -340,8 +369,10 @@ func (gm *GroupManager) publishGroupStatus(mg *managedGroup, status string, agen
 	})
 }
 
-// agentIDsLocked returns the agent IDs of participants. Caller must hold gm.mu.
-func (gm *GroupManager) agentIDsLocked(mg *managedGroup) []string {
+// agentIDs returns the agent IDs of the group's participants. Participants is
+// immutable after Start (the slice is never mutated once the state is built),
+// so this is safe to call without the lock.
+func (gm *GroupManager) agentIDs(mg *managedGroup) []string {
 	ids := make([]string, len(mg.state.Participants))
 	for i, p := range mg.state.Participants {
 		ids[i] = p.AgentID

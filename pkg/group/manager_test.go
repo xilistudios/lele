@@ -786,15 +786,8 @@ func TestStopByOrigin_EmptyChannelMatchesAny(t *testing.T) {
 		t.Errorf("StopByOrigin returned %d, want 1", count)
 	}
 
-	st, ok := gm.Status(groupID)
-	if !ok {
-		t.Fatal("group not found")
-	}
-	if st.Status != StatusStopped {
-		t.Errorf("status = %s, want stopped", st.Status)
-	}
-
-	// Drain.
+	// Drain first: StopByOrigin only requests the stop (it cancels the
+	// context); the run loop converges the status asynchronously via finalize.
 	done := make(chan struct{})
 	go func() { gm.Wait(groupID); close(done) }()
 	select {
@@ -802,6 +795,14 @@ func TestStopByOrigin_EmptyChannelMatchesAny(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		close(be.unblockCh)
 		t.Fatal("Wait did not return")
+	}
+
+	st, ok := gm.Status(groupID)
+	if !ok {
+		t.Fatal("group not found")
+	}
+	if st.Status != StatusStopped {
+		t.Errorf("status = %s, want stopped", st.Status)
 	}
 }
 
