@@ -407,18 +407,15 @@ func (gm *GroupManager) Start(
 		return "", fmt.Errorf("group start: group %q already exists", groupID)
 	}
 	gm.groups[groupID] = mg
-	storeDir := gm.storeDir // capture under lock
 	gm.mu.Unlock()
 
 	// Publish started event.
 	gm.publishGroupStatus(mg, "started", agentIDs)
 
-	// Best-effort: persist the started state.
-	if storeDir != "" {
-		if err := SaveGroup(storeDir, state); err != nil {
-			log.Printf("group %s: failed to persist started state: %v", groupID, err)
-		}
-	}
+	// Best-effort: persist the started state. Same single decision point as the
+	// per-turn/final saves (see saveStateBestEffort) so the two write paths can
+	// never disagree about whether persistence is configured.
+	gm.saveStateBestEffort(mg)
 
 	go gm.runGroup(gctx, mg)
 
@@ -458,6 +455,14 @@ func (gm *GroupManager) finalize(mg *managedGroup, status string, err error) {
 		mg.result = gm.synthesisLocked(mg)
 		agentIDs := gm.agentIDs(mg)
 		gm.mu.Unlock()
+
+		// Persist the terminal state BEFORE telling anyone the group ended.
+		// runGroup's deferred save runs after done is closed, so a client that
+		// re-reads history on the terminal signal (the WebUI does exactly that
+		// on session switch) could otherwise see an empty store — and a restart
+		// in that window would lose the group for good (#239). The deferred
+		// save stays as a safety net for a finalize that never runs.
+		gm.saveStateBestEffort(mg)
 
 		gm.publishGroupStatus(mg, status, agentIDs)
 		gm.publishGroupComplete(mg)
@@ -625,14 +630,19 @@ func (gm *GroupManager) agentIDs(mg *managedGroup) []string {
 	return ids
 }
 
-// saveStateBestEffort persists the group state to disk if a storeDir is
+// saveStateBestEffort persists the group state using whichever backend is
 // configured.  It reads storeDir under gm.mu.  Errors are logged but never
 // returned (best-effort semantics).
+//
+// Persistence is available when EITHER backend is configured: the SQLite
+// repository (package-level global, see UseStore) or the legacy per-file JSON
+// directory. Keying only on storeDir would silently disable persistence for a
+// SQLite-only wiring, because SaveGroup ignores dir when a repo is set.
 func (gm *GroupManager) saveStateBestEffort(mg *managedGroup) {
 	gm.mu.Lock()
 	dir := gm.storeDir
 	gm.mu.Unlock()
-	if dir == "" {
+	if dir == "" && getGroupRepo() == nil {
 		return
 	}
 	if err := SaveGroup(dir, mg.state); err != nil {
