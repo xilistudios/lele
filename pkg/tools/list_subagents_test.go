@@ -274,7 +274,7 @@ func TestSameSessionKey(t *testing.T) {
 		want            bool
 	}{
 		{"native:abc", "native:abc", true},
-		{"native:abc", "native:abc:subagent-1", true},  // child subagent session
+		{"native:abc", "native:abc:subagent-1", true}, // child subagent session
 		{"native:abc", "native:abc:cron-1:subagent-2", true},
 		{"native:abc", "native:abd", false},
 		{"native:abc", "", false},
