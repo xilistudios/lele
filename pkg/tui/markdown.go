@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // getMarkdownRenderer returns a cached glamour.TermRenderer for the given width.
@@ -64,8 +65,10 @@ func simpleMarkdownRender(content string, width int) string {
 			text := strings.TrimPrefix(trimmed, "### ")
 			result.WriteString(headerStyle.Render(text) + "\n\n")
 		} else {
-			// Regular text - wrap if needed
-			if width > 0 && len(line) > width {
+			// Regular text - wrap if needed. Compare the visual cell width
+			// (not the byte length) so multi-byte characters (CJK, emoji,
+			// accents) don't trigger premature wrapping.
+			if width > 0 && ansi.StringWidth(line) > width {
 				result.WriteString(wrapText(line, width) + "\n")
 			} else {
 				result.WriteString(line + "\n")
@@ -81,6 +84,14 @@ func (m *Model) getRenderedStream(width int) string {
 	rawLines := strings.Split(m.currentStream, "\n")
 	if len(rawLines) == 0 {
 		return ""
+	}
+
+	// Invalidate the line cache when the terminal width changed: cached
+	// lines were wrapped for the old width and would render incorrectly.
+	if m.streamRenderCacheWidth != width {
+		m.streamRenderedLines = nil
+		m.streamRenderedJoined = ""
+		m.streamRenderCacheWidth = width
 	}
 
 	if len(m.streamRenderedLines) == 0 {
@@ -116,6 +127,14 @@ func (m *Model) getRenderedThinking(width int) string {
 	rawLines := strings.Split(m.currentThinking, "\n")
 	if len(rawLines) == 0 {
 		return ""
+	}
+
+	// Invalidate the line cache when the terminal width changed: cached
+	// lines were wrapped for the old width and would render incorrectly.
+	if m.thinkingRenderCacheWidth != width {
+		m.thinkingRenderedLines = nil
+		m.thinkingRenderedJoined = ""
+		m.thinkingRenderCacheWidth = width
 	}
 
 	if len(m.thinkingRenderedLines) == 0 {

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/providers"
 )
@@ -42,7 +43,7 @@ func wrapText(text string, limit int) string {
 	var wrappedLines []string
 
 	for _, line := range lines {
-		if len(line) <= limit {
+		if ansi.StringWidth(line) <= limit {
 			wrappedLines = append(wrappedLines, line)
 			continue
 		}
@@ -51,13 +52,44 @@ func wrapText(text string, limit int) string {
 			wrappedLines = append(wrappedLines, "")
 			continue
 		}
-		currentLine := words[0]
-		for _, word := range words[1:] {
-			if len(currentLine)+1+len(word) <= limit {
-				currentLine += " " + word
-			} else {
+		currentLine, currentWidth := "", 0
+		for i, word := range words {
+			wordWidth := ansi.StringWidth(word)
+			// The first word starts the line with no separator; subsequent
+			// words join via a space when they fit.
+			if i > 0 {
+				if currentWidth+1+wordWidth <= limit {
+					currentLine += " " + word
+					currentWidth += 1 + wordWidth
+					continue
+				}
+				// Flush the current line before handling this word.
 				wrappedLines = append(wrappedLines, currentLine)
+				currentLine, currentWidth = "", 0
+			}
+			if wordWidth > limit {
+				// Hard-break words wider than the limit (long URLs, tokens
+				// without spaces). Accumulate visual width rune by rune so
+				// wide runes (e.g. CJK, width 2) are never split mid-rune.
+				// The trailing remainder stays as the current line so short
+				// words that follow can still join it if they fit.
+				var chunk strings.Builder
+				chunkWidth := 0
+				for _, r := range word {
+					rw := ansi.StringWidth(string(r))
+					if chunk.Len() > 0 && chunkWidth+rw > limit {
+						wrappedLines = append(wrappedLines, chunk.String())
+						chunk.Reset()
+						chunkWidth = 0
+					}
+					chunk.WriteRune(r)
+					chunkWidth += rw
+				}
+				currentLine = chunk.String()
+				currentWidth = chunkWidth
+			} else {
 				currentLine = word
+				currentWidth = wordWidth
 			}
 		}
 		wrappedLines = append(wrappedLines, currentLine)

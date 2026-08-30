@@ -1046,6 +1046,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reloadSessions()
 				}
 			case "esc", "q":
+				// "q" must not close form-based modals — it's a regular
+				// character while typing in a text field. Fall through to the
+				// textInput forwarding at the end of the modal handler.
+				// ESC always closes.
+				if msg.String() == "q" && isFormModal(m.modalMode, m.settingsEditField != "") {
+					break
+				}
 				// Theme picker: ESC cancels and returns to the settings list.
 				if m.modalMode == ModalSettingsTUI && m.themePickerActive {
 					// Revert to the original theme if a preview was active
@@ -2322,6 +2329,21 @@ func (m *Model) resetModal(mode modalType) {
 	m.subagentPickerLabels = nil
 	m.subagentPickerSelected = nil
 	m.subagentPickerIdx = 0
+}
+
+// isFormModal returns true if the modal type is a form-based modal (or a
+// settings modal with an active inline text edit), i.e. a modal where
+// keystrokes like "q" must be forwarded to the text input instead of being
+// treated as modal shortcuts.
+func isFormModal(mode modalType, editingField bool) bool {
+	switch mode {
+	case ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall:
+		return true
+	case ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystemEdit, ModalSettingsTUI:
+		return editingField
+	default:
+		return false
+	}
 }
 
 // isListModal returns true if the modal type is a list-selection modal

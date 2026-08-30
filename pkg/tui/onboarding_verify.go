@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -23,15 +26,28 @@ type obVerifyResultMsg struct {
 // just configured during onboarding. It runs on a goroutine (via tea.Cmd) so
 // the TUI never blocks. Local providers (ollama / localhost) are skipped and
 // considered valid.
+// obVerifyHTTPClient allows tests to inject a custom HTTP client (e.g. one
+// bound to an httptest server). When nil, a default client is used.
+var obVerifyHTTPClient *http.Client
+
 func (m *Model) obVerifyKeyCmd() tea.Cmd {
 	return func() tea.Msg {
 		providers := m.cfg.Providers.ListNamed()
 		var p config.NamedProviderConfig
 		var name string
+		// Prefer a provider that is actually configured (has a key or base
+		// URL) — ListNamed() also returns empty placeholders for every known
+		// provider name, and map iteration order is random.
 		for n, prov := range providers {
-			p = prov
-			name = n
-			break // get the first/only one
+			if prov.APIKey != "" || prov.APIBase != "" {
+				p = prov
+				name = n
+				break
+			}
+		}
+		if name == "" {
+			// Nothing configured — nothing to validate.
+			return obVerifyResultMsg{success: true}
 		}
 
 		// Skip validation for local providers.
@@ -42,7 +58,10 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 			return obVerifyResultMsg{success: true, providerName: name}
 		}
 
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := obVerifyHTTPClient
+		if client == nil {
+			client = &http.Client{Timeout: 10 * time.Second}
+		}
 		req, err := http.NewRequest("GET", p.APIBase+"/models", nil)
 		if err != nil {
 			return obVerifyResultMsg{success: false, providerName: name, err: err}
@@ -59,11 +78,64 @@ func (m *Model) obVerifyKeyCmd() tea.Cmd {
 		}
 		defer resp.Body.Close()
 
-		// 200 or 403 means the key is likely valid (some providers return 403
+		// 403 means the key is likely valid (some providers return 403
 		// on /models).
-		success := resp.StatusCode == 200 || resp.StatusCode == 403
-		return obVerifyResultMsg{success: success, providerName: name}
+		if resp.StatusCode == 403 {
+			return obVerifyResultMsg{success: true, providerName: name}
+		}
+		if resp.StatusCode != 200 {
+			return obVerifyResultMsg{success: false, providerName: name,
+				err: fmt.Errorf("unexpected status %d", resp.StatusCode)}
+		}
+
+		// A 200 can still carry an error payload (e.g. {"error": "invalid
+		// key"}). Inspect the body (bounded read) and treat a non-empty error
+		// field as a failure. Non-JSON bodies are tolerated — many providers
+		// return plain text on success.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if err != nil {
+			return obVerifyResultMsg{success: false, providerName: name,
+				err: fmt.Errorf("reading response body: %w", err)}
+		}
+		if err := checkVerifyBody(body); err != nil {
+			return obVerifyResultMsg{success: false, providerName: name, err: err}
+		}
+		return obVerifyResultMsg{success: true, providerName: name}
 	}
+}
+
+// checkVerifyBody inspects a 200 response body for an embedded error payload.
+// It returns nil when the body is OK (non-JSON, JSON without an error field,
+// or an empty body). A JSON object with a non-empty "error" field (string, or
+// object carrying a "message") is reported as an error.
+func checkVerifyBody(body []byte) error {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return nil
+	}
+	var payload struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Error) == 0 {
+		return nil //nolint:nilerr // not JSON or no error field — tolerant success
+	}
+	var errStr string
+	if json.Unmarshal(payload.Error, &errStr) == nil && errStr != "" {
+		return fmt.Errorf("provider reported error: %s", errStr)
+	}
+	var errObj struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if json.Unmarshal(payload.Error, &errObj) == nil {
+		switch {
+		case errObj.Message != "":
+			return fmt.Errorf("provider reported error: %s", errObj.Message)
+		case errObj.Error != "":
+			return fmt.Errorf("provider reported error: %s", errObj.Error)
+		}
+	}
+	return nil
 }
 
 // obFinalizeSetup sets the agent defaults (provider + model) from the provider
