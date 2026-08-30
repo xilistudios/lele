@@ -20,6 +20,40 @@ import (
 // within a single group turn before forcing a final response.
 const maxGroupToolIterations = 10
 
+// groupTurnExcludedTools are never offered to group participants:
+// group_chat would allow unbounded nested group trees (B8).
+//
+// A participant whose toolset still advertises group_chat can invoke it from
+// inside a group turn and spawn sub-groups, recursively, with no depth limit —
+// an unbounded tree of panels burning tokens. The tool is therefore stripped
+// from the definitions sent to the model (the same guard spawn/subagents have
+// via CloneWithout in tool_coordinator.go).
+var groupTurnExcludedTools = map[string]bool{"group_chat": true}
+
+// filterToolDefs returns the tool definitions a model should actually be
+// offered, dropping anything it cannot serve:
+//
+//   - when hasVision is false, read_image is removed (the model could not
+//     interpret the returned image content);
+//   - every name present as true in excluded is removed regardless of vision.
+//
+// It is a pure function so the policy can be unit-tested without building a
+// full runner. A nil excluded map simply means "only apply the vision filter".
+func filterToolDefs(defs []providers.ToolDefinition, hasVision bool, excluded map[string]bool) []providers.ToolDefinition {
+	filtered := make([]providers.ToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		name := def.Function.Name
+		if !hasVision && name == "read_image" {
+			continue
+		}
+		if excluded[name] {
+			continue
+		}
+		filtered = append(filtered, def)
+	}
+	return filtered
+}
+
 // runGroupTurn executes a single group turn: builds the messages (persona+role
 // system prompt, shared transcript as context, and the strategy instruction),
 // acquires the session semaphore with a key derived as group:<groupID>:<speaker>
@@ -75,18 +109,13 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 	if req.EnableTools {
 		providerToolDefs = agent.Tools.ToProviderDefs()
 
-		// Filter out read_image tool if the primary model doesn't support
-		// vision. This prevents the model from calling read_image when the
-		// resulting image content could not be understood by the model.
-		if !modelHasVision {
-			filtered := make([]providers.ToolDefinition, 0, len(providerToolDefs))
-			for _, def := range providerToolDefs {
-				if def.Function.Name != "read_image" {
-					filtered = append(filtered, def)
-				}
-			}
-			providerToolDefs = filtered
-		}
+		// Drop tools the model must not be offered during a group turn:
+		// read_image when the primary model has no vision (it could not
+		// understand the returned image content) and group_chat, which would
+		// let a participant spawn nested group trees (B8). Only the definitions
+		// handed to the provider are filtered — a model cannot call what it
+		// does not see, so no second guard is needed in the executor.
+		providerToolDefs = filterToolDefs(providerToolDefs, modelHasVision, groupTurnExcludedTools)
 	}
 
 	// g. Update tool contexts so tools know which channel/chat they're serving.
