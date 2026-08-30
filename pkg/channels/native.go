@@ -269,6 +269,12 @@ func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 	return nil
 }
 
+// ConsumesEvent declares that the native channel interprets every protocol
+// event itself (see dispatchOutboundMessage), including contentless ones such
+// as message.stream with done=true and turn.end. It therefore opts out of the
+// dispatcher's contentless-signal guard.
+func (n *NativeChannel) ConsumesEvent(string) bool { return true }
+
 // RegisterRoutes registers all native channel API routes on the given mux.
 // This is called by the unified server to mount the native channel endpoints.
 func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
@@ -634,6 +640,14 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Command: msg.Metadata["command"],
 			Reason:  msg.Metadata["reason"],
 		}, "")
+		return
+	case "turn.end":
+		// turn.end exists for channels that show transient "the bot is
+		// working" state (Telegram's typing indicator). The WebUI derives its
+		// processing state from message.ack/message.complete, so it has
+		// nothing to clear here — and it must NOT fall through to the
+		// full-message path below, which would emit a spurious empty
+		// message.complete on every turn whose final message was suppressed.
 		return
 	}
 

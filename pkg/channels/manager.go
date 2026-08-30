@@ -9,6 +9,7 @@ package channels
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -338,12 +339,57 @@ func (m *Manager) dispatchOutbound(ctx context.Context) {
 	}
 }
 
+// EventSignalConsumer is implemented by channels that interpret
+// bus.OutboundMessage.Event themselves inside Send and therefore must receive
+// signals even when those signals carry no content.
+//
+// The channel dispatcher drops contentless events by default (see
+// shouldDropEventSignal) because most channels ignore msg.Event and would
+// render a signal as an empty message. A channel that adds handling for a new
+// event declares it here, so the guard can never swallow a signal its own
+// channel is waiting for — the mistake a channel-name allowlist would invite.
+type EventSignalConsumer interface {
+	ConsumesEvent(event string) bool
+}
+
+// shouldDropEventSignal reports whether an event-only outbound message must be
+// kept away from a channel's Send.
+//
+// A message with Event != "" is a signal, not content. The same FIFO queue
+// feeds every channel, and channels that do not switch on msg.Event would
+// render an empty-content signal as an empty bubble. Dropping contentless
+// signals before Send is the structural guard: a future event can never become
+// a blank message on a channel that does not handle it.
+//
+// Channels that do handle events (native, telegram for turn.end) opt out per
+// event by implementing EventSignalConsumer.
+//
+// Signals that carry content or attachments are always passed through:
+// today's behavior for content-carrying events (group.*, verbose tool output)
+// is preserved, and no real message can be lost.
+func shouldDropEventSignal(ch Channel, msg bus.OutboundMessage) bool {
+	if msg.Event == "" {
+		return false
+	}
+	if consumer, ok := ch.(EventSignalConsumer); ok && consumer.ConsumesEvent(msg.Event) {
+		return false
+	}
+	return strings.TrimSpace(msg.Content) == "" && len(msg.Attachments) == 0
+}
+
 func (m *Manager) startChannelDispatcher(ctx context.Context, name string, ch Channel, queue chan bus.OutboundMessage) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case msg := <-queue:
+			if shouldDropEventSignal(ch, msg) {
+				logger.DebugCF("channels", "Dropped contentless event signal for channel", map[string]interface{}{
+					"channel": name,
+					"event":   msg.Event,
+				})
+				continue
+			}
 			if err := sendOutboundMessage(ctx, ch, msg); err != nil {
 				logger.ErrorCF("channels", "Error sending message to channel", map[string]interface{}{
 					"channel": name,

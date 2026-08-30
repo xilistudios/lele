@@ -22,6 +22,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
@@ -715,6 +716,45 @@ func (al *AgentLoop) isSessionProcessing(sessionKey string) bool {
 	}
 }
 
+// publishTurnEnd emits the terminal "turn.end" event for a turn.
+//
+// Channels use it as the single guaranteed signal that a turn is over, so
+// transient user-facing state (Telegram's typing indicator and "Thinking..."
+// placeholder) can never outlive the turn that started it — even when the
+// turn produced no final message (cancellation, error, or empty response).
+//
+// The event carries no content: it must never be rendered as a message.
+// Handlers are required to be idempotent, because the happy path emits
+// turn.end right after the final message, which already performed the same
+// cleanup on its way out. Publishing unconditionally keeps the agent loop
+// free of "did a final message escape?" bookkeeping.
+//
+// Internal channels (cli/system/subagent) have no user-visible indicator, and
+// an empty channel is unroutable, so both are skipped.
+func (al *AgentLoop) publishTurnEnd(m bus.InboundMessage) {
+	if m.Channel == "" || constants.IsInternalChannel(m.Channel) {
+		return
+	}
+
+	msg := bus.OutboundMessage{
+		Channel:        m.Channel,
+		ChatID:         m.ChatID,
+		Event:          "turn.end",
+		IsIntermediate: false,
+	}
+	// Carry the originating user message id so channels that key their
+	// per-message state on it (chatID:messageID) can locate the exact entry.
+	if m.Metadata != nil && m.Metadata["message_id"] != "" {
+		msg.Metadata = map[string]string{"message_id": m.Metadata["message_id"]}
+	}
+
+	logger.DebugCF("agent", "Published turn.end", map[string]interface{}{
+		"channel": msg.Channel,
+		"chat_id": msg.ChatID,
+	})
+	al.bus.PublishOutbound(msg)
+}
+
 // Run starts the main agent loop.
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
@@ -733,6 +773,14 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 			go func(m bus.InboundMessage) {
 				defer al.wg.Done()
 
+				// turn.end is the terminal signal of a turn: channels use it to
+				// stop the typing indicator. It is published on EVERY exit path
+				// below, including the ones that publish no final message (that
+				// is the whole point of the signal). Handlers must be idempotent
+				// because the happy path emits it right after the final message,
+				// which already performed the cleanup itself.
+				defer al.publishTurnEnd(m)
+
 				response, err := al.messageProcessor.processMessage(ctx, m)
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
@@ -742,6 +790,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 								"chat_id":     m.ChatID,
 								"session_key": m.SessionKey,
 							})
+						// No final message will be published: the deferred
+						// turn.end is the only thing that can stop typing.
 						return
 					}
 					response = fmt.Sprintf("Error processing message: %v", err)
@@ -759,6 +809,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					}
 					al.bus.PublishOutbound(outboundMsg)
 				}
+				// Empty response: nothing was published above, yet the turn is
+				// over. The deferred turn.end still fires.
 			}(msg)
 		}
 	}

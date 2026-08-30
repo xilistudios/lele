@@ -94,9 +94,103 @@ func (c *TelegramChannel) stopAllThinkingForChat(chatID string) {
 	})
 }
 
+// clearTransientTurnState removes everything the user could still perceive as
+// "the bot is still working on my message": the typing indicator loop(s) for
+// the chat and the pending "Thinking... 💭" placeholder message.
+//
+// chatKey is the chat ID as a string (the same representation used as the map
+// key when the indicator/placeholder was created); messageID is the originating
+// user message ID and may be empty, in which case only the per-chat sweep runs.
+//
+// It is idempotent and never fails: calling it twice, or after the final
+// message already performed the cleanup, is a no-op that sends nothing.
+// Deleting the placeholder requires the numeric chat ID for the Bot API call;
+// when it cannot be parsed the indicator is still stopped and the placeholder
+// entry is left for the normal send path to resolve.
+func (c *TelegramChannel) clearTransientTurnState(chatKey, messageID string) {
+	if chatKey == "" {
+		return
+	}
+
+	// Exact key used when the indicator was started:
+	// fmt.Sprintf("%d:%d", chatID, messageID), i.e. "<chatID>:<user message id>".
+	if messageID != "" {
+		c.stopActiveThinking(chatKey + ":" + messageID)
+	}
+	// Safety net: cancel any indicator left for this chat (concurrent messages,
+	// error paths, or an indicator stored under a different message id).
+	c.stopAllThinkingForChat(chatKey)
+
+	c.clearPlaceholderForChat(chatKey)
+}
+
+// clearPlaceholderForChat deletes the pending "Thinking... 💭" placeholder of a
+// chat, if any, and forgets it. Best-effort: when the chat ID is not numeric or
+// the stored value is not a message ID, nothing is removed, so the regular send
+// path can still resolve the placeholder into the real answer.
+func (c *TelegramChannel) clearPlaceholderForChat(chatKey string) {
+	// Deletion needs the bot token from config; without it the entry is left
+	// in place so the regular send path can still resolve the placeholder.
+	if c.config == nil {
+		return
+	}
+	pID, ok := c.placeholders.Load(chatKey)
+	if !ok {
+		return
+	}
+	chatID, err := parseChatID(chatKey)
+	if err != nil {
+		return
+	}
+	id, isInt := pID.(int)
+	if !isInt {
+		return
+	}
+	c.placeholders.Delete(chatKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c.deleteMessage(ctx, chatID, id)
+}
+
+// finishTurn handles the terminal turn.end signal from the agent loop.
+// Dedicated to keep Send readable: the signal carries no content, so all it
+// does is drop the transient per-turn state of the chat.
+func (c *TelegramChannel) finishTurn(chatKey, messageID string) {
+	c.clearTransientTurnState(chatKey, messageID)
+}
+
+// ConsumesEvent declares the events Telegram interprets inside Send. Only
+// turn.end is listed: it carries no content, so without this declaration the
+// dispatcher's contentless-signal guard would drop it and the typing indicator
+// would never stop — the exact bug #240 is about.
+//
+// Adding an event to Send() without adding it here makes the signal
+// undeliverable, which the companion test detects structurally.
+func (c *TelegramChannel) ConsumesEvent(event string) bool {
+	return event == "turn.end"
+}
+
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return fmt.Errorf("telegram bot not running")
+	}
+
+	// turn.end: the agent loop's guaranteed terminal signal for a turn. It is
+	// not content — it only asks for the transient "the bot is working" state
+	// to go away. Idempotent by design: the final message of a successful turn
+	// already stopped the indicator and resolved the placeholder on its way
+	// out, so this normally finds nothing to clean and sends nothing to
+	// Telegram. Handled before chat-ID parsing and rate limiting because
+	// cleanup must not depend on them.
+	if msg.Event == "turn.end" {
+		// metadata["message_id"] carries the originating user message id, so
+		// the exact "<chat>:<msg>" indicator key can be cancelled directly.
+		var turnMsgID string
+		if msg.Metadata != nil {
+			turnMsgID = msg.Metadata["message_id"]
+		}
+		c.finishTurn(msg.ChatID, turnMsgID)
+		return nil
 	}
 
 	chatID, err := parseChatID(msg.ChatID)
