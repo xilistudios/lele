@@ -198,6 +198,20 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	return nil
 }
 
+// handleInboundDropped undoes the user-visible side effects that handleMessage
+// starts before publishing to the bus (typing indicator + "Thinking... 💭"
+// placeholder). When the bus rejects a message there will never be an outbound
+// reply to clean them up, so the user would see a stuck indicator/placeholder.
+// Wired as BaseChannel.InboundDroppedHook in NewTelegramChannel.
+func (c *TelegramChannel) handleInboundDropped(msg bus.InboundMessage) {
+	// metadata["message_id"] carries the user message id as a string.
+	var messageID string
+	if msg.Metadata != nil {
+		messageID = msg.Metadata["message_id"]
+	}
+	c.clearTransientTurnState(msg.ChatID, messageID)
+}
+
 func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message *telego.Message, cmd string) error {
 	if message == nil {
 		return fmt.Errorf("message is nil")

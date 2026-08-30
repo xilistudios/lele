@@ -21,9 +21,14 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
+// thinkingCancel is the handle to a running typing-indicator loop.
+//
+// doneChan is receive-only on purpose: the loop owns the close, every other
+// party may only wait on it (Cancel does, with a timeout, so a wedged loop can
+// never wedge the sweeper with it).
 type thinkingCancel struct {
 	fn       context.CancelFunc
-	doneChan chan struct{}
+	doneChan <-chan struct{}
 }
 
 func (c *thinkingCancel) Cancel() {
@@ -38,35 +43,110 @@ func (c *thinkingCancel) Cancel() {
 	}
 }
 
-func (c *TelegramChannel) startTypingIndicator(chatID int64) *thinkingCancel {
-	ctx, cancel := context.WithCancel(context.Background())
-	doneChan := make(chan struct{})
-	ticker := time.NewTicker(4 * time.Second)
+// typingIndicatorInterval is how often the typing chat action is refreshed.
+// Telegram renders "typing..." for ~5s after each call, so 4s keeps it alive
+// without visible gaps.
+const typingIndicatorInterval = 4 * time.Second
 
-	if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
-		logger.ErrorCF("telegram", "Failed to send initial chat action", map[string]interface{}{
-			"error": err.Error(),
-		})
-	}
+// typingIndicatorMaxLifetime is the hard ceiling of a single typing indicator
+// loop: a backstop against an indicator that outlives its turn because every
+// terminal signal was lost (crash mid-turn, event dropped, channel restarted).
+//
+// 30 minutes, not 5: long turns are legitimate here — many tool iterations,
+// context compactions, and subagents that may themselves run for 30 minutes.
+// When the TTL expires the failure is deliberately silent (warning log only,
+// no user-facing message): losing "typing..." on a turn that is still running
+// is far less harmful than an indicator that never stops.
+const typingIndicatorMaxLifetime = 30 * time.Minute
+
+// runTypingLoop keeps a user-visible "working" state alive until the turn ends
+// or the TTL expires, whichever comes first.
+//
+// send is invoked immediately and then once per interval; returning an error
+// does not stop the loop (a transient Bot API failure must not kill the
+// indicator for the rest of a long turn) — the caller decides how to log it.
+//
+// The returned done channel is closed when the loop exits, for any reason.
+// onExpire runs exactly once and only on the TTL path, so a caller that
+// cancels normally never sees it.
+func runTypingLoop(ctx context.Context, interval, ttl time.Duration, send func(context.Context) error, onExpire func()) (done <-chan struct{}) {
+	doneChan := make(chan struct{})
 
 	go func() {
 		defer close(doneChan)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		expiry := time.NewTimer(ttl)
+		defer expiry.Stop()
+
+		if send != nil {
+			_ = send(ctx)
+		}
+
 		for {
 			select {
 			case <-ticker.C:
-				if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
-					logger.DebugCF("telegram", "Failed to send chat action", map[string]interface{}{
-						"error": err.Error(),
-					})
+				if send != nil {
+					_ = send(ctx)
 				}
+			case <-expiry.C:
+				// TTL is terminal: report it and leave. The loop owns its own
+				// exit, so thinkingCancel.Cancel() stays correct — doneChan is
+				// closed here and the (outer) context cancel is a no-op.
+				if onExpire != nil {
+					onExpire()
+				}
+				return
 			case <-ctx.Done():
-				ticker.Stop()
 				return
 			}
 		}
 	}()
 
-	return &thinkingCancel{fn: cancel, doneChan: doneChan}
+	return doneChan
+}
+
+func (c *TelegramChannel) startTypingIndicator(chatID int64) *thinkingCancel {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// On expiry the loop exits on its own; cancelling here additionally frees
+	// the context and releases its resources (and keeps thinkingCancel.Cancel
+	// consistent with the normal path).
+	onExpire := func() {
+		logger.WarnCF("telegram", "Typing indicator TTL expired", map[string]interface{}{
+			"chat_id":  chatID,
+			"ttl":      typingIndicatorMaxLifetime.String(),
+			"interval": typingIndicatorInterval.String(),
+		})
+		cancel()
+	}
+
+	// send runs exclusively on the loop goroutine, so attempts needs no lock.
+	// The original implementation logged the first failure at error level and
+	// refresh failures at debug; that distinction is preserved.
+	attempts := 0
+	send := func(ctx context.Context) error {
+		err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping))
+		if err != nil {
+			if attempts == 0 {
+				logger.ErrorCF("telegram", "Failed to send initial chat action", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else {
+				logger.DebugCF("telegram", "Failed to send chat action", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+		}
+		attempts++
+		return err
+	}
+
+	done := runTypingLoop(ctx, typingIndicatorInterval, typingIndicatorMaxLifetime, send, onExpire)
+
+	return &thinkingCancel{fn: cancel, doneChan: done}
 }
 
 func (c *TelegramChannel) stopActiveThinking(thinkingKey string) {
@@ -94,7 +174,107 @@ func (c *TelegramChannel) stopAllThinkingForChat(chatID string) {
 	})
 }
 
+// clearTransientTurnState removes everything the user could still perceive as
+// "the bot is still working on my message": the typing indicator loop(s) for
+// the chat and the pending "Thinking... 💭" placeholder message.
+//
+// chatKey is the chat ID as a string (the same representation used as the map
+// key when the indicator/placeholder was created); messageID is the originating
+// user message ID and may be empty, in which case only the per-chat sweep runs.
+//
+// It is idempotent and never fails: calling it twice, or after the final
+// message already performed the cleanup, is a no-op that sends nothing.
+// Deleting the placeholder requires the numeric chat ID for the Bot API call;
+// when it cannot be parsed the indicator is still stopped and the placeholder
+// entry is left for the normal send path to resolve.
+func (c *TelegramChannel) clearTransientTurnState(chatKey, messageID string) {
+	if chatKey == "" {
+		return
+	}
+
+	// Exact key used when the indicator was started:
+	// fmt.Sprintf("%d:%d", chatID, messageID), i.e. "<chatID>:<user message id>".
+	if messageID != "" {
+		c.stopActiveThinking(chatKey + ":" + messageID)
+	}
+	// Safety net: cancel any indicator left for this chat (concurrent messages,
+	// error paths, or an indicator stored under a different message id).
+	c.stopAllThinkingForChat(chatKey)
+
+	c.clearPlaceholderForChat(chatKey)
+}
+
+// clearPlaceholderForChat deletes the pending "Thinking... 💭" placeholder of a
+// chat, if any, and forgets it. Best-effort: when the chat ID is not numeric or
+// the stored value is not a message ID, nothing is removed, so the regular send
+// path can still resolve the placeholder into the real answer.
+func (c *TelegramChannel) clearPlaceholderForChat(chatKey string) {
+	// Deletion needs the bot token from config; without it the entry is left
+	// in place so the regular send path can still resolve the placeholder.
+	if c.config == nil {
+		return
+	}
+	pID, ok := c.placeholders.Load(chatKey)
+	if !ok {
+		return
+	}
+	chatID, err := parseChatID(chatKey)
+	if err != nil {
+		return
+	}
+	id, isInt := pID.(int)
+	if !isInt {
+		return
+	}
+	c.placeholders.Delete(chatKey)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c.deleteMessage(ctx, chatID, id)
+}
+
+// finishTurn handles the terminal turn.end signal from the agent loop.
+// Dedicated to keep Send readable: the signal carries no content, so all it
+// does is drop the transient per-turn state of the chat.
+func (c *TelegramChannel) finishTurn(chatKey, messageID string) {
+	c.clearTransientTurnState(chatKey, messageID)
+}
+
+// ConsumesEvent declares the events Telegram interprets inside Send. Only
+// turn.end is listed: it carries no content, so without this declaration the
+// dispatcher's contentless-signal guard would drop it and the typing indicator
+// would never stop — the exact bug #240 is about.
+//
+// Adding an event to Send() without adding it here makes the signal
+// undeliverable, which the companion test detects structurally.
+func (c *TelegramChannel) ConsumesEvent(event string) bool {
+	return event == "turn.end"
+}
+
 func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	// turn.end: the agent loop's guaranteed terminal signal for a turn. It is
+	// a cleanup signal, not content, so it is handled FIRST — before the
+	// running guard, chat-ID parsing and rate limiting: cleanup must not
+	// depend on any of them.
+	//
+	// Processing it even when the channel is already stopped is safe and
+	// desirable. Stop() sweeps typing state and placeholders on its way out,
+	// so finishTurn normally finds nothing to do and is an idempotent no-op
+	// that sends nothing to Telegram; and when the sweep did not catch this
+	// turn, this is precisely the last chance to clean it up. Rejecting the
+	// signal instead would leave the state behind AND log a misleading
+	// "Error sending message to channel" during shutdown. The call itself
+	// cannot fail loudly: deleteMessage is best-effort (debug log, no error).
+	if msg.Event == "turn.end" {
+		// metadata["message_id"] carries the originating user message id, so
+		// the exact "<chat>:<msg>" indicator key can be cancelled directly.
+		var turnMsgID string
+		if msg.Metadata != nil {
+			turnMsgID = msg.Metadata["message_id"]
+		}
+		c.finishTurn(msg.ChatID, turnMsgID)
+		return nil
+	}
+
 	if !c.IsRunning() {
 		return fmt.Errorf("telegram bot not running")
 	}
@@ -309,6 +489,15 @@ func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID
 	return false
 }
 
+// deleteHTTPClient returns the HTTP client used by deleteMessage. It defaults
+// to http.DefaultClient; tests may override deleteHTTP to keep the call local.
+func (c *TelegramChannel) deleteHTTPClient() *http.Client {
+	if c.deleteHTTP != nil {
+		return c.deleteHTTP
+	}
+	return http.DefaultClient
+}
+
 // deleteMessage deletes a Telegram message by chat ID and message ID.
 // Best-effort: errors are logged but not returned.
 func (c *TelegramChannel) deleteMessage(ctx context.Context, chatID int64, messageID int) {
@@ -320,7 +509,7 @@ func (c *TelegramChannel) deleteMessage(ctx context.Context, chatID int64, messa
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.deleteHTTPClient().Do(req)
 	if err != nil {
 		logger.DebugCF("telegram", "Failed to delete message", map[string]interface{}{"error": err.Error(), "message_id": messageID})
 		return

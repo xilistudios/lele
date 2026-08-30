@@ -51,6 +51,9 @@ type TelegramChannel struct {
 	// Fallback deduplication using ChatID:MessageID
 	processedIDs map[string]struct{}
 	processedMu  sync.Mutex
+	// deleteHTTP optionally overrides the HTTP client used by deleteMessage
+	// (tests). When nil, http.DefaultClient is used. Assign before Start.
+	deleteHTTP *http.Client
 }
 
 type telegramCommandSpec struct {
@@ -136,7 +139,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 	// via SetKVRepo once the channel manager is built)
 	lastUpdateID := loadLastUpdateIDFromFile(offsetFilePath)
 
-	return &TelegramChannel{
+	ch := &TelegramChannel{
 		BaseChannel:     base,
 		commands:        NewTelegramCommands(bot, cfg, agentLoop),
 		bot:             bot,
@@ -150,7 +153,15 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 		lastUpdateID:    lastUpdateID,
 		offsetFilePath:  offsetFilePath,
 		processedIDs:    make(map[string]struct{}),
-	}, nil
+	}
+
+	// Roll back user-visible side effects (typing indicator, "Thinking..."
+	// placeholder) when the bus rejects an inbound message. Assigned here —
+	// not inside NewBaseChannel — because the closure needs the concrete
+	// channel; it must be set before Start begins processing updates.
+	ch.InboundDroppedHook = ch.handleInboundDropped
+
+	return ch, nil
 }
 
 func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
@@ -436,6 +447,12 @@ func (c *TelegramChannel) pollingLoop(parentCtx context.Context) {
 			"delay": currentDelay.String(),
 		})
 
+		// Handler died and its turns are gone: sweep the orphaned typing state.
+		// context.Background() is deliberate — there is no request-scoped ctx
+		// here, and the reconnect must not be gated by the parent lifetime;
+		// clearAllPlaceholders caps the work at placeholderSweepDeadline.
+		c.sweepOrphanedTurnState(context.Background(), "bot handler stopped unexpectedly")
+
 		// Clean up before reconnect
 		if cancel != nil {
 			cancel()
@@ -455,6 +472,11 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 
 	c.setRunning(false)
 
+	// The caller's ctx is the parent so an already-cancelled/short-deadline
+	// shutdown cannot be prolonged by the sweep (the deadline cap keeps the
+	// reverse from happening too: the sweep never blocks for N timeouts).
+	c.sweepOrphanedTurnState(ctx, "channel stopping")
+
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -463,6 +485,88 @@ func (c *TelegramChannel) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// sweepOrphanedTurnState clears the per-turn UI state that can no longer be
+// reported by its owner: typing indicator loops and "Thinking..." placeholders.
+//
+// It is called whenever the update-processing path is torn down — explicit
+// Stop, or a BotHandler that died and is about to reconnect — because the
+// turns that started that state will never emit their terminal turn.end again.
+//
+// ctx bounds the whole sweep: placeholder deletes are network calls, so without
+// a shared deadline Stop() could block for (number of placeholders × per-call
+// timeout). reason is only for the log line.
+func (c *TelegramChannel) sweepOrphanedTurnState(ctx context.Context, reason string) {
+	stopped := countMapEntries(&c.stopThinking)
+	placeholders := countMapEntries(&c.placeholders)
+	if stopped == 0 && placeholders == 0 {
+		return
+	}
+
+	c.stopAllThinking()
+	c.clearAllPlaceholders(ctx)
+
+	logger.WarnCF("telegram", "Swept orphaned turn state", map[string]interface{}{
+		"reason":          reason,
+		"typing_loops":    stopped,
+		"thinking_bubble": placeholders,
+	})
+}
+
+func countMapEntries(m *sync.Map) int {
+	n := 0
+	m.Range(func(_, _ interface{}) bool { n++; return true })
+	return n
+}
+
+// stopAllThinking cancels every running typing-indicator loop, not just the
+// ones belonging to a single chat. Used on shutdown and before a reconnect,
+// when the turns that owned them are gone.
+func (c *TelegramChannel) stopAllThinking() {
+	c.stopThinking.Range(func(key, value interface{}) bool {
+		if cf, ok := value.(*thinkingCancel); ok && cf != nil {
+			cf.Cancel()
+		}
+		c.stopThinking.Delete(key)
+		return true
+	})
+}
+
+// placeholderSweepDeadline caps the total wall time of a placeholder sweep,
+// independently of how many placeholders are pending. Once it expires the
+// remaining deletes fail fast on the context, but the entries are still
+// dropped from the map — the sweep's real job is forgetting state, the API
+// call is only a courtesy to the user's chat.
+const placeholderSweepDeadline = 5 * time.Second
+
+// clearAllPlaceholders deletes every pending "Thinking... 💭" placeholder.
+// Best-effort: an individual delete failure only logs, and each entry is
+// removed from the map regardless so a stale placeholder can never be edited
+// into a later, unrelated turn.
+//
+// ctx bounds the sweep as a whole: all deletes share ONE deadline derived
+// from it (placeholderSweepDeadline at most), so degraded networking cannot
+// turn shutdown into N sequential timeouts.
+func (c *TelegramChannel) clearAllPlaceholders(ctx context.Context) {
+	if c.config == nil {
+		return
+	}
+	deadline, cancel := context.WithTimeout(ctx, placeholderSweepDeadline)
+	defer cancel()
+
+	c.placeholders.Range(func(key, value interface{}) bool {
+		chatKey, isStr := key.(string)
+		id, isInt := value.(int)
+		if isStr && isInt {
+			chatID, err := parseChatID(chatKey)
+			if err == nil {
+				c.deleteMessage(deadline, chatID, id)
+			}
+		}
+		c.placeholders.Delete(key)
+		return true
+	})
 }
 
 // isDuplicate checks if a message has already been processed

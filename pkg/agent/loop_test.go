@@ -871,7 +871,11 @@ func TestAgentLoop_ContextExhaustionRetry(t *testing.T) {
 	}
 }
 
-func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
+// TestAgentLoop_Run_SkipsFinalMessageOnSessionCancel pins both halves of the
+// cancelled-turn contract: the user must NOT receive a final message (the turn
+// was stopped), but the channel MUST receive the terminal turn.end signal —
+// otherwise Telegram's typing indicator would never stop (#240).
+func TestAgentLoop_Run_SkipsFinalMessageOnSessionCancel(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -931,10 +935,17 @@ func TestAgentLoop_Run_SkipsOutboundOnSessionCancel(t *testing.T) {
 		t.Fatalf("unexpected stop response: %s", response)
 	}
 
-	outboundCtx, cancelOutbound := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	outboundCtx, cancelOutbound := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancelOutbound()
-	if outbound, ok := msgBus.SubscribeOutbound(outboundCtx); ok {
-		t.Fatalf("expected no outbound response after session cancellation, got %+v", outbound)
+	outbound, ok := msgBus.SubscribeOutbound(outboundCtx)
+	if !ok {
+		t.Fatal("expected the terminal turn.end signal after session cancellation, got nothing")
+	}
+	if outbound.Event != "turn.end" {
+		t.Fatalf("expected turn.end as the only outbound after cancellation, got event=%q content=%q", outbound.Event, outbound.Content)
+	}
+	if outbound.Content != "" {
+		t.Fatalf("cancellation must not deliver a final message, got content %q", outbound.Content)
 	}
 
 	cancelRun()
