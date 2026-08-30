@@ -218,6 +218,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Audit M2: universal sync point for every keystroke while a modal
+			// is open. The forwarding block below also syncs, but transitions
+			// that END on a secret step (ESC-close, Enter-advance, success
+			// screen) return before reaching it — syncing at the top of the
+			// block guarantees the last processed event always leaves the
+			// echo mode consistent with the state it ended in.
+			m.syncTextInputEcho()
 			// Subagent multi-select picker navigation/toggle/confirm.
 			if m.subagentPickerActive {
 				switch msg.String() {
@@ -346,6 +353,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.formStepIndex = 0
 						m.formValues = nil
 						m.modalMode = ModalNone
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						m.reloadSessions()
 						return m, nil
 					}
@@ -595,6 +603,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.providerSavedInFlow = false
 						m.formStepIndex = 0
 						m.formValues = nil
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						m.onboardingStep = obVerify
 						m.obVerifying = true
 						m.obFinalizeSetup()                                  // set defaults + persist
@@ -632,6 +641,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 						m.modalMode = ModalNone
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						return m, nil
 					}
 					// Advance to next step
@@ -692,138 +702,87 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				} else if len(m.modalItems) > 0 {
-					selectedVal := m.modalItems[m.modalSelectedIdx]
-					if m.modalMode == ModalAgent {
-						if m.showWelcome {
-							m.pendingAgent = selectedVal
-						}
-						if m.currentKey != "" {
-							m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
-						}
-						// Agent name is rendered in the viewport header — force
-						// a re-render even if the content fingerprint is unchanged.
-						m.lastViewportKey = ""
-						m.renderedBaseKey = ""
-					} else if m.modalMode == ModalModel {
-						if m.showWelcome {
-							m.pendingModel = selectedVal
-						}
-						if m.currentKey != "" {
-							m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
-						}
-						// Model name is rendered in the bottom bar — re-render.
-						m.lastViewportKey = ""
-						m.renderedBaseKey = ""
-					} else if m.modalMode == ModalThink {
-						if m.showWelcome {
-							m.pendingThink = selectedVal
-						}
-						if m.currentKey != "" {
-							m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
-						}
-						// Think level is rendered in the bottom bar — re-render.
-						m.lastViewportKey = ""
-						m.renderedBaseKey = ""
-					} else if m.modalMode == ModalSessions {
-						if m.modalSelectedIdx < len(m.modalSessionKeys) {
-							m.currentKey = m.modalSessionKeys[m.modalSelectedIdx]
-							m.showWelcome = false
-							m.clearStreamingState()
-							// Sync pendingModel to the target session's model so
-							// that creating a new chat from here inherits it.
-							m.pendingModel = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
-						}
-					} else if m.modalMode == ModalSubagents {
-						if m.modalSelectedIdx < len(m.modalSubagentKeys) {
-							// Remember the parent chat so the user can navigate back (ctrl+b)
-							if m.parentSessionKey == "" {
-								m.parentSessionKey = m.currentKey
+					// Defensive clamp: a list reload that shrank the modal (e.g.
+					// deleting the last cron job) can leave modalSelectedIdx past
+					// the end. Fix the cursor here too so indexing below can never
+					// panic; if the list is empty we simply do nothing.
+					m.clampModalCursor()
+					if m.modalSelectedIdx >= 0 && m.modalSelectedIdx < len(m.modalItems) {
+						selectedVal := m.modalItems[m.modalSelectedIdx]
+						if m.modalMode == ModalAgent {
+							if m.showWelcome {
+								m.pendingAgent = selectedVal
 							}
-							m.currentKey = m.modalSubagentKeys[m.modalSelectedIdx]
-							m.showWelcome = false
-							m.clearStreamingState()
-						}
-					} else if m.modalMode == ModalLang {
-						// Extract language code from "Name (code)" format
-						langCode := selectedVal
-						if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
-							langCode = strings.TrimRight(selectedVal[idx+1:], ")")
-						}
-						m.cfg.SetLanguage(langCode)
-						i18n.SetLanguage(langCode)
-						m.chatInput.Placeholder = i18n.T("tui.placeholder")
-					} else if m.modalMode == ModalProviders {
-						// "+ Connect a provider" action entry.
-						if m.modalSelectedIdx < len(m.modalItems) &&
-							m.modalItems[m.modalSelectedIdx] == i18n.T("tui.connectAction") {
-							return m, m.executeCommand("/connect")
-						}
-						if m.modalSelectedIdx < len(m.providerModalKeys) {
-							providerName := m.providerModalKeys[m.modalSelectedIdx]
-							m.providerSelectedName = providerName
-							m.modalMode = ModalProviderDetail
-							// Build detail view items
-							m.modalItems = nil
-							m.modalSelectedIdx = 0
-							m.modalScrollOffset = 0
-							// Show provider info
-							snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
-							if snapshot != nil && snapshot.Providers != nil {
-								if p, ok := snapshot.Providers.GetNamed(providerName); ok {
-									m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
-									m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-									keyDisplay := p.APIKey
-									if len(keyDisplay) > 8 {
-										keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
-									}
-									m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
+							if m.currentKey != "" {
+								m.agentLoop.GetProvidable().SetSessionAgent(m.currentKey, selectedVal)
+							}
+							// Agent name is rendered in the viewport header — force
+							// a re-render even if the content fingerprint is unchanged.
+							m.lastViewportKey = ""
+							m.renderedBaseKey = ""
+						} else if m.modalMode == ModalModel {
+							if m.showWelcome {
+								m.pendingModel = selectedVal
+							}
+							if m.currentKey != "" {
+								m.agentLoop.GetProvidable().SetSessionModel(m.currentKey, selectedVal)
+							}
+							// Model name is rendered in the bottom bar — re-render.
+							m.lastViewportKey = ""
+							m.renderedBaseKey = ""
+						} else if m.modalMode == ModalThink {
+							if m.showWelcome {
+								m.pendingThink = selectedVal
+							}
+							if m.currentKey != "" {
+								m.agentLoop.GetProvidable().SetThinkLevel(m.currentKey, selectedVal)
+							}
+							// Think level is rendered in the bottom bar — re-render.
+							m.lastViewportKey = ""
+							m.renderedBaseKey = ""
+						} else if m.modalMode == ModalSessions {
+							if m.modalSelectedIdx < len(m.modalSessionKeys) {
+								m.setCurrentChatKey(m.modalSessionKeys[m.modalSelectedIdx])
+								m.showWelcome = false
+								m.clearStreamingState()
+								// Sync pendingModel to the target session's model so
+								// that creating a new chat from here inherits it.
+								m.pendingModel = m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
+							}
+						} else if m.modalMode == ModalSubagents {
+							if m.modalSelectedIdx < len(m.modalSubagentKeys) {
+								// Remember the parent chat so the user can navigate back (ctrl+b)
+								if m.parentSessionKey == "" {
+									m.parentSessionKey = m.currentKey
 								}
+								m.setCurrentChatKey(m.modalSubagentKeys[m.modalSelectedIdx])
+								m.showWelcome = false
+								m.clearStreamingState()
 							}
-							m.modalItems = append(m.modalItems, "---")
-							// List models
-							models := m.listProviderModels(providerName)
-							for _, alias := range models {
-								m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
+						} else if m.modalMode == ModalLang {
+							// Extract language code from "Name (code)" format
+							langCode := selectedVal
+							if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
+								langCode = strings.TrimRight(selectedVal[idx+1:], ")")
 							}
-							if len(models) == 0 {
-								m.modalItems = append(m.modalItems, "  (no models)")
+							m.cfg.SetLanguage(langCode)
+							i18n.SetLanguage(langCode)
+							m.chatInput.Placeholder = i18n.T("tui.placeholder")
+						} else if m.modalMode == ModalProviders {
+							// "+ Connect a provider" action entry.
+							if m.modalSelectedIdx < len(m.modalItems) &&
+								m.modalItems[m.modalSelectedIdx] == i18n.T("tui.connectAction") {
+								return m, m.executeCommand("/connect")
 							}
-							m.modalItems = append(m.modalItems, "---")
-							m.modalItems = append(m.modalItems, "+ Add model")
-							m.modalItems = append(m.modalItems, "- Delete provider")
-						}
-						return m, nil
-					} else if m.modalMode == ModalProviderDetail {
-						if m.modalSelectedIdx < len(m.modalItems) {
-							selectedItem := m.modalItems[m.modalSelectedIdx]
-							if selectedItem == "+ Add model" {
-								m.modalMode = ModalAddModel
-								m.formStepIndex = 0
-								m.formValues = make([]string, 5)
-								m.formError = ""
-								m.formConfirmMode = false
-								m.textInput.SetValue("")
-								m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
-								return m, nil
-							} else if selectedItem == "- Delete provider" {
-								if err := m.deleteProvider(m.providerSelectedName); err != nil {
-									m.formError = err.Error()
-									return m, nil
-								}
-								m.modalMode = ModalNone
-								return m, nil
-							} else if strings.HasPrefix(selectedItem, "  ") && !strings.HasPrefix(selectedItem, "  (") {
-								// Model entry — delete it
-								modelAlias := strings.TrimSpace(selectedItem)
-								if err := m.deleteModelFromProvider(m.providerSelectedName, modelAlias); err != nil {
-									m.formError = err.Error()
-									return m, nil
-								}
-								// Refresh detail view
-								providerName := m.providerSelectedName
+							if m.modalSelectedIdx < len(m.providerModalKeys) {
+								providerName := m.providerModalKeys[m.modalSelectedIdx]
+								m.providerSelectedName = providerName
+								m.modalMode = ModalProviderDetail
+								// Build detail view items
 								m.modalItems = nil
 								m.modalSelectedIdx = 0
 								m.modalScrollOffset = 0
+								// Show provider info
 								snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
 								if snapshot != nil && snapshot.Providers != nil {
 									if p, ok := snapshot.Providers.GetNamed(providerName); ok {
@@ -837,6 +796,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 									}
 								}
 								m.modalItems = append(m.modalItems, "---")
+								// List models
 								models := m.listProviderModels(providerName)
 								for _, alias := range models {
 									m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
@@ -847,203 +807,260 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.modalItems = append(m.modalItems, "---")
 								m.modalItems = append(m.modalItems, "+ Add model")
 								m.modalItems = append(m.modalItems, "- Delete provider")
+							}
+							return m, nil
+						} else if m.modalMode == ModalProviderDetail {
+							if m.modalSelectedIdx < len(m.modalItems) {
+								selectedItem := m.modalItems[m.modalSelectedIdx]
+								if selectedItem == "+ Add model" {
+									m.modalMode = ModalAddModel
+									m.formStepIndex = 0
+									m.formValues = make([]string, 5)
+									m.formError = ""
+									m.formConfirmMode = false
+									m.textInput.SetValue("")
+									m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+									return m, nil
+								} else if selectedItem == "- Delete provider" {
+									if err := m.deleteProvider(m.providerSelectedName); err != nil {
+										m.formError = err.Error()
+										return m, nil
+									}
+									m.modalMode = ModalNone
+									return m, nil
+								} else if strings.HasPrefix(selectedItem, "  ") && !strings.HasPrefix(selectedItem, "  (") {
+									// Model entry — delete it
+									modelAlias := strings.TrimSpace(selectedItem)
+									if err := m.deleteModelFromProvider(m.providerSelectedName, modelAlias); err != nil {
+										m.formError = err.Error()
+										return m, nil
+									}
+									// Refresh detail view
+									providerName := m.providerSelectedName
+									m.modalItems = nil
+									m.modalSelectedIdx = 0
+									m.modalScrollOffset = 0
+									snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
+									if snapshot != nil && snapshot.Providers != nil {
+										if p, ok := snapshot.Providers.GetNamed(providerName); ok {
+											m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
+											m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
+											keyDisplay := p.APIKey
+											if len(keyDisplay) > 8 {
+												keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+											}
+											m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
+										}
+									}
+									m.modalItems = append(m.modalItems, "---")
+									models := m.listProviderModels(providerName)
+									for _, alias := range models {
+										m.modalItems = append(m.modalItems, fmt.Sprintf("  %s", alias))
+									}
+									if len(models) == 0 {
+										m.modalItems = append(m.modalItems, "  (no models)")
+									}
+									m.modalItems = append(m.modalItems, "---")
+									m.modalItems = append(m.modalItems, "+ Add model")
+									m.modalItems = append(m.modalItems, "- Delete provider")
+									return m, nil
+								}
+							}
+							return m, nil
+						} else if m.modalMode == ModalBackgroundExecs {
+							if m.bgExecViewMode {
+								// We're in output view mode - go back to list
+								m.bgExecViewMode = false
+								m.bgExecViewOutput = ""
+								m.bgExecViewStatus = ""
+								return m, m.tickCmd()
+							}
+							if m.modalSelectedIdx < len(m.bgExecModalKeys) {
+								procID := m.bgExecModalKeys[m.modalSelectedIdx]
+								m.bgExecViewMode = true
+								m.bgExecViewID = procID
+								// Fetch initial output
+								output, status, _, err := m.agentLoop.GetProvidable().GetBackgroundExecOutput(procID, 5000)
+								if err == nil {
+									m.bgExecViewOutput = output
+									m.bgExecViewStatus = status
+								}
+								return m, m.tickCmd()
+							}
+						} else if m.modalMode == ModalCron {
+							if m.cronDetailMode {
+								// In detail view - go back to list
+								m.cronDetailMode = false
+								m.cronDetailJobID = ""
+								m.loadCronJobs()
+								return m, m.tickCmd()
+							}
+							if m.modalSelectedIdx < len(m.cronModalKeys) {
+								m.cronDetailMode = true
+								m.cronDetailJobID = m.cronModalKeys[m.modalSelectedIdx]
+								return m, m.tickCmd()
+							}
+						} else if m.modalMode == ModalSecrets {
+							if m.secretsDetailMode {
+								// In detail view - go back to list
+								m.secretsDetailMode = false
+								m.secretsDetailName = ""
+								m.secretsReveal = false
+								m.loadSecrets()
+								return m, m.tickCmd()
+							}
+							if m.modalSelectedIdx < len(m.secretsModalKeys) {
+								m.secretsDetailMode = true
+								m.secretsDetailName = m.secretsModalKeys[m.modalSelectedIdx]
+								m.secretsReveal = false
+								return m, m.tickCmd()
+							}
+						} else if m.modalMode == ModalSkills {
+							// Handle skills list selection
+							if m.modalSelectedIdx < len(m.skillsModalKeys) {
+								selectedKey := m.skillsModalKeys[m.modalSelectedIdx]
+								if selectedKey == "__install__" {
+									// Switch to install modal
+									m.modalMode = ModalSkillInstall
+									m.textInput.SetValue("")
+									m.textInput.Placeholder = "user/repo or user/repo/skill-name"
+									m.formError = ""
+									return m, m.tickCmd()
+								} else if selectedKey != "" {
+									// Toggle skill enabled/disabled
+									return m, m.toggleSkillCmd(selectedKey)
+								}
+							}
+						} else if m.modalMode == ModalSkillInstall {
+							// Submit repo URL for scanning
+							return m, m.handleSkillInstallSubmit()
+						} else if m.modalMode == ModalSkillPicker {
+							// Install selected skills
+							return m, m.handleSkillPickerEnter()
+						} else if m.modalMode == ModalSettings {
+							// Top-level settings menu: navigate to sub-menu based on selection.
+							// Items correspond to: Agents / System / Interface.
+							switch m.modalSelectedIdx {
+							case 0:
+								m.resetModal(ModalSettingsAgents)
+								m.settingsSection = "agents"
+								m.loadAgentsSettings()
+							case 1:
+								m.modalMode = ModalSettingsSystem
+								m.settingsSection = ""
+								m.loadSystemSettings()
+							case 2:
+								m.modalMode = ModalSettingsTUI
+								m.settingsSection = "tui"
+								m.loadTUISettings()
+							}
+							m.modalSelectedIdx = 0
+							m.modalScrollOffset = 0
+							return m, nil
+						} else if m.modalMode == ModalSettingsSystem {
+							// Navigate into the selected sub-group.
+							groupIdx := m.modalSelectedIdx
+							m.resetModal(ModalSettingsSystemEdit)
+							m.settingsSection = sysSubViewName(groupIdx)
+							switch groupIdx {
+							case sysGroupSession:
+								m.loadSessionSettings()
+							case sysGroupTools:
+								m.loadToolsSettings()
+							case sysGroupLogs:
+								m.loadLogsSettings()
+							case sysGroupLanguage:
+								m.loadLanguageSettings()
+							case sysGroupGoal:
+								m.loadGoalSettings()
+							case sysGroupUpdates:
+								m.loadUpdatesSettings()
+							}
+							return m, nil
+						} else if m.modalMode == ModalSettingsSystemEdit {
+							// System sub-view: inline edit (save), selector confirm,
+							// or row action.
+							if m.settingsSelectorActive {
+								return m, m.handleSelectorConfirm()
+							}
+							if m.settingsEditField != "" {
+								m.handleSystemSettingsInput(m.textInput.Value())
 								return m, nil
 							}
-						}
-						return m, nil
-					} else if m.modalMode == ModalBackgroundExecs {
-						if m.bgExecViewMode {
-							// We're in output view mode - go back to list
-							m.bgExecViewMode = false
-							m.bgExecViewOutput = ""
-							m.bgExecViewStatus = ""
-							return m, m.tickCmd()
-						}
-						if m.modalSelectedIdx < len(m.bgExecModalKeys) {
-							procID := m.bgExecModalKeys[m.modalSelectedIdx]
-							m.bgExecViewMode = true
-							m.bgExecViewID = procID
-							// Fetch initial output
-							output, status, _, err := m.agentLoop.GetProvidable().GetBackgroundExecOutput(procID, 5000)
-							if err == nil {
-								m.bgExecViewOutput = output
-								m.bgExecViewStatus = status
+							return m, m.handleSystemSubEnter()
+						} else if m.modalMode == ModalSettingsAgents {
+							// Agent list: navigate to detail, defaults, or start
+							// the add-agent flow.
+							if m.settingsEditField != "" {
+								m.handleAgentSettingsInput(m.textInput.Value())
+								return m, nil
 							}
-							return m, m.tickCmd()
-						}
-					} else if m.modalMode == ModalCron {
-						if m.cronDetailMode {
-							// In detail view - go back to list
-							m.cronDetailMode = false
-							m.cronDetailJobID = ""
-							m.loadCronJobs()
-							return m, m.tickCmd()
-						}
-						if m.modalSelectedIdx < len(m.cronModalKeys) {
-							m.cronDetailMode = true
-							m.cronDetailJobID = m.cronModalKeys[m.modalSelectedIdx]
-							return m, m.tickCmd()
-						}
-					} else if m.modalMode == ModalSecrets {
-						if m.secretsDetailMode {
-							// In detail view - go back to list
-							m.secretsDetailMode = false
-							m.secretsDetailName = ""
-							m.secretsReveal = false
-							m.loadSecrets()
-							return m, m.tickCmd()
-						}
-						if m.modalSelectedIdx < len(m.secretsModalKeys) {
-							m.secretsDetailMode = true
-							m.secretsDetailName = m.secretsModalKeys[m.modalSelectedIdx]
-							m.secretsReveal = false
-							return m, m.tickCmd()
-						}
-					} else if m.modalMode == ModalSkills {
-						// Handle skills list selection
-						if m.modalSelectedIdx < len(m.skillsModalKeys) {
-							selectedKey := m.skillsModalKeys[m.modalSelectedIdx]
-							if selectedKey == "__install__" {
-								// Switch to install modal
-								m.modalMode = ModalSkillInstall
-								m.textInput.SetValue("")
-								m.textInput.Placeholder = "user/repo or user/repo/skill-name"
-								m.formError = ""
-								return m, m.tickCmd()
-							} else if selectedKey != "" {
-								// Toggle skill enabled/disabled
-								return m, m.toggleSkillCmd(selectedKey)
+							return m, m.handleAgentsEnter()
+						} else if m.modalMode == ModalSettingsAgentEdit {
+							// Agent detail: save inline edit, selector confirm,
+							// or handle row action.
+							if m.settingsSelectorActive {
+								return m, m.handleSelectorConfirm()
 							}
-						}
-					} else if m.modalMode == ModalSkillInstall {
-						// Submit repo URL for scanning
-						return m, m.handleSkillInstallSubmit()
-					} else if m.modalMode == ModalSkillPicker {
-						// Install selected skills
-						return m, m.handleSkillPickerEnter()
-					} else if m.modalMode == ModalSettings {
-						// Top-level settings menu: navigate to sub-menu based on selection.
-						// Items correspond to: Agents / System / Interface.
-						switch m.modalSelectedIdx {
-						case 0:
-							m.resetModal(ModalSettingsAgents)
-							m.settingsSection = "agents"
-							m.loadAgentsSettings()
-						case 1:
-							m.modalMode = ModalSettingsSystem
-							m.settingsSection = ""
-							m.loadSystemSettings()
-						case 2:
-							m.modalMode = ModalSettingsTUI
-							m.settingsSection = "tui"
-							m.loadTUISettings()
-						}
-						m.modalSelectedIdx = 0
-						m.modalScrollOffset = 0
-						return m, nil
-					} else if m.modalMode == ModalSettingsSystem {
-						// Navigate into the selected sub-group.
-						groupIdx := m.modalSelectedIdx
-						m.resetModal(ModalSettingsSystemEdit)
-						m.settingsSection = sysSubViewName(groupIdx)
-						switch groupIdx {
-						case sysGroupSession:
-							m.loadSessionSettings()
-						case sysGroupTools:
-							m.loadToolsSettings()
-						case sysGroupLogs:
-							m.loadLogsSettings()
-						case sysGroupLanguage:
-							m.loadLanguageSettings()
-						case sysGroupGoal:
-							m.loadGoalSettings()
-						case sysGroupUpdates:
-							m.loadUpdatesSettings()
-						}
-						return m, nil
-					} else if m.modalMode == ModalSettingsSystemEdit {
-						// System sub-view: inline edit (save), selector confirm,
-						// or row action.
-						if m.settingsSelectorActive {
-							return m, m.handleSelectorConfirm()
-						}
-						if m.settingsEditField != "" {
-							m.handleSystemSettingsInput(m.textInput.Value())
-							return m, nil
-						}
-						return m, m.handleSystemSubEnter()
-					} else if m.modalMode == ModalSettingsAgents {
-						// Agent list: navigate to detail, defaults, or start
-						// the add-agent flow.
-						if m.settingsEditField != "" {
-							m.handleAgentSettingsInput(m.textInput.Value())
-							return m, nil
-						}
-						return m, m.handleAgentsEnter()
-					} else if m.modalMode == ModalSettingsAgentEdit {
-						// Agent detail: save inline edit, selector confirm,
-						// or handle row action.
-						if m.settingsSelectorActive {
-							return m, m.handleSelectorConfirm()
-						}
-						if m.settingsEditField != "" {
-							m.handleAgentSettingsInput(m.textInput.Value())
-							return m, nil
-						}
-						return m, m.handleAgentEditEnter()
-					} else if m.modalMode == ModalSettingsTUI {
-						// Theme picker is active — handle selection.
-						if m.themePickerActive {
-							if m.modalSelectedIdx < len(m.themePickerItems) {
-								item := m.themePickerItems[m.modalSelectedIdx]
-								switch item.kind {
-								case "builtin":
-									m.applyThemeByName(item.name)
-									m.themePreviewName = ""
-									m.themePickerActive = false
-									m.loadTUISettings()
-									m.modalSelectedIdx = 0
-									return m, nil
-								case "community":
-									if theme.IsInstalledCommunity(item.name, m.installedCommunity) {
-										// Already installed — just apply
+							if m.settingsEditField != "" {
+								m.handleAgentSettingsInput(m.textInput.Value())
+								return m, nil
+							}
+							return m, m.handleAgentEditEnter()
+						} else if m.modalMode == ModalSettingsTUI {
+							// Theme picker is active — handle selection.
+							if m.themePickerActive {
+								if m.modalSelectedIdx < len(m.themePickerItems) {
+									item := m.themePickerItems[m.modalSelectedIdx]
+									switch item.kind {
+									case "builtin":
 										m.applyThemeByName(item.name)
 										m.themePreviewName = ""
 										m.themePickerActive = false
 										m.loadTUISettings()
 										m.modalSelectedIdx = 0
 										return m, nil
+									case "community":
+										if theme.IsInstalledCommunity(item.name, m.installedCommunity) {
+											// Already installed — just apply
+											m.applyThemeByName(item.name)
+											m.themePreviewName = ""
+											m.themePickerActive = false
+											m.loadTUISettings()
+											m.modalSelectedIdx = 0
+											return m, nil
+										}
+										// Not installed — download and install
+										m.communityLoading = true
+										m.loadThemePickerItems()
+										return m, m.installCommunityThemeCmd(item.name)
+									case "retry":
+										m.communityLoading = true
+										m.communityErr = ""
+										m.loadThemePickerItems()
+										return m, m.fetchCommunityIndexCmd()
 									}
-									// Not installed — download and install
-									m.communityLoading = true
-									m.loadThemePickerItems()
-									return m, m.installCommunityThemeCmd(item.name)
-								case "retry":
-									m.communityLoading = true
-									m.communityErr = ""
-									m.loadThemePickerItems()
-									return m, m.fetchCommunityIndexCmd()
 								}
+								// For headers, loading, error — do nothing
+								return m, nil
 							}
-							// For headers, loading, error — do nothing
+							// Interface settings: handle row action.
+							cmd := m.handleTUISettingsEnter()
+							// If theme picker was activated, just return with the fetch cmd
+							if m.themePickerActive {
+								return m, cmd
+							}
+							// Mouse toggle returns a cmd
+							if m.modalSelectedIdx == 1 {
+								return m, m.toggleTUIMouse()
+							}
 							return m, nil
 						}
-						// Interface settings: handle row action.
-						cmd := m.handleTUISettingsEnter()
-						// If theme picker was activated, just return with the fetch cmd
-						if m.themePickerActive {
-							return m, cmd
+						if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
+							m.modalMode = ModalNone
 						}
-						// Mouse toggle returns a cmd
-						if m.modalSelectedIdx == 1 {
-							return m, m.toggleTUIMouse()
-						}
-						return m, nil
+						m.reloadSessions()
 					}
-					if !m.bgExecViewMode && !m.cronDetailMode && !m.secretsDetailMode {
-						m.modalMode = ModalNone
-					}
-					m.reloadSessions()
 				}
 			case "esc", "q":
 				// "q" must not close form-based modals — it's a regular
@@ -1186,10 +1203,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.formStepIndex = 0
 						m.onboardingStep = obProviderPicker
 						m.modalSelectedIdx = 0
+						// Audit M2: leaving the form from a secret step must
+						// not leave a stale password echo on the widget.
+						m.syncTextInputEcho()
 						return m, nil
 					}
 				}
 				m.modalMode = ModalNone
+				// Audit M2: ESC-close of a form modal — reset echo so a stale
+				// password mode can't affect any later text-input render.
+				m.syncTextInputEcho()
 			case "s":
 				if m.modalMode == ModalBackgroundExecs && !m.bgExecViewMode {
 					if m.modalSelectedIdx < len(m.bgExecModalKeys) {
@@ -1282,11 +1305,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Forward keystrokes to textInput for form-based modals
 			// so users can type in the input fields.
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret || m.modalMode == ModalSkillInstall ||
-				(m.modalMode == ModalSettingsTUI && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsSystemEdit && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsAgentEdit && m.settingsEditField != "") ||
-				(m.modalMode == ModalSettingsAgents && m.settingsEditField != "") {
+			if isFormModal(m.modalMode, m.settingsEditField != "") {
+				// Audit M2: re-derive echo mode from modalMode+formStepIndex
+				// before forwarding — single choke point, self-heals across
+				// every step transition.
+				m.syncTextInputEcho()
 				var cmd tea.Cmd
 				m.textInput, cmd = m.textInput.Update(msg)
 				if m.isSessionProcessing() {
@@ -1446,7 +1469,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+b":
 			// Go back to parent chat if currently viewing a subagent session.
 			if m.parentSessionKey != "" {
-				m.currentKey = m.parentSessionKey
+				m.setCurrentChatKey(m.parentSessionKey)
 				m.parentSessionKey = ""
 				m.clearStreamingState()
 				m.reloadSessions()
@@ -1622,7 +1645,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.parentSessionKey == "" {
 							m.parentSessionKey = m.currentKey
 						}
-						m.currentKey = target.key
+						m.setCurrentChatKey(target.key)
 						m.showWelcome = false
 						m.clearStreamingState()
 						m.reloadSessions()
@@ -1669,6 +1692,25 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case outboundMsg:
+		// Approval prompts must never be dropped by the currentKey gate below:
+		// the blocked agent waits on ApprovalManager's full timeout otherwise.
+		// Requests for the visible session surface immediately; requests for
+		// background sessions are stashed and restored on switch.
+		if msg.msg.Event == "approval.request" {
+			id := msg.msg.Metadata["id"]
+			command := msg.msg.Metadata["command"]
+			reason := msg.msg.Metadata["reason"]
+			if msg.msg.ChatID == m.currentKey {
+				m.queueApprovalForCurrentChat(id, command, reason)
+			} else {
+				m.stashApprovalForSession(msg.msg.ChatID, id, command, reason)
+			}
+			m.updateViewport()
+			// Re-arm the listener exactly like the tail of this case does;
+			// a bare break here would leave the TUI deaf to every later event.
+			cmds = append(cmds, m.startOutboundListener())
+			break
+		}
 		if msg.msg.ChatID == m.currentKey {
 			switch msg.msg.Event {
 			case "subagent.result":
@@ -1685,14 +1727,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.invalidateSubagentsCache() // subagent status changed
 				m.updateViewport()
 				cmds = append(cmds, m.tickCmd())
-			case "approval.request":
-				// Command approval requested by the agent — store the pending
-				// approval and update the viewport to show the prompt.
-				m.pendingApprovalID = msg.msg.Metadata["id"]
-				m.pendingApprovalCmd = msg.msg.Metadata["command"]
-				m.pendingApprovalReason = msg.msg.Metadata["reason"]
-				m.approvalResult = ""
-				m.updateViewport()
 			case "message.stream":
 				// Clear pending user message on first stream chunk — by the time
 				// the LLM starts streaming, the user message is already in history.
@@ -1845,9 +1879,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					(m.currentMessageID != "" && strings.HasPrefix(msg.msg.MessageID, m.currentMessageID+"-"))
 
 				if m.processing && (m.pendingSubagentCompletions > 0 || idMatches) {
-					cmds = append(cmds, func() tea.Msg {
-						return completeMsg{sessionKey: m.currentKey}
-					})
+					cmds = append(cmds, m.completeCmd())
 				}
 			}
 		} else if m.isSubagentOfCurrentChat(msg.msg.ChatID) {
@@ -2329,6 +2361,9 @@ func (m *Model) resetModal(mode modalType) {
 	m.subagentPickerLabels = nil
 	m.subagentPickerSelected = nil
 	m.subagentPickerIdx = 0
+	// Audit M2: a fresh modal is never on a secret step (formStepIndex was
+	// just reset to 0), so this also clears any stale password echo.
+	m.syncTextInputEcho()
 }
 
 // isFormModal returns true if the modal type is a form-based modal (or a
@@ -2366,11 +2401,20 @@ func (m *Model) handleApproval(approved bool) {
 	if m.pendingApprovalID == "" {
 		return
 	}
+	// Capture the id before clearing the visible fields so the defensive
+	// snapshot cleanup below can verify it still refers to the same request.
+	answeredID := m.pendingApprovalID
 	am := m.agentLoop.GetApprovalManager()
+	var err error
 	if am != nil {
-		am.HandleApproval(m.pendingApprovalID, approved)
+		_, err = am.HandleApproval(answeredID, approved)
 	}
-	if approved {
+	if err != nil {
+		// The approval already expired (cleanupExpired deleted it) or was
+		// answered elsewhere — surface a distinct warning instead of the
+		// misleading ✅/❌ confirmation.
+		m.approvalResult = ApprovalRejected.Render("⚠️ " + i18n.T("tui.approvalExpired"))
+	} else if approved {
 		m.approvalResult = ApprovalApproved.Render("✅ " + i18n.T("tui.approvalApproved"))
 	} else {
 		m.approvalResult = ApprovalRejected.Render("❌ " + i18n.T("tui.approvalRejected"))
@@ -2378,5 +2422,12 @@ func (m *Model) handleApproval(approved bool) {
 	m.pendingApprovalID = ""
 	m.pendingApprovalCmd = ""
 	m.pendingApprovalReason = ""
+	// Drop the stashed snapshot for this session if it still mirrors the
+	// request just answered. A newer approval.request that replaced it (or a
+	// prompt abandoned by a switch to a different session) keeps its snapshot,
+	// so it cannot be resurrected on the next clearStreamingState.
+	if snap, ok := m.pendingApprovals[m.currentKey]; ok && snap.id == answeredID {
+		delete(m.pendingApprovals, m.currentKey)
+	}
 	m.updateViewport()
 }

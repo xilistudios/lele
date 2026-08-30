@@ -42,6 +42,10 @@ func (m *Model) loadSecrets() {
 		m.modalItems = append(m.modalItems, formatSecretLine(s))
 		m.secretsModalKeys = append(m.secretsModalKeys, s.Name)
 	}
+
+	// The list may have shrunk (e.g. a secret was deleted while the cursor was
+	// on the last row) — keep the cursor within bounds.
+	m.clampModalCursor()
 }
 
 // formatSecretLine renders a single secret as a compact list line.
@@ -204,6 +208,9 @@ func (m *Model) startAddSecret() {
 	m.formConfirmMode = false
 	m.textInput.SetValue("")
 	m.textInput.Placeholder = "Secret name (e.g. openai.api_key)"
+	// Audit M2: sync echo before the first frame renders the widget (the
+	// forwarding block only runs on the next keystroke).
+	m.syncTextInputEcho()
 }
 
 // maskSecretValue renders a partially masked secret value for display.

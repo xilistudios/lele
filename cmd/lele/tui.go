@@ -47,7 +47,10 @@ func tuiCmd(sessionID string) {
 	}
 
 	// Initialize the TUI model
-	tuiModel := tui.NewModel(cfg, agentLoop, sessionMgr, sessionID)
+	// The TUI mutates its config copy (providers, agents list) while agent
+	// goroutines read through the loop's atomic pointer, so it must own a
+	// private deep copy — passing `cfg` here reintroduces the data race.
+	tuiModel := tui.NewModel(cfg.Snapshot(), agentLoop, sessionMgr, sessionID)
 
 	// Run bubbletea program in AltScreen mode.
 	// Mouse capture starts ON for scroll-wheel and sidebar click support.

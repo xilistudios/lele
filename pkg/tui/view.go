@@ -9,12 +9,20 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/theme"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return i18n.T("tui.initializing")
 	}
+
+	// Audit M2: universal render-side sync — bubbletea always calls View()
+	// after Update(), so re-deriving the echo mode here guarantees every
+	// renderer that paints the text input via m.textInputView() (form modals,
+	// settings edit fields) shows the correct mode even when an Enter/ESC
+	// transition returned before the Update-side sync could run.
+	m.syncTextInputEcho()
 
 	// --------------------------------------------------------------------------
 	// WELCOME HOME SCREEN LAYOUT
@@ -311,16 +319,8 @@ func (m *Model) View() string {
 			statusWidth := lipgloss.Width(statusLine)
 			remaining := (leftWidth - 2) - statusWidth - 2
 			if remaining > 8 {
-				goalLabel := goal.Text
-				r := []rune(goalLabel)
-				maxLabelLen := remaining - 4 // account for "🎯 "
-				if len(r) > maxLabelLen {
-					if maxLabelLen > 3 {
-						goalLabel = string(r[:maxLabelLen-3]) + "..."
-					} else {
-						goalLabel = string(r[:maxLabelLen])
-					}
-				}
+				// Budget the label by display cells: "🎯 " is 3 cells wide.
+				goalLabel := truncateGoalLabel(goal.Text, remaining)
 				goalColor := OrangeColor
 				if goal.Status == agent.GoalDone {
 					goalColor = SecondaryColor
@@ -337,14 +337,11 @@ func (m *Model) View() string {
 		}
 	}
 
-	// Ensure status line does not exceed available column width
+	// Ensure status line does not exceed available column width. The line may
+	// contain ANSI sequences (bouncing dots, goal badge); truncating by runes
+	// would cut mid-escape and collapse the visible width, so clamp by cells.
 	if maxSW := leftWidth - 2; maxSW > 0 && lipgloss.Width(statusLine) > maxSW {
-		r := []rune(statusLine)
-		if maxSW > 3 && len(r) > maxSW {
-			statusLine = string(r[:maxSW-3]) + "..."
-		} else if len(r) > maxSW {
-			statusLine = string(r[:maxSW])
-		}
+		statusLine = truncateRightCells(statusLine, maxSW)
 	}
 
 	var autocompleteView string
@@ -470,12 +467,9 @@ func (m *Model) View() string {
 	if m.parentSessionKey != "" {
 		sessionName = "⇗ " + sessionName
 	}
-	if r := []rune(sessionName); len(r) > contentWidth {
-		if contentWidth > 3 {
-			sessionName = string(r[:contentWidth-3]) + "..."
-		} else {
-			sessionName = string(r[:contentWidth])
-		}
+	// Clamp by display cells (ANSI- and wide-char-aware) instead of runes.
+	if ansi.StringWidth(sessionName) > contentWidth {
+		sessionName = truncateRightCells(sessionName, contentWidth)
 	}
 	rightBuilder.WriteString(SidebarTitle.Render(sessionName) + "\n\n")
 
@@ -497,17 +491,15 @@ func (m *Model) View() string {
 	if contentHeight >= 16 {
 		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 		wsPath := m.workspacePath
-		if r := []rune(wsPath); len(r) > contentWidth-1 {
-			if contentWidth > 4 {
-				wsPath = "..." + string(r[len(r)-(contentWidth-4):])
-			}
+		// Keep the tail of the path (directory name matters most); budget
+		// contentWidth-1 cells as before, but measure in display cells.
+		if ansi.StringWidth(wsPath) > contentWidth-1 {
+			wsPath = truncateLeftCells(wsPath, contentWidth-1)
 		}
 		rightBuilder.WriteString(SidebarValue.Render(wsPath) + "\n")
 		branch := m.gitBranch
-		if r := []rune(branch); len(r) > contentWidth-1 {
-			if contentWidth > 4 {
-				branch = string(r[:contentWidth-4]) + "..."
-			}
+		if ansi.StringWidth(branch) > contentWidth-1 {
+			branch = truncateRightCells(branch, contentWidth-1)
 		}
 		rightBuilder.WriteString(SidebarValue.Render(branch) + "\n\n")
 	}
@@ -1141,7 +1133,7 @@ func (m *Model) renderTUISettings(modalTitle string) string {
 			label = i18n.T("tui.settings.streamThrottle")
 		}
 		m.textInput.Width = 40
-		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
 		if m.formError != "" {
 			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
@@ -1184,7 +1176,7 @@ func (m *Model) renderSystemSettingsEdit(title string) string {
 
 	label := m.settingsEditField
 	m.textInput.Width = 40
-	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
 	if m.formError != "" {
 		sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
@@ -1226,7 +1218,7 @@ func (m *Model) renderAgentEditInput() string {
 			label = l
 		}
 		m.textInput.Width = 60
-		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 		if m.formError != "" {
 			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
 		}
@@ -1324,9 +1316,11 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			if i < len(m.formValues) {
 				val = m.formValues[i]
 			}
-			// Mask API key for display
-			if i == 2 && len(val) > 8 {
-				val = val[:4] + "..." + val[len(val)-4:]
+			// Mask secrets (API key) for display — audit M2. Uses the same
+			// predicate as the completed-step list so every secret step is
+			// covered for both form modals.
+			if m.isSecretFormValue(i) {
+				val = maskSecretDisplay(val)
 			}
 			// Add a section header before model steps
 			if i == 4 {
@@ -1341,6 +1335,10 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			if i < len(m.formValues) {
 				val = m.formValues[i]
 			}
+			// Audit M2: never render a collected secret in clear text.
+			if m.isSecretFormValue(i) {
+				val = maskSecretDisplay(val)
+			}
 			sb.WriteString(ModalItemInactive.Render(fmt.Sprintf("  ✓ %s: %s", step, val)) + "\n")
 		} else if i == m.formStepIndex {
 			if isReviewStep {
@@ -1348,6 +1346,12 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 			} else {
 				// Current step: highlighted with input indicator
 				val := m.textInput.Value()
+				// Audit M2: mask before display — the widget echoes dots but
+				// this line prints the raw value. Empty wins the "…"
+				// placeholder (masking "" would stay "").
+				if m.isSecretInputStep() {
+					val = maskSecretDisplay(val)
+				}
 				if val == "" {
 					val = "…"
 				}
@@ -1369,7 +1373,7 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	// Text input field (hidden on review step)
 	if !isReviewStep {
 		m.textInput.Width = 40
-		sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
+		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
 	// Contextual step hint (optional fields)

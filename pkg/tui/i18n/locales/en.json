@@ -144,6 +144,7 @@
   "tui.approvalReject": "Reject",
   "tui.approvalApproved": "Command approved — executing...",
   "tui.approvalRejected": "Command rejected",
+  "tui.approvalExpired": "Approval no longer active (expired or handled elsewhere)",
 
   "tui.group.layer": "Layer %d",
   "tui.group.synthesis": "Final synthesis",

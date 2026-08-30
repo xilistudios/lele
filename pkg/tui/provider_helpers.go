@@ -11,7 +11,16 @@ import (
 
 // saveConfigToDisk persists the current in-memory config to disk.
 func (m *Model) saveConfigToDisk() error {
-	return config.SaveConfig(config.DefaultConfigPath(), m.cfg)
+	if err := config.SaveConfig(config.DefaultConfigPath(), m.cfg); err != nil {
+		return err
+	}
+	// Publish a fresh private copy to the agent loop so its goroutines never
+	// read the pointer the TUI keeps mutating (audit C1 data race). Only on
+	// success: a failed save must leave the loop on the last known-good config.
+	if m.agentLoop != nil {
+		m.agentLoop.UpdateConfigSnapshot(m.cfg.Snapshot())
+	}
+	return nil
 }
 
 // listProviders returns a sorted list of provider names from the config.

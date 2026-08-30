@@ -45,6 +45,22 @@ func (m *Model) flushStreamUpdate() {
 	m.streamThrottleActive = false
 }
 
+// completeCmd builds the command that finalizes a streaming turn.
+//
+// bubbletea executes tea.Cmd functions asynchronously on a separate goroutine
+// ("this can be long"), so mutable per-session Model state MUST be captured at
+// closure creation time and never read at execution time. Capturing late would
+// both race on m.currentKey and misattribute the completion to whatever
+// session the user switched to in the meantime (the `msg.sessionKey ==
+// m.currentKey` guard in the completeMsg handler would then pass for the wrong
+// session, clearing its loading state while the real completion is lost).
+func (m *Model) completeCmd() tea.Cmd {
+	key := m.currentKey
+	return func() tea.Msg {
+		return completeMsg{sessionKey: key}
+	}
+}
+
 func (m *Model) startOutboundListener() tea.Cmd {
 	return func() tea.Msg {
 		for {

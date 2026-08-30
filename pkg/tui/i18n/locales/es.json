@@ -144,6 +144,7 @@
   "tui.approvalReject": "Rechazar",
   "tui.approvalApproved": "Comando aprobado — ejecutando...",
   "tui.approvalRejected": "Comando rechazado",
+  "tui.approvalExpired": "Aprobación ya no activa (expiró o se resolvió en otro lado)",
 
   "tui.group.layer": "Capa %d",
   "tui.group.synthesis": "Síntesis final",

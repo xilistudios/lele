@@ -135,6 +135,17 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	al.toolCoordinator = newToolCoordinatorWithSubagents(al, updatedSubagents, updatedBgManagers)
 }
 
+// UpdateConfigSnapshot atomically swaps the config pointer used by the loop.
+// Unlike ReloadRegistry it does NOT rebuild registries or cancel work; use it
+// when only config values changed. The caller MUST pass a private copy
+// (e.g. cfg.Snapshot()) that it will not mutate afterwards.
+func (al *AgentLoop) UpdateConfigSnapshot(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	al.cfgPtr.Store(cfg)
+}
+
 // ResolveSessionKey resolves the session key alias if one exists.
 func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 	if sessionKey == "" {

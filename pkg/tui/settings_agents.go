@@ -348,7 +348,9 @@ func (m *Model) handleAgentSettingsInput(value string) {
 // wired to an agent loop (never in unit tests where it is nil).
 func (m *Model) applyAgentReload() {
 	if m.agentLoop != nil {
-		m.agentLoop.ReloadRegistry(m.cfg)
+		// Pass a private deep copy: ReloadRegistry stores the pointer, and the
+		// TUI continues to mutate m.cfg (audit C1 data race).
+		m.agentLoop.ReloadRegistry(m.cfg.Snapshot())
 	}
 }
 
