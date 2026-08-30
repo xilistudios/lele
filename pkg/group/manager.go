@@ -165,6 +165,95 @@ func (gm *GroupManager) evictExpiredLocked(now time.Time) {
 	}
 }
 
+// LoadHistorical rehydrates the groups persisted under storeDir into the
+// in-memory map (B7). Without it the manager started empty after every process
+// restart: chat sessions survived restarts but "/group list" and the WebSocket
+// welcome payload lost every finished group, because Start saved state to disk
+// and nothing ever read it back.
+//
+// The rules that make a rehydrated group safe to expose:
+//
+//   - it is inert: no runGroup goroutine, no group.status/group.complete event,
+//     a no-op cancel. It exists to be listed and inspected, not to be resumed;
+//   - its done channel is already closed, so Wait returns immediately with the
+//     recomputed synthesis instead of blocking on a run that will never happen;
+//   - a status that is not terminal on disk ("running"/"started" — the process
+//     died mid-turn) is re-marked StatusError with a synthetic err, otherwise
+//     such a group would look permanently active, be immune to retention, and
+//     hang any Wait forever;
+//   - finishedAt is stamped from state.UpdatedAt, so the retention sweep (see
+//     evictExpiredLocked) expires weeks-old groups on the first read instead of
+//     flooding the welcome payload with history.
+//
+// The synthesis is not persisted in GroupState, so it is recomputed from the
+// transcript with the same function finalize uses (synthesisLocked): the
+// aggregator's last turn for moa, the last turn otherwise, "" for an empty
+// transcript. The per-group error is likewise not persisted, so a group that
+// ended in error or stopped comes back with err == nil; only the re-marked,
+// restart-orphaned groups carry the synthetic error.
+//
+// It is idempotent: a group whose ID is already tracked (an active run with the
+// same ID, or a previous LoadHistorical call) is skipped and logged, never
+// overwritten. Returns the number of groups loaded. With no storeDir configured
+// it is a no-op returning (0, nil).
+func (gm *GroupManager) LoadHistorical() (int, error) {
+	gm.mu.Lock()
+	dir := gm.storeDir
+	gm.mu.Unlock()
+
+	if dir == "" {
+		return 0, nil
+	}
+
+	states, err := ListGroups(dir)
+	if err != nil {
+		return 0, fmt.Errorf("group hydrate: %w", err)
+	}
+
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	now := time.Now()
+	loaded := 0
+	for _, st := range states {
+		if st == nil {
+			continue
+		}
+		if _, exists := gm.groups[st.ID]; exists {
+			log.Printf("group %s: hydrate skipped, ID already tracked", st.ID)
+			continue
+		}
+
+		var rehydratedErr error
+		if !isTerminalGroupStatus(st.Status) {
+			st.Status = StatusError
+			rehydratedErr = fmt.Errorf("group %s: terminated by process restart", st.ID)
+		}
+
+		mg := &managedGroup{
+			state:      st,
+			originCh:   st.OriginChannel,
+			originChat: st.OriginChatID,
+			cancel:     func() {}, // inert: there is no context to cancel
+			done:       make(chan struct{}),
+			err:        rehydratedErr,
+			finishedAt: st.UpdatedAt,
+		}
+		if mg.finishedAt.IsZero() {
+			// Unknown end time: age the group from now so it still stays
+			// visible for one retention window instead of expiring instantly.
+			mg.finishedAt = now
+		}
+		mg.result = gm.synthesisLocked(mg)
+		close(mg.done)
+
+		gm.groups[st.ID] = mg
+		loaded++
+	}
+
+	return loaded, nil
+}
+
 // SetEnabledHook installs a feature-gate predicate consulted by Start. When
 // the hook returns false, Start refuses with ErrGroupsDisabled. Passing nil
 // restores the default (always allowed), which is what existing tests rely on

@@ -480,6 +480,13 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	if dbStore != nil {
 		gm.SetStore(dbStore.Groups())
 	}
+	// B7: rehydrate the groups already on disk so "/group list" and the WS
+	// welcome payload still show finished groups after a restart, the way chat
+	// sessions do. Best-effort by design — an unreadable store must never block
+	// the agent from starting; the manager simply comes up empty.
+	if _, err := gm.LoadHistorical(); err != nil {
+		logger.WarnC("group", fmt.Sprintf("groups: failed to hydrate history: %v", err))
+	}
 	loop.groupManager = gm
 
 	// Goal manager (persistent goals, Hermes-style /goal command).
