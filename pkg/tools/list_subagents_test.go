@@ -519,3 +519,76 @@ func TestListSubagentsTool_ScopingHidesCount(t *testing.T) {
 
 	<-resultCh
 }
+
+// TestListSubagentsTool_SessionKeyOnlyFallback covers precedence 2 of
+// Execute's key resolution: the context carries NO channel/chatID (no
+// WithToolContext, so ToolContextFromCtx returns empty strings) but DOES
+// carry a session key injected via WithAgentToolContext. In that case the
+// tool must scope with the raw session key as-is, and sameSessionKey must
+// still let a child/alias session see its origin's tasks.
+//
+// This is the CLI/test path (and any caller that only gets the agent-loop
+// session key); precedence 1 (channel+chatID) is covered by the tests above.
+func TestListSubagentsTool_SessionKeyOnlyFallback(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 2)
+
+	// Two tasks spawned from two different sessions/chats.
+	_, err := manager.Spawn(context.Background(), "Task A", "alpha", "", "native", "uuid-A",
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn A failed: %v", err)
+	}
+	_, err = manager.Spawn(context.Background(), "Task B", "beta", "", "native", "uuid-B",
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn B failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+
+	// Precondition: without any context at all, both tasks are visible
+	// (precedence 3 -> no scoping). This pins that the filtering below is
+	// caused by the session key, not by something else.
+	result := tool.Execute(context.Background(), map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "subagent-1") || !strings.Contains(result.ForLLM, "subagent-2") {
+		t.Fatalf("Expected both tasks with no context, got: %s", result.ForLLM)
+	}
+
+	cases := []struct {
+		name       string
+		sessionKey string
+	}{
+		{"raw session key", "native:uuid-A"},
+		// Conversation alias: ":chat:N" suffix on the origin key.
+		{"conversation alias", "native:uuid-A:chat:2"},
+		// Subagent child session of the origin.
+		{"child subagent session", "native:uuid-A:subagent-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Only WithAgentToolContext: channel/chatID stay empty, so
+			// Execute falls through to precedence 2.
+			ctx := WithAgentToolContext(context.Background(), "test-agent", tc.sessionKey)
+			result := tool.Execute(ctx, map[string]interface{}{})
+
+			if result.IsError {
+				t.Fatalf("Expected success, got error: %s", result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "subagent-1") {
+				t.Errorf("Expected own task 'subagent-1' for key %q, got: %s", tc.sessionKey, result.ForLLM)
+			}
+			if strings.Contains(result.ForLLM, "subagent-2") {
+				t.Errorf("Task of another session must stay hidden for key %q, got: %s", tc.sessionKey, result.ForLLM)
+			}
+			if !strings.Contains(result.ForLLM, "Total: 1") {
+				t.Errorf("Expected 'Total: 1 task(s)' for key %q, got: %s", tc.sessionKey, result.ForLLM)
+			}
+		})
+	}
+
+	// Wait for tasks to complete (drain the callback channel).
+	<-resultCh
+	<-resultCh
+}
