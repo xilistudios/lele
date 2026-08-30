@@ -125,6 +125,10 @@ func (g *GroupState) ParticipantByAgent(agentID string) (Participant, bool) {
 // Snapshot returns a deep copy of the GroupState safe to read without holding
 // the manager lock. Slice fields (Participants, Transcript, StopKeywords) are
 // copied so the snapshot does not share backing arrays with the live state.
+//
+// Each Turn's ToolCalls slice is copied too: GroupToolCall holds only value
+// fields, so a shallow slice copy is a full copy of the data, and it is what
+// keeps the snapshot race-free while a running turn appends tool calls.
 func (s *GroupState) Snapshot() *GroupState {
 	if s == nil {
 		return nil
@@ -137,6 +141,12 @@ func (s *GroupState) Snapshot() *GroupState {
 	if s.Transcript != nil {
 		cp.Transcript = make([]Turn, len(s.Transcript))
 		copy(cp.Transcript, s.Transcript)
+		for i := range cp.Transcript {
+			if tc := cp.Transcript[i].ToolCalls; tc != nil {
+				cp.Transcript[i].ToolCalls = make([]GroupToolCall, len(tc))
+				copy(cp.Transcript[i].ToolCalls, tc)
+			}
+		}
 	}
 	if s.StopKeywords != nil {
 		cp.StopKeywords = make([]string, len(s.StopKeywords))
