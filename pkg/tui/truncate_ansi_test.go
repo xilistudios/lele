@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // auditDot mirrors the truecolor bouncing dots emitted by
@@ -229,6 +230,10 @@ func TestSidebarSessionNameTruncate(t *testing.T) {
 // visible-width floor that the rune-slicing bug produced.
 func TestViewRealPathStatusLineCells(t *testing.T) {
 	m := newTestModel(t)
+	// Pin the locale AFTER NewModel (it re-inits i18n from cfg.GetLanguage()
+	// and the host LANG may select es/pt), so the English content assertions
+	// below are deterministic (same convention as onboarding_test.go).
+	i18n.InitWithLanguage("en")
 
 	key := "native:chat:h1-e2e"
 	m.sessionMgr.GetOrCreate(key)
@@ -253,12 +258,19 @@ func TestViewRealPathStatusLineCells(t *testing.T) {
 				if strings.Contains(ansi.Strip(line), "\x1b") {
 					t.Fatalf("term %dx%d line %d: ESC survives Strip (partial CSI): %q", w, h, i, line)
 				}
-			}
-			// The frame must keep its structure: every line fits the width.
-			for i, line := range strings.Split(out, "\n") {
 				if lw := ansi.StringWidth(line); lw > w {
 					t.Fatalf("term %dx%d line %d overflows terminal width: %d > %d (%q)", w, h, i, lw, w, line)
 				}
+			}
+			// The status line must keep its visible content: at term widths
+			// >= 50 the left-column budget (0.72*w - 2) fits at least
+			// "[● ● ●          ] Press ESC" (~31 cells), so the text may not
+			// collapse the way rune-slicing collapsed 63 cells down to 3.
+			if w >= 50 && !strings.Contains(out, "Press ESC") {
+				t.Errorf("term %dx%d: status line collapsed — 'Press ESC' missing from frame", w, h)
+			}
+			if !strings.Contains(ansi.Strip(out), "●") {
+				t.Errorf("term %dx%d: bouncing dots missing from frame", w, h)
 			}
 		}
 	}
