@@ -234,7 +234,7 @@ func TestViewRealPathStatusLineCells(t *testing.T) {
 	// Force truecolor so getBouncingDots emits the ~22-bytes-per-cell ANSI
 	// that triggers the rune-slicing collapse; without this the test profile
 	// is Ascii and the bug is invisible.
-	prev := lipgloss.DefaultProfile()
+	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 
