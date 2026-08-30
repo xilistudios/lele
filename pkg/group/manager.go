@@ -196,6 +196,12 @@ func (gm *GroupManager) evictExpiredLocked(now time.Time) {
 // same ID, or a previous LoadHistorical call) is skipped and logged, never
 // overwritten. Returns the number of groups loaded. With no storeDir configured
 // it is a no-op returning (0, nil).
+//
+// Feature gate (deliberate): LoadHistorical does NOT consult the enabled hook.
+// Disabling groups refuses new runs (Start → ErrGroupsDisabled) but must not
+// erase or hide the operator's existing history — same semantics as disabling
+// a chat channel not deleting its stored conversations. Hydrated groups are
+// inert read-only state; they expire from memory via the normal retention.
 func (gm *GroupManager) LoadHistorical() (int, error) {
 	gm.mu.Lock()
 	dir := gm.storeDir

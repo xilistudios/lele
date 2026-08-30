@@ -177,3 +177,27 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 
 	return m.tickCmd()
 }
+
+// recordGroupCompleteStatus updates the tracked status of a group when a
+// group.complete event arrives.
+//
+// The backend guarantees exactly one terminal signal pair per group: a terminal
+// group.status (done | stopped | error) immediately followed by one
+// group.complete — including on failure paths. So group.complete is NOT itself
+// proof of success. Preserve the terminal status already recorded instead of
+// hardcoding "done", which would mislabel failed or stopped groups as
+// successful. Fall back to "done" only when no terminal status was seen yet
+// (e.g. a lost/misordered status event or a legacy backend).
+func (m *Model) recordGroupCompleteStatus(groupID string) {
+	if m.groupStatus == nil {
+		m.groupStatus = make(map[string]string)
+	}
+	switch m.groupStatus[groupID] {
+	case "done", "stopped", "error":
+		// Keep the terminal status already reported by group.status.
+	case "started", "":
+		m.groupStatus[groupID] = "done"
+	default:
+		m.groupStatus[groupID] = "done"
+	}
+}
