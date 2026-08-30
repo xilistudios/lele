@@ -84,11 +84,19 @@ func agentCmd() {
 	agentLoop := agent.NewAgentLoop(cfg, msgBus)
 
 	startupInfo := agentLoop.GetStartupInfo()
+	toolsInfo, _ := startupInfo["tools"].(map[string]interface{})
+	skillsInfo, _ := startupInfo["skills"].(map[string]interface{})
+	if toolsInfo == nil {
+		toolsInfo = map[string]interface{}{"count": 0}
+	}
+	if skillsInfo == nil {
+		skillsInfo = map[string]interface{}{"available": 0, "total": 0}
+	}
 	logger.InfoCF("agent", "Agent initialized",
 		map[string]interface{}{
-			"tools_count":      startupInfo["tools"].(map[string]interface{})["count"],
-			"skills_total":     startupInfo["skills"].(map[string]interface{})["total"],
-			"skills_available": startupInfo["skills"].(map[string]interface{})["available"],
+			"tools_count":      toolsInfo["count"],
+			"skills_total":     skillsInfo["total"],
+			"skills_available": skillsInfo["available"],
 		})
 
 	if message != "" {

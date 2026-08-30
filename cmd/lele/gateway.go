@@ -131,8 +131,14 @@ func gatewayCmd() {
 
 	fmt.Fprintln(gatewayOut, "\n📦 Agent Status:")
 	startupInfo := agentLoop.GetStartupInfo()
-	toolsInfo := startupInfo["tools"].(map[string]interface{})
-	skillsInfo := startupInfo["skills"].(map[string]interface{})
+	toolsInfo, _ := startupInfo["tools"].(map[string]interface{})
+	skillsInfo, _ := startupInfo["skills"].(map[string]interface{})
+	if toolsInfo == nil {
+		toolsInfo = map[string]interface{}{"count": 0}
+	}
+	if skillsInfo == nil {
+		skillsInfo = map[string]interface{}{"available": 0, "total": 0}
+	}
 	fmt.Fprintf(gatewayOut, "  • Tools: %d loaded\n", toolsInfo["count"])
 	fmt.Fprintf(gatewayOut, "  • Skills: %d/%d available\n",
 		skillsInfo["available"],

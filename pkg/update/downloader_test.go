@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -136,3 +137,55 @@ func TestDownloadMissingAsset(t *testing.T) {
 }
 
 func cleanupTemp(dir string) { _ = os.RemoveAll(dir) }
+
+// TestExtractFromTarGz verifies that extractFromTarGz extracts the binary to
+// dst without error and with the original content.
+func TestExtractFromTarGz(t *testing.T) {
+	outDir := t.TempDir()
+	binaryContent := []byte("#!/bin/sh\necho lele test\n")
+	archivePath := filepath.Join(outDir, "lele_Linux_x86_64.tar.gz")
+	if err := os.WriteFile(archivePath, makeTarGz(t, "lele", binaryContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	extractDir := t.TempDir()
+	dst, err := extractFromTarGz(archivePath, extractDir, "lele")
+	if err != nil {
+		t.Fatalf("extractFromTarGz returned error: %v", err)
+	}
+
+	if want := filepath.Join(extractDir, "lele"); dst != want {
+		t.Errorf("dst = %q, want %q", dst, want)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, binaryContent) {
+		t.Errorf("extracted content mismatch: got %q, want %q", got, binaryContent)
+	}
+
+	// File must be executable (0755).
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("extracted binary is not executable: %v", info.Mode())
+	}
+}
+
+// TestExtractFromTarGz_MissingBinary verifies the error when the archive does
+// not contain the expected binary.
+func TestExtractFromTarGz_MissingBinary(t *testing.T) {
+	outDir := t.TempDir()
+	archivePath := filepath.Join(outDir, "empty.tar.gz")
+	if err := os.WriteFile(archivePath, makeTarGz(t, "other-file", []byte("x")), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := extractFromTarGz(archivePath, t.TempDir(), "lele"); err == nil {
+		t.Error("expected error for archive without the binary, got nil")
+	}
+}

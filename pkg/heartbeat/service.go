@@ -137,10 +137,13 @@ func (hs *HeartbeatService) runLoop(stopChan chan struct{}) {
 	ticker := time.NewTicker(hs.interval)
 	defer ticker.Stop()
 
-	// Run first heartbeat after initial delay
-	time.AfterFunc(time.Second, func() {
+	// Run first heartbeat after initial delay (cancellable)
+	select {
+	case <-stopChan:
+		return
+	case <-time.After(time.Second):
 		hs.executeHeartbeat()
-	})
+	}
 
 	for {
 		select {

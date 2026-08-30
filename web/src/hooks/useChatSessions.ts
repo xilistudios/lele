@@ -187,11 +187,17 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       if (!token) return null
 
       await api.deleteSession(sessionKey)
-      setSessions((current) => current.filter((s) => s.key !== sessionKey))
+
+      let nextSessionKey: string | null = null
+      setSessions((current) => {
+        const remainingSessions = current.filter((s) => s.key !== sessionKey)
+        if (sessionKey === currentSessionKeyRef.current) {
+          nextSessionKey = remainingSessions.length > 0 ? remainingSessions[0].key : null
+        }
+        return remainingSessions
+      })
 
       if (sessionKey === currentSessionKeyRef.current) {
-        const remainingSessions = sessionsRef.current.filter((s) => s.key !== sessionKey)
-        const nextSessionKey = remainingSessions.length > 0 ? remainingSessions[0].key : null
         persistCurrentSessionKey(nextSessionKey)
         return nextSessionKey
       }

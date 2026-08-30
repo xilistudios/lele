@@ -114,18 +114,18 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 	if config != nil {
 		execConfig := config.Tools.Exec
 		if enableDenyPatterns {
+			// Defaults are always the base; custom patterns are added on top.
+			denyPatterns = append(denyPatterns, defaultDenyPatterns...)
 			if len(execConfig.CustomDenyPatterns) > 0 {
-				fmt.Printf("Using custom deny patterns: %v\n", execConfig.CustomDenyPatterns)
+				logger.DebugCF("tools", "adding custom deny patterns", map[string]interface{}{"patterns": execConfig.CustomDenyPatterns})
 				for _, pattern := range execConfig.CustomDenyPatterns {
 					re, err := regexp.Compile(pattern)
 					if err != nil {
-						fmt.Printf("Invalid custom deny pattern %q: %v\n", pattern, err)
+						logger.WarnCF("tools", "invalid custom deny pattern", map[string]interface{}{"pattern": pattern, "error": err.Error()})
 						continue
 					}
 					denyPatterns = append(denyPatterns, re)
 				}
-			} else {
-				denyPatterns = append(denyPatterns, defaultDenyPatterns...)
 			}
 		} else {
 			// If deny patterns are disabled, we won't add any patterns, allowing all commands.
@@ -210,6 +210,23 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	// Parse background mode flag
 	backgroundMode, _ := args["background"].(bool)
+
+	// Validate working_dir against the workspace when restriction is enabled.
+	// Without this check, cwd could point outside the workspace, defeating the
+	// path checks performed by the safety guard below.
+	if t.restrictToWorkspace && cwd != "" {
+		absCwd, err := filepath.Abs(cwd)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("invalid working_dir: %v", err))
+		}
+		absWorkspace, err := filepath.Abs(t.workingDir)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("invalid workspace: %v", err))
+		}
+		if !isWithinWorkspace(absCwd, absWorkspace) {
+			return ErrorResult("access denied: working_dir is outside the workspace")
+		}
+	}
 
 	// Check safety guards unless bypass is enabled (for approved commands)
 	if !t.bypassGuard {

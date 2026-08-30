@@ -19,6 +19,7 @@ func TestWebTool_WebFetch_Success(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	args := map[string]interface{}{
 		"url": server.URL,
@@ -55,6 +56,7 @@ func TestWebTool_WebFetch_JSON(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	args := map[string]interface{}{
 		"url": server.URL,
@@ -146,6 +148,7 @@ func TestWebTool_WebFetch_Truncation(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(1000) // Limit to 1000 chars
+	tool.allowPrivate = true
 	ctx := context.Background()
 	args := map[string]interface{}{
 		"url": server.URL,
@@ -211,6 +214,7 @@ func TestWebTool_WebFetch_HTMLExtraction(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	args := map[string]interface{}{
 		"url": server.URL,
@@ -658,6 +662,7 @@ func TestWebFetchTool_Execute_MaxCharsOverride(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	result := tool.Execute(ctx, map[string]interface{}{
 		"url":      server.URL,
@@ -690,6 +695,7 @@ func TestWebFetchTool_Execute_MaxCharsBelow100(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(10000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	result := tool.Execute(ctx, map[string]interface{}{
 		"url":      server.URL,
@@ -715,6 +721,7 @@ func TestWebFetchTool_Execute_PlainTextContent(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	result := tool.Execute(ctx, map[string]interface{}{"url": server.URL})
 
@@ -740,6 +747,7 @@ func TestWebFetchTool_Execute_ServerError(t *testing.T) {
 	defer server.Close()
 
 	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
 	ctx := context.Background()
 	result := tool.Execute(ctx, map[string]interface{}{"url": server.URL})
 
@@ -1083,5 +1091,73 @@ func TestWebSearchTool_SearXNG_Execute(t *testing.T) {
 	}
 	if !strings.Contains(result.ForLLM, "https://go.dev") {
 		t.Errorf("Expected URL in result, got: %s", result.ForLLM)
+	}
+}
+
+// ========== SSRF Protection Tests ==========
+
+// TestWebFetchTool_Execute_BlocksLoopback verifies that fetching loopback
+// addresses is denied (SSRF protection).
+func TestWebFetchTool_Execute_BlocksLoopback(t *testing.T) {
+	tool := NewWebFetchTool(50000)
+	ctx := context.Background()
+
+	result := tool.Execute(ctx, map[string]interface{}{"url": "http://127.0.0.1/"})
+	if !result.IsError {
+		t.Errorf("Expected error for 127.0.0.1, got success")
+	}
+	if !strings.Contains(result.ForLLM, "access denied") {
+		t.Errorf("Expected 'access denied' error, got: %s", result.ForLLM)
+	}
+}
+
+// TestWebFetchTool_Execute_BlocksLinkLocal verifies that fetching the cloud
+// metadata address (169.254.169.254) is denied (SSRF protection).
+func TestWebFetchTool_Execute_BlocksLinkLocal(t *testing.T) {
+	tool := NewWebFetchTool(50000)
+	ctx := context.Background()
+
+	result := tool.Execute(ctx, map[string]interface{}{"url": "http://169.254.169.254/"})
+	if !result.IsError {
+		t.Errorf("Expected error for 169.254.169.254, got success")
+	}
+	if !strings.Contains(result.ForLLM, "access denied") {
+		t.Errorf("Expected 'access denied' error, got: %s", result.ForLLM)
+	}
+}
+
+// TestWebFetchTool_Execute_BlocksPrivateRange verifies that private ranges
+// (10.x, 192.168.x, 172.16-31.x) are denied (SSRF protection).
+func TestWebFetchTool_Execute_BlocksPrivateRange(t *testing.T) {
+	tool := NewWebFetchTool(50000)
+	ctx := context.Background()
+
+	for _, url := range []string{
+		"http://10.0.0.1/",
+		"http://192.168.1.1/",
+		"http://172.16.0.1/",
+	} {
+		result := tool.Execute(ctx, map[string]interface{}{"url": url})
+		if !result.IsError {
+			t.Errorf("Expected error for %s, got success", url)
+		}
+		if !strings.Contains(result.ForLLM, "access denied") {
+			t.Errorf("Expected 'access denied' error for %s, got: %s", url, result.ForLLM)
+		}
+	}
+}
+
+// TestWebFetchTool_Execute_BlocksLocalhostName verifies that the "localhost"
+// hostname is denied (SSRF protection).
+func TestWebFetchTool_Execute_BlocksLocalhostName(t *testing.T) {
+	tool := NewWebFetchTool(50000)
+	ctx := context.Background()
+
+	result := tool.Execute(ctx, map[string]interface{}{"url": "http://localhost:8080/"})
+	if !result.IsError {
+		t.Errorf("Expected error for localhost, got success")
+	}
+	if !strings.Contains(result.ForLLM, "access denied") {
+		t.Errorf("Expected 'access denied' error, got: %s", result.ForLLM)
 	}
 }

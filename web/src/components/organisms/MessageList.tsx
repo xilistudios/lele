@@ -346,7 +346,7 @@ export function MessageList() {
             <>
               {isLoadingMore && (
                 <div className="flex justify-center py-2">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
                 </div>
               )}
               {!isLoadingMore && hasMore && (
