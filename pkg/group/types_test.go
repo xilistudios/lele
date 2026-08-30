@@ -248,3 +248,55 @@ func TestGroupState_Snapshot_IsDeepCopy(t *testing.T) {
 		t.Error("mutating snapshot StopKeywords entry changed original")
 	}
 }
+
+// TestGroupState_Snapshot_CopiesTurnToolCalls guards the ToolCalls leg of the
+// "deep copy" contract: a Turn's ToolCalls slice must not alias the live
+// transcript's backing array. Without the copy, a snapshot taken while a turn
+// is still appending tool calls could observe (or be observed through) the
+// original slice, and mutating a snapshot entry would corrupt live state.
+func TestGroupState_Snapshot_CopiesTurnToolCalls(t *testing.T) {
+	original := &GroupState{
+		ID:       "g1",
+		Strategy: "round_robin",
+		Status:   StatusRunning,
+		Transcript: []Turn{
+			{
+				Index:   0,
+				Speaker: "a",
+				Content: "hello",
+				ToolCalls: []GroupToolCall{
+					{ToolCallID: "tc1", Tool: "exec", Status: "running"},
+					{ToolCallID: "tc2", Tool: "read_file", Status: "running"},
+				},
+			},
+		},
+	}
+
+	snap := original.Snapshot()
+	if len(snap.Transcript[0].ToolCalls) != 2 {
+		t.Fatalf("snapshot ToolCalls len = %d, want 2", len(snap.Transcript[0].ToolCalls))
+	}
+
+	// Mutating a snapshot tool call must not touch the original.
+	snap.Transcript[0].ToolCalls[0].Status = "done"
+	snap.Transcript[0].ToolCalls[0].Result = "MUTATED"
+	if original.Transcript[0].ToolCalls[0].Status == "done" ||
+		original.Transcript[0].ToolCalls[0].Result == "MUTATED" {
+		t.Error("mutating snapshot ToolCalls changed original (aliased backing array)")
+	}
+
+	// Appending to the live turn's tool calls must not be visible in the
+	// snapshot (no shared backing array).
+	original.Transcript[0].ToolCalls = append(original.Transcript[0].ToolCalls,
+		GroupToolCall{ToolCallID: "tc3", Tool: "web_search", Status: "running"})
+	if len(snap.Transcript[0].ToolCalls) != 2 {
+		t.Errorf("snapshot ToolCalls grew with original: len=%d, want 2", len(snap.Transcript[0].ToolCalls))
+	}
+
+	// A turn with no tool calls must stay nil (don't invent empty slices).
+	original.Transcript = append(original.Transcript, Turn{Index: 1, Speaker: "b"})
+	snap2 := original.Snapshot()
+	if snap2.Transcript[1].ToolCalls != nil {
+		t.Errorf("snapshot ToolCalls for empty turn = %v, want nil", snap2.Transcript[1].ToolCalls)
+	}
+}
