@@ -833,6 +833,7 @@ export type ApiErrorResponse = {
   error?: string
   code?: string
   message?: string
+  errors?: ConfigError[]
 }
 
 export type UploadedFile = {

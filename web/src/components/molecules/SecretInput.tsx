@@ -77,7 +77,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           disabled={disabled}
           className={`rounded px-2 py-1 text-[11px] ${
             mode === 'env'
-              ? 'bg-cta-primary text-text-on-accent'
+              ? 'bg-accent-primary text-text-on-accent'
               : 'bg-surface-muted text-text-secondary hover:bg-surface-hover'
           }`}
         >
@@ -89,7 +89,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           disabled={disabled}
           className={`rounded px-2 py-1 text-[11px] ${
             mode === 'empty'
-              ? 'bg-cta-primary text-text-on-accent'
+              ? 'bg-accent-primary text-text-on-accent'
               : 'bg-surface-muted text-text-secondary hover:bg-surface-hover'
           }`}
         >

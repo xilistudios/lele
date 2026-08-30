@@ -598,7 +598,8 @@
     "confirm": "Confirm",
     "optional": "optional",
     "yes": "Yes",
-    "no": "No"
+    "no": "No",
+    "close": "Close"
   },
   "groups": {
     "title": "Group Chat",

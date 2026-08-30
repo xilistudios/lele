@@ -5,6 +5,7 @@ import { useAuthContext } from '../../contexts/AuthContext'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
 import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
+import { Button } from '../atoms'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -50,14 +51,14 @@ function StatusBadge({ job }: { job: CronJob }) {
   const { t } = useTranslation()
   if (!job.enabled) {
     return (
-      <span className="inline-flex items-center rounded-full border border-gray-500/30 bg-gray-500/20 px-2 py-0.5 text-xs font-medium text-gray-400">
+      <span className="inline-flex items-center rounded-full border border-state-error bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-tertiary">
         {t('cron.disabled', 'disabled')}
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/20 px-2 py-0.5 text-xs font-medium text-emerald-400">
-      <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+    <span className="inline-flex items-center rounded-full border border-state-success bg-state-success-light px-2 py-0.5 text-xs font-medium text-state-success">
+      <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-state-success" />
       {t('cron.enabled', 'enabled')}
     </span>
   )
@@ -68,8 +69,8 @@ function LastRunBadge({ job }: { job: CronJob }) {
   if (!status) return null
   const color =
     status === 'ok'
-      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-      : 'border-red-500/30 bg-red-500/10 text-red-400'
+      ? 'border-state-success bg-state-success-light text-state-success'
+      : 'border-state-error bg-state-error-light text-state-error'
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}
@@ -111,7 +112,7 @@ function JobCard({
       className={`rounded-xl border transition-colors ${
         expanded
           ? 'border-interaction-primary/40 bg-background-secondary'
-          : 'border-border bg-background-secondary/50 hover:bg-background-secondary'
+          : 'border-border bg-background-secondary hover:bg-background-secondary'
       } ${job.enabled ? '' : 'opacity-70'}`}
     >
       <button
@@ -215,7 +216,7 @@ function JobCard({
             )}
           </div>
           {job.state.lastError && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+            <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
               {job.state.lastError}
             </div>
           )}
@@ -239,12 +240,12 @@ function JobCard({
             </button>
             {confirmDelete ? (
               <span className="flex items-center gap-2">
-                <span className="text-xs text-red-400">{t('cron.confirmDelete', 'Delete?')}</span>
+                <span className="text-xs text-state-error">{t('cron.confirmDelete', 'Delete?')}</span>
                 <button
                   type="button"
                   onClick={onDelete}
                   disabled={busy}
-                  className="rounded-lg border border-red-500/40 bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/30 disabled:opacity-50"
+                  className="rounded-lg border border-state-error bg-state-error-light px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light disabled:opacity-50"
                 >
                   {t('common.yes', 'Yes')}
                 </button>
@@ -260,7 +261,7 @@ function JobCard({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20"
+                className="rounded-lg border border-state-error bg-state-error-light px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light"
               >
                 {t('common.delete', 'Delete')}
               </button>
@@ -738,7 +739,7 @@ function JobFormModal({
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+            <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
               {error}
             </div>
           )}
@@ -752,14 +753,9 @@ function JobFormModal({
           >
             {t('common.cancel', 'Cancel')}
           </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={busy}
-            className="rounded-lg bg-interaction-primary px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
+          <Button type="button" variant="primary" onClick={handleSubmit} disabled={busy}>
             {initial ? t('common.save', 'Save') : t('common.create', 'Create')}
-          </button>
+          </Button>
         </div>
       </dialog>
     </div>
@@ -772,7 +768,8 @@ function JobFormModal({
 
 export function CronPage() {
   const { t } = useTranslation()
-  const { sidebarOpen, onToggleSidebar, agents } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar, agents } =
+    useAppLogicContext()
   const { jobs, status, loading, refresh, toggleEnabled, removeJob, runJob, createJob, updateJob } =
     useCronJobs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -836,15 +833,15 @@ export function CronPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-border bg-background-secondary/30 px-6 py-4">
+        <header className="flex shrink-0 items-center justify-between border-b border-border bg-background-secondary px-4 py-3 md:px-6 md:py-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => onToggleSidebar()}
+              onClick={() => onOpenMobileSidebar()}
               className="flex rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary md:hidden"
               title={t('chat.toggleSidebar')}
             >
@@ -874,11 +871,7 @@ export function CronPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={openCreate}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-interaction-primary px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-            >
+            <Button type="button" variant="primary" size="md" onClick={openCreate}>
               <svg
                 className="h-4 w-4"
                 viewBox="0 0 24 24"
@@ -892,7 +885,7 @@ export function CronPage() {
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
               {t('cron.new', 'New')}
-            </button>
+            </Button>
             <button
               type="button"
               onClick={refresh}
@@ -916,7 +909,7 @@ export function CronPage() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {loading && jobs.length === 0 && (
             <div className="flex items-center justify-center py-20">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />

@@ -30,6 +30,16 @@ type SessionRecorder interface {
 	Save(sessionKey string) error
 }
 
+// SessionCompactor applies a loop-compaction result to the persisted session
+// of a subagent. It is implemented by *session.Manager (CompactSession) and
+// keeps the persisted summary/exclusion state in sync with the in-memory
+// compacted message list, so compaction survives restarts and the persisted
+// session does not grow unbounded. Optional: when nil, compaction still runs
+// in memory but is not persisted.
+type SessionCompactor interface {
+	CompactSession(key string, summary string, keepCount int, evict bool) error
+}
+
 // ToolLoopConfig configures the tool execution loop.
 type ToolLoopConfig struct {
 	Provider        providers.LLMProvider
@@ -55,7 +65,40 @@ type ToolLoopConfig struct {
 	// empty-response retries (nil means time.After). Used by tests to
 	// avoid real sleeps.
 	RetryWait func(time.Duration) <-chan time.Time
+	// CompactionModel optionally overrides the model used for summarization
+	// during context compaction (proactive and reactive). Empty = use Model.
+	CompactionModel string
+	// SessionCompactor optionally syncs compaction results to the persisted
+	// session (implemented by *session.Manager). nil = in-memory only.
+	SessionCompactor SessionCompactor
+	// EvictExcludedFromMemory controls whether session-synced compaction also
+	// evicts excluded messages from the in-memory session cache.
+	EvictExcludedFromMemory bool
 }
+
+// syncCompactionToSession persists a loop-compaction result to the subagent's
+// session via the optional SessionCompactor. The summary is the second
+// message of the compacted list ("[Context compacted — summary of ...]");
+// keepCount=6 matches the loop's keepLast so the persisted exclusion window
+// mirrors the in-memory one. Failures are logged and swallowed: compaction
+// is an optimization, and a persistence error must not kill a running task.
+func syncCompactionToSession(config ToolLoopConfig, summary string) {
+	if config.SessionCompactor == nil || config.SessionKey == "" || summary == "" {
+		return
+	}
+	if err := config.SessionCompactor.CompactSession(config.SessionKey, summary, 6, config.EvictExcludedFromMemory); err != nil {
+		logger.WarnCF("toolloop", "Failed to sync compaction to session", map[string]any{
+			"session_key": config.SessionKey,
+			"error":       err.Error(),
+		})
+	}
+}
+
+// maxReactiveCompactions is the maximum number of reactive compaction attempts
+// (context-overflow recovery) allowed between successful LLM responses. It
+// prevents infinite compact-fail loops when even the compacted context exceeds
+// the model's window.
+const maxReactiveCompactions = 3
 
 // toolLoopEmptyRetryBackoff returns the wait duration before the given
 // empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
@@ -189,6 +232,23 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		Content: "[The context was compacted to save space. You were in the middle of a multi-step task. Review the summary above and the recent tool results below, then CONTINUE executing the task using the available tools. Do not stop or ask for confirmation — resume where you left off.]",
 	}
 
+	// Trim the tail to a safe boundary. The kept tail must not start with a
+	// tool message whose assistant tool_calls message was summarized away,
+	// nor with an assistant tool_calls message whose tool results were cut
+	// off — providers reject both sequences. See safeTailBoundary for the
+	// boundary rules.
+	if bi := safeTailBoundary(tail); bi > 0 {
+		tail = tail[bi:]
+	} else if bi < 0 {
+		// No safe boundary exists in the tail (e.g. it is all orphaned tool
+		// results). Compacting would produce an invalid message sequence, so
+		// skip compaction entirely for this round.
+		logger.WarnCF("toolloop", "Compaction skipped: no safe tail boundary", map[string]any{
+			"tail_len": len(tail),
+		})
+		return messages, false
+	}
+
 	compacted := append([]providers.Message{systemMsg, summaryMsg, continueMsg}, tail...)
 	logger.InfoCF("toolloop", "Context compacted", map[string]any{
 		"before_messages": len(messages),
@@ -199,11 +259,60 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 	return compacted, true
 }
 
+// safeTailBoundary returns the index of the first safe boundary in the given
+// tail slice, or -1 if none exists. A boundary at index i means the slice may
+// start at i without producing an invalid assistant/tool sequence:
+//
+//   - The message at i must not be a tool result (role "tool"): its assistant
+//     tool_calls message would precede the boundary and be summarized away.
+//   - The remaining slice tail[i:] must be self-consistent: every tool result
+//     must be preceded (within the remaining slice) by the assistant message
+//     carrying the matching tool_calls ID, and every assistant tool_calls
+//     message must have all of its results present in the remaining slice.
+//
+// The first (smallest) safe boundary is returned so the tail keeps as much
+// recent context as possible. Tails are short (keepLast is typically 6), so
+// the O(n²) self-consistency rescan is negligible.
+func safeTailBoundary(tail []providers.Message) int {
+	// isSelfConsistent reports whether every tool result in msgs is preceded
+	// by its assistant tool_calls message and every tool call is answered.
+	isSelfConsistent := func(msgs []providers.Message) bool {
+		pending := map[string]bool{}
+		for _, m := range msgs {
+			switch m.Role {
+			case "assistant":
+				for _, tc := range m.ToolCalls {
+					if tc.ID != "" {
+						pending[tc.ID] = true
+					}
+				}
+			case "tool":
+				if !pending[m.ToolCallID] {
+					return false // orphaned result: assistant was trimmed
+				}
+				delete(pending, m.ToolCallID)
+			}
+		}
+		return len(pending) == 0 // false when calls lack their results
+	}
+
+	for i := 0; i < len(tail); i++ {
+		if tail[i].Role == "tool" {
+			continue
+		}
+		if isSelfConsistent(tail[i:]) {
+			return i
+		}
+	}
+	return -1
+}
+
 // RunToolLoop executes the LLM + tool call iteration loop.
 // This is the core agent logic that can be reused by both main agent and subagents.
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
 	emptyRetries := 0
+	reactiveCompactions := 0
 	var finalContent string
 
 	if config.SessionRecorder != nil && config.SessionKey != "" {
@@ -255,12 +364,59 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		apiModel := providers.StripProviderPrefix(config.Model)
 		var response *providers.LLMResponse
 		var err error
-		if config.Retry != nil {
-			response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
-		} else {
-			response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
-		}
-		if err != nil {
+		for {
+			if config.Retry != nil {
+				response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
+			} else {
+				response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
+			}
+			if err == nil {
+				// Success resets the reactive compaction budget so a later
+				// overflow in the same run gets a fresh set of attempts.
+				reactiveCompactions = 0
+				break
+			}
+			// Reactive compaction: when the API rejects the prompt because it
+			// exceeds the model's context window, summarize old messages and
+			// retry instead of failing the whole subagent task. Mirrors the
+			// main agent loop's executeWithRetry behavior (pkg/agent/llm_caller.go).
+			// The budget (3 attempts per successful response) prevents infinite
+			// compact-fail loops when even the compacted context is too large.
+			if config.ContextWindow > 0 &&
+				reactiveCompactions < maxReactiveCompactions &&
+				providers.IsContextOverflowError(err) {
+				reactiveCompactions++
+				logger.WarnCF("toolloop", "Context overflow detected, attempting reactive compaction",
+					map[string]any{
+						"iteration":    iteration,
+						"attempt":      reactiveCompactions,
+						"max_attempts": maxReactiveCompactions,
+						"error":        err.Error(),
+					})
+				compactModel := config.Model
+				if config.CompactionModel != "" {
+					compactModel = config.CompactionModel
+				}
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
+					messages = compacted
+					if config.MessageBus != nil {
+						config.MessageBus.PublishOutbound(bus.OutboundMessage{
+							Event:   "tool.result",
+							ChatID:  config.ChatID,
+							Content: "",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": "Context overflow — compacted and retrying",
+							},
+						})
+					}
+					syncCompactionToSession(config, compacted[1].Content)
+					continue
+				}
+				// Compaction could not reduce the context (e.g. nothing left
+				// to summarize or the summarizer failed) — fall through to
+				// returning the error.
+			}
 			logger.ErrorCF("toolloop", "LLM call failed",
 				map[string]any{
 					"iteration": iteration,
@@ -476,8 +632,24 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"iteration":         iteration,
 				})
 				// Keep last 6 messages (3 tool call/result pairs) for continuity
-				if compacted, ok := CompactLoopMessages(ctx, config.Provider, config.Model, messages, 6); ok {
+				compactModel := config.Model
+				if config.CompactionModel != "" {
+					compactModel = config.CompactionModel
+				}
+				if compacted, ok := CompactLoopMessages(ctx, config.Provider, compactModel, messages, 6); ok {
 					messages = compacted
+					if config.MessageBus != nil {
+						config.MessageBus.PublishOutbound(bus.OutboundMessage{
+							Event:   "tool.result",
+							ChatID:  config.ChatID,
+							Content: "",
+							Metadata: map[string]string{
+								"tool":   "compact",
+								"result": fmt.Sprintf("Tokens: ~%d → ~%d", tokens, EstimateLoopTokens(compacted)),
+							},
+						})
+					}
+					syncCompactionToSession(config, compacted[1].Content)
 				}
 			}
 		}

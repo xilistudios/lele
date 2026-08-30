@@ -138,7 +138,46 @@ func findTrailingIncompleteEscape(s string) int {
 	return 0
 }
 
+// Update is the Bubble Tea entry point. It delegates to update and then
+// synchronizes the chat input focus with the current application state, so
+// the input cursor is only visible when the input is the active surface
+// (no modal open, no pending approval, no onboarding wizard).
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	mm, ok := model.(*Model)
+	if !ok {
+		return model, cmd
+	}
+	if focusCmd := mm.syncChatInputFocus(); focusCmd != nil {
+		cmd = tea.Batch(cmd, focusCmd)
+	}
+	return mm, cmd
+}
+
+// syncChatInputFocus aligns the chat textarea's focus state with the app
+// state. The input is considered active only when no modal is open, no
+// command approval is pending, and the onboarding wizard is not running.
+// Blurring hides the blinking cursor; focusing restores it and restarts the
+// blink loop via the returned command. Returns a non-nil tea.Cmd only when
+// the focus state transitions from blurred to focused, so callers can batch
+// it without spamming blink commands on every update.
+func (m *Model) syncChatInputFocus() tea.Cmd {
+	shouldFocus := m.modalMode == ModalNone &&
+		m.pendingApprovalID == "" &&
+		!m.onboardingActive
+	if shouldFocus {
+		if !m.chatInput.Focused() {
+			return m.chatInput.Focus()
+		}
+		return nil
+	}
+	if m.chatInput.Focused() {
+		m.chatInput.Blur()
+	}
+	return nil
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -179,6 +218,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleOnboardingKey(msg)
 		}
 		if m.modalMode != ModalNone {
+			// Subagent multi-select picker navigation/toggle/confirm.
+			if m.subagentPickerActive {
+				switch msg.String() {
+				case "up", "k":
+					if m.subagentPickerIdx > 0 {
+						m.subagentPickerIdx--
+					}
+					return m, nil
+				case "down", "j":
+					if m.subagentPickerIdx < len(m.subagentPickerItems)-1 {
+						m.subagentPickerIdx++
+					}
+					return m, nil
+				case " ":
+					m.toggleSubagentPicker()
+					return m, nil
+				case "enter":
+					m.saveSubagentPicker()
+					return m, nil
+				case "esc":
+					m.cancelSubagentPicker()
+					m.loadAgentDetail(m.settingsAgentID)
+					return m, nil
+				case "q":
+					return m, nil
+				}
+			}
 			// Settings inline selector navigation.
 			if m.settingsSelectorActive {
 				switch msg.String() {
@@ -2251,6 +2317,11 @@ func (m *Model) resetModal(mode modalType) {
 	m.settingsSelectorIdx = 0
 	m.settingsSelectorField = ""
 	m.settingsSelectorOrig = ""
+	m.subagentPickerActive = false
+	m.subagentPickerItems = nil
+	m.subagentPickerLabels = nil
+	m.subagentPickerSelected = nil
+	m.subagentPickerIdx = 0
 }
 
 // isListModal returns true if the modal type is a list-selection modal

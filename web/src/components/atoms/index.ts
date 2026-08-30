@@ -1,3 +1,4 @@
+export { Button } from './Button'
 export { AddButton } from './AddButton'
 export { Card } from './Card'
 export { ConnectionIndicator } from './ConnectionIndicator'

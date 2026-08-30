@@ -585,7 +585,8 @@
     "confirm": "Confirmar",
     "optional": "opcional",
     "yes": "Sim",
-    "no": "Não"
+    "no": "Não",
+    "close": "Fechar"
   },
   "groups": {
     "title": "Chat em grupo",

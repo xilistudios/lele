@@ -234,6 +234,9 @@ func (m *Model) View() string {
 				return m.renderModal(modalTitle)
 			}
 			if m.modalMode == ModalSettingsAgentEdit {
+				if m.subagentPickerActive {
+					return m.renderSubagentPicker(modalTitle)
+				}
 				if m.settingsSelectorActive {
 					return m.renderSettingsSelector(modalTitle)
 				}
@@ -679,6 +682,9 @@ func (m *Model) View() string {
 			return m.renderModal(modalTitle)
 		}
 		if m.modalMode == ModalSettingsAgentEdit {
+			if m.subagentPickerActive {
+				return m.renderSubagentPicker(modalTitle)
+			}
 			if m.settingsSelectorActive {
 				return m.renderSettingsSelector(modalTitle)
 			}
@@ -1206,7 +1212,20 @@ func (m *Model) renderAgentEditInput() string {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.settings.confirmDeleteHint")))
 	} else {
 		label := m.settingsEditField
-		m.textInput.Width = 40
+		fieldLabels := map[string]string{
+			"agentName":                   "Name",
+			"agentDescription":            "Description",
+			"agentWorkspace":              "Workspace",
+			"agentModel":                  "Model",
+			"agentTemperature":            "Temperature",
+			"agentSubagentsMaxConcurrent": "Subagents MaxConcurrent",
+			"newAgentID":                  "Agent ID",
+			"confirmDelete":               "", // handled separately
+		}
+		if l, ok := fieldLabels[m.settingsEditField]; ok && l != "" {
+			label = l
+		}
+		m.textInput.Width = 60
 		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
 		if m.formError != "" {
 			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")

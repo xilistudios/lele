@@ -183,7 +183,7 @@ const ChatListItem = memo(function ChatListItem({
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') toggleMenu()
             }}
-            className="rounded-md p-1.5 hover:bg-background-secondary text-text-tertiary"
+            className="rounded-md p-2.5 md:p-1.5 hover:bg-background-secondary text-text-tertiary"
           >
             <svg
               width="14"

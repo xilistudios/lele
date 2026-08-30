@@ -176,9 +176,32 @@ func (m *Model) updateViewport() {
 			}
 		}
 		if !alreadyInHistory {
-			overlaySb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
-			overlaySb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
-			lastRole = "user"
+			// Defensive: if an assistant message already exists AFTER the
+			// last user message, the turn is already underway (mid-turn).
+			// The pending message is stale (e.g. it never matched history
+			// due to content normalization) — clear it and keep lastRole
+			// as-is so the agent title is not re-emitted before every
+			// tool call.
+			midTurn := false
+			for i := len(history) - 1; i >= 0; i-- {
+				if history[i].Role == "assistant" {
+					midTurn = true
+					break
+				}
+				if history[i].Role == "user" {
+					break
+				}
+				if len(history)-i > 10 {
+					break
+				}
+			}
+			if midTurn {
+				m.pendingUserMessage = ""
+			} else {
+				overlaySb.WriteString(UserRoleStyle.Render(i18n.T("tui.you")) + "\n")
+				overlaySb.WriteString(UserMessageStyle.Render(wrapText(m.pendingUserMessage, m.viewport.Width-4)) + "\n\n")
+				lastRole = "user"
+			}
 		} else {
 			m.pendingUserMessage = ""
 		}

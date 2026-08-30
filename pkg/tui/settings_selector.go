@@ -114,9 +114,30 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 
 	value := m.settingsSelectorValues[m.settingsSelectorIdx]
 	field := m.settingsSelectorField
+	orig := m.settingsSelectorOrig
+
+	// The "(custom...)" option opens a text input instead of saving.
+	if value == "__custom__" {
+		m.closeSettingsSelector()
+		m.settingsEditField = field
+		m.formError = ""
+		// Pre-fill the input with the original value so users can tweak it.
+		m.textInput.SetValue(m.settingsSelectorOrig)
+		m.textInput.Focus()
+		return nil
+	}
 
 	// Close selector first so the save handlers see a clean state.
 	m.closeSettingsSelector()
+
+	// "(custom…)" — don't save; open the free-text input pre-filled with the
+	// current value so the user can type an arbitrary reference.
+	if value == modelCustomValue {
+		m.settingsEditField = field
+		m.textInput.SetValue(orig)
+		m.textInput.Focus()
+		return nil
+	}
 
 	// Delegate to the existing save handlers by setting settingsEditField
 	// and calling the appropriate input handler.
@@ -150,4 +171,51 @@ func (m *Model) handleSelectorCancel() {
 	case ModalSettingsAgentEdit:
 		m.loadAgentDetail(m.settingsAgentID)
 	}
+}
+
+// renderSubagentPicker renders the multi-select picker for the current agent's
+// subagent allow-list. Each row shows [✓]/[ ] and the highlighted row is
+// marked with >. Returns the painted frame.
+func (m *Model) renderSubagentPicker(modalTitle string) string {
+	maxVisible := m.maxModalVisible()
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+
+	// Clamp scroll so the highlighted row is always visible.
+	if m.subagentPickerIdx < m.modalScrollOffset {
+		m.modalScrollOffset = m.subagentPickerIdx
+	}
+	if m.subagentPickerIdx >= m.modalScrollOffset+maxVisible {
+		m.modalScrollOffset = m.subagentPickerIdx - maxVisible + 1
+	}
+	if m.modalScrollOffset < 0 {
+		m.modalScrollOffset = 0
+	}
+
+	var sb strings.Builder
+	sb.WriteString(TitleStyle.Render(modalTitle) + "\n\n")
+
+	endIdx := m.modalScrollOffset + maxVisible
+	if endIdx > len(m.subagentPickerItems) {
+		endIdx = len(m.subagentPickerItems)
+	}
+
+	for i := m.modalScrollOffset; i < endIdx; i++ {
+		check := "[ ]"
+		if m.subagentPickerSelected[i] {
+			check = "[✓]"
+		}
+		label := check + " " + m.subagentPickerLabels[i]
+		if i == m.subagentPickerIdx {
+			sb.WriteString(ModalItemActive.Render("> "+label) + "\n")
+		} else {
+			sb.WriteString(ModalItemInactive.Render("  "+label) + "\n")
+		}
+	}
+
+	sb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.subagentPickerHint")))
+
+	modalView := ModalContainer.Render(sb.String())
+	return m.paintFrame(modalView)
 }

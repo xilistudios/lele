@@ -12,7 +12,7 @@ export function SettingsSection({ title, description, children, isRestartRequire
   const { t } = useTranslation()
 
   return (
-    <section className="rounded-lg border border-border bg-background-primary p-6">
+    <section className="rounded-lg border border-border bg-background-primary p-4 md:p-6">
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-sm font-medium text-text-primary">{title}</h2>
         {isRestartRequired && <Badge variant="warning">{t('settings.requiresRestart')}</Badge>}
