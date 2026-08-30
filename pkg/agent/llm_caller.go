@@ -88,6 +88,13 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		"temperature": opts.agent.Temperature,
 	}
 
+	// Explicit prompt caching (Anthropic-style cache_control breakpoints).
+	// Providers that cache implicitly ignore these keys.
+	if opts.agent.PromptCache.Enabled {
+		llmOptions[providers.OptPromptCache] = true
+		llmOptions[providers.OptPromptCacheTTL] = opts.agent.PromptCache.NormalizedTTL()
+	}
+
 	// Add reasoning config with per-session override support
 	sessionEffort := ""
 	if opts.sessionKey != "" {

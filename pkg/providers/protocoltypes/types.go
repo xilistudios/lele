@@ -56,10 +56,51 @@ type LLMResponse struct {
 }
 
 // UsageInfo contains token usage information.
+//
+// CacheReadInputTokens and CacheCreationInputTokens are reported by providers
+// that support prompt caching (Anthropic, Bedrock, OpenAI-compatible endpoints
+// exposing prompt_tokens_details). PromptTokens always reflects the *total*
+// input tokens billed for the request (cache read + cache write + uncached),
+// so cache hit-rate can be derived as CacheReadInputTokens / PromptTokens.
 type UsageInfo struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+
+	// CacheReadInputTokens counts input tokens served from prompt cache.
+	CacheReadInputTokens int `json:"cache_read_input_tokens,omitempty"`
+	// CacheCreationInputTokens counts input tokens written to prompt cache.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	// PromptTokensDetails carries the OpenAI-style usage breakdown; some
+	// OpenAI-compatible endpoints (OpenRouter, DeepSeek, Gemini compat)
+	// report cache hits as prompt_tokens_details.cached_tokens.
+	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+// PromptTokensDetails is the OpenAI Chat Completions usage breakdown.
+type PromptTokensDetails struct {
+	CachedTokens    int `json:"cached_tokens,omitempty"`
+	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+}
+
+// NormalizeCacheUsage folds OpenAI-style prompt_tokens_details.cached_tokens
+// into CacheReadInputTokens. Call after unmarshaling a provider response.
+func (u *UsageInfo) NormalizeCacheUsage() {
+	if u == nil || u.PromptTokensDetails == nil {
+		return
+	}
+	if u.CacheReadInputTokens == 0 && u.PromptTokensDetails.CachedTokens > 0 {
+		u.CacheReadInputTokens = u.PromptTokensDetails.CachedTokens
+	}
+}
+
+// CacheHitRate returns the fraction of input tokens served from the prompt
+// cache for this request, or 0 when there is no input-token data.
+func (u *UsageInfo) CacheHitRate() float64 {
+	if u == nil || u.PromptTokens <= 0 {
+		return 0
+	}
+	return float64(u.CacheReadInputTokens) / float64(u.PromptTokens)
 }
 
 // ImageURL represents an image URL for multimodal content.

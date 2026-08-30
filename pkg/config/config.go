@@ -274,22 +274,39 @@ const DefaultEphemeralThresholdSeconds = 560
 const DefaultCompactionThresholdPercent = 75
 
 type AgentDefaults struct {
-	Workspace              string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace    bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	Provider               string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
-	Model                  string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
-	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
-	ImageModel             string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens              int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature            *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations      int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines           int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
-	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
-	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
-	SubagentMaxRetries     int      `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`         // max retry attempts for transient failures (0 = no retry)
-	SubagentMaxIterations  int      `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
-	LLMLoopTimeoutMinutes  int      `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
+	Workspace              string            `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace    bool              `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	Provider               string            `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
+	Model                  string            `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
+	ModelFallbacks         []string          `json:"model_fallbacks,omitempty"`
+	ImageModel             string            `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks    []string          `json:"image_model_fallbacks,omitempty"`
+	MaxTokens              int               `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature            *float64          `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations      int               `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines           int               `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	SubagentTimeoutMinutes int               `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
+	SubagentMaxConcurrent  int               `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
+	SubagentMaxRetries     int               `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`         // max retry attempts for transient failures (0 = no retry)
+	SubagentMaxIterations  int               `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
+	LLMLoopTimeoutMinutes  int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
+	PromptCache            PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
+}
+
+// PromptCacheConfig controls explicit prompt caching (Anthropic-style
+// cache_control breakpoints). Providers that cache automatically (OpenAI,
+// OpenRouter) ignore the setting but still report cached-token usage.
+type PromptCacheConfig struct {
+	Enabled bool   `json:"enabled,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_ENABLED"` // master switch (default: off)
+	TTL     string `json:"ttl,omitempty" env:"LELE_AGENTS_DEFAULTS_PROMPT_CACHE_TTL"`         // "5m" (default) or "1h"
+}
+
+// NormalizedTTL returns "5m" or "1h".
+func (p PromptCacheConfig) NormalizedTTL() string {
+	if strings.EqualFold(strings.TrimSpace(p.TTL), "1h") {
+		return "1h"
+	}
+	return "5m"
 }
 
 type ChannelsConfig struct {

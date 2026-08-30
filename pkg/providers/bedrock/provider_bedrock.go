@@ -196,6 +196,10 @@ func (p *Provider) Chat(
 		}
 	}
 
+	// Explicit prompt caching: append cache points after the stable prefixes
+	// (system, tools, history) when enabled for the agent.
+	applyBedrockCacheBreakpoints(input, options)
+
 	// Call Bedrock Converse API
 	output, err := p.client.Converse(ctx, input)
 	if err != nil {
@@ -587,13 +591,23 @@ func parseResponse(output *bedrockruntime.ConverseOutput) (*LLMResponse, error) 
 		finishReason = "content_filter"
 	}
 
-	// Build usage info
+	// Build usage info.
+	// Bedrock (like the Anthropic API) reports input_tokens excluding cached
+	// tokens, so fold cache reads/writes into PromptTokens to reflect the true
+	// input size, and derive TotalTokens rather than trusting the API field
+	// (which may omit cached tokens depending on the model).
 	var usage *UsageInfo
 	if output.Usage != nil {
+		cacheRead := int(aws.ToInt32(output.Usage.CacheReadInputTokens))
+		cacheWrite := int(aws.ToInt32(output.Usage.CacheWriteInputTokens))
+		prompt := int(aws.ToInt32(output.Usage.InputTokens)) + cacheRead + cacheWrite
+		completion := int(aws.ToInt32(output.Usage.OutputTokens))
 		usage = &UsageInfo{
-			PromptTokens:     int(aws.ToInt32(output.Usage.InputTokens)),
-			CompletionTokens: int(aws.ToInt32(output.Usage.OutputTokens)),
-			TotalTokens:      int(aws.ToInt32(output.Usage.InputTokens)) + int(aws.ToInt32(output.Usage.OutputTokens)),
+			PromptTokens:             prompt,
+			CompletionTokens:         completion,
+			TotalTokens:              prompt + completion,
+			CacheReadInputTokens:     cacheRead,
+			CacheCreationInputTokens: cacheWrite,
 		}
 	}
 

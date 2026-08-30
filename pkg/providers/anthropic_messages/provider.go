@@ -379,6 +379,12 @@ func buildRequestBody(
 		result["tools"] = buildTools(tools)
 	}
 
+	// Explicit prompt caching: cache_control breakpoints after the stable
+	// prefixes (system, tools, history) when enabled.
+	if protocoltypes.CacheEnabled(options) {
+		applyPromptCacheBreakpoints(result, protocoltypes.CacheTTLOptions(options))
+	}
+
 	return result, nil
 }
 
@@ -443,9 +449,13 @@ func parseResponseBody(body []byte) (*LLMResponse, error) {
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		Usage: &UsageInfo{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:      int(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+			// Anthropic's input_tokens excludes cached tokens; include them so
+			// context-window accounting matches the model's true input size.
+			PromptTokens:             int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens),
+			CompletionTokens:         int(resp.Usage.OutputTokens),
+			TotalTokens:              int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.OutputTokens),
+			CacheReadInputTokens:     int(resp.Usage.CacheReadInputTokens),
+			CacheCreationInputTokens: int(resp.Usage.CacheCreationInputTokens),
 		},
 	}, nil
 }
@@ -509,8 +519,10 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 			} `json:"delta"`
 			Message struct {
 				Usage struct {
-					InputTokens  int64 `json:"input_tokens"`
-					OutputTokens int64 `json:"output_tokens"`
+					InputTokens              int64 `json:"input_tokens"`
+					OutputTokens             int64 `json:"output_tokens"`
+					CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+					CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 				} `json:"usage"`
 			} `json:"message"`
 			Usage *struct {
@@ -524,11 +536,14 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 
 		switch event.Type {
 		case "message_start":
-			if event.Message.Usage.InputTokens > 0 || event.Message.Usage.OutputTokens > 0 {
+			u := event.Message.Usage
+			if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadInputTokens > 0 || u.CacheCreationInputTokens > 0 {
 				usage = &UsageInfo{
-					PromptTokens:     int(event.Message.Usage.InputTokens),
-					CompletionTokens: int(event.Message.Usage.OutputTokens),
-					TotalTokens:      int(event.Message.Usage.InputTokens + event.Message.Usage.OutputTokens),
+					PromptTokens:             int(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
+					CompletionTokens:         int(u.OutputTokens),
+					TotalTokens:              int(u.InputTokens + u.OutputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
+					CacheReadInputTokens:     int(u.CacheReadInputTokens),
+					CacheCreationInputTokens: int(u.CacheCreationInputTokens),
 				}
 			}
 
@@ -590,7 +605,8 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 					usage = &UsageInfo{}
 				}
 				usage.CompletionTokens = int(event.Usage.OutputTokens)
-				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens +
+					usage.CacheReadInputTokens + usage.CacheCreationInputTokens
 			}
 
 		case "message_stop":
@@ -724,6 +740,8 @@ type contentBlock struct {
 }
 
 type usageInfo struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 }

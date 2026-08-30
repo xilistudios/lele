@@ -39,7 +39,8 @@ type AgentInstance struct {
 	Temperature           float64
 	ContextWindow         int
 	SupportsImages        bool
-	Reasoning             *config.ReasoningConfig // Reasoning configuration for the model
+	Reasoning             *config.ReasoningConfig  // Reasoning configuration for the model
+	PromptCache           config.PromptCacheConfig // Explicit prompt-cache breakpoints (Anthropic-style providers)
 	Provider              providers.LLMProvider
 	Sessions              *session.SessionManager
 	ContextBuilder        *ContextBuilder
@@ -267,6 +268,7 @@ func NewAgentInstance(
 		ContextWindow:         getContextWindow(cfg, model, providerName),
 		SupportsImages:        getSupportsImages(cfg, model, providerName),
 		Reasoning:             getReasoningConfig(cfg, model, providerName),
+		PromptCache:           defaults.PromptCache,
 		Provider:              provider,
 		Sessions:              sessionsManager,
 		ContextBuilder:        contextBuilder,

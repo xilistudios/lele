@@ -31,11 +31,13 @@ func trackTokenUsage(
 	if response.Usage != nil {
 		sessions.AddTokenCounts(sessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
 		logger.DebugCF("agent", "Token usage tracked", map[string]interface{}{
-			"agent_id":          agentID,
-			"session_key":       sessionKey,
-			"prompt_tokens":     response.Usage.PromptTokens,
-			"completion_tokens": response.Usage.CompletionTokens,
-			"total_tokens":      response.Usage.TotalTokens,
+			"agent_id":           agentID,
+			"session_key":        sessionKey,
+			"prompt_tokens":      response.Usage.PromptTokens,
+			"completion_tokens":  response.Usage.CompletionTokens,
+			"total_tokens":       response.Usage.TotalTokens,
+			"cache_read_tokens":  response.Usage.CacheReadInputTokens,
+			"cache_write_tokens": response.Usage.CacheCreationInputTokens,
 		})
 	} else {
 		// Provider returned no usage data — estimate using 2.5 chars/token heuristic
