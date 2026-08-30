@@ -303,6 +303,8 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 		})
 	}
 
+	apiResponse.Usage.NormalizeCacheUsage()
+
 	return &LLMResponse{
 		Content:          choice.Message.Content,
 		ReasoningContent: choice.Message.ReasoningContent,
@@ -498,6 +500,7 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 		}
 
 		if chunk.Usage != nil {
+			chunk.Usage.NormalizeCacheUsage()
 			usage = chunk.Usage
 		}
 	}

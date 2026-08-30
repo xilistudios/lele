@@ -157,6 +157,12 @@ func buildParams(messages []Message, tools []ToolDefinition, model string, optio
 		params.Tools = translateTools(tools)
 	}
 
+	// Explicit prompt caching: place cache_control breakpoints after the
+	// stable prefixes (system, tools, history) when enabled for the agent.
+	if protocoltypes.CacheEnabled(options) {
+		applyCacheBreakpoints(&params, protocoltypes.CacheTTLOptions(options))
+	}
+
 	return params, nil
 }
 
@@ -280,9 +286,14 @@ func parseResponse(resp *anthropic.Message) *LLMResponse {
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		Usage: &UsageInfo{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:      int(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+			// Anthropic's input_tokens excludes cached tokens; include them so
+			// context-window accounting matches the model's true input size
+			// (same convention as claude_cli_provider).
+			PromptTokens:             int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens),
+			CompletionTokens:         int(resp.Usage.OutputTokens),
+			TotalTokens:              int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens + resp.Usage.OutputTokens),
+			CacheReadInputTokens:     int(resp.Usage.CacheReadInputTokens),
+			CacheCreationInputTokens: int(resp.Usage.CacheCreationInputTokens),
 		},
 	}
 }

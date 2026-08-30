@@ -29,6 +29,37 @@ Supported fields include:
 - `max_tokens`
 - `temperature`
 - `max_tool_iterations`
+- `prompt_cache`
+
+### Prompt caching
+
+`prompt_cache` enables explicit prompt-cache breakpoints (Anthropic-style
+`cache_control`) for providers that support them: `anthropic`, the
+`anthropic_messages` HTTP provider, and `bedrock`. The agent marks the end of
+the three stable prefixes of every request — system prompt, tool definitions,
+and conversation history — so repeated turns read the cached prefix instead of
+re-processing it (typically 90% cheaper input tokens on cache hits).
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "prompt_cache": {
+        "enabled": true,
+        "ttl": "5m"
+      }
+    }
+  }
+}
+```
+
+- `enabled` (default `false`): master switch.
+- `ttl`: `"5m"` (default) or `"1h"`. `"1h"` is billed at a higher rate and
+  requires extended-TTL support on your plan/region.
+
+Providers that cache implicitly (OpenAI, OpenRouter, DeepSeek, Codex) ignore
+the setting but now report `cache_read_input_tokens` in usage, visible in
+debug-level token tracking logs.
 
 ### Example
 

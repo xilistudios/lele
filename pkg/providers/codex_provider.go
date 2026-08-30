@@ -364,6 +364,8 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 			PromptTokens:     int(resp.Usage.InputTokens),
 			CompletionTokens: int(resp.Usage.OutputTokens),
 			TotalTokens:      int(resp.Usage.TotalTokens),
+			// OpenAI reports cache hits as a subset of input_tokens.
+			CacheReadInputTokens: int(resp.Usage.InputTokensDetails.CachedTokens),
 		}
 	}
 

@@ -17,6 +17,12 @@ type ImageURL = protocoltypes.ImageURL
 type ToolDefinition = protocoltypes.ToolDefinition
 type ToolFunctionDefinition = protocoltypes.ToolFunctionDefinition
 
+// Prompt-cache option keys (see protocoltypes for semantics).
+const (
+	OptPromptCache    = protocoltypes.OptPromptCache
+	OptPromptCacheTTL = protocoltypes.OptPromptCacheTTL
+)
+
 type LLMProvider interface {
 	Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error)
 	GetDefaultModel() string
