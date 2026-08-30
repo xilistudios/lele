@@ -2381,11 +2381,20 @@ func (m *Model) handleApproval(approved bool) {
 	if m.pendingApprovalID == "" {
 		return
 	}
+	// Capture the id before clearing the visible fields so the defensive
+	// snapshot cleanup below can verify it still refers to the same request.
+	answeredID := m.pendingApprovalID
 	am := m.agentLoop.GetApprovalManager()
+	var err error
 	if am != nil {
-		am.HandleApproval(m.pendingApprovalID, approved)
+		_, err = am.HandleApproval(answeredID, approved)
 	}
-	if approved {
+	if err != nil {
+		// The approval already expired (cleanupExpired deleted it) or was
+		// answered elsewhere — surface a distinct warning instead of the
+		// misleading ✅/❌ confirmation.
+		m.approvalResult = ApprovalRejected.Render("⚠️ " + i18n.T("tui.approvalExpired"))
+	} else if approved {
 		m.approvalResult = ApprovalApproved.Render("✅ " + i18n.T("tui.approvalApproved"))
 	} else {
 		m.approvalResult = ApprovalRejected.Render("❌ " + i18n.T("tui.approvalRejected"))
@@ -2393,5 +2402,12 @@ func (m *Model) handleApproval(approved bool) {
 	m.pendingApprovalID = ""
 	m.pendingApprovalCmd = ""
 	m.pendingApprovalReason = ""
+	// Drop the stashed snapshot for this session if it still mirrors the
+	// request just answered. A newer approval.request that replaced it (or a
+	// prompt abandoned by a switch to a different session) keeps its snapshot,
+	// so it cannot be resurrected on the next clearStreamingState.
+	if snap, ok := m.pendingApprovals[m.currentKey]; ok && snap.id == answeredID {
+		delete(m.pendingApprovals, m.currentKey)
+	}
 	m.updateViewport()
 }
