@@ -288,3 +288,234 @@ func TestSameSessionKey(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests: list_active_subagents session-key asymmetry.
+//
+// SpawnWithOptions records a task's OriginSessionKey via BuildOriginSessionKey
+// ("<channel>:<chatID>"), but the list tool used to take the caller's key from
+// the agent-loop session key, which at runtime carries NO channel prefix
+// (rest_chat publishes the raw UUID as ChatID/SessionKey). The comparison
+// therefore filtered out every task ("No active subagents in this session"
+// while subagents were running). The tool now derives the caller's key with
+// the same builder, so both sides share one invariant by construction.
+// ---------------------------------------------------------------------------
+
+const (
+	reproChatUUID = "da9ad89c-08fd-4db8-b30f-fb8687eb5230"
+	otherChatUUID = "11111111-2222-3333-4444-555555555555"
+)
+
+// TestBuildOriginSessionKey pins the canonical key-building rules shared by
+// the spawn side and the list side.
+func TestBuildOriginSessionKey(t *testing.T) {
+	cases := []struct {
+		channel, chatID string
+		want            string
+	}{
+		{"native", "abc", "native:abc"},
+		{"native", "native:abc", "native:abc"}, // chatID already embeds the channel prefix
+		{"", "abc", "abc"},                     // no channel -> chatID as-is (never ":abc")
+		{"native", "", "native"},               // no chatID -> channel as-is (never "native:")
+		{"", "", ""},                           // both empty -> empty (no phantom key)
+		{"telegram", "123", "telegram:123"},
+	}
+	for _, tc := range cases {
+		if got := BuildOriginSessionKey(tc.channel, tc.chatID); got != tc.want {
+			t.Errorf("BuildOriginSessionKey(%q, %q) = %q, want %q", tc.channel, tc.chatID, got, tc.want)
+		}
+	}
+}
+
+// TestListSubagentsTool_MatchesUnprefixedRuntimeSessionKey replicates the live
+// bug: a task spawned with channel "native" and a bare-UUID chatID must be
+// visible to the caller that spawned it, even though the runtime session key
+// injected by the agent tool executor carries no channel prefix.
+func TestListSubagentsTool_MatchesUnprefixedRuntimeSessionKey(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 1)
+
+	_, err := manager.Spawn(context.Background(), "Task 1", "one", "", "native", reproChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+
+	t.Run("tool context only", func(t *testing.T) {
+		ctx := WithToolContext(context.Background(), "native", reproChatUUID)
+		result := tool.Execute(ctx, map[string]interface{}{})
+		if result.IsError {
+			t.Fatalf("Expected success, got error: %s", result.ForLLM)
+		}
+		if !strings.Contains(result.ForLLM, "subagent-1") {
+			t.Errorf("Expected 'subagent-1' in list, got: %s", result.ForLLM)
+		}
+		if !strings.Contains(result.ForLLM, "Total: 1") {
+			t.Errorf("Expected 'Total: 1 task(s)', got: %s", result.ForLLM)
+		}
+	})
+
+	t.Run("runtime parity with unprefixed session key", func(t *testing.T) {
+		// Real agent turn: the tool executor injects BOTH the channel/chatID
+		// (same values spawn sees) and the session key, which at runtime is
+		// the raw chat UUID without the "native:" prefix.
+		ctx := WithAgentToolContext(
+			WithToolContext(context.Background(), "native", reproChatUUID),
+			"test-agent", reproChatUUID)
+		result := tool.Execute(ctx, map[string]interface{}{})
+		if result.IsError {
+			t.Fatalf("Expected success, got error: %s", result.ForLLM)
+		}
+		if !strings.Contains(result.ForLLM, "subagent-1") {
+			t.Errorf("Expected 'subagent-1' in list, got: %s", result.ForLLM)
+		}
+		if !strings.Contains(result.ForLLM, "Total: 1") {
+			t.Errorf("Expected 'Total: 1 task(s)', got: %s", result.ForLLM)
+		}
+	})
+
+	<-resultCh
+}
+
+// TestListSubagentsTool_AgentsIsolationPreserved confirms the per-chat
+// isolation introduced in #224 survives the new key derivation: a caller
+// scoped to chat A must not see chat B's tasks.
+func TestListSubagentsTool_AgentsIsolationPreserved(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 2)
+
+	_, err := manager.Spawn(context.Background(), "Task A", "alpha", "", "native", reproChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn A failed: %v", err)
+	}
+	_, err = manager.Spawn(context.Background(), "Task B", "beta", "", "native", otherChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn B failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+	ctxA := WithToolContext(context.Background(), "native", reproChatUUID)
+	result := tool.Execute(ctxA, map[string]interface{}{})
+
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected caller's own task 'subagent-1', got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "subagent-2") {
+		t.Errorf("Task from another chat must stay hidden, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "Total: 1") {
+		t.Errorf("Expected 'Total: 1 task(s)', got: %s", result.ForLLM)
+	}
+
+	<-resultCh
+	<-resultCh
+}
+
+// TestListSubagentsTool_SubagentToolLoopSeesParentTasks verifies that the
+// subagent toolloop path (subagent_runner passes task.OriginChannel /
+// task.OriginChatID, which ExecuteWithContext re-injects) derives a key equal
+// to the PARENT's OriginSessionKey, so a child sees its parent's tasks — and
+// only those.
+func TestListSubagentsTool_SubagentToolLoopSeesParentTasks(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 2)
+
+	_, err := manager.Spawn(context.Background(), "Parent task", "parent", "", "native", reproChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn parent failed: %v", err)
+	}
+	_, err = manager.Spawn(context.Background(), "Unrelated task", "other-chat", "", "native", otherChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn unrelated failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+
+	// Child toolloop context: channel + the parent's OriginChatID, no agent
+	// session-key context (RunToolLoop does not inject one).
+	childCtx := WithToolContext(context.Background(), "native", reproChatUUID)
+	result := tool.Execute(childCtx, map[string]interface{}{})
+
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected child to see parent's 'subagent-1', got: %s", result.ForLLM)
+	}
+	if strings.Contains(result.ForLLM, "subagent-2") {
+		t.Errorf("Unrelated chat's task must stay hidden from the child, got: %s", result.ForLLM)
+	}
+
+	<-resultCh
+	<-resultCh
+}
+
+// TestListSubagentsTool_RoutedSessionKeyWithChannelChatID checks precedence:
+// when the caller carries BOTH channel/chatID and a routed agent session key
+// ("agent:<id>:main"), the channel/chatID-derived key wins and the caller's
+// own tasks are listed.
+func TestListSubagentsTool_RoutedSessionKeyWithChannelChatID(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 1)
+
+	_, err := manager.Spawn(context.Background(), "Task 1", "one", "", "native", reproChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+	ctx := WithAgentToolContext(
+		WithToolContext(context.Background(), "native", reproChatUUID),
+		"software-engineer", "agent:software-engineer:main")
+	result := tool.Execute(ctx, map[string]interface{}{})
+
+	if !strings.Contains(result.ForLLM, "subagent-1") {
+		t.Errorf("Expected 'subagent-1' despite routed session key, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "Total: 1") {
+		t.Errorf("Expected 'Total: 1 task(s)', got: %s", result.ForLLM)
+	}
+
+	<-resultCh
+}
+
+// TestListSubagentsTool_ScopingHidesCount makes the empty result debuggable:
+// when tasks exist but the session scoping discards all of them, the message
+// must report how many were hidden instead of suggesting there are none.
+func TestListSubagentsTool_ScopingHidesCount(t *testing.T) {
+	provider := &delayedSubagentProvider{delay: 500 * time.Millisecond}
+	manager := NewSubagentManager(provider, "test-model", "/tmp/test", nil, 20)
+	resultCh := make(chan *ToolResult, 1)
+
+	_, err := manager.Spawn(context.Background(), "Task X", "xray", "", "native", reproChatUUID,
+		func(ctx context.Context, result *ToolResult) { resultCh <- result })
+	if err != nil {
+		t.Fatalf("Spawn failed: %v", err)
+	}
+
+	tool := NewListSubagentsTool(manager)
+	ctx := WithToolContext(context.Background(), "native", otherChatUUID)
+
+	result := tool.Execute(ctx, map[string]interface{}{})
+	if !strings.Contains(result.ForLLM, "No active subagents in this session") {
+		t.Errorf("Expected session-scoped empty message, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "1 task(s) from other sessions were hidden") {
+		t.Errorf("Expected hidden-task count in message, got: %s", result.ForLLM)
+	}
+
+	result = tool.Execute(ctx, map[string]interface{}{"include_completed": true})
+	if !strings.Contains(result.ForLLM, "1 task(s) from other sessions were hidden") {
+		t.Errorf("Expected hidden-task count with include_completed, got: %s", result.ForLLM)
+	}
+
+	<-resultCh
+}

@@ -324,15 +324,39 @@ func (sm *SubagentManager) claimTaskID(originSessionKey string) string {
 	}
 }
 
+// BuildOriginSessionKey returns the canonical session key recorded as a
+// subagent task's OriginSessionKey. Callers that need to match a task's
+// origin (e.g. the list_active_subagents tool) must derive their own key
+// with this same function so both sides share one invariant.
+//
+// Rules:
+//   - chatID already embedding the channel prefix ("<channel>:...") is
+//     returned as-is (subagent toolloops pass the full session key as chatID).
+//   - channel empty -> chatID alone (never a stray ":<chatID>").
+//   - chatID empty -> channel alone (never "<channel>:").
+//   - both empty -> "" so no phantom key is fabricated.
+//   - otherwise -> "<channel>:<chatID>".
+func BuildOriginSessionKey(channel, chatID string) string {
+	switch {
+	case chatID == "" && channel == "":
+		return ""
+	case channel == "":
+		return chatID
+	case chatID == "":
+		return channel
+	case strings.HasPrefix(chatID, channel+":"):
+		return chatID
+	default:
+		return channel + ":" + chatID
+	}
+}
+
 // SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
 // which additionally supports a per-task model override.
 func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
 	sm.CleanupTerminalTasks() // Prevent unbounded growth of terminal tasks
 
-	originSessionKey := originChannel + ":" + originChatID
-	if strings.HasPrefix(originChatID, originChannel+":") {
-		originSessionKey = originChatID
-	}
+	originSessionKey := BuildOriginSessionKey(originChannel, originChatID)
 
 	// Claim a unique task ID BEFORE taking sm.mu. The session-existence probe
 	// inside claimTaskID may call into the SessionManager (its own lock + disk

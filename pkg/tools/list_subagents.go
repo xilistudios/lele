@@ -46,18 +46,28 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 
 	includeCompleted, _ := args["include_completed"].(bool)
 
-	// Scope to the invoking session when the session key is available in the
-	// tool context. Subagent tasks record the session that spawned them in
-	// OriginSessionKey, so we only surface tasks belonging to the caller.
-	// The agent loop injects the session key via WithAgentToolContext; the
-	// subagent toolloop only provides channel/chatID (where chatID doubles as
-	// the full subagent session key), so fall back to that. When neither is
-	// available (e.g. bare CLI invocations), list all tasks.
-	_, currentSessionKey := AgentToolContextFromCtx(ctx)
-	if currentSessionKey == "" {
-		if _, chatID := ToolContextFromCtx(ctx); chatID != "" && strings.Contains(chatID, ":") {
-			currentSessionKey = chatID
-		}
+	// Scope to the invoking session when its key can be determined. Subagent
+	// tasks record their spawning session in OriginSessionKey, built by
+	// BuildOriginSessionKey(channel, chatID); the caller derives its own key
+	// with the SAME function so both sides share one invariant by
+	// construction (the runtime session key alone is not comparable — it may
+	// lack the channel prefix, carry a ":chat:N" alias, or be a routed
+	// "agent:<id>:main" key).
+	//
+	// Precedence:
+	//  1. channel+chatID from the tool context — present for a normal agent
+	//     turn (tool_executor -> ExecuteWithContext) and for the subagent
+	//     toolloop (subagent_runner passes task.OriginChannel/OriginChatID,
+	//     which yields the parent's OriginSessionKey).
+	//  2. The agent-loop session key — covers CLI/tests that inject only a
+	//     session key; sameSessionKey still handles ":subagent-N" children
+	//     and ":chat:N" aliases on this path.
+	//  3. Neither -> no scoping (list all tasks), as before.
+	var currentSessionKey string
+	if channel, chatID := ToolContextFromCtx(ctx); channel != "" && chatID != "" {
+		currentSessionKey = BuildOriginSessionKey(channel, chatID)
+	} else if _, sessionKey := AgentToolContextFromCtx(ctx); sessionKey != "" {
+		currentSessionKey = sessionKey
 	}
 
 	allTasks := t.manager.ListTasks()
@@ -66,8 +76,10 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 	}
 
 	var filtered []*SubagentTask
+	hiddenByScope := 0
 	for _, task := range allTasks {
 		if currentSessionKey != "" && !sameSessionKey(task.OriginSessionKey, currentSessionKey) {
+			hiddenByScope++
 			continue
 		}
 		if includeCompleted {
@@ -80,10 +92,15 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 	}
 
 	if len(filtered) == 0 {
-		if includeCompleted {
-			if currentSessionKey != "" {
-				return SilentResult("No subagent tasks found for this session. Set include_completed=true to also see finished tasks (already included).")
+		// Tasks exist but scoping hid them: say so (with a count) instead of
+		// implying the manager is empty.
+		if hiddenByScope > 0 {
+			if includeCompleted {
+				return SilentResult(fmt.Sprintf("No subagent tasks found for this session (%d task(s) from other sessions were hidden).", hiddenByScope))
 			}
+			return SilentResult(fmt.Sprintf("No active subagents in this session (%d task(s) from other sessions were hidden; pass include_completed=true to see finished tasks).", hiddenByScope))
+		}
+		if includeCompleted {
 			return SilentResult("No subagent tasks found.")
 		}
 		if currentSessionKey != "" {
@@ -133,11 +150,11 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 }
 
 // sameSessionKey reports whether a task's origin session key refers to the
-// given session key. OriginSessionKey is stored as "<channel>:<chatID>" (or
-// the chatID itself when it already embeds the channel prefix). The invoking
-// session key may carry extra suffixes (e.g. "native:<chatID>:subagent-N" for
-// subagent sessions), so we compare on the resolved base key: the invoking
-// key must either equal the origin key or start with "<originKey>:".
+// given session key. Both sides are derived with BuildOriginSessionKey, so a
+// plain match covers the normal path; the prefix check is still needed for
+// callers whose key comes from the agent loop (precedence 2) and carries an
+// extra suffix — e.g. a subagent child session "<origin>:subagent-N" or a
+// "<origin>:chat:N" alias.
 func sameSessionKey(originSessionKey, sessionKey string) bool {
 	if originSessionKey == "" || sessionKey == "" {
 		return false
