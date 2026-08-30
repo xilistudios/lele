@@ -140,8 +140,9 @@ func TestRunToolLoop_ReactiveCompactionOnOverflow(t *testing.T) {
 
 func TestRunToolLoop_ReactiveCompactionExhausted(t *testing.T) {
 	// Summarizer always succeeds (so compaction "works") but the main prompt
-	// stays too large: the loop must give up after maxReactiveCompactions
-	// compaction attempts instead of looping forever.
+	// stays too large: the loop must give up after the first compaction retry
+	// because CompactLoopMessages detects the already-compacted context and
+	// skips redundant re-summarization.
 	p := newOverflowMainProvider(0)
 	p.alwaysFail = true
 
@@ -153,12 +154,14 @@ func TestRunToolLoop_ReactiveCompactionExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after exhausting reactive compaction attempts")
 	}
-	// 1 initial call + maxReactiveCompactions (3) compacted retries = 4 main calls.
-	if got := p.mainCallCount(); got != 1+maxReactiveCompactions {
-		t.Errorf("expected %d main LLM calls before giving up, got %d", 1+maxReactiveCompactions, got)
+	// 1 initial call + 1 compacted retry = 2 main calls. The second
+	// compaction is skipped because the context is already compacted and
+	// no new messages were added (CompactLoopMessages optimization).
+	if got := p.mainCallCount(); got != 2 {
+		t.Errorf("expected 2 main LLM calls before giving up, got %d", got)
 	}
-	if got := p.summarizerCallCount(); got != maxReactiveCompactions {
-		t.Errorf("expected %d summarizer calls, got %d", maxReactiveCompactions, got)
+	if got := p.summarizerCallCount(); got != 1 {
+		t.Errorf("expected 1 summarizer call, got %d", got)
 	}
 }
 
@@ -195,10 +198,15 @@ func (p *nonOverflowProvider) Chat(_ context.Context, _ []providers.Message, _ [
 func (p *nonOverflowProvider) GetDefaultModel() string { return "test-model" }
 
 func TestRunToolLoop_ReactiveCompactionBudgetResets(t *testing.T) {
-	// Overflow on main calls 1 and 2, success (with a tool call) on call 3,
-	// overflow on call 4, success on call 5: the reactive budget must reset
-	// after the successful response so the second overflow event gets a
-	// fresh set of attempts.
+	// Overflow on call 1, success (with a tool call) on call 2 which adds
+	// new messages, overflow on call 3, success on call 4: the reactive
+	// budget must reset after the successful response so the second overflow
+	// event gets a fresh compaction attempt. The tool call on call 2 adds
+	// assistant + tool result messages, growing the context past the
+	// "already compacted" guard in CompactLoopMessages.
+	//
+	// ContextWindow is set high enough to avoid proactive compaction
+	// interfering with the reactive compaction flow.
 	toolCallResp := &providers.LLMResponse{
 		Content: "",
 		ToolCalls: []providers.ToolCall{{
@@ -209,12 +217,12 @@ func TestRunToolLoop_ReactiveCompactionBudgetResets(t *testing.T) {
 		}},
 	}
 	p := newOverflowMainProvider(0)
-	p.scripted = []*providers.LLMResponse{nil, nil, toolCallResp, nil}
+	p.scripted = []*providers.LLMResponse{nil, toolCallResp, nil}
 
 	res, err := RunToolLoop(context.Background(), ToolLoopConfig{
 		Provider:      p,
 		Model:         "test-model",
-		ContextWindow: 1000,
+		ContextWindow: 100000, // high enough to avoid proactive compaction
 	}, buildLargeLoopMessages(), "native", "chat-1")
 	if err != nil {
 		t.Fatalf("expected recovery across two overflow events, got error: %v", err)
@@ -222,7 +230,11 @@ func TestRunToolLoop_ReactiveCompactionBudgetResets(t *testing.T) {
 	if res.Content != "done" {
 		t.Errorf("expected final content 'done', got %q", res.Content)
 	}
-	if got := p.mainCallCount(); got != 5 {
-		t.Errorf("expected 5 main LLM calls, got %d", got)
+	// Call 1: overflow → compact → retry (success with tool call)
+	// Call 2: tool call processed, tool result added → loop continues
+	// Call 3: overflow → compact → retry (success)
+	// = 4 main LLM calls
+	if got := p.mainCallCount(); got != 4 {
+		t.Errorf("expected 4 main LLM calls, got %d", got)
 	}
 }

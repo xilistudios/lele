@@ -22,7 +22,9 @@ export function ChatHistoryPage() {
     sessions,
     currentSessionKey,
     sidebarOpen,
-    onToggleSidebar,
+    mobileSidebarOpen,
+    onCloseMobileSidebar,
+    onOpenMobileSidebar,
     processingSessions,
     onSelectSession,
     onDeleteSession,
@@ -138,8 +140,8 @@ export function ChatHistoryPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
@@ -147,7 +149,7 @@ export function ChatHistoryPage() {
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <button
               type="button"
-              onClick={onToggleSidebar}
+              onClick={onOpenMobileSidebar}
               className="flex md:hidden items-center justify-center rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors mr-1"
               aria-label={t('chat.toggleSidebar')}
             >

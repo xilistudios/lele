@@ -39,9 +39,9 @@ type SubagentManager struct {
 	sessionExists              func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
 	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
+	compactionThresholdPercent int                                                       // percentage of context window triggering intra-loop compaction (0 = default)
 	redactor                   *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
 	sessionCompactor           SessionCompactor                                          // syncs loop compaction to the persisted subagent session
-	compactionThresholdPercent int                                                       // proactive compaction threshold percent (0 = default 75%)
 	compactionModel            string                                                    // dedicated compaction model (empty = agent model)
 	evictExcludedFromMemory    bool                                                      // evict excluded messages from in-memory session cache on compaction sync
 }
@@ -83,6 +83,22 @@ func (sm *SubagentManager) SetMaxIterations(maxIterations int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.maxIterations = maxIterations
+}
+
+// SetCompactionThresholdPercent sets the percentage of the context window at
+// which intra-loop compaction triggers for subagent tool loops. 0 = default.
+func (sm *SubagentManager) SetCompactionThresholdPercent(p int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.compactionThresholdPercent = p
+}
+
+// getCompactionThresholdPercent returns the configured compaction threshold
+// percent (0 = use pkg/config.DefaultCompactionThresholdPercent).
+func (sm *SubagentManager) getCompactionThresholdPercent() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.compactionThresholdPercent
 }
 
 // SetTimeout sets the maximum execution time for subagent tasks.

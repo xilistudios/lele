@@ -151,14 +151,12 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
         }`}
         onClick={onClose}
         onKeyDown={(e) => e.key === 'Escape' && onClose()}
-        role="button"
-        tabIndex={0}
         aria-hidden={!mobileOpen}
       />
 
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+          mobileOpen ? 'glass-effect translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
@@ -170,7 +168,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               <IconButton
                 onClick={onToggleSidebar}
                 ariaLabel={t('sidebar.expand')}
-                className="flex items-center justify-center h-8 w-8"
+                className="flex items-center justify-center h-10 w-10"
               >
                 <SidebarToggleIcon size={16} />
               </IconButton>
@@ -184,7 +182,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               <IconButton
                 onClick={onToggleSidebar}
                 ariaLabel={t('sidebar.collapse')}
-                className="flex items-center justify-center h-8 w-8"
+                className="flex items-center justify-center h-10 w-10"
               >
                 <SidebarToggleIcon size={16} />
               </IconButton>
@@ -193,6 +191,28 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
               </span>
             </div>
           )}
+          {/* Mobile-only close button */}
+          <IconButton
+            onClick={onClose}
+            ariaLabel={t('common.close')}
+            className={`flex md:hidden items-center justify-center h-10 w-10 ${collapsed ? 'md:hidden' : ''}`}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              role="img"
+              aria-label={t('common.close')}
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </IconButton>
         </div>
 
         <div
@@ -205,7 +225,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   onClick={() => onCreateSession()}
                   ariaLabel={t('chat.newChat')}
                   variant="nav"
-                  className="flex items-center justify-center h-8 w-8"
+                  className="flex items-center justify-center h-10 w-10"
                 >
                   <PlusCircleIcon size={24} />
                 </IconButton>
@@ -218,7 +238,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   onClick={() => openPanel(true)}
                   ariaLabel={t('chat.search')}
                   variant="nav"
-                  className="flex items-center justify-center h-8 w-8"
+                  className="flex items-center justify-center h-10 w-10"
                 >
                   <SearchIcon size={16} />
                 </IconButton>
@@ -235,7 +255,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 aria-label={t('chat.newChat')}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
-                <div className="h-8 w-8 flex items-center justify-center">
+                <div className="h-10 w-10 flex items-center justify-center">
                   <PlusCircleIcon size={24} />
                 </div>
                 <span className="leading-none">{t('chat.newChat')}</span>
@@ -246,7 +266,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                 aria-label={t('chat.search')}
                 className="flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
               >
-                <div className="h-8 w-8 flex items-center justify-center">
+                <div className="h-10 w-10 flex items-center justify-center">
                   <SearchIcon size={16} />
                 </div>
                 <span>{t('chat.search')}</span>
@@ -271,7 +291,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                   <IconButton
                     ariaLabel={t('chat.recent')}
                     variant="nav"
-                    className="flex items-center justify-center h-8 w-8"
+                    className="flex items-center justify-center h-10 w-10"
                   >
                     <HistoryIcon size={16} />
                   </IconButton>
@@ -413,7 +433,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                     title={item.label}
                     ariaLabel={item.label}
                     variant="nav"
-                    className={`flex items-center justify-center h-8 w-8 ${
+                    className={`flex items-center justify-center h-10 w-10 ${
                       isActiveRoute(item.path) ? 'text-brand-rosa bg-surface-selected' : ''
                     }`}
                   >
@@ -442,7 +462,7 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  <div className="h-8 w-8 flex items-center justify-center">
+                  <div className="h-10 w-10 flex items-center justify-center">
                     <item.icon size={16} />
                   </div>
                   <span>{item.label}</span>

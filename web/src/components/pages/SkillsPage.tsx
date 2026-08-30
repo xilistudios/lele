@@ -6,11 +6,13 @@ import { useSkills } from '../../hooks/useSkills'
 import { InstallSkillModal } from '../organisms/InstallSkillModal'
 import { Sidebar } from '../organisms/Sidebar'
 import { SkillsList } from '../organisms/SkillsList'
+import { Button } from '../atoms'
 
 export function SkillsPage() {
   const { t } = useTranslation()
   const { api } = useAuthContext()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
   const {
     skills,
     availableSkills,
@@ -74,16 +76,16 @@ export function SkillsPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border px-6 py-4 shrink-0 bg-background-secondary/30">
+        <header className="flex items-center justify-between border-b border-border px-4 py-3 md:px-6 md:py-4 shrink-0 bg-background-secondary">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => onToggleSidebar()}
+              onClick={() => onOpenMobileSidebar()}
               className="flex md:hidden p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-background-tertiary transition-colors"
               title={t('chat.toggleSidebar')}
             >
@@ -105,11 +107,7 @@ export function SkillsPage() {
               {t('skills.title', 'Skills')}
             </h1>
           </div>
-          <button
-            type="button"
-            onClick={handleOpenModal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-rosa px-3 py-2 text-sm font-medium text-white hover:bg-brand-rosa/90 transition-colors"
-          >
+          <Button type="button" variant="primary" size="md" onClick={handleOpenModal}>
             <svg
               width="14"
               height="14"
@@ -123,13 +121,13 @@ export function SkillsPage() {
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             {t('skills.installSkill', 'Install Skill')}
-          </button>
+          </Button>
         </header>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {error && (
-            <div className="mb-4 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-3 text-sm text-state-error">
+            <div className="mb-4 rounded-lg border border-state-error bg-state-error-light px-4 py-3 text-sm text-state-error">
               {error}
             </div>
           )}

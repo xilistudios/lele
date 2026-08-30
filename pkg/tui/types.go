@@ -274,6 +274,16 @@ type Model struct {
 	settingsSelectorField  string   // which settingsEditField triggered the selector
 	settingsSelectorOrig   string   // original config value when selector opened (for ✓ mark)
 
+	// Subagent multi-select picker state — when subagentPickerActive is true
+	// the modal shows a scrollable list of all configured agents (except the
+	// current one) with checkboxes that can be toggled with Space. Enter saves
+	// the selection to agent.Subagents.AllowAgents, Esc cancels.
+	subagentPickerActive   bool         // true while the subagent picker is open
+	subagentPickerItems    []string     // agent IDs shown in the picker (in picker order)
+	subagentPickerLabels   []string     // display labels (Name (ID) or ID) for each item
+	subagentPickerSelected map[int]bool // index → selected state
+	subagentPickerIdx      int          // currently highlighted row
+
 	// Provider management state
 	providerModalKeys    []string // maps modal items to provider names (for /providers)
 	providerSelectedName string   // currently selected provider name in detail view

@@ -102,7 +102,11 @@ func (m *Model) submitMessage() tea.Cmd {
 	// Store the user message so it renders immediately in the viewport.
 	// The LLM runner will also add it to the session; we clear our copy
 	// once we see it appear in the session history (on reloadSessions).
-	m.pendingUserMessage = content
+	// TrimSpace matches the normalization applied by the agent's
+	// RenderUserMessage before the message is stored in history, so the
+	// equality checks in viewport.go/model.go succeed and the pending
+	// copy is cleared as soon as the message lands in history.
+	m.pendingUserMessage = strings.TrimSpace(content)
 	m.reloadSessions()
 
 	m.agentLoop.MessageBus().PublishInbound(bus.InboundMessage{

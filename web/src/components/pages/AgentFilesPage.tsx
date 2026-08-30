@@ -11,7 +11,8 @@ type DirtyMap = Record<string, string | null> // fileName -> content if dirty, n
 export function AgentFilesPage() {
   const { agentId } = useParams<{ agentId: string }>()
   const { api } = useAuthContext()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
   const navigate = useNavigate()
 
   const [files, setFiles] = useState<AgentFileInfo[]>([])
@@ -131,11 +132,14 @@ export function AgentFilesPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        <SettingsHeader onToggleSidebar={onToggleSidebar} configPath={`Agent: ${agentId}`} />
+        <SettingsHeader
+          onOpenMobileSidebar={onOpenMobileSidebar}
+          configPath={`Agent: ${agentId}`}
+        />
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">

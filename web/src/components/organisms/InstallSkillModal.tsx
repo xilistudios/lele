@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AvailableSkill, ScannedSkill } from '../../lib/types'
-import { Modal, Spinner } from '../atoms'
+import { Button, Modal, Spinner } from '../atoms'
 
 type Props = {
   isOpen: boolean
@@ -115,7 +115,7 @@ export function InstallSkillModal({
             {scanResults.map((skill) => (
               <label
                 key={skill.path}
-                className="flex items-start gap-3 rounded-lg border border-border bg-background-secondary/50 p-3 hover:border-brand-rosa/30 transition-colors cursor-pointer"
+                className="flex items-start gap-3 rounded-xl border border-border bg-background-secondary p-3 hover:border-brand-rosa/30 transition-colors cursor-pointer"
               >
                 <input
                   type="checkbox"
@@ -148,18 +148,20 @@ export function InstallSkillModal({
             >
               ← {t('common.back', 'Back')}
             </button>
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="md"
               onClick={handleInstallSelected}
-              disabled={isInstalling || selectedSkills.size === 0}
-              className="rounded-lg bg-brand-rosa px-4 py-2 text-sm font-medium text-white hover:bg-brand-rosa/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              loading={isInstalling}
+              disabled={selectedSkills.size === 0}
+              type="button"
             >
               {isInstalling
                 ? t('skills.installing', 'Installing...')
                 : t('skills.installSelected', 'Install {{count}} skills', {
                     count: selectedSkills.size,
                   })}
-            </button>
+            </Button>
           </div>
         </div>
       </Modal>
@@ -232,7 +234,7 @@ export function InstallSkillModal({
                   {filteredSkills.map((skill) => (
                     <div
                       key={skill.name}
-                      className="flex items-start justify-between rounded-lg border border-border bg-background-secondary/50 p-3 hover:border-brand-rosa/30 transition-colors"
+                      className="flex items-start justify-between rounded-xl border border-border bg-background-secondary p-3 hover:border-brand-rosa/30 transition-colors"
                     >
                       <div className="flex-1 min-w-0 mr-3">
                         <div className="flex items-center gap-2">
@@ -315,24 +317,28 @@ export function InstallSkillModal({
             )}
 
             <div className="flex justify-end gap-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="md"
                 onClick={handleScan}
-                disabled={isScanning || isInstalling || !repoUrl.trim()}
-                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background-secondary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                loading={isScanning}
+                disabled={isInstalling || !repoUrl.trim()}
+                type="button"
               >
                 {isScanning ? t('skills.scanning', 'Scanning...') : t('skills.scan', 'Scan')}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
                 onClick={handleUrlInstall}
-                disabled={isInstalling || !repoUrl.trim()}
-                className="rounded-lg bg-brand-rosa px-4 py-2 text-sm font-medium text-white hover:bg-brand-rosa/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                loading={isInstalling}
+                disabled={!repoUrl.trim()}
+                type="button"
               >
                 {isInstalling
                   ? t('skills.installing', 'Installing...')
                   : t('skills.install', 'Install')}
-              </button>
+              </Button>
             </div>
           </div>
         )}

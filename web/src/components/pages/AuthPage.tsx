@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getDesktopToken } from '../../lib/api'
+import { Button } from '../atoms'
 
 type Props = {
   apiUrl: string
@@ -22,7 +23,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   if (getDesktopToken()) {
     return (
       <main className="flex min-h-screen items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md space-y-5 rounded-2xl border border-border bg-background-primary p-6 shadow-xl">
+        <div className="w-full max-w-md space-y-5 rounded-xl border border-border bg-background-primary p-6 shadow-xl">
           <div className="flex items-center justify-center py-8">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
           </div>
@@ -53,7 +54,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
       <form
-        className="w-full max-w-md space-y-5 rounded-2xl border border-border bg-background-primary p-6 shadow-xl"
+        className="w-full max-w-md space-y-5 rounded-xl border border-border bg-background-primary p-6 shadow-xl"
         onSubmit={handleSubmit}
       >
         <div className="space-y-2">
@@ -102,13 +103,16 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
           </p>
         )}
 
-        <button
-          className="w-full rounded-lg bg-cta-primary px-4 py-2.5 font-medium text-text-on-accent transition hover:bg-cta-hover disabled:cursor-not-allowed disabled:opacity-40"
+        <Button
+          variant="primary"
+          size="lg"
+          className="w-full"
+          loading={loading}
           disabled={disabled}
           type="submit"
         >
           {loading ? t('auth.connecting') : t('auth.connect')}
-        </button>
+        </Button>
       </form>
     </main>
   )

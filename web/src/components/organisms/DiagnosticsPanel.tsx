@@ -6,7 +6,7 @@ export function DiagnosticsPanel() {
   const { diagnostics } = useAppLogicContext()
 
   return (
-    <section className="mx-6 mt-3 rounded-lg border border-border bg-background-primary p-4 text-xs text-text-secondary">
+    <section className="mx-4 mt-3 rounded-lg border border-border bg-background-primary p-4 text-xs text-text-secondary md:mx-6">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">

@@ -570,10 +570,11 @@ func TestModelEnterNoProvidersWithCurrentValueOpensSelector(t *testing.T) {
 	}
 }
 
-// TestModelEnterNoProvidersNoCurrentValueFallsBackToText verifies that when
-// there are no configured providers AND no current value, the selector returns
-// nil and we fall back to text input.
-func TestModelEnterNoProvidersNoCurrentValueFallsBackToText(t *testing.T) {
+// TestModelEnterNoProvidersNoCurrentValueShowsMinimalSelector verifies that when
+// there are no configured providers AND no current value, the selector still
+// opens with a minimal "(default)" + "(custom...)" set instead of falling back
+// to text input. This ensures a consistent selector experience for model fields.
+func TestModelEnterNoProvidersNoCurrentValueShowsMinimalSelector(t *testing.T) {
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
@@ -595,14 +596,17 @@ func TestModelEnterNoProvidersNoCurrentValueFallsBackToText(t *testing.T) {
 	m.modalSelectedIdx = 1 // Model
 	m.handleDefaultsEditEnter()
 
-	// No providers AND no current value → selector returns nil → falls back to text
-	if m.settingsSelectorActive {
-		t.Error("expected selector NOT active (nothing to show)")
+	// No providers AND no current value → minimal selector with (default) + (custom...)
+	if !m.settingsSelectorActive {
+		t.Error("expected selector active with minimal options")
 	}
-	if m.settingsEditField != "defaultModel" {
-		t.Errorf("editField = %q, want defaultModel", m.settingsEditField)
+	if m.settingsSelectorField != "defaultModel" {
+		t.Errorf("selectorField = %q, want defaultModel", m.settingsSelectorField)
 	}
-	if !m.textInput.Focused() {
-		t.Error("expected text input focused")
+	if len(m.settingsSelectorValues) != 2 {
+		t.Fatalf("expected 2 selector values, got %d: %v", len(m.settingsSelectorValues), m.settingsSelectorValues)
+	}
+	if m.settingsSelectorValues[0] != "" || m.settingsSelectorValues[1] != "__custom__" {
+		t.Errorf("unexpected selector values: %v", m.settingsSelectorValues)
 	}
 }

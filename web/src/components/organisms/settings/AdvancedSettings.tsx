@@ -322,7 +322,7 @@ export function AdvancedSettings() {
               value={rawJsonText}
               onChange={(e) => handleJsonChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className={`h-[500px] w-full rounded border p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary ${
+              className={`h-[50vh] md:h-[500px] w-full rounded border p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary ${
                 jsonParseError
                   ? 'border-error-primary bg-error-surface text-text-primary focus:border-error-primary focus:ring-error-primary'
                   : 'border-border bg-background-primary text-text-primary focus:border-interaction-primary focus:ring-interaction-primary'

@@ -14,14 +14,15 @@ import (
 // view the first 8 indices correspond to read-only/editable fields and the
 // last two are actions (set as default / delete).
 const (
-	agentFieldID          = iota // 0: ID (read-only)
-	agentFieldName               // 1: Name
-	agentFieldDescription        // 2: Description
-	agentFieldWorkspace          // 3: Workspace
-	agentFieldModel              // 4: Model (provider/alias)
-	agentFieldTemperature        // 5: Temperature
-	agentFieldSkills             // 6: Skills (read-only)
-	agentFieldSubagents          // 7: Subagents (read-only)
+	agentFieldID                     = iota // 0: ID (read-only)
+	agentFieldName                          // 1: Name
+	agentFieldDescription                   // 2: Description
+	agentFieldWorkspace                     // 3: Workspace
+	agentFieldModel                         // 4: Model (provider/alias)
+	agentFieldTemperature                   // 5: Temperature
+	agentFieldSkills                        // 6: Skills (read-only)
+	agentFieldSubagentsAllow                // 7: Subagents Allow (multi-select)
+	agentFieldSubagentsMaxConcurrent        // 8: Subagents MaxConcurrent (text input)
 )
 
 // settingsAgentAddKey is the synthetic key in settingsAgentKeys that maps to
@@ -104,17 +105,14 @@ func (m *Model) loadAgentDetail(agentID string) {
 		skillsStr = strings.Join(agent.Skills, ", ")
 	}
 
-	subagentsStr := "default"
+	subagentsAllowStr := "default"
+	subagentsMaxStr := "default"
 	if agent.Subagents != nil {
-		parts := []string{}
 		if len(agent.Subagents.AllowAgents) > 0 {
-			parts = append(parts, "allow: "+strings.Join(agent.Subagents.AllowAgents, ","))
+			subagentsAllowStr = strings.Join(agent.Subagents.AllowAgents, ", ")
 		}
 		if agent.Subagents.MaxConcurrent > 0 {
-			parts = append(parts, fmt.Sprintf("max:%d", agent.Subagents.MaxConcurrent))
-		}
-		if len(parts) > 0 {
-			subagentsStr = strings.Join(parts, " ")
+			subagentsMaxStr = strconv.Itoa(agent.Subagents.MaxConcurrent)
 		}
 	}
 
@@ -131,7 +129,8 @@ func (m *Model) loadAgentDetail(agentID string) {
 		fmt.Sprintf("Model: %s", modelStr),
 		fmt.Sprintf("Temperature: %s", tempStr),
 		fmt.Sprintf("Skills: %s", skillsStr),
-		fmt.Sprintf("Subagents: %s", subagentsStr),
+		fmt.Sprintf("Subagents Allow: %s", subagentsAllowStr),
+		fmt.Sprintf("Subagents MaxConcurrent: %s", subagentsMaxStr),
 		fmt.Sprintf("★ %s", i18n.T("tui.settings.setAsDefault")),
 		fmt.Sprintf("🗑 %s", i18n.T("tui.settings.deleteAgent")),
 	}
@@ -191,20 +190,20 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		m.settingsEditField = "agentWorkspace"
 		m.textInput.SetValue(agent.Workspace)
 		m.textInput.Focus()
-	case agentFieldModel: // 4: Model — selector over all configured providers' models
+	case agentFieldModel: // 4: Model — always a selector with (default) and (custom...)
 		modelStr := ""
 		if agent.Model != nil {
 			modelStr = agent.Model.Primary
 		}
 		labels, values := m.modelSelectorOptions(modelStr)
 		if len(values) == 0 {
-			// No providers configured — fall back to text input
-			m.settingsEditField = "agentModel"
-			m.textInput.SetValue(modelStr)
-			m.textInput.Focus()
-		} else {
-			m.startSettingsSelector("agentModel", modelStr, labels, values)
+			// No providers configured — build minimal selector
+			labels = []string{"(default)"}
+			values = []string{""}
 		}
+		labels = append(labels, "(custom...)")
+		values = append(values, "__custom__")
+		m.startSettingsSelector("agentModel", modelStr, labels, values)
 	case agentFieldTemperature: // 5: Temperature
 		m.settingsEditField = "agentTemperature"
 		tempStr := ""
@@ -215,11 +214,19 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		m.textInput.Focus()
 	case agentFieldSkills: // 6: Skills — not editable (managed by /skills)
 		return nil
-	case agentFieldSubagents: // 7: Subagents — not editable in this view
-		return nil
-	case 8: // Set as default
+	case agentFieldSubagentsAllow: // 7: Subagents Allow — multi-select picker
+		m.startSubagentPicker(agent)
+	case agentFieldSubagentsMaxConcurrent: // 8: Subagents MaxConcurrent — text input
+		m.settingsEditField = "agentSubagentsMaxConcurrent"
+		maxStr := ""
+		if agent.Subagents != nil && agent.Subagents.MaxConcurrent > 0 {
+			maxStr = strconv.Itoa(agent.Subagents.MaxConcurrent)
+		}
+		m.textInput.SetValue(maxStr)
+		m.textInput.Focus()
+	case 9: // Set as default
 		m.setAgentDefault(agentID)
-	case 9: // Delete
+	case 10: // Delete
 		m.settingsEditField = "confirmDelete"
 		m.formError = i18n.T("tui.settings.confirmDelete")
 	}
@@ -241,16 +248,16 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 		} else {
 			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
 		}
-	case 1: // Model — selector over all configured providers' models
+	case 1: // Model — always a selector with (default) and (custom...)
 		labels, values := m.modelSelectorOptions(d.Model)
 		if len(values) == 0 {
-			// No providers configured — fall back to text input
-			m.settingsEditField = "defaultModel"
-			m.textInput.SetValue(d.Model)
-			m.textInput.Focus()
-		} else {
-			m.startSettingsSelector("defaultModel", d.Model, labels, values)
+			// No providers configured — build minimal selector
+			labels = []string{"(default)"}
+			values = []string{""}
 		}
+		labels = append(labels, "(custom...)")
+		values = append(values, "__custom__")
+		m.startSettingsSelector("defaultModel", d.Model, labels, values)
 	case 2: // MaxTokens
 		m.settingsEditField = "defaultMaxTokens"
 		m.textInput.SetValue(strconv.Itoa(d.MaxTokens))
@@ -374,6 +381,16 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 			}
 			agent.Temperature = &f
 		}
+	case "agentSubagentsMaxConcurrent":
+		v, err := strconv.Atoi(value)
+		if err != nil || v < 0 {
+			m.formError = i18n.T("tui.settings.invalidNumber")
+			return
+		}
+		if agent.Subagents == nil {
+			agent.Subagents = &config.SubagentsConfig{}
+		}
+		agent.Subagents.MaxConcurrent = v
 	}
 
 	m.formError = ""
@@ -507,6 +524,98 @@ func (m *Model) findAgent(agentID string) *config.AgentConfig {
 		}
 	}
 	return nil
+}
+
+// startSubagentPicker opens the multi-select picker for the current agent's
+// subagent allow-list. It lists every configured agent except the current one
+// (an agent cannot be its own subagent). Each row shows [✓]/[ ] depending on
+// whether the agent is in agent.Subagents.AllowAgents.
+func (m *Model) startSubagentPicker(agent *config.AgentConfig) {
+	m.subagentPickerActive = true
+	m.subagentPickerIdx = 0
+	m.modalScrollOffset = 0
+	m.subagentPickerItems = nil
+	m.subagentPickerLabels = nil
+	m.subagentPickerSelected = make(map[int]bool)
+
+	allowed := make(map[string]bool)
+	if agent.Subagents != nil {
+		for _, id := range agent.Subagents.AllowAgents {
+			allowed[id] = true
+		}
+	}
+
+	for _, a := range m.cfg.Agents.List {
+		if a.ID == m.settingsAgentID {
+			continue // don't list self
+		}
+		idx := len(m.subagentPickerItems)
+		m.subagentPickerItems = append(m.subagentPickerItems, a.ID)
+		label := a.ID
+		if a.Name != "" {
+			label = fmt.Sprintf("%s (%s)", a.Name, a.ID)
+		}
+		m.subagentPickerLabels = append(m.subagentPickerLabels, label)
+		m.subagentPickerSelected[idx] = allowed[a.ID]
+	}
+}
+
+// toggleSubagentPicker toggles the selection state of the highlighted row.
+func (m *Model) toggleSubagentPicker() {
+	if !m.subagentPickerActive || m.subagentPickerIdx >= len(m.subagentPickerItems) {
+		return
+	}
+	m.subagentPickerSelected[m.subagentPickerIdx] = !m.subagentPickerSelected[m.subagentPickerIdx]
+}
+
+// saveSubagentPicker writes the selected agents to agent.Subagents.AllowAgents
+// and closes the picker. If nothing is selected, agent.Subagents is set to nil
+// (when it has no other meaningful fields) to keep the config clean.
+func (m *Model) saveSubagentPicker() {
+	if !m.subagentPickerActive {
+		return
+	}
+
+	agent := m.findAgent(m.settingsAgentID)
+	if agent != nil {
+		selected := make([]string, 0, len(m.subagentPickerSelected))
+		for i, isSel := range m.subagentPickerSelected {
+			if isSel && i < len(m.subagentPickerItems) {
+				selected = append(selected, m.subagentPickerItems[i])
+			}
+		}
+		if len(selected) == 0 {
+			// Clear the allow-list. If the Subagents struct has no other
+			// meaningful fields, drop it entirely to keep config clean.
+			if agent.Subagents != nil && agent.Subagents.MaxConcurrent == 0 &&
+				agent.Subagents.TimeoutMin == 0 && agent.Subagents.MaxIterations == 0 &&
+				agent.Subagents.Model == nil {
+				agent.Subagents = nil
+			} else if agent.Subagents != nil {
+				agent.Subagents.AllowAgents = nil
+			}
+		} else {
+			if agent.Subagents == nil {
+				agent.Subagents = &config.SubagentsConfig{}
+			}
+			agent.Subagents.AllowAgents = selected
+		}
+		m.saveConfigToDisk()
+		m.applyAgentReload()
+	}
+
+	m.cancelSubagentPicker()
+	m.loadAgentDetail(m.settingsAgentID)
+}
+
+// cancelSubagentPicker closes the subagent picker without saving.
+func (m *Model) cancelSubagentPicker() {
+	m.subagentPickerActive = false
+	m.subagentPickerItems = nil
+	m.subagentPickerLabels = nil
+	m.subagentPickerSelected = nil
+	m.subagentPickerIdx = 0
+	m.modalScrollOffset = 0
 }
 
 // formatFloatPtr formats a *float64 for display; nil renders as "default".

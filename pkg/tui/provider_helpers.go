@@ -16,6 +16,9 @@ func (m *Model) saveConfigToDisk() error {
 
 // listProviders returns a sorted list of provider names from the config.
 func (m *Model) listProviders() []string {
+	if m.agentLoop == nil {
+		return nil
+	}
 	snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
 	if snapshot == nil || snapshot.Providers == nil {
 		return nil
@@ -33,6 +36,9 @@ func (m *Model) listProviders() []string {
 
 // listProviderModels returns a sorted list of model aliases for a given provider.
 func (m *Model) listProviderModels(providerName string) []string {
+	if m.agentLoop == nil {
+		return nil
+	}
 	snapshot := m.agentLoop.GetProvidable().GetConfigSnapshot()
 	if snapshot == nil || snapshot.Providers == nil {
 		return nil

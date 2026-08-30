@@ -16,7 +16,7 @@ import { SubagentsSidebar } from './SubagentsSidebar'
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onToggleSidebar, chatMode } =
+  const { currentAgent, wsStatus, currentSessionKey, onOpenMobileSidebar, chatMode } =
     useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
@@ -53,9 +53,7 @@ export const ChatHeader = memo(function ChatHeader() {
     ? formatSessionTitle(currentSession.key, currentSession.name)
     : t('chat.session')
 
-  const parentTitle = parentSession
-    ? formatSessionTitle(parentSession.key, parentSession.name)
-    : ''
+  const parentTitle = parentSession ? formatSessionTitle(parentSession.key, parentSession.name) : ''
 
   return (
     <>
@@ -63,8 +61,8 @@ export const ChatHeader = memo(function ChatHeader() {
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <button
             type="button"
-            onClick={onToggleSidebar}
-            className="flex md:hidden items-center justify-center rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors mr-1"
+            onClick={onOpenMobileSidebar}
+            className="flex md:hidden items-center justify-center rounded-md p-2.5 md:p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors mr-1"
             aria-label={t('chat.toggleSidebar')}
           >
             <SidebarToggleIcon size={20} />

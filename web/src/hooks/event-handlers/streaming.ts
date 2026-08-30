@@ -28,6 +28,7 @@ import {
   updateChatHistoryFromRaw,
 } from '../useChatHistory'
 import { getSessionKey, isSessionMismatch, snapshotToGroupInfo } from './helpers'
+import { registerStableId } from '../stableIdRegistry'
 import type { ClientEvent, MessageEventContext } from './types'
 
 export function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -229,14 +230,29 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
     buildChatHistoryQueryKey(historySessionKey, ctx.parentSessionKeyRef.current ?? undefined),
   )
 
-  ctx.setStreamingMessages((current) =>
-    current.filter((m) => {
+  ctx.setStreamingMessages((current) => {
+    // Before stripping confirmed messages, record their ephemeral id in the
+    // durable stableId registry so every future history build (including
+    // refetches from the 4s poll) re-attaches it as `stableId`. This keeps
+    // React render keys identical across the WebSocket→HTTP transition —
+    // without it, the key flips from uuid to content-hash at confirmation
+    // time and the bubble remounts (flicker).
+    for (const m of current) {
+      if (m.sessionKey !== historySessionKey) continue
+      if (m.role === 'user' && m.optimistic && isConfirmedInCache(m, cached)) {
+        registerStableId('user', m.content, m.id)
+      }
+      if (m.role === 'assistant' && !m.streaming && isConfirmedInCache(m, cached)) {
+        registerStableId('assistant', m.content, m.id)
+      }
+    }
+    return current.filter((m) => {
       if (m.sessionKey !== historySessionKey) return true
       if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
       if (m.role === 'assistant' && !m.streaming) return !isConfirmedInCache(m, cached)
       return true
-    }),
-  )
+    })
+  })
 }
 
 export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<string, unknown>) {

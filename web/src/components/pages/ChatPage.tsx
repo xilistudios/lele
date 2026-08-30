@@ -9,16 +9,23 @@ import { MessageList } from '../organisms/MessageList'
 import { Sidebar } from '../organisms/Sidebar'
 
 export function ChatPage() {
-  const { error, diagnosticsOpen, sidebarOpen, chatMode, parentSessionKey, onToggleSidebar } =
-    useAppLogicContext()
+  const {
+    error,
+    diagnosticsOpen,
+    sidebarOpen,
+    mobileSidebarOpen,
+    chatMode,
+    parentSessionKey,
+    onCloseMobileSidebar,
+  } = useAppLogicContext()
 
   return (
     <ChatPageProvider>
       <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
         <Sidebar
           collapsed={!sidebarOpen}
-          mobileOpen={sidebarOpen}
-          onClose={() => onToggleSidebar()}
+          mobileOpen={mobileSidebarOpen}
+          onClose={() => onCloseMobileSidebar()}
         />
 
         <main className="flex flex-1 flex-col overflow-hidden">

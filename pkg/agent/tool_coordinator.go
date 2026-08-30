@@ -469,6 +469,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	}
 
 	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
+	subagentManager.SetCompactionThresholdPercent(cfg.SessionCompactionThresholdPercent())
 	subagentManager.SetRedactor(keyring.NewRedactor(keyringSvc))
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.

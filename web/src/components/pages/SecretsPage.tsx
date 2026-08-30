@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useSecrets } from '../../hooks/useSecrets'
 import type { SecretAuditRecord, SecretInput, SecretMeta } from '../../lib/types'
+import { Button } from '../atoms'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -20,8 +21,8 @@ function BackendBadge({ backend }: { backend?: string }) {
   if (!backend) return null
   const isKeychain = /keychain|keyring|kwallet|gnome|secret/i.test(backend)
   const color = isKeychain
-    ? 'border-emerald-500/30 bg-emerald-500/20 text-emerald-400'
-    : 'border-amber-500/30 bg-amber-500/20 text-amber-400'
+    ? 'border-state-success bg-state-success-light text-state-success'
+    : 'border-state-warning bg-state-warning-light text-state-warning'
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}
@@ -95,13 +96,13 @@ function SecretCard({
   const scope = secret.scope ?? []
 
   return (
-    <div className="rounded-xl border border-border bg-background-secondary/50 transition-colors hover:bg-background-secondary">
+    <div className="rounded-xl border border-border bg-background-secondary transition-colors hover:bg-background-secondary">
       <div className="flex items-start gap-4 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm font-semibold text-text-primary">{secret.name}</span>
             {scope.length === 0 ? (
-              <span className="inline-flex items-center rounded-full border border-gray-500/30 bg-gray-500/20 px-2 py-0.5 text-xs text-gray-400">
+              <span className="inline-flex items-center rounded-full border border-state-error bg-surface-muted px-2 py-0.5 text-xs text-text-tertiary">
                 {t('secrets.allAgents', 'all agents')}
               </span>
             ) : (
@@ -145,7 +146,7 @@ function SecretCard({
               </button>
             </div>
           )}
-          {revealError && <p className="mt-2 text-xs text-red-400">{revealError}</p>}
+          {revealError && <p className="mt-2 text-xs text-state-error">{revealError}</p>}
 
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-tertiary">
             <span>
@@ -176,7 +177,7 @@ function SecretCard({
                 type="button"
                 onClick={() => onDelete(secret.name)}
                 disabled={busy}
-                className="rounded-lg bg-red-500/90 px-2.5 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="rounded-lg bg-state-error px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {t('common.confirm', 'Confirm')}
               </button>
@@ -194,7 +195,7 @@ function SecretCard({
               type="button"
               onClick={() => setConfirmDelete(true)}
               disabled={busy}
-              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light disabled:opacity-50"
             >
               {t('secrets.delete', 'Delete')}
             </button>
@@ -354,7 +355,7 @@ function SecretFormModal({
           </div>
 
           {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-400">
+            <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
               {error}
             </div>
           )}
@@ -368,14 +369,9 @@ function SecretFormModal({
           >
             {t('common.cancel', 'Cancel')}
           </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={busy}
-            className="rounded-lg bg-interaction-primary px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
+          <Button type="button" variant="primary" onClick={handleSubmit} disabled={busy}>
             {t('common.create', 'Create')}
-          </button>
+          </Button>
         </div>
       </dialog>
     </div>
@@ -398,7 +394,7 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-border bg-background-secondary/50 text-xs uppercase text-text-tertiary">
+        <thead className="border-b border-border bg-background-secondary text-xs uppercase text-text-tertiary">
           <tr>
             <th className="px-3 py-2 font-medium">{t('secrets.name', 'Name')}</th>
             <th className="px-3 py-2 font-medium">{t('secrets.action', 'Action')}</th>
@@ -415,9 +411,9 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
               <td className="px-3 py-2 text-text-secondary">{r.agent_id || '—'}</td>
               <td className="px-3 py-2">
                 {r.granted ? (
-                  <span className="text-emerald-400">{t('secrets.granted', 'Granted')}</span>
+                  <span className="text-state-success">{t('secrets.granted', 'Granted')}</span>
                 ) : (
-                  <span className="text-red-400">{t('secrets.denied', 'Denied')}</span>
+                  <span className="text-state-error">{t('secrets.denied', 'Denied')}</span>
                 )}
               </td>
               <td className="px-3 py-2 text-xs text-text-tertiary">
@@ -437,7 +433,8 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
 
 export function SecretsPage() {
   const { t } = useTranslation()
-  const { sidebarOpen, onToggleSidebar } = useAppLogicContext()
+  const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
+    useAppLogicContext()
   const {
     secrets,
     status,
@@ -489,7 +486,7 @@ export function SecretsPage() {
   const tabCls = (active: boolean) =>
     `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
       active
-        ? 'bg-interaction-primary text-white'
+        ? 'bg-interaction-primary text-text-on-accent'
         : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
     }`
 
@@ -497,15 +494,15 @@ export function SecretsPage() {
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
       <Sidebar
         collapsed={!sidebarOpen}
-        mobileOpen={sidebarOpen}
-        onClose={() => onToggleSidebar()}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => onCloseMobileSidebar()}
       />
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-between border-b border-border bg-background-secondary/30 px-6 py-4">
+        <header className="flex shrink-0 items-center justify-between border-b border-border bg-background-secondary px-4 py-3 md:px-6 md:py-4">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => onToggleSidebar()}
+              onClick={() => onOpenMobileSidebar()}
               className="flex rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary md:hidden"
               title={t('chat.toggleSidebar')}
             >
@@ -550,11 +547,7 @@ export function SecretsPage() {
               </button>
             </div>
             {tab === 'secrets' && (
-              <button
-                type="button"
-                onClick={openCreate}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-interaction-primary px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
-              >
+              <Button type="button" variant="primary" size="md" onClick={openCreate}>
                 <svg
                   className="h-4 w-4"
                   viewBox="0 0 24 24"
@@ -568,7 +561,7 @@ export function SecretsPage() {
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
                 {t('secrets.new', 'New')}
-              </button>
+              </Button>
             )}
             <button
               type="button"
@@ -593,7 +586,7 @@ export function SecretsPage() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {tab === 'audit' ? (
             <AuditLog records={audit} />
           ) : (
