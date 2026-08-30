@@ -21,9 +21,14 @@ import (
 	"github.com/xilistudios/lele/pkg/utils"
 )
 
+// thinkingCancel is the handle to a running typing-indicator loop.
+//
+// doneChan is receive-only on purpose: the loop owns the close, every other
+// party may only wait on it (Cancel does, with a timeout, so a wedged loop can
+// never wedge the sweeper with it).
 type thinkingCancel struct {
 	fn       context.CancelFunc
-	doneChan chan struct{}
+	doneChan <-chan struct{}
 }
 
 func (c *thinkingCancel) Cancel() {
@@ -38,35 +43,110 @@ func (c *thinkingCancel) Cancel() {
 	}
 }
 
-func (c *TelegramChannel) startTypingIndicator(chatID int64) *thinkingCancel {
-	ctx, cancel := context.WithCancel(context.Background())
-	doneChan := make(chan struct{})
-	ticker := time.NewTicker(4 * time.Second)
+// typingIndicatorInterval is how often the typing chat action is refreshed.
+// Telegram renders "typing..." for ~5s after each call, so 4s keeps it alive
+// without visible gaps.
+const typingIndicatorInterval = 4 * time.Second
 
-	if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
-		logger.ErrorCF("telegram", "Failed to send initial chat action", map[string]interface{}{
-			"error": err.Error(),
-		})
-	}
+// typingIndicatorMaxLifetime is the hard ceiling of a single typing indicator
+// loop: a backstop against an indicator that outlives its turn because every
+// terminal signal was lost (crash mid-turn, event dropped, channel restarted).
+//
+// 30 minutes, not 5: long turns are legitimate here — many tool iterations,
+// context compactions, and subagents that may themselves run for 30 minutes.
+// When the TTL expires the failure is deliberately silent (warning log only,
+// no user-facing message): losing "typing..." on a turn that is still running
+// is far less harmful than an indicator that never stops.
+const typingIndicatorMaxLifetime = 30 * time.Minute
+
+// runTypingLoop keeps a user-visible "working" state alive until the turn ends
+// or the TTL expires, whichever comes first.
+//
+// send is invoked immediately and then once per interval; returning an error
+// does not stop the loop (a transient Bot API failure must not kill the
+// indicator for the rest of a long turn) — the caller decides how to log it.
+//
+// The returned done channel is closed when the loop exits, for any reason.
+// onExpire runs exactly once and only on the TTL path, so a caller that
+// cancels normally never sees it.
+func runTypingLoop(ctx context.Context, interval, ttl time.Duration, send func(context.Context) error, onExpire func()) (done <-chan struct{}) {
+	doneChan := make(chan struct{})
 
 	go func() {
 		defer close(doneChan)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		expiry := time.NewTimer(ttl)
+		defer expiry.Stop()
+
+		if send != nil {
+			_ = send(ctx)
+		}
+
 		for {
 			select {
 			case <-ticker.C:
-				if err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping)); err != nil {
-					logger.DebugCF("telegram", "Failed to send chat action", map[string]interface{}{
-						"error": err.Error(),
-					})
+				if send != nil {
+					_ = send(ctx)
 				}
+			case <-expiry.C:
+				// TTL is terminal: report it and leave. The loop owns its own
+				// exit, so thinkingCancel.Cancel() stays correct — doneChan is
+				// closed here and the (outer) context cancel is a no-op.
+				if onExpire != nil {
+					onExpire()
+				}
+				return
 			case <-ctx.Done():
-				ticker.Stop()
 				return
 			}
 		}
 	}()
 
-	return &thinkingCancel{fn: cancel, doneChan: doneChan}
+	return doneChan
+}
+
+func (c *TelegramChannel) startTypingIndicator(chatID int64) *thinkingCancel {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// On expiry the loop exits on its own; cancelling here additionally frees
+	// the context and releases its resources (and keeps thinkingCancel.Cancel
+	// consistent with the normal path).
+	onExpire := func() {
+		logger.WarnCF("telegram", "Typing indicator TTL expired", map[string]interface{}{
+			"chat_id":  chatID,
+			"ttl":      typingIndicatorMaxLifetime.String(),
+			"interval": typingIndicatorInterval.String(),
+		})
+		cancel()
+	}
+
+	// send runs exclusively on the loop goroutine, so attempts needs no lock.
+	// The original implementation logged the first failure at error level and
+	// refresh failures at debug; that distinction is preserved.
+	attempts := 0
+	send := func(ctx context.Context) error {
+		err := c.bot.SendChatAction(ctx, tu.ChatAction(tu.ID(chatID), telego.ChatActionTyping))
+		if err != nil {
+			if attempts == 0 {
+				logger.ErrorCF("telegram", "Failed to send initial chat action", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else {
+				logger.DebugCF("telegram", "Failed to send chat action", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
+		}
+		attempts++
+		return err
+	}
+
+	done := runTypingLoop(ctx, typingIndicatorInterval, typingIndicatorMaxLifetime, send, onExpire)
+
+	return &thinkingCancel{fn: cancel, doneChan: done}
 }
 
 func (c *TelegramChannel) stopActiveThinking(thinkingKey string) {
