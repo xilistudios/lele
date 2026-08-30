@@ -285,7 +285,7 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 		return fmt.Errorf("turn %s: %w", speaker, err)
 	}
 
-	turn, role := gm.recordTurn(state, self, speaker, layer, content, tokens, &tcMu, toolCalls)
+	turn, role := gm.recordTurn(state, self, speaker, layer, inputs.turnIndex, content, tokens, &tcMu, toolCalls)
 
 	// Publish group.turn event.
 	gm.publishTurn(mg, turn, role)
@@ -297,12 +297,20 @@ func (gm *GroupManager) executeSpeaker(ctx context.Context, mg *managedGroup, sp
 // the speaker's role. The unlock is deferred so a panic while building the turn
 // cannot leave the manager mutex held, which would deadlock finalize and break
 // the terminal signal guarantee.
-func (gm *GroupManager) recordTurn(state *GroupState, self Participant, speaker string, layer int, content string, tokens int, tcMu *sync.Mutex, toolCalls []GroupToolCall) (Turn, string) {
+//
+// turnIndex is the index reserved at turn start by prepareTurn. It is never
+// recomputed here from len(Transcript): under Parallel execution the append
+// order is the completion order, so a len-based index would collide between
+// concurrent turns and would not match the turn_index already advertised to
+// the client by group.tool events for this same turn. The turn keeps its
+// reserved Index even though its position in Transcript may differ (see the
+// comment on Turn.Index).
+func (gm *GroupManager) recordTurn(state *GroupState, self Participant, speaker string, layer, turnIndex int, content string, tokens int, tcMu *sync.Mutex, toolCalls []GroupToolCall) (Turn, string) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 
 	turn := Turn{
-		Index:     len(state.Transcript),
+		Index:     turnIndex,
 		Layer:     layer,
 		Speaker:   speaker,
 		Label:     self.Label,
@@ -330,10 +338,21 @@ type turnInputs struct {
 	label       string
 }
 
-// prepareTurn reads the group state and renders the turn request inputs under
-// gm.mu. The unlock is deferred so a panic inside the renderers cannot leave
-// the manager mutex held (which would deadlock finalize and break the terminal
-// signal guarantee).
+// prepareTurn reads the group state, reserves this turn's unique index, and
+// renders the turn request inputs under gm.mu. The unlock is deferred so a
+// panic inside the renderers cannot leave the manager mutex held (which would
+// deadlock finalize and break the terminal signal guarantee).
+//
+// Index reservation (B5 fix): the index is taken from state.NextTurnIndex at
+// turn START — before the speaker runs — instead of being derived from
+// len(Transcript) when the turn is appended. Under Parallel execution N
+// speakers run concurrently and append in completion order, so a
+// len-at-append calculation could hand the same index to two turns (the
+// transcript length only advances under the lock, but both turns read it
+// before either appended) and the client-visible index would depend on timing.
+// Reserving here guarantees every turn — and every group.tool event emitted
+// while it runs — carries a single, unique, stable index regardless of
+// completion order.
 func (gm *GroupManager) prepareTurn(mg *managedGroup, speaker string, layer int, agCtx AgentContext) turnInputs {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
@@ -349,13 +368,23 @@ func (gm *GroupManager) prepareTurn(mg *managedGroup, speaker string, layer int,
 		self.Label = speaker
 	}
 
+	// Reserve the index. Defensive re-base for states not built by Start (for
+	// example a snapshot rehydrated by a future resume path where the counter
+	// field is absent/zero but the transcript is not): the counter must never
+	// collide with an index already present in the transcript.
+	if state.NextTurnIndex < len(state.Transcript) {
+		state.NextTurnIndex = len(state.Transcript)
+	}
+	idx := state.NextTurnIndex
+	state.NextTurnIndex++
+
 	return turnInputs{
 		state:       state,
 		self:        self,
 		sysPrompt:   BuildTurnSystemPrompt(agCtx.SystemPrompt, self, state.Participants, state.Task),
 		transcript:  RenderTranscript(state.Transcript),
 		instruction: instructionFor(state, self, layer),
-		turnIndex:   len(state.Transcript),
+		turnIndex:   idx,
 		label:       self.Label,
 	}
 }
