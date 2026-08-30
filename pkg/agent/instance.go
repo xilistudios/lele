@@ -177,6 +177,9 @@ func NewAgentInstance(
 		maxReadLines = 500
 	}
 	toolsRegistry := tools.NewToolRegistry()
+	sendFileTool := tools.NewSendFileTool()
+	sendFileTool.SetWorkspaceRestrictions(workspace, restrict)
+	toolsRegistry.Register(sendFileTool)
 	toolsRegistry.Register(tools.NewReadFileTool(workspace, restrict, maxReadLines))
 	toolsRegistry.Register(tools.NewWriteFileTool(workspace, restrict))
 	toolsRegistry.Register(tools.NewListDirTool(workspace, restrict))

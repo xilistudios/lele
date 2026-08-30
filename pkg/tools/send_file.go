@@ -22,10 +22,19 @@ type SendFileTool struct {
 	sendCallback   SendFileCallback
 	defaultChannel string
 	defaultChatID  string
+	workspace      string
+	restrict       bool
 }
 
 func NewSendFileTool() *SendFileTool {
 	return &SendFileTool{}
+}
+
+// SetWorkspaceRestrictions configures the workspace boundary and whether file
+// paths must be restricted to it (mirrors ExecTool's restriction pattern).
+func (t *SendFileTool) SetWorkspaceRestrictions(workspace string, restrict bool) {
+	t.workspace = workspace
+	t.restrict = restrict
 }
 
 func (t *SendFileTool) Name() string {
@@ -75,7 +84,7 @@ func (t *SendFileTool) SetSendCallback(callback SendFileCallback) {
 
 func (t *SendFileTool) Execute(ctx context.Context, args map[string]interface{}) *ToolResult {
 	content, _ := args["content"].(string)
-	attachments, err := parseSendFileAttachments(args["file_paths"])
+	attachments, err := parseSendFileAttachments(args["file_paths"], t.workspace, t.restrict)
 	if err != nil {
 		return &ToolResult{ForLLM: err.Error(), IsError: true}
 	}
@@ -119,7 +128,7 @@ func (t *SendFileTool) Execute(ctx context.Context, args map[string]interface{})
 	}
 }
 
-func parseSendFileAttachments(raw interface{}) ([]bus.FileAttachment, error) {
+func parseSendFileAttachments(raw interface{}, workspace string, restrict bool) ([]bus.FileAttachment, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -143,6 +152,11 @@ func parseSendFileAttachments(raw interface{}) ([]bus.FileAttachment, error) {
 
 	attachments := make([]bus.FileAttachment, 0, len(paths))
 	for _, path := range paths {
+		validated, err := validatePath(path, workspace, restrict)
+		if err != nil {
+			return nil, fmt.Errorf("cannot access file %s: %w", path, err)
+		}
+		path = validated
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, fmt.Errorf("cannot access file %s: %w", path, err)

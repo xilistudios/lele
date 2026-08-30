@@ -133,15 +133,21 @@ function ChatRoute() {
     if (chat_id === 'new') {
       if (creatingRef.current) return
       creatingRef.current = true
-      wsDebug('[ChatRoute] Creating new session...')
-      const sessionKey = createSession()
-      wsDebug('[ChatRoute] createSession returned:', sessionKey)
-      if (sessionKey) {
-        wsDebug(`[ChatRoute] Navigating to /chat/${sessionKey}`)
-        navigate(`/chat/${sessionKey}`, { replace: true })
-        return
-      }
-      navigate('/')
+      ;(async () => {
+        try {
+          wsDebug('[ChatRoute] Creating new session...')
+          const sessionKey = await createSession()
+          wsDebug('[ChatRoute] createSession returned:', sessionKey)
+          if (sessionKey) {
+            wsDebug(`[ChatRoute] Navigating to /chat/${sessionKey}`)
+            navigate(`/chat/${sessionKey}`, { replace: true })
+            return
+          }
+          navigate('/')
+        } catch {
+          navigate('/')
+        }
+      })()
       return
     }
     creatingRef.current = false

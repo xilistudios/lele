@@ -739,3 +739,10 @@ html.desktop textarea,
 html.desktop [contenteditable] {
   user-select: text;
 }
+/* Text diff colors (used by MessageBubble / MarkdownText) */
+.text-diff-addition {
+  color: var(--color-state-success);
+}
+.text-diff-deletion {
+  color: var(--color-state-error);
+}

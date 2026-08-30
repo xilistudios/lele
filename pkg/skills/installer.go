@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -72,7 +73,18 @@ func (si *SkillInstaller) InstallFromGitHub(ctx context.Context, repo string) er
 }
 
 func (si *SkillInstaller) Uninstall(skillName string) error {
+	if strings.Contains(skillName, "/") || strings.Contains(skillName, "\\") || strings.Contains(skillName, "..") || skillName == "" {
+		return fmt.Errorf("invalid skill name: %q", skillName)
+	}
+
 	skillDir := filepath.Join(si.workspace, "skills", skillName)
+
+	// Defense in depth: ensure the resolved directory stays inside the skills dir.
+	absDir, _ := filepath.Abs(skillDir)
+	absSkills, _ := filepath.Abs(filepath.Join(si.workspace, "skills"))
+	if !strings.HasPrefix(absDir, absSkills+string(filepath.Separator)) {
+		return fmt.Errorf("invalid skill name")
+	}
 
 	if _, err := os.Stat(skillDir); os.IsNotExist(err) {
 		return fmt.Errorf("skill '%s' not found", skillName)

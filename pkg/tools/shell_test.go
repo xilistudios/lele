@@ -396,3 +396,82 @@ func TestShellTool_SecretSubstitution_ScopeDenied(t *testing.T) {
 		t.Errorf("secret value must not leak on denied access, got: %s", result.ForUser)
 	}
 }
+
+// TestShellTool_WorkingDirOutsideWorkspace verifies that a working_dir outside
+// the workspace is rejected when restrictToWorkspace is enabled. Without this
+// check, the guard validates command paths relative to cwd, but cwd itself
+// could point anywhere — a total bypass of workspace restriction.
+func TestShellTool_WorkingDirOutsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir() // different directory, outside the workspace
+
+	tool := NewExecTool(workspace, true)
+	tool.SetRestrictToWorkspace(true)
+
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"command":     "cat test.txt",
+		"working_dir": outside,
+	}
+
+	result := tool.Execute(ctx, args)
+
+	if !result.IsError {
+		t.Errorf("Expected working_dir outside workspace to be blocked")
+	}
+	if !strings.Contains(result.ForLLM, "access denied") {
+		t.Errorf("Expected 'access denied' message, got: %s", result.ForLLM)
+	}
+}
+
+// TestShellTool_WorkingDirInsideWorkspace verifies that a working_dir inside
+// the workspace is still allowed when restrictToWorkspace is enabled.
+func TestShellTool_WorkingDirInsideWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	inner := filepath.Join(workspace, "sub")
+	if err := os.MkdirAll(inner, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testFile := filepath.Join(inner, "test.txt")
+	if err := os.WriteFile(testFile, []byte("inner content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewExecTool(workspace, true)
+	tool.SetRestrictToWorkspace(true)
+
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"command":     "cat test.txt",
+		"working_dir": inner,
+	}
+
+	result := tool.Execute(ctx, args)
+
+	if result.IsError {
+		t.Errorf("Expected working_dir inside workspace to be allowed, got error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, "inner content") {
+		t.Errorf("Expected output from inner dir, got: %s", result.ForUser)
+	}
+}
+
+// TestShellTool_WorkingDirTraversal verifies traversal via working_dir is blocked.
+func TestShellTool_WorkingDirTraversal(t *testing.T) {
+	workspace := t.TempDir()
+
+	tool := NewExecTool(workspace, true)
+	tool.SetRestrictToWorkspace(true)
+
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"command":     "cat /etc/passwd",
+		"working_dir": filepath.Join(workspace, "..", ".."),
+	}
+
+	result := tool.Execute(ctx, args)
+
+	if !result.IsError {
+		t.Errorf("Expected traversal working_dir to be blocked")
+	}
+}

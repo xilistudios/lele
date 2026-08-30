@@ -14,7 +14,7 @@ const POPOVER_HEIGHT = 80
 
 const STATUS_CONFIG = {
   connected: { dot: 'bg-state-success', text: 'text-state-success' },
-  connecting: { dot: 'bg-state-warning animate-pulse-dot', text: 'text-state-warning' },
+  connecting: { dot: 'bg-state-warning animate-pulse', text: 'text-state-warning' },
   disconnected: { dot: 'bg-state-error', text: 'text-text-tertiary' },
 } as const
 

@@ -1,6 +1,9 @@
 package skills
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -175,5 +178,61 @@ func TestStripFrontmatter(t *testing.T) {
 			result := sl.stripFrontmatter(tc.content)
 			assert.Equal(t, tc.expectedContent, result, "Frontmatter should be stripped correctly for %s", tc.lineEndingType)
 		})
+	}
+}
+
+// TestSkillsLoader_LoadSkillTraversal verifies that malicious skill names with
+// path separators or traversal sequences are rejected without reading files.
+func TestSkillsLoader_LoadSkillTraversal(t *testing.T) {
+	workspace := t.TempDir()
+
+	// Place a sensitive file outside the skills dir that must not be readable.
+	secret := filepath.Join(workspace, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOPSECRET"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sl := NewSkillsLoader(workspace, "", "")
+
+	cases := []string{
+		"../secret",
+		"../secret.txt",
+		"../../secret",
+		"..\\secret",
+		"foo/../bar",
+		"sub/dir",
+		"",
+	}
+
+	for _, name := range cases {
+		content, ok := sl.LoadSkill(name)
+		if ok {
+			t.Errorf("LoadSkill(%q) should return false, got content %q", name, content)
+		}
+		if strings.Contains(content, "TOPSECRET") {
+			t.Errorf("LoadSkill(%q) leaked secret file content", name)
+		}
+	}
+}
+
+// TestSkillsLoader_LoadSkillValidName verifies legitimate skills still load.
+func TestSkillsLoader_LoadSkillValidName(t *testing.T) {
+	workspace := t.TempDir()
+	skillDir := filepath.Join(workspace, "skills", "good-skill")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte("---\nname: good-skill\ndescription: test\n---\nhello body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sl := NewSkillsLoader(workspace, "", "")
+	content, ok := sl.LoadSkill("good-skill")
+	if !ok {
+		t.Fatal("expected valid skill to load")
+	}
+	if !strings.Contains(content, "hello body") {
+		t.Errorf("expected skill body in content, got: %q", content)
 	}
 }

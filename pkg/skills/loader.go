@@ -219,6 +219,10 @@ func (sl *SkillsLoader) isSkillEnabled(name string) bool {
 }
 
 func (sl *SkillsLoader) LoadSkill(name string) (string, bool) {
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return "", false
+	}
+
 	// 1. 优先从 workspace skills 加载（项目级别）
 	if sl.workspaceSkills != "" {
 		skillFile := filepath.Join(sl.workspaceSkills, name, "SKILL.md")
