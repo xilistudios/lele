@@ -1860,9 +1860,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					(m.currentMessageID != "" && strings.HasPrefix(msg.msg.MessageID, m.currentMessageID+"-"))
 
 				if m.processing && (m.pendingSubagentCompletions > 0 || idMatches) {
-					cmds = append(cmds, func() tea.Msg {
-						return completeMsg{sessionKey: m.currentKey}
-					})
+					cmds = append(cmds, m.completeCmd())
 				}
 			}
 		} else if m.isSubagentOfCurrentChat(msg.msg.ChatID) {

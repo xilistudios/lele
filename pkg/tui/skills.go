@@ -214,6 +214,10 @@ func (m *Model) handleSkillPickerEnter() tea.Cmd {
 		return nil
 	}
 
+	// Capture mutable Model state at creation time: bubbletea runs this Cmd
+	// asynchronously, and a second /skills scan could overwrite
+	// m.skillsScanRepo before the install executes.
+	repo := m.skillsScanRepo
 	return func() tea.Msg {
 		installer := m.skillInstaller()
 		if installer == nil {
@@ -223,7 +227,7 @@ func (m *Model) handleSkillPickerEnter() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		installed, err := installer.InstallMultiple(ctx, m.skillsScanRepo, selected)
+		installed, err := installer.InstallMultiple(ctx, repo, selected)
 		return skillsInstallResultMsg{installed: installed, err: err}
 	}
 }
