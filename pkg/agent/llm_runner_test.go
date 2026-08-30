@@ -607,6 +607,9 @@ func TestRunAgentLoop_EmptyResponse(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
+	// The provider always returns empty, so the loop retries with backoff
+	// (1s, 2s, 3s...). Without an instant wait this test sleeps ~27s.
+	runner.retryWait = instantRetryWait
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 
 	// Mock the provider to return an empty response
@@ -2688,6 +2691,11 @@ func TestRunAgentLoop_TinyTimeout(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	runner := newLLMRunner(al)
+	// LLMLoopTimeoutMinutes has minute granularity by contract, so exercising
+	// the real timeout would cost a minute of wall clock. The unit is
+	// injectable for exactly this: the timeout still fires through the real
+	// context machinery, just on a compressed scale.
+	runner.loopTimeoutUnit = 200 * time.Millisecond
 	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 	agent.LLMLoopTimeoutMinutes = 1 // minimum granularity (whole minutes)
 
@@ -2717,13 +2725,18 @@ func TestRunAgentLoop_TinyTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected a timeout error, got nil")
 	}
+	// The user-facing message reports the configured minutes, not the
+	// injected unit — that mapping is the point of this test.
 	if !strings.Contains(err.Error(), "LLM loop exceeded 1 minute timeout") {
 		t.Errorf("Expected timeout error message, got: %v", err)
 	}
-	// The provider blocks until cancellation, so the loop should return once
-	// the timeout fires (after ~1 minute). Allow generous margin for CI.
-	if elapsed < 50*time.Second {
-		t.Errorf("Expected the loop to wait for the ~1 minute timeout, completed in %v", elapsed)
+	// The provider blocks until cancellation, so the loop cannot return before
+	// the (compressed) timeout fires.
+	if elapsed < 150*time.Millisecond {
+		t.Errorf("Expected the loop to wait for the timeout, completed in %v", elapsed)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Loop took %v; timeout did not bound the run", elapsed)
 	}
 }
 

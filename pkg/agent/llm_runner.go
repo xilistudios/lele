@@ -63,11 +63,35 @@ type llmRunnerImpl struct {
 	// nil means use default (time.After, set on llmCaller).
 	// Override in tests to avoid real sleeps.
 	retryWait func(time.Duration) <-chan time.Time
+
+	// loopTimeoutUnit converts LLMLoopTimeoutMinutes into a duration.
+	// Production uses time.Minute; tests override it so the loop-timeout path
+	// can be exercised without waiting a real minute.
+	loopTimeoutUnit time.Duration
 }
 
 // newLLMRunner creates a new LLM runner
 func newLLMRunner(al *AgentLoop) *llmRunnerImpl {
-	return &llmRunnerImpl{al: al}
+	return &llmRunnerImpl{al: al, loopTimeoutUnit: time.Minute}
+}
+
+// waitForBackoff blocks for d or until ctx is done, honouring the test-injectable
+// retryWait hook. Production uses time.After; tests set retryWait to
+// instantRetryWait so retry logic can be exercised without real sleeps.
+// Returns true if the wait completed, false if ctx was cancelled.
+func (lr *llmRunnerImpl) waitForBackoff(ctx context.Context, d time.Duration) bool {
+	var ch <-chan time.Time
+	if lr.retryWait != nil {
+		ch = lr.retryWait(d)
+	} else {
+		ch = time.After(d)
+	}
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // runAgentLoop is the core message processing logic.
@@ -103,7 +127,11 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		// returns a clear error instead of hanging indefinitely.
 		var timeoutCancel context.CancelFunc
 		if agent.LLMLoopTimeoutMinutes > 0 {
-			runCtx, timeoutCancel = context.WithTimeout(sessionCtx, time.Duration(agent.LLMLoopTimeoutMinutes)*time.Minute)
+			unit := lr.loopTimeoutUnit
+			if unit <= 0 {
+				unit = time.Minute
+			}
+			runCtx, timeoutCancel = context.WithTimeout(sessionCtx, time.Duration(agent.LLMLoopTimeoutMinutes)*unit)
 		} else {
 			runCtx = sessionCtx
 		}
@@ -613,9 +641,7 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 					"waiting":   backoff.String(),
 					"error":     err.Error(),
 				})
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
+			if !lr.waitForBackoff(ctx, backoff) {
 				return "", iteration, ctx.Err()
 			}
 		}
@@ -662,19 +688,8 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 						"retry":     emptyRetries,
 					})
 				// Small backoff between empty-response retries (capped).
-				wait := emptyRetryBackoff(emptyRetries - 1)
-				if lr.retryWait != nil {
-					select {
-					case <-lr.retryWait(wait):
-					case <-ctx.Done():
-						return "", iteration, ctx.Err()
-					}
-				} else {
-					select {
-					case <-time.After(wait):
-					case <-ctx.Done():
-						return "", iteration, ctx.Err()
-					}
+				if !lr.waitForBackoff(ctx, emptyRetryBackoff(emptyRetries-1)) {
+					return "", iteration, ctx.Err()
 				}
 				messages = append(messages, providers.Message{
 					Role:    "user",

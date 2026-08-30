@@ -675,6 +675,49 @@ func TestIsRetriableError(t *testing.T) {
 			fmt.Errorf("outer: %w", &FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverRateLimit}}}),
 			true,
 		},
+		// Raw transport errors from the non-streaming path are never wrapped in
+		// a FailoverError. A single timeout must not abort the whole agent run.
+		{
+			"raw deadline exceeded (no fallback chain)",
+			errors.New("failed to send request: context deadline exceeded"),
+			true,
+		},
+		{
+			"raw timeout awaiting response headers",
+			errors.New("failed to send request: timeout awaiting response headers"),
+			true,
+		},
+		{
+			"raw TLS handshake timeout",
+			errors.New("failed to send request: net/http: TLS handshake timeout"),
+			true,
+		},
+		{
+			"transient upstream 5xx body",
+			errors.New("API request failed:\n  Status: 502\n  Body: bad gateway"),
+			true,
+		},
+		// Permanent failures must fail fast, never be hammered with retries.
+		{
+			"raw auth error is not retried",
+			errors.New("API request failed:\n  Status: 401\n  Body: invalid api key"),
+			false,
+		},
+		{
+			"raw billing error is not retried",
+			errors.New("API request failed:\n  Status: 402\n  Body: insufficient credits"),
+			false,
+		},
+		{
+			"raw format error is not retried",
+			errors.New("API request failed:\n  Status: 400\n  Body: invalid request format"),
+			false,
+		},
+		{
+			"cancelled context is never retried",
+			fmt.Errorf("stream read: %w", context.Canceled),
+			false,
+		},
 	}
 
 	for _, tt := range tests {

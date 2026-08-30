@@ -238,8 +238,9 @@ func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
 		return lc.callWithFallback(opts, llmOptions)
 	}
 
-	// Direct call without fallback
-	return callProvider.Chat(opts.ctx, opts.messages, opts.toolDefs, apiModel, llmOptions)
+	// Direct call without fallback. Use the streaming transport so long
+	// reasoning is bounded by an idle timeout instead of a fixed 120s cap.
+	return providers.ChatIdle(opts.ctx, callProvider, opts.messages, opts.toolDefs, apiModel, llmOptions)
 }
 
 // callWithFallback executes LLM call through the fallback chain
@@ -259,7 +260,7 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 			providerInst, err := providers.CreateProviderForCandidate(lc.al.cfg(), provider)
 			if err != nil {
 				if opts.agent.Provider != nil {
-					return opts.agent.Provider.Chat(ctx, messages, opts.toolDefs, model, llmOptions)
+					return providers.ChatIdle(ctx, opts.agent.Provider, messages, opts.toolDefs, model, llmOptions)
 				}
 				return nil, fmt.Errorf("no provider available for model %s", model)
 			}
@@ -267,7 +268,7 @@ func (lc *llmCaller) callWithFallback(opts llmCallOptions, llmOptions map[string
 			// (e.g., "deepseek/deepseek-v4-pro") resolved from ResolveModelAlias.
 			// Do NOT wrap with FormatProviderModel — the "provider:model" colon
 			// format is internal-only and would break the API call.
-			return providerInst.Chat(ctx, messages, opts.toolDefs, model, llmOptions)
+			return providers.ChatIdle(ctx, providerInst, messages, opts.toolDefs, model, llmOptions)
 		},
 	)
 	if fbErr != nil {

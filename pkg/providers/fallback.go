@@ -435,5 +435,17 @@ func IsRetriableError(err error) bool {
 	if errors.As(err, &fe) {
 		return fe.IsRetriable()
 	}
+	// Unclassified transport errors. The non-streaming path returns a raw
+	// *url.Error (e.g. "context deadline exceeded", "TLS handshake timeout")
+	// that is never wrapped in a FailoverError, so without this a single
+	// timeout would abort the whole agent run with no retry. Only reasons that
+	// are genuinely transient are retried; auth/billing/format failures fail
+	// fast so a misconfiguration is never hammered.
+	if classified := ClassifyError(err, "", ""); classified != nil {
+		switch classified.Reason {
+		case FailoverTimeout, FailoverRateLimit, FailoverOverloaded:
+			return true
+		}
+	}
 	return false
 }
