@@ -308,7 +308,15 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		Metadata:    map[string]string{"message_id": messageID},
 	})
 
-	ackData := map[string]string{"message_id": messageID, "session_key": sessionKey}
+	// The ack must carry the same alias-resolved session_key that stream/complete
+	// events are emitted with (see dispatchOutboundMessage), otherwise the frontend
+	// registers its processing state under the base key while completion arrives
+	// under the alias (e.g. after /new or /agent) and never clears the loading state.
+	ackSessionKey := sessionKey
+	if n.agentLoop != nil {
+		ackSessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
+	}
+	ackData := map[string]string{"message_id": messageID, "session_key": ackSessionKey}
 	ack := marshalWithID("message.ack", ackData, eventID)
 	if err := client.Send(ack); err != nil {
 		logger.WarnCF("native", "Failed to send message.ack", map[string]interface{}{

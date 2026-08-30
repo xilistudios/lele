@@ -13,6 +13,7 @@ export {
   snapshotToGroupInfo,
   getSessionKey,
   isSessionMismatch,
+  sessionKeysLooselyMatch,
   findToolMessageIndex,
 } from './helpers'
 

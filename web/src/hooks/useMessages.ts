@@ -231,6 +231,10 @@ export function useMessages(
 
   return {
     streamingMessages,
+    // Exposed so processing-indicator safety nets (useAppLogic HTTP-poll
+    // backstop) can finalize stale streaming flags without going through a
+    // WebSocket event. Prefer the pure helpers in streamingOpsLocal.ts.
+    setStreamingMessages,
     streamingRef,
     toolStatus,
     approvalRequest: approvals.approvalRequest,
