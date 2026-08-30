@@ -32,6 +32,9 @@ func TestGroupCommand_NoArgs_ShowsUsage(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -65,6 +68,9 @@ func TestGroupCommand_Help_ShowsUsage(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -95,6 +101,9 @@ func TestGroupCommand_List_NoGroups(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -125,6 +134,9 @@ func TestGroupCommand_Status_NoGroups(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -156,6 +168,9 @@ func TestGroupCommand_Status_NotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -189,6 +204,9 @@ func TestGroupCommand_Stop_NoID(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -219,6 +237,9 @@ func TestGroupCommand_Stop_NotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -249,6 +270,9 @@ func TestGroupCommand_Start_NoArgs(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -279,6 +303,9 @@ func TestGroupCommand_Start_ProfileNotFound(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -315,6 +342,9 @@ func TestGroupCommand_Start_ProfileMissingTask(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -346,6 +376,9 @@ func TestGroupCommand_Start_AdHoc_MissingAgents(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -376,6 +409,9 @@ func TestGroupCommand_Start_AdHoc_MissingTask(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -406,6 +442,9 @@ func TestGroupCommand_Start_AdHoc_InvalidStrategy(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)
@@ -436,6 +475,9 @@ func TestGroupCommand_Start_AdHoc_Success(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, al := newTestGroupHandler(cfg)
@@ -491,6 +533,7 @@ func TestGroupCommand_Start_Profile_Success(t *testing.T) {
 			},
 		},
 		Groups: config.GroupsConfig{
+			Enabled: true,
 			List: []config.GroupProfile{
 				{
 					ID:           "test-group",
@@ -548,6 +591,9 @@ func TestGroupCommand_UnknownSubcommand(t *testing.T) {
 				Model:     "test-model",
 			},
 		},
+		// These tests exercise the /group subcommands themselves; the feature
+		// gate (B10) is covered in group_gating_test.go.
+		Groups: config.GroupsConfig{Enabled: true},
 	}
 
 	ch, _ := newTestGroupHandler(cfg)

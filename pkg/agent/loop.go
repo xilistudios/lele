@@ -472,6 +472,10 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 		return groupLLMRunner.runGroupTurn(ctx, req)
 	}
 	gm := group.NewGroupManager(resolveAgent, turnExecutor, loop.bus.PublishOutbound)
+	// Feature-gate enforcement inside Start (B10): the manager refuses to start
+	// groups when the feature is disabled, regardless of the caller (tool,
+	// /group command, or any internal path).
+	gm.SetEnabledHook(loop.GroupsEnabled)
 	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
 	if dbStore != nil {
 		gm.SetStore(dbStore.Groups())
@@ -585,6 +589,14 @@ func (al *AgentLoop) GetDefaultAgent() *AgentInstance {
 // GroupManager returns the group collaboration manager (Mixture of Agents).
 func (al *AgentLoop) GroupManager() *group.GroupManager {
 	return al.groupManager
+}
+
+// GroupsEnabled reports whether the groups feature is active. It is the
+// pkg/agent-side accessor for the single source of truth,
+// config.Config.GroupsFeatureEnabled (B10): tool registration, the /group
+// command, GroupManager.Start and the WS welcome payload all consult it.
+func (al *AgentLoop) GroupsEnabled() bool {
+	return al.cfg().GroupsFeatureEnabled()
 }
 
 // GoalManager returns the persistent goal manager.

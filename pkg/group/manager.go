@@ -4,6 +4,7 @@ package group
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -58,6 +59,7 @@ type GroupManager struct {
 	publish          Publisher
 	moderatorDecider ModeratorDecider // optional; nil → defaultModeratorDecider
 	storeDir         string           // persistence directory; empty = no persistence
+	enabled          func() bool      // optional feature gate; nil → always allowed
 }
 
 // NewGroupManager creates a GroupManager with the given injected dependencies.
@@ -94,6 +96,30 @@ func (gm *GroupManager) SetModeratorDecider(d ModeratorDecider) {
 	gm.moderatorDecider = d
 }
 
+// SetEnabledHook installs a feature-gate predicate consulted by Start. When
+// the hook returns false, Start refuses with ErrGroupsDisabled. Passing nil
+// restores the default (always allowed), which is what existing tests rely on
+// when they construct managers directly. The host (pkg/agent) injects the real
+// config-backed predicate (B10: single gating point).
+func (gm *GroupManager) SetEnabledHook(fn func() bool) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+	gm.enabled = fn
+}
+
+// ErrGroupsDisabled is returned by Start when the groups feature is disabled
+// by configuration.
+var ErrGroupsDisabled = errors.New("group start: groups feature is disabled (set groups.enabled = true in config)")
+
+// featureEnabled reports the current value of the injected feature gate.
+// nil hook → allowed (default, keeps direct-construction tests working).
+func (gm *GroupManager) featureEnabled() bool {
+	gm.mu.Lock()
+	fn := gm.enabled
+	gm.mu.Unlock()
+	return fn == nil || fn()
+}
+
 // Start validates participants, constructs a GroupState, publishes a
 // group.status=started event, and launches the group loop in a goroutine.
 // Returns the groupID on success.
@@ -104,6 +130,13 @@ func (gm *GroupManager) Start(
 	opts GroupOptions,
 	originChannel, originChatID string,
 ) (string, error) {
+	// Feature gate (B10): every path that can start a group (group_chat tool,
+	// /group start, internal callers) funnels through here, so a single check
+	// makes it structurally impossible to run a group while the feature is off.
+	if !gm.featureEnabled() {
+		return "", ErrGroupsDisabled
+	}
+
 	// Validate strategy exists.
 	if _, err := NewStrategy(strategy); err != nil {
 		return "", fmt.Errorf("group start: %w", err)
