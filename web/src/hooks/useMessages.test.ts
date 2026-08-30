@@ -864,3 +864,128 @@ describe('welcome-driven hydrateGroups', () => {
     expect(state.groups.get('existing')?.status).toBe('started')
   })
 })
+
+// ── group.complete terminal-status preservation ──────────────────────────────
+//
+// Backend contract (pkg/group/manager.go finalize): each group emits exactly
+// one terminal group.status (done|error|stopped) followed by one
+// group.complete. WSGroupCompletePayload has no status field, so the client
+// must NOT downgrade an already-known terminal status to 'done'.
+
+describe('group.complete preserves terminal status', () => {
+  const sessionKey = 'test-session'
+
+  test('error status survives group.complete and partial synthesis is stored', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: { group_id: 'g1', status: 'started', participants: 'a,b', session_key: sessionKey },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.turn',
+      data: {
+        group_id: 'g1',
+        speaker: 'agent-a',
+        label: 'Agent A',
+        role: 'proposer',
+        layer: 0,
+        turn_index: 0,
+        content: 'Partial proposal before failure',
+        session_key: sessionKey,
+      },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: { group_id: 'g1', status: 'error', participants: 'a,b', session_key: sessionKey },
+    })
+
+    expect(state.groups.get('g1')?.status).toBe('error')
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: {
+        group_id: 'g1',
+        content: 'Partial best-effort synthesis',
+        strategy: 'moa',
+        layers: 1,
+        total_tokens: 900,
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.status).toBe('error')
+    expect(group.synthesis).toBe('Partial best-effort synthesis')
+    expect(group.strategy).toBe('moa')
+    expect(group.totalTokens).toBe(900)
+    expect(group.turns).toHaveLength(1)
+  })
+
+  test('stopped status survives group.complete', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: { group_id: 'g1', status: 'started', participants: 'a', session_key: sessionKey },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: { group_id: 'g1', status: 'stopped', participants: 'a', session_key: sessionKey },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: { group_id: 'g1', content: 'Stopped mid-run synthesis', session_key: sessionKey },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.status).toBe('stopped')
+    expect(group.synthesis).toBe('Stopped mid-run synthesis')
+  })
+
+  test('complete after started (no terminal status yet) falls back to done', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.status',
+      data: { group_id: 'g1', status: 'started', participants: 'a', session_key: sessionKey },
+    })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: { group_id: 'g1', content: 'Final synthesis', session_key: sessionKey },
+    })
+
+    const group = state.groups.get('g1') as GroupInfo
+    expect(group.status).toBe('done')
+    expect(group.synthesis).toBe('Final synthesis')
+  })
+
+  test('complete with no prior group.status creates the card as done', () => {
+    const { ctx, state } = createMockContext({ currentSessionKey: sessionKey })
+
+    dispatchMessageEvent(ctx, {
+      event: 'group.complete',
+      data: {
+        group_id: 'g-orphan',
+        content: 'Snapshot lost, complete only',
+        strategy: 'pipeline',
+        layers: 2,
+        total_tokens: 42,
+        session_key: sessionKey,
+      },
+    })
+
+    const group = state.groups.get('g-orphan') as GroupInfo
+    expect(group).toBeDefined()
+    expect(group.status).toBe('done')
+    expect(group.synthesis).toBe('Snapshot lost, complete only')
+    expect(group.strategy).toBe('pipeline')
+    expect(group.layers).toBe(2)
+    expect(group.totalTokens).toBe(42)
+  })
+})
