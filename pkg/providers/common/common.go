@@ -44,8 +44,21 @@ const DefaultRequestTimeout = 120 * time.Second
 const DefaultResponseHeaderTimeout = DefaultRequestTimeout
 
 // DefaultStreamIdleTimeout is the maximum time allowed between streamed
-// bytes before the connection is considered stalled.
-const DefaultStreamIdleTimeout = 120 * time.Second
+// bytes before the connection is considered stalled. This is the guard used
+// for long-reasoning models: the request may run for many minutes as long as
+// data keeps flowing.
+//
+// It must stay well above DefaultRequestTimeout: some gateways buffer a
+// reasoning model's thinking tokens and emit nothing until the answer starts,
+// so a tight idle window would reintroduce the very failure this replaces.
+const DefaultStreamIdleTimeout = 5 * time.Minute
+
+// MaxRequestLifetime is an absolute upper bound on a single LLM request,
+// applied on top of the idle timeout. An idle timeout alone cannot detect a
+// misbehaving upstream that dribbles a byte every few seconds forever, so this
+// acts as defence in depth. It is deliberately far above any legitimate
+// reasoning time.
+const MaxRequestLifetime = 30 * time.Minute
 
 // newTransport builds an *http.Transport cloning http.DefaultTransport and
 // applying an optional proxy. headerTimeout is the ResponseHeaderTimeout; pass

@@ -692,3 +692,34 @@ func TestParseResponse_WithThoughtSignature(t *testing.T) {
 			out.ToolCalls[0].ExtraContent.Google.ThoughtSignature, "sig123")
 	}
 }
+
+// --- Timeout policy invariants ---
+//
+// These guard the reasoning-model fix: long-thinking requests must survive as
+// long as the upstream is alive, so the idle window must dominate the old
+// duration-based cap and the lifetime ceiling must sit above both.
+
+func TestTimeoutPolicy_IdleWindowDominatesRequestTimeout(t *testing.T) {
+	if DefaultStreamIdleTimeout <= DefaultRequestTimeout {
+		t.Errorf("DefaultStreamIdleTimeout (%v) must exceed DefaultRequestTimeout (%v): "+
+			"a gateway that buffers reasoning tokens emits no bytes until the answer starts, "+
+			"so a tight idle window reintroduces the duration-timeout failure",
+			DefaultStreamIdleTimeout, DefaultRequestTimeout)
+	}
+}
+
+func TestTimeoutPolicy_LifetimeCapAboveIdleWindow(t *testing.T) {
+	if MaxRequestLifetime <= DefaultStreamIdleTimeout {
+		t.Errorf("MaxRequestLifetime (%v) must exceed DefaultStreamIdleTimeout (%v): "+
+			"the total cap would otherwise cut off a healthy long-running stream",
+			MaxRequestLifetime, DefaultStreamIdleTimeout)
+	}
+}
+
+func TestTimeoutPolicy_IdleWindowWithinLifetimeCap(t *testing.T) {
+	// Sanity: the cap is a generous safety net, not a practical limit for a
+	// single request.
+	if MaxRequestLifetime < 10*time.Minute {
+		t.Errorf("MaxRequestLifetime = %v, expected a generous safety net (>= 10m)", MaxRequestLifetime)
+	}
+}

@@ -111,7 +111,9 @@ func ChatWithRetry(
 		default:
 		}
 
-		response, err := provider.Chat(ctx, messages, tools, model, options)
+		// Prefer the streaming transport so long-reasoning calls are bounded by
+		// an idle timeout instead of a fixed total-duration cap.
+		response, err := providers.ChatIdle(ctx, provider, messages, tools, model, options)
 		if err == nil {
 			// Success - log if we retried
 			if attempt > 0 {

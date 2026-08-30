@@ -209,7 +209,7 @@ func CompactLoopMessages(ctx context.Context, provider providers.LLMProvider, mo
 		summaryInput
 
 	apiModel := providers.StripProviderPrefix(model)
-	resp, err := provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
+	resp, err := providers.ChatIdle(ctx, provider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, map[string]interface{}{
 		"max_tokens":  1024,
 		"temperature": 0.3,
 	})
@@ -368,7 +368,9 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			if config.Retry != nil {
 				response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
 			} else {
-				response, err = config.Provider.Chat(ctx, messages, providerToolDefs, apiModel, llmOpts)
+				// Streaming transport: bounded by an idle timeout so a
+				// long-reasoning subagent is not killed at 120s of wall clock.
+				response, err = providers.ChatIdle(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts)
 			}
 			if err == nil {
 				// Success resets the reactive compaction budget so a later

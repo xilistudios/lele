@@ -706,13 +706,13 @@ func (sm *sessionManagerImpl) summarizeSessionCore(agent *AgentInstance, session
 		summarizeOpts["temperature"] = 0.3
 	}
 
-	resp, err := summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
+	resp, err := providers.ChatIdle(ctx, summarizeProvider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
 
 	// Retry without temperature if the model rejects it (safety net for
 	// models that deprecate temperature but aren't flagged as reasoning).
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "temperature") {
 		delete(summarizeOpts, "temperature")
-		resp, err = summarizeProvider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
+		resp, err = providers.ChatIdle(ctx, summarizeProvider, []providers.Message{{Role: "user", Content: prompt}}, nil, apiModel, summarizeOpts)
 	}
 
 	var finalSummary string

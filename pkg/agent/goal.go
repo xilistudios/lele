@@ -646,7 +646,7 @@ func (j *SummaryGoalJudge) JudgeGoal(ctx context.Context, sessionKey, goalText s
 		}
 	}
 
-	resp, err := callProvider.Chat(ctx, messages, nil, apiModel, options)
+	resp, err := providers.ChatIdle(ctx, callProvider, messages, nil, apiModel, options)
 	if err != nil {
 		return false, "", fmt.Errorf("goal judge LLM call failed: %w", err)
 	}
