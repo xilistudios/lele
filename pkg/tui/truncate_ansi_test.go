@@ -131,7 +131,7 @@ func TestTruncateRightCellsBasics(t *testing.T) {
 		}
 	}
 	// Wide characters count as cells, not runes.
-	out = truncateRightCells("模型测试", 5)
+	out = truncateRightCells("\u6a21\u578b\u6d4b\u8bd5", 5)
 	if w := ansi.StringWidth(out); w > 5 {
 		t.Errorf("CJK width %d > 5: %q", w, out)
 	}
@@ -143,7 +143,7 @@ func TestTruncateRightCellsBasics(t *testing.T) {
 func TestGoalBadgeBudget(t *testing.T) {
 	prefixCells := ansi.StringWidth(goalBadgePrefix) // "🎯 " = 3 cells
 	labels := []string{
-		"模型🚀test",
+		"\u6a21\u578b\U0001f680test",
 		"fix the ANSI truncation bug across the whole TUI rendering pipeline",
 		"café ☕ naïve",
 		"short",
@@ -209,7 +209,7 @@ func TestSidebarSessionNameTruncate(t *testing.T) {
 	contentWidth := 15
 	names := []string{
 		"⇗ " + "Subagent chat about the multi-step refactor pipeline",
-		"模型会话名称测试用很长的一串",
+		"\u6a21\u578b\u4f1a\u8bdd\u540d\u79f0\u6d4b\u8bd5\u7528\u5f88\u957f\u7684\u4e00\u4e32",
 		"👨‍👩‍👧‍👦 family session name that is quite long",
 	}
 	for _, name := range names {
@@ -246,8 +246,8 @@ func TestViewRealPathStatusLineCells(t *testing.T) {
 
 	key := "native:chat:h1-e2e"
 	m.sessionMgr.GetOrCreate(key)
-	m.sessionMgr.SetName(key, "模型🚀 very long session name that must be clamped by cells")
-	m.agentLoop.GoalManager().Set(key, "模型🚀fix ANSI truncation across the pipeline", 5)
+	m.sessionMgr.SetName(key, "\u6a21\u578b\U0001f680 very long session name that must be clamped by cells")
+	m.agentLoop.GoalManager().Set(key, "\u6a21\u578b\U0001f680fix ANSI truncation across the pipeline", 5)
 
 	m.currentKey = key
 	m.parentSessionKey = "native:chat:parent"
