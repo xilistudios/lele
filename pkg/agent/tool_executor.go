@@ -49,6 +49,17 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		return nil, err
 	}
 
+	// Defensive early return: an agent context is a hard precondition of
+	// every branch below (publishExecuting reads opts.agent.ID and both
+	// execution branches read opts.agent.Tools). Without this guard a nil
+	// agent panics deep inside the publisher; with it the invariant
+	// "opts.agent != nil" holds for the rest of the function, so the
+	// pre-existing nil guards in the chat-mode/vision checks below are
+	// belt-and-braces only and the context injection needs no guard at all.
+	if opts.agent == nil {
+		return nil, fmt.Errorf("tool %s: execution requires an agent context", opts.tc.Name)
+	}
+
 	// Chat mode: only web_search and web_fetch are allowed (defense-in-depth;
 	// the LLM normally never sees other tool defs in chat mode).
 	if opts.agent != nil && opts.agent.Sessions != nil {
@@ -92,15 +103,24 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		publishSubagentAsyncResult(te.al, opts.sessionKey, opts.channel, opts.chatID, taskID, result)
 	}
 
+	// Inject the acting agent ID and session key ONCE, right before the
+	// execution branches (issue #231). opts is a by-value struct, so this
+	// enrichment is local to the call and never leaks to the caller.
+	// Both branches — executeWithApproval (which reads opts.ctx for the
+	// pre-approval probe, WaitForResponse and the post-approval retry) and
+	// the plain ExecuteWithContext path — now share this single enriched
+	// context, making a divergent context structurally impossible.
+	//
+	// No nil guard here: the early return at the top of Execute guarantees
+	// opts.agent != nil by the time we reach this line.
+	opts.ctx = tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
+
 	// Execute tool with approval handling for exec
 	var toolResult *tools.ToolResult
-	// Inject the acting agent ID and session key so tools that enforce
-	// per-agent access control (e.g. the keyring secret tool) can read them.
-	execCtx := tools.WithAgentToolContext(opts.ctx, opts.agent.ID, opts.sessionKey)
 	if opts.tc.Name == "exec" && te.al.approvalManager != nil {
 		toolResult = te.executeWithApproval(opts, asyncCallback)
 	} else {
-		toolResult = opts.agent.Tools.ExecuteWithContext(execCtx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
+		toolResult = opts.agent.Tools.ExecuteWithContext(opts.ctx, opts.tc.Name, opts.tc.Arguments, opts.channel, opts.chatID, asyncCallback)
 	}
 
 	// Handle nil result
