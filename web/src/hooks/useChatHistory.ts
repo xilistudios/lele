@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage, GroupInfo, GroupSnapshot, HistoryToolCall } from '../lib/types'
@@ -27,11 +27,43 @@ export function buildChatHistoryQueryKey(sessionKey: string, parentSessionKey?: 
   return chatHistoryQueryKey(sessionKey)
 }
 
+/** Merge two GroupInfo lists by group id: entries from `incoming` overwrite
+ *  same-id entries of `existing`; existing-only ids are kept. Mirrors the
+ *  per-id overwrite semantics of the useGroupState 'hydrate' reducer so the
+ *  cached data and the group Map stay consistent. */
+function mergeGroupsById(existing: GroupInfo[], incoming: GroupInfo[]): GroupInfo[] {
+  if (!incoming.length) return existing
+  const byId = new Map(existing.map((g) => [g.groupID, g] as const))
+  for (const g of incoming) byId.set(g.groupID, g)
+  return Array.from(byId.values())
+}
+
 // Merge logic lives in its own pure module (see messageMerge.ts) so the
 // reconciliation rules can be unit-tested without React. Re-exported here
 // to preserve the existing import path used by consumers and tests.
 import { mergeMessages } from './messageMerge'
 export { mergeMessages }
+
+// Shape of the cached chat-history query data. `groups` holds the group
+// snapshots (already converted to the internal GroupInfo shape) that back the
+// group cards. Keeping them INSIDE the cached data — instead of hydrating the
+// group Map from a side-effect inside queryFn — is what makes rehydration work
+// on cache hits: queryFn does not run when fresh cache data is served (see
+// staleTime in lib/queryClient.ts), so a session switch that clears the group
+// Map must be repaired by the useEffect below reading `groups` off the cache.
+export type ChatHistoryData = {
+  sessionKey: string
+  messages: ChatMessage[]
+  rawMessages: HistoryMessage
+  hasMore: boolean
+  processing?: boolean
+  groups?: GroupInfo[]
+}
+
+/** Convert the optional groups payload of a history response to GroupInfos. */
+function historyGroupsToInfos(history: { groups?: GroupSnapshot[] }): GroupInfo[] {
+  return (history.groups ?? []).map(snapshotToGroupInfo)
+}
 
 export function useChatHistory(
   api: ApiClient,
@@ -63,14 +95,15 @@ export function useChatHistory(
           rawMessages: [],
           hasMore: false,
           processing: false,
+          groups: history ? historyGroupsToInfos(history) : [],
         }
       }
 
-      // Hydrate groups from history response if present
-      const groups = history.groups as GroupSnapshot[] | undefined
-      if (groups?.length && hydrateGroups) {
-        hydrateGroups(groups.map(snapshotToGroupInfo))
-      }
+      // Groups ride along in the cached data (see ChatHistoryData). The
+      // hydrate side-effect that used to live here is what made cache hits
+      // lose group cards: queryFn never runs when fresh cache data is served,
+      // so hydration now happens in a useEffect on [query.data, sessionKey].
+      const groups = historyGroupsToInfos(history)
 
       const newMessages = toChatMessages(history.messages, history.session_key)
 
@@ -79,13 +112,7 @@ export function useChatHistory(
       // replaces the entire cache with only the latest DEFAULT_LIMIT messages,
       // discarding any older messages the user loaded by scrolling up.
       const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
-      const cachedData = queryClient.getQueryData<{
-        sessionKey: string
-        messages: ChatMessage[]
-        rawMessages: HistoryMessage
-        hasMore: boolean
-        processing?: boolean
-      }>(queryKey)
+      const cachedData = queryClient.getQueryData<ChatHistoryData>(queryKey)
 
       if (cachedData && cachedData.messages.length > DEFAULT_LIMIT) {
         const newMessageIds = new Set(newMessages.map((m) => m.id))
@@ -107,6 +134,7 @@ export function useChatHistory(
           rawMessages: [...olderRawMessages, ...history.messages],
           hasMore: olderCachedMessages.length > 0 || history.has_more,
           processing: history.processing,
+          groups: groups.length > 0 ? groups : (cachedData.groups ?? []),
         }
       }
 
@@ -116,6 +144,7 @@ export function useChatHistory(
         rawMessages: history.messages,
         hasMore: history.has_more,
         processing: history.processing,
+        groups,
       }
     },
     enabled:
@@ -147,6 +176,24 @@ export function useChatHistory(
     retry: false,
   })
 
+  // Rehydrate group cards from the query data instead of from a side-effect
+  // inside queryFn. queryFn does not run on cache hits (staleTime 10s), so the
+  // old side-effect left the group Map empty after a session switch
+  // (clearStreaming() empties it) when the history was still fresh in cache —
+  // cards vanished despite cached data. Driving hydration off
+  // [query.data, sessionKey] covers every data source: fresh fetches,
+  // cache-served remounts, polling refetches, and loadMore's setQueryData.
+  // Idempotent: the reducer's 'hydrate' branch overwrites per groupID (the
+  // same key 'upsert' uses), so re-applying the same infos changes nothing.
+  // Empty/missing groups never dispatch — no garbage hydration.
+  useEffect(() => {
+    if (!sessionKey) return
+    const groups = query.data?.groups
+    if (groups?.length && hydrateGroups) {
+      hydrateGroups(groups)
+    }
+  }, [query.data, sessionKey, hydrateGroups])
+
   const hasMore = query.data?.hasMore ?? true
 
   const loadMore = useCallback(async () => {
@@ -154,13 +201,7 @@ export function useChatHistory(
     // Read the latest cache data directly to avoid stale closures.
     // query.data in the useCallback deps may lag one render behind.
     const queryKey = buildChatHistoryQueryKey(sessionKey, parentSessionKey)
-    const currentData = queryClient.getQueryData<{
-      sessionKey: string
-      messages: ChatMessage[]
-      rawMessages: HistoryMessage
-      hasMore: boolean
-      processing?: boolean
-    }>(queryKey)
+    const currentData = queryClient.getQueryData<ChatHistoryData>(queryKey)
     if (!currentData || !currentData.messages.length || currentData.hasMore === false) return
 
     const oldestRaw = currentData.rawMessages?.[0]
@@ -192,12 +233,21 @@ export function useChatHistory(
         return
       }
 
+      // The backend attaches the session's CURRENT group snapshots to every
+      // page, so per-id overwrite (keeping cached-only ids) is safe and never
+      // clobbers the session-level groups.
+      const pageGroups = historyGroupsToInfos(history)
+      const mergedGroups = pageGroups.length
+        ? mergeGroupsById(currentData.groups ?? [], pageGroups)
+        : (currentData.groups ?? [])
+
       queryClient.setQueryData(queryKey, {
         sessionKey: currentData.sessionKey,
         messages: [...uniqueOlderMessages, ...currentData.messages],
         rawMessages: [...history.messages, ...(currentData.rawMessages || [])],
         hasMore: history.has_more,
         processing: history.processing,
+        groups: mergedGroups,
       })
     } catch (error) {
       console.error('[RQ] Error loading more history:', error)
@@ -252,10 +302,16 @@ export function updateChatHistoryFromRaw(
   processing?: boolean,
   parentSessionKey?: string,
 ) {
-  queryClient.setQueryData(buildChatHistoryQueryKey(sessionKey, parentSessionKey), {
-    sessionKey,
-    messages: toChatMessages(rawMessages, sessionKey),
-    rawMessages,
-    processing,
-  })
+  // Preserve the cached `groups` payload (catchup responses carry messages
+  // only); dropping it here would re-break cache-hit group rehydration.
+  queryClient.setQueryData(
+    buildChatHistoryQueryKey(sessionKey, parentSessionKey),
+    (old: ChatHistoryData | undefined) => ({
+      sessionKey,
+      messages: toChatMessages(rawMessages, sessionKey),
+      rawMessages,
+      processing,
+      groups: old?.groups,
+    }),
+  )
 }

@@ -1064,3 +1064,9 @@ func (ap *agentProvidableImpl) StopBackgroundExec(id string) error {
 func (ap *agentProvidableImpl) AllGroupSnapshots() []group.GroupSnapshot {
 	return ap.al.AllGroupSnapshots()
 }
+
+// GroupSnapshotsForSession returns the group snapshots belonging to a session,
+// unioning memory with the persisted store (see AgentLoop).
+func (ap *agentProvidableImpl) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
+	return ap.al.GroupSnapshotsForSession(sessionKey)
+}

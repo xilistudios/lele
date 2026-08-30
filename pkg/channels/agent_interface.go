@@ -157,6 +157,12 @@ type AgentProvidable interface {
 
 	// AllGroupSnapshots returns a GroupSnapshot for every tracked group.
 	AllGroupSnapshots() []group.GroupSnapshot
+	// GroupSnapshotsForSession returns the group snapshots belonging to a
+	// session, unioning the groups tracked in memory with the persisted store
+	// and honouring session aliases (#239). This is what the session-scoped
+	// payloads (welcome / reconnected / history) must use: AllGroupSnapshots is
+	// memory-only and loses groups once retention sweeps them.
+	GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot
 }
 
 // AgentBasicInfo contiene información pública de un agente

@@ -405,7 +405,14 @@ const unsynthesizedPrefix = "[unsynthesized: aggregator never spoke]\n"
 // example a persisted group rehydrated with a Moderator that has since been
 // removed from the registry).
 func (gm *GroupManager) synthesisLocked(mg *managedGroup) string {
-	state := mg.state
+	return synthesisFor(mg.state)
+}
+
+// synthesisFor derives the group's final answer from its transcript alone. It
+// is the pure core of synthesisLocked and is shared with read paths that build
+// a synthesis for a state that is not tracked in memory (a persisted row
+// rehydrated for a session's history payload), so both agree by construction.
+func synthesisFor(state *GroupState) string {
 	if len(state.Transcript) == 0 {
 		return ""
 	}
