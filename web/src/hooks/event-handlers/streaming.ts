@@ -12,6 +12,7 @@
  */
 import { wsDebug } from '../../lib/debug'
 import type { ChatMessage, GroupSnapshot, HistoryToolCall } from '../../lib/types'
+import { registerStableId } from '../stableIdRegistry'
 import {
   applyMessageComplete,
   attachToLastAssistant,
@@ -27,8 +28,12 @@ import {
   chatHistoryQueryKey,
   updateChatHistoryFromRaw,
 } from '../useChatHistory'
-import { getSessionKey, isSessionMismatch, snapshotToGroupInfo } from './helpers'
-import { registerStableId } from '../stableIdRegistry'
+import {
+  getSessionKey,
+  isSessionMismatch,
+  sessionKeysLooselyMatch,
+  snapshotToGroupInfo,
+} from './helpers'
 import type { ClientEvent, MessageEventContext } from './types'
 
 export function handleWelcome(ctx: MessageEventContext, data: Record<string, unknown>) {
@@ -75,12 +80,33 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
   }
 }
 
+/**
+ * Effective UI session key for an event that belongs to the current session.
+ *
+ * After /new or /agent the backend maps `base` -> `base:chat:N` and emits
+ * message.ack — and every subsequent event (stream/complete/history) — with the
+ * resolved conversation alias (pkg/channels/websocket.go calls
+ * agentLoop.ResolveSessionKey before publishing the ack). The frontend re-tags
+ * those events with the CURRENT session key because all UI state —
+ * streamingMessages, the typewriter queues and the history cache — lives keyed
+ * by the session currently on screen; an aliased key would be hidden by
+ * mergeMessages (which filters strictly by sessionKey) and the loading state
+ * would never clear.
+ */
+function effectiveSessionKey(ctx: MessageEventContext, eventSessionKey?: string): string {
+  const current = ctx.currentSessionKeyRef.current
+  if (!eventSessionKey) return current ?? ''
+  if (current && sessionKeysLooselyMatch(eventSessionKey, current)) return current
+  return eventSessionKey
+}
+
 export function handleMessageStream(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'message.stream')) return
 
   const msgId = data.message_id as string
-  const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+  // Re-tag aliased events with the current key (see effectiveSessionKey).
+  const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
   const chunk = (data.chunk as string) ?? ''
   const done = (data.done as boolean) ?? false
 
@@ -112,7 +138,8 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
 
   const msgId = data.message_id as string
   const chunk = (data.chunk as string) ?? ''
-  const sessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+  // Re-tag aliased events with the current key (see effectiveSessionKey).
+  const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
 
   // Migrate any restore- placeholder to the real message id (see stream handler).
   ctx.setStreamingMessages((current) => migrateRestoreId(current, msgId, sessionKey))
@@ -136,7 +163,11 @@ export function handleMessageThinking(ctx: MessageEventContext, data: Record<str
 }
 
 export function handleMessageAck(ctx: MessageEventContext, data: Record<string, unknown>) {
-  const ackSessionKey = (data.session_key as string) ?? ''
+  const rawAckKey = (data.session_key as string) ?? ''
+  // Backend may report the alias-resolved key (base:chat:N, see
+  // pkg/channels/websocket.go); UI state is keyed by the current session —
+  // re-tag so processing, the placeholder and restore-cleanup all target it.
+  const ackSessionKey = rawAckKey ? effectiveSessionKey(ctx, rawAckKey) : ''
   if (ackSessionKey) {
     ctx.addProcessingSession(ackSessionKey)
     ctx.debouncedSessionRefresh()
@@ -153,27 +184,36 @@ export function handleMessageAck(ctx: MessageEventContext, data: Record<string, 
 
 export function handleMessageComplete(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
-  const completedSessionKey = eventSessionKey ?? ctx.currentSessionKeyRef.current
+  const currentKey = ctx.currentSessionKeyRef.current
+  const completedSessionKey = eventSessionKey ?? currentKey
 
   ctx.clearQueue(data.message_id as string)
   wsDebug('[WS] message.complete received', {
     messageId: data.message_id,
     eventSessionKey,
+    currentSessionKey: currentKey,
     completedSessionKey,
   })
 
+  // The ack registers the BASE key as processing while complete can carry the
+  // alias (and vice versa), so clear both sides of an aliased pair — otherwise
+  // the entry added by the ack leaks and the spinner stays stuck.
   if (completedSessionKey) {
     ctx.removeProcessingSession(completedSessionKey)
   }
-
-  if (completedSessionKey && completedSessionKey !== ctx.currentSessionKeyRef.current) {
-    console.warn('[WS] message.complete for different session, skipping streaming update')
-    ctx.setPendingAttachments([])
-    ctx.processingSessionKeyRef.current = null
-    return
+  if (currentKey && completedSessionKey && currentKey !== completedSessionKey) {
+    if (sessionKeysLooselyMatch(currentKey, completedSessionKey)) {
+      ctx.removeProcessingSession(currentKey)
+    } else {
+      // Event for an unrelated session: never touch the current session's
+      // global refs, tool status or streaming state.
+      return
+    }
   }
 
-  const targetSessionKey = (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? '') as string
+  // Streaming state is keyed by the current session key, so complete the
+  // placeholder under it even when the event carried an alias.
+  const targetSessionKey = (currentKey ?? completedSessionKey ?? '') as string
   ctx.setStreamingMessages((current) =>
     applyMessageComplete(
       current,
@@ -215,11 +255,25 @@ function isConfirmedInCache(
 }
 
 export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<string, unknown>) {
-  const historySessionKey = (data.session_key as string) ?? ctx.currentSessionKeyRef.current
-  ctx.queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(historySessionKey) })
+  const eventSessionKey = data.session_key as string | undefined
+  const currentKey = ctx.currentSessionKeyRef.current
+  // The query cache is keyed by the session key the frontend knows (the base
+  // key). An aliased event key (`base:chat:N`, pkg/agent/loop.go) refers to the
+  // SAME conversation, so it must resolve to the current key — invalidating the
+  // alias key would be a no-op and the UI would never refetch.
+  const historySessionKey: string | null =
+    eventSessionKey && sessionKeysLooselyMatch(eventSessionKey, currentKey)
+      ? currentKey
+      : (eventSessionKey ?? currentKey)
+
+  if (historySessionKey) {
+    ctx.queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey(historySessionKey) })
+  }
   ctx.debouncedSessionRefresh()
 
-  if (historySessionKey !== ctx.currentSessionKeyRef.current) return
+  // Genuinely another conversation: invalidation above is harmless, but the
+  // stripping below only applies to the session currently on screen.
+  if (!historySessionKey || historySessionKey !== currentKey) return
 
   // invalidateQueries triggers an ASYNC refetch. We must only strip optimistic
   // users / completed assistants once the HTTP cache already holds the
@@ -303,7 +357,10 @@ export function handleAttachments(ctx: MessageEventContext, event: ClientEvent) 
 }
 
 export function handleMessageError(ctx: MessageEventContext, data: Record<string, unknown>) {
-  const errorSessionKey = (getSessionKey(data) ?? ctx.currentSessionKeyRef.current ?? '') as string
+  // Defense for the future: the backend does not emit message.error today; if
+  // it ever does with an alias-resolved key, re-tag it to the current session
+  // so the failure markers below hit the UI state (keyed by that key).
+  const errorSessionKey = effectiveSessionKey(ctx, getSessionKey(data))
 
   // Mark optimistic user message as failed (instead of removing it)
   ctx.setStreamingMessages((current) => markOptimisticUserFailed(current, errorSessionKey))
@@ -328,7 +385,10 @@ export function handleMessageError(ctx: MessageEventContext, data: Record<string
 }
 
 export function handleStreamError(ctx: MessageEventContext, data: Record<string, unknown>) {
-  const errorSessionKey = (getSessionKey(data) ?? ctx.currentSessionKeyRef.current ?? '') as string
+  // Defense for the future: the backend does not emit stream.error today; if
+  // it ever does with an alias-resolved key, re-tag it to the current session
+  // so the error markers below hit the streaming state (keyed by that key).
+  const errorSessionKey = effectiveSessionKey(ctx, getSessionKey(data))
 
   ctx.setStreamingMessages((current) =>
     markStreamingAssistantsErrored(

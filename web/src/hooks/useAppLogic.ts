@@ -12,6 +12,10 @@ import type {
   SystemStatus,
   ToolInfo,
 } from '../lib/types'
+import {
+  finalizeStreamingAssistantsForSession,
+  hasStreamingMessageForSession,
+} from './streamingOpsLocal'
 import { useChatHistory } from './useChatHistory'
 import { useChatSessions } from './useChatSessions'
 import { useMessages } from './useMessages'
@@ -527,6 +531,14 @@ export function useAppLogic(
         next.delete(sessionKey)
         return next
       })
+      // Backstop for the session-scoped streaming term of isProcessing: the
+      // backend is no longer processing this session (HTTP ground truth), so
+      // any assistant still flagged streaming:true for it is stale (e.g. a
+      // placeholder orphaned by a lost message.complete). Finalize them here,
+      // otherwise the loading dots would stay lit until a page reload.
+      messagesHook.setStreamingMessages((prev) =>
+        finalizeStreamingAssistantsForSession(prev, sessionKey),
+      )
     }
 
     prevProcessingRef.current = chatHistory.processing
@@ -549,8 +561,14 @@ export function useAppLogic(
     (g) => g.status === 'started',
   )
 
+  // Loading is scoped PER SESSION: the first term only counts streaming
+  // messages whose sessionKey matches the session currently being viewed
+  // (an orphan placeholder left over from a background conversation, or from
+  // a missed message.complete after a chat switch, must not light the dots
+  // here). If no session is selected the term is false. Per-session spinners
+  // in the sidebar are driven independently by processingSessions.
   const isProcessing =
-    messagesHook.streamingMessages.some((m) => m.streaming) ||
+    hasStreamingMessageForSession(messagesHook.streamingMessages, sessionsHook.currentSessionKey) ||
     (sessionsHook.currentSessionKey
       ? processingSessions.has(sessionsHook.currentSessionKey)
       : false) ||

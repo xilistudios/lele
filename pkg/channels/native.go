@@ -682,6 +682,30 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	}
 
 	if msg.Content == "" && len(msg.Attachments) == 0 {
+		// Even with empty final content we MUST emit message.complete +
+		// history.updated: message.complete is the turn-end signal the frontend
+		// uses to clear its processing state and finalize the assistant
+		// placeholder created on message.ack (streaming:true). Suppressing it
+		// leaves the WebUI loading spinner stuck until the HTTP polling
+		// safety-net kicks in (and the placeholder stale if the poll misses
+		// it). An empty-content complete is safe client-side:
+		// applyMessageComplete keeps the existing accumulated content when the
+		// server sends none (web/src/hooks/streamingOps.ts).
+		var sessionName string
+		if n.agentLoop != nil {
+			sessionName = n.agentLoop.GetName(sessionKey)
+		}
+		n.emitNativeEvent(sessionKey, "message.complete", WSMessageCompletePayload{
+			MessageID:   messageID,
+			SessionKey:  sessionKey,
+			Content:     "",
+			Attachments: nil,
+		}, messageID)
+
+		n.emitNativeEvent(sessionKey, "history.updated", map[string]interface{}{
+			"session_key": sessionKey,
+			"name":        sessionName,
+		}, "")
 		return
 	}
 

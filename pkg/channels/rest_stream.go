@@ -130,7 +130,18 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	}
 
 	messageID := uuid.New().String()
-	sub := n.registerRESTStreamSubscriber(sessionKey, messageID)
+
+	// Resolve the session alias (base -> base:chat:N after /new or /agent) so the
+	// ack and the subscriber both use the same key that dispatchOutboundMessage
+	// emits stream/complete events with. Without this, the ack would report the
+	// unresolved key while all subsequent SSE events are fanned out under the
+	// alias, leaving the frontend unable to pair the ack with its stream.
+	ackSessionKey := sessionKey
+	if n.agentLoop != nil {
+		ackSessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
+	}
+
+	sub := n.registerRESTStreamSubscriber(ackSessionKey, messageID)
 	defer n.unregisterRESTStreamSubscriber(sub.id)
 
 	attachments := n.processAttachments(req.Attachments, sessionKey)
@@ -143,7 +154,7 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 
 	if err := writeSSE(w, "message.ack", ChatSendResponse{
 		MessageID:  messageID,
-		SessionKey: sessionKey,
+		SessionKey: ackSessionKey,
 	}); err != nil {
 		return
 	}
