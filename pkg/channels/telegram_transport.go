@@ -309,6 +309,15 @@ func (c *TelegramChannel) resolvePlaceholderWithText(ctx context.Context, chatID
 	return false
 }
 
+// deleteHTTPClient returns the HTTP client used by deleteMessage. It defaults
+// to http.DefaultClient; tests may override deleteHTTP to keep the call local.
+func (c *TelegramChannel) deleteHTTPClient() *http.Client {
+	if c.deleteHTTP != nil {
+		return c.deleteHTTP
+	}
+	return http.DefaultClient
+}
+
 // deleteMessage deletes a Telegram message by chat ID and message ID.
 // Best-effort: errors are logged but not returned.
 func (c *TelegramChannel) deleteMessage(ctx context.Context, chatID int64, messageID int) {
@@ -320,7 +329,7 @@ func (c *TelegramChannel) deleteMessage(ctx context.Context, chatID int64, messa
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.deleteHTTPClient().Do(req)
 	if err != nil {
 		logger.DebugCF("telegram", "Failed to delete message", map[string]interface{}{"error": err.Error(), "message_id": messageID})
 		return

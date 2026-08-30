@@ -24,16 +24,24 @@ func NewMessageBus() *MessageBus {
 	}
 }
 
-func (mb *MessageBus) PublishInbound(msg InboundMessage) {
+// PublishInbound enqueues msg for the agent loop without blocking.
+//
+// It returns true if the message was accepted into the inbound queue;
+// false if the bus is closed or the queue is full. Callers that have
+// already started user-visible side effects (typing indicators,
+// placeholder messages) MUST roll them back when this returns false.
+func (mb *MessageBus) PublishInbound(msg InboundMessage) bool {
 	mb.mu.RLock()
 	defer mb.mu.RUnlock()
 	if mb.closed {
-		return
+		return false
 	}
 	select {
 	case mb.inbound <- msg:
+		return true
 	default:
 		mb.droppedInbound.Add(1)
+		return false
 	}
 }
 

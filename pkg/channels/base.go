@@ -23,6 +23,18 @@ type BaseChannel struct {
 	running   bool
 	name      string
 	allowList []string
+	// InboundDroppedHook is invoked when PublishInbound rejects a message
+	// (bus closed or inbound queue full). Channels that start user-visible
+	// side effects before publishing (typing indicators, "Thinking..."
+	// placeholders) use it to roll those effects back, since no outbound
+	// reply will ever arrive for the dropped message.
+	//
+	// It must be assigned before the channel starts processing updates
+	// (typically at the end of the channel constructor) and must not be
+	// mutated afterwards: it is read from update-handling goroutines
+	// without additional synchronization. Nil-safe: the hook is only called
+	// when set.
+	InboundDroppedHook func(msg bus.InboundMessage)
 }
 
 func NewBaseChannel(name string, config interface{}, bus *bus.MessageBus, allowList []string) *BaseChannel {
@@ -121,7 +133,18 @@ func (c *BaseChannel) HandleMessageWithAttachments(senderID, chatID, content str
 		Metadata:    metadata,
 	}
 
-	c.bus.PublishInbound(msg)
+	if !c.bus.PublishInbound(msg) {
+		c.onInboundDropped(msg)
+	}
+}
+
+// onInboundDropped notifies the channel that a message was rejected by the
+// bus so it can undo side effects already shown to the user. Safe to call
+// when no hook is configured.
+func (c *BaseChannel) onInboundDropped(msg bus.InboundMessage) {
+	if c.InboundDroppedHook != nil {
+		c.InboundDroppedHook(msg)
+	}
 }
 
 func (c *BaseChannel) setRunning(running bool) {

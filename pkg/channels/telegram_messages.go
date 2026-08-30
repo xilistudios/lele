@@ -198,6 +198,53 @@ func (c *TelegramChannel) handleMessage(ctx context.Context, message *telego.Mes
 	return nil
 }
 
+// handleInboundDropped undoes the user-visible side effects that handleMessage
+// starts before publishing to the bus (typing indicator + "Thinking... 💭"
+// placeholder). When the bus rejects a message there will never be an outbound
+// reply to clean them up, so the user would see a stuck indicator/placeholder.
+// Wired as BaseChannel.InboundDroppedHook in NewTelegramChannel.
+func (c *TelegramChannel) handleInboundDropped(msg bus.InboundMessage) {
+	chatIDStr := msg.ChatID
+	if chatIDStr == "" {
+		return
+	}
+
+	// Exact key used by handleMessage: fmt.Sprintf("%d:%d", chatID, messageID),
+	// i.e. "<chatID>:<user message id>". metadata["message_id"] carries the
+	// user message id as a string.
+	if messageID := msg.Metadata["message_id"]; messageID != "" {
+		c.stopActiveThinking(chatIDStr + ":" + messageID)
+	}
+	// Safety net: cancel any thinking entries left for this chat (e.g. when
+	// the metadata key is missing or the indicator was stored under a
+	// different message id).
+	c.stopAllThinkingForChat(chatIDStr)
+
+	// Delete the "Thinking... 💭" placeholder if it is still pending for
+	// this chat. Placeholders are stored keyed by the chatID string.
+	// Deletion needs the bot token from config; when it is unavailable the
+	// entry is left in place so the regular send path can still resolve it.
+	if c.config == nil {
+		return
+	}
+	pID, ok := c.placeholders.Load(chatIDStr)
+	if !ok {
+		return
+	}
+	chatID, err := parseChatID(chatIDStr)
+	if err != nil {
+		return
+	}
+	id, isInt := pID.(int)
+	if !isInt {
+		return
+	}
+	c.placeholders.Delete(chatIDStr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c.deleteMessage(ctx, chatID, id)
+}
+
 func (c *TelegramChannel) handleCommandWithSession(ctx context.Context, message *telego.Message, cmd string) error {
 	if message == nil {
 		return fmt.Errorf("message is nil")

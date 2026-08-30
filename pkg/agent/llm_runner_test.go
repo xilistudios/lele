@@ -271,10 +271,11 @@ func (m *llmRunnerMockEventBus) PublishOutbound(msg bus.OutboundMessage) {
 	m.publishedOutbound = append(m.publishedOutbound, msg)
 }
 
-func (m *llmRunnerMockEventBus) PublishInbound(msg bus.InboundMessage) {
+func (m *llmRunnerMockEventBus) PublishInbound(msg bus.InboundMessage) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.publishedInbound = append(m.publishedInbound, msg)
+	return true
 }
 
 func (m *llmRunnerMockEventBus) GetPublishedOutbound() []bus.OutboundMessage {

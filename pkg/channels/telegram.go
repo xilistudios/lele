@@ -51,6 +51,9 @@ type TelegramChannel struct {
 	// Fallback deduplication using ChatID:MessageID
 	processedIDs map[string]struct{}
 	processedMu  sync.Mutex
+	// deleteHTTP optionally overrides the HTTP client used by deleteMessage
+	// (tests). When nil, http.DefaultClient is used. Assign before Start.
+	deleteHTTP *http.Client
 }
 
 type telegramCommandSpec struct {
@@ -136,7 +139,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 	// via SetKVRepo once the channel manager is built)
 	lastUpdateID := loadLastUpdateIDFromFile(offsetFilePath)
 
-	return &TelegramChannel{
+	ch := &TelegramChannel{
 		BaseChannel:     base,
 		commands:        NewTelegramCommands(bot, cfg, agentLoop),
 		bot:             bot,
@@ -150,7 +153,15 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 		lastUpdateID:    lastUpdateID,
 		offsetFilePath:  offsetFilePath,
 		processedIDs:    make(map[string]struct{}),
-	}, nil
+	}
+
+	// Roll back user-visible side effects (typing indicator, "Thinking..."
+	// placeholder) when the bus rejects an inbound message. Assigned here —
+	// not inside NewBaseChannel — because the closure needs the concrete
+	// channel; it must be set before Start begins processing updates.
+	ch.InboundDroppedHook = ch.handleInboundDropped
+
+	return ch, nil
 }
 
 func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {

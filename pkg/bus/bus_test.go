@@ -12,14 +12,68 @@ func TestMessageBus_PublishInboundNonBlocking(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
 
+	accepted := 0
 	for i := 0; i < cap(mb.inbound)+50; i++ {
-		mb.PublishInbound(InboundMessage{Channel: "test", Content: "msg"})
+		if mb.PublishInbound(InboundMessage{Channel: "test", Content: "msg"}) {
+			accepted++
+		}
+	}
+
+	// The first cap(inbound) publishes must be accepted, the rest rejected.
+	if accepted != cap(mb.inbound) {
+		t.Errorf("expected %d accepted publishes, got %d", cap(mb.inbound), accepted)
 	}
 
 	_, _, dropped, _, _, _ := mb.Stats()
 	if dropped == 0 {
 		t.Error("expected some inbound messages to be dropped when buffer is full")
 	}
+}
+
+// TestMessageBus_PublishInboundReturnValues pins down the acceptance
+// contract: true when enqueued, false when the queue is full, false after
+// Close. Callers rely on false to roll back side effects (typing
+// indicators, placeholders).
+func TestMessageBus_PublishInboundReturnValues(t *testing.T) {
+	t.Run("accepted returns true", func(t *testing.T) {
+		mb := NewMessageBus()
+		defer mb.Close()
+
+		if !mb.PublishInbound(InboundMessage{Channel: "test", Content: "ok"}) {
+			t.Fatal("expected PublishInbound to return true when the queue has room")
+		}
+		inLen, _, dropped, _, _, _ := mb.Stats()
+		if inLen != 1 || dropped != 0 {
+			t.Fatalf("expected 1 queued / 0 dropped, got len=%d dropped=%d", inLen, dropped)
+		}
+	})
+
+	t.Run("full queue returns false", func(t *testing.T) {
+		mb := NewMessageBus()
+		defer mb.Close()
+
+		for i := 0; i < cap(mb.inbound); i++ {
+			if !mb.PublishInbound(InboundMessage{Channel: "test"}) {
+				t.Fatalf("publish %d into a not-yet-full queue returned false", i)
+			}
+		}
+		if mb.PublishInbound(InboundMessage{Channel: "test", Content: "overflow"}) {
+			t.Fatal("expected PublishInbound to return false when the queue is full")
+		}
+		_, _, dropped, _, _, _ := mb.Stats()
+		if dropped != 1 {
+			t.Fatalf("expected droppedInbound=1, got %d", dropped)
+		}
+	})
+
+	t.Run("closed bus returns false", func(t *testing.T) {
+		mb := NewMessageBus()
+		mb.Close()
+
+		if mb.PublishInbound(InboundMessage{Channel: "test"}) {
+			t.Fatal("expected PublishInbound to return false after Close")
+		}
+	})
 }
 
 func TestMessageBus_PublishOutboundNonBlocking(t *testing.T) {
