@@ -353,6 +353,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.formStepIndex = 0
 						m.formValues = nil
 						m.modalMode = ModalNone
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						m.reloadSessions()
 						return m, nil
 					}
@@ -602,6 +603,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.providerSavedInFlow = false
 						m.formStepIndex = 0
 						m.formValues = nil
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						m.onboardingStep = obVerify
 						m.obVerifying = true
 						m.obFinalizeSetup()                                  // set defaults + persist
@@ -639,6 +641,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, nil
 						}
 						m.modalMode = ModalNone
+						m.syncTextInputEcho() // audit M2: clear stale echo on close
 						return m, nil
 					}
 					// Advance to next step
@@ -1200,10 +1203,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.formStepIndex = 0
 						m.onboardingStep = obProviderPicker
 						m.modalSelectedIdx = 0
+						// Audit M2: leaving the form from a secret step must
+						// not leave a stale password echo on the widget.
+						m.syncTextInputEcho()
 						return m, nil
 					}
 				}
 				m.modalMode = ModalNone
+				// Audit M2: ESC-close of a form modal — reset echo so a stale
+				// password mode can't affect any later text-input render.
+				m.syncTextInputEcho()
 			case "s":
 				if m.modalMode == ModalBackgroundExecs && !m.bgExecViewMode {
 					if m.modalSelectedIdx < len(m.bgExecModalKeys) {
@@ -1697,6 +1706,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stashApprovalForSession(msg.msg.ChatID, id, command, reason)
 			}
 			m.updateViewport()
+			// Re-arm the listener exactly like the tail of this case does;
+			// a bare break here would leave the TUI deaf to every later event.
+			cmds = append(cmds, m.startOutboundListener())
 			break
 		}
 		if msg.msg.ChatID == m.currentKey {
