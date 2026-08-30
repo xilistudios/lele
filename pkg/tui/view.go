@@ -9,6 +9,7 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/theme"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func (m *Model) View() string {
@@ -311,16 +312,8 @@ func (m *Model) View() string {
 			statusWidth := lipgloss.Width(statusLine)
 			remaining := (leftWidth - 2) - statusWidth - 2
 			if remaining > 8 {
-				goalLabel := goal.Text
-				r := []rune(goalLabel)
-				maxLabelLen := remaining - 4 // account for "🎯 "
-				if len(r) > maxLabelLen {
-					if maxLabelLen > 3 {
-						goalLabel = string(r[:maxLabelLen-3]) + "..."
-					} else {
-						goalLabel = string(r[:maxLabelLen])
-					}
-				}
+				// Budget the label by display cells: "🎯 " is 3 cells wide.
+				goalLabel := truncateGoalLabel(goal.Text, remaining)
 				goalColor := OrangeColor
 				if goal.Status == agent.GoalDone {
 					goalColor = SecondaryColor
@@ -337,14 +330,11 @@ func (m *Model) View() string {
 		}
 	}
 
-	// Ensure status line does not exceed available column width
+	// Ensure status line does not exceed available column width. The line may
+	// contain ANSI sequences (bouncing dots, goal badge); truncating by runes
+	// would cut mid-escape and collapse the visible width, so clamp by cells.
 	if maxSW := leftWidth - 2; maxSW > 0 && lipgloss.Width(statusLine) > maxSW {
-		r := []rune(statusLine)
-		if maxSW > 3 && len(r) > maxSW {
-			statusLine = string(r[:maxSW-3]) + "..."
-		} else if len(r) > maxSW {
-			statusLine = string(r[:maxSW])
-		}
+		statusLine = truncateRightCells(statusLine, maxSW)
 	}
 
 	var autocompleteView string
@@ -470,12 +460,9 @@ func (m *Model) View() string {
 	if m.parentSessionKey != "" {
 		sessionName = "⇗ " + sessionName
 	}
-	if r := []rune(sessionName); len(r) > contentWidth {
-		if contentWidth > 3 {
-			sessionName = string(r[:contentWidth-3]) + "..."
-		} else {
-			sessionName = string(r[:contentWidth])
-		}
+	// Clamp by display cells (ANSI- and wide-char-aware) instead of runes.
+	if ansi.StringWidth(sessionName) > contentWidth {
+		sessionName = truncateRightCells(sessionName, contentWidth)
 	}
 	rightBuilder.WriteString(SidebarTitle.Render(sessionName) + "\n\n")
 
@@ -497,17 +484,15 @@ func (m *Model) View() string {
 	if contentHeight >= 16 {
 		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.workspace")) + "\n")
 		wsPath := m.workspacePath
-		if r := []rune(wsPath); len(r) > contentWidth-1 {
-			if contentWidth > 4 {
-				wsPath = "..." + string(r[len(r)-(contentWidth-4):])
-			}
+		// Keep the tail of the path (directory name matters most); budget
+		// contentWidth-1 cells as before, but measure in display cells.
+		if ansi.StringWidth(wsPath) > contentWidth-1 {
+			wsPath = truncateLeftCells(wsPath, contentWidth-1)
 		}
 		rightBuilder.WriteString(SidebarValue.Render(wsPath) + "\n")
 		branch := m.gitBranch
-		if r := []rune(branch); len(r) > contentWidth-1 {
-			if contentWidth > 4 {
-				branch = string(r[:contentWidth-4]) + "..."
-			}
+		if ansi.StringWidth(branch) > contentWidth-1 {
+			branch = truncateRightCells(branch, contentWidth-1)
 		}
 		rightBuilder.WriteString(SidebarValue.Render(branch) + "\n\n")
 	}
