@@ -1304,6 +1304,15 @@ func DefaultConfigPath() string {
 	return filepath.Join(GetLeleDir(), "config.json")
 }
 
+// SaveConfig writes cfg to path as pretty-printed JSON.
+//
+// The write is atomic: data is written to a temporary file in the same
+// directory as path (so os.Rename stays on one filesystem), fsync'd, then
+// renamed into place. Readers — including the config watcher backed by
+// fsnotify — and crash recovery therefore never observe a truncated or
+// partially written config.json; they see either the old file or the new one.
+// The final file mode is 0600. On any failure after the temp file is created,
+// the temp file is removed so no leftovers remain.
 func SaveConfig(path string, cfg *Config) error {
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
@@ -1318,7 +1327,41 @@ func SaveConfig(path string, cfg *Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	tmp, err := os.CreateTemp(dir, ".lele-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	// CreateTemp already uses 0600 on Unix; be explicit for portability.
+	// Must happen before Close: fchmod on a closed fd fails on Linux.
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func (c *Config) TelegramVerbose() VerboseLevel {

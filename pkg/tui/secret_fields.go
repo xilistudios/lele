@@ -69,3 +69,12 @@ func (m *Model) syncTextInputEcho() {
 		m.textInput.EchoMode = textinput.EchoNormal
 	}
 }
+
+// textInputView is the only safe way to paint the shared textinput widget:
+// it re-derives the echo mode from the current modal/step first, so no
+// renderer can show a secret in clear text (or hide a non-secret behind
+// stale bullets) regardless of which transition last touched the widget.
+func (m *Model) textInputView() string {
+	m.syncTextInputEcho()
+	return m.textInput.View()
+}

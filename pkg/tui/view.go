@@ -19,9 +19,9 @@ func (m *Model) View() string {
 
 	// Audit M2: universal render-side sync — bubbletea always calls View()
 	// after Update(), so re-deriving the echo mode here guarantees every
-	// renderer that paints m.textInput.View() (form modals, settings edit
-	// fields) shows the correct mode even when an Enter/ESC transition
-	// returned before the Update-side sync could run.
+	// renderer that paints the text input via m.textInputView() (form modals,
+	// settings edit fields) shows the correct mode even when an Enter/ESC
+	// transition returned before the Update-side sync could run.
 	m.syncTextInputEcho()
 
 	// --------------------------------------------------------------------------
@@ -1133,7 +1133,7 @@ func (m *Model) renderTUISettings(modalTitle string) string {
 			label = i18n.T("tui.settings.streamThrottle")
 		}
 		m.textInput.Width = 40
-		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
 		if m.formError != "" {
 			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
@@ -1176,7 +1176,7 @@ func (m *Model) renderSystemSettingsEdit(title string) string {
 
 	label := m.settingsEditField
 	m.textInput.Width = 40
-	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+	sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 
 	if m.formError != "" {
 		sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
@@ -1218,7 +1218,7 @@ func (m *Model) renderAgentEditInput() string {
 			label = l
 		}
 		m.textInput.Width = 60
-		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInput.View())) + "\n")
+		sb.WriteString(ModalItemActive.Render(fmt.Sprintf("  %s: %s", label, m.textInputView())) + "\n")
 		if m.formError != "" {
 			sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  ✗ "+m.formError) + "\n")
 		}
@@ -1373,7 +1373,7 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	// Text input field (hidden on review step)
 	if !isReviewStep {
 		m.textInput.Width = 40
-		sb.WriteString(InputBarContainer.Width(44).Render(m.textInput.View()) + "\n\n")
+		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
 	// Contextual step hint (optional fields)
