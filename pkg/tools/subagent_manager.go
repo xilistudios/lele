@@ -41,6 +41,9 @@ type SubagentManager struct {
 	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
 	compactionThresholdPercent int                                                       // percentage of context window triggering intra-loop compaction (0 = default)
 	redactor                   *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
+	sessionCompactor           SessionCompactor                                          // syncs loop compaction to the persisted subagent session
+	compactionModel            string                                                    // dedicated compaction model (empty = agent model)
+	evictExcludedFromMemory    bool                                                      // evict excluded messages from in-memory session cache on compaction sync
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -169,6 +172,27 @@ func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionRecorder = rec
+}
+
+// SetSessionCompactor attaches a session compactor used to sync loop
+// compaction results (proactive and reactive) to the subagent's persisted
+// session. Implemented by *session.Manager.
+func (sm *SubagentManager) SetSessionCompactor(sc SessionCompactor) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionCompactor = sc
+}
+
+// SetCompactionConfig configures the subagent loop's context-compaction
+// behavior: threshold percent of the context window (0 = default 75%),
+// optional dedicated compaction model, and whether synced compaction evicts
+// excluded messages from the in-memory session cache.
+func (sm *SubagentManager) SetCompactionConfig(thresholdPercent int, compactionModel string, evictExcluded bool) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.compactionThresholdPercent = thresholdPercent
+	sm.compactionModel = compactionModel
+	sm.evictExcludedFromMemory = evictExcluded
 }
 
 // SetSessionKeyCallback sets a callback function that is called whenever a

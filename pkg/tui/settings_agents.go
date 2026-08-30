@@ -190,20 +190,16 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		m.settingsEditField = "agentWorkspace"
 		m.textInput.SetValue(agent.Workspace)
 		m.textInput.Focus()
-	case agentFieldModel: // 4: Model — always a selector from default provider's models
-		providerName := m.cfg.Agents.Defaults.Provider
-		models := m.listProviderModels(providerName)
+	case agentFieldModel: // 4: Model — always a selector with (default) and (custom...)
 		modelStr := ""
 		if agent.Model != nil {
 			modelStr = agent.Model.Primary
 		}
-		labels := make([]string, 0, len(models)+2)
-		values := make([]string, 0, len(models)+2)
-		labels = append(labels, "(default)")
-		values = append(values, "")
-		for _, model := range models {
-			labels = append(labels, model)
-			values = append(values, model)
+		labels, values := m.modelSelectorOptions(modelStr)
+		if len(values) == 0 {
+			// No providers configured — build minimal selector
+			labels = []string{"(default)"}
+			values = []string{""}
 		}
 		labels = append(labels, "(custom...)")
 		values = append(values, "__custom__")
@@ -242,34 +238,22 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 	d := &m.cfg.Agents.Defaults
 	switch m.modalSelectedIdx {
-	case 0: // Provider — selector from configured providers
-		providers := m.listProviders()
-		if len(providers) == 0 {
+	case 0: // Provider — selector from all configured providers
+		labels, values := m.providerSelectorOptions(d.Provider)
+		if len(values) == 0 {
 			// No providers configured — fall back to text input
 			m.settingsEditField = "defaultProvider"
 			m.textInput.SetValue(d.Provider)
 			m.textInput.Focus()
 		} else {
-			labels := make([]string, 0, len(providers)+1)
-			values := make([]string, 0, len(providers)+1)
-			labels = append(labels, "(default)")
-			values = append(values, "")
-			for _, p := range providers {
-				labels = append(labels, p)
-				values = append(values, p)
-			}
 			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
 		}
-	case 1: // Model — always a selector from default provider's models
-		providerName := d.Provider
-		models := m.listProviderModels(providerName)
-		labels := make([]string, 0, len(models)+2)
-		values := make([]string, 0, len(models)+2)
-		labels = append(labels, "(default)")
-		values = append(values, "")
-		for _, model := range models {
-			labels = append(labels, model)
-			values = append(values, model)
+	case 1: // Model — always a selector with (default) and (custom...)
+		labels, values := m.modelSelectorOptions(d.Model)
+		if len(values) == 0 {
+			// No providers configured — build minimal selector
+			labels = []string{"(default)"}
+			values = []string{""}
 		}
 		labels = append(labels, "(custom...)")
 		values = append(values, "__custom__")

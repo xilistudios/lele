@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-08-28
+
+### Added
+
+#### Agent
+- Subagent context compaction with reactive recovery and session sync (#216) — when the LLM API rejects a subagent prompt for exceeding the model's context window, old messages are summarized and the request retried instead of failing the whole task. Uses a data-driven per-provider overflow classifier (`IsContextOverflowError`) covering OpenAI, Anthropic, Gemini, Bedrock, and Mistral patterns, with a budget of 3 reactive compaction attempts between successful responses to prevent compact-fail loops. Proactive compaction threshold is configurable (`CompactionThresholdPercent`, default 75%) with an optional dedicated `CompactionModel` for summarization, and compact events are published to the message bus for TUI visibility.
+- Subagent compaction synced to persisted sessions (#216) — new `SessionManager.CompactSession` stores the summary, excludes all but the last keepCount messages from context (preserving the original request at index 0), persists, and optionally evicts excluded messages. Both proactive and reactive subagent compaction paths sync to the persisted session, so history no longer balloons back after a restart. The main agent loop now uses the shared overflow classifier too, including Bedrock `InvalidParameter` total-token errors, instead of a broad substring heuristic that misfired on unrelated errors like max_tokens limits.
+
+#### WebUI
+- Validation error extraction in settings (#215) — validation errors from 422 API responses are extracted and displayed; the `ApiError` class gained a `validationErrors` field, with tests for HTTP client parsing.
+- `max_tool_iterations=0` is now allowed (#215) — config validation accepts 0 to mean unlimited tool iterations instead of rejecting it.
+
+### Fixed
+
+#### TUI
+- Add-agent flow in settings not working (#214) — Enter was routed to `handleAgentsEnter()` instead of the text input handler because `modalMode` stayed as `ModalSettingsAgents` during the add-agent flow, and keystrokes were never forwarded to the text input. Both fixed by checking `settingsEditField` first and adding `ModalSettingsAgents` to the forwarding condition.
+- Input focus indicator shown only when the input is active (#217) — the chat input cursor kept blinking even when a modal, pending approval, or onboarding wizard was on top. A `syncChatInputFocus` helper now aligns textarea focus with app state after every message, and the blink command is only returned on the blurred→focused transition so the cursor restarts cleanly without spamming blink timers.
+
+#### Session
+- Seq rebase after `LoadEvictedMessages` (#215) — loading evicted rows back into memory after `PruneExcluded` left gapped seqs, breaking the `seq = firstInMemorySeq + sliceIndex` invariant so the next save wrote content onto the wrong rows (role/JSON mismatch corruption). Rows are now re-numbered contiguously via a full rewrite after loading, with a regression test reproducing the evict→prune→load→save sequence.
+- Epoch-guard all save paths to prevent lost concurrent mutations (#215) — every save path releases the session mutex during disk I/O; a mutation in flight was silently dropped from post-I/O bookkeeping. A save epoch counter is bumped on every logical mutation and re-checked after I/O: idempotent paths skip bookkeeping on mismatch so the mutation is re-persisted, and destructive paths force a clean full rewrite. `DeleteLastMessage` was also replaced with a seq-watermark delete so a stale delete cannot wipe a concurrent append.
+
 ## [0.7.7] - 2026-08-20
 
 ### Added

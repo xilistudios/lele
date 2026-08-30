@@ -114,6 +114,7 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 
 	value := m.settingsSelectorValues[m.settingsSelectorIdx]
 	field := m.settingsSelectorField
+	orig := m.settingsSelectorOrig
 
 	// The "(custom...)" option opens a text input instead of saving.
 	if value == "__custom__" {
@@ -128,6 +129,15 @@ func (m *Model) handleSelectorConfirm() tea.Cmd {
 
 	// Close selector first so the save handlers see a clean state.
 	m.closeSettingsSelector()
+
+	// "(custom…)" — don't save; open the free-text input pre-filled with the
+	// current value so the user can type an arbitrary reference.
+	if value == modelCustomValue {
+		m.settingsEditField = field
+		m.textInput.SetValue(orig)
+		m.textInput.Focus()
+		return nil
+	}
 
 	// Delegate to the existing save handlers by setting settingsEditField
 	// and calling the appropriate input handler.

@@ -208,6 +208,7 @@
   "tui.settings.editHint": "Enter para salvar, Esc para cancelar",
   "tui.settings.selectorHint": "↑/↓ selecionar · ENTER confirmar · ESC cancelar",
   "tui.settings.subagentPickerHint": "↑/↓ navegar · ESPAÇO alternar · ENTER salvar · ESC cancelar",
+  "tui.settings.selectorCustom": "(personalizado…)",
   "tui.settings.invalidNumber": "Insira um número positivo válido",
   "tui.settings.session": "Sessão",
   "tui.settings.tools": "Ferramentas",
