@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -67,10 +68,11 @@ type GroupManager struct {
 	resolve          ResolveAgentFunc
 	executor         TurnExecutor
 	publish          Publisher
-	moderatorDecider ModeratorDecider // optional; nil → defaultModeratorDecider
-	storeDir         string           // persistence directory; empty = no persistence
-	enabled          func() bool      // optional feature gate; nil → always allowed
-	retention        time.Duration    // how long finished groups stay tracked; 0 → DefaultGroupRetention
+	moderatorDecider ModeratorDecider    // optional; nil → defaultModeratorDecider
+	storeDir         string              // persistence directory; empty = no persistence
+	enabled          func() bool         // optional feature gate; nil → always allowed
+	retention        time.Duration       // how long finished groups stay tracked; 0 → DefaultGroupRetention
+	resolveSession   func(string) string // optional session-alias resolver for read paths; nil → exact match
 }
 
 // NewGroupManager creates a GroupManager with the given injected dependencies.
@@ -269,6 +271,21 @@ func (gm *GroupManager) SetEnabledHook(fn func() bool) {
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
 	gm.enabled = fn
+}
+
+// SetSessionAliasResolver installs the callback SnapshotsForSession uses to map
+// a group's origin chat ID onto the session key currently serving it. The host
+// (pkg/agent) injects AgentLoop.ResolveSessionKey, which resolves the
+// base-session → active-conversation aliases created by startFreshConversation;
+// without it, groups started before a session was rotated would be filtered out
+// of that session's history (#239). Passing nil restores exact matching.
+//
+// The callback is invoked with gm.mu NOT held: implementations must be safe for
+// concurrent use (sync.Map-backed ones are).
+func (gm *GroupManager) SetSessionAliasResolver(fn func(chatID string) string) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+	gm.resolveSession = fn
 }
 
 // ErrGroupsDisabled is returned by Start when the groups feature is disabled
@@ -533,6 +550,128 @@ func (gm *GroupManager) AllSnapshots() []GroupSnapshot {
 		out = append(out, BuildSnapshot(mg.state, mg.result))
 	}
 	return out
+}
+
+// SnapshotsForSession returns the client-facing snapshots of every group that
+// belongs to the given session key, taken as the UNION of the groups tracked in
+// memory and the groups persisted in the store (#239, read path).
+//
+// Why the union: AllSnapshots is memory-only, and finished groups leave memory
+// once their retention window elapses (DefaultGroupRetention, 30 min) or the
+// process restarts before anything re-reads them. The WebUI asks for the groups
+// of a session on every welcome/reconnected/history request, so a memory-only
+// answer makes a group card vanish permanently even though its transcript is
+// still on disk.
+//
+// Rules:
+//   - a group belongs to the session when its OriginChatID equals sessionKey or
+//     resolves to it through the injected session-alias resolver (installed with
+//     SetSessionAliasResolver; nil → exact match). A group without an origin
+//     belongs to no session, and an empty sessionKey selects nothing;
+//   - duplicates across the two sources collapse to one entry per group ID and
+//     the in-memory copy wins: it is the live state, ahead of the last flush;
+//   - a persisted row whose status is not terminal is reported as StatusError
+//     with an explanatory synthesis. Such a row means the writer died mid-run;
+//     showing it as "running" would hang the card forever — the same re-marking
+//     rule LoadHistorical applies at startup;
+//   - the synthesis is recomputed from the persisted transcript (it is not
+//     stored) with the function finalize uses, so a rehydrated card shows the
+//     same text it showed live;
+//   - ordering is UpdatedAt descending with ID ascending as tie-break, matching
+//     ListGroups;
+//   - an unreadable store degrades to the memory result rather than dropping the
+//     whole payload.
+//
+// Retention governs memory only — it never deletes history from the store, so
+// this method keeps answering after a group has left memory.
+func (gm *GroupManager) SnapshotsForSession(sessionKey string) []GroupSnapshot {
+	// sessionEntry carries the sort key that GroupSnapshot deliberately does not
+	// expose to clients.
+	type sessionEntry struct {
+		snap      GroupSnapshot
+		updatedAt time.Time
+	}
+
+	// Read memory under gm.mu (AllSnapshots semantics: lazy retention sweep, and
+	// mg.result is only safe to read while locked). gm.mu is NOT held while the
+	// resolver runs or the store is read.
+	gm.mu.Lock()
+	gm.evictExpiredLocked(time.Now())
+	dir := gm.storeDir
+	resolve := gm.resolveSession
+	entries := make([]sessionEntry, 0, len(gm.groups))
+	seen := make(map[string]bool, len(gm.groups))
+	for _, mg := range gm.groups {
+		// BuildSnapshot copies every slice it exposes, so the returned snapshot
+		// shares no backing array with the live state (see AllSnapshots).
+		seen[mg.state.ID] = true
+		entries = append(entries, sessionEntry{
+			snap:      BuildSnapshot(mg.state, mg.result),
+			updatedAt: mg.state.UpdatedAt,
+		})
+	}
+	gm.mu.Unlock()
+
+	// Persisted history: the exact same read path LoadHistorical uses, so the
+	// two can never disagree about what the store holds (backend selection,
+	// legacy migration and corrupt-entry rules live in ListGroups). The guard
+	// mirrors saveStateBestEffort: with no backend configured there is nothing
+	// to read, and ListGroups would report a readdir error for an empty dir.
+	var persisted []*GroupState
+	if dir != "" || getGroupRepo() != nil {
+		states, err := ListGroups(dir)
+		if err != nil {
+			log.Printf("group: session history read failed, serving memory only: %v", err)
+		} else {
+			persisted = states
+		}
+	}
+
+	matches := func(originChatID string) bool {
+		if originChatID == "" || sessionKey == "" {
+			return false
+		}
+		if originChatID == sessionKey {
+			return true
+		}
+		if resolve == nil {
+			return false
+		}
+		return resolve(originChatID) == sessionKey
+	}
+
+	out := entries[:0]
+	for _, e := range entries {
+		if matches(e.snap.OriginChatID) {
+			out = append(out, e)
+		}
+	}
+
+	for _, st := range persisted {
+		if st == nil || seen[st.ID] || !matches(st.OriginChatID) {
+			continue
+		}
+		seen[st.ID] = true
+
+		synthesis := synthesisFor(st)
+		if !isTerminalGroupStatus(st.Status) {
+			// Restart-orphaned row: never present it as an eternal "running" card.
+			st.Status = StatusError
+			synthesis = fmt.Sprintf("group %s: terminated by process restart", st.ID)
+		}
+		out = append(out, sessionEntry{snap: BuildSnapshot(st, synthesis), updatedAt: st.UpdatedAt})
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		return groupSortsBefore(out[i].snap.GroupID, out[i].updatedAt,
+			out[j].snap.GroupID, out[j].updatedAt)
+	})
+
+	snapshots := make([]GroupSnapshot, len(out))
+	for i, e := range out {
+		snapshots[i] = e.snap
+	}
+	return snapshots
 }
 
 // Wait blocks until the group finishes and returns the final synthesis.

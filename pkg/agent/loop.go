@@ -487,6 +487,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	// groups when the feature is disabled, regardless of the caller (tool,
 	// /group command, or any internal path).
 	gm.SetEnabledHook(loop.GroupsEnabled)
+	// Session-alias resolution for read paths (#239): a group records the chat
+	// session that started it, but startFreshConversation rotates that base key
+	// to a new conversation key. Without this hook the session-scoped history
+	// payload filters the group out and its card disappears on a session switch.
+	gm.SetSessionAliasResolver(loop.ResolveSessionKey)
 	gm.SetStoreDir(filepath.Join(config.GetLeleDir(), "groups"))
 	if dbStore != nil {
 		gm.SetStore(dbStore.Groups())
@@ -674,6 +679,18 @@ func (al *AgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
 		return nil
 	}
 	return al.groupManager.AllSnapshots()
+}
+
+// GroupSnapshotsForSession returns the group snapshots that belong to a session,
+// unioning the groups tracked in memory with the persisted history (#239).
+// Filtering honours the loop's session aliases, so a group started before
+// startFreshConversation rotated the conversation key is still reported for the
+// key the client now uses.
+func (al *AgentLoop) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
+	if al.groupManager == nil {
+		return nil
+	}
+	return al.groupManager.SnapshotsForSession(sessionKey)
 }
 
 // SessionManager returns the shared session manager used by all agents.

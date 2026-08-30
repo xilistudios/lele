@@ -38,6 +38,16 @@ type nativeTestAgentLoop struct {
 	sessionThinkLevels map[string]string
 	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
 	processing         map[string]bool               // sessionKey -> is session processing
+
+	// groupSnapshotsBySession lets a test control what the store-backed session
+	// lookup returns; groupSnapshotCalls records that the channel delegated to
+	// the agent loop instead of filtering memory itself (#239).
+	groupSnapshotsBySession map[string][]group.GroupSnapshot
+	groupSnapshotCalls      []string
+	groupSnapshotMu         sync.Mutex
+	// allGroupSnapshotsCalls counts uses of the memory-only API, which the
+	// session read path must no longer touch (#239).
+	allGroupSnapshotsCalls int
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -347,7 +357,45 @@ func (m *nativeTestAgentLoop) StopBackgroundExec(id string) error {
 }
 
 func (m *nativeTestAgentLoop) AllGroupSnapshots() []group.GroupSnapshot {
+	m.groupSnapshotMu.Lock()
+	defer m.groupSnapshotMu.Unlock()
+	m.allGroupSnapshotsCalls++
 	return nil
+}
+
+// GroupSnapshotsForSession is the store-backed session lookup the channel now
+// delegates to (#239).
+func (m *nativeTestAgentLoop) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
+	m.groupSnapshotMu.Lock()
+	defer m.groupSnapshotMu.Unlock()
+	m.groupSnapshotCalls = append(m.groupSnapshotCalls, sessionKey)
+	return m.groupSnapshotsBySession[sessionKey]
+}
+
+// setGroupSnapshotsForSession publishes the snapshots a session should get.
+func (m *nativeTestAgentLoop) setGroupSnapshotsForSession(sessionKey string, snaps ...group.GroupSnapshot) {
+	m.groupSnapshotMu.Lock()
+	defer m.groupSnapshotMu.Unlock()
+	if m.groupSnapshotsBySession == nil {
+		m.groupSnapshotsBySession = make(map[string][]group.GroupSnapshot)
+	}
+	m.groupSnapshotsBySession[sessionKey] = snaps
+}
+
+// groupSnapshotCallCount reports how many times the channel delegated the
+// session group lookup to the agent loop.
+func (m *nativeTestAgentLoop) groupSnapshotCallCount() int {
+	m.groupSnapshotMu.Lock()
+	defer m.groupSnapshotMu.Unlock()
+	return len(m.groupSnapshotCalls)
+}
+
+// allGroupSnapshotsCallCount reports how many times the memory-only group API
+// was used; the session read path must leave it at zero (#239).
+func (m *nativeTestAgentLoop) allGroupSnapshotsCallCount() int {
+	m.groupSnapshotMu.Lock()
+	defer m.groupSnapshotMu.Unlock()
+	return m.allGroupSnapshotsCalls
 }
 
 func (m *nativeTestAgentLoop) ResolveRoute(channel, peerKind, peerID string) string {

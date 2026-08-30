@@ -531,17 +531,21 @@ func (n *NativeChannel) collectCatchupMessages(sessionKey string, processing boo
 	}}
 }
 
-// sessionGroupSnapshots returns GroupSnapshots whose OriginChatID matches
-// the given sessionKey (after resolving session aliases).
+// sessionGroupSnapshots returns the GroupSnapshots that belong to the given
+// sessionKey, unioning the groups tracked in memory with the persisted store.
+//
+// It delegates the whole lookup to the agent loop (#239): filtering by origin
+// chat, session-alias resolution and the memory/store union all live in
+// GroupManager.SnapshotsForSession, which is the only place with access to both
+// sources. Doing it here from AllGroupSnapshots() — as this did before — could
+// only ever see memory, so a finished group disappeared from the session's
+// history as soon as retention swept it (30 min) or the daemon restarted, and
+// its card never came back even though the transcript was still on disk.
 func (n *NativeChannel) sessionGroupSnapshots(sessionKey string) []group.GroupSnapshot {
-	all := n.agentLoop.AllGroupSnapshots()
-	out := make([]group.GroupSnapshot, 0, len(all))
-	for _, g := range all {
-		if g.OriginChatID == sessionKey || n.agentLoop.ResolveSessionKey(g.OriginChatID) == sessionKey {
-			out = append(out, g)
-		}
+	if n.agentLoop == nil {
+		return nil
 	}
-	return out
+	return n.agentLoop.GroupSnapshotsForSession(sessionKey)
 }
 
 func (n *NativeChannel) sendWelcome(client *WSClient) {

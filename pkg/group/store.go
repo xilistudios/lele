@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/store"
 )
@@ -35,14 +36,22 @@ func getGroupRepo() *store.GroupRepo {
 	return groupRepo
 }
 
+// groupSortsBefore reports whether the group identified by (idA, atA) sorts
+// before (idB, atB): UpdatedAt descending, ID ascending as tie-break. Shared by
+// every listing that clients consume (ListGroups and the per-session read path)
+// so the two can never disagree about the order cards arrive in.
+func groupSortsBefore(idA string, atA time.Time, idB string, atB time.Time) bool {
+	if atA.Equal(atB) {
+		return idA < idB
+	}
+	return atA.After(atB)
+}
+
 // sortGroupsByUpdatedAt sorts states by UpdatedAt descending with
 // tie-break by ID ascending. Reused by both backends.
 func sortGroupsByUpdatedAt(states []*GroupState) {
 	sort.Slice(states, func(i, j int) bool {
-		if states[i].UpdatedAt.Equal(states[j].UpdatedAt) {
-			return states[i].ID < states[j].ID
-		}
-		return states[i].UpdatedAt.After(states[j].UpdatedAt)
+		return groupSortsBefore(states[i].ID, states[i].UpdatedAt, states[j].ID, states[j].UpdatedAt)
 	})
 }
 
