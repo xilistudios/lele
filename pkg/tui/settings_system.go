@@ -176,23 +176,14 @@ func (m *Model) handleSessionEnter() tea.Cmd {
 		m.settingsEditField = "compactionPercent"
 		m.textInput.SetValue(strconv.Itoa(m.cfg.Session.CompactionThresholdPercent))
 		m.textInput.Focus()
-	case 3: // Compaction model — selector from configured providers' models
-		providerName := m.cfg.Agents.Defaults.Provider
-		models := m.listProviderModels(providerName)
-		if len(models) == 0 {
-			// No models configured — fall back to text input
+	case 3: // Compaction model — selector over all configured providers' models
+		labels, values := m.modelSelectorOptions(m.cfg.Session.CompactionModel)
+		if len(values) == 0 {
+			// No providers configured — fall back to text input
 			m.settingsEditField = "compactionModel"
 			m.textInput.SetValue(m.cfg.Session.CompactionModel)
 			m.textInput.Focus()
 		} else {
-			labels := make([]string, 0, len(models)+1)
-			values := make([]string, 0, len(models)+1)
-			labels = append(labels, "(default)")
-			values = append(values, "")
-			for _, model := range models {
-				labels = append(labels, model)
-				values = append(values, model)
-			}
 			m.startSettingsSelector("compactionModel", m.cfg.Session.CompactionModel, labels, values)
 		}
 	}

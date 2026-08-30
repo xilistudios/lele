@@ -207,6 +207,7 @@
   "tui.settings.communityFetchRetry": "Retry fetch",
   "tui.settings.editHint": "Enter to save, Esc to cancel",
   "tui.settings.selectorHint": "↑/↓ select · ENTER confirm · ESC cancel",
+  "tui.settings.selectorCustom": "(custom…)",
   "tui.settings.invalidNumber": "Please enter a valid positive number",
   "tui.settings.session": "Session",
   "tui.settings.tools": "Tools",
