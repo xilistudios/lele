@@ -254,7 +254,7 @@ func TestWrapText_ExactLimitWordNotSplit(t *testing.T) {
 // never cut in half and each output line fits the limit.
 func TestWrapText_WideCJKRunesNotSplitMidRune(t *testing.T) {
 	const limit = 5
-	text := "你好世界测试" // 6 CJK runes, width 2 each = 12 columns
+	text := "\u4f60\u597d\u4e16\u754c\u6d4b\u8bd5" // 6 CJK runes, width 2 each = 12 columns
 	got := wrapText(text, limit)
 
 	if maxLineWidth(got) > limit {

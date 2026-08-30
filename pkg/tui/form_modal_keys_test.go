@@ -75,8 +75,8 @@ func TestQKeyStillClosesNonFormModals(t *testing.T) {
 // text (double-width runes) wraps within the visual column limit instead of
 // the byte length.
 func TestWrapText_CJKVisualWidth(t *testing.T) {
-	// Each "日本語" word is 9 bytes but 6 visual columns.
-	input := "日本語 日本語 日本語"
+	// \u65e5\u672c\u8a9e = 日本語 (each word: 9 bytes, 6 visual columns).
+	input := "\u65e5\u672c\u8a9e \u65e5\u672c\u8a9e \u65e5\u672c\u8a9e"
 	limit := 7 // fits "日本語" (6 cols) but not two words (13 cols)
 	got := wrapText(input, limit)
 

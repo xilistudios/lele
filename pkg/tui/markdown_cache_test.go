@@ -113,10 +113,10 @@ func TestInvalidateRenderCacheClearsStreams(t *testing.T) {
 // compares visual cell width (not byte length) when deciding whether to wrap,
 // so CJK text within the width limit is not wrapped prematurely.
 func TestSimpleMarkdownRenderMultibyteWidth(t *testing.T) {
-	// CJK words: 5 groups of "世世" separated by spaces.
+	// CJK words: 5 groups of "\u4e16\u4e16" separated by spaces.
 	// Total: 20 bytes but visual width 14 (CJK chars are 2 cells wide).
 	// At width 10 it must wrap at word boundaries.
-	cjkWide := "世世 世世 世世 世世 世世"
+	cjkWide := "\u4e16\u4e16 \u4e16\u4e16 \u4e16\u4e16 \u4e16\u4e16 \u4e16\u4e16"
 	got := simpleMarkdownRender(cjkWide, 10)
 	if !strings.Contains(got, "\n") {
 		t.Fatalf("expected CJK line of visual width 14 to wrap at width 10, got: %q", got)
@@ -124,7 +124,7 @@ func TestSimpleMarkdownRenderMultibyteWidth(t *testing.T) {
 
 	// 5 CJK chars: 15 bytes (old len() check would wrap) but visual width 10,
 	// so it fits exactly in width 10: must NOT wrap.
-	cjk10 := strings.Repeat("世", 5)
+	cjk10 := strings.Repeat("\u4e16", 5)
 	got = simpleMarkdownRender(cjk10, 10)
 	if strings.Contains(got, "\n") {
 		t.Fatalf("expected CJK line of visual width 10 to fit in width 10, got wrapped output: %q", got)

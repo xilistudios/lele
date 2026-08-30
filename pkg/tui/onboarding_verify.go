@@ -117,7 +117,7 @@ func checkVerifyBody(body []byte) error {
 		Error json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil || len(payload.Error) == 0 {
-		return nil // not JSON or no error field — tolerant success
+		return nil //nolint:nilerr // not JSON or no error field — tolerant success
 	}
 	var errStr string
 	if json.Unmarshal(payload.Error, &errStr) == nil && errStr != "" {
