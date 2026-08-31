@@ -283,23 +283,28 @@ const DefaultEphemeralThresholdSeconds = 560
 const DefaultCompactionThresholdPercent = 75
 
 type AgentDefaults struct {
-	Workspace              string            `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace    bool              `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	Provider               string            `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
-	Model                  string            `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
-	ModelFallbacks         []string          `json:"model_fallbacks,omitempty"`
-	ImageModel             string            `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks    []string          `json:"image_model_fallbacks,omitempty"`
-	MaxTokens              int               `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature            *float64          `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations      int               `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines           int               `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
-	SubagentTimeoutMinutes int               `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
-	SubagentMaxConcurrent  int               `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
-	SubagentMaxRetries     int               `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`         // max retry attempts for transient failures (0 = no retry)
-	SubagentMaxIterations  int               `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
-	LLMLoopTimeoutMinutes  int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
-	PromptCache            PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
+	Workspace              string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace    bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	Provider               string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
+	Model                  string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
+	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
+	ImageModel             string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
+	MaxTokens              int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature            *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations      int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines           int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
+	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
+	// SubagentMaxRetries bounds re-runs of a subagent whose LLM call failed
+	// transiently. 0 disables retries, but only when reached through config.json:
+	// LoadConfig unmarshals over DefaultConfig, so an explicit 0 in the file wins.
+	// Through the editable document (applyDefaults) 0 cannot be told apart from
+	// unset and inherits the default instead.
+	SubagentMaxRetries    int               `json:"subagent_max_retries" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_RETRIES"`
+	SubagentMaxIterations int               `json:"subagent_max_iterations" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_ITERATIONS"`   // max tool iterations for subagent tasks (0 = unlimited)
+	LLMLoopTimeoutMinutes int               `json:"llm_loop_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_LLM_LOOP_TIMEOUT_MINUTES"` // 0 means no timeout
+	PromptCache           PromptCacheConfig `json:"prompt_cache,omitempty"`                                                       // explicit prompt-cache breakpoints for providers that support them
 }
 
 // PromptCacheConfig controls explicit prompt caching (Anthropic-style
@@ -1013,7 +1018,16 @@ func DefaultConfig() *Config {
 				MaxReadLines:           500,
 				SubagentTimeoutMinutes: 30, // default 30 minutes for subagent tasks
 				SubagentMaxIterations:  0,  // default unlimited for subagent tasks
-				LLMLoopTimeoutMinutes:  0,  // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
+				// SubagentMaxRetries bounds how many times a subagent whose LLM
+				// call failed transiently is re-run. It was 0 by default, which
+				// silently disabled runTask's retry entirely: with no value here,
+				// tool_coordinator's `if > 0` guard never called the setter, so a
+				// single flaky provider response killed the subagent for good.
+				// 2 outer retries is ~3 rounds of full fallback-chain effort (each
+				// attempt already retries internally); SubagentTimeoutMinutes caps
+				// the total wall clock.
+				SubagentMaxRetries:    2,
+				LLMLoopTimeoutMinutes: 0, // default: no LLM loop timeout (0 = disabled; set >0 to opt in)
 			},
 		},
 		Session: SessionConfig{

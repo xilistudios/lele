@@ -511,10 +511,11 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	} else if cfg.Agents.Defaults.SubagentMaxConcurrent > 0 {
 		subagentManager.SetMaxConcurrent(cfg.Agents.Defaults.SubagentMaxConcurrent)
 	}
-	// Set default max retries from global config
-	if cfg.Agents.Defaults.SubagentMaxRetries > 0 {
-		subagentManager.SetDefaultMaxRetries(cfg.Agents.Defaults.SubagentMaxRetries)
-	}
+	// Set default max retries from global config. Unconditional on purpose: the
+	// `> 0` guard this replaces made an explicit 0 depend on SubagentManager's own
+	// zero value also meaning "disabled", an undocumented coupling. Passing the
+	// configured value directly makes 0 mean disabled in exactly one place.
+	subagentManager.SetDefaultMaxRetries(cfg.Agents.Defaults.SubagentMaxRetries)
 	subagentManager.SetAgentContextCallback(func(targetAgentID string) tools.AgentContextInfo {
 		if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
 			return tools.AgentContextInfo{
