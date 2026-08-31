@@ -96,7 +96,6 @@ func transientPolicyCases() []struct {
 func assertDelegatesToProviderPolicy(t *testing.T, name string, fn func(error) bool) {
 	t.Helper()
 	for _, tt := range transientPolicyCases() {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			got := fn(tt.err)
 			if got != tt.want {
