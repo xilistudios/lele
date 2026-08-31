@@ -320,9 +320,51 @@ func TestFallback_EmptyFallbacks(t *testing.T) {
 	}
 }
 
-func TestFallback_UnclassifiedError(t *testing.T) {
+// TestFallback_UnknownErrorFallsBackToNextCandidate replaces the former
+// TestFallback_UnclassifiedError, which asserted that an unrecognised error
+// must abort the chain after a single call. That was the bug: transport
+// failures (unexpected EOF, connection reset, ...) are unrecognised yet fully
+// recoverable, so aborting killed sessions that a retry would have saved.
+// Under default-to-transient an unknown error is retriable and the chain moves
+// on to the next candidate.
+func TestFallback_UnknownErrorFallsBackToNextCandidate(t *testing.T) {
 	ct := NewCooldownTracker()
-	fc := NewFallbackChain(ct)
+	// 1 retry per candidate + ~0s backoff: keeps the test fast while exercising
+	// the (now-backing-off) unknown path.
+	fc := NewFallbackChain(ct).WithRetryConfig(1, time.Millisecond)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	var providersTried []string
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		providersTried = append(providersTried, provider)
+		if provider == "openai" {
+			return nil, errors.New("completely unknown internal error")
+		}
+		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Provider != "anthropic" {
+		t.Errorf("provider = %q, want anthropic (unknown error must not abort the chain)", result.Provider)
+	}
+	if len(providersTried) != 2 {
+		t.Errorf("providersTried = %v, want both candidates", providersTried)
+	}
+}
+
+// TestFallback_WrappedContextCanceledAborts is the counterpart: cancellation is
+// the ONE case ClassifyError still refuses to classify, so the chain must stop
+// without trying the next candidate.
+func TestFallback_WrappedContextCanceledAborts(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryConfig(3, time.Millisecond)
 
 	candidates := []FallbackCandidate{
 		makeCandidate("openai", "gpt-4"),
@@ -332,15 +374,18 @@ func TestFallback_UnclassifiedError(t *testing.T) {
 	attempt := 0
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		attempt++
-		return nil, errors.New("completely unknown internal error")
+		return nil, fmt.Errorf("stream read: %w", context.Canceled)
 	}
 
 	_, err := fc.Execute(context.Background(), candidates, run)
 	if err == nil {
-		t.Fatal("expected error for unclassified error")
+		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 	if attempt != 1 {
-		t.Errorf("attempt = %d, want 1 (should not fallback on unclassified)", attempt)
+		t.Errorf("attempt = %d, want 1 (cancellation must not retry or fallback)", attempt)
 	}
 }
 
@@ -637,10 +682,39 @@ func TestIsRetriableError(t *testing.T) {
 			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverFormat}}},
 			false,
 		},
+		// Updated by T1: a chain where every candidate is in cooldown is not a
+		// failure, it is a "wait, the cooldown will expire". The old `false`
+		// made an all-skipped chain terminal and killed the turn.
 		{
-			"FallbackExhaustedError with only skipped attempts",
+			"FallbackExhaustedError with only skipped attempts (all in cooldown)",
 			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Skipped: true, Reason: FailoverRateLimit}}},
-			false,
+			true,
+		},
+		{
+			"FallbackExhaustedError all skipped with unknown reason",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{
+				{Skipped: true},
+				{Skipped: true, Reason: FailoverUnknown},
+			}},
+			true,
+		},
+		{
+			"FallbackExhaustedError with unknown reason (transient by default)",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: FailoverUnknown}}},
+			true,
+		},
+		{
+			"FallbackExhaustedError with unclassified attempt (empty reason)",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{{Reason: ""}}},
+			true,
+		},
+		{
+			"FallbackExhaustedError mixed: terminal + unknown",
+			&FallbackExhaustedError{Attempts: []FallbackAttempt{
+				{Reason: FailoverAuth},
+				{Reason: FailoverUnknown},
+			}},
+			true,
 		},
 		{
 			"FallbackExhaustedError mixed: skipped + retriable",
@@ -665,10 +739,22 @@ func TestIsRetriableError(t *testing.T) {
 			&FailoverError{Reason: FailoverFormat},
 			false,
 		},
+		// The bug-catch case: an unrecognised error used to be reported as
+		// non-retriable (false) and ended the agent's turn.
 		{
-			"generic error",
+			"generic error is transient by default",
+			errors.New("weird sdk failure xyz"),
+			true,
+		},
+		{
+			"generic error boom",
 			errors.New("boom"),
-			false,
+			true,
+		},
+		{
+			"wrapped generic error",
+			fmt.Errorf("call failed: %w", errors.New("totally novel provider failure")),
+			true,
 		},
 		{
 			"wrapped FallbackExhaustedError (errors.As)",
@@ -790,5 +876,82 @@ func TestFallback_MultipleCandidatesNoReduction(t *testing.T) {
 	// With 2 candidates the full retry budget is used.
 	if openaiCalls != 10 {
 		t.Errorf("openaiCalls = %d, want 10 (full retry budget with fallback)", openaiCalls)
+	}
+}
+
+// ============================================================================
+// IsRetriableError: default-to-transient blacklist (T1)
+// ============================================================================
+
+func TestIsRetriableError_AllSkippedCooldownIsTransient(t *testing.T) {
+	// Every candidate in cooldown: nothing was actually tried, and cooldowns
+	// expire, so the caller must keep retrying instead of aborting the turn.
+	err := &FallbackExhaustedError{Attempts: []FallbackAttempt{
+		{Provider: "openai", Model: "gpt-4", Skipped: true, Reason: FailoverRateLimit},
+		{Provider: "anthropic", Model: "claude", Skipped: true, Reason: FailoverRateLimit},
+	}}
+	if !IsRetriableError(err) {
+		t.Error("all-skipped chain must be retriable (cooldown is transient)")
+	}
+}
+
+func TestIsRetriableError_TransportErrorsAreTransient(t *testing.T) {
+	// Real strings seen in production logs; each one killed a session before T1.
+	msgs := []string{
+		"unexpected EOF",
+		"read tcp 10.0.0.5:443->1.2.3.4:443: connection reset by peer",
+		"dial tcp: lookup api.openai.com: no such host",
+		"net/http: TLS handshake timeout",
+		`malformed HTTP response "\x00\x12"`,
+		"stream disconnected before completion",
+		"EOF",
+		"openai: go stream error",
+	}
+	for _, msg := range msgs {
+		err := fmt.Errorf("provider request failed: %w", errors.New(msg))
+		if !IsRetriableError(err) {
+			t.Errorf("IsRetriableError(%q) = false, want true", msg)
+		}
+	}
+}
+
+func TestIsRetriableError_TerminalBlacklist(t *testing.T) {
+	// The ONLY non-retriable inputs: cancellation plus explicitly terminal
+	// reasons. Everything else is transient by default.
+	terminal := []error{
+		context.Canceled,
+		fmt.Errorf("wrap: %w", context.Canceled),
+		errors.New("context canceled"),
+		&FailoverError{Reason: FailoverFormat},
+		fmt.Errorf("outer: %w", &FailoverError{Reason: FailoverFormat}),
+		&FallbackExhaustedError{Attempts: []FallbackAttempt{
+			{Reason: FailoverFormat},
+			{Reason: FailoverAuth},
+			{Reason: FailoverBilling},
+		}},
+		errors.New("API request failed:\n  Status: 401\n  Body: invalid api key"),
+		errors.New("API request failed:\n  Status: 402\n  Body: insufficient credits"),
+		errors.New("API request failed:\n  Status: 400\n  Body: invalid request format"),
+	}
+	for _, err := range terminal {
+		if IsRetriableError(err) {
+			t.Errorf("IsRetriableError(%v) = true, want false (terminal)", err)
+		}
+	}
+
+	// A bare FailoverError with an auth/billing reason is terminal for THAT
+	// provider but still candidate-swappable (FailoverError.IsRetriable), so it
+	// reports true here by design: the chain may still have work left. Only a
+	// chain whose every attempt is terminal is a dead end (covered above).
+	for _, r := range []FailoverReason{FailoverAuth, FailoverBilling} {
+		if !IsRetriableError(&FailoverError{Reason: r}) {
+			t.Errorf("FailoverError(%s) must be retriable for the chain (next candidate)", r)
+		}
+	}
+}
+
+func TestIsRetriableError_NilIsFalse(t *testing.T) {
+	if IsRetriableError(nil) {
+		t.Error("nil error must not be retriable")
 	}
 }

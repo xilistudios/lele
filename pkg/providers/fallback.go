@@ -175,6 +175,10 @@ func (fc *FallbackChain) Execute(
 		// Classify the error.
 		failErr := ClassifyError(err, candidate.Provider, candidate.Model)
 
+		// Guard kept for symmetry only: after default-to-transient, ClassifyError
+		// returns nil exclusively for context cancellation, which is already
+		// handled by the ctx.Err() checks above. So this branch is effectively
+		// dead but harmless; the retry budget around it belongs to T3.
 		if failErr == nil {
 			// Unclassifiable error: do not fallback, return immediately.
 			result.Attempts = append(result.Attempts, FallbackAttempt{
@@ -413,19 +417,36 @@ func (e *FallbackExhaustedError) Error() string {
 }
 
 // IsRetriableError reports whether a (possibly wrapped) error returned by the
-// fallback chain represents a transient failure worth retrying. Context
-// cancellation and non-retriable reasons (e.g. format) return false.
+// fallback chain represents a transient failure worth retrying.
+//
+// It is default-to-transient: only an explicit blacklist of terminal cases
+// returns false. A whitelist ("retry only timeout/rate_limit/overloaded") was
+// the original bug - every transport error that was not enumerated (unexpected
+// EOF, connection reset, no such host, malformed HTTP response, SDK stream
+// errors, ...) fell through to false and killed the agent's turn even though it
+// was fully recoverable. With a blacklist, adding a new provider or SDK can
+// never reintroduce the bug: an unrecognised failure is retried by default.
 func IsRetriableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) {
+	// User abort (/stop) or cancelled run: terminal, never retried.
+	if isCancellation(err) {
 		return false
 	}
 	var exhausted *FallbackExhaustedError
 	if errors.As(err, &exhausted) {
+		// Retriable if any attempt was retriable OR merely skipped: a chain
+		// where every candidate is in cooldown is not a failure, it is a
+		// "wait and try again" - the cooldown will expire. Only a chain whose
+		// attempts are all terminal (format) is a genuine dead end.
 		for _, a := range exhausted.Attempts {
-			if !a.Skipped && a.Reason != "" && a.Reason != FailoverFormat {
+			if a.Skipped {
+				return true
+			}
+			// An empty reason means the attempt was never classified (the image
+			// chain records raw errors); default-to-transient applies.
+			if a.Reason == "" || !isTerminalReason(a.Reason) {
 				return true
 			}
 		}
@@ -435,17 +456,12 @@ func IsRetriableError(err error) bool {
 	if errors.As(err, &fe) {
 		return fe.IsRetriable()
 	}
-	// Unclassified transport errors. The non-streaming path returns a raw
-	// *url.Error (e.g. "context deadline exceeded", "TLS handshake timeout")
-	// that is never wrapped in a FailoverError, so without this a single
-	// timeout would abort the whole agent run with no retry. Only reasons that
-	// are genuinely transient are retried; auth/billing/format failures fail
-	// fast so a misconfiguration is never hammered.
-	if classified := ClassifyError(err, "", ""); classified != nil {
-		switch classified.Reason {
-		case FailoverTimeout, FailoverRateLimit, FailoverOverloaded:
-			return true
-		}
+	// Anything else (raw *url.Error, SDK errors, plain errors): ask the
+	// classifier and reject only the terminal reasons. ClassifyError now
+	// defaults unknown errors to FailoverUnknown, so the retriable branch is
+	// the fall-through rather than a list of known-good reasons.
+	if classified := ClassifyError(err, "", ""); classified != nil && classified.IsTerminal() {
+		return false
 	}
-	return false
+	return true
 }

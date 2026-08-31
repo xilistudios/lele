@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 )
@@ -70,6 +71,44 @@ var (
 		substr("no api key found"),
 	}
 
+	// networkPatterns covers transport-level failures: Go's net/http, the TLS
+	// stack, the DNS resolver and the error strings SDKs emit when the wire
+	// breaks mid-stream. None of them say anything about the request being
+	// wrong or the credentials being bad, so they are all transient and are
+	// mapped to FailoverTimeout (which already means "retry with backoff").
+	//
+	// This group exists because a *missing* classification used to be fatal:
+	// see ClassifyError, which now defaults unknown errors to transient.
+	// Deliberately avoids the word "expired" (authPatterns matches it) and any
+	// form of "canceled", which stays terminal (see isCancellation).
+	networkPatterns = []errorPattern{
+		substr("unexpected eof"),
+		substr("eof"),
+		substr("connection reset"),
+		substr("connection refused"),
+		substr("broken pipe"),
+		substr("no such host"),
+		substr("server misbehaving"),
+		substr("network is unreachable"),
+		substr("connection semiclosed"),
+		substr("use of closed network connection"),
+		substr("tls handshake"),
+		substr("tls: use of closed connection"),
+		substr("malformed http response"),
+		substr("http: server gave whitespace"),
+		substr("wsarecv"),
+		substr("wsasend"),
+		substr("operation timed out"),
+		substr("i/o timeout"),
+		substr("read: connection"),
+		substr("dial tcp"),
+		substr("stream disconnected"),
+		substr("stream ended before completion"),
+		substr("go stream error"),
+		substr("incomplete json"),
+		substr("unexpected end of json input"),
+	}
+
 	formatPatterns = []errorPattern{
 		substr("string should match pattern"),
 		substr("tool_use.id"),
@@ -95,19 +134,30 @@ var (
 )
 
 // ClassifyError classifies an error into a FailoverError with reason.
-// Returns nil if the error is not classifiable (unknown errors should not trigger fallback).
+//
+// Default-to-transient: an error that matches no known pattern is classified as
+// FailoverUnknown, which callers treat as retriable. Returning nil for unknown
+// errors used to be fatalistic - it made FallbackChain abort without trying the
+// next candidate and killed the agent's transient-retry loop on perfectly
+// recoverable transport failures (unexpected EOF, connection reset, TLS
+// handshake timeout, malformed HTTP responses, ...).
+//
+// nil is returned only for:
+//   - err == nil
+//   - context cancellation (user abort / /stop), which is always terminal.
 func ClassifyError(err error, provider, model string) *FailoverError {
 	if err == nil {
 		return nil
 	}
 
-	// Context cancellation: user abort, never fallback.
-	if err == context.Canceled {
+	// Context cancellation: user abort, never fallback. errors.Is (plus the
+	// canonical message) so a fmt.Errorf("%w") wrapper cannot escape it.
+	if isCancellation(err) {
 		return nil
 	}
 
 	// Context deadline exceeded: treat as timeout, always fallback.
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return &FailoverError{
 			Reason:   FailoverTimeout,
 			Provider: provider,
@@ -151,7 +201,50 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 		}
 	}
 
-	return nil
+	// Context-window overflow is evaluated LAST among the known reasons, on
+	// purpose: its generic patterns ("token limit", "too long", "context
+	// length") also occur inside quota and rate-limit bodies, e.g.
+	// "429 ... you exceeded your daily token limit". Checking overflow earlier
+	// would eclipse those and mark a transient quota error as terminal, which
+	// is precisely the failure mode this file exists to eliminate.
+	//
+	// The payload is too large for the model, so the failure repeats identically
+	// no matter how often it is retried or which candidate receives it; it is a
+	// request-size problem like the image cases above, hence FailoverFormat.
+	// Without this branch the error would fall through to FailoverUnknown and
+	// the chain would burn its whole retry budget on an oversized prompt instead
+	// of surfacing it to the caller's summarization/compaction path, which is the
+	// only thing that can actually fix it (see llmCaller.executeWithRetry).
+	if IsContextOverflowError(err) {
+		return &FailoverError{
+			Reason:   FailoverFormat,
+			Provider: provider,
+			Model:    model,
+			Wrapped:  err,
+		}
+	}
+
+	// Unknown error: assume transient. Retrying a hiccup is cheap; killing a
+	// session because we did not recognise a string is not.
+	return &FailoverError{
+		Reason:   FailoverUnknown,
+		Provider: provider,
+		Model:    model,
+		Wrapped:  err,
+	}
+}
+
+// isCancellation reports whether err represents a context cancellation, which
+// is always terminal (the user pressed /stop or the run was aborted).
+//
+// errors.Is covers sentinels wrapped with %w (including *url.Error, which
+// unwraps to its transport error). The message check covers SDKs that flatten
+// the cancellation into a plain string and lose the sentinel.
+func isCancellation(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "context canceled")
 }
 
 // classifyByStatus maps HTTP status codes to FailoverReason.
@@ -186,6 +279,15 @@ func classifyByMessage(msg string) FailoverReason {
 		return FailoverBilling
 	}
 	if matchesAny(msg, timeoutPatterns) {
+		return FailoverTimeout
+	}
+	// Transport failures are transient: mapped to timeout so they get the same
+	// backoff/retry treatment instead of failing fast. Placed after the
+	// provider-facing groups (rate_limit/overloaded/billing/timeout) so a body
+	// that mentions both "429" and a broken pipe is still a rate limit, and
+	// before auth/format so "TLS handshake timeout" never reads as a
+	// credential problem.
+	if matchesAny(msg, networkPatterns) {
 		return FailoverTimeout
 	}
 	if matchesAny(msg, authPatterns) {
