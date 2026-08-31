@@ -39,7 +39,17 @@ type SubagentTask struct {
 	MaxRetries       int           // maximum number of automatic retry attempts for transient failures
 	RetryCount       int           // current number of retry attempts made
 	delivered        bool          // tracks whether result was already consumed via wait_for_subagent
-	mu               *sync.Mutex   // protects doneCh and delivered from concurrent access
+	// lastErr is the raw error from the most recent run of this task, kept so
+	// the retry decision can ask the provider layer's classifier instead of
+	// pattern-matching the rendered Result string. Invariant: it is set ONLY by
+	// the generic error branch of runTaskImpl; the timeout and cancellation
+	// branches deliberately leave it nil, and nil means NOT transient - a
+	// subagent that burned its whole SubagentTimeoutMinutes must not get that
+	// budget again. It is cleared whenever a run starts or restarts, and on
+	// success. Unexported and never JSON-marshalled; Snapshot's value copy
+	// carries it, which is fine for a read-only error reference.
+	lastErr error
+	mu      *sync.Mutex // protects doneCh and delivered from concurrent access
 }
 
 // DoneChannel returns the done channel for this task.

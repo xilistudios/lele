@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/logger"
@@ -31,55 +30,32 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 // isRetryableError determines if an error is worth retrying.
-// Returns true for timeouts, rate limits, and transient server errors.
+//
+// It delegates to providers.IsRetriableError, the single source of truth for
+// "was this LLM failure transient?". The parent agent loop (pkg/agent) already
+// asks that predicate; this function used to carry its own whitelist of ~20
+// substrings over err.Error(), so the SAME error could be transient for the
+// parent and fatal for a subagent. A whitelist is also structurally wrong: any
+// transport failure it did not enumerate (unexpected EOF variants, TLS
+// handshake timeout, "no such host", SDK stream errors, ...) fell through to
+// false and killed the session, even though it is fully recoverable.
+//
+// providers.IsRetriableError is default-to-transient with an explicit terminal
+// blacklist (cancellation, format/auth/billing-only chains), so adding a new
+// provider can never reintroduce that bug.
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-
-	errMsg := strings.ToLower(err.Error())
-
-	// Timeouts - server didn't respond in time
-	if strings.Contains(errMsg, "timeout") ||
-		strings.Contains(errMsg, "deadline exceeded") ||
-		strings.Contains(errMsg, "context deadline exceeded") {
-		return true
-	}
-
-	// Rate limiting
-	if strings.Contains(errMsg, "429") ||
-		strings.Contains(errMsg, "rate limit") ||
-		strings.Contains(errMsg, "too many requests") {
-		return true
-	}
-
-	// Transient server errors (5xx)
-	if strings.Contains(errMsg, "500") ||
-		strings.Contains(errMsg, "502") ||
-		strings.Contains(errMsg, "503") ||
-		strings.Contains(errMsg, "504") ||
-		strings.Contains(errMsg, "bad gateway") ||
-		strings.Contains(errMsg, "service unavailable") ||
-		strings.Contains(errMsg, "gateway timeout") {
-		return true
-	}
-
-	// Connection errors (transient network issues)
-	if strings.Contains(errMsg, "connection refused") ||
-		strings.Contains(errMsg, "connection reset") ||
-		strings.Contains(errMsg, "broken pipe") ||
-		strings.Contains(errMsg, "i/o timeout") {
-		return true
-	}
-
-	// EOF or unexpected EOF (connection closed prematurely)
-	if strings.Contains(errMsg, "unexpected eof") ||
-		strings.Contains(errMsg, "unexpected end of") {
-		return true
-	}
-
-	return false
+	return providers.IsRetriableError(err)
 }
+
+// retrySleep is the seam used for every backoff wait in this package (the
+// per-call retry loop below and the subagent task retry in subagent_runner.go).
+// It exists only so tests can run retry paths without real wall-clock sleeps;
+// production always uses time.After, which the callers already select on
+// alongside ctx.Done(), so cancellation behaviour is unchanged.
+var retrySleep = time.After
 
 // calculateDelay computes the delay for a given retry attempt using exponential backoff.
 func calculateDelay(config RetryConfig, attempt int) time.Duration {
@@ -91,7 +67,8 @@ func calculateDelay(config RetryConfig, attempt int) time.Duration {
 }
 
 // ChatWithRetry wraps a provider's Chat call with retry logic.
-// It will automatically retry on transient errors (timeouts, rate limits, 5xx).
+// It retries only errors that providers.IsRetriableError considers transient
+// (see isRetryableError), unless RetryOnAll is set.
 func ChatWithRetry(
 	ctx context.Context,
 	provider providers.LLMProvider,
@@ -158,7 +135,7 @@ func ChatWithRetry(
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(delay):
+		case <-retrySleep(delay):
 		}
 	}
 

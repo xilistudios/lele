@@ -70,8 +70,7 @@ func (t *SpawnTool) Parameters() map[string]interface{} {
 			},
 			"max_retries": map[string]interface{}{
 				"type":        "integer",
-				"description": "Maximum automatic retry attempts for transient failures (default: 0)",
-				"default":     0,
+				"description": "Maximum automatic retry attempts for transient failures. Omitted or non-positive values fall back to the configured default (agents.defaults.subagent_max_retries, default 2).",
 			},
 		},
 	}

@@ -10,6 +10,26 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 )
 
+// subagentFailureReason maps a provider FailoverReason to the human-readable
+// explanation attached to the subagent failure log. The error type itself is
+// the reason string (e.g. "rate_limit", "timeout", "unknown"), so logs, the
+// rendered task result and the retry decision all speak the provider layer's
+// vocabulary.
+//
+// There is no "connection_error" reason: transport failures are classified as
+// "timeout" by providers.ClassifyError, or fall through to "unknown". Both are
+// transient, so the subagent retries them - which is exactly what the old
+// hand-rolled taxonomy got wrong.
+var subagentFailureReason = map[providers.FailoverReason]string{
+	providers.FailoverRateLimit:  "API rate limit exceeded",
+	providers.FailoverTimeout:    "HTTP request timeout (server did not respond in time)",
+	providers.FailoverOverloaded: "provider overloaded",
+	providers.FailoverAuth:       "authentication failed",
+	providers.FailoverBilling:    "provider billing issue",
+	providers.FailoverFormat:     "request rejected as malformed",
+	providers.FailoverUnknown:    "unexpected error during LLM call or tool execution",
+}
+
 // resolveAgentConfig resolves the agent's provider, model, system prompt, max iterations,
 // LLM options, and context window from the SubagentManager's configuration and the
 // target agent's context callback. Both runTask and SubagentTool use this method
@@ -120,14 +140,26 @@ func extractProgress(raw string) string {
 	return ""
 }
 
-// isTransientFailure checks if a task's result string indicates a transient failure
-// that may be worth retrying.
-func isTransientFailure(result string) bool {
-	lower := strings.ToLower(result)
-	return strings.Contains(lower, "rate_limited") ||
-		strings.Contains(lower, "connection_error") ||
-		strings.Contains(lower, "http_timeout") ||
-		strings.Contains(lower, "server_error")
+// isTransientFailure reports whether the error from a task's last run is worth
+// retrying at the subagent level.
+//
+// It delegates to providers.IsRetriableError - the same policy the parent agent
+// loop uses (pkg/agent/llm_runner.go) - so a failure can never be transient for
+// the parent and fatal for a subagent. The previous version matched four
+// literal tokens ("rate_limited", "connection_error", "http_timeout",
+// "server_error") against task.Result, a *rendered* string produced by
+// runTaskImpl, which (a) missed every error the token list did not enumerate
+// and (b) silently broke whenever the rendered taxonomy changed.
+//
+// Invariant: a nil error means NOT transient. The timeout and cancellation
+// branches of runTaskImpl deliberately leave task.lastErr nil, so a subagent
+// that burned its whole SubagentTimeoutMinutes is never handed that budget
+// again.
+func isTransientFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	return providers.IsRetriableError(err)
 }
 
 // runTask is the public entry point for running a subagent task.
@@ -135,9 +167,13 @@ func isTransientFailure(result string) bool {
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
 	sm.runTaskImpl(ctx, task, callback)
 
-	// After runTaskImpl completes, check if we should retry
+	// After runTaskImpl completes, check if we should retry.
+	//
+	// The decision uses task.lastErr (the raw error), never the rendered
+	// task.Result string: see isTransientFailure. A nil lastErr (timeout,
+	// cancellation) is terminal by design.
 	sm.mu.Lock()
-	if task.Status == SubagentStatusFailed && task.MaxRetries > 0 && task.RetryCount < task.MaxRetries && isTransientFailure(task.Result) {
+	if task.Status == SubagentStatusFailed && task.MaxRetries > 0 && task.RetryCount < task.MaxRetries && isTransientFailure(task.lastErr) {
 		task.RetryCount++
 		backoff := time.Duration(task.RetryCount) * 5 * time.Second
 		if backoff > 60*time.Second {
@@ -150,10 +186,15 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 				"retry_count": task.RetryCount,
 				"max_retries": task.MaxRetries,
 				"backoff":     backoff.String(),
+				"error":       task.lastErr.Error(),
 				"result":      task.Result,
 			})
 
 		task.Status = SubagentStatusRunning
+		// Clear the error this retry is responding to: a run must never be
+		// judged on a previous attempt's failure (and a nil lastErr means
+		// "nothing pending", see isTransientFailure).
+		task.lastErr = nil
 		task.Updated = time.Now().UnixMilli()
 		sm.mu.Unlock()
 
@@ -168,7 +209,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			sm.mu.Unlock()
 			task.SignalDone()
 			return
-		case <-time.After(backoff):
+		case <-retrySleep(backoff):
 		}
 
 		// Recursive retry
@@ -187,6 +228,11 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	sm.mu.Lock()
 	previousTask := *task
 	task.Status = SubagentStatusRunning
+	// A fresh run has no pending failure: clear lastErr so this attempt is
+	// never judged on the previous one's error (covers the pending->running
+	// transition, dependency release, and any entry that did not go through
+	// the runTask retry branch).
+	task.lastErr = nil
 	task.Updated = time.Now().UnixMilli()
 	timeout := sm.timeout
 	sm.mu.Unlock()
@@ -442,34 +488,26 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 			task.Summary = "Task cancelled during execution"
 			task.Result = "Task cancelled during execution"
 		} else {
-			// Check for specific error patterns in the error message
-			errMsg := strings.ToLower(err.Error())
-			switch {
-			case strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline exceeded"):
-				errType = "http_timeout"
-				errDetails["reason"] = "HTTP request timeout (server did not respond in time)"
-				logger.ErrorCF("subagent", "Subagent FAILED: HTTP timeout - server did not respond",
-					errDetails)
-			case strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "429"):
-				errType = "rate_limited"
-				errDetails["reason"] = "API rate limit exceeded"
-				logger.ErrorCF("subagent", "Subagent FAILED: rate limited by API",
-					errDetails)
-			case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host"):
-				errType = "connection_error"
-				errDetails["reason"] = "cannot connect to LLM API endpoint"
-				logger.ErrorCF("subagent", "Subagent FAILED: connection error to LLM API",
-					errDetails)
-			case strings.Contains(errMsg, "500") || strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503"):
-				errType = "server_error"
-				errDetails["reason"] = "LLM API server error (5xx)"
-				logger.ErrorCF("subagent", "Subagent FAILED: LLM API server error",
-					errDetails)
-			default:
-				errDetails["reason"] = "unexpected error during LLM call or tool execution"
-				logger.ErrorCF("subagent", "Subagent FAILED: unexpected error",
-					errDetails)
+			// Derive the error type from the provider layer's classifier.
+			//
+			// The switch this replaces re-implemented providers.ClassifyError
+			// with its own substring list, and its default branch produced
+			// "unknown" - a token the retry whitelist rejected, so any error the
+			// list missed was fatal even when the parent would have retried it.
+			// One classifier now serves logging, the rendered task result, and
+			// the retry decision, and they cannot drift apart.
+			reason := providers.FailoverUnknown
+			if fe := providers.ClassifyError(err, "", ""); fe != nil {
+				reason = fe.Reason
 			}
+			errType = string(reason)
+			errDetails["reason"] = subagentFailureReason[reason]
+			logger.ErrorCF("subagent", "Subagent FAILED: "+errType, errDetails)
+
+			// The ONLY branch that records lastErr: runTask's retry decision
+			// reads the raw error (see isTransientFailure for why nil means
+			// "do not retry").
+			task.lastErr = err
 		}
 
 		task.Status = SubagentStatusFailed
@@ -492,6 +530,8 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		task.Result = outcome.Details
 		task.ContextRequest = outcome.ContextRequest
 		task.Iterations = loopResult.Iterations
+		// A completed run leaves no pending failure behind.
+		task.lastErr = nil
 		task.Updated = time.Now().UnixMilli()
 
 		// Extract intermediate progress from the subagent output

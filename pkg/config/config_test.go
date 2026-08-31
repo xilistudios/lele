@@ -1003,3 +1003,67 @@ func TestHasUsableProvider(t *testing.T) {
 		})
 	}
 }
+
+// TestDefaultConfig_SubagentMaxRetries pins the default that makes runTask's
+// retry reachable. It was absent from DefaultConfig, so SubagentMaxRetries was
+// the zero value and the subagent retry loop could never fire: a single flaky
+// provider response killed the subagent permanently.
+func TestDefaultConfig_SubagentMaxRetries(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.Agents.Defaults.SubagentMaxRetries != 2 {
+		t.Errorf("SubagentMaxRetries = %d, want 2 (0 disables subagent retries entirely)",
+			cfg.Agents.Defaults.SubagentMaxRetries)
+	}
+}
+
+// TestApplyDefaults_SubagentMaxRetries covers the editable-document path: unset
+// inherits 2, an explicit non-zero value is preserved.
+//
+// Known limitation asserted rather than hidden: on this path an explicit 0 is
+// indistinguishable from unset, because applyDefaults uses the same `== 0` test
+// as every other numeric default. 0 is therefore a no-op yielding the default 2,
+// not "retries disabled". Disabling on this path requires a sentinel type (*int),
+// out of scope here; TestLoadConfig_SubagentMaxRetriesZeroPinned covers the
+// config.json path, where an explicit 0 does win.
+func TestApplyDefaults_SubagentMaxRetries(t *testing.T) {
+	t.Run("unset inherits default", func(t *testing.T) {
+		doc := defaultEditableDocument()
+		doc.Agents.Defaults.SubagentMaxRetries = 0
+		applyDefaults(doc)
+		if got := doc.Agents.Defaults.SubagentMaxRetries; got != 2 {
+			t.Errorf("SubagentMaxRetries = %d, want 2", got)
+		}
+	})
+
+	t.Run("explicit value preserved", func(t *testing.T) {
+		doc := defaultEditableDocument()
+		doc.Agents.Defaults.SubagentMaxRetries = 5
+		applyDefaults(doc)
+		if got := doc.Agents.Defaults.SubagentMaxRetries; got != 5 {
+			t.Errorf("SubagentMaxRetries = %d, want 5", got)
+		}
+	})
+}
+
+// TestLoadConfig_SubagentMaxRetriesZeroPinned is the other half of the "0 means
+// disabled" contract: LoadConfig starts from DefaultConfig and unmarshals the
+// file over it, so an explicit 0 in config.json survives and really does disable
+// retries. Without this, changing the default to 2 would have silently removed
+// the user's only way to turn the retry loop off.
+func TestLoadConfig_SubagentMaxRetriesZeroPinned(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.json")
+
+	if err := os.WriteFile(path, []byte(`{"agents":{"defaults":{"subagent_max_retries":0}}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if got := loaded.Agents.Defaults.SubagentMaxRetries; got != 0 {
+		t.Errorf("SubagentMaxRetries = %d, want 0 (explicit 0 must disable retries)", got)
+	}
+}

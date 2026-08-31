@@ -479,6 +479,9 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 
 	task.Guidance = append(task.Guidance, guidance)
 	task.Status = SubagentStatusRunning
+	// A resumed run starts clean: the previous needs_context outcome is not a
+	// failure, and a stale lastErr must never influence a later retry decision.
+	task.lastErr = nil
 	task.Updated = time.Now().UnixMilli()
 	// Reset the done channel so wait_for_subagent does not immediately
 	// observe the closed channel from the previous run and return stale

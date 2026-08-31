@@ -88,9 +88,16 @@ func TestIsRetryableError_Timeout(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:     "bad request - not retryable",
+			// Updated by T8: the old whitelist called every "400" terminal.
+			// providers.IsRetriableError is default-to-transient and this string
+			// carries no HTTP status the classifier can parse, so it is now
+			// retried - matching what the parent agent loop already does with
+			// the same error. A genuinely malformed request is still terminal,
+			// but only when it classifies as format (see the delegation table in
+			// subagent_retry_test.go).
+			name:     "unclassifiable 400 - transient by default",
 			err:      errors.New("400 Bad Request: invalid model"),
-			expected: false,
+			expected: true,
 		},
 		{
 			name:     "nil error",

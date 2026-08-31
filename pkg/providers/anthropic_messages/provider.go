@@ -141,29 +141,34 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	// Check for HTTP errors with detailed messages
-	switch resp.StatusCode {
-	case http.StatusUnauthorized:
-		return nil, fmt.Errorf("authentication failed (401): check your API key")
-	case http.StatusTooManyRequests:
-		return nil, fmt.Errorf("rate limited (429): %s", string(body))
-	case http.StatusBadRequest:
-		return nil, fmt.Errorf("bad request (400): %s", string(body))
-	case http.StatusNotFound:
-		return nil, fmt.Errorf("endpoint not found (404): %s", string(body))
-	case http.StatusInternalServerError:
-		return nil, fmt.Errorf("internal server error (500): %s", string(body))
-	case http.StatusServiceUnavailable:
-		return nil, fmt.Errorf("service unavailable (503): %s", string(body))
-	default:
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
-
-		}
+	// Check for HTTP errors with detailed messages.
+	//
+	// Every branch returns a structured *common.APIError: the per-status
+	// messages below are this provider's historical wording and are kept
+	// verbatim through APIError.Message, while the status code and the
+	// server's Retry-After hint travel as data. The 429 case is the whole
+	// point: it is the one status whose hint must survive to the backoff.
+	if resp.StatusCode == http.StatusOK {
+		return parseResponseBody(body)
 	}
 
-	// Parse response
-	return parseResponseBody(body)
+	apiErr := common.NewAPIError(resp, body, endpointURL)
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		apiErr.Message = "authentication failed (401): check your API key"
+	case http.StatusTooManyRequests:
+		apiErr.Message = fmt.Sprintf("rate limited (429): %s", string(body))
+	case http.StatusBadRequest:
+		apiErr.Message = fmt.Sprintf("bad request (400): %s", string(body))
+	case http.StatusNotFound:
+		apiErr.Message = fmt.Sprintf("endpoint not found (404): %s", string(body))
+	case http.StatusInternalServerError:
+		apiErr.Message = fmt.Sprintf("internal server error (500): %s", string(body))
+	case http.StatusServiceUnavailable:
+		apiErr.Message = fmt.Sprintf("service unavailable (503): %s", string(body))
+	}
+
+	return nil, apiErr
 }
 
 // ChatStream sends messages to the Anthropic Messages API with streaming (SSE).
@@ -217,7 +222,8 @@ func (p *Provider) ChatStream(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
+		// Structured error, see Chat().
+		return nil, common.NewAPIError(resp, body, endpointURL)
 	}
 
 	streamBody := common.NewIdleTimeoutReader(resp.Body, common.DefaultStreamIdleTimeout)

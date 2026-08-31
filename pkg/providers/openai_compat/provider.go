@@ -147,7 +147,12 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s", resp.StatusCode, string(body))
+		// Structured error: keeps the historical message text (no URL line, no
+		// body truncation - both are this provider's observable behaviour) but
+		// carries the status code and the server's Retry-After hint so the
+		// classifier does not have to rebuild them from the message string.
+		// See common.APIError.
+		return nil, common.NewAPIError(resp, body, "")
 	}
 
 	return parseResponse(body)
@@ -244,7 +249,11 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed(OpenIA):\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), req.URL)
+		// Structured error, same as Chat(). The old message carried a
+		// "(OpenIA)" typo in its first line; nothing parses that string (only
+		// the "Status: %d" pattern does, which the canonical format preserves),
+		// so the two error paths now emit one identical shape.
+		return nil, common.NewAPIError(resp, body, req.URL.String())
 
 	}
 

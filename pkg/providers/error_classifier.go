@@ -2,8 +2,10 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // errorPattern defines a single pattern (string or regex) for error classification.
@@ -70,6 +72,44 @@ var (
 		substr("no api key found"),
 	}
 
+	// networkPatterns covers transport-level failures: Go's net/http, the TLS
+	// stack, the DNS resolver and the error strings SDKs emit when the wire
+	// breaks mid-stream. None of them say anything about the request being
+	// wrong or the credentials being bad, so they are all transient and are
+	// mapped to FailoverTimeout (which already means "retry with backoff").
+	//
+	// This group exists because a *missing* classification used to be fatal:
+	// see ClassifyError, which now defaults unknown errors to transient.
+	// Deliberately avoids the word "expired" (authPatterns matches it) and any
+	// form of "canceled", which stays terminal (see isCancellation).
+	networkPatterns = []errorPattern{
+		substr("unexpected eof"),
+		substr("eof"),
+		substr("connection reset"),
+		substr("connection refused"),
+		substr("broken pipe"),
+		substr("no such host"),
+		substr("server misbehaving"),
+		substr("network is unreachable"),
+		substr("connection semiclosed"),
+		substr("use of closed network connection"),
+		substr("tls handshake"),
+		substr("tls: use of closed connection"),
+		substr("malformed http response"),
+		substr("http: server gave whitespace"),
+		substr("wsarecv"),
+		substr("wsasend"),
+		substr("operation timed out"),
+		substr("i/o timeout"),
+		substr("read: connection"),
+		substr("dial tcp"),
+		substr("stream disconnected"),
+		substr("stream ended before completion"),
+		substr("go stream error"),
+		substr("incomplete json"),
+		substr("unexpected end of json input"),
+	}
+
 	formatPatterns = []errorPattern{
 		substr("string should match pattern"),
 		substr("tool_use.id"),
@@ -95,25 +135,46 @@ var (
 )
 
 // ClassifyError classifies an error into a FailoverError with reason.
-// Returns nil if the error is not classifiable (unknown errors should not trigger fallback).
+//
+// Default-to-transient: an error that matches no known pattern is classified as
+// FailoverUnknown, which callers treat as retriable. Returning nil for unknown
+// errors used to be fatalistic - it made FallbackChain abort without trying the
+// next candidate and killed the agent's transient-retry loop on perfectly
+// recoverable transport failures (unexpected EOF, connection reset, TLS
+// handshake timeout, malformed HTTP responses, ...).
+//
+// nil is returned only for:
+//   - err == nil
+//   - context cancellation (user abort / /stop), which is always terminal.
 func ClassifyError(err error, provider, model string) *FailoverError {
 	if err == nil {
 		return nil
 	}
 
-	// Context cancellation: user abort, never fallback.
-	if err == context.Canceled {
+	// Context cancellation: user abort, never fallback. errors.Is (plus the
+	// canonical message) so a fmt.Errorf("%w") wrapper cannot escape it.
+	if isCancellation(err) {
 		return nil
 	}
 
 	// Context deadline exceeded: treat as timeout, always fallback.
-	if err == context.DeadlineExceeded {
+	if errors.Is(err, context.DeadlineExceeded) {
 		return &FailoverError{
 			Reason:   FailoverTimeout,
 			Provider: provider,
 			Model:    model,
 			Wrapped:  err,
 		}
+	}
+
+	// Structured path first: a provider that gives us the status code and the
+	// server's wait hint as data must not be re-parsed out of its own message.
+	// This is checked before any message matching because the message of an
+	// API error embeds the response body, and a body containing e.g. "401" or
+	// "invalid api key" is about the *request that just failed*, whereas the
+	// status code is what the server actually answered with.
+	if fe, ok := classifyStructured(err, provider, model); ok {
+		return fe
 	}
 
 	msg := strings.ToLower(err.Error())
@@ -151,7 +212,123 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 		}
 	}
 
-	return nil
+	// Context-window overflow is evaluated LAST among the known reasons, on
+	// purpose: its generic patterns ("token limit", "too long", "context
+	// length") also occur inside quota and rate-limit bodies, e.g.
+	// "429 ... you exceeded your daily token limit". Checking overflow earlier
+	// would eclipse those and mark a transient quota error as terminal, which
+	// is precisely the failure mode this file exists to eliminate.
+	//
+	// The payload is too large for the model, so the failure repeats identically
+	// no matter how often it is retried or which candidate receives it; it is a
+	// request-size problem like the image cases above, hence FailoverFormat.
+	// Without this branch the error would fall through to FailoverUnknown and
+	// the chain would burn its whole retry budget on an oversized prompt instead
+	// of surfacing it to the caller's summarization/compaction path, which is the
+	// only thing that can actually fix it (see llmCaller.executeWithRetry).
+	if IsContextOverflowError(err) {
+		return &FailoverError{
+			Reason:   FailoverFormat,
+			Provider: provider,
+			Model:    model,
+			Wrapped:  err,
+		}
+	}
+
+	// Unknown error: assume transient. Retrying a hiccup is cheap; killing a
+	// session because we did not recognise a string is not.
+	return &FailoverError{
+		Reason:   FailoverUnknown,
+		Provider: provider,
+		Model:    model,
+		Wrapped:  err,
+	}
+}
+
+// httpStatusError is the local, minimal contract a provider error may
+// implement to hand the classifier structured data instead of prose.
+//
+// It is deliberately an interface rather than a direct dependency on
+// *common.APIError: the classifier stays decoupled from the concrete type (and
+// from the common package's import graph), so any provider, SDK shim or test
+// double that exposes these two accessors gets the structured path for free.
+type httpStatusError interface {
+	error
+	HTTPStatus() int
+	RetryAfterHint() time.Duration
+}
+
+// classifyStructured tries to classify err from its structured fields.
+// ok is false when err does not carry an HTTP status, so the caller falls back
+// to the message-based heuristics used by providers that only return strings
+// (bedrock, claude_cli, codex, antigravity, github_copilot, ...).
+//
+// A status that maps to a known reason wins outright. An unmapped status
+// (404, 409, 413, ...) still consults the body patterns, and if nothing
+// matches it becomes FailoverUnknown - transient - because an unrecognised
+// status says nothing about the request being wrong.
+func classifyStructured(err error, provider, model string) (fe *FailoverError, ok bool) {
+	var hs httpStatusError
+	if !errors.As(err, &hs) {
+		return nil, false
+	}
+	status := hs.HTTPStatus()
+	if status <= 0 {
+		return nil, false
+	}
+	hint := hs.RetryAfterHint()
+	if hint < 0 {
+		hint = 0
+	}
+
+	fe = &FailoverError{
+		Provider:   provider,
+		Model:      model,
+		Status:     status,
+		RetryAfter: hint,
+		Wrapped:    err,
+	}
+	if reason := classifyByStatus(status); reason != "" {
+		fe.Reason = reason
+		return fe, true
+	}
+	if reason := classifyByMessage(strings.ToLower(err.Error())); reason != "" {
+		fe.Reason = reason
+		return fe, true
+	}
+	// Body patterns exhausted: the remaining checks are the terminal,
+	// request-shape ones, in the same order as the string path.
+	//
+	// Image dimension/size complaints are checked before overflow (as in the
+	// string path) and both are terminal: the same payload fails at every
+	// candidate, so FailoverFormat beats the FailoverUnknown fallback.
+	lower := strings.ToLower(err.Error())
+	if IsImageDimensionError(lower) || IsImageSizeError(lower) {
+		fe.Reason = FailoverFormat
+		return fe, true
+	}
+	// Context-window overflow is evaluated LAST among the known reasons so
+	// quota bodies that mention "token limit" are not mistaken for a
+	// prompt-size problem (see ClassifyError).
+	if IsContextOverflowError(err) {
+		fe.Reason = FailoverFormat
+		return fe, true
+	}
+	fe.Reason = FailoverUnknown
+	return fe, true
+}
+
+// isCancellation reports whether err represents a context cancellation, which
+// is always terminal (the user pressed /stop or the run was aborted).
+//
+// errors.Is covers sentinels wrapped with %w (including *url.Error, which
+// unwraps to its transport error). The message check covers SDKs that flatten
+// the cancellation into a plain string and lose the sentinel.
+func isCancellation(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "context canceled")
 }
 
 // classifyByStatus maps HTTP status codes to FailoverReason.
@@ -188,6 +365,15 @@ func classifyByMessage(msg string) FailoverReason {
 	if matchesAny(msg, timeoutPatterns) {
 		return FailoverTimeout
 	}
+	// Transport failures are transient: mapped to timeout so they get the same
+	// backoff/retry treatment instead of failing fast. Placed after the
+	// provider-facing groups (rate_limit/overloaded/billing/timeout) so a body
+	// that mentions both "429" and a broken pipe is still a rate limit, and
+	// before auth/format so "TLS handshake timeout" never reads as a
+	// credential problem.
+	if matchesAny(msg, networkPatterns) {
+		return FailoverTimeout
+	}
 	if matchesAny(msg, authPatterns) {
 		return FailoverAuth
 	}
@@ -198,7 +384,16 @@ func classifyByMessage(msg string) FailoverReason {
 }
 
 // extractHTTPStatus extracts an HTTP status code from an error message.
-// Looks for patterns like "status: 429", "status 429", "HTTP 429", or standalone "429".
+// Looks for patterns like "status: 429", "status 401", "HTTP 429".
+//
+// This is the FALLBACK path, kept on purpose: providers that do not build a
+// common.APIError (bedrock, claude_cli, codex, antigravity, github_copilot and
+// every SDK that only returns strings) still surface their status code inside
+// the message text, and this is the only way to recover it. It is inherently
+// fragile - a "429" inside a response body is indistinguishable from the real
+// status here - which is why ClassifyError always tries the structured path
+// (classifyStructured) first. New providers should return *common.APIError
+// instead of relying on this.
 func extractHTTPStatus(msg string) int {
 	// Common patterns in Go HTTP error messages
 	patterns := []*regexp.Regexp{
