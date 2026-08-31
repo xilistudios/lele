@@ -485,7 +485,14 @@ func (fc *FallbackChain) executeWithRetry(
 			return nil, lastErr
 		}
 
-		wait := computeBackoff(attempt, defaultRetryBaseDelay, fc.maxBackoff, failErr.RetryAfter, fc.jitter)
+		// One jitter draw feeds both the pure ladder and the floored wait, so
+		// the log can state precisely whether the wait is our ladder or the
+		// provider's order.
+		jitterDraw := fc.jitter()
+		fixedRand := func() float64 { return jitterDraw }
+		ladder := computeBackoff(attempt, defaultRetryBaseDelay, fc.maxBackoff, 0, fixedRand)
+		wait := computeBackoff(attempt, defaultRetryBaseDelay, fc.maxBackoff, failErr.RetryAfter, fixedRand)
+		honoringHint := failErr.RetryAfter > 0 && wait > ladder
 		if wait > budgetLeft && attempts >= minAttemptsPerCandidate {
 			wait = budgetLeft
 		}
@@ -501,7 +508,7 @@ func (fc *FallbackChain) executeWithRetry(
 			"reason":   string(failErr.Reason),
 			"error":    lastErr.Error(),
 		}
-		if failErr.RetryAfter > 0 && wait >= failErr.RetryAfter {
+		if honoringHint {
 			// Worth a distinct line: this wait is the provider's order, not
 			// our ladder, and it is the reason the budget is wall-clock.
 			logFields["retry_after"] = failErr.RetryAfter.Round(time.Second).String()
