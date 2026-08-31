@@ -533,7 +533,10 @@ func repairTruncatedJSONObject(raw []byte) (map[string]any, bool) {
 
 // --- HTTP response helpers ---
 
-// HandleErrorResponse reads a non-200 response body and returns an appropriate error.
+// HandleErrorResponse reads a non-200 response body and returns an appropriate
+// error. HTML responses keep their dedicated descriptive error; everything else
+// becomes a structured *APIError so the status code and the Retry-After hint
+// survive down to the classifier instead of being rebuilt from the message.
 func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	contentType := resp.Header.Get("Content-Type")
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256))
@@ -543,11 +546,9 @@ func HandleErrorResponse(resp *http.Response, apiBase string) error {
 	if LooksLikeHTML(body, contentType) {
 		return WrapHTMLResponseError(resp.StatusCode, body, contentType, apiBase)
 	}
-	return fmt.Errorf(
-		"API request failed:\n  Status: %d\n  Body:   %s",
-		resp.StatusCode,
-		ResponsePreview(body, 128),
-	)
+	// Truncation stays here (not in NewAPIError) so providers that render the
+	// full body keep their current observable error text.
+	return NewAPIError(resp, []byte(ResponsePreview(body, 128)), apiBase)
 }
 
 // ReadAndParseResponse peeks at the response body to detect HTML errors,

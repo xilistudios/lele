@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // errorPattern defines a single pattern (string or regex) for error classification.
@@ -166,6 +167,16 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 		}
 	}
 
+	// Structured path first: a provider that gives us the status code and the
+	// server's wait hint as data must not be re-parsed out of its own message.
+	// This is checked before any message matching because the message of an
+	// API error embeds the response body, and a body containing e.g. "401" or
+	// "invalid api key" is about the *request that just failed*, whereas the
+	// status code is what the server actually answered with.
+	if fe, ok := classifyStructured(err, provider, model); ok {
+		return fe
+	}
+
 	msg := strings.ToLower(err.Error())
 
 	// Image dimension/size errors: non-retriable, non-fallback.
@@ -234,6 +245,79 @@ func ClassifyError(err error, provider, model string) *FailoverError {
 	}
 }
 
+// httpStatusError is the local, minimal contract a provider error may
+// implement to hand the classifier structured data instead of prose.
+//
+// It is deliberately an interface rather than a direct dependency on
+// *common.APIError: the classifier stays decoupled from the concrete type (and
+// from the common package's import graph), so any provider, SDK shim or test
+// double that exposes these two accessors gets the structured path for free.
+type httpStatusError interface {
+	error
+	HTTPStatus() int
+	RetryAfterHint() time.Duration
+}
+
+// classifyStructured tries to classify err from its structured fields.
+// ok is false when err does not carry an HTTP status, so the caller falls back
+// to the message-based heuristics used by providers that only return strings
+// (bedrock, claude_cli, codex, antigravity, github_copilot, ...).
+//
+// A status that maps to a known reason wins outright. An unmapped status
+// (404, 409, 413, ...) still consults the body patterns, and if nothing
+// matches it becomes FailoverUnknown - transient - because an unrecognised
+// status says nothing about the request being wrong.
+func classifyStructured(err error, provider, model string) (fe *FailoverError, ok bool) {
+	var hs httpStatusError
+	if !errors.As(err, &hs) {
+		return nil, false
+	}
+	status := hs.HTTPStatus()
+	if status <= 0 {
+		return nil, false
+	}
+	hint := hs.RetryAfterHint()
+	if hint < 0 {
+		hint = 0
+	}
+
+	fe = &FailoverError{
+		Provider:   provider,
+		Model:      model,
+		Status:     status,
+		RetryAfter: hint,
+		Wrapped:    err,
+	}
+	if reason := classifyByStatus(status); reason != "" {
+		fe.Reason = reason
+		return fe, true
+	}
+	if reason := classifyByMessage(strings.ToLower(err.Error())); reason != "" {
+		fe.Reason = reason
+		return fe, true
+	}
+	// Body patterns exhausted: the remaining checks are the terminal,
+	// request-shape ones, in the same order as the string path.
+	//
+	// Image dimension/size complaints are checked before overflow (as in the
+	// string path) and both are terminal: the same payload fails at every
+	// candidate, so FailoverFormat beats the FailoverUnknown fallback.
+	lower := strings.ToLower(err.Error())
+	if IsImageDimensionError(lower) || IsImageSizeError(lower) {
+		fe.Reason = FailoverFormat
+		return fe, true
+	}
+	// Context-window overflow is evaluated LAST among the known reasons so
+	// quota bodies that mention "token limit" are not mistaken for a
+	// prompt-size problem (see ClassifyError).
+	if IsContextOverflowError(err) {
+		fe.Reason = FailoverFormat
+		return fe, true
+	}
+	fe.Reason = FailoverUnknown
+	return fe, true
+}
+
 // isCancellation reports whether err represents a context cancellation, which
 // is always terminal (the user pressed /stop or the run was aborted).
 //
@@ -300,7 +384,16 @@ func classifyByMessage(msg string) FailoverReason {
 }
 
 // extractHTTPStatus extracts an HTTP status code from an error message.
-// Looks for patterns like "status: 429", "status 429", "HTTP 429", or standalone "429".
+// Looks for patterns like "status: 429", "status 401", "HTTP 429".
+//
+// This is the FALLBACK path, kept on purpose: providers that do not build a
+// common.APIError (bedrock, claude_cli, codex, antigravity, github_copilot and
+// every SDK that only returns strings) still surface their status code inside
+// the message text, and this is the only way to recover it. It is inherently
+// fragile - a "429" inside a response body is indistinguishable from the real
+// status here - which is why ClassifyError always tries the structured path
+// (classifyStructured) first. New providers should return *common.APIError
+// instead of relying on this.
 func extractHTTPStatus(msg string) int {
 	// Common patterns in Go HTTP error messages
 	patterns := []*regexp.Regexp{

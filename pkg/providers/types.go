@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/xilistudios/lele/pkg/providers/protocoltypes"
 )
@@ -51,12 +52,23 @@ type FailoverError struct {
 	Provider string
 	Model    string
 	Status   int
-	Wrapped  error
+	// RetryAfter is the wait the server asked for (Retry-After and friends),
+	// propagated verbatim from the provider response. 0 means no usable hint,
+	// which is the overwhelmingly common case; consumers must treat it as a
+	// floor for backoff, not as a schedule (see common.ParseRetryAfter).
+	RetryAfter time.Duration
+	Wrapped    error
 }
 
 func (e *FailoverError) Error() string {
-	return fmt.Sprintf("failover(%s): provider=%s model=%s status=%d: %v",
-		e.Reason, e.Provider, e.Model, e.Status, e.Wrapped)
+	base := fmt.Sprintf("failover(%s): provider=%s model=%s status=%d",
+		e.Reason, e.Provider, e.Model, e.Status)
+	// The hint is appended only when present so the historical message format
+	// is unchanged for every error without a server-side wait hint.
+	if e.RetryAfter > 0 {
+		base += fmt.Sprintf(" retry_after=%gs", e.RetryAfter.Seconds())
+	}
+	return fmt.Sprintf("%s: %v", base, e.Wrapped)
 }
 
 func (e *FailoverError) Unwrap() error {

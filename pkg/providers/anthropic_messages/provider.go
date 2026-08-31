@@ -157,7 +157,10 @@ func (p *Provider) Chat(
 		return nil, fmt.Errorf("service unavailable (503): %s", string(body))
 	default:
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
+			// Structured error: same message text as before, but the status
+			// code and the server's Retry-After hint travel with the error
+			// instead of being regexed back out of it. See common.APIError.
+			return nil, common.NewAPIError(resp, body, endpointURL)
 
 		}
 	}
@@ -217,7 +220,8 @@ func (p *Provider) ChatStream(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed:\n  Status: %d\n  Body:   %s\n URL: %s", resp.StatusCode, string(body), endpointURL)
+		// Structured error, see Chat().
+		return nil, common.NewAPIError(resp, body, endpointURL)
 	}
 
 	streamBody := common.NewIdleTimeoutReader(resp.Body, common.DefaultStreamIdleTimeout)
