@@ -757,6 +757,45 @@ func TestClassifyError_Structured_UnmappedStatusIsTransientNotFormat(t *testing.
 	}
 }
 
+// TestClassifyError_Structured_MappedStatusPrecedesQuotaBody pins the m1
+// interaction from the T1-T7 review as INTENTIONAL: for a status the classifier
+// already maps (400 -> format), the structured path returns that reason without
+// consulting the body patterns. A misconfigured proxy answering 400 with a
+// quota-flavoured body ("rate limit", "exceeded your daily token limit") is
+// therefore terminal, while the string-only path (no structured status) would
+// have matched the quota patterns and stayed transient.
+//
+// The asymmetry is deliberate: when the server tells us the request itself was
+// malformed, retrying or failing over is pointless regardless of what the body
+// prose says, and body text is attacker-influenced while the status is what the
+// server actually answered. If this test ever fails, the ordering in
+// classifyStructured changed and the terminality contract must be re-reviewed,
+// not the test adjusted.
+func TestClassifyError_Structured_MappedStatusPrecedesQuotaBody(t *testing.T) {
+	result := ClassifyError(&stubAPIError{status: 400, body: "error: rate limit exceeded, you exceeded your daily token limit"}, "openai", "gpt-4o")
+	if result == nil {
+		t.Fatal("expected non-nil")
+	}
+	if result.Reason != FailoverFormat {
+		t.Errorf("reason = %q, want %q (mapped status must win over body patterns)", result.Reason, FailoverFormat)
+	}
+	if !result.IsTerminal() {
+		t.Error("400+quota-body is terminal by design: the request itself was rejected")
+	}
+	// Contrast that keeps the pin honest: the same prose WITHOUT any status the
+	// classifier can read (neither structured nor extractable from the text)
+	// goes through classifyByMessage, where the quota patterns match first
+	// (rate_limit before format) and the error stays transient. Prose decides
+	// only when no status does.
+	viaMessage := ClassifyError(errors.New("you exceeded your daily token limit: rate limit exceeded"), "openai", "gpt-4o")
+	if viaMessage == nil {
+		t.Fatal("expected non-nil for message path")
+	}
+	if viaMessage.Reason != FailoverRateLimit {
+		t.Errorf("message path reason = %q, want %q (body patterns decide when no status exists)", viaMessage.Reason, FailoverRateLimit)
+	}
+}
+
 // The whole point of the structured path: a body that *mentions* 401 while the
 // server actually answered 429 must be classified from the status, not from the
 // text. Under the old regex-only classifier this was a terminal auth error.
