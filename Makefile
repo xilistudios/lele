@@ -74,8 +74,14 @@ generate:
 	@echo "Run generate complete"
 
 ## web-build: Build the web app for embedding
+# Farm caches PostCSS/Tailwind output in node_modules/.farm keyed only on the
+# CSS entry, so edits to .tsx files never invalidate it: Tailwind's JIT scans
+# all sources but the bundler serves the stale cached sheet, silently dropping
+# newly-introduced utility classes (e.g. translate-x-5) from the emitted CSS.
+# Wipe cache + dist so every build sees the full current source.
 web-build:
 	@echo "Building web app..."
+	@rm -rf $(WEB_DIR)/node_modules/.farm $(WEB_DIR)/dist
 	@cd $(WEB_DIR) && bun run --bun build 
 	@rm -rf ./cmd/lele/web
 	@mkdir -p ./cmd/lele/web
