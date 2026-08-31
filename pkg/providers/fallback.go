@@ -304,7 +304,7 @@ func (fc *FallbackChain) Execute(
 		for _, c := range candidates {
 			names = append(names, c.Provider)
 		}
-		logger.InfoCF("fallback", "fallback: all candidates in cooldown, waiting",
+		logger.InfoCF("fallback", "all candidates in cooldown, waiting",
 			map[string]interface{}{
 				"waiting":   wait.Round(time.Millisecond).String(),
 				"providers": strings.Join(names, ","),
