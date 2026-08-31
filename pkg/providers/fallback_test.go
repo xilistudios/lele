@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/xilistudios/lele/pkg/providers/common"
 )
 
 func makeCandidate(provider, model string) FallbackCandidate {
@@ -270,6 +272,15 @@ func TestFallback_CooldownSkip(t *testing.T) {
 func TestFallback_AllInCooldown(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct)
+	// T3 made an all-cooldown chain wait instead of failing instantly, so the
+	// real 90s cap would slow this test down. A no-op fake sleep keeps it
+	// instant while still exercising the wait loop (the cooldown, driven by the
+	// real clock, never expires here, so the chain must still give up).
+	var waits []time.Duration
+	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
 
 	// Put all providers in cooldown
 	ct.MarkFailure("openai", FailoverRateLimit)
@@ -292,6 +303,83 @@ func TestFallback_AllInCooldown(t *testing.T) {
 	var exhausted *FallbackExhaustedError
 	if !errors.As(err, &exhausted) {
 		t.Fatalf("expected FallbackExhaustedError, got %T", err)
+	}
+	// It waited the maximum number of rounds before declaring the chain dead,
+	// and each wait was bounded by maxCooldownWait.
+	if len(waits) != maxCooldownWaits {
+		t.Fatalf("waits = %d, want %d (bounded all-cooldown waiting)", len(waits), maxCooldownWaits)
+	}
+	for i, w := range waits {
+		if w <= 0 || w > fc.cooldownWaitCap() {
+			t.Errorf("wait[%d] = %v, want (0, %v]", i, w, fc.cooldownWaitCap())
+		}
+	}
+}
+
+// TestExecute_AllInCooldownWaitsAndSucceeds is defect C's fix: a chain whose
+// candidates are all in cooldown must block until the earliest one frees up
+// and then succeed, instead of returning FallbackExhaustedError for the caller
+// to retry a millisecond later against the same wall.
+func TestExecute_AllInCooldownWaitsAndSucceeds(t *testing.T) {
+	now := time.Now()
+	ct, current := newTestTracker(now)
+	fc := NewFallbackChain(ct)
+
+	// Both providers punished with the 1-minute first rung of the ladder.
+	ct.MarkFailure("openai", FailoverRateLimit)
+	ct.MarkFailure("anthropic", FailoverRateLimit)
+
+	// The fake sleep advances the tracker's clock past the cooldown, which is
+	// exactly what a real 60s wait does - without the test sleeping.
+	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
+		*current = current.Add(d)
+		return nil
+	}
+	fc.randFn = func() float64 { return 0 } // deterministic jitter
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude"),
+	}
+
+	calls := 0
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		calls++
+		return &LLMResponse{Content: "back from cooldown", FinishReason: "stop"}, nil
+	}
+
+	result, err := fc.Execute(context.Background(), candidates, run)
+	if err != nil {
+		t.Fatalf("expected success after waiting out the cooldown, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1", calls)
+	}
+	if result.Response.Content != "back from cooldown" {
+		t.Errorf("content = %q", result.Response.Content)
+	}
+	// The skipped attempts must not be reported: the chain never gave up.
+	for _, a := range result.Attempts {
+		if a.Skipped {
+			t.Errorf("unexpected skipped attempt after a successful wait: %+v", a)
+		}
+	}
+}
+
+// TestExecute_AllInCooldownRespectsContext: the wait is still tied to ctx, so a
+// cancelled turn cannot be blocked by a cooldown wait.
+func TestExecute_AllInCooldownRespectsContext(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ct.MarkFailure("openai", FailoverRateLimit)
+
+	_, err := fc.Execute(ctx, []FallbackCandidate{makeCandidate("openai", "gpt-4")},
+		successRun("never"))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 
@@ -817,12 +905,18 @@ func TestIsRetriableError(t *testing.T) {
 }
 
 // ============================================================================
-// Tests for single-candidate retry reduction
+// Tests for the per-candidate retry budget
 // ============================================================================
 
-func TestFallback_SingleCandidateReducedRetries(t *testing.T) {
-	// With a single candidate and a large retry budget (10), the internal
-	// retry loop should be capped at singleCandidateMaxRetries (3).
+// TestFallback_SingleCandidateGetsFullBudget is the anti-regression test for
+// defect A. The old code capped a single-candidate chain at
+// singleCandidateMaxRetries (3) with a 1s/2s ladder, so a 429 carrying
+// `Retry-After: 30` was retried at t=0, 1s and 3s: the chain died in ~3
+// seconds while the provider's quota window was still open. One candidate is
+// exactly the case that needs MORE budget, not less, so the special case is
+// gone: a lone provider now gets the same attempt count and the full
+// wall-clock budget as the first candidate of a multi-provider chain.
+func TestFallback_SingleCandidateGetsFullBudget(t *testing.T) {
 	ct := NewCooldownTracker()
 	fc := NewFallbackChain(ct).WithRetryConfig(10, time.Millisecond)
 
@@ -839,9 +933,60 @@ func TestFallback_SingleCandidateReducedRetries(t *testing.T) {
 		t.Fatal("expected error when single candidate fails")
 	}
 
-	// Should have been called exactly singleCandidateMaxRetries times, not 10.
-	if callCount != singleCandidateMaxRetries {
-		t.Errorf("callCount = %d, want %d (singleCandidateMaxRetries)", callCount, singleCandidateMaxRetries)
+	// The single candidate is no longer truncated to 3 attempts.
+	if callCount != 10 {
+		t.Errorf("callCount = %d, want 10 (full retry budget, single candidate)", callCount)
+	}
+}
+
+// TestExecute_SingleCandidateHonorsRetryAfterFloor proves the Retry-After hint
+// is actually consumed: the waits the chain performs must be at least the
+// server's ask, not the 1s/2s exponential ladder. A fake clock/sleep keeps the
+// test instant while still exercising the real budget arithmetic.
+func TestExecute_SingleCandidateHonorsRetryAfterFloor(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct).WithRetryBudget(10, time.Millisecond, time.Minute)
+
+	var clock time.Time
+	start := clock
+	now := func() time.Time { return clock }
+	var waits []time.Duration
+	fc.nowFn = now
+	fc.randFn = func() float64 { return 0 }
+	fc.sleepFn = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		clock = clock.Add(d) // the fake clock advances with every wait
+		return nil
+	}
+
+	candidates := []FallbackCandidate{makeCandidate("openai", "gpt-4")}
+	// The realistic shape: providers surface 429 as *common.APIError, which is
+	// what carries the hint through ClassifyError's structured path.
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		return nil, &common.APIError{StatusCode: 429, RetryAfter: 30 * time.Second, Body: "slow down"}
+	}
+
+	_, err := fc.Execute(context.Background(), candidates, run)
+	if err == nil {
+		t.Fatal("expected error when the provider keeps rate limiting")
+	}
+	if len(waits) < 2 {
+		t.Fatalf("waits = %v, want at least 2 backoff sleeps", waits)
+	}
+	// The first waits are the server's ask; only the tail may be clamped to
+	// whatever budget was left over.
+	honored := 0
+	for _, w := range waits {
+		if w >= 30*time.Second {
+			honored++
+		}
+	}
+	if honored < 2 {
+		t.Errorf("waits = %v, want at least 2 waits >= 30s (server Retry-After floor)", waits)
+	}
+	// Total elapsed must be well beyond the ~3s the old code gave up in.
+	if elapsed := clock.Sub(start); elapsed <= 3*time.Second {
+		t.Errorf("chain gave up after %v, want > 3s (defect A regression)", elapsed)
 	}
 }
 
