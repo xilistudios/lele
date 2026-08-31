@@ -257,11 +257,18 @@ func ResolveCandidates(cfg ModelConfig, defaultProvider string) []FallbackCandid
 // It tries each candidate in order, respecting cooldowns and error classification.
 //
 // Behavior:
-//   - Candidates in cooldown are skipped (logged as skipped attempt).
+//   - If EVERY candidate is in cooldown, wait (bounded by maxCooldownWait and
+//     maxCooldownWaits rounds) for the earliest one to free up before failing.
+//   - Candidates still in cooldown after that are skipped (logged as skipped
+//     attempt).
 //   - context.Canceled aborts immediately (user abort, no fallback).
 //   - Non-retriable errors (format) abort immediately.
-//   - Retriable errors trigger retry with exponential backoff (up to 10 retries, max 60s).
-//   - After all retries exhausted, mark provider as failed and try next candidate.
+//   - Retriable errors retry per candidate within the retry budget: up to
+//     maxRetries attempts and totalBudget of wall clock (whichever ends first,
+//     never fewer than minAttemptsPerCandidate), backing off with exponential
+//     jitter floored by the server's Retry-After hint.
+//   - After a candidate's budget is exhausted, mark provider as failed and try
+//     next candidate.
 //   - Success marks provider as good (resets cooldown).
 //   - If all fail, returns aggregate error with all attempts.
 func (fc *FallbackChain) Execute(
@@ -359,7 +366,7 @@ func (fc *FallbackChain) Execute(
 		// Guard kept for symmetry only: after default-to-transient, ClassifyError
 		// returns nil exclusively for context cancellation, which is already
 		// handled by the ctx.Err() checks above. So this branch is effectively
-		// dead but harmless; the retry budget around it belongs to T3.
+		// dead but harmless.
 		if failErr == nil {
 			// Unclassifiable error: do not fallback, return immediately.
 			result.Attempts = append(result.Attempts, FallbackAttempt{
