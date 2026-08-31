@@ -164,16 +164,27 @@ func isTransientFailure(err error) bool {
 
 // runTask is the public entry point for running a subagent task.
 // It wraps runTaskImpl with retry logic for transient failures.
+//
+// Iterative by design: an earlier shape recursed (runTask -> runTaskImpl ->
+// runTask) once per retry. Go's growable stacks made overflow unlikely, but the
+// self-call kept each attempt's frame alive across the backoff sleep for no
+// benefit, and a loop makes the retry flow readable in one screen.
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
-	sm.runTaskImpl(ctx, task, callback)
+	for {
+		sm.runTaskImpl(ctx, task, callback)
 
-	// After runTaskImpl completes, check if we should retry.
-	//
-	// The decision uses task.lastErr (the raw error), never the rendered
-	// task.Result string: see isTransientFailure. A nil lastErr (timeout,
-	// cancellation) is terminal by design.
-	sm.mu.Lock()
-	if task.Status == SubagentStatusFailed && task.MaxRetries > 0 && task.RetryCount < task.MaxRetries && isTransientFailure(task.lastErr) {
+		// After runTaskImpl completes, check if we should retry.
+		//
+		// The decision uses task.lastErr (the raw error), never the rendered
+		// task.Result string: see isTransientFailure. A nil lastErr (timeout,
+		// cancellation) is terminal by design.
+		sm.mu.Lock()
+		if task.Status != SubagentStatusFailed || task.MaxRetries <= 0 ||
+			task.RetryCount >= task.MaxRetries || !isTransientFailure(task.lastErr) {
+			sm.mu.Unlock()
+			return
+		}
+
 		task.RetryCount++
 		backoff := time.Duration(task.RetryCount) * 5 * time.Second
 		if backoff > 60*time.Second {
@@ -211,12 +222,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			return
 		case <-retrySleep(backoff):
 		}
-
-		// Recursive retry
-		sm.runTask(ctx, task, callback)
-		return
 	}
-	sm.mu.Unlock()
 }
 
 // runTaskImpl contains the actual subagent execution logic.
