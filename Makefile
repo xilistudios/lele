@@ -103,11 +103,17 @@ build-all: web-build generate
 	@echo "All builds complete"
 
 ## install: Install lele binary and copy builtin skills
+# Uses copy-to-temp + atomic rename so the binary can be replaced even while
+# it is running: `cp` over an executing file fails with ETXTBSY ("Text file
+# busy"), but rename() swaps the inode and the live process keeps the old one.
 install: build
 	@echo "Installing $(BINARY_NAME)..."
 	@mkdir -p $(INSTALL_BIN_DIR)
-	@cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_BIN_DIR)/$(BINARY_NAME)
-	@chmod +x $(INSTALL_BIN_DIR)/$(BINARY_NAME)
+	@tmp="$(INSTALL_BIN_DIR)/.$(BINARY_NAME).new.$$"; \
+	cp $(BUILD_DIR)/$(BINARY_NAME) $$tmp \
+		&& chmod +x $$tmp \
+		&& mv -f $$tmp $(INSTALL_BIN_DIR)/$(BINARY_NAME) \
+		|| { rm -f $$tmp; echo "install: failed to replace $(INSTALL_BIN_DIR)/$(BINARY_NAME)"; exit 1; }
 	@echo "Installed binary to $(INSTALL_BIN_DIR)/$(BINARY_NAME)"
 	@echo "Installation complete!"
 
