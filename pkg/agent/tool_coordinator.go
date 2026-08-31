@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -474,24 +475,23 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	subagentManager.SetRedactor(keyring.NewRedactor(keyringSvc))
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
 	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.
-	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int) {
+	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int, error) {
 		resolvedModel := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
 		providerName := extractProviderFromModel(resolvedModel, cfg.Agents.Defaults.Provider)
 		overrideProvider, err := providers.CreateProviderForCandidate(cfg, providerName)
-		if err != nil || overrideProvider == nil {
-			errMsg := "provider is nil"
-			if err != nil {
-				errMsg = err.Error()
-			}
+		if err == nil && overrideProvider == nil {
+			err = errors.New("provider is nil")
+		}
+		if err != nil {
 			logger.WarnCF("agent", "Failed to create provider for subagent model override",
 				map[string]interface{}{
 					"model":    model,
 					"provider": providerName,
-					"error":    errMsg,
+					"error":    err.Error(),
 				})
-			return nil, "", 0
+			return nil, "", 0, err
 		}
-		return overrideProvider, resolvedModel, getContextWindow(cfg, resolvedModel, providerName)
+		return overrideProvider, resolvedModel, getContextWindow(cfg, resolvedModel, providerName), nil
 	})
 	// Report whether a model supports vision so subagent tool loops can
 	// filter out read_image for non-vision models.

@@ -22,8 +22,8 @@ type SubagentManager struct {
 	workspace                  string
 	tools                      *ToolRegistry
 	getAgentContext            func(agentID string) AgentContextInfo
-	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int) // resolves a per-task model override to (provider, model, contextWindow)
-	visionChecker              func(model string) bool                                 // reports whether a model supports vision
+	modelOverrideResolver      func(model string) (providers.LLMProvider, string, int, error) // resolves a per-task model override to (provider, model, contextWindow, error)
+	visionChecker              func(model string) bool                                        // reports whether a model supports vision
 	maxIterations              int
 	maxTokens                  int
 	temperature                float64
@@ -151,9 +151,10 @@ func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string)
 
 // SetModelOverrideResolver registers a callback that resolves a per-task model
 // override (e.g. "anthropic:claude-opus") into a provider, model name, and
-// context window. When the resolver is nil or returns a nil provider, the
-// task falls back to the agent's (or manager's) default model.
-func (sm *SubagentManager) SetModelOverrideResolver(resolver func(model string) (providers.LLMProvider, string, int)) {
+// context window. When a task carries a model override and the resolver is nil
+// or reports a failure (error, nil provider, or empty model), the task FAILS
+// instead of silently falling back to the agent's (or manager's) default model.
+func (sm *SubagentManager) SetModelOverrideResolver(resolver func(model string) (providers.LLMProvider, string, int, error)) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.modelOverrideResolver = resolver
