@@ -430,10 +430,13 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	cfg.Channels.Native.MaxClients = 5
 	cfg.Channels.Native.SessionExpiryDays = 30
 
-	// Configure test providers for model endpoint tests
+	// Configure test providers for model endpoint tests. API keys are set so
+	// cron spawn model validation (which must be able to CREATE a provider,
+	// mirroring the runtime resolver) accepts these providers.
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
+			ProviderConfig: config.ProviderConfig{APIKey: "test-openai-key"},
 			Models: map[string]config.ProviderModelConfig{
 				"gpt-4":       {Model: "gpt-4"},
 				"gpt-4o":      {Model: "gpt-4o"},
@@ -441,7 +444,8 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 			},
 		},
 		"anthropic": {
-			Type: "anthropic",
+			Type:           "anthropic",
+			ProviderConfig: config.ProviderConfig{APIKey: "test-anthropic-key"},
 			Models: map[string]config.ProviderModelConfig{
 				"claude-sonnet": {Model: "claude-3-5-sonnet"},
 			},
@@ -511,10 +515,13 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	cfg.Channels.Native.MaxClients = 5
 	cfg.Channels.Native.SessionExpiryDays = 30
 
-	// Configure test providers for model endpoint tests
+	// Configure test providers for model endpoint tests. API keys are set so
+	// cron spawn model validation (which must be able to CREATE a provider,
+	// mirroring the runtime resolver) accepts these providers.
 	cfg.Providers.Named = map[string]config.NamedProviderConfig{
 		"openai": {
-			Type: "openai",
+			Type:           "openai",
+			ProviderConfig: config.ProviderConfig{APIKey: "test-openai-key"},
 			Models: map[string]config.ProviderModelConfig{
 				"gpt-4":       {Model: "gpt-4"},
 				"gpt-4o":      {Model: "gpt-4o"},
@@ -522,7 +529,8 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 			},
 		},
 		"anthropic": {
-			Type: "anthropic",
+			Type:           "anthropic",
+			ProviderConfig: config.ProviderConfig{APIKey: "test-anthropic-key"},
 			Models: map[string]config.ProviderModelConfig{
 				"claude-sonnet": {Model: "claude-3-5-sonnet"},
 			},

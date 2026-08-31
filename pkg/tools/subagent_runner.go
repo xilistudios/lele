@@ -214,34 +214,87 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	// Resolve agent config using shared method
 	agentProvider, agentModel, systemPrompt, maxIter, llmOptions, agentContextWindow := sm.resolveAgentConfig(task.AgentID)
 
-	// Apply per-task model override if configured and resolvable.
+	// Apply per-task model override if configured. The override is a hard
+	// requirement: if it cannot be resolved, the task FAILS loudly instead of
+	// silently running on the agent's default model (which would ignore the
+	// model the user selected, e.g. via a cron spawn job).
 	if task.ModelOverride != "" {
 		sm.mu.RLock()
 		resolver := sm.modelOverrideResolver
 		sm.mu.RUnlock()
-		if resolver != nil {
-			if overrideProvider, overrideModel, overrideWindow := resolver(task.ModelOverride); overrideProvider != nil && overrideModel != "" {
-				agentProvider = overrideProvider
-				agentModel = overrideModel
-				if overrideWindow > 0 {
-					agentContextWindow = overrideWindow
-				}
-				logger.InfoCF("subagent", "Subagent using model override",
-					map[string]interface{}{
-						"task_id":        task.ID,
-						"agent_id":       task.AgentID,
-						"model_override": task.ModelOverride,
-						"resolved_model": overrideModel,
-					})
-			} else {
-				logger.WarnCF("subagent", "Failed to resolve model override, using agent default",
-					map[string]interface{}{
-						"task_id":        task.ID,
-						"agent_id":       task.AgentID,
-						"model_override": task.ModelOverride,
-					})
+
+		var reason string
+		var overrideProvider providers.LLMProvider
+		var overrideModel string
+		var overrideWindow int
+		if resolver == nil {
+			reason = fmt.Sprintf("no model resolver configured to honor model override %q", task.ModelOverride)
+		} else {
+			resolverErr := error(nil)
+			overrideProvider, overrideModel, overrideWindow, resolverErr = resolver(task.ModelOverride)
+			switch {
+			case resolverErr != nil:
+				reason = resolverErr.Error()
+			case overrideProvider == nil || overrideModel == "":
+				reason = "resolver returned no provider"
 			}
 		}
+
+		if reason != "" {
+			msg := fmt.Sprintf("subagent model override %q could not be applied: %s", task.ModelOverride, reason)
+			logger.ErrorCF("subagent", "Subagent model override could not be applied, failing task",
+				map[string]interface{}{
+					"task_id":        task.ID,
+					"agent_id":       task.AgentID,
+					"model_override": task.ModelOverride,
+					"error":          reason,
+				})
+
+			// Mirror the terminal-state mutation style of the early-cancel path
+			// below, then deliver the failure through the cancels cleanup +
+			// callback exactly like the deferred block at the end of this
+			// function does, so the callback fires exactly once and no cancel
+			// func leaks. runTask (the wrapper) sees Status==Failed with a
+			// non-transient Result and will not retry; the task goroutine calls
+			// SignalDone after runTask returns.
+			sm.mu.Lock()
+			task.Status = SubagentStatusFailed
+			task.Summary = msg
+			task.Result = msg
+			task.Updated = time.Now().UnixMilli()
+			var cancel context.CancelFunc
+			if c, ok := sm.cancels[task.ID]; ok {
+				cancel = c
+				delete(sm.cancels, task.ID)
+			}
+			sm.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+			if callback != nil {
+				callback(ctx, &ToolResult{
+					ForLLM:   msg,
+					Silent:   true,
+					IsError:  true,
+					Async:    false,
+					Metadata: map[string]string{"task_id": task.ID, "subagent_session_key": task.OriginSessionKey + ":" + task.ID},
+				})
+			}
+			return
+		}
+
+		agentProvider = overrideProvider
+		agentModel = overrideModel
+		if overrideWindow > 0 {
+			agentContextWindow = overrideWindow
+		}
+		logger.InfoCF("subagent", "Subagent using model override",
+			map[string]interface{}{
+				"task_id":        task.ID,
+				"agent_id":       task.AgentID,
+				"model_override": task.ModelOverride,
+				"resolved_model": overrideModel,
+			})
 	}
 
 	// Determine whether the resolved model supports vision so RunToolLoop

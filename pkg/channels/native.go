@@ -1386,27 +1386,39 @@ func (n *NativeChannel) validateSpawnInput(in *cronSpawnInput) (*cron.SpawnConfi
 	}, nil
 }
 
-// validateSpawnModel checks that a model override references a configured
-// provider. Models may be "provider:model" or a bare model name (resolved
-// against the default provider at runtime).
+// validateSpawnModel checks that a model override can actually be honored at
+// runtime. It mirrors the resolver chain used by subagent spawns
+// (ResolveModelAlias -> provider extraction -> CreateProviderForCandidate) so
+// a model accepted at job-creation time cannot later be silently dropped.
+// Models may be "provider:model" or a bare model name (resolved against the
+// default provider at runtime).
 func (n *NativeChannel) validateSpawnModel(model string) error {
 	ref := providers.ParseModelRef(model, "")
 	if ref == nil {
 		return fmt.Errorf("invalid model %q", model)
 	}
-	// Bare model names are resolved against the default provider at runtime,
-	// so only validate the provider when one is explicitly given.
-	if !strings.Contains(model, ":") {
-		return nil
-	}
 	cfg := n.cfgSnapshot()
 	if cfg == nil {
+		// Keep lenient behavior when no config snapshot is available.
 		return nil
 	}
-	if _, ok := cfg.Providers.GetNamed(ref.Provider); ok {
+	// Same alias resolution as the runtime resolver (pkg/agent tool_coordinator).
+	resolved := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
+	// Extract the provider name the same way the runtime does
+	// (agent.extractProviderFromModel delegates to providers.ParseModelRef).
+	// Inlined here to avoid importing pkg/agent from pkg/channels.
+	providerName := cfg.Agents.Defaults.Provider
+	if idx := strings.Index(resolved, ":"); idx > 0 {
+		providerName = resolved[:idx]
+	}
+	if providerName == "" {
+		// No explicit provider and no default: only a shape check is possible.
 		return nil
 	}
-	return fmt.Errorf("unknown provider %q in model %q", ref.Provider, model)
+	if _, err := providers.CreateProviderForCandidate(cfg, providerName); err != nil {
+		return fmt.Errorf("model %q cannot be used: %w", model, err)
+	}
+	return nil
 }
 
 func (n *NativeChannel) cronAvailable(w http.ResponseWriter) bool {
