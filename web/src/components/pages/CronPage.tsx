@@ -47,37 +47,67 @@ function scheduleLabel(schedule: CronSchedule): string {
   }
 }
 
-function StatusBadge({ job }: { job: CronJob }) {
+/**
+ * Header toggle switch for a job's enabled state.
+ *
+ * Replaces the old read-only "enabled/disabled" pill: the switch is both the
+ * status indicator (green track = enabled) and the control, so the duplicated
+ * Disable/Enable button in the expanded section is gone.
+ *
+ * Rendered inside the card header, which is itself a <button> (pre-existing
+ * pattern in this file). We keep a nested <button> with stopPropagation rather
+ * than an <input type="checkbox"> to avoid invalid interactive-in-button DOM.
+ */
+function EnabledToggle({
+  job,
+  busy,
+  onToggle,
+}: {
+  job: CronJob
+  busy: boolean
+  onToggle: () => void
+}) {
   const { t } = useTranslation()
-  if (!job.enabled) {
-    return (
-      <span className="inline-flex items-center rounded-full border border-state-error bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-tertiary">
-        {t('cron.disabled', 'disabled')}
-      </span>
-    )
-  }
   return (
-    <span className="inline-flex items-center rounded-full border border-state-success bg-state-success-light px-2 py-0.5 text-xs font-medium text-state-success">
-      <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-state-success" />
-      {t('cron.enabled', 'enabled')}
-    </span>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={job.enabled}
+      aria-label={job.enabled ? t('cron.enabled', 'enabled') : t('cron.disabled', 'disabled')}
+      title={job.enabled ? t('cron.enabled', 'enabled') : t('cron.disabled', 'disabled')}
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle()
+      }}
+      className="shrink-0 cursor-pointer rounded-full disabled:opacity-50"
+    >
+      <span
+        className={`flex h-5 w-9 items-center rounded-full transition-colors ${
+          job.enabled ? 'bg-state-success' : 'border border-border bg-surface-muted'
+        }`}
+      >
+        <span
+          className={`h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+            job.enabled ? 'translate-x-5' : 'translate-x-0.5'
+          }`}
+        />
+      </span>
+    </button>
   )
 }
 
+/** Last-run indicator: a bare colored dot (green = ok, red = anything else). */
 function LastRunBadge({ job }: { job: CronJob }) {
   const status = job.state.lastStatus
   if (!status) return null
-  const color =
-    status === 'ok'
-      ? 'border-state-success bg-state-success-light text-state-success'
-      : 'border-state-error bg-state-error-light text-state-error'
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}
-      title={job.state.lastError || undefined}
-    >
-      {status === 'ok' ? '✓' : '✗'} {status}
-    </span>
+      title={job.state.lastError || status}
+      className={`h-2 w-2 shrink-0 rounded-full ${
+        status === 'ok' ? 'bg-state-success' : 'bg-state-error'
+      }`}
+    />
   )
 }
 
@@ -125,7 +155,7 @@ function JobCard({
             <span className="truncate text-sm font-medium text-text-primary">
               {job.name || job.id}
             </span>
-            <StatusBadge job={job} />
+            <EnabledToggle job={job} busy={busy} onToggle={onEnableToggle} />
             <LastRunBadge job={job} />
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
@@ -145,9 +175,13 @@ function JobCard({
             }}
             disabled={busy}
             title={t('cron.runNow', 'Run now')}
-            className="rounded-lg border border-interaction-primary/30 bg-interaction-primary/10 px-3 py-1 text-xs font-medium text-interaction-primary transition-colors hover:bg-interaction-primary/20 disabled:opacity-50"
+            aria-label={t('cron.runNow', 'Run now')}
+            className="inline-flex rounded-lg bg-state-success p-1.5 text-background-primary transition-opacity hover:opacity-90 disabled:opacity-50"
           >
-            {t('cron.run', 'Run')}
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <title>{t('cron.runNow', 'Run now')}</title>
+              <path d="M8 5v14l11-7z" />
+            </svg>
           </button>
           <svg
             className={`h-4 w-4 text-text-tertiary transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -224,14 +258,6 @@ function JobCard({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               type="button"
-              onClick={onEnableToggle}
-              disabled={busy}
-              className="rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
-            >
-              {job.enabled ? t('cron.disable', 'Disable') : t('cron.enable', 'Enable')}
-            </button>
-            <button
-              type="button"
               onClick={onEdit}
               disabled={busy}
               className="rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
@@ -240,7 +266,9 @@ function JobCard({
             </button>
             {confirmDelete ? (
               <span className="flex items-center gap-2">
-                <span className="text-xs text-state-error">{t('cron.confirmDelete', 'Delete?')}</span>
+                <span className="text-xs text-state-error">
+                  {t('cron.confirmDelete', 'Delete?')}
+                </span>
                 <button
                   type="button"
                   onClick={onDelete}
