@@ -58,6 +58,12 @@ type AgentProvidable interface {
 	GetSessionModelSupportsImages(sessionKey string) bool
 	// SetSessionModel establece el modelo de una sesión
 	SetSessionModel(sessionKey, model string) string
+	// SetSessionFolder establece el folder seleccionado por el usuario para una
+	// sesión ("" limpia la selección) y devuelve el folder efectivo.
+	SetSessionFolder(sessionKey, folder string) string
+	// GetSessionFolder devuelve el folder seleccionado por el usuario para una
+	// sesión, o "" cuando no hay selección.
+	GetSessionFolder(sessionKey string) string
 	// ListAvailableModels devuelve los modelos configurados para un agente/sesión
 	ListAvailableModels(agentID string) []string
 	// GetConfigSnapshot devuelve la configuración actual

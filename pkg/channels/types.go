@@ -240,6 +240,7 @@ type ChatSession struct {
 	Name    string    `json:"name,omitempty"`
 	Mode    string    `json:"mode,omitempty"`
 	Kind    string    `json:"kind,omitempty"` // "chat", "heartbeat", "cron", "cron-spawn", "subagent"
+	Folder  string    `json:"folder,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }

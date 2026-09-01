@@ -62,6 +62,9 @@ export function useAppLogic(
   })
   const [parentSessionKey, setParentSessionKey] = useState<string | null>(null)
   const [thinkLevel, setThinkLevel] = useState('default')
+  // Server folder attached to the current session (injected into the agent
+  // context by the backend). '' means "no folder".
+  const [sessionFolder, setSessionFolder] = useState('')
   const navigate = useNavigate()
 
   const sessionsHook = useChatSessions(api, token, clientId)
@@ -233,6 +236,22 @@ export function useAppLogic(
         setThinkLevel(res.level)
       })
       .catch(() => {})
+
+    // Rehydrate the session folder the same way thinking level is rehydrated.
+    // A 404 (session without folder yet) silently resolves to "no folder".
+    // Guard against the session changing while the request is in flight: the
+    // response must only apply to the session that was current when it started.
+    const folderKey = sessionsHook.currentSessionKey
+    api
+      .sessionFolder(folderKey)
+      .then((res) => {
+        if (sessionsHook.currentSessionKeyRef.current !== folderKey) return
+        setSessionFolder(res.folder ?? '')
+      })
+      .catch(() => {
+        if (sessionsHook.currentSessionKeyRef.current !== folderKey) return
+        setSessionFolder('')
+      })
   }, [
     sessionsHook.currentSessionKey,
     currentAgentId,
@@ -243,6 +262,13 @@ export function useAppLogic(
     loadModels,
     chatHistory.rawMessages.length,
   ])
+
+  // No session selected → no folder chip (e.g. after deleting the last chat).
+  useEffect(() => {
+    if (!sessionsHook.currentSessionKey) {
+      setSessionFolder('')
+    }
+  }, [sessionsHook.currentSessionKey])
 
   const handleLogout = useCallback(async () => {
     // Revoke token server-side first
@@ -255,6 +281,7 @@ export function useAppLogic(
     clearCurrentSessionKey()
     setAgents([])
     setCurrentAgentId(null)
+    setSessionFolder('')
     setDiagnostics({ status: null, channels: [], tools: [], config: null, agentInfo: null })
     setError(null)
   }, [api, wsClose, messagesHook.clearAll, persistSession])
@@ -458,6 +485,33 @@ export function useAppLogic(
     [api, sessionsHook.currentSessionKey],
   )
 
+  const handleSelectFolder = useCallback(
+    async (folder: string) => {
+      if (!sessionsHook.currentSessionKey) return
+      try {
+        const res = await api.updateSessionFolder(sessionsHook.currentSessionKey, folder)
+        setSessionFolder(res.folder ?? folder)
+      } catch (err) {
+        setError((err as Error).message)
+      }
+    },
+    [api, sessionsHook.currentSessionKey],
+  )
+
+  const handleClearFolder = useCallback(async () => {
+    if (!sessionsHook.currentSessionKey) {
+      setSessionFolder('')
+      return
+    }
+    try {
+      await api.updateSessionFolder(sessionsHook.currentSessionKey, '')
+    } catch (err) {
+      setError((err as Error).message)
+      return
+    }
+    setSessionFolder('')
+  }, [api, sessionsHook.currentSessionKey])
+
   const handleUploadAttachments = useCallback(
     async (files: File[]): Promise<string[]> => {
       if (!token) return []
@@ -611,6 +665,9 @@ export function useAppLogic(
     onSelectAgent: handleSelectAgent,
     onSelectModel: (model: string) => void handleSelectModel(model),
     onSelectThinkLevel: handleSelectThinkLevel,
+    sessionFolder,
+    onSelectFolder: handleSelectFolder,
+    onClearFolder: handleClearFolder,
     onUploadAttachments: handleUploadAttachments,
     onAttachmentsChange: messagesHook.setPendingAttachments,
     onLogout: handleLogout,

@@ -11,7 +11,9 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { getModeTheme } from '../../lib/modeTheme'
-import { CloseIcon } from '../atoms/Icons'
+import { IconButton } from '../atoms/IconButton'
+import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
+import { FolderPickerModal } from '../organisms/FolderPickerModal'
 import { AttachmentInput } from './AttachmentInput'
 import { SearchableSelect } from './SearchableSelect'
 
@@ -42,6 +44,9 @@ export function ChatComposer() {
     onSelectAgent,
     onSelectModel,
     onSelectThinkLevel,
+    sessionFolder,
+    onSelectFolder,
+    onClearFolder,
     chatMode,
     sendTyping,
     currentSessionKey,
@@ -49,6 +54,7 @@ export function ChatComposer() {
   const { apiUrl } = useAuthContext()
 
   const [draft, setDraft] = useState('')
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
 
@@ -215,9 +221,39 @@ export function ChatComposer() {
       )}
       <div className="rounded-lg border border-border bg-background-secondary transition-all duration-150 focus-within:border-border-light focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
+        {/* Top toolbar: folder picker above the input, folder chip when set */}
+        <div className="flex items-center gap-1 px-2 pt-1.5">
+          <IconButton
+            onClick={() => setFolderPickerOpen(true)}
+            title={t('chat.addFolder')}
+            ariaLabel={t('chat.addFolder')}
+          >
+            <PlusIcon size={14} />
+          </IconButton>
+          {sessionFolder && (
+            <span
+              title={sessionFolder}
+              className="flex max-w-[180px] items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--color-accent-primary)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] px-2 py-0.5 text-accent-primary"
+            >
+              <FolderIcon size={11} className="flex-shrink-0" />
+              <span className="truncate text-[10px] font-medium">
+                {sessionFolder.split('/').filter(Boolean).pop() || sessionFolder}
+              </span>
+              <button
+                type="button"
+                onClick={onClearFolder}
+                title={t('chat.removeFolder')}
+                aria-label={t('chat.removeFolder')}
+                className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-[color-mix(in_srgb,var(--color-accent-primary)_25%,transparent)] transition-colors"
+              >
+                <CloseIcon size={8} />
+              </button>
+            </span>
+          )}
+        </div>
         <textarea
           ref={textareaRef}
-          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
           placeholder={t('chat.messagePlaceholder')}
           value={draft}
           onChange={handleTextareaChange}
@@ -225,64 +261,60 @@ export function ChatComposer() {
           disabled={false}
           rows={1}
         />
-        <div className="flex items-center justify-between px-3 pb-2 pt-1 gap-2">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <AttachmentInput
-              onUpload={onUploadAttachments}
-              onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 sm:gap-3">
+          <AttachmentInput
+            onUpload={onUploadAttachments}
+            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+          />
+          <SearchableSelect
+            ariaLabel={t('chat.model')}
+            buttonLabel={t('chat.model')}
+            emptyLabel={t('chat.default')}
+            groups={groupedModels}
+            onChange={onSelectModel}
+            options={groupedModels ? undefined : availableModels}
+            placeholder={selectedModel}
+            searchAriaLabel={`${t('chat.model')} buscar`}
+            searchPlaceholder={t('chat.model')}
+            value={selectedModel}
+          />
+          {thinkingEnabled && (
+            <SearchableSelect
+              ariaLabel={t('chat.thinking')}
+              buttonLabel={t('chat.thinking')}
+              direction="up"
+              emptyLabel={t('chat.thinkingOff')}
+              onChange={onSelectThinkLevel}
+              options={thinkOptions}
+              placeholder={
+                thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
+              }
+              searchAriaLabel={`${t('chat.thinking')} buscar`}
+              searchPlaceholder={t('chat.thinking')}
+              value={thinkLevel}
             />
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] text-text-tertiary min-w-0 flex-1">
-              <SearchableSelect
-                ariaLabel={t('chat.model')}
-                buttonLabel={t('chat.model')}
-                emptyLabel={t('chat.default')}
-                groups={groupedModels}
-                onChange={onSelectModel}
-                options={groupedModels ? undefined : availableModels}
-                placeholder={selectedModel}
-                searchAriaLabel={`${t('chat.model')} buscar`}
-                searchPlaceholder={t('chat.model')}
-                value={selectedModel}
-              />
-              {thinkingEnabled && (
-                <SearchableSelect
-                  ariaLabel={t('chat.thinking')}
-                  buttonLabel={t('chat.thinking')}
-                  direction="up"
-                  emptyLabel={t('chat.thinkingOff')}
-                  onChange={onSelectThinkLevel}
-                  options={thinkOptions}
-                  placeholder={
-                    thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
-                  }
-                  searchAriaLabel={`${t('chat.thinking')} buscar`}
-                  searchPlaceholder={t('chat.thinking')}
-                  value={thinkLevel}
-                />
-              )}
-              {agentsOptions.length > 1 && (
-                <SearchableSelect
-                  ariaLabel={t('chat.agent')}
-                  buttonLabel={t('chat.agent')}
-                  disabled={hasConversation}
-                  emptyLabel={t('chat.agentLocked')}
-                  onChange={onSelectAgent}
-                  options={agentsOptions}
-                  placeholder={
-                    agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
-                  }
-                  searchAriaLabel={`${t('chat.agent')} buscar`}
-                  searchPlaceholder={t('chat.agent')}
-                  value={selectedAgentId}
-                />
-              )}
-            </div>
-          </div>
+          )}
+          {agentsOptions.length > 1 && (
+            <SearchableSelect
+              ariaLabel={t('chat.agent')}
+              buttonLabel={t('chat.agent')}
+              disabled={hasConversation}
+              emptyLabel={t('chat.agentLocked')}
+              onChange={onSelectAgent}
+              options={agentsOptions}
+              placeholder={
+                agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
+              }
+              searchAriaLabel={`${t('chat.agent')} buscar`}
+              searchPlaceholder={t('chat.agent')}
+              value={selectedAgentId}
+            />
+          )}
           <button
             type={canCancel ? 'button' : 'submit'}
             disabled={false}
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
-            className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${
+            className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
               canCancel
                 ? 'bg-state-error-light text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
                 : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
@@ -316,6 +348,15 @@ export function ChatComposer() {
           </button>
         </div>
       </div>
+      <FolderPickerModal
+        open={folderPickerOpen}
+        onClose={() => setFolderPickerOpen(false)}
+        onSelect={(path) => {
+          onSelectFolder(path)
+          setFolderPickerOpen(false)
+        }}
+        currentFolder={sessionFolder || undefined}
+      />
     </form>
   )
 }

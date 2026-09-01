@@ -313,6 +313,7 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 			Name:    n.agentLoop.GetName(sk),
 			Mode:    sessionMode,
 			Kind:    kind,
+			Folder:  n.agentLoop.GetSessionFolder(sk),
 			Created: n.agentLoop.GetCreated(sk),
 			Updated: n.agentLoop.GetUpdated(sk),
 		})
@@ -440,6 +441,7 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 			Name:    n.agentLoop.GetName(sk),
 			Mode:    sessionMode,
 			Kind:    kind,
+			Folder:  n.agentLoop.GetSessionFolder(sk),
 			Created: n.agentLoop.GetCreated(sk),
 			Updated: n.agentLoop.GetUpdated(sk),
 		})
@@ -576,6 +578,7 @@ func (n *NativeChannel) handleChatSessionGet(w http.ResponseWriter, r *http.Requ
 		"model":       model,
 		"name":        name,
 		"think_level": thinkLevel,
+		"folder":      n.agentLoop.GetSessionFolder(sessionKey),
 	})
 }
 

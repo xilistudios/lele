@@ -30,6 +30,7 @@ type nativeTestAgentLoop struct {
 	evicted            map[string][]providers.Message // messages evicted from in-memory history, loaded on demand
 	sessionAgents      map[string]string
 	sessionModels      map[string]string
+	sessionFolders     map[string]string // sessionKey -> user-selected folder
 	sessionAliases     map[string]string // base -> resolved
 	sessionAliasesMu   sync.RWMutex
 	subagentParents    map[string]string // subagent_key -> parent_key
@@ -57,6 +58,7 @@ func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
 		evicted:            make(map[string][]providers.Message),
 		sessionAgents:      make(map[string]string),
 		sessionModels:      make(map[string]string),
+		sessionFolders:     make(map[string]string),
 		sessionAliases:     make(map[string]string),
 		subagentParents:    make(map[string]string),
 		sessionNames:       make(map[string]string),
@@ -150,6 +152,18 @@ func (m *nativeTestAgentLoop) GetSessionModel(sessionKey string) string {
 func (m *nativeTestAgentLoop) SetSessionModel(sessionKey, model string) string {
 	m.sessionModels[sessionKey] = model
 	return model
+}
+
+func (m *nativeTestAgentLoop) GetSessionFolder(sessionKey string) string {
+	if folder, ok := m.sessionFolders[sessionKey]; ok {
+		return folder
+	}
+	return ""
+}
+
+func (m *nativeTestAgentLoop) SetSessionFolder(sessionKey, folder string) string {
+	m.sessionFolders[sessionKey] = folder
+	return folder
 }
 
 func (m *nativeTestAgentLoop) GetSessionMode(sessionKey string) string {

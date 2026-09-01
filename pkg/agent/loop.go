@@ -108,6 +108,9 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 	}
 
 	al.registry.ReloadAgents(cfg)
+	// ReloadAgents may have created fresh ContextBuilders; re-attach the
+	// folder resolver so per-session folder context survives config reloads.
+	al.attachFolderResolver()
 	al.cfgPtr.Store(cfg)
 
 	// Re-register shared tools for new/recreated agents
@@ -158,6 +161,30 @@ func (al *AgentLoop) ResolveSessionKey(sessionKey string) string {
 		}
 	}
 	return sessionKey
+}
+
+// attachFolderResolver wires the per-session folder context into every agent's
+// ContextBuilder. The resolver mirrors the read path used by
+// agentProvidableImpl.GetSessionFolder: resolve the alias, find the agent that
+// owns the session, and read the folder persisted on the shared session
+// manager. It is called once in NewAgentLoop (after the registry exists) and
+// again after ReloadRegistry, which may hand back freshly built instances with
+// fresh ContextBuilders.
+func (al *AgentLoop) attachFolderResolver() {
+	if al.registry == nil {
+		return
+	}
+	al.registry.SetFolderResolver(func(sessionKey string) string {
+		resolved := al.ResolveSessionKey(sessionKey)
+		if resolved == "" {
+			return ""
+		}
+		agent := al.agentForSession(resolved)
+		if agent == nil || agent.Sessions == nil {
+			return ""
+		}
+		return agent.Sessions.GetFolder(resolved)
+	})
 }
 
 // GetSubagentParentSessionKey returns the parent session key for a subagent session.
@@ -445,6 +472,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
 	loop.goalLoopSessions = make(map[string]struct{})
 	loop.cfgPtr.Store(cfg)
+
+	// Wire per-session folder context into every agent's ContextBuilder. The
+	// registry keeps the resolver and applies it to existing and future
+	// instances, so agents recreated by ReloadRegistry stay wired as well.
+	loop.attachFolderResolver()
 
 	// Initialize internal components
 	loop.messageProcessor = newMessageProcessor(loop)

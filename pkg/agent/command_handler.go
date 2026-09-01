@@ -413,7 +413,7 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 	}
 
 	// Build system prompt to get accurate token count
-	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(sessionKey, originChannel)
+	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(sessionKey, originChannel)
 	systemTokens := ch.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	// Total context = system prompt + summary (if any) + history

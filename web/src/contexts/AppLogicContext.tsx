@@ -43,6 +43,7 @@ export type AppLogicContextValue = {
   onSelectMode: (mode: ChatMode) => void
   modelState: UseApp['modelState']
   thinkLevel: UseApp['thinkLevel']
+  sessionFolder: UseApp['sessionFolder']
   isProcessing: UseApp['isProcessing']
   processingSessions: UseApp['processingSessions']
   sessions: UseApp['sessions']
@@ -69,6 +70,8 @@ export type AppLogicContextValue = {
   onSelectAgent: UseApp['onSelectAgent']
   onSelectModel: UseApp['onSelectModel']
   onSelectThinkLevel: UseApp['onSelectThinkLevel']
+  onSelectFolder: UseApp['onSelectFolder']
+  onClearFolder: UseApp['onClearFolder']
   onUploadAttachments: UseApp['onUploadAttachments']
   onAttachmentsChange: UseApp['onAttachmentsChange']
   onLogout: UseApp['onLogout']
@@ -144,6 +147,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       onSelectMode: app.onSelectMode,
       modelState: app.modelState,
       thinkLevel: app.thinkLevel,
+      sessionFolder: app.sessionFolder,
       isProcessing: app.isProcessing,
       processingSessions: app.processingSessions,
       sessions: app.sessions,
@@ -170,6 +174,8 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       onSelectAgent: app.onSelectAgent,
       onSelectModel: app.onSelectModel,
       onSelectThinkLevel: app.onSelectThinkLevel,
+      onSelectFolder: app.onSelectFolder,
+      onClearFolder: app.onClearFolder,
       onUploadAttachments: app.onUploadAttachments,
       onAttachmentsChange: app.onAttachmentsChange,
       onLogout: app.onLogout,
@@ -201,6 +207,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.onSelectMode,
       app.modelState,
       app.thinkLevel,
+      app.sessionFolder,
       app.isProcessing,
       app.processingSessions,
       app.sessions,
@@ -225,6 +232,8 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.onSelectAgent,
       app.onSelectModel,
       app.onSelectThinkLevel,
+      app.onSelectFolder,
+      app.onClearFolder,
       app.onUploadAttachments,
       app.onAttachmentsChange,
       app.onLogout,

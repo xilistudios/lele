@@ -19,25 +19,30 @@ import (
 const maxStoredMessages = 10000
 
 type Session struct {
-	Key                string              `json:"key"`
-	Name               string              `json:"name,omitempty"`
-	Mode               string              `json:"mode,omitempty"` // "chat", "agent", "group" (default empty = "agent")
-	Messages           []providers.Message `json:"messages"`
-	Summary            string              `json:"summary,omitempty"`
-	VerboseMode        bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
-	VerboseLevel       string              `json:"verbose_level,omitempty"`  // "off", "basic", or "full"
-	Model              string              `json:"model,omitempty"`          // Session-specific model override
-	ThinkingLevel      string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
-	Created            time.Time           `json:"created"`
-	Updated            time.Time           `json:"updated"`
-	lastStreamFlush    time.Time           // throttle for stream persistence (not persisted)
-	hadStreamedContent bool                // tracks if content was delivered via streaming this turn (not persisted)
-	lastPersistedSeq   int                 // last message seq persisted to SQLite (-1 = none)
-	metaDirty          bool                // metadata changed since last save (needs UpsertSession)
-	msgsAppended       int                 // messages appended since lastPersistedSeq (needs InsertMessage)
-	modifiedFrom       int                 // 1 + lowest in-memory index modified in-place since last save (0 = none; needs UpdateMessage)
-	excludedRange      [2]int              // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
-	lastMsgDeleted     bool                // last message was removed (needs DeleteLastMessage)
+	Key           string              `json:"key"`
+	Name          string              `json:"name,omitempty"`
+	Mode          string              `json:"mode,omitempty"` // "chat", "agent", "group" (default empty = "agent")
+	Messages      []providers.Message `json:"messages"`
+	Summary       string              `json:"summary,omitempty"`
+	VerboseMode   bool                `json:"verbose_mode,omitempty"`   // Deprecated: use VerboseLevel
+	VerboseLevel  string              `json:"verbose_level,omitempty"`  // "off", "basic", or "full"
+	Model         string              `json:"model,omitempty"`          // Session-specific model override
+	ThinkingLevel string              `json:"thinking_level,omitempty"` // "off", "low", "medium", "high"
+	// Folder is the directory selected by the user for this session (WebUI
+	// folder picker). Its absolute path plus a first-level listing are injected
+	// into the session's system prompt by ContextBuilder's folder resolver.
+	// Empty means "no folder selected".
+	Folder             string    `json:"folder,omitempty"`
+	Created            time.Time `json:"created"`
+	Updated            time.Time `json:"updated"`
+	lastStreamFlush    time.Time // throttle for stream persistence (not persisted)
+	hadStreamedContent bool      // tracks if content was delivered via streaming this turn (not persisted)
+	lastPersistedSeq   int       // last message seq persisted to SQLite (-1 = none)
+	metaDirty          bool      // metadata changed since last save (needs UpsertSession)
+	msgsAppended       int       // messages appended since lastPersistedSeq (needs InsertMessage)
+	modifiedFrom       int       // 1 + lowest in-memory index modified in-place since last save (0 = none; needs UpdateMessage)
+	excludedRange      [2]int    // [start, end) range of messages whose excluded flag changed (needs UpdateMessagesExcluded)
+	lastMsgDeleted     bool      // last message was removed (needs DeleteLastMessage)
 	// deleteFromSeq is the absolute SQLite seq of the message removed by
 	// RemoveLastMessage, captured at deletion time. saveDeleteLastUnlocked
 	// uses it as a watermark (DELETE WHERE seq >= deleteFromSeq) instead of a
@@ -73,6 +78,7 @@ type sessionMetadata struct {
 	Key     string    `json:"key"`
 	Name    string    `json:"name"`
 	Mode    string    `json:"mode,omitempty"`
+	Folder  string    `json:"folder,omitempty"`
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
 }
@@ -277,6 +283,7 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		VerboseLevel:     meta.VerboseLevel,
 		Model:            meta.Model,
 		ThinkingLevel:    meta.ThinkingLevel,
+		Folder:           meta.Folder,
 		InputTokens:      meta.InputTokens,
 		OutputTokens:     meta.OutputTokens,
 		CompactionCount:  meta.CompactionCount,
@@ -1112,6 +1119,7 @@ func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
 			Key:     meta.Key,
 			Name:    meta.Name,
 			Mode:    meta.Mode,
+			Folder:  meta.Folder,
 			Created: meta.CreatedAt,
 			Updated: meta.UpdatedAt,
 		}
@@ -1307,6 +1315,80 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	return sm.saveMetaOnlyUnlocked(key)
 }
 
+// GetFolder returns the user-selected folder for a session.
+// Returns "" when no folder is set.
+//
+// Unlike GetModel, this reads the lightweight metadata when the session is not
+// resident in memory: the WebUI session-list endpoints call it once per
+// session, and a full loadSessionFromDisk fallback would re-materialize every
+// session's entire message history just to read one string (the N+1 the meta
+// fast path exists to avoid).
+func (sm *SessionManager) GetFolder(key string) string {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if session, ok := sm.sessions[key]; ok {
+		return session.Folder
+	}
+	if meta, ok := sm.sessionMeta[key]; ok {
+		return meta.Folder
+	}
+	return ""
+}
+
+// SetFolder sets the user-selected folder for a session and persists it.
+// An empty folder clears the selection.
+func (sm *SessionManager) SetFolder(key string, folder string) error {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			// Create session if it doesn't exist
+			session = &Session{
+				Key:              key,
+				Messages:         []providers.Message{},
+				Created:          time.Now(),
+				lastPersistedSeq: -1,
+			}
+			sm.evictIfNeeded()
+			sm.sessions[key] = session
+		}
+	}
+
+	session.Folder = folder
+	session.Updated = time.Now()
+	session.metaDirty = true
+	session.bumpEpoch()
+	sm.touchSession(key)
+
+	// Keep the lightweight metadata in sync so read-only listing paths
+	// (GetFolder on non-resident sessions) observe the new value without a
+	// full load.
+	if meta, ok := sm.sessionMeta[key]; ok {
+		meta.Folder = folder
+		meta.Name = session.Name
+		meta.Mode = session.Mode
+		meta.Updated = session.Updated
+	} else {
+		sm.sessionMeta[key] = &sessionMetadata{
+			Key:     session.Key,
+			Name:    session.Name,
+			Mode:    session.Mode,
+			Folder:  session.Folder,
+			Created: session.Created,
+			Updated: session.Updated,
+		}
+	}
+
+	// Persist immediately
+	return sm.saveMetaOnlyUnlocked(key)
+}
+
 // GetMode returns the mode override for a session.
 // Returns "" if not set. Callers should normalize "" to "agent" (backward compat).
 func (sm *SessionManager) GetMode(key string) string {
@@ -1365,6 +1447,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 		Key:     session.Key,
 		Name:    session.Name,
 		Mode:    session.Mode,
+		Folder:  session.Folder,
 		Created: session.Created,
 		Updated: session.Updated,
 	}
@@ -1575,6 +1658,7 @@ func sessionMetaFromSession(s *Session) store.SessionMeta {
 		VerboseLevel:     s.VerboseLevel,
 		Model:            s.Model,
 		ThinkingLevel:    s.ThinkingLevel,
+		Folder:           s.Folder,
 		InputTokens:      s.InputTokens,
 		OutputTokens:     s.OutputTokens,
 		CompactionCount:  s.CompactionCount,

@@ -533,6 +533,26 @@ export type SessionThinkingResponse = {
   level: string
 }
 
+export type SessionFolderResponse = {
+  session_key: string
+  folder: string
+}
+
+export type FsListEntry = {
+  name: string
+  path: string
+  is_dir: boolean
+}
+
+export type FsListResponse = {
+  path: string
+  parent: string
+  entries: FsListEntry[]
+  home: string
+  roots: string[]
+  truncated: boolean
+}
+
 export type SessionContextResponse = {
   session_key: string
   input_tokens: number

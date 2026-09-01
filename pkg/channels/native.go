@@ -321,6 +321,8 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/history/{subagentId}", withAuth(n.handleChatHistory))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/model", withAuth(n.handleSessionModel))
 	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/model", withAuth(applyBodyLimit(n.handleSessionModel)))
+	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/folder", withAuth(n.handleSessionFolder))
+	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/folder", withAuth(applyBodyLimit(n.handleSessionFolder)))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/agent", withAuth(n.handleSessionAgent))
 	mux.HandleFunc("PATCH /api/v1/chat/sessions/{sessionKey}/agent", withAuth(applyBodyLimit(n.handleSessionAgent)))
 	mux.HandleFunc("GET /api/v1/chat/sessions/{sessionKey}/thinking", withAuth(n.handleSessionThinking))
@@ -397,6 +399,9 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// Files
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
+
+	// Filesystem browsing (folder picker for the WebUI)
+	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
