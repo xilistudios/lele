@@ -221,12 +221,8 @@ export function ChatComposer() {
       )}
       <div className="rounded-lg border border-border bg-background-secondary transition-all duration-150 focus-within:border-border-light focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
-        {/* Top toolbar: attachment + folder picker above the input, folder chip when set */}
+        {/* Top toolbar: folder picker above the input, folder chip when set */}
         <div className="flex items-center gap-1 px-2 pt-1.5">
-          <AttachmentInput
-            onUpload={onUploadAttachments}
-            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
-          />
           <IconButton
             onClick={() => setFolderPickerOpen(true)}
             title={t('chat.addFolder')}
@@ -266,6 +262,10 @@ export function ChatComposer() {
           rows={1}
         />
         <div className="flex flex-wrap items-center gap-2 px-3 pb-2 pt-1 sm:gap-3">
+          <AttachmentInput
+            onUpload={onUploadAttachments}
+            onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
+          />
           <SearchableSelect
             ariaLabel={t('chat.model')}
             buttonLabel={t('chat.model')}
