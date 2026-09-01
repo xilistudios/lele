@@ -111,7 +111,7 @@ func ParseRetryAfter(h http.Header) time.Duration {
 	if d, ok := parseRetryAfterHeader(h.Get("Retry-After")); ok {
 		return clampRetryAfter(d)
 	}
-	if ms := h.Get("retry-after-ms"); ms != "" {
+	if ms := h.Get("Retry-After-Ms"); ms != "" {
 		if v, err := strconv.ParseFloat(ms, 64); err == nil {
 			return clampRetryAfter(time.Duration(v * float64(time.Millisecond)))
 		}
