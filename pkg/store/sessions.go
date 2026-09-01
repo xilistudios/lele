@@ -25,6 +25,7 @@ type SessionMeta struct {
 	VerboseLevel     string
 	Model            string
 	ThinkingLevel    string
+	Folder           string
 	InputTokens      int
 	OutputTokens     int
 	CompactionCount  int
@@ -37,9 +38,9 @@ type SessionMeta struct {
 func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 	if _, err := r.db.Exec(
 		`INSERT INTO sessions(key, name, mode, summary, verbose_level, model,
-		 thinking_level, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		   name = excluded.name,
 		   mode = excluded.mode,
@@ -47,6 +48,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		   verbose_level = excluded.verbose_level,
 		   model = excluded.model,
 		   thinking_level = excluded.thinking_level,
+		   folder = excluded.folder,
 		   input_tokens = excluded.input_tokens,
 		   output_tokens = excluded.output_tokens,
 		   compaction_count = excluded.compaction_count,
@@ -59,6 +61,7 @@ func (r *SessionRepo) UpsertSession(meta SessionMeta) error {
 		meta.VerboseLevel,
 		meta.Model,
 		meta.ThinkingLevel,
+		meta.Folder,
 		meta.InputTokens,
 		meta.OutputTokens,
 		meta.CompactionCount,
@@ -77,12 +80,12 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 	var createdAt, updatedAt string
 	err := r.db.QueryRow(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE key = ?`, key,
 	).Scan(
 		&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-		&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
+		&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
 		&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 		&meta.FirstInMemorySeq,
 		&createdAt, &updatedAt,
@@ -102,7 +105,7 @@ func (r *SessionRepo) GetSessionMeta(key string) (*SessionMeta, error) {
 func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions ORDER BY updated_at DESC`,
 	)
@@ -117,7 +120,7 @@ func (r *SessionRepo) ListSessionMeta() ([]SessionMeta, error) {
 		var createdAt, updatedAt string
 		if err := rows.Scan(
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
+			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 			&meta.FirstInMemorySeq,
 			&createdAt, &updatedAt,
@@ -145,7 +148,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 
 	rows, err := r.db.Query(
 		`SELECT key, name, mode, summary, verbose_level, model,
-		 thinking_level, input_tokens, output_tokens, compaction_count,
+		 thinking_level, folder, input_tokens, output_tokens, compaction_count,
 		 first_in_memory_seq, created_at, updated_at
 		 FROM sessions WHERE mode = ? ORDER BY updated_at DESC`, queryMode,
 	)
@@ -160,7 +163,7 @@ func (r *SessionRepo) ListSessionMetaByMode(mode string) ([]SessionMeta, error) 
 		var createdAt, updatedAt string
 		if err := rows.Scan(
 			&meta.Key, &meta.Name, &meta.Mode, &meta.Summary,
-			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel,
+			&meta.VerboseLevel, &meta.Model, &meta.ThinkingLevel, &meta.Folder,
 			&meta.InputTokens, &meta.OutputTokens, &meta.CompactionCount,
 			&meta.FirstInMemorySeq,
 			&createdAt, &updatedAt,

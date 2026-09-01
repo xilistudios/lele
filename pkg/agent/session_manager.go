@@ -211,7 +211,7 @@ func (sm *sessionManagerImpl) maybeSummarize(agent *AgentInstance, sessionKey, c
 
 	systemPromptTokens := 0
 	if agent.ContextBuilder != nil {
-		systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(sessionKey, channel)
+		systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(sessionKey, channel)
 		systemPromptTokens = sm.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 	}
 

@@ -52,6 +52,14 @@ type ContextBuilder struct {
 	// When false, the read_image tool is hidden from the system prompt's
 	// tools section. Defaults to false (safe default).
 	visionSupported bool
+
+	// folderResolver maps a session key to the folder the user selected for
+	// that session (WebUI "per-session folder context"). When set, the
+	// resolved folder's path + first-level listing are appended to the
+	// session's system prompt. Guarded by folderMu because the loop wires it
+	// after construction and prompt builders read it concurrently.
+	folderResolver func(sessionKey string) string
+	folderMu       sync.RWMutex
 }
 
 const summaryMessageHeader = "## Summary of Previous Conversation\n\n"
@@ -245,6 +253,40 @@ func (cb *ContextBuilder) BuildSystemPromptForSession(sessionKey, channel string
 	return prompt
 }
 
+// SetFolderResolver wires a function that maps a session key to the folder the
+// user selected for that session. Passing nil disables folder injection.
+func (cb *ContextBuilder) SetFolderResolver(fn func(sessionKey string) string) {
+	cb.folderMu.Lock()
+	defer cb.folderMu.Unlock()
+	cb.folderResolver = fn
+}
+
+// resolveFolder reads the folder resolver under the guard. Returns "" when no
+// resolver is wired or the session has no folder selected.
+func (cb *ContextBuilder) resolveFolder(sessionKey string) string {
+	cb.folderMu.RLock()
+	resolver := cb.folderResolver
+	cb.folderMu.RUnlock()
+	if resolver == nil {
+		return ""
+	}
+	return resolver(sessionKey)
+}
+
+// BuildSystemPromptForSessionWithFolder returns the session's system prompt
+// with the "## Selected Folder" section appended when the user selected a
+// folder for the session. It extends BuildSystemPromptForSession (harness
+// context included) so the turn prompt and every token estimation agree.
+func (cb *ContextBuilder) BuildSystemPromptForSessionWithFolder(sessionKey, channel string) string {
+	prompt := cb.BuildSystemPromptForSession(sessionKey, channel)
+	if folder := cb.resolveFolder(sessionKey); folder != "" {
+		if folderCtx := lelecontext.BuildFolderContext(folder); folderCtx != "" {
+			prompt = prompt + "\n\n---\n\n" + folderCtx
+		}
+	}
+	return prompt
+}
+
 // ResetMemoryContext clears the in-memory cache of the memory store
 // to force a fresh reload of memory files on next access.
 // Used when creating a new session with /new.
@@ -339,7 +381,7 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	if mode == "chat" {
 		systemPrompt = cb.BuildMinimalSystemPrompt()
 	} else {
-		systemPrompt = cb.buildSystemPromptForTurn(channel, chatID)
+		systemPrompt = cb.buildSystemPromptForTurn(channel, chatID, sessionKey)
 	}
 
 	// Debug logging
@@ -386,8 +428,8 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 	return messages
 }
 
-func (cb *ContextBuilder) buildSystemPromptForTurn(channel, chatID string) string {
-	systemPrompt := cb.BuildSystemPromptForSession(chatID, channel)
+func (cb *ContextBuilder) buildSystemPromptForTurn(channel, chatID, sessionKey string) string {
+	systemPrompt := cb.BuildSystemPromptForSessionWithFolder(sessionKey, channel)
 	sessionContext := cb.renderSessionContext(channel, chatID)
 	if sessionContext == "" {
 		return systemPrompt

@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -113,6 +113,15 @@ ALTER TABLE session_messages DROP COLUMN content;
 -- first_in_memory_seq = SQLite seq of the first message resident in memory.
 -- Rows with seq < first_in_memory_seq were evicted from RAM (still persisted).
 ALTER TABLE sessions ADD COLUMN first_in_memory_seq INTEGER NOT NULL DEFAULT 0;
+`,
+	},
+	{
+		Version: 4,
+		DDL: `
+-- Persist the per-session folder selected by the user (WebUI folder picker).
+-- Its absolute path + first-level listing are injected into the session's
+-- system prompt. Empty string means "no folder selected".
+ALTER TABLE sessions ADD COLUMN folder TEXT NOT NULL DEFAULT '';
 `,
 	},
 }

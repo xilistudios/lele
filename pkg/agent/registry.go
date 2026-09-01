@@ -17,6 +17,11 @@ type AgentRegistry struct {
 	resolver             *routing.RouteResolver
 	mu                   sync.RWMutex
 	sharedSessionManager *session.SessionManager // optionally set by AgentLoop
+	// folderResolver is propagated to every agent's ContextBuilder so each
+	// session's system prompt can inject the folder the user selected for it
+	// (WebUI "per-session folder context"). Set by AgentLoop after the
+	// registry is created; applied to instances as they are created.
+	folderResolver func(sessionKey string) string
 }
 
 // NewAgentRegistry creates a registry from config, instantiating all agents.
@@ -84,6 +89,31 @@ func (r *AgentRegistry) SetSharedSessionManager(sm *session.SessionManager) {
 			agent.Sessions = sm
 		}
 	}
+}
+
+// SetFolderResolver stores fn and wires it into every current agent's
+// ContextBuilder so per-session folder context reaches the system prompt.
+// Agents created later (ReloadAgents) inherit the same resolver, which is how
+// the loop's attachFolderResolver reaches builders created inside
+// NewAgentInstance without instance.go seeing the loop.
+func (r *AgentRegistry) SetFolderResolver(fn func(sessionKey string) string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.folderResolver = fn
+	for _, agent := range r.agents {
+		r.applyFolderResolverLocked(agent)
+	}
+}
+
+// applyFolderResolverLocked wires the stored resolver into one instance.
+// A nil resolver is propagated as well: it means "folder injection disabled",
+// and clearing must reach builders that were already wired.
+// Caller must hold r.mu.
+func (r *AgentRegistry) applyFolderResolverLocked(instance *AgentInstance) {
+	if instance == nil || instance.ContextBuilder == nil {
+		return
+	}
+	instance.ContextBuilder.SetFolderResolver(r.folderResolver)
 }
 
 // CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.
@@ -179,6 +209,7 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 				Default: true,
 			}
 			instance := NewAgentInstance(implicitAgent, &cfg.Agents.Defaults, cfg)
+			r.applyFolderResolverLocked(instance)
 			r.agents["main"] = instance
 		}
 		return
@@ -212,6 +243,10 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 				available := resolveAvailableSubagents(ac, cfg)
 				existing.ContextBuilder.SetAvailableSubagents(available)
 			}
+			// Preserved builder already carries the resolver; re-attach so a
+			// builder created before SetFolderResolver also gets it (no-op
+			// otherwise).
+			r.applyFolderResolverLocked(existing)
 			continue
 		}
 
@@ -233,6 +268,9 @@ func (r *AgentRegistry) ReloadAgents(cfg *config.Config) {
 			// New agent: use the shared session manager if one is configured.
 			instance.Sessions = r.sharedSessionManager
 		}
+
+		// Newly created builders must see the loop's folder resolver too.
+		r.applyFolderResolverLocked(instance)
 
 		r.agents[id] = instance
 	}

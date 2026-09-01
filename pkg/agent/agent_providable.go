@@ -408,6 +408,34 @@ func (ap *agentProvidableImpl) SetSessionModel(sessionKey, model string) string 
 	return next
 }
 
+// SetSessionFolder sets the user-selected folder for a session and persists
+// it. An empty folder clears the selection. Returns the effective folder.
+func (ap *agentProvidableImpl) SetSessionFolder(sessionKey, folder string) string {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	if resolvedSessionKey == "" {
+		return ""
+	}
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent != nil && agent.Sessions != nil {
+		agent.Sessions.SetFolder(resolvedSessionKey, folder)
+	}
+	return folder
+}
+
+// GetSessionFolder returns the user-selected folder for a session, or ""
+// when none is set.
+func (ap *agentProvidableImpl) GetSessionFolder(sessionKey string) string {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+	if resolvedSessionKey == "" {
+		return ""
+	}
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil || agent.Sessions == nil {
+		return ""
+	}
+	return agent.Sessions.GetFolder(resolvedSessionKey)
+}
+
 // ListAvailableModels returns configured model aliases for the provider backing an agent.
 func (ap *agentProvidableImpl) ListAvailableModels(agentID string) []string {
 	providerName := ap.al.cfg().Agents.Defaults.Provider
@@ -858,7 +886,7 @@ func (ap *agentProvidableImpl) GetCurrentContextUsage(sessionKey string) (curren
 	}
 
 	// Build system prompt and estimate its token count
-	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSession(resolvedSessionKey, "")
+	systemPrompt := agent.ContextBuilder.BuildSystemPromptForSessionWithFolder(resolvedSessionKey, "")
 	systemTokens := ap.al.sessionManager.EstimateTokens([]providers.Message{{Role: "system", Content: systemPrompt}})
 
 	currentTokens = systemTokens + summaryTokens + historyTokens
