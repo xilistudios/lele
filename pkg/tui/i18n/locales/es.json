@@ -145,6 +145,12 @@
   "tui.approvalApproved": "Comando aprobado — ejecutando...",
   "tui.approvalRejected": "Comando rechazado",
   "tui.approvalExpired": "Aprobación ya no activa (expiró o se resolvió en otro lado)",
+  "tui.approvalWhitelisted": "Comando agregado a la lista de permitidos y aprobado",
+  "tui.approvalCommandLabel": "Comando",
+  "tui.approvalViewShort": "Ver solo resumen",
+  "tui.approvalViewFull": "Ver comando completo",
+  "tui.approvalWhitelistFailed": "No se pudo guardar en la lista de permitidos",
+  "tui.approvalWhitelist": "Siempre permitir",
 
   "tui.group.layer": "Capa %d",
   "tui.group.synthesis": "Síntesis final",

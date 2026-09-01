@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -36,6 +37,19 @@ type ExecTool struct {
 	backgroundThreshold time.Duration                         // Duration threshold for auto-backgrounding
 	keyringSvc          *keyring.Service                      // Optional keyring for {{SECRET:name}} substitution
 	secretSubstitution  bool                                  // Enable {{SECRET:name}} substitution (default true)
+
+	// whitelistMu guards whitelistCmds, which can be extended at run time from
+	// the UI ("always allow" on an approval prompt) while other turns execute.
+	whitelistMu   sync.RWMutex
+	whitelistCmds map[string]struct{}
+}
+
+// NormalizeWhitelistKey canonicalizes a command for whitelist comparison:
+// trimmed, inner whitespace collapsed and lowercased. Exact-match semantics
+// keep the feature predictable — no regex surprises for users typing commands
+// into a config file.
+func NormalizeWhitelistKey(command string) string {
+	return strings.ToLower(strings.Join(strings.Fields(command), " "))
 }
 
 // secretPlaceholderInlineRegex matches {{SECRET:name}} placeholders anywhere in
@@ -140,7 +154,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		timeout = time.Duration(config.Tools.Exec.TimeoutSeconds) * time.Second
 	}
 
-	return &ExecTool{
+	t := &ExecTool{
 		workingDir:          workingDir,
 		timeout:             timeout,
 		denyPatterns:        denyPatterns,
@@ -148,7 +162,59 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		restrictToWorkspace: restrict,
 		backgroundThreshold: 60 * time.Second,
 		secretSubstitution:  true,
+		whitelistCmds:       make(map[string]struct{}),
 	}
+	if config != nil {
+		t.SetWhitelist(config.Tools.Exec.WhitelistCommands)
+	}
+	return t
+}
+
+// SetWhitelist replaces the run-time command whitelist (exact commands the user
+// chose to "always allow"). Empty/whitespace-only entries are ignored.
+func (t *ExecTool) SetWhitelist(commands []string) {
+	next := make(map[string]struct{}, len(commands))
+	for _, c := range commands {
+		key := NormalizeWhitelistKey(c)
+		if key == "" {
+			continue
+		}
+		next[key] = struct{}{}
+	}
+	t.whitelistMu.Lock()
+	t.whitelistCmds = next
+	t.whitelistMu.Unlock()
+}
+
+// AddWhitelistCommand adds one command to the in-memory whitelist. Returns true
+// when the entry is new.
+func (t *ExecTool) AddWhitelistCommand(command string) bool {
+	key := NormalizeWhitelistKey(command)
+	if key == "" {
+		return false
+	}
+	t.whitelistMu.Lock()
+	defer t.whitelistMu.Unlock()
+	if t.whitelistCmds == nil {
+		t.whitelistCmds = make(map[string]struct{})
+	}
+	if _, ok := t.whitelistCmds[key]; ok {
+		return false
+	}
+	t.whitelistCmds[key] = struct{}{}
+	return true
+}
+
+// Whitelisted reports whether command matches a whitelisted entry.
+func (t *ExecTool) Whitelisted(command string) bool {
+	key := NormalizeWhitelistKey(command)
+	if key == "" {
+		return false
+	}
+	t.whitelistMu.RLock()
+	defer t.whitelistMu.RUnlock()
+	_, ok := t.whitelistCmds[key]
+	return ok
 }
 
 func (t *ExecTool) Name() string {
@@ -445,64 +511,20 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 }
 
 func (t *ExecTool) guardCommand(command, cwd string) string {
-	cmd := strings.TrimSpace(command)
-	lower := strings.ToLower(cmd)
-
-	for _, pattern := range t.denyPatterns {
-		if pattern.MatchString(lower) {
-			return "Command blocked by safety guard (dangerous pattern detected)"
-		}
-	}
-
-	if len(t.allowPatterns) > 0 {
-		allowed := false
-		for _, pattern := range t.allowPatterns {
-			if pattern.MatchString(lower) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return "Command blocked by safety guard (not in allowlist)"
-		}
-	}
-
-	if t.restrictToWorkspace {
-		if strings.Contains(cmd, "..\\") || strings.Contains(cmd, "../") {
-			return "Command blocked by safety guard (path traversal detected)"
-		}
-
-		cwdPath, err := filepath.Abs(cwd)
-		if err != nil {
-			return ""
-		}
-
-		pathPattern := regexp.MustCompile(`[A-Za-z]:\\[^\\\"']+|/[^\s\"']+`)
-		matches := pathPattern.FindAllString(cmd, -1)
-
-		for _, raw := range matches {
-			p, err := filepath.Abs(raw)
-			if err != nil {
-				continue
-			}
-
-			rel, err := filepath.Rel(cwdPath, p)
-			if err != nil {
-				continue
-			}
-
-			if strings.HasPrefix(rel, "..") {
-				return "Command blocked by safety guard (path outside working dir)"
-			}
-		}
-	}
-
-	return ""
+	msg, _ := t.guardCommandWithStatus(command, cwd)
+	return msg
 }
 
 func (t *ExecTool) guardCommandWithStatus(command, cwd string) (string, bool) {
 	cmd := strings.TrimSpace(command)
 	lower := strings.ToLower(cmd)
+
+	// Explicit user whitelist ("always allow" on a previous approval prompt)
+	// short-circuits the safety guards, exactly like the post-approval
+	// bypassGuard path does for a single command.
+	if t.Whitelisted(cmd) {
+		return "", false
+	}
 
 	for _, pattern := range t.denyPatterns {
 		if pattern.MatchString(lower) {

@@ -145,6 +145,12 @@
   "tui.approvalApproved": "Command approved — executing...",
   "tui.approvalRejected": "Command rejected",
   "tui.approvalExpired": "Approval no longer active (expired or handled elsewhere)",
+  "tui.approvalCommandLabel": "Command",
+  "tui.approvalWhitelisted": "Command added to the allowlist and approved",
+  "tui.approvalViewFull": "View full command",
+  "tui.approvalWhitelistFailed": "Failed to save command to the allowlist",
+  "tui.approvalWhitelist": "Always allow",
+  "tui.approvalViewShort": "View summary only",
 
   "tui.group.layer": "Layer %d",
   "tui.group.synthesis": "Final synthesis",

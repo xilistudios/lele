@@ -9,6 +9,7 @@ import (
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // AgentRegistry manages multiple agent instances and routes messages to them.
@@ -114,6 +115,25 @@ func (r *AgentRegistry) applyFolderResolverLocked(instance *AgentInstance) {
 		return
 	}
 	instance.ContextBuilder.SetFolderResolver(r.folderResolver)
+}
+
+// SetExecWhitelist applies (or re-applies) the exec command whitelist to every
+// agent's exec tool without rebuilding the registry. Used when the user adds a
+// command to the whitelist from the TUI approval prompt, so the decision takes
+// effect on the very next tool call.
+func (r *AgentRegistry) SetExecWhitelist(commands []string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, agent := range r.agents {
+		if agent.Tools == nil {
+			continue
+		}
+		if tool, ok := agent.Tools.Get("exec"); ok {
+			if et, ok := tool.(*tools.ExecTool); ok {
+				et.SetWhitelist(commands)
+			}
+		}
+	}
 }
 
 // CanSpawnSubagent checks if parentAgentID is allowed to spawn targetAgentID.

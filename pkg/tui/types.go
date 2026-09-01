@@ -494,7 +494,11 @@ type Model struct {
 	pendingApprovalID     string
 	pendingApprovalCmd    string
 	pendingApprovalReason string
-	approvalResult        string // brief feedback after user decision ("✅ ..." or "❌ ...")
+	// approvalShowFull toggles the command display between a one-line preview
+	// (default — keeps the prompt box intact at any terminal width) and the
+	// full wrapped command ("v" key).
+	approvalShowFull bool
+	approvalResult   string // brief feedback after user decision ("✅ ..." or "❌ ...")
 
 	// pendingApprovals stashes approval prompts that belong to sessions other
 	// than the one currently on screen (background/subagent sessions) as well
