@@ -397,6 +397,9 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	// Files
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
+
+	// Filesystem browsing (folder picker for the WebUI)
+	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
