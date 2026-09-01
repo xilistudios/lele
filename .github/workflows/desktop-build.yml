@@ -1,0 +1,107 @@
+name: Desktop build (reusable)
+
+# Reusable workflow that builds the Lele Desktop (Tauri) bundles for the
+# supported platforms and uploads them as workflow artifacts.
+#
+# Called by:
+#   - desktop.yml  (CI on PRs / tag pushes)
+#   - release.yml  (to attach desktop binaries to a GitHub release)
+#
+# Artifacts are named: lele-desktop-<target-triple>
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build (branch/sha/tag). Defaults to the caller's ref."
+        required: false
+        type: string
+        default: ""
+      version:
+        description: "Semver (no leading 'v') to stamp into the bundles. Empty = keep tauri.conf.json version."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "desktop/src-tauri"
+
+      - name: Build sidecar
+        shell: bash
+        run: bash desktop/scripts/build-sidecar.sh --target ${{ matrix.target }}
+
+      - name: Build desktop app
+        shell: bash
+        working-directory: desktop
+        env:
+          DESKTOP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          bun install
+          if [ -n "${DESKTOP_VERSION}" ]; then
+            # Stamp the release version into the bundles (Tauri requires plain
+            # semver, no leading 'v'). Edit the config in place — cross-platform
+            # and avoids CLI quoting issues on Windows.
+            bun -e 'const p = "src-tauri/tauri.conf.json"; const c = await Bun.file(p).json(); c.version = process.env.DESKTOP_VERSION; await Bun.write(p, JSON.stringify(c, null, 2) + "\n");'
+            echo "Stamped desktop version: ${DESKTOP_VERSION}"
+            grep '"version"' src-tauri/tauri.conf.json | head -1
+          fi
+          bun run tauri build
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: lele-desktop-${{ matrix.target }}
+          path: desktop/src-tauri/target/release/bundle/*
+          if-no-files-found: error
