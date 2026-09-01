@@ -239,12 +239,17 @@ export function useAppLogic(
 
     // Rehydrate the session folder the same way thinking level is rehydrated.
     // A 404 (session without folder yet) silently resolves to "no folder".
+    // Guard against the session changing while the request is in flight: the
+    // response must only apply to the session that was current when it started.
+    const folderKey = sessionsHook.currentSessionKey
     api
-      .sessionFolder(sessionsHook.currentSessionKey)
+      .sessionFolder(folderKey)
       .then((res) => {
+        if (sessionsHook.currentSessionKeyRef.current !== folderKey) return
         setSessionFolder(res.folder ?? '')
       })
       .catch(() => {
+        if (sessionsHook.currentSessionKeyRef.current !== folderKey) return
         setSessionFolder('')
       })
   }, [

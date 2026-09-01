@@ -417,7 +417,13 @@ func (ap *agentProvidableImpl) SetSessionFolder(sessionKey, folder string) strin
 	}
 	agent := ap.al.agentForSession(resolvedSessionKey)
 	if agent != nil && agent.Sessions != nil {
-		agent.Sessions.SetFolder(resolvedSessionKey, folder)
+		if err := agent.Sessions.SetFolder(resolvedSessionKey, folder); err != nil {
+			logger.WarnCF("agent", "Failed to persist session folder", map[string]interface{}{
+				"session_key": resolvedSessionKey,
+				"folder":      folder,
+				"error":       err.Error(),
+			})
+		}
 	}
 	return folder
 }
