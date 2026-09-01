@@ -437,6 +437,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 			"enable_deny_patterns": doc.Tools.Exec.EnableDenyPatterns,
 			"custom_deny_patterns": doc.Tools.Exec.CustomDenyPatterns,
 			"timeout_seconds":      doc.Tools.Exec.TimeoutSeconds,
+			"whitelist_commands":   doc.Tools.Exec.WhitelistCommands,
 		},
 	}
 

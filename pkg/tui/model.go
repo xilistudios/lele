@@ -439,6 +439,7 @@ func (m *Model) queueApprovalForCurrentChat(id, cmd, reason string) {
 	m.pendingApprovalID = id
 	m.pendingApprovalCmd = cmd
 	m.pendingApprovalReason = reason
+	m.approvalShowFull = false
 	m.approvalResult = ""
 }
 
@@ -488,6 +489,7 @@ func (m *Model) clearStreamingState() {
 	m.pendingApprovalID = ""
 	m.pendingApprovalCmd = ""
 	m.pendingApprovalReason = ""
+	m.approvalShowFull = false
 	m.approvalResult = ""
 
 	// ...then restore an approval that belongs to the session we just switched

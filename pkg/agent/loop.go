@@ -928,6 +928,17 @@ func (al *AgentLoop) GetApprovalManager() *channels.ApprovalManager {
 	return al.approvalManager
 }
 
+// SetExecWhitelist hot-applies the exec command whitelist to all live agents
+// without rebuilding the registry. Called after the user adds a command to the
+// whitelist from the TUI approval prompt so the decision takes effect
+// immediately, without waiting for a config reload.
+func (al *AgentLoop) SetExecWhitelist(commands []string) {
+	if al.registry == nil {
+		return
+	}
+	al.registry.SetExecWhitelist(commands)
+}
+
 // RecordLastChannel records the last active channel for this workspace.
 // This uses the atomic state save mechanism to prevent data loss on crash.
 func (al *AgentLoop) RecordLastChannel(channel string) error {

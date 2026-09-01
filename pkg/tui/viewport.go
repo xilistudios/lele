@@ -486,17 +486,96 @@ func (m *Model) buildRenderedHistory() []string {
 	return m.buildRenderedHistoryLines(history)
 }
 
+// approvalInnerWidth returns the usable text width inside the approval box for
+// the current viewport. ApprovalBox adds 2 border cells and 4 horizontal
+// padding cells, so the content budget is viewport.Width-6. Small/zero widths
+// (pre-layout renders) fall back to a sane minimum so the box never collapses.
+func (m *Model) approvalInnerWidth() int {
+	w := m.chatColumnWidth() - 6
+	if w < approvalMinInnerWidth {
+		return approvalMinInnerWidth
+	}
+	return w
+}
+
+// chatColumnWidth returns the width of the chat column (the viewport column).
+// It mirrors the layout math performed in View so overlay content is sized
+// correctly even when it is built before View runs — m.viewport.Width can be
+// stale at that point (e.g. it still holds its default 80 right after a
+// WindowSizeMsg), which would make boxes wider than the column and wrap their
+// borders.
+func (m *Model) chatColumnWidth() int {
+	leftWidth := int(float64(m.width) * leftColumnRatio)
+	if w := leftWidth - 2; w > 0 {
+		return w
+	}
+	return m.viewport.Width
+}
+
+// approvalMinInnerWidth keeps the prompt readable in extremely narrow
+// terminals; the box is still clipped by the viewport, which is the same
+// behaviour as every other overlay block.
+const approvalMinInnerWidth = 20
+
+// singleLine collapses every whitespace run (including newlines) into single
+// spaces so a multi-line command renders as one preview line.
+func singleLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // renderApprovalPrompt builds the inline approval prompt shown in the viewport
 // when a command requires user approval.
+//
+// The command is rendered as a single truncated preview line by default. This
+// is a correctness requirement, not cosmetics: the viewport clips every line to
+// its width, so an unwrapped long command used to overflow the box and destroy
+// its right border (and the surrounding layout). Pressing "v" swaps the preview
+// for the full command, wrapped to the box width.
 func (m *Model) renderApprovalPrompt() string {
+	inner := m.approvalInnerWidth()
+	cmd := sanitizeDisplayText(m.pendingApprovalCmd)
+
 	var sb strings.Builder
 	sb.WriteString("⚠️  " + i18n.T("tui.approvalRequired") + "\n\n")
-	sb.WriteString(fmt.Sprintf("%s\n", sanitizeDisplayText(m.pendingApprovalCmd)))
-	if m.pendingApprovalReason != "" {
-		sb.WriteString(fmt.Sprintf("\n%s: %s\n", i18n.T("tui.approvalReason"), sanitizeDisplayText(m.pendingApprovalReason)))
+	sb.WriteString(i18n.T("tui.approvalCommandLabel") + "\n")
+	if m.approvalShowFull {
+		sb.WriteString(wrapText(cmd, inner) + "\n")
+	} else {
+		sb.WriteString(truncateRightCells(singleLine(cmd), inner) + "\n")
 	}
-	sb.WriteString(fmt.Sprintf("\n[y] %s  [n] %s", i18n.T("tui.approvalApprove"), i18n.T("tui.approvalReject")))
-	return ApprovalBox.Render(sb.String()) + "\n\n"
+	if m.pendingApprovalReason != "" {
+		reason := wrapText(i18n.T("tui.approvalReason")+": "+sanitizeDisplayText(m.pendingApprovalReason), inner)
+		sb.WriteString("\n" + reason + "\n")
+	}
+	sb.WriteString("\n" + m.renderApprovalKeys(inner))
+	return ApprovalBox.Width(inner+approvalBoxChrome).Render(sb.String()) + "\n\n"
+}
+
+// approvalBoxChrome is the horizontal cost of ApprovalBox beyond its content:
+// 2 border cells plus 2x2 padding cells. lipgloss.Width sets content+padding
+// (borders excluded), so box.Width = inner+4 yields an outer width of inner+6,
+// exactly the chat column. Kept explicit so the width math and the style stay
+// in one place.
+const approvalBoxChrome = 4
+
+// renderApprovalKeys lays out the approval shortcuts, wrapped to the box's
+// inner width. Wrapping matters: lipgloss grows a box to fit its widest line,
+// so an unwrapped key row would push ApprovalBox past the chat column and
+// break the surrounding layout. The [v] label describes the action the key
+// performs: while the full command is shown it offers the summary back, and
+// vice versa.
+func (m *Model) renderApprovalKeys(inner int) string {
+	viewKey := i18n.T("tui.approvalViewFull")
+	if m.approvalShowFull {
+		viewKey = i18n.T("tui.approvalViewShort")
+	}
+	keys := []string{
+		fmt.Sprintf("[y] %s", i18n.T("tui.approvalApprove")),
+		fmt.Sprintf("[n] %s", i18n.T("tui.approvalReject")),
+		fmt.Sprintf("[v] %s", viewKey),
+		fmt.Sprintf("[w] %s", i18n.T("tui.approvalWhitelist")),
+	}
+	return wrapText(strings.Join(keys, "  "), inner)
 }
 
 // lastHistoryRole returns the role of the last non-system message in history.

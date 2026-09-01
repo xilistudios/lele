@@ -997,6 +997,11 @@ type ExecConfig struct {
 	EnableDenyPatterns bool     `json:"enable_deny_patterns" env:"LELE_TOOLS_EXEC_ENABLE_DENY_PATTERNS"`
 	CustomDenyPatterns []string `json:"custom_deny_patterns" env:"LELE_TOOLS_EXEC_CUSTOM_DENY_PATTERNS"`
 	TimeoutSeconds     int      `json:"timeout_seconds" env:"LELE_TOOLS_EXEC_TIMEOUT_SECONDS"` // 0 means no timeout
+	// WhitelistCommands are exact command strings the user approved permanently
+	// ("always allow" from the approval prompt). They bypass deny patterns
+	// without switching on the strict allowlist mode (allowPatterns), which
+	// would block every command not listed there.
+	WhitelistCommands []string `json:"whitelist_commands" env:"LELE_TOOLS_EXEC_WHITELIST_COMMANDS"`
 }
 
 type ToolsConfig struct {

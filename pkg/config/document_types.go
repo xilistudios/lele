@@ -267,6 +267,7 @@ type EditableExecConfig struct {
 	EnableDenyPatterns bool     `json:"enable_deny_patterns"`
 	CustomDenyPatterns []string `json:"custom_deny_patterns"`
 	TimeoutSeconds     int      `json:"timeout_seconds"` // 0 means no timeout
+	WhitelistCommands  []string `json:"whitelist_commands"`
 }
 
 // EditableLogsConfig for logs.

@@ -818,7 +818,8 @@ func TestEditableDocument_WithToolsConfig(t *testing.T) {
 			},
 			"exec": {
 				"enable_deny_patterns": true,
-				"custom_deny_patterns": ["rm -rf /"]
+				"custom_deny_patterns": ["rm -rf /"],
+				"whitelist_commands": ["git push origin main", "docker ps"]
 			}
 		}
 	}`
@@ -854,6 +855,47 @@ func TestEditableDocument_WithToolsConfig(t *testing.T) {
 	}
 	if len(doc.Tools.Exec.CustomDenyPatterns) != 1 {
 		t.Errorf("exec custom_deny_patterns len = %d, want 1", len(doc.Tools.Exec.CustomDenyPatterns))
+	}
+	if len(doc.Tools.Exec.WhitelistCommands) != 2 {
+		t.Errorf("exec whitelist_commands len = %d, want 2", len(doc.Tools.Exec.WhitelistCommands))
+	}
+}
+
+// TestEditableDocument_ExecWhitelistRoundTrip pins the WebUI save path: a
+// whitelist persisted by the TUI ("always allow") must survive an
+// editable-document load→ToConfig cycle untouched. Without this, editing any
+// other setting in the WebUI would silently drop the user's approved commands.
+func TestEditableDocument_ExecWhitelistRoundTrip(t *testing.T) {
+	cfg := &Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.WhitelistCommands = []string{"git push origin main", "docker  ps"}
+
+	doc := editableDocumentFromConfig(cfg)
+	got, err := doc.ToConfig()
+	if err != nil {
+		t.Fatalf("ToConfig: %v", err)
+	}
+	if len(got.Tools.Exec.WhitelistCommands) != 2 {
+		t.Fatalf("whitelist lost in round trip: %v", got.Tools.Exec.WhitelistCommands)
+	}
+	if got.Tools.Exec.WhitelistCommands[0] != "git push origin main" {
+		t.Errorf("whitelist[0] = %q", got.Tools.Exec.WhitelistCommands[0])
+	}
+	if got.Tools.Exec.WhitelistCommands[1] != "docker  ps" {
+		t.Errorf("whitelist[1] = %q (raw form must be preserved)", got.Tools.Exec.WhitelistCommands[1])
+	}
+
+	// toSerializable (the map actually written to disk) must carry the field.
+	serialized, ok := doc.toSerializable()["tools"].(map[string]interface{})
+	if !ok {
+		t.Fatal("tools section missing from serializable doc")
+	}
+	execMap, ok := serialized["exec"].(map[string]interface{})
+	if !ok {
+		t.Fatal("exec section missing from serializable doc")
+	}
+	if _, ok := execMap["whitelist_commands"]; !ok {
+		t.Error("whitelist_commands missing from serialized exec config")
 	}
 }
 
