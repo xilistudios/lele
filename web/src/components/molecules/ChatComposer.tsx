@@ -11,7 +11,9 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
 import { getModeTheme } from '../../lib/modeTheme'
-import { CloseIcon } from '../atoms/Icons'
+import { IconButton } from '../atoms/IconButton'
+import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
+import { FolderPickerModal } from '../organisms/FolderPickerModal'
 import { AttachmentInput } from './AttachmentInput'
 import { SearchableSelect } from './SearchableSelect'
 
@@ -42,6 +44,9 @@ export function ChatComposer() {
     onSelectAgent,
     onSelectModel,
     onSelectThinkLevel,
+    sessionFolder,
+    onSelectFolder,
+    onClearFolder,
     chatMode,
     sendTyping,
     currentSessionKey,
@@ -49,6 +54,7 @@ export function ChatComposer() {
   const { apiUrl } = useAuthContext()
 
   const [draft, setDraft] = useState('')
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
 
@@ -231,7 +237,34 @@ export function ChatComposer() {
               onUpload={onUploadAttachments}
               onAttach={(paths) => onAttachmentsChange((prev) => [...prev, ...paths])}
             />
+            <IconButton
+              onClick={() => setFolderPickerOpen(true)}
+              title={t('chat.addFolder')}
+              ariaLabel={t('chat.addFolder')}
+            >
+              <PlusIcon size={14} />
+            </IconButton>
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] text-text-tertiary min-w-0 flex-1">
+              {sessionFolder && (
+                <span
+                  title={sessionFolder}
+                  className="flex max-w-[180px] items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--color-accent-primary)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] px-2 py-0.5 text-accent-primary"
+                >
+                  <FolderIcon size={11} className="flex-shrink-0" />
+                  <span className="truncate font-medium">
+                    {sessionFolder.split('/').filter(Boolean).pop() || sessionFolder}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onClearFolder}
+                    title={t('chat.removeFolder')}
+                    aria-label={t('chat.removeFolder')}
+                    className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-[color-mix(in_srgb,var(--color-accent-primary)_25%,transparent)] transition-colors"
+                  >
+                    <CloseIcon size={8} />
+                  </button>
+                </span>
+              )}
               <SearchableSelect
                 ariaLabel={t('chat.model')}
                 buttonLabel={t('chat.model')}
@@ -316,6 +349,15 @@ export function ChatComposer() {
           </button>
         </div>
       </div>
+      <FolderPickerModal
+        open={folderPickerOpen}
+        onClose={() => setFolderPickerOpen(false)}
+        onSelect={(path) => {
+          onSelectFolder(path)
+          setFolderPickerOpen(false)
+        }}
+        currentFolder={sessionFolder || undefined}
+      />
     </form>
   )
 }

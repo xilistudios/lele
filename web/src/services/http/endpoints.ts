@@ -37,7 +37,15 @@ export const endpoints = {
     sessionsMeta: '/api/v1/chat/sessions/meta',
     session: (
       sessionKey: string,
-      subresource?: 'model' | 'name' | 'agent' | 'thinking' | 'context' | 'summary' | 'subagents',
+      subresource?:
+        | 'model'
+        | 'name'
+        | 'agent'
+        | 'thinking'
+        | 'folder'
+        | 'context'
+        | 'summary'
+        | 'subagents',
     ) => {
       const base = `/api/v1/chat/sessions/${encodeURIComponent(sessionKey)}`
       return subresource ? `${base}/${subresource}` : base
@@ -70,6 +78,9 @@ export const endpoints = {
   },
   files: {
     upload: '/api/v1/files/upload',
+  },
+  fs: {
+    list: '/api/v1/fs/list',
   },
   skills: {
     list: '/api/v1/skills',

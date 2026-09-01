@@ -26,6 +26,7 @@ import type {
   CronJobsResponse,
   EditableConfig,
   FileUploadResponse,
+  FsListResponse,
   GroupsConfig,
   HistoryResponse,
   LogsDatesResponse,
@@ -43,6 +44,7 @@ import type {
   SendMessageResponse,
   SessionAgentResponse,
   SessionContextResponse,
+  SessionFolderResponse,
   SessionModelResponse,
   SessionNameResponse,
   SessionSubagentsResponse,
@@ -556,6 +558,23 @@ export const createApiClient = (baseUrl: string) => {
         method: 'PATCH',
         body: JSON.stringify({ level }),
       }),
+    sessionFolder: (sessionKey: string) =>
+      request<SessionFolderResponse>(endpoints.chat.session(sessionKey, 'folder'), {
+        method: 'GET',
+      }),
+    updateSessionFolder: (sessionKey: string, folder: string) =>
+      request<SessionFolderResponse>(endpoints.chat.session(sessionKey, 'folder'), {
+        method: 'PATCH',
+        body: JSON.stringify({ folder }),
+      }),
+    fsList: (path: string) => {
+      const params = new URLSearchParams()
+      if (path) params.set('path', path)
+      const query = params.toString()
+      return request<FsListResponse>(`${endpoints.fs.list}${query ? `?${query}` : ''}`, {
+        method: 'GET',
+      })
+    },
     sessionContext: (sessionKey: string) =>
       request<SessionContextResponse>(endpoints.chat.session(sessionKey, 'context'), {
         method: 'GET',
