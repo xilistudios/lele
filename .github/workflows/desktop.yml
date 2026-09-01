@@ -2,8 +2,10 @@ name: Desktop
 
 on:
   push:
+    # `v*` tags are built by release.yml (Create Tag and Release), which also
+    # attaches the bundles to the GitHub release. `desktop-v*` stays here for
+    # desktop-only builds.
     tags:
-      - "v*"
       - "desktop-v*"
   pull_request:
     paths:
@@ -12,6 +14,7 @@ on:
       - "cmd/lele/**"
       - "pkg/**"
       - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-build.yml"
   workflow_dispatch:
 
 concurrency:
@@ -53,67 +56,7 @@ jobs:
         run: go test ./pkg/server/ ./pkg/lockfile/ ./pkg/channels/ ./cmd/lele/
 
   build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.platform }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "desktop/src-tauri"
-
-      - name: Build sidecar
-        shell: bash
-        run: bash desktop/scripts/build-sidecar.sh --target ${{ matrix.target }}
-
-      - name: Build desktop app
-        shell: bash
-        run: |
-          cd desktop
-          bun install
-          bun run tauri build
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lele-desktop-${{ matrix.target }}
-          path: |
-            desktop/src-tauri/target/release/bundle/*
-          if-no-files-found: warn
+    name: Desktop bundles
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ github.ref }}

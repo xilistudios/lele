@@ -58,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      # Plain semver (no leading 'v') for tooling that requires it (Tauri).
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -73,6 +76,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
           git push origin "$RELEASE_TAG"
+
+      - name: Derive plain semver
+        id: version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
 
   release:
     name: GoReleaser Release
@@ -109,11 +119,89 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GOVERSION: ${{ steps.setup-go.outputs.go-version }}
 
+  desktop:
+    name: Desktop binaries
+    needs: create-tag
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      ref: ${{ inputs.tag }}
+      version: ${{ needs.create-tag.outputs.version }}
+
+  publish:
+    name: Attach Desktop Binaries
+    needs: [release, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lele-desktop-*
+          path: artifacts
+
+      - name: Stage assets as lele-desktop files
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          mkdir -p staging
+
+          # artifact dir -> "<os>_<arch>" used in the release asset name
+          osarch_for() {
+            case "$1" in
+              lele-desktop-x86_64-unknown-linux-gnu) echo "linux_x86_64" ;;
+              lele-desktop-aarch64-apple-darwin)     echo "macos_aarch64" ;;
+              lele-desktop-x86_64-pc-windows-msvc)   echo "windows_x86_64" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          for dir in artifacts/lele-desktop-*; do
+            [ -d "$dir" ] || continue
+            artifact="$(basename "$dir")"
+            osarch="$(osarch_for "$artifact")"
+            if [ -z "$osarch" ]; then
+              echo "::warning::Unknown desktop artifact '$artifact', skipping"
+              continue
+            fi
+            while IFS= read -r -d '' f; do
+              base="$(basename "$f")"
+              case "${base##*.}" in
+                deb|rpm|AppImage|dmg|exe|msi) ;;
+                *) continue ;;
+              esac
+              name="lele-desktop_${VERSION}_${osarch}.${base##*.}"
+              mv "$f" "staging/$name"
+              echo "staged: $name"
+            done < <(find "$dir" -type f -print0)
+          done
+
+          if [ -z "$(ls -A staging)" ]; then
+            echo "::error::No desktop bundles were produced"
+            exit 1
+          fi
+
+      - name: Upload desktop assets to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          gh release upload "$RELEASE_TAG" staging/* --clobber
+
       - name: Apply release flags
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
         run: |
-          gh release edit "${{ inputs.tag }}" \
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
             --draft=${{ inputs.draft }} \
             --prerelease=${{ inputs.prerelease }}
+          gh release view "$RELEASE_TAG"
