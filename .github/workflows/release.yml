@@ -192,7 +192,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          gh release upload "$RELEASE_TAG" staging/* --clobber
+          # This job has no checkout step, so gh cannot infer the repo from
+          # git — pass --repo explicitly.
+          gh release upload "$RELEASE_TAG" staging/* --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Apply release flags
         shell: bash
@@ -203,5 +205,6 @@ jobs:
           set -euo pipefail
           gh release edit "$RELEASE_TAG" \
             --draft=${{ inputs.draft }} \
-            --prerelease=${{ inputs.prerelease }}
-          gh release view "$RELEASE_TAG"
+            --prerelease=${{ inputs.prerelease }} \
+            --repo "$GITHUB_REPOSITORY"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
