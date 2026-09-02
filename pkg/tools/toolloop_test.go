@@ -192,11 +192,13 @@ func TestRunToolLoop_EmptyResponseRetries(t *testing.T) {
 }
 
 // ctxCaptureTool records the agent tool context visible during Execute.
+// All methods use a pointer receiver: Execute mutates the struct, and mixing
+// receiver kinds on one type is a lint error (recvcheck).
 type ctxCaptureTool struct{ agentID, sessionKey string }
 
-func (ctxCaptureTool) Name() string        { return "ctxprobe" }
-func (ctxCaptureTool) Description() string { return "records tool context" }
-func (ctxCaptureTool) Parameters() map[string]interface{} {
+func (c *ctxCaptureTool) Name() string        { return "ctxprobe" }
+func (c *ctxCaptureTool) Description() string { return "records tool context" }
+func (c *ctxCaptureTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{"type": "object"}
 }
 func (c *ctxCaptureTool) Execute(ctx context.Context, _ map[string]interface{}) *ToolResult {

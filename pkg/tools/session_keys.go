@@ -8,6 +8,9 @@ package tools
 
 import "strings"
 
+// SessionKeysRelated reports whether two session keys belong to the same
+// logical session family.
+//
 // Session keys are colon-qualified strings built by different subsystems with
 // different levels of detail for the SAME logical session:
 //
@@ -18,10 +21,10 @@ import "strings"
 //	native bare key      "<uuid>" (frontend) vs "native:<uuid>" (origin)
 //
 // Equality alone never matches across these forms, which is the root cause of
-// issue #230 (/stop not cancelling subagents and background processes).
-// SessionKeysRelated is the single shared predicate that treats two keys as
-// belonging to the same session family when either one is a segment-aligned
-// suffix of the other (the channel/agent prefix is metadata, not identity).
+// issue #230 (/stop not cancelling subagents and background processes). This is
+// the single shared predicate that treats two keys as related when either one
+// is a segment-aligned suffix or prefix of the other (the channel/agent prefix
+// is metadata, not identity).
 //
 // Rules:
 //   - empty keys are never related (guards against a "" matching everything);
