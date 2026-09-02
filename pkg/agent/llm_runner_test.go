@@ -311,6 +311,9 @@ func (m *llmRunnerMockToolCoordinator) updateToolContexts(agent *AgentInstance, 
 func (m *llmRunnerMockToolCoordinator) stopAllSubagents() int { return 0 }
 
 func (m *llmRunnerMockToolCoordinator) stopSessionSubagents(sessionKey string) int { return 0 }
+func (m *llmRunnerMockToolCoordinator) cancelSessionTree(sessionKey string) (int, int, int) {
+	return 0, 0, 0
+}
 
 func (m *llmRunnerMockToolCoordinator) cancelAll() int { return 0 }
 

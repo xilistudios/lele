@@ -1087,6 +1087,9 @@ func (m *commandHandlerSubagentCoordinatorStub) updateToolContexts(agent *AgentI
 func (m *commandHandlerSubagentCoordinatorStub) stopAllSubagents() int { return 0 }
 
 func (m *commandHandlerSubagentCoordinatorStub) stopSessionSubagents(sessionKey string) int { return 0 }
+func (m *commandHandlerSubagentCoordinatorStub) cancelSessionTree(sessionKey string) (int, int, int) {
+	return 0, 0, 0
+}
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelAll() int { return 0 }
 
@@ -1260,7 +1263,9 @@ func TestHandleStopCommand(t *testing.T) {
 	if !handled {
 		t.Error("Expected /stop to be handled")
 	}
-	if result != "Agente detenido." {
+	// /stop shares the StopAgent response format across channels (#230):
+	// bare message when nothing else was cancelled, counts when it was.
+	if result != "⏹️ Agente detenido." {
 		t.Errorf("Expected stop message, got: %s", result)
 	}
 }

@@ -28,6 +28,10 @@ type toolCoordinator interface {
 	updateToolContexts(agent *AgentInstance, channel, chatID, sessionKey string)
 	stopAllSubagents() int
 	stopSessionSubagents(sessionKey string) int
+	// cancelSessionTree stops every running resource owned by a session:
+	// its subagents, its group runs and its background processes. It returns
+	// the counts of each so callers can report what was cancelled.
+	cancelSessionTree(sessionKey string) (subagents, groups, procs int)
 	cancelAll() int
 	cancelSession(sessionKey string)
 	markSessionSubagentsDelivered(sessionKey string)
@@ -125,17 +129,37 @@ func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 	return totalStopped
 }
 
+// sessionCancellationKeys returns the distinct identities a session can be
+// referenced by when matching owned resources: the key as given (typically
+// the resolved/active session key) and its alias resolution. Task and process
+// matching uses tools.SessionKeysRelated, which bridges the remaining format
+// differences ("native:<uuid>" vs "<uuid>", "telegram:123" vs
+// "agent:main:telegram:123").
+func (tc *toolCoordinatorImpl) sessionCancellationKeys(sessionKey string) []string {
+	if sessionKey == "" {
+		return nil
+	}
+	keys := []string{sessionKey}
+	if resolved := tc.al.ResolveSessionKey(sessionKey); resolved != sessionKey {
+		keys = append(keys, resolved)
+	}
+	return keys
+}
+
 // stopSessionSubagents stops running subagents for a specific session.
+// A task belongs to the session when its spawn-time runtime key, its
+// routing-derived origin key, or its child session key is related to any of
+// the session's identities (see tools.TaskBelongsToSession). This replaces
+// the pre-#230 equality comparison that never matched because
+// OriginSessionKey ("<channel>:<chatID>") and the runtime key can use
+// different forms of the same session.
 func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
-	resolvedKey := tc.al.ResolveSessionKey(sessionKey)
+	keys := tc.sessionCancellationKeys(sessionKey)
 	totalStopped := 0
 	for _, manager := range tc.subagents {
 		if manager != nil {
 			for _, task := range manager.ListTasks() {
-				resolvedOrigin := tc.al.ResolveSessionKey(task.OriginSessionKey)
-				taskSessionKey := task.OriginSessionKey + ":" + task.ID
-				resolvedTaskKey := tc.al.ResolveSessionKey(taskSessionKey)
-				if resolvedOrigin == resolvedKey || resolvedTaskKey == resolvedKey || taskSessionKey == resolvedKey {
+				if tools.TaskBelongsToSession(task, keys) {
 					if manager.StopTask(task.ID) {
 						totalStopped++
 					}
@@ -144,6 +168,47 @@ func (tc *toolCoordinatorImpl) stopSessionSubagents(sessionKey string) int {
 		}
 	}
 	return totalStopped
+}
+
+// cancelSessionTree stops every running resource owned by a session: its
+// subagents (and transitively their child subagents and background
+// processes, which are attributed to the spawner's session), its group runs,
+// and its background exec processes. sessionKey is expected to be the
+// resolved key, but alias resolution is applied defensively here. Callers
+// still need to cancel the session's own in-flight turn separately
+// (al.cancelSession).
+func (tc *toolCoordinatorImpl) cancelSessionTree(sessionKey string) (subagents, groups, procs int) {
+	if sessionKey == "" {
+		return 0, 0, 0
+	}
+
+	subagents = tc.stopSessionSubagents(sessionKey)
+	keys := tc.sessionCancellationKeys(sessionKey)
+
+	// Group runs are keyed by the origin chat/session key they were started
+	// with; stop once per identity (a stopped group cannot be counted twice
+	// because StopByOrigin only matches running groups).
+	if gm := tc.al.GroupManager(); gm != nil {
+		for _, k := range keys {
+			groups += gm.StopByOrigin("", k)
+		}
+	}
+
+	// Background processes track their owning session at spawn time; the
+	// relation also covers subagent-owned processes ("{owner}:{task_id}").
+	// Every session identity is tried (alias first, then resolved): a process
+	// stopped under one identity cannot be counted twice because
+	// StopForSession only matches running processes.
+	for _, mgr := range tc.bgManagers {
+		if mgr == nil {
+			continue
+		}
+		for _, k := range keys {
+			procs += mgr.StopForSession(k)
+		}
+	}
+
+	return subagents, groups, procs
 }
 
 // cancelAll cancels all running subagent tasks and clears the subagent map.
@@ -161,15 +226,15 @@ func (tc *toolCoordinatorImpl) cancelSession(sessionKey string) {
 }
 
 // markSessionSubagentsDelivered marks all finished/terminal subagents for a specific session as delivered.
+// It uses the same ownership matcher as stopSessionSubagents so that a task
+// is never left "undelivered" under one key form while being stopped under
+// another (issue #230).
 func (tc *toolCoordinatorImpl) markSessionSubagentsDelivered(sessionKey string) {
-	resolvedKey := tc.al.ResolveSessionKey(sessionKey)
+	keys := tc.sessionCancellationKeys(sessionKey)
 	for _, manager := range tc.subagents {
 		if manager != nil {
 			for _, task := range manager.ListTasks() {
-				resolvedOrigin := tc.al.ResolveSessionKey(task.OriginSessionKey)
-				taskSessionKey := task.OriginSessionKey + ":" + task.ID
-				resolvedTaskKey := tc.al.ResolveSessionKey(taskSessionKey)
-				if resolvedOrigin == resolvedKey || resolvedTaskKey == resolvedKey || taskSessionKey == resolvedKey {
+				if tools.TaskBelongsToSession(task, keys) {
 					// Check if task status is terminal/finished (not running)
 					if task.Status != tools.SubagentStatusRunning {
 						manager.MarkDelivered(task.ID)

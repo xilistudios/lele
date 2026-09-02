@@ -155,6 +155,11 @@ func (t *ListSubagentsTool) Execute(ctx context.Context, args map[string]interfa
 // callers whose key comes from the agent loop (precedence 2) and carries an
 // extra suffix — e.g. a subagent child session "<origin>:subagent-N" or a
 // "<origin>:chat:N" alias.
+//
+// NOTE: this relation is deliberately DIRECTIONAL (a caller only sees tasks
+// whose origin is its own key or an ancestor of it), unlike the symmetric
+// SessionKeysRelated used for cancellation cascades. Do not swap one for the
+// other.
 func sameSessionKey(originSessionKey, sessionKey string) bool {
 	if originSessionKey == "" || sessionKey == "" {
 		return false

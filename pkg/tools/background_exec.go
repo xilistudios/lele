@@ -87,10 +87,13 @@ type BackgroundProcess struct {
 //   - Unowned processes (empty OwnerSessionKey) are visible to everyone
 //     (backward compatibility).
 //   - Callers without a session key (e.g. operator views) see everything.
-//   - A process is visible to its owning session and to any ancestor
-//     session: subagent session keys are "{parent_key}:{task_id}", so a
-//     parent session can monitor processes started by its own subagents,
-//     while sibling subagents cannot see each other's processes.
+//   - A process is visible to its owning session and to any session in the
+//     same family (see SessionKeysRelated): subagent session keys are
+//     "{parent_key}:{task_id}", so a parent session can monitor processes
+//     started by its own subagents, while sibling subagents cannot see each
+//     other's processes. The relation also bridges the different key forms
+//     built by routing ("telegram:123") and the runtime
+//     ("agent:main:telegram:123").
 func (p *BackgroundProcess) VisibleTo(callerSessionKey string) bool {
 	p.mu.RLock()
 	owner := p.OwnerSessionKey
@@ -99,10 +102,7 @@ func (p *BackgroundProcess) VisibleTo(callerSessionKey string) bool {
 	if owner == "" || callerSessionKey == "" {
 		return true
 	}
-	if owner == callerSessionKey {
-		return true
-	}
-	return strings.HasPrefix(owner, callerSessionKey+":")
+	return SessionKeysRelated(owner, callerSessionKey)
 }
 
 // Output returns combined stdout + stderr (stderr prefixed with "\nSTDERR:\n").
@@ -365,25 +365,61 @@ func (m *BackgroundProcessManager) StopAll() int {
 
 	count := 0
 	for _, p := range m.processes {
-		if p.Status == BgExecStatusRunning {
-			if p.cancel != nil {
-				p.cancel()
-			}
-			if p.cmd != nil && p.cmd.Process != nil {
-				_ = p.cmd.Process.Kill()
-			}
-
-			now := time.Now()
-			p.mu.Lock()
-			p.Status = BgExecStatusStopped
-			p.EndTime = &now
-			p.releaseBuffers()
-			p.mu.Unlock()
-
+		if m.stopLocked(p) {
 			count++
 		}
 	}
 	return count
+}
+
+// StopForSession stops every running process owned by the given session
+// family (the session itself, its aliases, and its subagents' processes —
+// see SessionKeysRelated). An empty sessionKey is a no-op so that callers
+// without session context never kill other sessions' processes by accident.
+// It returns the number of processes stopped.
+func (m *BackgroundProcessManager) StopForSession(sessionKey string) int {
+	if sessionKey == "" {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	count := 0
+	for _, p := range m.processes {
+		p.mu.RLock()
+		owner := p.OwnerSessionKey
+		p.mu.RUnlock()
+		if !SessionKeysRelated(owner, sessionKey) {
+			continue
+		}
+		if m.stopLocked(p) {
+			count++
+		}
+	}
+	return count
+}
+
+// stopLocked stops one process if it is running. m.mu must be held.
+func (m *BackgroundProcessManager) stopLocked(p *BackgroundProcess) bool {
+	if p == nil || p.Status != BgExecStatusRunning {
+		return false
+	}
+
+	if p.cancel != nil {
+		p.cancel()
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+
+	now := time.Now()
+	p.mu.Lock()
+	p.Status = BgExecStatusStopped
+	p.EndTime = &now
+	p.releaseBuffers()
+	p.mu.Unlock()
+
+	return true
 }
 
 // MarkCompleted sets the status and exit code for a process.
