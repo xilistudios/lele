@@ -465,3 +465,22 @@ func TestGoalContinuation_SessionMarkedActiveDuringJudgeEval(t *testing.T) {
 		t.Fatalf("expected goal DONE, got: %+v", goal)
 	}
 }
+
+// TestLastAssistantResponse_SkipsBlanks verifies that legacy blank assistant
+// messages (persisted by the old empty-response bug) do not mask the last
+// real assistant reply from the goal judge.
+func TestLastAssistantResponse_SkipsBlanks(t *testing.T) {
+	sm := session.NewSessionManager()
+	agent := &AgentInstance{Sessions: sm}
+
+	sm.AddMessage("skey", "user", "hello")
+	sm.AddMessage("skey", "assistant", "real reply")
+	sm.AddMessage("skey", "user", "again")
+	// Legacy blanks: no content, no tool calls.
+	sm.AddFullMessage("skey", providers.Message{Role: "assistant", Content: "", ReasoningContent: "thinking..."})
+	sm.AddFullMessage("skey", providers.Message{Role: "assistant", Content: "  "})
+
+	if got := lastAssistantResponse(agent, "skey"); got != "real reply" {
+		t.Errorf("lastAssistantResponse = %q, want %q", got, "real reply")
+	}
+}

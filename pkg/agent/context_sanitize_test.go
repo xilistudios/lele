@@ -376,3 +376,66 @@ func TestStripNamelessToolCalls(t *testing.T) {
 		t.Errorf("Unexpected cleaned order: %+v", cleaned)
 	}
 }
+
+// ============================================================================
+// dropBlankAssistantMessages — healing sessions contaminated by the legacy
+// blank-persistence bug (empty assistant turns saved before the empty-retry
+// check, which models then imitate, stalling the session forever).
+// ============================================================================
+
+func TestDropBlankAssistantMessages_RemovesBlanks(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "", ReasoningContent: "lots of thinking"},
+		{Role: "user", Content: "continue"},
+		{Role: "assistant", Content: "   "}, // whitespace-only counts as blank
+		{Role: "assistant", Content: "real reply"},
+	}
+
+	cleaned, removed := dropBlankAssistantMessages(history)
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	if len(cleaned) != 3 {
+		t.Fatalf("expected 3 messages, got %d: %+v", len(cleaned), cleaned)
+	}
+	if cleaned[0].Content != "hi" || cleaned[1].Content != "continue" || cleaned[2].Content != "real reply" {
+		t.Errorf("unexpected surviving messages: %+v", cleaned)
+	}
+}
+
+func TestDropBlankAssistantMessages_KeepsToolCallTurns(t *testing.T) {
+	// An assistant turn with empty content but tool calls is NOT blank — the
+	// following tool results depend on it.
+	history := []providers.Message{
+		{Role: "user", Content: "run it"},
+		{Role: "assistant", Content: "", ToolCalls: []providers.ToolCall{{ID: "c1", Name: "exec"}}},
+		{Role: "tool", Content: "output", ToolCallID: "c1"},
+	}
+
+	cleaned, removed := dropBlankAssistantMessages(history)
+	if removed {
+		t.Fatal("expected removed=false: tool-call turns must survive")
+	}
+	if len(cleaned) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(cleaned))
+	}
+}
+
+func TestDropBlankAssistantMessages_NoBlanksReturnsSameSlice(t *testing.T) {
+	history := []providers.Message{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello"},
+	}
+	cleaned, removed := dropBlankAssistantMessages(history)
+	if removed {
+		t.Error("expected removed=false")
+	}
+	if len(cleaned) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(cleaned))
+	}
+	// Must not allocate a new slice when nothing changes.
+	if &cleaned[0] != &history[0] {
+		t.Error("expected the original slice to be returned unchanged")
+	}
+}

@@ -109,11 +109,18 @@ func syncCompactionToSession(config ToolLoopConfig, summary string) {
 // the model's window.
 const maxReactiveCompactions = 3
 
+// maxConsecutiveEmptyResponses bounds how many consecutive blank assistant
+// responses the tool loop tolerates before ending the run. Thinking models
+// can exhaust their token budget on reasoning and return content:"" with
+// finish_reason:length; retrying forever with unlimited MaxIterations would
+// hang the subagent until the LLM loop timeout kills it.
+const maxConsecutiveEmptyResponses = 5
+
 // toolLoopEmptyRetryBackoff returns the wait duration before the given
 // empty-response retry attempt (1s, 2s, 3s, capped at 3s). Empty responses
-// are retried indefinitely — bounded by MaxIterations (when set) and by
-// context cancellation — with the backoff capped at 3s to avoid a tight
-// spin when a provider repeatedly returns HTTP 200 with empty content.
+// are retried up to maxConsecutiveEmptyResponses times, bounded by context
+// cancellation (user abort / task cancel); after the limit the run ends with
+// a not_done status.
 func toolLoopEmptyRetryBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
@@ -457,29 +464,45 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"content_chars": len(finalContent),
 				})
 
-			// Save assistant message with reasoning content (important for thinking models)
-			assistantMsg := providers.Message{
-				Role:             "assistant",
-				Content:          response.Content,
-				ReasoningContent: response.ReasoningContent,
-			}
-			if config.SessionRecorder != nil && config.SessionKey != "" {
-				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
-			}
-
-			// If the response is empty, retry by prompting the model again. This
-			// keeps the subagent loop alive when a provider returns HTTP 200 with
-			// empty content instead of terminating the run with a misleading
-			// "maximum iterations reached" fallback. The retry loop is bounded by
-			// MaxIterations (when set) and by context cancellation; with unlimited
-			// iterations it keeps retrying until a non-empty response arrives.
+			// If the response is empty, do NOT persist it and retry a bounded
+			// number of times. Persisting blank assistant messages (a thinking
+			// model that burns its token budget on reasoning returns content:""
+			// with finish_reason:length) poisons the subagent session history,
+			// and retrying forever with unlimited MaxIterations hangs the
+			// subagent until the (often 90-minute) timeout kills it.
 			if len(strings.TrimSpace(finalContent)) == 0 {
 				emptyRetries++
+				if emptyRetries > maxConsecutiveEmptyResponses {
+					logger.ErrorCF("toolloop", "Empty response limit reached, ending run",
+						map[string]any{
+							"iteration": iteration,
+							"retries":   emptyRetries,
+							"max":       maxConsecutiveEmptyResponses,
+						})
+					// End with an explicit not_done instead of looping or
+					// persisting blanks. The parent receives this as the
+					// subagent result.
+					finalContent = "STATUS: not_done\nSUMMARY: The model returned empty responses repeatedly\nDETAILS:\nThe provider kept returning blank content (likely a thinking model exhausting its token budget on reasoning). The run was stopped to avoid an infinite retry loop."
+					if config.SessionRecorder != nil && config.SessionKey != "" {
+						config.SessionRecorder.AddFullMessage(config.SessionKey, providers.Message{
+							Role:    "assistant",
+							Content: finalContent,
+						})
+					}
+					break
+				}
 				logger.WarnCF("toolloop", "Empty response received, retrying with follow-up prompt",
 					map[string]any{
 						"iteration": iteration,
 						"retry":     emptyRetries,
 					})
+				// Keep the blank turn in the in-memory context only (preserves
+				// role alternation) but never persist it to the session.
+				messages = append(messages, providers.Message{
+					Role:             "assistant",
+					Content:          response.Content,
+					ReasoningContent: response.ReasoningContent,
+				})
 				wait := toolLoopEmptyRetryBackoff(emptyRetries - 1)
 				waitFn := config.RetryWait
 				if waitFn == nil {
@@ -499,6 +522,18 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			// Non-empty final content: reset the consecutive-empty counter so the
 			// backoff restarts small after a real response.
 			emptyRetries = 0
+
+			// Save assistant message with reasoning content (important for thinking
+			// models). Only reached for non-empty content, so blanks never enter
+			// the persisted session.
+			assistantMsg := providers.Message{
+				Role:             "assistant",
+				Content:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+			}
+			if config.SessionRecorder != nil && config.SessionKey != "" {
+				config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
+			}
 
 			// Publish final response as stream event if bus is available
 			if config.MessageBus != nil && finalContent != "" {

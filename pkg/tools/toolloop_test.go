@@ -292,3 +292,104 @@ func TestRunToolLoop_InheritsOwnerFromContext(t *testing.T) {
 		t.Errorf("explicit owner not honored: %q/%q", probe2.agentID, probe2.sessionKey)
 	}
 }
+
+// unlimitedProvider returns a fixed response for every Chat call.
+type unlimitedProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (p *unlimitedProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	return &providers.LLMResponse{Content: ""}, nil
+}
+
+func (p *unlimitedProvider) GetDefaultModel() string { return "test-model" }
+
+func (p *unlimitedProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+// TestRunToolLoop_EmptyResponsesNotPersisted verifies that blank assistant
+// responses never reach the session recorder (they used to be saved before
+// the empty-retry check, contaminating subagent sessions), while the task
+// prompt and the eventual real response are.
+func TestRunToolLoop_EmptyResponsesNotPersisted(t *testing.T) {
+	p := &scriptedProvider{
+		responses: []*providers.LLMResponse{
+			{Content: "", ReasoningContent: "burned the whole budget"},
+			{Content: "real answer"},
+		},
+	}
+	rec := &recordingSessionRecorder{}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        p,
+		Model:           "test-model",
+		MaxIterations:   0,
+		SessionRecorder: rec,
+		SessionKey:      "origin:task-1",
+		RetryWait:       instantToolLoopWait,
+	}, []providers.Message{{Role: "user", Content: "task"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if result.Content != "real answer" {
+		t.Fatalf("expected %q, got %q", "real answer", result.Content)
+	}
+
+	saved := rec.messages["origin:task-1"]
+	if len(saved) != 2 {
+		t.Fatalf("expected 2 persisted messages (user prompt + real answer), got %d: %+v", len(saved), saved)
+	}
+	if saved[0].Role != "user" || saved[0].Content != "task" {
+		t.Errorf("unexpected first persisted message: %+v", saved[0])
+	}
+	if saved[1].Role != "assistant" || saved[1].Content != "real answer" {
+		t.Errorf("unexpected second persisted message: %+v", saved[1])
+	}
+}
+
+// TestRunToolLoop_EmptyResponsesBounded verifies that a provider that ALWAYS
+// returns blank content cannot hang the subagent loop: the run ends after a
+// bounded number of retries with a not_done status and persists no blanks.
+func TestRunToolLoop_EmptyResponsesBounded(t *testing.T) {
+	p := &unlimitedProvider{}
+	rec := &recordingSessionRecorder{}
+
+	result, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        p,
+		Model:           "test-model",
+		MaxIterations:   0, // unlimited iterations — empty-retry cap is the guard
+		SessionRecorder: rec,
+		SessionKey:      "origin:task-2",
+		RetryWait:       instantToolLoopWait,
+	}, []providers.Message{{Role: "user", Content: "task"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop returned error: %v", err)
+	}
+	if !strings.Contains(result.Content, "STATUS: not_done") {
+		t.Fatalf("expected not_done fallback, got %q", result.Content)
+	}
+	wantCalls := maxConsecutiveEmptyResponses + 1 // 1 initial + N retries
+	if got := p.callCount(); got != wantCalls {
+		t.Fatalf("expected %d provider calls, got %d", wantCalls, got)
+	}
+	for _, m := range rec.messages["origin:task-2"] {
+		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" {
+			t.Fatalf("blank assistant message persisted: %+v", m)
+		}
+	}
+}
+
+// instantToolLoopWait returns an already-ready channel so empty-response
+// backoffs add no real delay in tests.
+func instantToolLoopWait(time.Duration) <-chan time.Time {
+	ch := make(chan time.Time, 1)
+	ch <- time.Now()
+	return ch
+}

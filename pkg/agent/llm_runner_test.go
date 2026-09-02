@@ -2838,3 +2838,61 @@ func TestRunAgentLoop_NoTimeoutWhenDisabled(t *testing.T) {
 		t.Fatal("Provider never saw the ctx")
 	}
 }
+
+// TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit verifies the core fix for
+// the "session won't continue" bug: with unlimited MaxIterations (0) and a
+// provider that ALWAYS returns blank content, the loop must NOT spin forever.
+// It ends after maxConsecutiveEmptyResponses retries with the DefaultResponse.
+func TestRunAgentLoop_AlwaysEmpty_BoundedByEmptyLimit(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	runner.retryWait = instantRetryWait
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.MaxIterations = 0 // unlimited: only the empty-retry cap can stop it
+
+	provider := &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{Content: "", ToolCalls: []providers.ToolCall{}},
+	}
+	agent.Provider = provider
+
+	opts := processOptions{
+		SessionKey:      "test-session",
+		Channel:         "test-channel",
+		ChatID:          "test-chat-id",
+		UserMessage:     "Hi",
+		DefaultResponse: "Default fallback",
+		EnableSummary:   false,
+		SendResponse:    false,
+	}
+
+	done := make(chan string, 1)
+	go func() {
+		response, err := runner.runAgentLoop(context.Background(), agent, opts)
+		if err != nil {
+			t.Errorf("Expected no error, got: %v", err)
+		}
+		done <- response
+	}()
+
+	select {
+	case response := <-done:
+		if response != "Default fallback" {
+			t.Errorf("Expected default fallback, got: %q", response)
+		}
+		// 1 initial call + maxConsecutiveEmptyResponses retries.
+		want := maxConsecutiveEmptyResponses + 1
+		if provider.callCount != want {
+			t.Errorf("Expected %d provider calls (bounded by empty limit), got %d", want, provider.callCount)
+		}
+		// No blank assistant messages must have been persisted.
+		for _, m := range agent.Sessions.GetHistory("test-session") {
+			if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+				t.Errorf("blank assistant message persisted: %+v", m)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("runAgentLoop did not terminate — empty-response loop is unbounded")
+	}
+}
