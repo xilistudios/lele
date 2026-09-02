@@ -9,7 +9,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
@@ -438,16 +437,12 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)
 }
 
-// gatewayVersion returns the gateway version from build info.
+// gatewayVersion returns the gateway version.
+//
+// Thin alias to the exported helper (DRY): both /status renderers must show
+// exactly the same string as the TUI sidebar.
 func gatewayVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info == nil || info.Main.Version == "" {
-		return "dev"
-	}
-	if info.Main.Version == "(devel)" {
-		return "dev"
-	}
-	return info.Main.Version
+	return GatewayVersion()
 }
 
 // extractPeer extracts the routing peer from inbound message metadata.

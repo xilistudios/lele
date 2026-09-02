@@ -8,13 +8,13 @@ package agent
 
 import (
 	"fmt"
-	"runtime/debug"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/utils"
+	"github.com/xilistudios/lele/pkg/version"
 )
 
 // FormatMessagesForLog formats messages for logging
@@ -123,14 +123,11 @@ func ExtractParentPeer(msg bus.InboundMessage) *routing.RoutePeer {
 	return &routing.RoutePeer{Kind: parentKind, ID: parentID}
 }
 
-// GatewayVersion returns the gateway version from build info
+// GatewayVersion returns the gateway version from build info.
+//
+// Delegates to pkg/version, the single source of truth: it prefers the
+// ldflags-injected value and strips the toolchain's VCS "+dirty" marker from
+// build-info fallbacks, so released builds never display "x.y.z-dirty".
 func GatewayVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info == nil || info.Main.Version == "" {
-		return "dev"
-	}
-	if info.Main.Version == "(devel)" {
-		return "dev"
-	}
-	return info.Main.Version
+	return version.Get()
 }

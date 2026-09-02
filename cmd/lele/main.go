@@ -7,9 +7,16 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/skills"
+	appversion "github.com/xilistudios/lele/pkg/version"
 )
 
 func main() {
+	// Make the ldflags-injected version the single source of truth for every
+	// display path (TUI sidebar, /status, API). Without this, consumers fall
+	// back to build-info, which Go stamps with "+dirty" whenever the tree was
+	// modified during the build — released binaries showed "0.7.10-dirty".
+	appversion.Set(version)
+
 	configDir, remaining := parseConfigDirFlag(os.Args[1:])
 	if configDir != "" {
 		os.Setenv("LELE_CONFIG_DIR", configDir)
