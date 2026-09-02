@@ -25,20 +25,28 @@ type SubagentTask struct {
 	OriginChannel    string
 	OriginChatID     string
 	OriginSessionKey string
-	Status           string
-	Summary          string
-	Result           string
-	ContextRequest   string
-	Guidance         []string
-	Created          int64
-	Updated          int64
-	Iterations       int
-	doneCh           chan struct{} // closed when the task reaches a terminal state (event-driven waiting)
-	Progress         string        // latest intermediate progress update from the subagent
-	Dependencies     []string      // task IDs that must complete before this task starts
-	MaxRetries       int           // maximum number of automatic retry attempts for transient failures
-	RetryCount       int           // current number of retry attempts made
-	delivered        bool          // tracks whether result was already consumed via wait_for_subagent
+	// SpawnerSessionKey is the runtime session key of the agent loop that
+	// called the spawn tool, captured from the tool context (empty when the
+	// spawn happens outside an agent turn). OriginSessionKey is built from
+	// message routing ("<channel>:<chatID>") and can differ in form from the
+	// runtime key ("agent:<id>:<channel>:<chatID>", a bare uuid, an alias),
+	// so cancellation matching uses this key first and falls back to the
+	// origin (see tools.SessionKeysRelated, issue #230).
+	SpawnerSessionKey string
+	Status            string
+	Summary           string
+	Result            string
+	ContextRequest    string
+	Guidance          []string
+	Created           int64
+	Updated           int64
+	Iterations        int
+	doneCh            chan struct{} // closed when the task reaches a terminal state (event-driven waiting)
+	Progress          string        // latest intermediate progress update from the subagent
+	Dependencies      []string      // task IDs that must complete before this task starts
+	MaxRetries        int           // maximum number of automatic retry attempts for transient failures
+	RetryCount        int           // current number of retry attempts made
+	delivered         bool          // tracks whether result was already consumed via wait_for_subagent
 	// lastErr is the raw error from the most recent run of this task, kept so
 	// the retry decision can ask the provider layer's classifier instead of
 	// pattern-matching the rendered Result string. Invariant: it is set ONLY by

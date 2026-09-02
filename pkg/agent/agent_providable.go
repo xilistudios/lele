@@ -490,7 +490,10 @@ func (ap *agentProvidableImpl) GetStatus(sessionKey string) string {
 	return ap.al.messageProcessor.formatStatusResponse(agent, sessionKey, "telegram")
 }
 
-// StopAgent stops the agent processing for a session.
+// StopAgent stops the agent processing for a session. It cascades through
+// every resource the session owns - subagents (and transitively their child
+// subagents and background processes), group runs and background exec
+// processes - before cancelling the session's own in-flight turn.
 func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	logger.InfoCF("agent", "StopAgent called", map[string]interface{}{
@@ -499,35 +502,40 @@ func (ap *agentProvidableImpl) StopAgent(sessionKey string) string {
 		"is_processing": ap.al.sessionManager.IsSessionProcessing(resolvedKey),
 	})
 
-	subagentCount := 0
+	subagentCount, groupCount, procCount := 0, 0, 0
 	if ap.al.toolCoordinator != nil {
-		subagentCount = ap.al.toolCoordinator.stopSessionSubagents(resolvedKey)
+		subagentCount, groupCount, procCount = ap.al.toolCoordinator.cancelSessionTree(resolvedKey)
 	}
 	cancelled := ap.al.cancelSession(resolvedKey)
-	groupCount := 0
-	if gm := ap.al.GroupManager(); gm != nil {
-		groupCount = gm.StopByOrigin("", resolvedKey)
-		if sessionKey != "" && sessionKey != resolvedKey {
-			groupCount += gm.StopByOrigin("", sessionKey)
-		}
-	}
 	logger.InfoCF("agent", "StopAgent completed", map[string]interface{}{
 		"session_key":    resolvedKey,
 		"cancelled":      cancelled,
 		"subagent_count": subagentCount,
 		"group_count":    groupCount,
+		"process_count":  procCount,
 	})
 
-	if groupCount > 0 && subagentCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s) y %d grupo(s)).", subagentCount, groupCount)
+	return formatStopAgentResponse(subagentCount, groupCount, procCount)
+}
+
+// formatStopAgentResponse renders the user-facing summary of a stop request.
+// counts are the number of subagents, group runs and background processes
+// that were cancelled; zero values are omitted so a plain stop stays terse.
+func formatStopAgentResponse(subagentCount, groupCount, procCount int) string {
+	var parts []string
+	if subagentCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d subagente(s)", subagentCount))
 	}
 	if groupCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d grupo(s)).", groupCount)
+		parts = append(parts, fmt.Sprintf("%d grupo(s)", groupCount))
 	}
-	if subagentCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
+	if procCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d proceso(s) en segundo plano", procCount))
 	}
-	return "⏹️ Agente detenido."
+	if len(parts) == 0 {
+		return "⏹️ Agente detenido."
+	}
+	return fmt.Sprintf("⏹️ Agente detenido (incluye %s).", strings.Join(parts, " y "))
 }
 
 // CompactSession compacts the session history.

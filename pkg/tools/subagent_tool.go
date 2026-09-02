@@ -108,6 +108,9 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		originChatID = cid
 	}
 
+	// Owning session for cancellation attribution (#230).
+	ownerAgentID, ownerSessionKey := AgentToolContextFromCtx(ctx)
+
 	// Use a background context to decouple the subagent from the parent agent's
 	// lifecycle. This prevents the subagent from being killed by parent context
 	// cancellation (e.g., timeouts, /stop commands). The subagent should run
@@ -136,6 +139,11 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		ContextWindow:              agentContextWindow,
 		CompactionThresholdPercent: sm.getCompactionThresholdPercent(),
 		Redactor:                   t.manager.getRedactor(),
+		// taskCtx is detached from the caller's context (see above), so the
+		// owner must be forwarded explicitly: whatever this loop spawns
+		// belongs to the caller's session for cancellation purposes (#230).
+		OwnerAgentID:    ownerAgentID,
+		OwnerSessionKey: ownerSessionKey,
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)

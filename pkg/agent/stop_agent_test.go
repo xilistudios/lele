@@ -8,7 +8,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,44 +85,58 @@ func TestStopAgent_StopsActiveGroup(t *testing.T) {
 
 // TestStopAgent_ResponseMessageFormatting is a table-driven test that verifies
 // the message formatting logic in StopAgent for all combinations of
-// subagentCount and groupCount.
+// subagentCount, groupCount and procCount. It exercises the production
+// formatStopAgentResponse (agent_providable.go) directly.
 func TestStopAgent_ResponseMessageFormatting(t *testing.T) {
 	cases := []struct {
 		name           string
 		subagentCount  int
 		groupCount     int
+		procCount      int
 		wantContains   []string
 		wantNotContain []string
 	}{
 		{
-			name:          "both zero",
+			name:          "all zero",
 			subagentCount: 0,
 			groupCount:    0,
+			procCount:     0,
 			wantContains:  []string{"Agente detenido"},
 		},
 		{
-			name:          "subagents only",
-			subagentCount: 3,
-			groupCount:    0,
-			wantContains:  []string{"Agente detenido", "subagente(s)"},
+			name:           "subagents only",
+			subagentCount:  3,
+			groupCount:     0,
+			wantContains:   []string{"Agente detenido", "subagente(s)"},
+			wantNotContain: []string{"grupo(s)", "proceso(s)"},
 		},
 		{
-			name:          "groups only",
-			subagentCount: 0,
-			groupCount:    2,
-			wantContains:  []string{"Agente detenido", "grupo(s)"},
+			name:           "groups only",
+			subagentCount:  0,
+			groupCount:     2,
+			wantContains:   []string{"Agente detenido", "grupo(s)"},
+			wantNotContain: []string{"subagente(s)"},
 		},
 		{
-			name:          "both subagents and groups",
+			name:           "processes only",
+			subagentCount:  0,
+			groupCount:     0,
+			procCount:      1,
+			wantContains:   []string{"Agente detenido", "proceso(s) en segundo plano"},
+			wantNotContain: []string{"subagente(s)", "grupo(s)"},
+		},
+		{
+			name:          "all three",
 			subagentCount: 4,
 			groupCount:    1,
-			wantContains:  []string{"Agente detenido", "subagente(s)", "grupo(s)"},
+			procCount:     2,
+			wantContains:  []string{"Agente detenido", "subagente(s)", "grupo(s)", "proceso(s) en segundo plano"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := formatStopAgentResponse(tc.subagentCount, tc.groupCount)
+			result := formatStopAgentResponse(tc.subagentCount, tc.groupCount, tc.procCount)
 			if !strings.Contains(result, "Agente detenido") {
 				t.Errorf("response should contain 'Agente detenido', got: %s", result)
 			}
@@ -137,28 +150,12 @@ func TestStopAgent_ResponseMessageFormatting(t *testing.T) {
 					t.Errorf("response should NOT contain %q, got: %s", avoid, result)
 				}
 			}
-			// Verify exact content for the "both zero" case.
-			if tc.subagentCount == 0 && tc.groupCount == 0 {
+			// Verify exact content for the "all zero" case.
+			if tc.subagentCount == 0 && tc.groupCount == 0 && tc.procCount == 0 {
 				if result != "⏹️ Agente detenido." {
 					t.Errorf("exact response = %q, want %q", result, "⏹️ Agente detenido.")
 				}
 			}
 		})
 	}
-}
-
-// formatStopAgentResponse replicates the message formatting logic from
-// StopAgent for testability. This is an internal helper; keep in sync
-// with the production code in agent_providable.go.
-func formatStopAgentResponse(subagentCount, groupCount int) string {
-	if groupCount > 0 && subagentCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s) y %d grupo(s)).", subagentCount, groupCount)
-	}
-	if groupCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d grupo(s)).", groupCount)
-	}
-	if subagentCount > 0 {
-		return fmt.Sprintf("⏹️ Agente detenido (incluye %d subagente(s)).", subagentCount)
-	}
-	return "⏹️ Agente detenido."
 }

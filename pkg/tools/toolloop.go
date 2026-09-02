@@ -74,6 +74,15 @@ type ToolLoopConfig struct {
 	// EvictExcludedFromMemory controls whether session-synced compaction also
 	// evicts excluded messages from the in-memory session cache.
 	EvictExcludedFromMemory bool
+	// OwnerAgentID and OwnerSessionKey identify the agent loop that owns this
+	// tool loop. When OwnerSessionKey is set, RunToolLoop injects them into
+	// the tool-execution context (tools.WithAgentToolContext) so tools run
+	// inside the loop can attribute their work - spawned subagents, background
+	// processes - to the owning session for cancellation (issue #230). The
+	// main agent loop gets this via the agent tool executor; standalone tool
+	// loops (subagents, sync subagent tool) must set it explicitly.
+	OwnerAgentID    string
+	OwnerSessionKey string
 }
 
 // syncCompactionToSession persists a loop-compaction result to the subagent's
@@ -314,6 +323,18 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 	emptyRetries := 0
 	reactiveCompactions := 0
 	var finalContent string
+
+	// Attribute tool executions inside this loop to the owning session so
+	// nested spawns/background processes can be cancelled with it (#230).
+	// When the config does not name an owner explicitly, inherit the agent
+	// tool context already carried by ctx (a synchronous subagent tool runs
+	// inside its caller's context, so the caller owns whatever it spawns).
+	if config.OwnerSessionKey == "" {
+		config.OwnerAgentID, config.OwnerSessionKey = AgentToolContextFromCtx(ctx)
+	}
+	if config.OwnerSessionKey != "" {
+		ctx = WithAgentToolContext(ctx, config.OwnerAgentID, config.OwnerSessionKey)
+	}
 
 	if config.SessionRecorder != nil && config.SessionKey != "" {
 		for _, m := range messages {

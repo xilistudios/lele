@@ -519,3 +519,84 @@ func TestThreadSafeBuffer_MaxSize(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// StopForSession / session-family visibility (issue #230)
+// ---------------------------------------------------------------------------
+
+func registerOwnedProc(t *testing.T, mgr *BackgroundProcessManager, owner string) *BackgroundProcess {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	var stdout, stderr threadSafeBuffer
+	p := mgr.Register(cmd, "sleep 30", "/tmp", &stdout, &stderr, func() {}, owner)
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return p
+}
+
+func TestBackgroundProcessManager_StopForSession(t *testing.T) {
+	mgr := NewBackgroundProcessManager()
+	own := registerOwnedProc(t, mgr, "native:uuid-1")
+	child := registerOwnedProc(t, mgr, "agent:main:native:uuid-1") // subagent-loop proc
+	sibling := registerOwnedProc(t, mgr, "native:uuid-2")
+	unowned := registerOwnedProc(t, mgr, "")
+
+	// Bare runtime key stops the owner's family (qualified + child forms).
+	if n := mgr.StopForSession("uuid-1"); n != 2 {
+		t.Fatalf("StopForSession(bare uuid) = %d, want 2", n)
+	}
+	if own.Status != BgExecStatusStopped || child.Status != BgExecStatusStopped {
+		t.Errorf("owned/child status = %q/%q, want stopped", own.Status, child.Status)
+	}
+	if sibling.Status != BgExecStatusRunning {
+		t.Errorf("sibling status = %q, want running (untouched)", sibling.Status)
+	}
+	if unowned.Status != BgExecStatusRunning {
+		t.Errorf("unowned status = %q, want running (empty key never matches)", unowned.Status)
+	}
+
+	// Empty sessionKey is a no-op (destructive guard).
+	if n := mgr.StopForSession(""); n != 0 {
+		t.Errorf("StopForSession(\"\") = %d, want 0", n)
+	}
+	if sibling.Status != BgExecStatusRunning {
+		t.Errorf("sibling status after no-op = %q, want running", sibling.Status)
+	}
+
+	// Stopping an already-stopped family counts nothing new.
+	if n := mgr.StopForSession("uuid-1"); n != 0 {
+		t.Errorf("second StopForSession = %d, want 0", n)
+	}
+}
+
+func TestBackgroundProcessVisibleTo_SessionFamily(t *testing.T) {
+	tests := []struct {
+		name    string
+		owner   string
+		caller  string
+		wantVis bool
+	}{
+		{"exact", "telegram:123", "telegram:123", true},
+		{"ancestor prefix", "telegram:123:subagent-1", "telegram:123", true},
+		{"descendant sees parent-owned", "telegram:123", "telegram:123:subagent-1", true},
+		{"qualified vs bare (issue #230)", "native:uuid", "uuid", true},
+		{"agent runtime vs origin", "agent:main:telegram:123", "telegram:123", true},
+		{"sibling isolated", "telegram:123:chat:1", "telegram:123:chat:2", false},
+		{"cross-channel isolated", "native:uuid", "telegram:uuid", false},
+		{"unowned visible", "", "telegram:123", true},
+		{"operator sees all", "telegram:123", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &BackgroundProcess{ID: "bg-1", OwnerSessionKey: tc.owner}
+			if got := p.VisibleTo(tc.caller); got != tc.wantVis {
+				t.Errorf("VisibleTo(%q) for owner %q = %v, want %v", tc.caller, tc.owner, got, tc.wantVis)
+			}
+		})
+	}
+}

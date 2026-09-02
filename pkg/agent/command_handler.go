@@ -105,12 +105,11 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	case "/subagents":
 		return formatSubagentsCommand(ctx, ch.al.toolCoordinator, sessionKey, args), true
 	case "/stop":
-		subagentCount := ch.al.toolCoordinator.stopSessionSubagents(sessionKey)
+		// Cancel the whole session tree (subagents, groups, background
+		// processes) and the session's own in-flight turn (#230).
+		subagentCount, groupCount, procCount := ch.al.toolCoordinator.cancelSessionTree(sessionKey)
 		ch.al.toolCoordinator.cancelSession(sessionKey)
-		if subagentCount > 0 {
-			return fmt.Sprintf("Agente detenido (incluye %d subagente(s)).", subagentCount), true
-		}
-		return "Agente detenido.", true
+		return formatStopAgentResponse(subagentCount, groupCount, procCount), true
 	case "/show":
 		if len(args) < 1 {
 			return "Usage: /show [model|channel|agents]", true

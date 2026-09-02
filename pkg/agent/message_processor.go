@@ -280,14 +280,11 @@ func (mp *messageProcessorImpl) processSystemMessage(ctx context.Context, msg bu
 		return "", nil
 
 	case "/stop":
-		// Stop session-specific subagents first (delegated to toolCoordinator)
-		subagentCount := mp.al.toolCoordinator.stopSessionSubagents(sessionKey)
-		// Cancel any active session processing
+		// Cancel the whole session tree (subagents, groups, background
+		// processes) and the session's own in-flight turn (#230).
+		subagentCount, groupCount, procCount := mp.al.toolCoordinator.cancelSessionTree(sessionKey)
 		mp.al.toolCoordinator.cancelSession(sessionKey)
-		response := "Agente detenido."
-		if subagentCount > 0 {
-			response = fmt.Sprintf("Agente detenido (incluye %d subagente(s)).", subagentCount)
-		}
+		response := formatStopAgentResponse(subagentCount, groupCount, procCount)
 		mp.al.bus.PublishOutbound(bus.OutboundMessage{
 			Channel:   originChannel,
 			ChatID:    originChatID,

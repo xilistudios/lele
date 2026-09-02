@@ -190,3 +190,103 @@ func TestRunToolLoop_EmptyResponseRetries(t *testing.T) {
 		t.Fatalf("expected 3 provider calls (2 empty retries + 1 final), got %d", got)
 	}
 }
+
+// ctxCaptureTool records the agent tool context visible during Execute.
+type ctxCaptureTool struct{ agentID, sessionKey string }
+
+func (ctxCaptureTool) Name() string        { return "ctxprobe" }
+func (ctxCaptureTool) Description() string { return "records tool context" }
+func (ctxCaptureTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+func (c *ctxCaptureTool) Execute(ctx context.Context, _ map[string]interface{}) *ToolResult {
+	c.agentID, c.sessionKey = AgentToolContextFromCtx(ctx)
+	return &ToolResult{ForLLM: "ok"}
+}
+
+// toolCallProvider emits one tool call on the first turn, then a final answer.
+type toolCallProvider struct {
+	calls int
+}
+
+func (p *toolCallProvider) Chat(_ context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+	p.calls++
+	if p.calls == 1 {
+		return &providers.LLMResponse{ToolCalls: []providers.ToolCall{{
+			ID:        "call-1",
+			Name:      "ctxprobe",
+			Arguments: map[string]interface{}{},
+		}}}, nil
+	}
+	return &providers.LLMResponse{Content: "done"}, nil
+}
+
+func (p *toolCallProvider) GetDefaultModel() string { return "test-model" }
+
+// TestRunToolLoop_InjectsOwnerContext verifies that a tool loop configured
+// with an owner injects the agent tool context into tool executions, so
+// nested spawns/background processes can be attributed to the owning session
+// for cancellation (issue #230).
+func TestRunToolLoop_InjectsOwnerContext(t *testing.T) {
+	reg := NewToolRegistry()
+	probe := &ctxCaptureTool{}
+	reg.Register(probe)
+
+	_, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        &toolCallProvider{},
+		Model:           "test-model",
+		Tools:           reg,
+		MaxIterations:   3,
+		OwnerAgentID:    "main",
+		OwnerSessionKey: "agent:main:native:uuid-1",
+	}, []providers.Message{{Role: "user", Content: "go"}}, "", "")
+	if err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if probe.sessionKey != "agent:main:native:uuid-1" {
+		t.Errorf("tool saw session key %q, want %q", probe.sessionKey, "agent:main:native:uuid-1")
+	}
+	if probe.agentID != "main" {
+		t.Errorf("tool saw agent id %q, want %q", probe.agentID, "main")
+	}
+}
+
+// TestRunToolLoop_InheritsOwnerFromContext verifies that without an explicit
+// owner the loop keeps the context's owner (used by the sync subagent tool,
+// whose caller context already carries it). An explicit owner wins.
+func TestRunToolLoop_InheritsOwnerFromContext(t *testing.T) {
+	reg := NewToolRegistry()
+	probe := &ctxCaptureTool{}
+	reg.Register(probe)
+
+	ctx := WithAgentToolContext(context.Background(), "inherited-agent", "inherited-key")
+	if _, err := RunToolLoop(ctx, ToolLoopConfig{
+		Provider:      &toolCallProvider{},
+		Model:         "test-model",
+		Tools:         reg,
+		MaxIterations: 3,
+	}, []providers.Message{{Role: "user", Content: "go"}}, "", ""); err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if probe.sessionKey != "inherited-key" {
+		t.Errorf("tool saw session key %q, want inherited %q", probe.sessionKey, "inherited-key")
+	}
+
+	// Explicit owner overrides the inherited one.
+	probe2 := &ctxCaptureTool{}
+	reg2 := NewToolRegistry()
+	reg2.Register(probe2)
+	if _, err := RunToolLoop(ctx, ToolLoopConfig{
+		Provider:        &toolCallProvider{},
+		Model:           "test-model",
+		Tools:           reg2,
+		MaxIterations:   3,
+		OwnerAgentID:    "explicit",
+		OwnerSessionKey: "explicit-key",
+	}, []providers.Message{{Role: "user", Content: "go"}}, "", ""); err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if probe2.sessionKey != "explicit-key" || probe2.agentID != "explicit" {
+		t.Errorf("explicit owner not honored: %q/%q", probe2.agentID, probe2.sessionKey)
+	}
+}

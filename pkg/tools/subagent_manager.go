@@ -359,6 +359,10 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 
 	originSessionKey := BuildOriginSessionKey(originChannel, originChatID)
 
+	// The runtime session key of the calling agent loop, when available.
+	// Used for cancellation matching (see SubagentTask.SpawnerSessionKey).
+	_, spawnerSessionKey := AgentToolContextFromCtx(ctx)
+
 	// Claim a unique task ID BEFORE taking sm.mu. The session-existence probe
 	// inside claimTaskID may call into the SessionManager (its own lock + disk
 	// I/O); running it while holding sm.mu would recreate the lock-ordering
@@ -387,19 +391,20 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 	}
 
 	subagentTask := &SubagentTask{
-		ID:               taskID,
-		Task:             task,
-		Label:            label,
-		AgentID:          agentID,
-		ModelOverride:    strings.TrimSpace(opts.ModelOverride),
-		OriginChannel:    originChannel,
-		OriginChatID:     originChatID,
-		OriginSessionKey: originSessionKey,
-		Status:           initialStatus,
-		Created:          time.Now().UnixMilli(),
-		Updated:          time.Now().UnixMilli(),
-		Dependencies:     opts.Dependencies,
-		MaxRetries:       maxRetries,
+		ID:                taskID,
+		Task:              task,
+		Label:             label,
+		AgentID:           agentID,
+		ModelOverride:     strings.TrimSpace(opts.ModelOverride),
+		OriginChannel:     originChannel,
+		OriginChatID:      originChatID,
+		OriginSessionKey:  originSessionKey,
+		SpawnerSessionKey: spawnerSessionKey,
+		Status:            initialStatus,
+		Created:           time.Now().UnixMilli(),
+		Updated:           time.Now().UnixMilli(),
+		Dependencies:      opts.Dependencies,
+		MaxRetries:        maxRetries,
 	}
 	subagentTask.mu = &sync.Mutex{}
 	subagentTask.InitDoneChannel()
@@ -677,4 +682,23 @@ func (sm *SubagentManager) HasTool(name string) bool {
 	defer sm.mu.RUnlock()
 	_, ok := sm.tools.Get(name)
 	return ok
+}
+
+// AddTaskForTest registers a pre-built task in the manager without starting a
+// run. It exists so tests (including tests in other packages) can set up
+// precise task identities - origin/spawner session keys, status - without
+// racing a real subagent execution. The task is initialised the same way
+// SpawnWithOptions initialises its tasks, and an optional cancel function is
+// stored so StopTask behaves as it would for a running task.
+func (sm *SubagentManager) AddTaskForTest(task *SubagentTask, cancel context.CancelFunc) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if task.mu == nil {
+		task.mu = &sync.Mutex{}
+	}
+	task.InitDoneChannel()
+	sm.tasks[task.ID] = task
+	if cancel != nil {
+		sm.cancels[task.ID] = cancel
+	}
 }
