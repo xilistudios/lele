@@ -42,11 +42,19 @@ func transientLLMBackoff(attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
+// maxConsecutiveEmptyResponses bounds how many consecutive empty (blank)
+// assistant responses the agent loop will retry before ending the turn with
+// the default response. A blank HTTP-200 is usually transient (thinking model
+// exhausting its token budget on reasoning, provider hiccup), so a few
+// retries recover it — but retrying forever (the old behavior) hangs the
+// session: the per-session semaphore is held, follow-up user messages queue
+// up, and the conversation appears dead ("session won't continue").
+const maxConsecutiveEmptyResponses = 5
+
 // emptyRetryBackoff returns the wait duration before the given empty-response
-// retry attempt (1s, 2s, 3s, capped at 3s). Empty responses are retried
-// indefinitely — bounded by MaxIterations (when set) and by context
-// cancellation — with the backoff capped at 3s to avoid a tight spin when a
-// provider repeatedly returns HTTP 200 with empty content (e.g. every ~119s).
+// retry attempt (1s, 2s, 3s, capped at 3s). Empty responses are retried up to
+// maxConsecutiveEmptyResponses times, bounded by context cancellation (user
+// abort / session cancel); after the limit the turn ends cleanly.
 func emptyRetryBackoff(attempt int) time.Duration {
 	backoffs := []time.Duration{1 * time.Second, 2 * time.Second, 3 * time.Second}
 	if attempt >= len(backoffs) {
@@ -161,6 +169,21 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		// Heal sessions contaminated by the legacy blank-persistence bug:
+		// assistant messages with no content and no tool calls are dropped
+		// from the history (and rewritten to the store) so the model cannot
+		// imitate them into a fresh empty-response loop.
+		if cleaned, removed := dropBlankAssistantMessages(history); removed {
+			logger.WarnCF("agent", "Dropped blank assistant messages from session history",
+				map[string]interface{}{
+					"agent_id":     agent.ID,
+					"session_key":  opts.SessionKey,
+					"before_count": len(history),
+					"after_count":  len(cleaned),
+				})
+			history = cleaned
+			agent.Sessions.SetHistory(opts.SessionKey, history)
+		}
 		history = ensureSummaryMaterialized(agent, opts.SessionKey, history, summary)
 		// Initialize verbose mode from persistent storage
 		lr.al.verboseManager.InitializeFromSession(opts.SessionKey)
@@ -286,9 +309,15 @@ func lastAssistantResponse(agent *AgentInstance, sessionKey string) string {
 	}
 	history := agent.Sessions.GetHistoryView(sessionKey)
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Role == "assistant" {
-			return history[i].Content
+		if history[i].Role != "assistant" {
+			continue
 		}
+		// Skip blank assistant turns: a legacy bug persisted empty responses,
+		// and the goal judge must not receive an empty "last response".
+		if strings.TrimSpace(history[i].Content) == "" {
+			continue
+		}
+		return history[i].Content
 	}
 	return ""
 }
@@ -663,30 +692,43 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
 
-			// Save assistant message with reasoning content (important for thinking models like DeepSeek)
-			assistantMsg := providers.Message{
-				Role:             "assistant",
-				Content:          response.Content,
-				ReasoningContent: response.ReasoningContent,
-			}
-			messages = append(messages, assistantMsg)
-			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
-
-			// If response is empty, retry by prompting the model again. This keeps
-			// the agent loop alive when a provider returns HTTP 200 with empty
-			// content (e.g. every ~119s with no timeout) instead of terminating
-			// the run with a fallback response. The retry loop is bounded by
-			// MaxIterations (when set) and by context cancellation (user abort /
-			// session cancel); with unlimited iterations it keeps retrying until
-			// a non-empty response arrives.
+			// If the response is empty, do NOT persist it and retry a bounded
+			// number of times. Persisting an assistant message with empty content
+			// (which happens when a thinking model burns the whole token budget on
+			// reasoning and returns content:"" with finish_reason:length) poisons
+			// the session history: every later turn replays those blanks, the model
+			// imitates them, and the session becomes permanently stuck in an empty
+			// loop that never terminates when MaxIterations is unlimited (0).
+			// Instead we keep only the follow-up prompt in memory for the retry and
+			// bound consecutive empties so the turn always ends cleanly.
 			if len(strings.TrimSpace(finalContent)) == 0 {
 				emptyRetries++
+				if emptyRetries > maxConsecutiveEmptyResponses {
+					logger.ErrorCF("agent", "Empty response limit reached, ending turn",
+						map[string]interface{}{
+							"agent_id":  agent.ID,
+							"iteration": iteration,
+							"retries":   emptyRetries,
+							"max":       maxConsecutiveEmptyResponses,
+						})
+					// Return empty content so runAgentLoop falls back to
+					// DefaultResponse and the session is left clean.
+					return "", iteration, nil
+				}
 				logger.WarnCF("agent", "Empty response received, retrying with follow-up prompt",
 					map[string]interface{}{
 						"agent_id":  agent.ID,
 						"iteration": iteration,
 						"retry":     emptyRetries,
 					})
+				// Keep the blank turn in the in-memory context only (preserves
+				// user/assistant role alternation and shows the model what it
+				// just produced) but never persist it to the session.
+				messages = append(messages, providers.Message{
+					Role:             "assistant",
+					Content:          response.Content,
+					ReasoningContent: response.ReasoningContent,
+				})
 				// Small backoff between empty-response retries (capped).
 				if !lr.waitForBackoff(ctx, emptyRetryBackoff(emptyRetries-1)) {
 					return "", iteration, ctx.Err()
@@ -700,6 +742,17 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			// Non-empty final content: reset the consecutive-empty counter so the
 			// backoff restarts small after a real response.
 			emptyRetries = 0
+
+			// Save assistant message with reasoning content (important for thinking
+			// models like DeepSeek). Only reached for non-empty content, so blanks
+			// are never written to the session.
+			assistantMsg := providers.Message{
+				Role:             "assistant",
+				Content:          response.Content,
+				ReasoningContent: response.ReasoningContent,
+			}
+			messages = append(messages, assistantMsg)
+			agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
 
 			// Check if the response contains plain-text tool invocations (e.g., `read_file{"path":"..."}`)
 			// instead of proper function calls. Some models (like DeepSeek) sometimes output tool call

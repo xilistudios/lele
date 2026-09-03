@@ -640,6 +640,32 @@ func stripNamelessToolCalls(toolCalls []providers.ToolCall) []providers.ToolCall
 	return cleaned
 }
 
+// dropBlankAssistantMessages removes persisted assistant messages that carry
+// neither content nor tool calls. Such blanks are the footprint of an older
+// bug (empty responses were saved to the session before the empty-retry
+// check), and models imitate them: replaying blanks triggers fresh blanks,
+// permanently stalling the session. Dropping them is safe for the API because
+// reasoning_content is never re-serialized to providers. Returns the cleaned
+// slice and whether anything was removed.
+func dropBlankAssistantMessages(history []providers.Message) ([]providers.Message, bool) {
+	isBlank := func(m providers.Message) bool {
+		return m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0
+	}
+	removed := false
+	cleaned := make([]providers.Message, 0, len(history))
+	for _, m := range history {
+		if isBlank(m) {
+			removed = true
+			continue
+		}
+		cleaned = append(cleaned, m)
+	}
+	if !removed {
+		return history, false
+	}
+	return cleaned, true
+}
+
 // ensureSummaryMaterialized ensures the summary is materialized as a message in the history.
 // Returns the updated history (may be the same slice if no changes needed).
 func ensureSummaryMaterialized(agent *AgentInstance, sessionKey string, history []providers.Message, summary string) []providers.Message {
