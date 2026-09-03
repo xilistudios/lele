@@ -14,6 +14,7 @@ import type {
   BackgroundExecStopResponse,
   BackgroundExecsResponse,
   ChannelsResponse,
+  ChatCommandsResponse,
   ChatSessionsResponse,
   ClientEvent,
   ConfigResponse,
@@ -579,6 +580,7 @@ export const createApiClient = (baseUrl: string) => {
       request<SessionContextResponse>(endpoints.chat.session(sessionKey, 'context'), {
         method: 'GET',
       }),
+    chatCommands: () => request<ChatCommandsResponse>(endpoints.chat.commands, { method: 'GET' }),
     sessionSubagents: (sessionKey: string) =>
       request<SessionSubagentsResponse>(endpoints.chat.session(sessionKey, 'subagents'), {
         method: 'GET',

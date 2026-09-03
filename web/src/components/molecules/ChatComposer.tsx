@@ -2,6 +2,7 @@ import {
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -10,12 +11,16 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useChatPageContext } from '../../contexts/ChatPageContext'
+import { useSlashCommands } from '../../hooks/useSlashCommands'
 import { getModeTheme } from '../../lib/modeTheme'
+import type { SlashCommandInfo } from '../../lib/types'
 import { IconButton } from '../atoms/IconButton'
 import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
 import { FolderPickerModal } from '../organisms/FolderPickerModal'
 import { AttachmentInput } from './AttachmentInput'
 import { SearchableSelect } from './SearchableSelect'
+import { SlashCommandMenu } from './SlashCommandMenu'
+import { completeDraft, filterCommands, isPaletteTrigger } from './commandPalette'
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'])
 
@@ -51,12 +56,43 @@ export function ChatComposer() {
     sendTyping,
     currentSessionKey,
   } = useAppLogicContext()
-  const { apiUrl } = useAuthContext()
+  const { apiUrl, api } = useAuthContext()
 
   const [draft, setDraft] = useState('')
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
+
+  // "/" slash-command palette. The palette only assists composing: accepting a
+  // row inserts "<name> " into the draft and the command itself runs on the
+  // backend once the text is sent as a normal message (handleCommand there).
+  const { commands } = useSlashCommands(api)
+  const [paletteIdx, setPaletteIdx] = useState(0)
+  // Escape hides the palette until the next edit of the trigger text (the
+  // textarea change handler re-arms it).
+  const [paletteDismissed, setPaletteDismissed] = useState(false)
+
+  const paletteTriggered = isPaletteTrigger(draft)
+  const paletteItems = useMemo(() => filterCommands(commands, draft), [commands, draft])
+  const paletteOpen = paletteTriggered && !paletteDismissed && paletteItems.length > 0
+  // Items can shrink asynchronously (commands load once, late), so clamp the
+  // highlight instead of trusting paletteIdx to stay in range.
+  const activePaletteIdx = Math.min(paletteIdx, Math.max(paletteItems.length - 1, 0))
+
+  const selectCommand = (command: SlashCommandInfo) => {
+    setDraft(completeDraft(draft, command))
+    setPaletteIdx(0)
+    setPaletteDismissed(false)
+    textareaRef.current?.focus()
+  }
+
+  // The composer is not remounted on session switch, so palette state is
+  // cleared explicitly. Draft behaviour on switch is left untouched.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: currentSessionKey is the trigger, not a read — the effect must run exactly when the session changes.
+  useEffect(() => {
+    setPaletteIdx(0)
+    setPaletteDismissed(false)
+  }, [currentSessionKey])
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
@@ -71,6 +107,34 @@ export function ChatComposer() {
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME safety: while composing (CJK candidates), every key belongs to the
+    // input method — the palette must not swallow them.
+    if (e.nativeEvent.isComposing) return
+
+    if (paletteOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setPaletteIdx((idx) => (idx + 1) % paletteItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setPaletteIdx((idx) => (idx - 1 + paletteItems.length) % paletteItems.length)
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        const command = paletteItems[activePaletteIdx]
+        if (command) selectCommand(command)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setPaletteDismissed(true)
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
@@ -79,6 +143,10 @@ export function ChatComposer() {
 
   const handleTextareaChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setDraft(e.target.value)
+    // Any edit restarts the highlight, and typing a new trigger re-arms the
+    // palette after an Escape dismissal.
+    setPaletteIdx(0)
+    if (isPaletteTrigger(e.target.value)) setPaletteDismissed(false)
     e.target.style.height = 'auto'
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
 
@@ -251,6 +319,14 @@ export function ChatComposer() {
             </span>
           )}
         </div>
+        {paletteOpen && (
+          <SlashCommandMenu
+            items={paletteItems}
+            activeIndex={activePaletteIdx}
+            onSelect={selectCommand}
+            onHover={setPaletteIdx}
+          />
+        )}
         <textarea
           ref={textareaRef}
           className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary"
@@ -258,6 +334,9 @@ export function ChatComposer() {
           value={draft}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
+          aria-autocomplete="list"
+          aria-controls={paletteOpen ? 'slash-command-menu' : undefined}
+          aria-activedescendant={paletteOpen ? `slash-command-${activePaletteIdx}` : undefined}
           disabled={false}
           rows={1}
         />
