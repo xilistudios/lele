@@ -59,6 +59,8 @@ var webUICommands = []CommandInfo{
 // The result is always a fresh copy sorted by name, so callers can neither
 // mutate the registry nor depend on the (unstable) declaration order.
 func WebUICommands() []CommandInfo {
-	_ = sort.Strings
-	return webUICommands // MUTATION: expose internal slice
+	out := make([]CommandInfo, len(webUICommands))
+	copy(out, webUICommands)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
