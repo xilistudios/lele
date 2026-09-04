@@ -6,11 +6,13 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // maxQueuedMessages caps the client-side queue so a stuck backend cannot grow
-// the list without bound.
-const maxQueuedMessages = 50
+// the list without bound. 10 matches the WebUI queue cap.
+const maxQueuedMessages = 10
 
 // queueRetryInterval bounds how often a deferred flush is re-checked while the
 // session is idle but the UI cannot accept a turn (modal open, approval
@@ -44,16 +46,87 @@ type queuedMessage struct {
 // why in queueFeedback so the caller can leave the text where it is instead of
 // dropping it silently.
 func (m *Model) enqueueMessage(content string) bool {
-	if len(m.messageQueue[m.currentKey]) >= maxQueuedMessages {
-		m.queueFeedback = fmt.Sprintf("queue full (%d) — message not queued", maxQueuedMessages)
+	return m.enqueueMessageTo(m.currentKey, content)
+}
+
+// enqueueMessageTo appends content to the FIFO queue of an explicit session
+// key. It exists for callers that must queue into a session other than the one
+// on screen; Enter paths use enqueueMessage (current session).
+func (m *Model) enqueueMessageTo(key, content string) bool {
+	if len(m.messageQueue[key]) >= maxQueuedMessages {
+		m.queueFeedback = fmt.Sprintf(i18n.T("tui.queue.full"), maxQueuedMessages)
 		return false
 	}
 	if m.messageQueue == nil {
 		m.messageQueue = make(map[string][]queuedMessage)
 	}
-	m.messageQueue[m.currentKey] = append(m.messageQueue[m.currentKey], queuedMessage{Content: content})
+	m.messageQueue[key] = append(m.messageQueue[key], queuedMessage{Content: content})
 	m.queueFeedback = ""
 	return true
+}
+
+// groupStartCommand wraps a group-mode task into the exact string
+// submitGroupStart publishes to the bus ("/group start <profileID> <task>").
+// Sharing the format between the live submit and the busy-enqueue path is what
+// keeps a queued group turn identical to one started while idle.
+func groupStartCommand(profileID, task string) string {
+	return fmt.Sprintf("/group start %s %s", profileID, task)
+}
+
+// enqueueCurrentInputWhileBusy is the busy-time enqueue for the composer
+// content: the text is parked in the current session's queue, cleared from the
+// composer (so it cannot be edited or duplicated by further typing) and the
+// animation tick is armed. It returns the command the Enter handler should
+// batch, mirroring enqueueCurrentInput.
+//
+// The tick matters because the busy flag that routed the message here can be
+// stale, and without a live tick chain nothing would ever drain the queue.
+// tickCmd() is a no-op when a tick is already pending.
+func (m *Model) enqueueCurrentInputWhileBusy(content string) tea.Cmd {
+	if !m.enqueueMessage(content) {
+		return nil
+	}
+	m.chatInput.SetValue("")
+	return m.tickCmd()
+}
+
+// removeLastQueued drops the most recently queued message of the current
+// session (LIFO undo of an accidental Enter while busy). It only acts when
+// there is a backlog and reports the result through queueFeedback.
+func (m *Model) removeLastQueued() {
+	q := m.messageQueue[m.currentKey]
+	if len(q) == 0 {
+		return
+	}
+	m.queueFeedback = i18n.T("tui.queue.removed")
+	if len(q) == 1 {
+		delete(m.messageQueue, m.currentKey)
+		return
+	}
+	m.messageQueue[m.currentKey] = q[:len(q)-1]
+}
+
+// pruneQueueToSessions drops queued backlogs for sessions that no longer
+// exist, so messages of a deleted chat cannot linger in memory forever or be
+// resurrected under a reused key. The current session is always kept — a fresh
+// chat is only registered in the session list after its first turn, and
+// pruning it would wipe the backlog the user just typed.
+func (m *Model) pruneQueueToSessions(liveKeys []string) {
+	if len(m.messageQueue) == 0 {
+		return
+	}
+	live := make(map[string]struct{}, len(liveKeys))
+	for _, k := range liveKeys {
+		live[k] = struct{}{}
+	}
+	for key := range m.messageQueue {
+		if key == m.currentKey {
+			continue
+		}
+		if _, ok := live[key]; !ok {
+			delete(m.messageQueue, key)
+		}
+	}
 }
 
 // enqueueCurrentInput handles Enter while the agent is busy: the composer
@@ -155,10 +228,21 @@ func (m *Model) queuePreview() string {
 	return q[0].Content
 }
 
+// queueRemoveKey is the key that removes the last queued message. It is
+// declared here so the handler, the tests and the status-line hint cannot
+// drift apart. bubbletea reports it as "alt+delete" (ESC [ 3 ; 3 ~).
+const queueRemoveKey = "alt+delete"
+
 // queueStatusLine returns the queue strip text, or "" when there is nothing to
 // show. The count is scoped to the session on screen, so switching sessions
 // cannot display a stale depth.
-func (m *Model) queueStatusLine() string {
+//
+// available is how many display cells the strip may occupy in the status line
+// (the rest is taken by the base status text and the goal badge). The
+// remove-key hint is only appended when it fits: view.go clamps the whole line
+// by cells, and a hint cut in half is worse than no hint at all. The count
+// itself always stays — dropping it would hide pending messages.
+func (m *Model) queueStatusLine(available int) string {
 	if m.queueFeedback != "" {
 		return m.queueFeedback
 	}
@@ -166,5 +250,10 @@ func (m *Model) queueStatusLine() string {
 	if n == 0 {
 		return ""
 	}
-	return fmt.Sprintf("⏳ %d queued — Enter to add, /clearq to drop", n)
+	status := fmt.Sprintf(i18n.T("tui.queue.status"), n)
+	hint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
+	if lipgloss.Width(status)+lipgloss.Width(hint) <= available {
+		status += hint
+	}
+	return status
 }

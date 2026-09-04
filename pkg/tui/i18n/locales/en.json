@@ -278,5 +278,10 @@
   "tui.onboard.tipAgents": "  /agents  Switch agents",
   "tui.onboard.tipChats": "  Ctrl+S   Browse chats",
   "tui.onboard.tipConnect": "  /connect Add another provider",
-  "tui.onboard.pressEnterStart": "Press Enter to start chatting!"
+  "tui.onboard.pressEnterStart": "Press Enter to start chatting!",
+  "tui.queue.status": "⏳ %d queued — Enter to add, /clearq to drop",
+  "tui.queue.removeHint": " · %s removes last",
+  "tui.queue.full": "queue full (%d) — message not queued",
+  "tui.queue.removed": "removed last queued message",
+  "tui.queue.dropped": "dropped %d queued message(s)"
 }

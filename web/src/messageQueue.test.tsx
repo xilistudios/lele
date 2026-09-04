@@ -543,6 +543,47 @@ describe('cola de mensajes del composer', () => {
     expect(sentUserMessages(ws)).toEqual(['first message', 'keep me'])
   })
 
+  test('no envia nada al cerrar el turno si la cola quedo vacia al quitar', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    // The only queued entry of the busy turn.
+    submitMessage(view, 'drop before turn end')
+    await waitFor(() => expect(queuedRows(view).length).toBe(1))
+
+    const row = view.container.querySelector('[data-testid="queued-message"]')
+    expect(row?.textContent).toContain('drop before turn end')
+    const removeButton = (row as Element).querySelector('button[aria-label="Quitar de la cola"]')
+    expect(removeButton).toBeDefined()
+    await act(async () => {
+      fireEvent.click(removeButton as HTMLElement)
+    })
+
+    // The strip is gone: the session's backlog is empty.
+    await waitFor(() => expect(queuedRows(view).length).toBe(0))
+    expect(view.container.querySelector('[data-testid="queued-messages"]')).toBeNull()
+
+    // Turn ends → the falling edge fires, but there is nothing to replay.
+    await act(async () => {
+      ws.emitJSON({
+        event: 'message.complete',
+        data: { session_key: SESSION, message_id: 'm1', content: 'reply one' },
+      })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    expect(sentUserMessages(ws)).toEqual(['first message'])
+    const messageEvents = ws.sent
+      .map((raw) => JSON.parse(raw) as { event?: string })
+      .filter((payload) => payload.event === 'message')
+    expect(messageEvents.length).toBe(1)
+  })
+
   test('no contamina otras sesiones al cambiar de chat', async () => {
     const { view, ws } = await openChat()
 

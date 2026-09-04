@@ -117,7 +117,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		// sessions keep their backlog and flush when they become active.
 		n := m.queueDepth()
 		m.clearQueue()
-		m.queueFeedback = fmt.Sprintf("dropped %d queued message(s)", n)
+		m.queueFeedback = fmt.Sprintf(i18n.T("tui.queue.dropped"), n)
 		return nil
 
 	case "/think":

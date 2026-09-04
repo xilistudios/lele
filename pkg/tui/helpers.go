@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -174,7 +173,7 @@ func (m *Model) getGroupProfiles() []config.GroupProfile {
 // message bus so the backend command handler processes it. It handles session
 // creation, UI state cleanup, and returns a tick command for the loading animation.
 func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
-	groupCmd := fmt.Sprintf("/group start %s %s", profileID, task)
+	groupCmd := groupStartCommand(profileID, task)
 
 	if m.currentKey == "" {
 		m.createNewChat()

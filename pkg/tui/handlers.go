@@ -1544,6 +1544,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+y":
 			m.copyLastAssistantMessage()
 
+		case queueRemoveKey:
+			// Undo the last queued message of the current session. Only acts
+			// on an empty composer so it can never eat text the user is still
+			// typing — with a draft the key keeps its textarea meaning
+			// (delete word forward) and is not consumed here.
+			if strings.TrimSpace(m.chatInput.Value()) == "" {
+				m.removeLastQueued()
+				return m, nil
+			}
+
 		case "up", "down", "pgup", "pgdown":
 			// Group mode welcome: cycle profile selection with up/down arrows
 			if (msg.String() == "up" || msg.String() == "down") &&
@@ -1583,12 +1593,28 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			inputVal := m.chatInput.Value()
+			// The busy gate guards every path that starts a turn: group mode
+			// and plain messages fall through to the queue instead of starting
+			// a concurrent second turn. Slash commands stay exempt — they run
+			// locally in the TUI (see below).
+			busy := m.processing || m.hasRunningSubagents()
 
 			// Group mode: wrap non-command input as /group start <profileID> <task>
 			if m.currentMode == ModeGroup && !strings.HasPrefix(inputVal, "/") &&
 				strings.TrimSpace(inputVal) != "" {
 				profiles := m.getGroupProfiles()
 				if len(profiles) > 0 && m.groupProfileIdx >= 0 && m.groupProfileIdx < len(profiles) {
+					// submitGroupStart publishes immediately, so it must not run
+					// while the session is busy. Queue the SAME wrapped command
+					// the idle path would have sent — the flushed turn then
+					// behaves identically to one started while idle.
+					if busy {
+						wrapped := groupStartCommand(profiles[m.groupProfileIdx].ID, inputVal)
+						if cmd := m.enqueueCurrentInputWhileBusy(wrapped); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return m, tea.Batch(cmds...)
+					}
 					cmd := m.submitGroupStart(profiles[m.groupProfileIdx].ID, inputVal)
 					if cmd != nil {
 						cmds = append(cmds, cmd)
@@ -1599,12 +1625,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if strings.HasPrefix(inputVal, "/") {
+				// Slash commands run locally in the TUI (modals, /clearq,
+				// /quit, …), so they must stay responsive while the agent is
+				// busy — queuing them would defer UI actions that are exactly
+				// what the user reaches for during a turn.
 				cmd := m.executeCommand(inputVal)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				m.chatInput.SetValue("")
-			} else if !m.processing && !m.hasRunningSubagents() {
+			} else if !busy {
 				cmd := m.submitMessage()
 				if cmd != nil {
 					cmds = append(cmds, cmd)

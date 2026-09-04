@@ -686,8 +686,13 @@ export function useAppLogic(
     }
 
     // handleSend needs the session's agent, otherwise it returns early and the
-    // popped message would be lost. Leave the transition unconsumed so this
-    // effect retries as soon as currentAgentId arrives (it is a dependency).
+    // popped message would be lost. Deliberately do NOT write
+    // prevQueueProcessingRef here: the ref keeps the previous (processing=true)
+    // value, so the true→false falling edge stays unconsumed. currentAgentId is
+    // a dependency, so as soon as it arrives this effect re-runs, still sees the
+    // edge, and flushes then. Overwriting the ref with the current value would
+    // swallow the edge and the queued message would sit until the next turn end
+    // (or a session switch).
     if (!currentAgentId) return
 
     prevQueueProcessingRef.current = { key: sessionKey, value: isProcessing }
