@@ -150,6 +150,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return model, cmd
 	}
+	// Safety net for the client-side queue: every event path — including the
+	// many early returns inside the modal branch — funnels through here, so a
+	// pending backlog can never be left without a live retry chain (e.g. ESC
+	// closing the modal that had deferred a flush). maybeFlushQueue is a no-op
+	// on an empty queue, re-checks the busy state itself, and its retry tick
+	// is deduped by tickPending, so it can never start a second turn or a
+	// second tick chain.
+	if flushCmd := mm.maybeFlushQueue(); flushCmd != nil {
+		cmd = tea.Batch(cmd, flushCmd)
+	}
 	if focusCmd := mm.syncChatInputFocus(); focusCmd != nil {
 		cmd = tea.Batch(cmd, focusCmd)
 	}
@@ -1597,6 +1607,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if !m.processing && !m.hasRunningSubagents() {
 				cmd := m.submitMessage()
 				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			} else {
+				// Agent is busy: park the message in the per-session FIFO
+				// queue instead of swallowing it. It is auto-submitted when
+				// the turn ends (see maybeFlushQueue).
+				if cmd := m.enqueueCurrentInput(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			}

@@ -312,6 +312,13 @@ func (m *Model) View() string {
 		statusLine = i18n.T("tui.ready")
 	}
 
+	// Client-side queue indicator: shows how many messages are waiting to be
+	// auto-submitted for this session (see queue.go). Appended before the goal
+	// badge so both fit within the width clamp below.
+	if qs := m.queueStatusLine(); qs != "" {
+		statusLine = fmt.Sprintf("%s · %s", statusLine, qs)
+	}
+
 	// Append goal badge to the right of the status line.
 	// Orange = goal in progress, Green = goal completed.
 	if m.currentKey != "" && m.agentLoop != nil {

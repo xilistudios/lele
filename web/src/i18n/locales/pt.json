@@ -123,7 +123,11 @@
     "loadError": "Falha ao carregar sessões: {{error}}",
     "loadMore": "Carregar mais ({{loaded}} de {{total}})",
     "loadingMore": "Carregando…",
-    "commandsHint": "Digite / para ver comandos"
+    "commandsHint": "Digite / para ver comandos",
+    "queueHeader": "Na fila · {{count}}",
+    "queueRemove": "Remover da fila",
+    "queueClear": "Limpar fila",
+    "queueFull": "A fila está cheia (10 mensagens). Aguarde o agente terminar."
   },
   "connection": {
     "connected": "Conectado",

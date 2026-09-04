@@ -112,6 +112,14 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.reloadSessions()
 		return nil
 
+	case "/clearq":
+		// Drop the client-side queue for the current session only. Other
+		// sessions keep their backlog and flush when they become active.
+		n := m.queueDepth()
+		m.clearQueue()
+		m.queueFeedback = fmt.Sprintf("dropped %d queued message(s)", n)
+		return nil
+
 	case "/think":
 		m.resetModal(ModalThink)
 		m.modalItems = []string{"off", "low", "medium", "high"}

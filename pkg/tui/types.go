@@ -125,6 +125,7 @@ var allCommands = []commandInfo{
 	{name: "/agents", description: "Switch agent"},
 	{name: "/models", description: "Switch model"},
 	{name: "/clear", description: "Clear session history"},
+	{name: "/clearq", description: "Drop queued messages for this session"},
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},
@@ -334,7 +335,12 @@ type Model struct {
 	groupMeta        map[string]groupMeta   // groupID -> accumulated metadata
 
 	// Message processing / streaming
-	processing            bool
+	processing bool
+	// Client-side FIFO message queue per session (see queue.go). While the
+	// agent is busy, Enter enqueues the input instead of swallowing it; the
+	// front item is auto-submitted when the turn ends.
+	messageQueue          map[string][]queuedMessage
+	queueFeedback         string // transient notice shown in the queue strip (e.g. "queue full")
 	currentMessageID      string
 	currentAssistantMsgID string
 	// A subagent result is queued as a follow-up message for the parent. Keep

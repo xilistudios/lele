@@ -18,6 +18,7 @@ import { IconButton } from '../atoms/IconButton'
 import { CloseIcon, FolderIcon, PlusIcon } from '../atoms/Icons'
 import { FolderPickerModal } from '../organisms/FolderPickerModal'
 import { AttachmentInput } from './AttachmentInput'
+import { QueuedMessages } from './QueuedMessages'
 import { SearchableSelect } from './SearchableSelect'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { completeDraft, filterCommands, isPaletteTrigger } from './commandPalette'
@@ -60,6 +61,9 @@ export function ChatComposer() {
 
   const [draft, setDraft] = useState('')
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  // Set when a submit was refused because this session's queue is full; cleared
+  // by the next accepted submit (or by editing the draft).
+  const [queueFullHint, setQueueFullHint] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
 
@@ -99,7 +103,15 @@ export function ChatComposer() {
     const content = draft.trim()
     if (!content && pendingAttachments.length === 0) return
 
-    onSend(content, pendingAttachments)
+    // While the agent is busy onSend enqueues instead of sending, and returns
+    // false when that session's queue is full — keep the draft so nothing is
+    // silently lost.
+    const accepted = onSend(content, pendingAttachments)
+    if (accepted === false) {
+      setQueueFullHint(true)
+      return
+    }
+    setQueueFullHint(false)
     setDraft('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -147,6 +159,7 @@ export function ChatComposer() {
     // palette after an Escape dismissal.
     setPaletteIdx(0)
     if (isPaletteTrigger(e.target.value)) setPaletteDismissed(false)
+    if (queueFullHint && e.target.value.trim()) setQueueFullHint(false)
     e.target.style.height = 'auto'
     e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
 
@@ -209,6 +222,14 @@ export function ChatComposer() {
   ]
   return (
     <form onSubmit={submit}>
+      {/* Messages typed while the agent was busy. Rendered inside the form but
+          above the attachments strip; QueuedMessages hides itself when empty. */}
+      <QueuedMessages />
+      {queueFullHint && (
+        <p className="mb-2 px-1 text-xs text-state-error" role="alert">
+          {t('chat.queueFull')}
+        </p>
+      )}
       {pendingAttachments.length > 0 && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
           {pendingAttachments.map((attachment) => {

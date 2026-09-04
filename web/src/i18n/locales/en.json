@@ -123,7 +123,11 @@
     "loadError": "Failed to load sessions: {{error}}",
     "loadMore": "Load more ({{loaded}} of {{total}})",
     "loadingMore": "Loading…",
-    "commandsHint": "Type / to see commands"
+    "commandsHint": "Type / to see commands",
+    "queueHeader": "Queued · {{count}}",
+    "queueRemove": "Remove from queue",
+    "queueClear": "Clear queue",
+    "queueFull": "The queue is full (10 messages). Wait for the agent to finish."
   },
   "connection": {
     "connected": "Connected",
