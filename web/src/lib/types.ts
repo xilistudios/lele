@@ -553,6 +553,22 @@ export type FsListResponse = {
   truncated: boolean
 }
 
+/**
+ * A slash command the backend dispatches and the WebUI palette advertises.
+ * Mirrors Go commands.CommandInfo (pkg/agent/commands). `name` already carries
+ * the leading "/" (e.g. "/clear"); description/usage arrive in English from the
+ * server and are intentionally not translated.
+ */
+export type SlashCommandInfo = {
+  name: string
+  description: string
+  usage: string
+}
+
+export type ChatCommandsResponse = {
+  commands: SlashCommandInfo[]
+}
+
 export type SessionContextResponse = {
   session_key: string
   input_tokens: number

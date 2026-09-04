@@ -122,7 +122,8 @@
     "totalSessions": "{{count}} sesiones en total",
     "loadError": "No se pudieron cargar las sesiones: {{error}}",
     "loadMore": "Cargar más ({{loaded}} de {{total}})",
-    "loadingMore": "Cargando…"
+    "loadingMore": "Cargando…",
+    "commandsHint": "Escribe / para ver comandos"
   },
   "connection": {
     "connected": "Conectado",

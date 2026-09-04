@@ -35,6 +35,7 @@ export const endpoints = {
     },
     sessions: '/api/v1/chat/sessions',
     sessionsMeta: '/api/v1/chat/sessions/meta',
+    commands: '/api/v1/chat/commands',
     session: (
       sessionKey: string,
       subresource?:
