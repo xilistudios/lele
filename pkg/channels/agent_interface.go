@@ -141,6 +141,12 @@ type AgentProvidable interface {
 	AppendReasoningChunk(sessionKey, chunk string)
 	// FinalizeAssistantMessage marks the in-progress assistant message as complete.
 	FinalizeAssistantMessage(sessionKey string)
+	// AttachFilesToLastAssistant appends file attachments (already staged under
+	// the lele dir) to the last assistant message of the session, deduplicating
+	// by path, and persists the session. No-op when the session has no assistant
+	// message. Used by the WebUI delivery path so send_file attachments survive
+	// in chat history and remain downloadable after a page reload.
+	AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment)
 	// HasStreamedContent returns true if the session has an in-progress streaming message with content.
 	HasStreamedContent(sessionKey string) bool
 	// GetInProgressAssistant returns the in-progress assistant message, if any.

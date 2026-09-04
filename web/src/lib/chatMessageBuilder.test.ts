@@ -11,6 +11,7 @@ import {
   isCompactionSummary,
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
+  toChatMessages,
 } from './chatMessageBuilder'
 import type { HistoryToolCall } from './types'
 
@@ -395,5 +396,117 @@ describe('isCompactionSummary', () => {
       }),
     ).toBe(false)
     expect(isCompactionSummary({ role: 'tool', content: '[Context compacted — x]' })).toBe(false)
+  })
+})
+
+describe('toChatMessages history attachments', () => {
+  const sessionKey = 's1'
+
+  test('maps structured attachments on assistant messages to ChatMessage.attachments', () => {
+    const attachments = [
+      {
+        name: 'chart.png',
+        path: '/home/u/.lele/tmp/attachments/a1_chart.png',
+        mime_type: 'image/png',
+        kind: 'image',
+        caption: 'sales chart',
+      },
+    ]
+    const history = [
+      { id: '0', role: 'user' as const, content: 'dame el grafico' },
+      {
+        id: '1',
+        role: 'assistant' as const,
+        content: 'aqui esta',
+        attachments,
+      },
+    ]
+
+    const result = toChatMessages(history, sessionKey)
+    expect(result).toHaveLength(2)
+    expect(result[1].attachments).toEqual(attachments)
+    expect(result[0].attachments).toBeUndefined()
+  })
+
+  test('maps structured attachments on user and tool messages (any role)', () => {
+    const attachments = [{ name: 'f.txt', path: '/tmp/f.txt', kind: 'file' }]
+    const history = [
+      { id: '0', role: 'user' as const, content: 'hola', attachments },
+      {
+        id: '1',
+        role: 'tool' as const,
+        content: 'result',
+        tool_call_id: 'call-1',
+        tool_name: 'send_file',
+        attachments,
+      },
+    ]
+
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].attachments).toEqual(attachments)
+    const tool = result.find((m) => m.role === 'tool')
+    expect(tool?.attachments).toEqual(attachments)
+  })
+
+  test('no attachments field in history -> ChatMessage.attachments is undefined', () => {
+    const history = [
+      { id: '0', role: 'user' as const, content: 'hola' },
+      { id: '1', role: 'assistant' as const, content: 'hi' },
+    ]
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].attachments).toBeUndefined()
+    expect(result[1].attachments).toBeUndefined()
+  })
+
+  test('empty attachments array is treated as none', () => {
+    const history = [{ id: '0', role: 'assistant' as const, content: 'hi', attachments: [] }]
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].attachments).toBeUndefined()
+  })
+
+  test('user "## Attachments" content block still parses (no regression)', () => {
+    const history = [
+      {
+        id: '0',
+        role: 'user' as const,
+        content: 'mira esto\n## Attachments\n- /tmp/foto.png',
+      },
+    ]
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].content).toBe('mira esto')
+    expect(result[0].attachments).toEqual([
+      { path: '/tmp/foto.png', name: 'foto.png', mime_type: undefined, kind: 'file' },
+    ])
+  })
+
+  test('structured attachments override legacy parsed block on user messages', () => {
+    const structured = [
+      {
+        name: 'foto.png',
+        path: '/home/u/.lele/tmp/attachments/z9_foto.png',
+        mime_type: 'image/png',
+        kind: 'image',
+      },
+    ]
+    const history = [
+      {
+        id: '0',
+        role: 'user' as const,
+        content: 'mira esto\n## Attachments\n- /tmp/foto.png',
+        attachments: structured,
+      },
+    ]
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].content).toBe('mira esto')
+    expect(result[0].attachments).toEqual(structured)
+  })
+
+  test('assistant messages never parse the "## Attachments" block (unchanged behavior)', () => {
+    const history = [
+      { id: '0', role: 'assistant' as const, content: 'texto\n## Attachments\n- /tmp/x.png' },
+    ]
+    const result = toChatMessages(history, sessionKey)
+    expect(result[0].content).toBe('texto\n## Attachments\n- /tmp/x.png')
+    expect(result[0].attachments).toBeUndefined()
   })
 })

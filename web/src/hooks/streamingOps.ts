@@ -138,6 +138,9 @@ export function restoreInProgressAssistant(
  *   - drop restore placeholders for the session,
  *   - mark the completed assistant (overwriting content only if the server
  *     sent a non-empty final version),
+ *   - attach server-provided attachments when present (the `attachments`
+ *     event / final payload is authoritative; existing attachments are kept
+ *     when the server sends none),
  *   - drop empty user messages for the session,
  *   - mark session tools as no longer streaming.
  */
@@ -146,7 +149,10 @@ export function applyMessageComplete(
   msgId: string,
   sessionKey: string,
   serverContent: string | undefined,
+  serverAttachments?: ChatMessage['attachments'],
 ): ChatMessage[] {
+  const hasServerAttachments = !!serverAttachments && serverAttachments.length > 0
+
   // If the message never made it into the streaming list (e.g. message.complete
   // arrived before the typewriter queue drained its first tick, or the stream
   // events were coalesced/lost), create it with the final content instead of
@@ -158,6 +164,7 @@ export function applyMessageComplete(
       sessionKey,
       content,
       streaming: false,
+      attachments: hasServerAttachments ? serverAttachments : undefined,
     })
     const arr = [...current]
     arr.splice(computeAssistantInsertIndex(current), 0, newMsg)
@@ -169,7 +176,14 @@ export function applyMessageComplete(
 
     if (m.role === 'assistant' && m.id === msgId) {
       const content = serverContent && serverContent.length > 0 ? serverContent : m.content
-      return [{ ...m, content, streaming: false }]
+      return [
+        {
+          ...m,
+          content,
+          streaming: false,
+          ...(hasServerAttachments ? { attachments: serverAttachments } : {}),
+        },
+      ]
     }
     if (m.role === 'user' && m.sessionKey === sessionKey && m.content.trim() === '') {
       return []

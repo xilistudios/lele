@@ -116,6 +116,23 @@ type ContentPart struct {
 	ImageURL *ImageURL `json:"image_url,omitempty"`
 }
 
+// MessageAttachment is a file attachment associated with a message. It is the
+// persistence/display counterpart of bus.FileAttachment: defined here (and NOT
+// imported from pkg/bus) so the providers layer stays free of bus dependencies.
+// Path is always a filesystem path the WebUI can serve via
+// /api/v1/files/view (staged under the lele dir by the native channel).
+//
+// IMPORTANT: Attachments are metadata for the UI only. Providers build LLM
+// request payloads from explicit fields (Content/ContentParts/ToolCalls/...),
+// so this field is never injected into model requests.
+type MessageAttachment struct {
+	Name     string `json:"name,omitempty"`
+	Path     string `json:"path,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Caption  string `json:"caption,omitempty"`
+}
+
 // Message represents a message in a conversation.
 type Message struct {
 	Role               string        `json:"role"`
@@ -127,17 +144,22 @@ type Message struct {
 	ReasoningContent   string        `json:"reasoning_content,omitempty"`
 	ExcludeFromContext bool          `json:"exclude_from_context,omitempty"`
 	Streaming          bool          `json:"streaming,omitempty"`
+	// Attachments carries file attachments delivered with this message (e.g.
+	// via the send_file tool) so the WebUI can list and download them from
+	// chat history. UI metadata only — never sent to LLM providers.
+	Attachments []MessageAttachment `json:"attachments,omitempty"`
 }
 
 func (m *Message) MarshalJSON() ([]byte, error) {
 	type rawMessage struct {
-		Role               string      `json:"role"`
-		Content            interface{} `json:"content"`
-		ToolCalls          []ToolCall  `json:"tool_calls,omitempty"`
-		ToolCallID         string      `json:"tool_call_id,omitempty"`
-		ReasoningContent   string      `json:"reasoning_content"`
-		ExcludeFromContext bool        `json:"exclude_from_context,omitempty"`
-		Streaming          bool        `json:"streaming,omitempty"`
+		Role               string              `json:"role"`
+		Content            interface{}         `json:"content"`
+		ToolCalls          []ToolCall          `json:"tool_calls,omitempty"`
+		ToolCallID         string              `json:"tool_call_id,omitempty"`
+		ReasoningContent   string              `json:"reasoning_content"`
+		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
+		Streaming          bool                `json:"streaming,omitempty"`
+		Attachments        []MessageAttachment `json:"attachments,omitempty"`
 	}
 
 	content := interface{}(m.Content)
@@ -153,18 +175,20 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ReasoningContent:   m.ReasoningContent,
 		ExcludeFromContext: m.ExcludeFromContext,
 		Streaming:          m.Streaming,
+		Attachments:        m.Attachments,
 	})
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
 	type rawMessage struct {
-		Role               string          `json:"role"`
-		Content            json.RawMessage `json:"content"`
-		ToolCalls          []ToolCall      `json:"tool_calls,omitempty"`
-		ToolCallID         string          `json:"tool_call_id,omitempty"`
-		ReasoningContent   string          `json:"reasoning_content,omitempty"`
-		ExcludeFromContext bool            `json:"exclude_from_context,omitempty"`
-		Streaming          bool            `json:"streaming,omitempty"`
+		Role               string              `json:"role"`
+		Content            json.RawMessage     `json:"content"`
+		ToolCalls          []ToolCall          `json:"tool_calls,omitempty"`
+		ToolCallID         string              `json:"tool_call_id,omitempty"`
+		ReasoningContent   string              `json:"reasoning_content,omitempty"`
+		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
+		Streaming          bool                `json:"streaming,omitempty"`
+		Attachments        []MessageAttachment `json:"attachments,omitempty"`
 	}
 
 	var raw rawMessage
@@ -178,6 +202,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ReasoningContent = raw.ReasoningContent
 	m.ExcludeFromContext = raw.ExcludeFromContext
 	m.Streaming = raw.Streaming
+	m.Attachments = raw.Attachments
 	m.Content = ""
 	m.ContentParts = nil
 

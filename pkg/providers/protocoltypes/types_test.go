@@ -1,6 +1,7 @@
 package protocoltypes
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,47 @@ func TestTextOnlyContent_ContentAndPartsCombined(t *testing.T) {
 	want := "main text\nextra text"
 	if got != want {
 		t.Errorf("TextOnlyContent() = %q, want %q", got, want)
+	}
+}
+
+// --- send_file attachments persistence (WebUI file download) ---
+
+func TestMessageAttachmentsRoundTrip(t *testing.T) {
+	m := Message{
+		Role:    "assistant",
+		Content: "done",
+		Attachments: []MessageAttachment{{
+			Name: "report.pdf", Path: "/home/u/.lele/tmp/attachments/aa_report.pdf",
+			MIMEType: "application/pdf", Kind: "file", Caption: "final",
+		}},
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"attachments"`) {
+		t.Fatalf("marshal must persist attachments for session storage: %s", data)
+	}
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("unmarshal attachments = %d, want 1 (%s)", len(got.Attachments), data)
+	}
+	a := got.Attachments[0]
+	if a.Name != "report.pdf" || a.Path != "/home/u/.lele/tmp/attachments/aa_report.pdf" ||
+		a.MIMEType != "application/pdf" || a.Kind != "file" || a.Caption != "final" {
+		t.Errorf("round-trip lost fields: %+v", a)
+	}
+}
+
+func TestMessageOmitsEmptyAttachments(t *testing.T) {
+	data, err := json.Marshal(Message{Role: "user", Content: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "attachments") {
+		t.Errorf("empty attachments must be omitted from stored JSON: %s", data)
 	}
 }

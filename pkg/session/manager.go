@@ -2228,6 +2228,70 @@ func (sm *SessionManager) FinalizeAssistantMessage(key string) {
 	}
 }
 
+// AttachFilesToLastAssistant appends file attachments to the last assistant
+// message of a session (even if it is still in streaming state) and persists
+// the session. Attachments already present with the same path are skipped
+// (dedupe by path), so the operation is idempotent across repeated
+// message.complete events. When the session has no assistant message the call
+// is a silent no-op: attachments delivered out of band (e.g. a send_file whose
+// turn produced no assistant bubble yet) must not fail the delivery path.
+func (sm *SessionManager) AttachFilesToLastAssistant(key string, attachments []providers.MessageAttachment) {
+	if len(attachments) == 0 {
+		return
+	}
+
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
+	}
+
+	idx := -1
+	for i := len(session.Messages) - 1; i >= 0; i-- {
+		if session.Messages[i].Role == "assistant" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		logger.DebugCF("session", "AttachFilesToLastAssistant: no assistant message in session",
+			map[string]interface{}{"session_key": key})
+		return
+	}
+
+	msg := &session.Messages[idx]
+	existing := make(map[string]struct{}, len(msg.Attachments))
+	for _, a := range msg.Attachments {
+		existing[a.Path] = struct{}{}
+	}
+	added := 0
+	for _, a := range attachments {
+		if _, dup := existing[a.Path]; dup {
+			continue
+		}
+		existing[a.Path] = struct{}{}
+		msg.Attachments = append(msg.Attachments, a)
+		added++
+	}
+	if added == 0 {
+		return
+	}
+
+	session.Updated = time.Now()
+	session.markModified(idx)
+	sm.touchSession(key)
+	if err := sm.saveUnlocked(key); err != nil {
+		logger.WarnCF("session", "Failed to persist message attachments",
+			map[string]interface{}{"session_key": key, "error": err.Error()})
+	}
+}
+
 // HasStreamedContent returns true if the session already had content delivered
 // via streaming chunks this turn. Used to prevent duplicate message.stream
 // delivery. It checks the in-memory flag (set by AppendAssistantChunk and

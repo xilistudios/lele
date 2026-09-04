@@ -206,6 +206,7 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 			ReasoningContent:   vm.msg.ReasoningContent,
 			ToolCallID:         vm.msg.ToolCallID,
 			ExcludeFromContext: vm.msg.ExcludeFromContext,
+			Attachments:        vm.msg.Attachments,
 		}
 		// For tool messages, look up the tool name from the assistant message that initiated the call
 		if vm.msg.Role == "tool" && vm.msg.ToolCallID != "" {

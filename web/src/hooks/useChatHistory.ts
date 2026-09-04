@@ -2,7 +2,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
-import type { ChatMessage, GroupInfo, GroupSnapshot, HistoryToolCall } from '../lib/types'
+import type {
+  Attachment,
+  ChatMessage,
+  GroupInfo,
+  GroupSnapshot,
+  HistoryToolCall,
+} from '../lib/types'
 import { snapshotToGroupInfo } from './messageEventHandlers'
 
 const DEFAULT_LIMIT = 50
@@ -16,6 +22,7 @@ export type HistoryMessage = Array<{
   tool_call_id?: string
   tool_name?: string
   exclude_from_context?: boolean
+  attachments?: Attachment[]
 }>
 
 export const chatHistoryQueryKey = (sessionKey: string) => ['chatHistory', sessionKey] as const

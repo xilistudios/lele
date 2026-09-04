@@ -181,6 +181,47 @@ describe('applyMessageComplete', () => {
     expect(next[0].content).toBe('')
     expect(next[0].streaming).toBe(false)
   })
+
+  test('attaches server attachments to the completed message (replacing existing)', () => {
+    const stale = [{ path: '/stale.png', name: 'stale.png', kind: 'image' as const }]
+    const server = [
+      {
+        name: 'report.pdf',
+        path: '/home/u/.lele/tmp/attachments/ab12_report.pdf',
+        mime_type: 'application/pdf',
+        kind: 'file',
+        caption: 'monthly report',
+      },
+    ]
+    const current = [msg('a1', 'assistant', 'done', { streaming: true, attachments: stale })]
+    const next = applyMessageComplete(current, 'a1', 's1', 'done', server)
+    expect(next[0].attachments).toEqual(server)
+    expect(next[0].streaming).toBe(false)
+  })
+
+  test('preserves existing attachments when server sends none', () => {
+    const prev = [{ path: '/f.png', name: 'f.png', kind: 'image' as const }]
+    const current = [msg('a1', 'assistant', 'done', { streaming: true, attachments: prev })]
+    const nextUndefined = applyMessageComplete(current, 'a1', 's1', 'done', undefined)
+    expect(nextUndefined[0].attachments).toEqual(prev)
+    const nextEmpty = applyMessageComplete(current, 'a1', 's1', 'done', [])
+    expect(nextEmpty[0].attachments).toEqual(prev)
+  })
+
+  test('creates never-seen message including server attachments', () => {
+    const server = [{ name: 'a.txt', path: '/tmp/a.txt', kind: 'file' as const }]
+    const current = [msg('u1', 'user', 'hi')]
+    const next = applyMessageComplete(current, 'a1', 's1', 'Here is the file', server)
+    expect(next.map((m) => m.id)).toEqual(['u1', 'a1'])
+    expect(next.find((m) => m.id === 'a1')?.attachments).toEqual(server)
+    expect(next.find((m) => m.id === 'a1')?.streaming).toBe(false)
+  })
+
+  test('never-seen message without attachments has none', () => {
+    const current = [msg('u1', 'user', 'hi')]
+    const next = applyMessageComplete(current, 'a1', 's1', 'plain', undefined)
+    expect(next.find((m) => m.id === 'a1')?.attachments).toBeUndefined()
+  })
 })
 
 describe('markOptimisticUserFailed', () => {

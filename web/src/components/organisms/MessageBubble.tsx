@@ -32,6 +32,41 @@ function buildFileUrl(apiUrl: string, path: string): string {
   return `${base}/api/v1/files/view?path=${encodeURIComponent(path)}`
 }
 
+/**
+ * URL for the download flavour of a file. `download=1` makes the backend
+ * answer with Content-Disposition: attachment (filename taken from `name`),
+ * so the browser saves the file instead of rendering it inline. The inline
+ * preview flavour is buildFileUrl above.
+ */
+function buildDownloadUrl(apiUrl: string, path: string, name?: string): string {
+  const base = apiUrl.replace(/\/$/, '')
+  let url = `${base}/api/v1/files/view?path=${encodeURIComponent(path)}&download=1`
+  if (name) url += `&name=${encodeURIComponent(name)}`
+  return url
+}
+
+/** Download icon (12px) shared by the file card and the image overlay. */
+function DownloadIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
 function looksLikeHTMLorSVG(content: string): 'html' | 'svg' | null {
   const trimmed = content.trim().toLowerCase()
   if (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) return 'html'
@@ -381,15 +416,31 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
         {message.attachments?.length ? (
           <div className="flex flex-wrap gap-2">
             {message.attachments.map((attachment, index) => {
+              const label = attachment.name ?? attachment.path ?? 'attachment'
               if (isImageAttachment(attachment)) {
                 return (
-                  <img
+                  <div
                     key={`${attachment.path ?? attachment.name ?? 'img'}:${index}`}
-                    src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
-                    alt={attachment.name ?? 'image'}
-                    className="max-w-full rounded-lg object-contain max-h-96"
-                    loading="lazy"
-                  />
+                    className="relative inline-block max-w-full"
+                  >
+                    <img
+                      src={buildFileUrl(apiUrl ?? '', attachment.path ?? '')}
+                      alt={attachment.name ?? 'image'}
+                      className="max-w-full rounded-lg object-contain max-h-96"
+                      loading="lazy"
+                    />
+                    {attachment.path ? (
+                      <a
+                        href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
+                        download={attachment.name ?? true}
+                        aria-label={`Download ${label}`}
+                        title={`Download ${label}`}
+                        className="absolute right-1.5 top-1.5 inline-flex items-center justify-center rounded-md border border-border bg-background-primary/90 p-1 text-text-secondary shadow-card transition-colors hover:text-text-primary"
+                      >
+                        <DownloadIcon />
+                      </a>
+                    ) : null}
+                  </div>
                 )
               }
               return (
@@ -397,14 +448,23 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                   key={`${attachment.path ?? attachment.name ?? 'attachment'}:${index}`}
                   className="rounded-lg border border-border bg-background-secondary px-3 py-2 text-xs text-text-secondary"
                 >
-                  <p className="font-medium text-text-primary">
-                    {attachment.name ?? attachment.path ?? 'attachment'}
-                  </p>
+                  <p className="font-medium text-text-primary">{label}</p>
                   {attachment.caption ? (
                     <p className="mt-1 text-text-secondary">{attachment.caption}</p>
                   ) : null}
                   {attachment.path ? (
-                    <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
+                    <>
+                      <a
+                        href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
+                        download={attachment.name ?? true}
+                        aria-label={`Download ${label}`}
+                        className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-background-primary px-2 py-1 font-medium text-text-primary transition-colors hover:text-text-secondary"
+                      >
+                        <DownloadIcon />
+                        <span>Download</span>
+                      </a>
+                      <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
+                    </>
                   ) : null}
                 </div>
               )

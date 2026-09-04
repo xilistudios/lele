@@ -1038,6 +1038,21 @@ func (ap *agentProvidableImpl) FinalizeAssistantMessage(sessionKey string) {
 	agent.Sessions.FinalizeAssistantMessage(resolvedKey)
 }
 
+// AttachFilesToLastAssistant persists file attachments on the last assistant
+// message of a session (see SessionManager). Used by the native channel when a
+// turn delivers send_file attachments so they appear in chat history.
+func (ap *agentProvidableImpl) AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment) {
+	if len(attachments) == 0 {
+		return
+	}
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	agent := ap.al.agentForSession(resolvedKey)
+	if agent == nil || agent.Sessions == nil {
+		return
+	}
+	agent.Sessions.AttachFilesToLastAssistant(resolvedKey, attachments)
+}
+
 // HasStreamedContent returns true if the session has an in-progress streaming message with content.
 func (ap *agentProvidableImpl) HasStreamedContent(sessionKey string) bool {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)

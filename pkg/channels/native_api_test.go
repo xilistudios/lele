@@ -49,6 +49,11 @@ type nativeTestAgentLoop struct {
 	// allGroupSnapshotsCalls counts uses of the memory-only API, which the
 	// session read path must no longer touch (#239).
 	allGroupSnapshotsCalls int
+
+	// attachFilesCalls records AttachFilesToLastAssistant invocations made by
+	// the outbound dispatch path (send_file staging/persistence).
+	attachFilesCalls []attachFilesCall
+	attachMu         sync.Mutex
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -349,6 +354,27 @@ func (m *nativeTestAgentLoop) AppendAssistantChunk(sessionKey, chunk string) {}
 func (m *nativeTestAgentLoop) AppendReasoningChunk(sessionKey, chunk string) {}
 
 func (m *nativeTestAgentLoop) FinalizeAssistantMessage(sessionKey string) {}
+
+// attachFilesCalls records (sessionKey, attachments) pairs passed to
+// AttachFilesToLastAssistant so tests can assert staging/persistence wiring.
+type attachFilesCall struct {
+	sessionKey  string
+	attachments []providers.MessageAttachment
+}
+
+func (m *nativeTestAgentLoop) AttachFilesToLastAssistant(sessionKey string, attachments []providers.MessageAttachment) {
+	m.attachMu.Lock()
+	defer m.attachMu.Unlock()
+	m.attachFilesCalls = append(m.attachFilesCalls, attachFilesCall{sessionKey: sessionKey, attachments: attachments})
+}
+
+func (m *nativeTestAgentLoop) attachCalls() []attachFilesCall {
+	m.attachMu.Lock()
+	defer m.attachMu.Unlock()
+	out := make([]attachFilesCall, len(m.attachFilesCalls))
+	copy(out, m.attachFilesCalls)
+	return out
+}
 
 func (m *nativeTestAgentLoop) HasStreamedContent(sessionKey string) bool {
 	return false
