@@ -6,6 +6,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 type ClientInfo struct {
@@ -217,14 +218,15 @@ type ChatHistoryResponse struct {
 }
 
 type ChatHistoryMessage struct {
-	ID                 string            `json:"id"`
-	Role               string            `json:"role"`
-	Content            string            `json:"content"`
-	ReasoningContent   string            `json:"reasoning_content,omitempty"`
-	ToolCalls          []HistoryToolCall `json:"tool_calls,omitempty"`
-	ToolCallID         string            `json:"tool_call_id,omitempty"`
-	ToolName           string            `json:"tool_name,omitempty"`
-	ExcludeFromContext bool              `json:"exclude_from_context,omitempty"`
+	ID                 string                        `json:"id"`
+	Role               string                        `json:"role"`
+	Content            string                        `json:"content"`
+	ReasoningContent   string                        `json:"reasoning_content,omitempty"`
+	ToolCalls          []HistoryToolCall             `json:"tool_calls,omitempty"`
+	ToolCallID         string                        `json:"tool_call_id,omitempty"`
+	ToolName           string                        `json:"tool_name,omitempty"`
+	ExcludeFromContext bool                          `json:"exclude_from_context,omitempty"`
+	Attachments        []providers.MessageAttachment `json:"attachments,omitempty"`
 }
 
 type HistoryToolCall struct {

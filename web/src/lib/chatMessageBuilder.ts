@@ -225,6 +225,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
     streaming: false,
     createdAt: props.createdAt ?? new Date().toISOString(),
     sessionKey: props.sessionKey,
+    attachments: props.attachments,
     toolName: props.toolName,
     toolArgs: props.toolArgs,
     toolResult: props.toolResult,
@@ -253,6 +254,7 @@ export function toChatMessages(
     tool_call_id?: string
     tool_name?: string
     exclude_from_context?: boolean
+    attachments?: Attachment[]
   }>,
   sessionKey: string,
 ): ChatMessage[] {
@@ -296,6 +298,13 @@ export function toChatMessages(
       if (parsed.attachments.length > 0) {
         parsedAttachments = parsed.attachments
       }
+    }
+
+    // Structured attachments from the backend (any role) win over the
+    // text-block parsing above, which only applies to the legacy
+    // "## Attachments" section of user messages.
+    if (message.attachments?.length) {
+      parsedAttachments = message.attachments
     }
 
     if (message.role === 'user') {
@@ -346,6 +355,7 @@ export function toChatMessages(
             streaming: false,
             createdAt: new Date().toISOString(),
             sessionKey,
+            attachments: parsedAttachments,
           },
         ]
       }
@@ -368,6 +378,7 @@ export function toChatMessages(
           toolStatus: 'completed',
           toolCallId: message.tool_call_id,
           subagentSessionKey,
+          attachments: parsedAttachments,
         }),
       ]
     }

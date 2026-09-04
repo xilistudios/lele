@@ -63,7 +63,7 @@ func (p *Provider) Chat(ctx context.Context, messages []Message, tools []ToolDef
 
 	requestBody := map[string]interface{}{
 		"model":    model,
-		"messages": messages,
+		"messages": common.SerializeMessages(messages),
 	}
 
 	if len(tools) > 0 {
@@ -170,7 +170,7 @@ func (p *Provider) ChatStream(ctx context.Context, messages []Message, tools []T
 
 	requestBody := map[string]interface{}{
 		"model":    model,
-		"messages": messages,
+		"messages": common.SerializeMessages(messages),
 		"stream":   true,
 	}
 

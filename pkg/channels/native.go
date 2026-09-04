@@ -248,8 +248,14 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 	uploadDir := filepath.Join(n.cfg.LeleDir, "tmp", "uploads")
 	maxAge := time.Duration(n.cfg.UploadTTLHours) * time.Hour
+	// Outbound send_file attachments staged for download (see stageAttachment)
+	// live under tmp/attachments and must expire too, or every external file
+	// ever sent would fill the disk. After the TTL old downloads break —
+	// acceptable trade-off (history keeps showing the file name).
+	stagingDir := attachmentStagingDir(n.cfg.LeleDir)
 
 	utils.CleanupOldUploads(uploadDir, maxAge)
+	utils.CleanupOldUploads(stagingDir, maxAge)
 
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -260,6 +266,7 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 			return
 		case <-ticker.C:
 			utils.CleanupOldUploads(uploadDir, maxAge)
+			utils.CleanupOldUploads(stagingDir, maxAge)
 		}
 	}
 }
@@ -525,6 +532,24 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 	if n.agentLoop != nil {
 		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
 	}
+
+	// Outbound file attachments (send_file tool): make them servable by
+	// /api/v1/files/view (staging outside paths under <leleDir>/tmp/attachments)
+	// and persist them on the assistant message so they survive reloads. This
+	// must happen BEFORE any emit below so the history.updated refetch the
+	// frontend triggers already sees the attachments.
+	if len(msg.Attachments) > 0 {
+		// Copy before mutating: the same OutboundMessage may be delivered to
+		// other channel subscribers sharing the slice backing array.
+		staged := make([]bus.FileAttachment, len(msg.Attachments))
+		copy(staged, msg.Attachments)
+		stageAttachments(staged, n.cfg.LeleDir)
+		msg.Attachments = staged
+		if n.agentLoop != nil {
+			n.agentLoop.AttachFilesToLastAssistant(sessionKey, attachmentsToProviders(staged))
+		}
+	}
+
 	switch msg.Event {
 	case "message.stream":
 		done := msg.Metadata["done"] == "true"

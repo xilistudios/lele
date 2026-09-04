@@ -220,6 +220,7 @@ export function handleMessageComplete(ctx: MessageEventContext, data: Record<str
       data.message_id as string,
       targetSessionKey,
       data.content as string | undefined,
+      data.attachments as ChatMessage['attachments'],
     ),
   )
   ctx.setToolStatus(null)
