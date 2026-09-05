@@ -1811,6 +1811,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd := m.throttledUpdateViewport(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case "command.applied":
+				// A custom (harness) slash command was expanded by the backend
+				// for this turn. Render it like a tool activity line: the
+				// overlay shows it until the stream resumes (same lifecycle and
+				// styling as "tool.executing" below).
+				m.currentToolAction = formatCommandApplied(msg.msg.Metadata)
+				m.updateViewport()
 			case "tool.executing":
 				// Only clear streaming state if it's a different message.
 				if msg.msg.MessageID != "" && msg.msg.MessageID != m.currentAssistantMsgID {

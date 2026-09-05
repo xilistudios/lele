@@ -298,6 +298,19 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.cancel()
 		return tea.Quit
 	}
+
+	// Unknown to the built-in switch: it may be a custom (harness) slash
+	// command defined in config.json or a commands/*.md file. The backend
+	// expands these, so publish the raw "/name args" text exactly like a
+	// normal user message (queue it while a turn is running, same as the
+	// non-slash send path). Anything else keeps the previous behavior.
+	if m.isCustomCommand(parts[0]) {
+		content := strings.TrimSpace(cmd)
+		if m.processing {
+			return m.enqueueCurrentInputWhileBusy(content)
+		}
+		return m.publishUserMessage(content)
+	}
 	return nil
 }
 
