@@ -536,6 +536,11 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	}
 
 	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
+	// Issue #234: remember which agent owns this manager. Tasks that arrive
+	// without any identity (no explicit agent_id and no agent tool context at
+	// spawn time, e.g. legacy cron spawn jobs) are attributed to this agent at
+	// run time, so the subagent's tool loop never runs owner-less.
+	subagentManager.SetDefaultAgentID(agentID)
 	subagentManager.SetCompactionThresholdPercent(cfg.SessionCompactionThresholdPercent())
 	subagentManager.SetRedactor(keyring.NewRedactor(keyringSvc))
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)

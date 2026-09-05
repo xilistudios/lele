@@ -127,6 +127,34 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	return provider, model, systemPrompt, maxIter, llmOptions, contextWindow
 }
 
+// ownerAgentID returns the agent identity to attribute a task's tool loop to.
+//
+// Issue #234: identity-scoped tools (keyring secret lookup, nested spawn
+// attribution) key on the OwnerAgentID injected into the tool context, so it
+// must never be empty when the runner knows which agent it is executing.
+// Resolution order:
+//  1. task.AgentID — the explicit target (or the spawner identity inherited at
+//     spawn time, see SpawnWithOptions).
+//  2. the manager's owning agent id, set by the agent layer via
+//     SetDefaultAgentID. This is the agent whose provider/model/system prompt
+//     resolveAgentConfig actually fell back to, so it is the true executing
+//     identity rather than a fabricated literal.
+//  3. "" as a last resort (standalone managers with no owner configured, e.g.
+//     tests) — RunToolLoop then keeps whatever identity its ctx carries.
+//
+// Chosen over extending resolveAgentConfig: the callback there is supplied by
+// the agent layer and returns AgentContextInfo, which carries no id (adding one
+// would touch every implementation for information the manager already knows).
+// Nor is the routing default ("main") used here: pkg/tools must not depend on
+// pkg/routing, and hardcoding a literal id would be wrong for any deployment
+// whose default agent is named differently.
+func (sm *SubagentManager) ownerAgentID(task *SubagentTask) string {
+	if task != nil && task.AgentID != "" {
+		return task.AgentID
+	}
+	return sm.getDefaultAgentID()
+}
+
 // extractProgress extracts a "PROGRESS:" line from raw subagent output.
 // Subagents can include a "PROGRESS: <message>" line in their response to report
 // intermediate status updates before the final STATUS/SUMMARY/DETAILS block.
@@ -414,7 +442,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		LLMOptions:                 llmOptions,
 		SessionRecorder:            recorder,
 		SessionKey:                 sessionKey,
-		OwnerAgentID:               task.AgentID,
+		OwnerAgentID:               sm.ownerAgentID(task),
 		OwnerSessionKey:            taskOwnershipKey(task),
 		Retry:                      retryConfigPtr(),
 		ContextWindow:              agentContextWindow,

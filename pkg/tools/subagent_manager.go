@@ -40,10 +40,18 @@ type SubagentManager struct {
 	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
 	compactionThresholdPercent int                                                       // percentage of context window triggering intra-loop compaction (0 = default)
-	redactor                   *keyring.Redactor                                         // redacts secret values from tool results before they enter the subagent LLM context
-	sessionCompactor           SessionCompactor                                          // syncs loop compaction to the persisted subagent session
-	compactionModel            string                                                    // dedicated compaction model (empty = agent model)
-	evictExcludedFromMemory    bool                                                      // evict excluded messages from in-memory session cache on compaction sync
+	// defaultAgentID is the id of the agent that OWNS this manager (the agent
+	// whose toolset contains the spawn tool). Every agent gets its own manager,
+	// so this is unambiguous. It is the last-resort identity for a task whose
+	// AgentID is still empty at run time, so a subagent's tool loop never runs
+	// owner-less (issue #234: identity-scoped tools such as the secret lookup
+	// key their grants by agent id). Set via SetDefaultAgentID; empty when the
+	// manager is constructed standalone (tests).
+	defaultAgentID          string
+	redactor                *keyring.Redactor // redacts secret values from tool results before they enter the subagent LLM context
+	sessionCompactor        SessionCompactor  // syncs loop compaction to the persisted subagent session
+	compactionModel         string            // dedicated compaction model (empty = agent model)
+	evictExcludedFromMemory bool              // evict excluded messages from in-memory session cache on compaction sync
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -147,6 +155,23 @@ func (sm *SubagentManager) SetAgentContextCallback(callback func(agentID string)
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.getAgentContext = callback
+}
+
+// SetDefaultAgentID records the id of the agent that owns this manager.
+// The agent layer calls it while wiring the manager into an agent's toolset so
+// tasks without an explicit target agent can still be attributed to a real
+// identity (issue #234).
+func (sm *SubagentManager) SetDefaultAgentID(agentID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.defaultAgentID = strings.TrimSpace(agentID)
+}
+
+// getDefaultAgentID returns the owning agent id ("" when unset).
+func (sm *SubagentManager) getDefaultAgentID() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.defaultAgentID
 }
 
 // SetModelOverrideResolver registers a callback that resolves a per-task model
@@ -361,7 +386,19 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 
 	// The runtime session key of the calling agent loop, when available.
 	// Used for cancellation matching (see SubagentTask.SpawnerSessionKey).
-	_, spawnerSessionKey := AgentToolContextFromCtx(ctx)
+	spawnerAgentID, spawnerSessionKey := AgentToolContextFromCtx(ctx)
+
+	// Issue #234: when the spawner does not name a target agent, the new
+	// subagent inherits the spawner's own identity (agent id) from the tool
+	// context. This keeps identity-scoped tools (secret lookup, nested spawn
+	// attribution) working for subagents spawned without an explicit agent_id —
+	// the previous behavior left task.AgentID empty, which propagated an empty
+	// OwnerAgentID into the subagent's tool loop.
+	// Explicit agentID always wins; the manager's configured default agent
+	// remains the last fallback in the runner (see runTaskImpl).
+	if agentID == "" {
+		agentID = spawnerAgentID
+	}
 
 	// Claim a unique task ID BEFORE taking sm.mu. The session-existence probe
 	// inside claimTaskID may call into the SessionManager (its own lock + disk
