@@ -40,6 +40,13 @@ type EditableDocument struct {
 	Heartbeat HeartbeatConfig         `json:"heartbeat"`
 	Devices   DevicesConfig           `json:"devices"`
 	Logs      EditableLogsConfig      `json:"logs"`
+
+	// Commands and Harness mirror Config.Commands / Config.Harness so the
+	// editor can read and write custom slash commands. Their element types are
+	// plain (no secret fields, no ENV placeholders), so the editable and
+	// runtime representations are the same structs.
+	Commands map[string]CommandDefinition `json:"commands,omitempty"`
+	Harness  HarnessConfig                `json:"harness,omitempty"`
 }
 
 // EditableAgentsConfig represents agents in editable mode.

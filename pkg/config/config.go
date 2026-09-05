@@ -156,7 +156,37 @@ type Config struct {
 	Goal      GoalConfig       `json:"goal"`
 	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
 	TUI       TUIConfig        `json:"tui,omitempty"`                      // TUI settings (mouse/rendering/stream)
-	mu        sync.RWMutex
+
+	// Commands declares custom slash commands inline (lowest precedence: file
+	// levels global/workspace/directory override same-name entries here).
+	// Keyed by command name without the leading slash; see pkg/harness.
+	Commands map[string]CommandDefinition `json:"commands,omitempty"`
+	// Harness tunes how custom commands behave at runtime.
+	Harness HarnessConfig `json:"harness,omitempty"`
+
+	mu sync.RWMutex
+}
+
+// CommandDefinition mirrors harness.CommandDef. pkg/config deliberately does
+// NOT import pkg/harness: keeping the dependency one-way (harness is a leaf
+// package, config must stay importable everywhere) avoids any future cycle and
+// keeps the JSON schema in one place. The fields and tags must stay in sync
+// with harness.CommandDef; callers convert between them when building the
+// harness ManagerConfig.
+type CommandDefinition struct {
+	Description string `json:"description,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Template    string `json:"template"`
+	AllowShell  bool   `json:"allow_shell,omitempty"`
+}
+
+// HarnessConfig holds global settings for custom slash commands.
+type HarnessConfig struct {
+	// AllowShell is the default permission for !`cmd` expansion in commands
+	// that do not set allow_shell themselves. Off by default: executing shell
+	// snippets found in config/markdown is opt-in.
+	AllowShell bool `json:"allow_shell,omitempty"`
 }
 
 // TUIConfig holds tunable settings for the TUI rendered through the

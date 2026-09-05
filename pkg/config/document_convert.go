@@ -182,6 +182,17 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 	// Copiar logs
 	cfg.Logs = LogsConfig(doc.Logs)
 
+	// Custom slash commands. The types are identical on both sides, so a
+	// shallow copy is enough; the map is cloned to keep the document and the
+	// resulting config independent.
+	if len(doc.Commands) > 0 {
+		cfg.Commands = make(map[string]CommandDefinition, len(doc.Commands))
+		for name, def := range doc.Commands {
+			cfg.Commands[name] = def
+		}
+	}
+	cfg.Harness = doc.Harness
+
 	data, err := json.Marshal(doc.toSerializable())
 	if err != nil {
 		return nil, err
@@ -495,6 +506,15 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"rotation": doc.Logs.Rotation,
 	}
 
+	// Custom slash commands. ToConfig round-trips through this map, so any
+	// section missing here is silently dropped from the runtime config.
+	if len(doc.Commands) > 0 {
+		result["commands"] = doc.Commands
+	}
+	if doc.Harness.AllowShell {
+		result["harness"] = doc.Harness
+	}
+
 	return result
 }
 
@@ -571,5 +591,14 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 	doc.Heartbeat = cfg.Heartbeat
 	doc.Devices = cfg.Devices
 	doc.Logs = EditableLogsConfig(cfg.Logs)
+
+	// Custom slash commands: same element types, so clone the map directly.
+	if len(cfg.Commands) > 0 {
+		doc.Commands = make(map[string]CommandDefinition, len(cfg.Commands))
+		for name, def := range cfg.Commands {
+			doc.Commands[name] = def
+		}
+	}
+	doc.Harness = cfg.Harness
 	return doc
 }
