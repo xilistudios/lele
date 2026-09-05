@@ -202,7 +202,7 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]interface{}) *To
 
 	switch action {
 	case "add":
-		return t.addJob(args)
+		return t.addJob(ctx, args)
 	case "list":
 		return t.listJobs()
 	case "remove":
@@ -216,7 +216,12 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	}
 }
 
-func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
+func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *ToolResult {
+	// Issue #234: remember which agent created this job so execution-time
+	// tools (exec command path, spawn) run with a valid identity-scoped
+	// context (keyring secrets, etc.).
+	creatorAgentID, _ := AgentToolContextFromCtx(ctx)
+
 	t.mu.RLock()
 	channel := t.channel
 	chatID := t.chatID
@@ -295,6 +300,12 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 		if model, ok := spawnRaw["model"].(string); ok {
 			spawnConfig.Model = model
 		}
+		// Issue #234: a spawn without an explicit target agent inherits the
+		// creating agent, so the SYSTEM_SPAWN message carries AGENT_ID and
+		// handleSystemSpawn propagates it to the SubagentTask.
+		if spawnConfig.AgentID == "" && creatorAgentID != "" {
+			spawnConfig.AgentID = creatorAgentID
+		}
 		// When spawn is configured, deliver must be false
 		deliver = false
 	}
@@ -337,14 +348,24 @@ func (t *CronTool) addJob(args map[string]interface{}) *ToolResult {
 		return ErrorResult(fmt.Sprintf("Error adding job: %v", err))
 	}
 
+	// Issue #234: enrich the job payload in memory (creator agent identity,
+	// exec command, spawn config) and persist it with a single UpdateJob so
+	// execution-time tools (exec, spawn) run with a valid identity-scoped
+	// context (keyring secrets, etc.).
+	payloadSet := false
 	if command != "" {
 		job.Payload.Command = command
-		// Need to save the updated payload
-		t.cronService.UpdateJob(job)
+		payloadSet = true
 	}
-
 	if spawnConfig != nil {
 		job.Payload.Spawn = spawnConfig
+		payloadSet = true
+	}
+	if creatorAgentID != "" {
+		job.Payload.AgentID = creatorAgentID
+		payloadSet = true
+	}
+	if payloadSet {
 		t.cronService.UpdateJob(job)
 	}
 
@@ -419,6 +440,14 @@ func (t *CronTool) enableJob(args map[string]interface{}, enable bool) *ToolResu
 
 // ExecuteJob executes a cron job through the agent
 func (t *CronTool) ExecuteJob(ctx context.Context, job *cron.CronJob) string {
+	// Issue #234: restore the creating agent's identity so tools executed by
+	// the scheduler (exec command path, spawn) are identity-scoped. Cron's
+	// session key is synthetic unless the job is session-scoped; the agent id
+	// is what matters for scoped secrets.
+	if job.Payload.AgentID != "" {
+		ctx = WithAgentToolContext(ctx, job.Payload.AgentID, job.Payload.SessionKey)
+	}
+
 	// Get channel/chatID from job payload
 	channel := job.Payload.Channel
 	chatID := job.Payload.To

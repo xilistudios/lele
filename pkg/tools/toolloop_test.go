@@ -393,3 +393,73 @@ func instantToolLoopWait(time.Duration) <-chan time.Time {
 	ch <- time.Now()
 	return ch
 }
+
+// identityProbeTool records the agent identity visible to the tool during
+// Execute (issue #234). It is registered under the name "ctxprobe" so the
+// existing toolCallProvider (which emits a call to that tool) can drive it.
+type identityProbeTool struct {
+	gotAgent string
+	gotSess  string
+}
+
+func (t *identityProbeTool) Name() string        { return "ctxprobe" }
+func (t *identityProbeTool) Description() string { return "records the acting agent identity" }
+func (t *identityProbeTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+func (t *identityProbeTool) Execute(ctx context.Context, _ map[string]interface{}) *ToolResult {
+	t.gotAgent, t.gotSess = AgentToolContextFromCtx(ctx)
+	return &ToolResult{ForLLM: "ok"}
+}
+
+// TestRunToolLoop_InjectsOwnerIdentityWithSubagentSession covers issue #234:
+// a standalone tool loop (subagent tool, cron, cron spawn) must expose its
+// owning agent identity to the tools it runs, otherwise identity-scoped tools
+// such as the secret lookup (keyring.GetScoped) fail with no agent id.
+func TestRunToolLoop_InjectsOwnerIdentityWithSubagentSession(t *testing.T) {
+	reg := NewToolRegistry()
+	probe := &identityProbeTool{}
+	reg.Register(probe)
+
+	if _, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:        &toolCallProvider{},
+		Model:           "test-model",
+		Tools:           reg,
+		MaxIterations:   3,
+		OwnerAgentID:    "planner",
+		OwnerSessionKey: "subagent:test-234",
+	}, []providers.Message{{Role: "user", Content: "go"}}, "", ""); err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if probe.gotAgent != "planner" {
+		t.Errorf("tool saw agent id %q, want %q", probe.gotAgent, "planner")
+	}
+	if probe.gotSess != "subagent:test-234" {
+		t.Errorf("tool saw session key %q, want %q", probe.gotSess, "subagent:test-234")
+	}
+}
+
+// TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey covers the cron case:
+// the owning agent is known but no session key exists yet. The agent identity
+// must still reach the tools, and it must not be wiped by context inheritance.
+func TestRunToolLoop_InjectsOwnerIdentityWithoutSessionKey(t *testing.T) {
+	reg := NewToolRegistry()
+	probe := &identityProbeTool{}
+	reg.Register(probe)
+
+	if _, err := RunToolLoop(context.Background(), ToolLoopConfig{
+		Provider:      &toolCallProvider{},
+		Model:         "test-model",
+		Tools:         reg,
+		MaxIterations: 3,
+		OwnerAgentID:  "planner",
+	}, []providers.Message{{Role: "user", Content: "go"}}, "", ""); err != nil {
+		t.Fatalf("RunToolLoop: %v", err)
+	}
+	if probe.gotAgent != "planner" {
+		t.Errorf("tool saw agent id %q, want %q", probe.gotAgent, "planner")
+	}
+	if probe.gotSess != "" {
+		t.Errorf("tool saw session key %q, want empty", probe.gotSess)
+	}
+}
