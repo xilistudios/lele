@@ -200,38 +200,6 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 	return agent.Sessions.GetHistoryView(resolvedSessionKey)
 }
 
-// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite
-// back into memory, restoring full display history. Idempotent; no-op when
-// nothing was evicted. Returns the number of messages loaded.
-func (ap *agentProvidableImpl) LoadEvictedMessages(sessionKey string) int {
-	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
-
-	if routing.IsSubagentSessionKey(resolvedSessionKey) {
-		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
-			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
-				return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
-			}
-		}
-		for _, agentID := range ap.al.registry.ListAgentIDs() {
-			agent, ok := ap.al.registry.GetAgent(agentID)
-			if !ok {
-				continue
-			}
-			if agent.Sessions.GetEvictedMessageCount(resolvedSessionKey) > 0 {
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
-				return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
-			}
-		}
-		return 0
-	}
-
-	agent := ap.al.agentForSession(resolvedSessionKey)
-	if agent == nil {
-		return 0
-	}
-	return agent.Sessions.LoadEvictedMessages(resolvedSessionKey)
-}
-
 // GetEvictedMessageCount returns the number of messages that were evicted
 // from memory (excluded + persisted in SQLite but not in the in-memory slice).
 func (ap *agentProvidableImpl) GetEvictedMessageCount(sessionKey string) int {
@@ -1126,4 +1094,41 @@ func (ap *agentProvidableImpl) AllGroupSnapshots() []group.GroupSnapshot {
 // unioning memory with the persisted store (see AgentLoop).
 func (ap *agentProvidableImpl) GroupSnapshotsForSession(sessionKey string) []group.GroupSnapshot {
 	return ap.al.GroupSnapshotsForSession(sessionKey)
+}
+
+// LoadEvictedMessagesPage returns a page of the session's persisted messages
+// that are no longer resident in memory (evicted history / out-of-context
+// messages), read directly from SQLite. Read-only: it never loads the session
+// into memory and never affects the agent's context. Returns nil when the
+// session has no out-of-memory messages or does not exist.
+//
+// before/after are exclusive seq cursors (-1/0 = unset); limit is clamped by
+// the session manager.
+func (ap *agentProvidableImpl) LoadEvictedMessagesPage(sessionKey string, before, after, limit int) *session.EvictedMessagesPage {
+	resolvedSessionKey := ap.al.ResolveSessionKey(sessionKey)
+
+	if routing.IsSubagentSessionKey(resolvedSessionKey) {
+		if agentID, ok := ap.al.subagentSessionAgent.Load(resolvedSessionKey); ok {
+			if agent, ok := ap.al.registry.GetAgent(agentID.(string)); ok && agent != nil {
+				return agent.Sessions.LoadMessagesWindow(resolvedSessionKey, before, after, limit)
+			}
+		}
+		for _, agentID := range ap.al.registry.ListAgentIDs() {
+			agent, ok := ap.al.registry.GetAgent(agentID)
+			if !ok {
+				continue
+			}
+			if page := agent.Sessions.LoadMessagesWindow(resolvedSessionKey, before, after, limit); page != nil {
+				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				return page
+			}
+		}
+		return nil
+	}
+
+	agent := ap.al.agentForSession(resolvedSessionKey)
+	if agent == nil {
+		return nil
+	}
+	return agent.Sessions.LoadMessagesWindow(resolvedSessionKey, before, after, limit)
 }

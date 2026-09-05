@@ -670,3 +670,120 @@ func (r *SessionRepo) AllMessageCounts() (map[string]int, error) {
 	}
 	return counts, nil
 }
+
+// LoadMessagesBeforeLimited returns up to limit message rows with seq <
+// beforeSeq, ordered by seq DESC (newest first). Used by the session manager
+// to page through messages that are not resident in memory.
+func (r *SessionRepo) LoadMessagesBeforeLimited(sessionKey string, beforeSeq, limit int) ([]MessageRowFull, error) {
+	rows, err := r.db.Query(
+		`SELECT seq, message, excluded FROM session_messages
+		 WHERE session_key = ? AND seq < ?
+		 ORDER BY seq DESC LIMIT ?`, sessionKey, beforeSeq, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load messages before seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var out []MessageRowFull
+	for rows.Next() {
+		var row MessageRowFull
+		if err := rows.Scan(&row.Seq, &row.JSON, &row.Excluded); err != nil {
+			return nil, fmt.Errorf("load messages before seq scan session=%q: %w", sessionKey, err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages before seq rows session=%q: %w", sessionKey, err)
+	}
+	return out, nil
+}
+
+// LoadMessagesBetweenLimited returns up to limit message rows with
+// afterSeq < seq < beforeSeq (beforeSeq < 0 means unbounded above), ordered
+// by seq ASC (oldest first).
+func (r *SessionRepo) LoadMessagesBetweenLimited(sessionKey string, afterSeq, beforeSeq, limit int) ([]MessageRowFull, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if beforeSeq >= 0 {
+		rows, err = r.db.Query(
+			`SELECT seq, message, excluded FROM session_messages
+			 WHERE session_key = ? AND seq > ? AND seq < ?
+			 ORDER BY seq ASC LIMIT ?`, sessionKey, afterSeq, beforeSeq, limit)
+	} else {
+		rows, err = r.db.Query(
+			`SELECT seq, message, excluded FROM session_messages
+			 WHERE session_key = ? AND seq > ?
+			 ORDER BY seq ASC LIMIT ?`, sessionKey, afterSeq, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load messages between seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var out []MessageRowFull
+	for rows.Next() {
+		var row MessageRowFull
+		if err := rows.Scan(&row.Seq, &row.JSON, &row.Excluded); err != nil {
+			return nil, fmt.Errorf("load messages between seq scan session=%q: %w", sessionKey, err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load messages between seq rows session=%q: %w", sessionKey, err)
+	}
+	return out, nil
+}
+
+// CountMessagesBefore returns the number of persisted rows with seq <
+// beforeSeq (beforeSeq < 0 counts everything).
+func (r *SessionRepo) CountMessagesBefore(sessionKey string, beforeSeq int) (int, error) {
+	var count int
+	var err error
+	if beforeSeq >= 0 {
+		err = r.db.QueryRow(
+			`SELECT COUNT(*) FROM session_messages WHERE session_key = ? AND seq < ?`,
+			sessionKey, beforeSeq).Scan(&count)
+	} else {
+		err = r.db.QueryRow(
+			`SELECT COUNT(*) FROM session_messages WHERE session_key = ?`,
+			sessionKey).Scan(&count)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("count messages before seq session=%q: %w", sessionKey, err)
+	}
+	return count, nil
+}
+
+// LoadMessagesFullBeforeSeq returns seq + JSON + excluded flag of all
+// messages with seq strictly less than beforeSeq, ordered by seq ASC. Unlike
+// LoadMessagesBeforeSeq it preserves the persisted excluded state, which a
+// full rewrite must carry over: the evicted prefix can contain non-excluded
+// rows (e.g. the original request folded into a summary but never excluded),
+// and hardcoding excluded=true would silently drop them from future context
+// rebuilds that filter on the flag.
+func (r *SessionRepo) LoadMessagesFullBeforeSeq(sessionKey string, beforeSeq int) ([]MessageRowFull, error) {
+	rows, err := r.db.Query(
+		`SELECT seq, message, excluded FROM session_messages WHERE session_key = ? AND seq < ?
+		 ORDER BY seq ASC`, sessionKey, beforeSeq,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load full messages before seq session=%q: %w", sessionKey, err)
+	}
+	defer rows.Close()
+
+	var out []MessageRowFull
+	for rows.Next() {
+		var row MessageRowFull
+		if err := rows.Scan(&row.Seq, &row.JSON, &row.Excluded); err != nil {
+			return nil, fmt.Errorf("load full messages before seq scan session=%q: %w", sessionKey, err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load full messages before seq rows session=%q: %w", sessionKey, err)
+	}
+	return out, nil
+}

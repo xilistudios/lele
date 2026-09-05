@@ -698,15 +698,35 @@ func (sm *SessionManager) GetSummary(key string) string {
 // GetEvictedMessageCount returns the number of messages that have been evicted
 // from memory (excluded + persisted in SQLite but not in the in-memory slice).
 // Consumers use this to decide when to lazy-load evicted history.
+//
+// For a non-resident session (LRU/TTL-evicted, metadata only), the eviction
+// boundary persisted in the sessions table defines the prefix: rows with
+// seq < first_in_memory_seq exist in SQLite but not in memory. Without this
+// fallback a fully evicted session would report 0 and frontends would never
+// page into its history.
 func (sm *SessionManager) GetEvictedMessageCount(key string) int {
 	sm.ensureLoaded()
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
+	sm.mu.RLock()
 	if session, ok := sm.sessions[key]; ok {
-		return session.evictedTotal
+		n := session.evictedTotal
+		sm.mu.RUnlock()
+		return n
 	}
-	return 0
+	store := sm.store
+	sm.mu.RUnlock()
+
+	if store == nil {
+		return 0
+	}
+	meta, err := store.Sessions().GetSessionMeta(key)
+	if err != nil || meta == nil || meta.FirstInMemorySeq <= 0 {
+		return 0
+	}
+	n, err := store.Sessions().CountMessagesBefore(key, meta.FirstInMemorySeq)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // HasMessages returns true if the session has any persisted messages (in-memory
@@ -753,76 +773,6 @@ func (sm *SessionManager) GetTotalMessageCount(key string) int {
 		}
 	}
 	return 0
-}
-
-// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite back
-// into the in-memory slice, before the current first in-memory message,
-// restoring full display history. Idempotent: no-op when evictedTotal == 0.
-// Returns the number of messages loaded.
-func (sm *SessionManager) LoadEvictedMessages(key string) int {
-	sm.ensureLoaded()
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, ok := sm.sessions[key]
-	if !ok {
-		// Nothing in memory to prepend to; loading here would inflate a cold
-		// session. Callers invoke this only for sessions known to be active.
-		return 0
-	}
-	if session.evictedTotal == 0 || session.firstInMemorySeq <= 0 {
-		return 0
-	}
-
-	evictedJSONs, err := sm.store.Sessions().LoadMessagesBeforeSeq(key, session.firstInMemorySeq)
-	if err != nil {
-		logger.WarnCF("session", "LoadEvictedMessages store read failed", map[string]interface{}{
-			"session_key": key,
-			"error":       err.Error(),
-		})
-		return 0
-	}
-
-	loaded := make([]providers.Message, 0, len(evictedJSONs)+len(session.Messages))
-	for _, msgJSON := range evictedJSONs {
-		var msg providers.Message
-		if uerr := json.Unmarshal([]byte(msgJSON), &msg); uerr != nil {
-			continue // skip corrupted rows
-		}
-		loaded = append(loaded, msg)
-	}
-	loaded = append(loaded, session.Messages...)
-
-	session.Messages = loaded
-	session.firstInMemorySeq = 0
-	session.evictedTotal = 0
-	session.lastPersistedSeq = len(loaded) - 1
-	sm.touchSession(key)
-
-	// CRITICAL: restore the invariant `seq = firstInMemorySeq + sliceIndex`.
-	// The evicted rows loaded back above may have gaps (PruneExcluded
-	// physically deletes the oldest excluded rows once a session exceeds
-	// maxStoredMessages), so slice index i no longer maps to seq i. Without a
-	// rebase, every subsequent save (saveExcludedRangeUnlocked, streaming
-	// updates, incremental appends) computes seqs via seqForIndex and writes
-	// content onto the WRONG rows — shifting JSON blobs relative to the role
-	// column and corrupting the persisted history. A full rewrite re-numbers
-	// all rows contiguously from 0, healing any gaps. saveFullUnlocked sees
-	// firstInMemorySeq == 0 and rewrites purely from the (now complete)
-	// in-memory slice.
-	if err := sm.saveFullUnlocked(key); err != nil {
-		logger.WarnCF("session", "LoadEvictedMessages rebase save failed; seqs may be misaligned until next full rewrite", map[string]interface{}{
-			"session_key": key,
-			"error":       err.Error(),
-		})
-	}
-
-	logger.InfoCF("session", "Loaded evicted messages back into memory", map[string]interface{}{
-		"session_key": key,
-		"loaded":      len(evictedJSONs),
-		"total":       len(loaded),
-	})
-	return len(evictedJSONs)
 }
 
 func (sm *SessionManager) GetName(key string) string {
@@ -1774,29 +1724,33 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	// Re-materialize them from SQLite and prepend them so the rewrite keeps
 	// the full persisted set (evicted rows keep excluded=1, so the model
 	// never sees them and the eviction gap is closed: seqs re-base from 0).
-	var evictedJSONs []string
+	var evictedRows []store.MessageRowFull
 	var err error
 	if session.firstInMemorySeq > 0 {
-		evictedJSONs, err = sm.store.Sessions().LoadMessagesBeforeSeq(key, session.firstInMemorySeq)
+		evictedRows, err = sm.store.Sessions().LoadMessagesFullBeforeSeq(key, session.firstInMemorySeq)
 		if err != nil {
 			return fmt.Errorf("re-materialize evicted messages %q: %w", key, err)
 		}
 	}
 
-	rows := make([]store.MessageRow, len(evictedJSONs)+len(session.Messages))
-	for i, msgJSON := range evictedJSONs {
+	rows := make([]store.MessageRow, len(evictedRows)+len(session.Messages))
+	for i, evicted := range evictedRows {
 		var evt providers.Message
-		if uerr := json.Unmarshal([]byte(msgJSON), &evt); uerr != nil {
+		if uerr := json.Unmarshal([]byte(evicted.JSON), &evt); uerr != nil {
 			continue // skip corrupted rows
 		}
+		// Carry the persisted excluded flag through the rewrite: the evicted
+		// prefix can contain non-excluded rows (the original request folded
+		// into a summary stays excluded=false), and hardcoding true here
+		// would corrupt their state on every full rewrite.
 		rows[i] = store.MessageRow{
 			Seq:      i,
 			Role:     evt.Role,
-			JSON:     msgJSON,
-			Excluded: true,
+			JSON:     evicted.JSON,
+			Excluded: evicted.Excluded,
 		}
 	}
-	offset := len(evictedJSONs)
+	offset := len(evictedRows)
 	for i, msg := range session.Messages {
 		msgJSON, mErr := json.Marshal(msg)
 		if mErr != nil {
@@ -1848,8 +1802,8 @@ func (sm *SessionManager) saveFullUnlocked(key string) error {
 	// session is mutated mid-flight, the guard above forces a rewrite via
 	// lastPersistedSeq == -1, and pre-setting these fields would defeat it.
 	session.lastPersistedSeq = len(session.Messages) - 1
-	session.firstInMemorySeq = len(evictedJSONs)
-	session.evictedTotal = len(evictedJSONs) - pruned
+	session.firstInMemorySeq = len(evictedRows)
+	session.evictedTotal = len(evictedRows) - pruned
 	if session.evictedTotal < 0 {
 		session.evictedTotal = 0
 	}
@@ -2860,4 +2814,208 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 	}
 
 	return results
+}
+
+// ---------------------------------------------------------------------------
+// On-demand history for evicted messages
+// ---------------------------------------------------------------------------
+
+// EvictedMessagesPage is a page of a session's persisted messages that are NOT
+// resident in memory (evicted history / out-of-context messages). Frontends
+// use it to render the full transcript on demand without ever re-injecting
+// these messages into the agent's context.
+type EvictedMessagesPage struct {
+	// Messages are in chronological order (ascending seq).
+	Messages []providers.Message
+	// FirstSeq/LastSeq are the SQLite seqs of the first/last message.
+	FirstSeq int
+	LastSeq  int
+	// Seqs holds the SQLite seq of each message in Messages (same order).
+	// Exposed because the persisted region may contain gaps: PruneExcluded
+	// physically deletes the oldest rows, so seqs are not guaranteed to be
+	// contiguous and consumers must not derive them from slice indices.
+	Seqs []int
+	// HasOlder is true when out-of-memory persisted rows exist before FirstSeq.
+	HasOlder bool
+	// HasNewer is true when out-of-memory persisted rows exist after LastSeq.
+	HasNewer bool
+	// EvictedCount is the number of persisted messages not resident in memory.
+	EvictedCount int
+	// TotalCount is the session's total message count (memory + evicted).
+	TotalCount int
+}
+
+// maxMessagesWindowLimit caps the number of messages a single
+// LoadMessagesWindow call may return, so a misbehaving client cannot make the
+// gateway deserialize a whole multi-thousand-message transcript in one call.
+const maxMessagesWindowLimit = 200
+
+// LoadMessagesWindow returns a page of the session's out-of-memory messages
+// from SQLite. It is read-only: it never loads the session into memory, never
+// touches the LRU list, and never changes context membership.
+//
+// Boundaries:
+//   - For a resident session, the out-of-memory region is seq <
+//     session.firstInMemorySeq (the evicted prefix).
+//   - For a non-resident (fully evicted) session, every persisted row is
+//     out-of-memory, so the window covers the whole transcript.
+//
+// Paging:
+//   - before >= 0: return up to limit rows with seq < before (scroll-up /
+//     paging deeper into history), clamped to the out-of-memory region.
+//     before = -1 means "no cursor".
+//   - after > 0: return up to limit rows with after < seq (gap fill /
+//     scroll-down), clamped to the out-of-memory region.
+//   - neither: return the newest limit rows of the out-of-memory region.
+//
+// Returns nil when the session does not exist or has no out-of-memory rows
+// for the requested page.
+func (sm *SessionManager) LoadMessagesWindow(sessionKey string, before, after, limit int) *EvictedMessagesPage {
+	if sm.store == nil || limit <= 0 {
+		return nil
+	}
+	if limit > maxMessagesWindowLimit {
+		limit = maxMessagesWindowLimit
+	}
+
+	sm.ensureLoaded()
+
+	// Snapshot the memory boundary under the read lock (store queries run
+	// outside it; SessionRepo reads are safe on their own, same pattern as
+	// HasMessages/GetTotalMessageCount).
+	var memFloor, residentCount, evicted int
+	resident := false
+	sm.mu.RLock()
+	if session, ok := sm.sessions[sessionKey]; ok {
+		resident = true
+		memFloor = session.firstInMemorySeq // exclusive upper bound of evicted region
+		residentCount = len(session.Messages)
+		evicted = session.evictedTotal
+	}
+	sm.mu.RUnlock()
+
+	repo := sm.store.Sessions()
+	if !resident {
+		// Not loaded in memory. The persisted eviction boundary
+		// (FirstInMemorySeq) defines the out-of-memory prefix: a cold load
+		// via GetHistoryView materializes exactly seq >= boundary, so the
+		// window must serve seq < boundary and nothing more (no overlap).
+		// Pruning may have deleted the oldest rows, so count what remains.
+		meta, err := repo.GetSessionMeta(sessionKey)
+		if err != nil || meta == nil {
+			return nil
+		}
+		memFloor = meta.FirstInMemorySeq
+		if memFloor <= 0 {
+			return nil // nothing was eviction-excluded; cold load serves all
+		}
+		n, cerr := repo.CountMessagesBefore(sessionKey, memFloor)
+		if cerr != nil {
+			return nil
+		}
+		evicted = n
+		if evicted == 0 {
+			return nil
+		}
+		total, merr := repo.MessageCount(sessionKey)
+		if merr != nil {
+			return nil
+		}
+		residentCount = total - evicted // the tail cold-load will bring back
+	} else if evicted == 0 {
+		// Resident with no eviction gap: nothing to serve.
+		return nil
+	}
+
+	total := residentCount + evicted
+
+	// Clamp the requested page to the out-of-memory region [0, memFloor).
+	// `before` is a seq cursor: 0 is a valid value meaning "before seq 0"
+	// (i.e. nothing older exists), so the "no cursor" sentinel is negative.
+	bound := memFloor
+	if before >= 0 && (bound < 0 || before < bound) {
+		bound = before
+	}
+
+	var rows []store.MessageRowFull
+	var err error
+	if after > 0 {
+		// Scroll-down / gap fill: rows after `after`, below the memory window.
+		if memFloor >= 0 && after >= memFloor {
+			return nil
+		}
+		upper := -1
+		if memFloor >= 0 {
+			upper = memFloor
+		}
+		rows, err = repo.LoadMessagesBetweenLimited(sessionKey, after, upper, limit)
+	} else {
+		if bound <= 0 {
+			return nil // no evicted region below the memory window
+		}
+		rows, err = repo.LoadMessagesBeforeLimited(sessionKey, bound, limit)
+	}
+	if err != nil {
+		logger.WarnCF("session", "LoadMessagesWindow store read failed", map[string]interface{}{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		return nil
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	// `before` queries come back newest-first; normalize to chronological.
+	if after <= 0 {
+		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+			rows[i], rows[j] = rows[j], rows[i]
+		}
+	}
+
+	msgs := make([]providers.Message, 0, len(rows))
+	seqs := make([]int, 0, len(rows))
+	for _, row := range rows {
+		var msg providers.Message
+		if uerr := json.Unmarshal([]byte(row.JSON), &msg); uerr != nil {
+			continue // skip corrupted rows
+		}
+		msgs = append(msgs, msg)
+		seqs = append(seqs, row.Seq)
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	firstSeq, lastSeq := seqs[0], seqs[len(seqs)-1]
+
+	// Older rows: any persisted seq below the page (the evicted region is
+	// everything under memFloor; pruning only removes the oldest rows, so a
+	// simple count is enough).
+	hasOlder := false
+	olderThan := firstSeq
+	if memFloor >= 0 && memFloor < olderThan {
+		olderThan = memFloor
+	}
+	if olderThan > 0 {
+		if n, cerr := repo.CountMessagesBefore(sessionKey, olderThan); cerr == nil && n > 0 {
+			hasOlder = true
+		}
+	}
+
+	// Newer rows within the out-of-memory region: the evicted region is
+	// contiguous between the pruning floor and memFloor, so a simple bound
+	// check suffices.
+	hasNewer := lastSeq+1 < memFloor
+
+	return &EvictedMessagesPage{
+		Messages:     msgs,
+		Seqs:         seqs,
+		FirstSeq:     firstSeq,
+		LastSeq:      lastSeq,
+		HasOlder:     hasOlder,
+		HasNewer:     hasNewer,
+		EvictedCount: evicted,
+		TotalCount:   total,
+	}
 }
