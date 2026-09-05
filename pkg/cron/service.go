@@ -41,6 +41,7 @@ type CronPayload struct {
 	To         string       `json:"to,omitempty"`
 	Spawn      *SpawnConfig `json:"spawn,omitempty"`
 	SessionKey string       `json:"session_key,omitempty"` // Originating session key (for session-scoped jobs)
+	AgentID    string       `json:"agent_id,omitempty"`    // Creating agent (issue #234): tools run during job execution inherit this identity.
 }
 
 type CronJobState struct {
