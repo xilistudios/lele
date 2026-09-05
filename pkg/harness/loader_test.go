@@ -9,9 +9,13 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// boolPtr returns a pointer to b: fixtures for tri-state flags.
+func boolPtr(b bool) *bool { return &b }
 
 // writeFile creates a fixture file inside t.TempDir(), returning its path.
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -115,6 +119,34 @@ func TestLoadMarkdownFile(t *testing.T) {
 			content: "---\nallow_shell: maybe\n---\nbody",
 			wantErr: true,
 		},
+		{
+			name:    "allow_absolute_files true is tri-state set",
+			file:    "absyes.md",
+			content: "---\nallow_absolute_files: true\n---\nbody",
+			wantCmd: &Command{
+				Name:               "absyes",
+				Template:           "body",
+				AllowAbsoluteFiles: boolPtr(true),
+				Source:             SourceGlobal,
+			},
+		},
+		{
+			name:    "allow_absolute_files false is tri-state set, not unset",
+			file:    "absno.md",
+			content: "---\nallow_absolute_files: false\n---\nbody",
+			wantCmd: &Command{
+				Name:               "absno",
+				Template:           "body",
+				AllowAbsoluteFiles: boolPtr(false),
+				Source:             SourceGlobal,
+			},
+		},
+		{
+			name:    "invalid allow_absolute_files",
+			file:    "absbad.md",
+			content: "---\nallow_absolute_files: perhaps\n---\nbody",
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -134,7 +166,9 @@ func TestLoadMarkdownFile(t *testing.T) {
 				t.Fatalf("LoadMarkdownFile: %v", err)
 			}
 			tc.wantCmd.Path = path
-			if *got != *tc.wantCmd {
+			// DeepEqual, not struct comparison: AllowAbsoluteFiles is a
+			// *bool, and == would compare pointers.
+			if !reflect.DeepEqual(got, tc.wantCmd) {
 				t.Errorf("got %+v, want %+v", *got, *tc.wantCmd)
 			}
 		})

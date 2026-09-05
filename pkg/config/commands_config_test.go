@@ -23,7 +23,7 @@ const commandsJSON = `{
   "commands": {
     "review": {"description": "d", "agent": "coder", "model": "m", "template": "t"}
   },
-  "harness": {"allow_shell": true}
+  "harness": {"allow_shell": true, "allow_absolute_files": true}
 }`
 
 func writeCommandsConfig(t *testing.T) string {
@@ -39,6 +39,9 @@ func assertCommandFields(t *testing.T, cmds map[string]CommandDefinition, h Harn
 	t.Helper()
 	if h.AllowShell != true {
 		t.Error("harness.allow_shell = false, want true")
+	}
+	if h.AllowAbsoluteFiles != true {
+		t.Error("harness.allow_absolute_files = false, want true")
 	}
 	def, ok := cmds["review"]
 	if !ok {
@@ -114,6 +117,66 @@ func TestEditableDocumentFromConfigRoundTrip(t *testing.T) {
 	}
 	if !src.Harness.AllowShell || !back.Harness.AllowShell {
 		t.Error("harness flag lost on the round trip")
+	}
+	if !src.Harness.AllowAbsoluteFiles || !back.Harness.AllowAbsoluteFiles {
+		t.Error("harness.allow_absolute_files lost on the round trip")
+	}
+}
+
+// TestHarnessFlagsRoundTripIndependently guards the toSerializable gate: the
+// harness section must be emitted when EITHER flag is set, so a config with
+// only allow_absolute_files:true survives save/reload (gating on AllowShell
+// alone dropped it silently).
+func TestHarnessFlagsRoundTripIndependently(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name    string
+		shell   *bool
+		absFile *bool
+	}{
+		{"both off", nil, nil},
+		{"shell only", &yes, nil},
+		{"abs only", nil, &yes},
+		{"both on", &yes, &yes},
+		{"shell on abs off", &yes, &no},
+		{"shell off abs on", &no, &yes},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			shell, abs := false, false
+			if tc.shell != nil {
+				shell = *tc.shell
+			}
+			if tc.absFile != nil {
+				abs = *tc.absFile
+			}
+			src := &Config{}
+			src.Harness = HarnessConfig{AllowShell: shell, AllowAbsoluteFiles: abs}
+			doc := editableDocumentFromConfig(src)
+			back, err := doc.ToConfig()
+			if err != nil {
+				t.Fatalf("ToConfig: %v", err)
+			}
+			if back.Harness.AllowShell != shell {
+				t.Errorf("ToConfig AllowShell = %v, want %v", back.Harness.AllowShell, shell)
+			}
+			if back.Harness.AllowAbsoluteFiles != abs {
+				t.Errorf("ToConfig AllowAbsoluteFiles = %v, want %v", back.Harness.AllowAbsoluteFiles, abs)
+			}
+
+			// Full save/reload cycle.
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := SaveEditableDocument(path, doc); err != nil {
+				t.Fatalf("SaveEditableDocument: %v", err)
+			}
+			reloaded, err := LoadConfig(path)
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if reloaded.Harness.AllowShell != shell || reloaded.Harness.AllowAbsoluteFiles != abs {
+				t.Errorf("after save+reload: %+v, want shell=%v abs=%v", reloaded.Harness, shell, abs)
+			}
+		})
 	}
 }
 

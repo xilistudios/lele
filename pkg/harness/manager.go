@@ -30,6 +30,10 @@ type ManagerConfig struct {
 	Dir               string                // directory level: <Dir> (already includes .lele/commands; "" disables)
 	Commands          map[string]CommandDef // config.json level (lowest precedence)
 	AllowShellDefault bool                  // default AllowShell for expanded commands
+	// AllowAbsoluteFilesDefault is the harness-wide default for @/abs/path
+	// inlining; individual commands can override it with the tri-state
+	// allow_absolute_files frontmatter flag (unlike AllowShell's OR merge).
+	AllowAbsoluteFilesDefault bool
 }
 
 // Manager owns the command Registry and keeps it in sync with the four
@@ -40,11 +44,12 @@ type ManagerConfig struct {
 // The Registry instance is stable across reloads (contents are swapped with
 // Replace), so callers may hold the pointer returned by Registry() forever.
 type Manager struct {
-	mu             sync.RWMutex
-	cfg            ManagerConfig
-	reg            *Registry
-	lastLoad       time.Time
-	shellOverrides map[string]bool // per-command AllowShell overrides (tests, runtime flags)
+	mu              sync.RWMutex
+	cfg             ManagerConfig
+	reg             *Registry
+	lastLoad        time.Time
+	shellOverrides  map[string]bool // per-command AllowShell overrides (tests, runtime flags)
+	absFileOverride map[string]bool // per-command AllowAbsoluteFiles pins
 }
 
 // NewManager builds a Manager and performs the initial load. Loading errors
@@ -52,9 +57,10 @@ type Manager struct {
 // not take the agent down.
 func NewManager(mc ManagerConfig) *Manager {
 	m := &Manager{
-		cfg:            mc,
-		reg:            NewRegistry(),
-		shellOverrides: make(map[string]bool),
+		cfg:             mc,
+		reg:             NewRegistry(),
+		shellOverrides:  make(map[string]bool),
+		absFileOverride: make(map[string]bool),
 	}
 	if err := m.Reload(); err != nil {
 		slog.Warn("harness: initial command load had errors", "error", err)
@@ -185,6 +191,51 @@ func (m *Manager) ClearAllowShell(name string) {
 	delete(m.shellOverrides, stem)
 }
 
+// AllowAbsoluteFiles reports whether @/abs/path inlining is permitted for cmd.
+// Resolution order: runtime pin > command tri-state > harness default. The
+// command flag is a *bool, so an explicit false genuinely vetoes a global
+// true — deliberately different from AllowShell's OR merge, which cannot
+// express opt-out (documented wart).
+func (m *Manager) AllowAbsoluteFiles(cmd *Command) bool {
+	if cmd != nil {
+		m.mu.RLock()
+		pin, ok := m.absFileOverride[cmd.Name]
+		m.mu.RUnlock()
+		if ok {
+			return pin
+		}
+		if cmd.AllowAbsoluteFiles != nil {
+			return *cmd.AllowAbsoluteFiles
+		}
+	}
+	return m.cfg.AllowAbsoluteFilesDefault
+}
+
+// SetAllowAbsoluteFiles pins the absolute-file permission for one command
+// name, overriding both the command tri-state and the harness default.
+// Presence in the map is the signal, so pinning false really means false.
+// Intended for tests and explicit runtime overrides.
+func (m *Manager) SetAllowAbsoluteFiles(name string, allow bool) {
+	stem := strings.ToLower(strings.TrimSpace(name))
+	if stem == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.absFileOverride == nil {
+		m.absFileOverride = make(map[string]bool)
+	}
+	m.absFileOverride[stem] = allow
+}
+
+// ClearAllowAbsoluteFiles removes a per-command absolute-file pin.
+func (m *Manager) ClearAllowAbsoluteFiles(name string) {
+	stem := strings.ToLower(strings.TrimSpace(name))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.absFileOverride, stem)
+}
+
 // Config returns a copy of the manager configuration (for diagnostics).
 func (m *Manager) Config() ManagerConfig {
 	m.mu.RLock()
@@ -196,6 +247,6 @@ func (m *Manager) Config() ManagerConfig {
 
 // String renders a one-line summary, handy in logs.
 func (c ManagerConfig) String() string {
-	return fmt.Sprintf("harness.ManagerConfig{lele=%q workspace=%q dir=%q defs=%d allow_shell=%v}",
-		c.LeleDir, c.Workspace, c.Dir, len(c.Commands), c.AllowShellDefault)
+	return fmt.Sprintf("harness.ManagerConfig{lele=%q workspace=%q dir=%q defs=%d allow_shell=%v allow_abs_files=%v}",
+		c.LeleDir, c.Workspace, c.Dir, len(c.Commands), c.AllowShellDefault, c.AllowAbsoluteFilesDefault)
 }

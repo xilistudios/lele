@@ -285,3 +285,46 @@ func registeredNames(m *Manager) []string {
 	}
 	return out
 }
+
+func TestManagerAllowAbsoluteFiles(t *testing.T) {
+	yes, no := true, false
+
+	// nil tri-state inherits the default, in both directions.
+	mOff := NewManager(ManagerConfig{AllowAbsoluteFilesDefault: false})
+	if mOff.AllowAbsoluteFiles(&Command{Name: "x"}) {
+		t.Error("nil flag with default false must deny")
+	}
+	if mOff.AllowAbsoluteFiles(nil) {
+		t.Error("nil command with default false must deny")
+	}
+	mOn := NewManager(ManagerConfig{AllowAbsoluteFilesDefault: true})
+	if !mOn.AllowAbsoluteFiles(&Command{Name: "x"}) {
+		t.Error("nil flag with default true must allow")
+	}
+
+	// Explicit tri-state overrides the default in BOTH directions (this is
+	// the deliberate difference from AllowShell's OR merge).
+	if !mOff.AllowAbsoluteFiles(&Command{Name: "y", AllowAbsoluteFiles: &yes}) {
+		t.Error("explicit true must beat default false")
+	}
+	if mOn.AllowAbsoluteFiles(&Command{Name: "z", AllowAbsoluteFiles: &no}) {
+		t.Error("explicit false must beat default true")
+	}
+
+	// Runtime pin wins over tri-state and default; clearing restores them.
+	mOn.SetAllowAbsoluteFiles("Z", true)
+	if !mOn.AllowAbsoluteFiles(&Command{Name: "z", AllowAbsoluteFiles: &no}) {
+		t.Error("pin true must beat explicit false")
+	}
+	mOn.SetAllowAbsoluteFiles("z", false)
+	if mOn.AllowAbsoluteFiles(&Command{Name: "z", AllowAbsoluteFiles: &yes}) {
+		t.Error("pin false must beat explicit true")
+	}
+	mOn.ClearAllowAbsoluteFiles("z")
+	if mOn.AllowAbsoluteFiles(&Command{Name: "z", AllowAbsoluteFiles: &no}) {
+		t.Error("after clear, explicit false must win again")
+	}
+	if !mOn.AllowAbsoluteFiles(&Command{Name: "other"}) {
+		t.Error("pins must not leak into other commands")
+	}
+}

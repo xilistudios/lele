@@ -38,6 +38,12 @@ type CommandDef struct {
 	Model       string `json:"model,omitempty"`
 	Template    string `json:"template"`
 	AllowShell  bool   `json:"allow_shell,omitempty"`
+	// AllowAbsoluteFiles is tri-state: nil inherits the harness default,
+	// an explicit pointer overrides it. A pointer (not a plain bool) is
+	// deliberate: the OR-semantics of AllowShell means a command cannot
+	// opt *out* of a global default; absolute-file inlining must not
+	// repeat that mistake.
+	AllowAbsoluteFiles *bool `json:"allow_absolute_files,omitempty"`
 }
 
 // Command is a fully-resolved custom command ready for lookup and expansion.
@@ -48,21 +54,25 @@ type Command struct {
 	Agent       string // agent override for the turn ("" = keep current)
 	Model       string // model alias override for the turn ("" = keep current)
 	AllowShell  bool   // whether !`cmd` placeholders may execute
-	Source      Source
-	Path        string // source file ("" for config-defined commands)
+	// AllowAbsoluteFiles is tri-state (see CommandDef): nil inherits the
+	// harness default, a non-nil pointer overrides it.
+	AllowAbsoluteFiles *bool
+	Source             Source
+	Path               string // source file ("" for config-defined commands)
 }
 
 // ToCommand builds a resolved Command from a config/frontmatter definition.
 // name is the map key or the file stem; source/path tag the origin.
 func (d CommandDef) ToCommand(name string, source Source, path string) *Command {
 	return &Command{
-		Name:        name,
-		Description: d.Description,
-		Template:    d.Template,
-		Agent:       d.Agent,
-		Model:       d.Model,
-		AllowShell:  d.AllowShell,
-		Source:      source,
-		Path:        path,
+		Name:               name,
+		Description:        d.Description,
+		Template:           d.Template,
+		Agent:              d.Agent,
+		Model:              d.Model,
+		AllowShell:         d.AllowShell,
+		AllowAbsoluteFiles: d.AllowAbsoluteFiles,
+		Source:             source,
+		Path:               path,
 	}
 }

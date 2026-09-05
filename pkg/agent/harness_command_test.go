@@ -8,9 +8,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -223,7 +225,66 @@ func TestHarnessManager_RebuildsOnConfigChange(t *testing.T) {
 	}
 }
 
+// TestHarnessManager_ConcurrentRebuild hammers harnessManager() from several
+// goroutines while the config fingerprint changes underneath (simulating a
+// hot-reload racing message processing). Guards the lock ordering that makes
+// the lazy rebuild safe: harnessMu serializes rebuilds, the returned Manager
+// is always fully loaded, and Registry pointers stay stable per Manager. Run
+// under -race in CI.
+func TestHarnessManager_ConcurrentRebuild(t *testing.T) {
+	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"base": {Template: "b"},
+	})
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				mgr := al.harnessManager()
+				if mgr == nil || mgr.Registry() == nil {
+					t.Error("harnessManager returned nil manager/registry")
+					return
+				}
+			}
+		}()
+	}
+	// Mutate the config (fingerprint changes -> rebuilds) while readers run.
+	// Each iteration publishes a NEW map: a real hot-reload replaces the whole
+	// Config, and mutating the shared map in place would be a test-only race.
+	for n := 1; n <= 30; n++ {
+		cfg := al.cfg()
+		next := make(map[string]config.CommandDefinition, len(cfg.Commands)+1)
+		for k, v := range cfg.Commands {
+			next[k] = v
+		}
+		next[fmt.Sprintf("cmd%d", n)] = config.CommandDefinition{Template: "t"}
+		mutated := *cfg
+		mutated.Commands = next
+		al.cfgPtr.Store(&mutated)
+	}
+	close(stop)
+	wg.Wait()
+
+	// Final state must contain every command published so far.
+	names := map[string]bool{}
+	for _, c := range al.HarnessCommands() {
+		names[c.Name] = true
+	}
+	if !names["base"] {
+		t.Error("base command lost after concurrent rebuilds")
+	}
+}
+
 func TestHarnessCommandDefsFromConfig(t *testing.T) {
+
 	if got := harnessCommandDefsFromConfig(nil); got != nil {
 		t.Errorf("empty map should convert to nil, got %v", got)
 	}
@@ -257,7 +318,75 @@ func TestHarnessCommand_AllowShellDefault(t *testing.T) {
 	_ = consumeCommandApplied(t, al.bus)
 }
 
+// TestHarnessCommand_AbsoluteFileOptIn pins the security default: @/abs/path
+// inlining is blocked unless the harness default or the command tri-state
+// enables it, and an explicit tri-state false vetoes a global true.
+func TestHarnessCommand_AbsoluteFileOptIn(t *testing.T) {
+	yes, no := true, false
+	secret := filepath.Join(t.TempDir(), "id_rsa")
+	if err := os.WriteFile(secret, []byte("PRIVATE-KEY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref := "@" + secret
+
+	// Default off: blocked placeholder, content never appears.
+	al, tmpDir := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"peek": {Template: "see " + ref},
+	})
+	mp := newMessageProcessor(al)
+	msg := bus.InboundMessage{Channel: "cli", ChatID: "c", Content: "/peek"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected command to apply")
+	}
+	if !strings.Contains(msg.Content, "[blocked: absolute path]") || strings.Contains(msg.Content, "PRIVATE-KEY") {
+		t.Errorf("default must block absolute refs, content = %q", msg.Content)
+	}
+	_ = consumeCommandApplied(t, al.bus)
+
+	// Harness-wide default on: inlined.
+	cfg := al.cfg()
+	cfg.Harness.AllowAbsoluteFiles = true
+	al.cfgPtr.Store(cfg)
+	msg = bus.InboundMessage{Channel: "cli", ChatID: "c", Content: "/peek"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected command to apply (default on)")
+	}
+	if !strings.Contains(msg.Content, "PRIVATE-KEY") {
+		t.Errorf("default on must inline, content = %q", msg.Content)
+	}
+	_ = consumeCommandApplied(t, al.bus)
+
+	// Tri-state false vetoes the global true (the deliberate difference from
+	// allow_shell's OR merge).
+	cfg = al.cfg()
+	cfg.Commands["peek"] = config.CommandDefinition{Template: "see " + ref, AllowAbsoluteFiles: &no}
+	al.cfgPtr.Store(cfg)
+	msg = bus.InboundMessage{Channel: "cli", ChatID: "c", Content: "/peek"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected command to apply (tri-state false)")
+	}
+	if !strings.Contains(msg.Content, "[blocked: absolute path]") {
+		t.Errorf("explicit false must veto default true, content = %q", msg.Content)
+	}
+	_ = consumeCommandApplied(t, al.bus)
+
+	// And with the global default off, tri-state true opts in.
+	cfg = al.cfg()
+	cfg.Harness.AllowAbsoluteFiles = false
+	cfg.Commands["peek"] = config.CommandDefinition{Template: "see " + ref, AllowAbsoluteFiles: &yes}
+	al.cfgPtr.Store(cfg)
+	msg = bus.InboundMessage{Channel: "cli", ChatID: "c", Content: "/peek"}
+	if !mp.applyHarnessCommand(context.Background(), &msg, tmpDir) {
+		t.Fatal("expected command to apply (tri-state true)")
+	}
+	if !strings.Contains(msg.Content, "PRIVATE-KEY") {
+		t.Errorf("explicit true must opt in despite default off, content = %q", msg.Content)
+	}
+	_ = consumeCommandApplied(t, al.bus)
+}
+
 // TestModelForTurn_PrefersOverride covers the runner-side half of the model
+
 // override: turn override wins, session model otherwise.
 func TestModelForTurn_PrefersOverride(t *testing.T) {
 	al, tmpDir := newHarnessTestLoop(t, nil)

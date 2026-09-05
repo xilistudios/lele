@@ -49,17 +49,18 @@ func (al *AgentLoop) harnessManager() *harness.Manager {
 	}
 	defs := harnessCommandDefsFromConfig(cfg.Commands)
 
-	fp := harnessFingerprint(cfg.Harness.AllowShell, defs, workspace, leleDir, dir)
+	fp := harnessFingerprint(cfg.Harness.AllowShell, cfg.Harness.AllowAbsoluteFiles, defs, workspace, leleDir, dir)
 
 	al.harnessMu.Lock()
 	defer al.harnessMu.Unlock()
 	if al.harnessMgr == nil || al.harnessCfgFP != fp {
 		mgr := harness.NewManager(harness.ManagerConfig{
-			LeleDir:           leleDir,
-			Workspace:         workspace,
-			Dir:               dir,
-			Commands:          defs,
-			AllowShellDefault: cfg.Harness.AllowShell,
+			LeleDir:                   leleDir,
+			Workspace:                 workspace,
+			Dir:                       dir,
+			Commands:                  defs,
+			AllowShellDefault:         cfg.Harness.AllowShell,
+			AllowAbsoluteFilesDefault: cfg.Harness.AllowAbsoluteFiles,
 		})
 		al.harnessMgr = mgr
 		al.harnessCfgFP = fp
@@ -71,17 +72,19 @@ func (al *AgentLoop) harnessManager() *harness.Manager {
 }
 
 // harnessFingerprint builds the change detector for the manager: it covers every
-// config input that requires a rebuild (paths, the shell default and a hash of
-// the declared commands, so an in-place template edit is picked up too).
-// Markdown edits on disk are handled by EnsureFresh instead.
-func harnessFingerprint(allowShell bool, defs map[string]harness.CommandDef, workspace, leleDir, dir string) string {
+// config input that requires a rebuild (paths, the permission defaults and a
+// hash of the declared commands, so an in-place template or flag edit is
+// picked up too). Markdown edits on disk are handled by EnsureFresh instead.
+func harnessFingerprint(allowShell, allowAbs bool, defs map[string]harness.CommandDef, workspace, leleDir, dir string) string {
 	h := fnv.New64a()
 	names := slices.Sorted(maps.Keys(defs))
 	for _, name := range names {
 		d := defs[name]
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\n", name, d.Description, d.Agent, d.Model, d.Template, d.AllowShell)
+		// %v on the *bool hashes nil/true/false distinctly, so flipping the
+		// tri-state absolute-files flag changes the fingerprint.
+		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%v\n", name, d.Description, d.Agent, d.Model, d.Template, d.AllowShell, d.AllowAbsoluteFiles)
 	}
-	return fmt.Sprintf("%t|%x|%s|%s|%s", allowShell, h.Sum64(), workspace, leleDir, dir)
+	return fmt.Sprintf("%t|%t|%x|%s|%s|%s", allowShell, allowAbs, h.Sum64(), workspace, leleDir, dir)
 }
 
 // HarnessCommands returns the currently available custom commands (all four
@@ -114,11 +117,12 @@ func harnessCommandDefsFromConfig(m map[string]config.CommandDefinition) map[str
 	out := make(map[string]harness.CommandDef, len(m))
 	for name, def := range m {
 		out[name] = harness.CommandDef{
-			Description: def.Description,
-			Agent:       def.Agent,
-			Model:       def.Model,
-			Template:    def.Template,
-			AllowShell:  def.AllowShell,
+			Description:        def.Description,
+			Agent:              def.Agent,
+			Model:              def.Model,
+			Template:           def.Template,
+			AllowShell:         def.AllowShell,
+			AllowAbsoluteFiles: def.AllowAbsoluteFiles,
 		}
 	}
 	return out
@@ -165,8 +169,9 @@ func (mp *messageProcessorImpl) applyHarnessCommand(_ context.Context, msg *bus.
 
 	rawArgs := strings.Join(fields[1:], " ")
 	expanded, err := harness.Expand(cmd, rawArgs, harness.ExpandOptions{
-		WorkDir:    workDir,
-		AllowShell: mgr.AllowShell(cmd),
+		WorkDir:            workDir,
+		AllowShell:         mgr.AllowShell(cmd),
+		AllowAbsoluteFiles: mgr.AllowAbsoluteFiles(cmd),
 	})
 	if err != nil {
 		slog.Warn("harness: command expansion failed", "command", name, "error", err)

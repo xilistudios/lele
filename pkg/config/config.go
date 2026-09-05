@@ -179,6 +179,9 @@ type CommandDefinition struct {
 	Model       string `json:"model,omitempty"`
 	Template    string `json:"template"`
 	AllowShell  bool   `json:"allow_shell,omitempty"`
+	// AllowAbsoluteFiles is tri-state (see harness.CommandDef): nil inherits
+	// harness.allow_absolute_files, an explicit value overrides it.
+	AllowAbsoluteFiles *bool `json:"allow_absolute_files,omitempty"`
 }
 
 // HarnessConfig holds global settings for custom slash commands.
@@ -187,6 +190,12 @@ type HarnessConfig struct {
 	// that do not set allow_shell themselves. Off by default: executing shell
 	// snippets found in config/markdown is opt-in.
 	AllowShell bool `json:"allow_shell,omitempty"`
+	// AllowAbsoluteFiles gates @/abs/path file inlining in custom commands.
+	// Off by default: command files can come from untrusted repos (directory
+	// scope), and absolute references would exfiltrate any readable file into
+	// the prompt. Individual commands may override this with the tri-state
+	// allow_absolute_files frontmatter flag.
+	AllowAbsoluteFiles bool `json:"allow_absolute_files,omitempty"`
 }
 
 // TUIConfig holds tunable settings for the TUI rendered through the

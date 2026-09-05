@@ -129,6 +129,14 @@ func parseFrontmatter(block, path string) (CommandDef, error) {
 				return def, fmt.Errorf("harness: invalid allow_shell %q in %s: %w", value, path, err)
 			}
 			def.AllowShell = b
+		case "allow_absolute_files":
+			// Tri-state: an explicit value always wins over the harness
+			// default (in either direction), unlike allow_shell.
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				return def, fmt.Errorf("harness: invalid allow_absolute_files %q in %s: %w", value, path, err)
+			}
+			def.AllowAbsoluteFiles = &b
 		default:
 			// Unknown keys are ignored on purpose: forward compatibility.
 		}

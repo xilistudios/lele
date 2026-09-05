@@ -511,7 +511,10 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	if len(doc.Commands) > 0 {
 		result["commands"] = doc.Commands
 	}
-	if doc.Harness.AllowShell {
+	// Emit the harness section when ANY of its flags is set: gating on
+	// AllowShell alone would silently drop allow_absolute_files:true on
+	// save (ToConfig re-unmarshals from this map).
+	if doc.Harness.AllowShell || doc.Harness.AllowAbsoluteFiles {
 		result["harness"] = doc.Harness
 	}
 

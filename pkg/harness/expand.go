@@ -52,6 +52,11 @@ type ExpandOptions struct {
 	AllowShell     bool
 	MaxShellOutput int
 	MaxFileOutput  int
+	// AllowAbsoluteFiles gates @/abs/path inlining. Off by default:
+	// command files can come from untrusted repos (directory scope), and
+	// an absolute reference would silently exfiltrate any readable file
+	// (ssh keys, /etc/shadow) into the LLM prompt.
+	AllowAbsoluteFiles bool
 }
 
 // Expand renders cmd.Template with the user's raw arguments. Substitution
@@ -170,11 +175,17 @@ func isWordByte(c byte) bool {
 	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-// readFileRef resolves and reads one @path reference. Absolute paths are used
-// as-is only when they exist; relative paths resolve against WorkDir and may
-// not escape it.
+// readFileRef resolves and reads one @path reference. Relative paths resolve
+// against WorkDir and may not escape it. Absolute paths are opt-in: command
+// files can arrive from untrusted repos (directory scope), so reading them
+// without an explicit AllowAbsoluteFiles would exfiltrate any readable file
+// into the LLM prompt. When denied, the path is not even stat'ed, so the
+// placeholder cannot leak whether the file exists.
 func readFileRef(path string, opts ExpandOptions) string {
 	if filepath.IsAbs(path) {
+		if !opts.AllowAbsoluteFiles {
+			return "[blocked: absolute path]"
+		}
 		if _, err := os.Stat(path); err != nil {
 			return "[missing: @" + path + "]"
 		}

@@ -152,7 +152,9 @@ func TestExpandFileRefs(t *testing.T) {
 		{"trailing @ alone", "trailing @ alone"},
 	}
 	for _, tc := range tests {
-		got := mustExpand(t, tpl(tc.tmpl), "", ExpandOptions{WorkDir: dir})
+		// AllowAbsoluteFiles so the "abs" case inlines; the deny-by-default
+		// behavior is covered by TestExpandFileRefEscapeRejected.
+		got := mustExpand(t, tpl(tc.tmpl), "", ExpandOptions{WorkDir: dir, AllowAbsoluteFiles: true})
 		if got != tc.want {
 			t.Errorf("template %q:\n got %q\nwant %q", tc.tmpl, got, tc.want)
 		}
@@ -172,10 +174,25 @@ func TestExpandFileRefEscapeRejected(t *testing.T) {
 	if got != "[outside workspace: @../secret]" {
 		t.Errorf("got %q, want escape placeholder", got)
 	}
-	// absolute paths are allowed when they exist
-	got = mustExpand(t, tpl("@"+filepath.Join(parent, "secret")), "", ExpandOptions{WorkDir: work})
+	// absolute paths are blocked by default: the file must not even be stat'ed,
+	// and its content must never appear in the output.
+	absPath := filepath.Join(parent, "secret")
+	got = mustExpand(t, tpl("@"+absPath), "", ExpandOptions{WorkDir: work})
+	if got != "[blocked: absolute path]" {
+		t.Errorf("abs default got %q, want blocked placeholder", got)
+	}
+	if strings.Contains(got, "TOPSECRET") {
+		t.Errorf("abs default leaked file content: %q", got)
+	}
+	// ...and inlined only when explicitly allowed.
+	got = mustExpand(t, tpl("@"+absPath), "", ExpandOptions{WorkDir: work, AllowAbsoluteFiles: true})
 	if got != "TOPSECRET" {
-		t.Errorf("abs got %q, want content", got)
+		t.Errorf("abs allowed got %q, want content", got)
+	}
+	// Allowed but nonexistent keeps the missing placeholder.
+	got = mustExpand(t, tpl("@/definitely/not/here-42"), "", ExpandOptions{WorkDir: work, AllowAbsoluteFiles: true})
+	if got != "[missing: @/definitely/not/here-42]" {
+		t.Errorf("abs missing got %q, want missing placeholder", got)
 	}
 }
 

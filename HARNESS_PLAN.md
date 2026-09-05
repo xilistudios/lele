@@ -174,3 +174,22 @@ and Usage "/name [args]" for custom.
   emits command.applied; WebUI shows ⚡ card; agent/model switch honored for that turn only
   (session model unchanged afterwards); TUI autocompletes and executes it the same way.
 - No regression: built-in /clear etc. unaffected; unknown /foo still falls through to LLM.
+
+## Security follow-up (post-review, PR #262)
+
+Reviewer finding HIGH: `@/absolute/path` inlining was unrestricted while
+shell (`!`cmd``) is opt-in — a repo-provided command file (directory scope)
+could exfiltrate any readable file (ssh keys, /etc/shadow) into the LLM
+prompt. Fixed by making absolute refs opt-in too:
+
+- `harness.allow_absolute_files` (config.json, default false) — harness-wide.
+- `allow_absolute_files: true|false` frontmatter — **tri-state** (`*bool`):
+  explicit false vetoes a global true (deliberately different from
+  allow_shell's OR merge, which cannot express opt-out).
+- Precedence: runtime pin (`Manager.SetAllowAbsoluteFiles`) > command
+  tri-state > harness default. Denied refs return `[blocked: absolute path]`
+  without stat'ing (no existence leak).
+- Relative refs unchanged: confined to WorkDir, `..` escapes blocked.
+
+Known wart kept as-is (documented in PR body): allow_shell is OR-based; a
+per-command `allow_shell: false` does not veto `harness.allow_shell: true`.
