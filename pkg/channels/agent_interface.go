@@ -7,6 +7,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/session"
 )
 
 // AgentSessionManager define la interfaz necesaria para gestionar agentes por sesión
@@ -31,13 +32,15 @@ type AgentProvidable interface {
 	// message slice on every render — copies become expensive (tens of MB) for
 	// long conversations.
 	GetHistoryView(sessionKey string) []providers.Message
-	// LoadEvictedMessages re-inserts evicted (excluded) messages from SQLite
-	// back into memory, restoring full display history. Idempotent; no-op when
-	// nothing was evicted. Returns the number of messages loaded.
-	LoadEvictedMessages(sessionKey string) int
 	// GetEvictedMessageCount returns the number of messages that were evicted
 	// from memory (excluded + persisted in SQLite but not in the in-memory slice).
 	GetEvictedMessageCount(sessionKey string) int
+	// LoadEvictedMessagesPage returns a page of the session's persisted
+	// messages that are NOT resident in memory, read on demand from SQLite.
+	// Read-only: never loads the session into memory nor touches context.
+	// before/after are exclusive seq cursors (-1/0 = unset). Returns nil when
+	// there is nothing out of memory to serve.
+	LoadEvictedMessagesPage(sessionKey string, before, after, limit int) *session.EvictedMessagesPage
 	// GetTotalMessageCount returns the total persisted message count for a
 	// session: in-memory slice length plus evicted messages.
 	GetTotalMessageCount(sessionKey string) int

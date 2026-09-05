@@ -99,12 +99,6 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		limit = 50
 	}
 
-	// Materialize evicted (out-of-context) messages so the full history is
-	// available for pagination. Idempotent no-op when nothing was evicted.
-	if n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
-		n.agentLoop.LoadEvictedMessages(sessionKey)
-	}
-
 	history := n.agentLoop.GetSessionHistory(sessionKey)
 
 	processing := false
@@ -114,23 +108,7 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 
 	// Build a map of tool_call_id -> tool name from assistant messages
 	// This is used to populate ToolName for tool result messages
-	toolCallIDToName := make(map[string]string)
-	for _, msg := range history {
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" {
-					// Use tc.Name if available, otherwise try tc.Function.Name
-					toolName := tc.Name
-					if toolName == "" && tc.Function != nil {
-						toolName = tc.Function.Name
-					}
-					if toolName != "" {
-						toolCallIDToName[tc.ID] = toolName
-					}
-				}
-			}
-		}
-	}
+	builder := newChatHistoryBuilder(history)
 
 	// Build a list of valid messages (user, assistant, tool) with their IDs
 	type indexedMessage struct {
@@ -160,18 +138,28 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		// Generate a stable ID from message content hash (position-independent).
 		// This ensures cursor-based pagination survives history mutations (pruning,
 		// new messages appended, etc.) because the ID only depends on the message itself.
-		hasher := sha256.New()
-		hasher.Write([]byte(msg.Role))
-		hasher.Write([]byte(msg.Content))
-		if msg.ToolCallID != "" {
-			hasher.Write([]byte(msg.ToolCallID))
-		}
-		for _, tc := range msg.ToolCalls {
-			hasher.Write([]byte(tc.ID))
-			hasher.Write([]byte(tc.Name))
-		}
-		msgID := fmt.Sprintf("%s:%x", sessionKey, hasher.Sum(nil)[:8])
+		msgID := residentMessageID(sessionKey, msg)
 		validMessages = append(validMessages, indexedMessage{id: msgID, msg: msg})
+	}
+
+	// Evicted history is served on demand from SQLite instead of being
+	// materialized into memory: a client scrolling to the top of the resident
+	// window pages into messages that stay out of the agent's context, so
+	// reading them back never inflates RAM nor re-injects them into prompts.
+	// Cursor forms:
+	//   - "evicted:<seq>": the client is already in the evicted region; serve
+	//     the page immediately older than that seq.
+	//   - a resident ID matching the FIRST resident message (or no resident
+	//     messages at all): the client just exhausted the resident window;
+	//     serve the newest evicted page.
+	if strings.HasPrefix(beforeID, evictedIDPrefix) {
+		seq, err := strconv.Atoi(strings.TrimPrefix(beforeID, evictedIDPrefix))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid evicted cursor", "cursor_invalid")
+			return
+		}
+		n.writeEvictedHistory(w, sessionKey, seq, limit, processing, builder)
+		return
 	}
 
 	// Find the starting point based on before_id cursor
@@ -195,54 +183,185 @@ func (n *NativeChannel) handleChatHistory(w http.ResponseWriter, r *http.Request
 		resultStartIdx = 0
 	}
 
+	// Resident window exhausted (cursor was the oldest visible resident):
+	// continue paging in the evicted region. Only when a cursor was supplied:
+	// the very first request (no cursor) must return the newest resident page.
+	// An unmatched cursor (startIdx unchanged) means the referenced message
+	// left the resident window since the last page — it was evicted or pruned.
+	// Falling through to the evicted region keeps history reachable; in the
+	// rare evicted case the message may reappear once under its seq-based ID.
+	if beforeID != "" && resultStartIdx == 0 && len(validMessages) > 0 && (startIdx == 0 || startIdx == len(validMessages)) {
+		if n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
+			n.writeEvictedHistory(w, sessionKey, -1, limit, processing, builder)
+			return
+		}
+	}
+	// No resident messages at all (entire transcript evicted and the cold
+	// tail is empty): the first page must come from the evicted region even
+	// without a cursor, or the session would look permanently empty.
+	if len(validMessages) == 0 && n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
+		n.writeEvictedHistory(w, sessionKey, beforeSeqFromCursor(beforeID), limit, processing, builder)
+		return
+	}
+
 	// Build response messages
-	messages := make([]ChatHistoryMessage, 0)
+	messages := make([]ChatHistoryMessage, 0, endIdx-resultStartIdx)
 	for i := resultStartIdx; i < endIdx; i++ {
 		vm := validMessages[i]
-		historyMsg := ChatHistoryMessage{
-			ID:                 vm.id,
-			Role:               vm.msg.Role,
-			Content:            vm.msg.Content,
-			ReasoningContent:   vm.msg.ReasoningContent,
-			ToolCallID:         vm.msg.ToolCallID,
-			ExcludeFromContext: vm.msg.ExcludeFromContext,
-			Attachments:        vm.msg.Attachments,
-		}
-		// For tool messages, look up the tool name from the assistant message that initiated the call
-		if vm.msg.Role == "tool" && vm.msg.ToolCallID != "" {
-			if toolName, ok := toolCallIDToName[vm.msg.ToolCallID]; ok {
-				historyMsg.ToolName = toolName
-			}
-		}
-		if len(vm.msg.ToolCalls) > 0 {
-			historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(vm.msg.ToolCalls))
-			for _, tc := range vm.msg.ToolCalls {
-				args := tc.Arguments
-				if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
-					var parsed map[string]interface{}
-					if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
-						args = parsed
-					}
-				}
-				tcName := tc.Name
-				if tcName == "" && tc.Function != nil {
-					tcName = tc.Function.Name
-				}
-				historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
-					ID:               tc.ID,
-					Type:             tc.Type,
-					Name:             tcName,
-					Arguments:        args,
-					ThoughtSignature: tc.ThoughtSignature,
-				})
-			}
-		}
-		messages = append(messages, historyMsg)
+		messages = append(messages, builder.message(vm.id, vm.msg))
 	}
 
 	// Check if there are more messages available
 	hasMore := resultStartIdx > 0
+	// Older messages still exist in the (unmaterialized) evicted region.
+	if !hasMore && n.agentLoop != nil && n.agentLoop.GetEvictedMessageCount(sessionKey) > 0 {
+		hasMore = true
+	}
 
+	writeJSON(w, http.StatusOK, ChatHistoryResponse{
+		SessionKey: sessionKey,
+		Messages:   messages,
+		Processing: processing,
+		HasMore:    hasMore,
+		Groups:     n.sessionGroupSnapshots(sessionKey),
+	})
+}
+
+// evictedIDPrefix marks a chat history message ID as belonging to a message
+// persisted in SQLite but NOT resident in memory. The suffix is the message's
+// SQLite seq, which doubles as the pagination cursor for the evicted region.
+const evictedIDPrefix = "evicted:"
+
+// beforeSeqFromCursor extracts the seq from an "evicted:<seq>" cursor,
+// returning -1 (meaning "no cursor: newest evicted page") for anything else.
+func beforeSeqFromCursor(cursor string) int {
+	if strings.HasPrefix(cursor, evictedIDPrefix) {
+		if seq, err := strconv.Atoi(strings.TrimPrefix(cursor, evictedIDPrefix)); err == nil {
+			return seq
+		}
+	}
+	return -1
+}
+
+// residentMessageID builds a stable, position-independent ID for an
+// in-memory message.
+func residentMessageID(sessionKey string, msg providers.Message) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(msg.Role))
+	hasher.Write([]byte(msg.Content))
+	if msg.ToolCallID != "" {
+		hasher.Write([]byte(msg.ToolCallID))
+	}
+	for _, tc := range msg.ToolCalls {
+		hasher.Write([]byte(tc.ID))
+		hasher.Write([]byte(tc.Name))
+	}
+	return fmt.Sprintf("%s:%x", sessionKey, hasher.Sum(nil)[:8])
+}
+
+// chatHistoryBuilder converts providers.Message values into the wire format,
+// resolving tool_call_id -> tool name from the assistant messages that
+// initiated them.
+type chatHistoryBuilder struct {
+	toolCallIDToName map[string]string
+}
+
+func newChatHistoryBuilder(history []providers.Message) *chatHistoryBuilder {
+	b := &chatHistoryBuilder{toolCallIDToName: make(map[string]string)}
+	for _, msg := range history {
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID == "" {
+					continue
+				}
+				toolName := tc.Name
+				if toolName == "" && tc.Function != nil {
+					toolName = tc.Function.Name
+				}
+				if toolName != "" {
+					b.toolCallIDToName[tc.ID] = toolName
+				}
+			}
+		}
+	}
+	return b
+}
+
+func (b *chatHistoryBuilder) message(id string, msg providers.Message) ChatHistoryMessage {
+	historyMsg := ChatHistoryMessage{
+		ID:                 id,
+		Role:               msg.Role,
+		Content:            msg.Content,
+		ReasoningContent:   msg.ReasoningContent,
+		ToolCallID:         msg.ToolCallID,
+		ExcludeFromContext: msg.ExcludeFromContext,
+		Attachments:        msg.Attachments,
+	}
+	// For tool messages, look up the tool name from the assistant message that initiated the call
+	if msg.Role == "tool" && msg.ToolCallID != "" {
+		if toolName, ok := b.toolCallIDToName[msg.ToolCallID]; ok {
+			historyMsg.ToolName = toolName
+		}
+	}
+	if len(msg.ToolCalls) > 0 {
+		historyMsg.ToolCalls = make([]HistoryToolCall, 0, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
+			args := tc.Arguments
+			if len(args) == 0 && tc.Function != nil && tc.Function.Arguments != "" {
+				var parsed map[string]interface{}
+				if json.Unmarshal([]byte(tc.Function.Arguments), &parsed) == nil {
+					args = parsed
+				}
+			}
+			tcName := tc.Name
+			if tcName == "" && tc.Function != nil {
+				tcName = tc.Function.Name
+			}
+			historyMsg.ToolCalls = append(historyMsg.ToolCalls, HistoryToolCall{
+				ID:               tc.ID,
+				Type:             tc.Type,
+				Name:             tcName,
+				Arguments:        args,
+				ThoughtSignature: tc.ThoughtSignature,
+			})
+		}
+	}
+	return historyMsg
+}
+
+// writeEvictedHistory serves one page of the session's non-resident messages
+// straight from SQLite. beforeSeq selects the page (newest evicted page when
+// < 0). Messages are never added to the session's in-memory slice, so this
+// keeps eviction semantics intact while making the full transcript visible.
+func (n *NativeChannel) writeEvictedHistory(w http.ResponseWriter, sessionKey string, beforeSeq, limit int, processing bool, builder *chatHistoryBuilder) {
+	page := n.agentLoop.LoadEvictedMessagesPage(sessionKey, beforeSeq, 0, limit)
+	messages := make([]ChatHistoryMessage, 0)
+	hasMore := false
+	if page != nil {
+		// Tool-call names usually live inside the same page (exclusion never
+		// splits tool_use/tool_result groups); fall back to the resident
+		// builder for groups a page boundary split.
+		pageBuilder := newChatHistoryBuilder(page.Messages)
+		for id, name := range builder.toolCallIDToName {
+			if _, ok := pageBuilder.toolCallIDToName[id]; !ok {
+				pageBuilder.toolCallIDToName[id] = name
+			}
+		}
+		for i := range page.Messages {
+			msg := page.Messages[i]
+			if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "tool" {
+				continue
+			}
+			if msg.Role == "user" && msg.Content == "" && len(msg.ContentParts) > 0 {
+				continue
+			}
+			// IDs carry the persisted seq (not a slice offset): the evicted
+			// region can contain gaps after PruneExcluded, and the seq is the
+			// cursor the next page request needs.
+			messages = append(messages, pageBuilder.message(evictedIDPrefix+strconv.Itoa(page.Seqs[i]), msg))
+		}
+		hasMore = page.HasOlder
+	}
 	writeJSON(w, http.StatusOK, ChatHistoryResponse{
 		SessionKey: sessionKey,
 		Messages:   messages,
