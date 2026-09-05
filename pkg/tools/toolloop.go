@@ -333,13 +333,20 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 
 	// Attribute tool executions inside this loop to the owning session so
 	// nested spawns/background processes can be cancelled with it (#230).
-	// When the config does not name an owner explicitly, inherit the agent
-	// tool context already carried by ctx (a synchronous subagent tool runs
-	// inside its caller's context, so the caller owns whatever it spawns).
-	if config.OwnerSessionKey == "" {
+	// When the config does not name an owner explicitly at all, inherit the
+	// agent tool context already carried by ctx (a synchronous subagent tool
+	// runs inside its caller's context, so the caller owns whatever it spawns).
+	// A partially named owner is kept as-is: it is the caller's intent.
+	if config.OwnerAgentID == "" && config.OwnerSessionKey == "" {
 		config.OwnerAgentID, config.OwnerSessionKey = AgentToolContextFromCtx(ctx)
 	}
-	if config.OwnerSessionKey != "" {
+	// Issue #234: standalone tool loops (subagent tool, cron, cron spawn) must
+	// carry their owning agent identity in the context so identity-scoped tools
+	// (secret lookup, spawn attribution) work. The main agent loop already gets
+	// this via the agent tool executor; here we cover loop-owned executions.
+	// The owner may be known by agent id alone (cron jobs without a session key
+	// yet), so either field being set is enough to inject.
+	if config.OwnerAgentID != "" || config.OwnerSessionKey != "" {
 		ctx = WithAgentToolContext(ctx, config.OwnerAgentID, config.OwnerSessionKey)
 	}
 
