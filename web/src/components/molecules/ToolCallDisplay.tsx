@@ -116,6 +116,11 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
     color: 'text-state-success',
   },
+  // Custom slash command applied by the backend (pkg/harness) — bolt.
+  command: {
+    icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+    color: 'text-brand-amarillo',
+  },
 }
 
 const GENERIC_ICON =
@@ -164,6 +169,7 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     wait_for_subagent: t('toolCalls.waitSubagent'),
     list_active_subagents: t('toolCalls.listSubagents'),
     send_file: t('toolCalls.sendFile'),
+    command: t('toolCalls.commandApplied'),
   }
 
   const key = toolName.toLowerCase()
@@ -258,6 +264,59 @@ function parseArgsSummary(toolName?: string, args?: string): string {
   return firstLine
 }
 
+type CommandArgs = {
+  command: string
+  args: string
+  agent: string
+  model: string
+  source: string
+  description: string
+}
+
+/**
+ * Parse the `arguments` object written by the command.applied handler
+ * (hooks/event-handlers/command.ts) out of the "toolName {json}" toolArgs
+ * string. Returns null for anything that is not a well-formed command payload,
+ * so the caller can fall back to the generic rendering.
+ */
+export function parseCommandArgs(args?: string): CommandArgs | null {
+  if (!args) return null
+
+  const jsonStart = args.indexOf('{')
+  if (jsonStart === -1) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(args.slice(jsonStart))
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+
+  const raw = parsed as Record<string, unknown>
+  const command = typeof raw.command === 'string' ? raw.command : ''
+  if (!command) return null
+
+  const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+  return {
+    command,
+    args: text(raw.args),
+    agent: text(raw.agent),
+    model: text(raw.model),
+    source: text(raw.source),
+    description: text(raw.description),
+  }
+}
+
+/** Small pill used for the agent/model/source badges on the command card. */
+function ToolBadge({ text }: { text: string }) {
+  return (
+    <span className="inline-flex flex-shrink-0 items-center rounded-md border border-border bg-background-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary">
+      {text}
+    </span>
+  )
+}
+
 type Props = {
   toolName?: string
   toolArgs?: string
@@ -284,6 +343,61 @@ export function ToolCallDisplay({
   const label = getToolLabel(toolName, t)
   const argsSummary = parseArgsSummary(toolName, toolArgs)
   const isFileOp = toolName ? FILE_OPS.has(toolName.toLowerCase()) : false
+
+  // Custom slash command (backend pkg/harness): "/name args" up front plus small
+  // badges for the per-turn agent/model overrides. Rendered as a static card —
+  // the command already expanded the prompt, so there is nothing to expand and
+  // no result payload.
+  const commandArgs = toolName?.toLowerCase() === 'command' ? parseCommandArgs(toolArgs) : null
+  if (commandArgs) {
+    const summary = commandArgs.args
+      ? `${commandArgs.command} ${commandArgs.args}`
+      : commandArgs.command
+    return (
+      <div className="group" data-testid="command-applied-card">
+        <div className="rounded-lg border border-border bg-background-secondary/50 overflow-hidden">
+          <div className="flex w-full items-center gap-2 px-3 py-1.5 text-left">
+            {/* Tool icon */}
+            <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                aria-hidden="true"
+              >
+                {iconConfig.icon
+                  .split(' M')
+                  .map((path, i) =>
+                    i === 0 ? (
+                      <path key={path} d={path} />
+                    ) : (
+                      <path key={`M${path}`} d={`M${path}`} />
+                    ),
+                  )}
+              </svg>
+            </div>
+
+            <span className="text-xs text-text-secondary flex-shrink-0">{label}</span>
+
+            {/* "/name args" — the command itself is the interesting part */}
+            <span
+              className="min-w-0 truncate font-mono text-xs font-semibold text-text-primary"
+              title={commandArgs.description || summary}
+            >
+              {summary}
+            </span>
+
+            {/* Per-turn overrides (only when set) */}
+            {commandArgs.agent ? <ToolBadge text={commandArgs.agent} /> : null}
+            {commandArgs.model ? <ToolBadge text={commandArgs.model} /> : null}
+            {commandArgs.source ? <ToolBadge text={commandArgs.source} /> : null}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // For file ops: show path only, no expansion
   if (isFileOp) {

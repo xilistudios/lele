@@ -684,6 +684,7 @@
     "waitSubagent": "Aguardando subagente",
     "listSubagents": "Subagentes ativos",
     "sendFile": "Enviando arquivo",
+    "commandApplied": "Comando aplicado",
     "genericAction": "Ação"
   },
   "sidebar": {
