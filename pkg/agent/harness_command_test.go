@@ -439,3 +439,41 @@ func TestHarnessManager_RebuildsOnInPlaceTemplateEdit(t *testing.T) {
 		t.Errorf("after in-place edit commands = %+v, want template v2", got)
 	}
 }
+
+// TestAgentProvidable_ExposesHarnessCommands is the structural guard for the
+// wiring gap this pins down: channels.NewManager receives
+// AgentLoop.GetProvidable() — the agentProvidableImpl wrapper — NOT the loop,
+// and it discovers custom commands through an optional interface assertion
+// (channels.customCommandProvider). If the wrapper ever stops exposing
+// HarnessCommands, the assertion fails silently and the WebUI palette shows
+// built-ins only, while the TUI (which holds *AgentLoop) keeps working. That
+// asymmetry is exactly what a test must catch, so it is asserted here against
+// the same interface shape channels/rest_commands.go declares.
+func TestAgentProvidable_ExposesHarnessCommands(t *testing.T) {
+	// Same shape as channels.customCommandProvider (pkg/channels cannot import
+	// pkg/agent, so the declaration is duplicated by design).
+	type harnessProvider interface {
+		HarnessCommands() []*harness.Command
+	}
+
+	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"review": {Description: "Review code", Template: "check $ARGUMENTS"},
+	})
+
+	provider, ok := interface{}(al.GetProvidable()).(harnessProvider)
+	if !ok {
+		t.Fatal("AgentLoop.GetProvidable() does not expose HarnessCommands(): " +
+			"channels.customCommandProvider would never match in production")
+	}
+
+	got := provider.HarnessCommands()
+	want := al.HarnessCommands()
+	if len(got) != len(want) {
+		t.Fatalf("providable returned %d commands, loop returned %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("command %d differs: providable=%+v loop=%+v", i, got[i], want[i])
+		}
+	}
+}

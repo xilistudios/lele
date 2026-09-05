@@ -91,6 +91,19 @@ func (al *AgentLoop) HarnessCommands() []*harness.Command {
 	return al.harnessManager().Registry().All()
 }
 
+// HarnessCommands delegates to the owning loop.
+//
+// The channels package receives this object (AgentLoop.GetProvidable), not the
+// loop itself, and it discovers custom commands through an OPTIONAL interface
+// assertion (channels.customCommandProvider) rather than a method added to
+// AgentProvidable — adding one there would break every channel fake and mock.
+// Without this delegation the assertion would silently fail in the real binary
+// and the WebUI palette would never show harness commands, even though the TUI
+// (which holds *AgentLoop directly) does.
+func (ap *agentProvidableImpl) HarnessCommands() []*harness.Command {
+	return ap.al.HarnessCommands()
+}
+
 // harnessCommandDefsFromConfig converts the config.json command map into the
 // harness shape. pkg/config does not import pkg/harness (dependency direction),
 // so the mapping lives here.

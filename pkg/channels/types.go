@@ -153,6 +153,26 @@ type WSGroupToolPayload struct {
 	Result     string `json:"result,omitempty"`
 }
 
+// WSCommandAppliedPayload reports that the backend expanded a user-defined
+// (harness) slash command into the prompt for this turn. Emitted from the
+// "command.applied" outbound event (pkg/agent publishes it after expansion).
+//
+// Command carries the name WITHOUT the leading slash (that is what the agent
+// publishes in bus.OutboundMessage.Metadata["command"]); UIs render "/"+command.
+// Agent/Model are the per-turn overrides ("" when the command defines none) and
+// Source is the discovery level the definition came from.
+//
+// Mirrored on the client side as web/src/lib/types.ts WSCommandAppliedPayload.
+type WSCommandAppliedPayload struct {
+	SessionKey  string `json:"session_key"`
+	Command     string `json:"command"`
+	Description string `json:"description,omitempty"`
+	Args        string `json:"args,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Source      string `json:"source,omitempty"`
+}
+
 type WSErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

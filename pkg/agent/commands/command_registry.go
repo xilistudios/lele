@@ -28,6 +28,12 @@ type CommandInfo struct {
 	Name        string `json:"name"`        // e.g. "/clear"
 	Description string `json:"description"` // short human-readable description (English)
 	Usage       string `json:"usage"`       // e.g. "/clear" or "/compact"
+	// Source is where the definition came from: empty for built-ins (the
+	// registry above) and one of the harness discovery levels ("config",
+	// "global", "workspace", "directory") for user-defined commands. It is
+	// omitempty so built-ins stay byte-identical on the wire and UIs can tell
+	// the two apart without a name allowlist.
+	Source string `json:"source,omitempty"` // "" = built-in; else harness.Source
 }
 
 // webUICommands is the source of truth for the commands UI-visible clients may
@@ -109,6 +115,7 @@ func WithCustom(base []CommandInfo, custom []CustomCommandInfo) []CommandInfo {
 			Name:        key,
 			Description: c.Description,
 			Usage:       c.Usage,
+			Source:      c.Source,
 		})
 	}
 
