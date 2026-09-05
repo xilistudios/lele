@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -91,20 +90,31 @@ func (m *Model) tickCmd() tea.Cmd {
 	})
 }
 
+// submitMessage reads the composer, clears it and publishes its content as a
+// user turn. The input clear is caller-owned so queued messages (which never
+// lived in the composer at flush time) can reuse publishUserMessage directly.
 func (m *Model) submitMessage() tea.Cmd {
 	content := strings.TrimSpace(m.chatInput.Value())
 	if content == "" {
 		return nil
 	}
+	m.chatInput.SetValue("")
+	return m.publishUserMessage(content)
+}
 
+// publishUserMessage starts a turn with the given content: it sets the local
+// processing state, resets streaming fields and publishes the inbound message
+// on the bus. Behavior is identical to the old inline submitMessage body
+// minus reading/clearing the composer.
+func (m *Model) publishUserMessage(content string) tea.Cmd {
 	// If we're on the welcome screen with no session, create one now
 	if m.currentKey == "" {
 		m.createNewChat()
 	}
 	m.showWelcome = false
 
-	m.chatInput.SetValue("")
 	m.compactFeedback = ""
+	m.queueFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
 	m.elapsedTime = 0
@@ -163,7 +173,7 @@ func (m *Model) getGroupProfiles() []config.GroupProfile {
 // message bus so the backend command handler processes it. It handles session
 // creation, UI state cleanup, and returns a tick command for the loading animation.
 func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
-	groupCmd := fmt.Sprintf("/group start %s %s", profileID, task)
+	groupCmd := groupStartCommand(profileID, task)
 
 	if m.currentKey == "" {
 		m.createNewChat()

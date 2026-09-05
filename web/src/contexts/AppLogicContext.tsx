@@ -52,6 +52,8 @@ export type AppLogicContextValue = {
   approvalRequest: UseApp['approvalRequest']
   approvalResult: UseApp['approvalResult']
   pendingAttachments: UseApp['pendingAttachments']
+  /** Messages typed while the agent was busy, waiting for the turn to end. */
+  queuedMessages: UseApp['queuedMessages']
   groups: UseApp['groups']
   groupsEnabled: boolean
   sendTyping: UseApp['sendTyping']
@@ -59,6 +61,9 @@ export type AppLogicContextValue = {
   // Handlers from useAppLogic
   handleEvent: UseApp['handleEvent']
   onSend: UseApp['onSend']
+  removeQueuedMessage: UseApp['removeQueuedMessage']
+  clearQueue: UseApp['clearQueue']
+  queueCount: UseApp['queueCount']
   onRetry: (message: import('../lib/types').ChatMessage) => void
   onApprove: UseApp['onApprove']
   onCancel: UseApp['onCancel']
@@ -156,6 +161,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       approvalRequest: app.approvalRequest,
       approvalResult: app.approvalResult,
       pendingAttachments: app.pendingAttachments,
+      queuedMessages: app.queuedMessages,
       groups: app.groups,
       groupsEnabled: app.groupsEnabled,
       sendTyping: app.sendTyping,
@@ -163,6 +169,9 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       // Handlers from useAppLogic
       handleEvent: app.handleEvent,
       onSend: app.onSend,
+      removeQueuedMessage: app.removeQueuedMessage,
+      clearQueue: app.clearQueue,
+      queueCount: app.queueCount,
       onRetry: app.retryMessage,
       onApprove: app.onApprove,
       onCancel: app.onCancel,
@@ -216,11 +225,15 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.approvalRequest,
       app.approvalResult,
       app.pendingAttachments,
+      app.queuedMessages,
       app.groups,
       app.groupsEnabled,
       app.sendTyping,
       app.handleEvent,
       app.onSend,
+      app.removeQueuedMessage,
+      app.clearQueue,
+      app.queueCount,
       app.retryMessage,
       app.onApprove,
       app.onCancel,

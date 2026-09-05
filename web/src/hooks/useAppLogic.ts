@@ -18,6 +18,7 @@ import {
 } from './streamingOpsLocal'
 import { useChatHistory } from './useChatHistory'
 import { useChatSessions } from './useChatSessions'
+import { useMessageQueue } from './useMessageQueue'
 import { useMessages } from './useMessages'
 import { useModels } from './useModels'
 import type { SocketStatus } from './useSocket'
@@ -85,6 +86,7 @@ export function useAppLogic(
     parentSessionKey ?? undefined,
     messagesHook.hydrateGroups,
   )
+  const queueHook = useMessageQueue()
 
   const wsStatusRef = useRef(wsStatus)
   wsStatusRef.current = wsStatus
@@ -628,6 +630,97 @@ export function useAppLogic(
       : false) ||
     hasActiveGroup
 
+  // ── Message queue ───────────────────────────────────────────────────────
+  // Enter-submit while the agent is busy must not lose the message: it lands in
+  // the per-session FIFO queue and is replayed through the normal send path when
+  // the turn ends. Slash commands are NOT special-cased here — the backend runs
+  // them when the message is delivered, so queueing them is enough.
+  //
+  // The busy check reads isProcessing through a ref so the callback identity
+  // stays stable across streaming ticks (isProcessing is derived from hot state
+  // and would otherwise rebuild onMessage every tick).
+  const busyRef = useRef(isProcessing)
+  busyRef.current = isProcessing
+
+  const currentSessionKeyRef = useRef(sessionsHook.currentSessionKey)
+  currentSessionKeyRef.current = sessionsHook.currentSessionKey
+
+  const sendOrQueue = useCallback(
+    (content: string, attachments: string[]): boolean => {
+      const sessionKey = currentSessionKeyRef.current
+      if (busyRef.current && sessionKey) {
+        // False when this session's queue is at QUEUE_CAP: the caller keeps the
+        // draft so the message is not lost.
+        const accepted = queueHook.enqueueMessage(sessionKey, content, attachments)
+        // The queue entry now owns those attachments (they are sent with it on
+        // flush). Clearing avoids the second queued message inheriting the first
+        // one's files, mirroring what handleSend does after a real send.
+        if (accepted && attachments.length > 0) messagesHook.setPendingAttachments([])
+        return accepted
+      }
+      void handleSend(content, attachments)
+      return true
+    },
+    [handleSend, queueHook.enqueueMessage, messagesHook.setPendingAttachments],
+  )
+
+  // Auto-flush: one queued message per processing falling edge. The replayed
+  // message raises isProcessing again, so the rest of the queue drains on the
+  // following turn ends — paced by real agent turns instead of firing at once.
+  //
+  // prev is tracked per session key so switching chats does not look like a
+  // falling edge of the session we just left.
+  const prevQueueProcessingRef = useRef<{ key: string | null; value: boolean } | null>(null)
+  const flushingIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const sessionKey = sessionsHook.currentSessionKey
+    const previous = prevQueueProcessingRef.current
+    const wasProcessing = previous !== null && previous.key === sessionKey && previous.value
+    const switchedToThisSession = previous === null || previous.key !== sessionKey
+
+    // Never flush while the agent is busy on this session. The state IS recorded
+    // here so the next run can detect the true→false (falling) edge.
+    if (!sessionKey || isProcessing) {
+      prevQueueProcessingRef.current = { key: sessionKey, value: isProcessing }
+      return
+    }
+
+    // handleSend needs the session's agent, otherwise it returns early and the
+    // popped message would be lost. Deliberately do NOT write
+    // prevQueueProcessingRef here: the ref keeps the previous (processing=true)
+    // value, so the true→false falling edge stays unconsumed. currentAgentId is
+    // a dependency, so as soon as it arrives this effect re-runs, still sees the
+    // edge, and flushes then. Overwriting the ref with the current value would
+    // swallow the edge and the queued message would sit until the next turn end
+    // (or a session switch).
+    if (!currentAgentId) return
+
+    prevQueueProcessingRef.current = { key: sessionKey, value: isProcessing }
+
+    // Trigger: this session's turn just ended, or the user switched onto an
+    // idle session that still holds a backlog.
+    if (!wasProcessing && !switchedToThisSession) return
+
+    // A dequeue is already in flight (its message.ack may not have arrived yet).
+    if (flushingIdRef.current) return
+
+    const next = queueHook.peekNext(sessionKey)
+    if (!next || next.sessionKey !== sessionKey) return
+
+    flushingIdRef.current = next.id
+    queueHook.dequeueNext(sessionKey)
+    void handleSend(next.content, next.attachments).finally(() => {
+      if (flushingIdRef.current === next.id) flushingIdRef.current = null
+    })
+  }, [
+    isProcessing,
+    sessionsHook.currentSessionKey,
+    currentAgentId,
+    handleSend,
+    queueHook.peekNext,
+    queueHook.dequeueNext,
+  ])
+
   return {
     error,
     agents,
@@ -653,7 +746,11 @@ export function useAppLogic(
     groupsEnabled,
     setProcessingSessions: messagesHook.setProcessingSessions,
     handleEvent: messagesHook.handleEvent,
-    onSend: handleSend,
+    onSend: sendOrQueue,
+    queuedMessages: queueHook.queuedMessages,
+    removeQueuedMessage: queueHook.removeQueuedMessage,
+    clearQueue: queueHook.clearQueue,
+    queueCount: queueHook.queueCount,
     retryMessage: messagesHook.retryMessage,
     onApprove: handleApprove,
     onCancel: handleCancel,

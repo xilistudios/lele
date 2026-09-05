@@ -278,5 +278,10 @@
   "tui.onboard.tipAgents": "  /agents  Cambiar agente",
   "tui.onboard.tipChats": "  Ctrl+S   Ver chats",
   "tui.onboard.tipConnect": "  /connect Agregar otro proveedor",
-  "tui.onboard.pressEnterStart": "¡Presiona Enter para empezar a chatear!"
+  "tui.onboard.pressEnterStart": "¡Presiona Enter para empezar a chatear!",
+  "tui.queue.status": "⏳ %d en cola — Enter para añadir, /clearq para vaciar",
+  "tui.queue.removeHint": " · %s quita el último",
+  "tui.queue.full": "cola llena (%d) — mensaje no encolado",
+  "tui.queue.removed": "se quitó el último mensaje de la cola",
+  "tui.queue.dropped": "se descartaron %d mensaje(s) de la cola"
 }

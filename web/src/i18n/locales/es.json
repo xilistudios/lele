@@ -123,7 +123,11 @@
     "loadError": "No se pudieron cargar las sesiones: {{error}}",
     "loadMore": "Cargar más ({{loaded}} de {{total}})",
     "loadingMore": "Cargando…",
-    "commandsHint": "Escribe / para ver comandos"
+    "commandsHint": "Escribe / para ver comandos",
+    "queueHeader": "En cola · {{count}}",
+    "queueRemove": "Quitar de la cola",
+    "queueClear": "Vaciar cola",
+    "queueFull": "La cola está llena (10 mensajes). Espera a que termine el agente."
   },
   "connection": {
     "connected": "Conectado",

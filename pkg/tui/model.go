@@ -208,6 +208,18 @@ func (m *Model) reloadSessions() {
 	m.visibleSessions = nil
 	all := m.sessionMgr.ListSessions()
 
+	// The TUI has no session-delete path of its own — a chat can disappear
+	// from the list because it was deleted elsewhere (WebUI, backend). This is
+	// the choke point that observes that, so stale backlogs are dropped here
+	// instead of living in memory (or resurrecting if a key is ever reused).
+	if len(m.messageQueue) > 0 {
+		liveKeys := make([]string, 0, len(all))
+		for _, s := range all {
+			liveKeys = append(liveKeys, s.Key)
+		}
+		m.pruneQueueToSessions(liveKeys)
+	}
+
 	// Batch-fetch message counts once (single SQLite query for cold sessions)
 	// instead of calling GetTotalMessageCount per session (N+1 queries).
 	msgCounts := m.sessionMgr.AllTotalMessageCounts()

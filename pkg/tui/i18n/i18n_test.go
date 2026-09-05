@@ -193,6 +193,11 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.onboard.tipChats",
 		"tui.onboard.tipConnect",
 		"tui.onboard.pressEnterStart",
+		"tui.queue.status",
+		"tui.queue.removeHint",
+		"tui.queue.full",
+		"tui.queue.removed",
+		"tui.queue.dropped",
 	}
 
 	Init()
