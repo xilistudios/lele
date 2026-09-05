@@ -300,6 +300,12 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		if model, ok := spawnRaw["model"].(string); ok {
 			spawnConfig.Model = model
 		}
+		// Issue #234: a spawn without an explicit target agent inherits the
+		// creating agent, so the SYSTEM_SPAWN message carries AGENT_ID and
+		// handleSystemSpawn propagates it to the SubagentTask.
+		if spawnConfig.AgentID == "" && creatorAgentID != "" {
+			spawnConfig.AgentID = creatorAgentID
+		}
 		// When spawn is configured, deliver must be false
 		deliver = false
 	}
@@ -342,27 +348,24 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]interface{}) *Too
 		return ErrorResult(fmt.Sprintf("Error adding job: %v", err))
 	}
 
-	// Issue #234: remember which agent created this job so execution-time
-	// tools (exec, spawn) run with a valid identity-scoped context.
-	if creatorAgentID != "" {
-		job.Payload.AgentID = creatorAgentID
-		t.cronService.UpdateJob(job)
-	}
-
+	// Issue #234: enrich the job payload in memory (creator agent identity,
+	// exec command, spawn config) and persist it with a single UpdateJob so
+	// execution-time tools (exec, spawn) run with a valid identity-scoped
+	// context (keyring secrets, etc.).
+	payloadSet := false
 	if command != "" {
 		job.Payload.Command = command
-		// Need to save the updated payload
-		t.cronService.UpdateJob(job)
+		payloadSet = true
 	}
-
 	if spawnConfig != nil {
-		// Issue #234: a spawn without an explicit target agent inherits the
-		// creating agent, so the SYSTEM_SPAWN message carries AGENT_ID and
-		// handleSystemSpawn propagates it to the SubagentTask.
-		if spawnConfig.AgentID == "" && creatorAgentID != "" {
-			spawnConfig.AgentID = creatorAgentID
-		}
 		job.Payload.Spawn = spawnConfig
+		payloadSet = true
+	}
+	if creatorAgentID != "" {
+		job.Payload.AgentID = creatorAgentID
+		payloadSet = true
+	}
+	if payloadSet {
 		t.cronService.UpdateJob(job)
 	}
 
