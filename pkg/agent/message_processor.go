@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -58,6 +59,13 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		return response, nil
 	}
 
+	// Built-in commands declined: try user-defined (harness) slash commands.
+	// When one matches, msg.Content is rewritten with the expanded prompt and
+	// msg.Metadata carries harness_agent / harness_model for this turn only.
+	// The default agent workspace is used for @file and !`cmd` resolution
+	// because routing into a specific agent happens below.
+	mp.applyHarnessCommand(ctx, &msg, mp.al.cfg().WorkspacePath())
+
 	// Route to determine agent and session key
 	route := mp.al.registry.ResolveRoute(routing.RouteInput{
 		Channel:    msg.Channel,
@@ -84,6 +92,28 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	if sessionAgentID := mp.al.getSessionAgent(sessionKey); sessionAgentID != "" {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
+		}
+	}
+
+	// A custom command can pin an agent and/or a model for the turn. The
+	// harness agent wins over the session-selected agent (the user asked for it
+	// explicitly in this message) but is never persisted, so the next turn
+	// resumes with the routed/session agent. Same for the model, which is
+	// carried through processOptions.ModelOverride instead of sessionModels.
+	turnModelOverride := ""
+	if msg.Metadata != nil {
+		if harnessAgent := msg.Metadata["harness_agent"]; harnessAgent != "" {
+			if hAgent, ok := mp.al.registry.GetAgent(harnessAgent); ok {
+				agent = hAgent
+			} else {
+				slog.Warn("harness: unknown agent in custom command, keeping routed agent",
+					"command", msg.Metadata["harness_command"], "agent", harnessAgent)
+			}
+		}
+		if m := msg.Metadata["harness_model"]; m != "" {
+			// Resolve aliases so the runner sees a provider-qualified model, the
+			// same shape ModelForSession returns for persisted values.
+			turnModelOverride = mp.al.cfg().Providers.ResolveModelAlias(m, mp.al.cfg().Agents.Defaults.Provider)
 		}
 	}
 
@@ -127,6 +157,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		SendResponse:    true,
 		ReplyTo:         replyTo,
 		MessageID:       messageID,
+		ModelOverride:   turnModelOverride,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {

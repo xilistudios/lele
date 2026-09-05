@@ -158,8 +158,12 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 	// change at runtime (/model, TUI model picker, REST). Without this sync,
 	// the tools section of the system prompt keeps hiding read_image based on
 	// a stale flag even after switching to a vision-capable model.
+	// A harness custom command's per-turn model wins over the session model so
+	// the vision flag matches the model actually used for this request. The
+	// override is never stored, so the next turn re-reads the session model.
 	if agent.ContextBuilder != nil {
-		if sessionModel := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey); sessionModel != "" {
+		sessionModel := lr.modelForTurn(agent, opts)
+		if sessionModel != "" {
 			providerName := extractProviderFromModel(sessionModel, lr.al.cfg().Agents.Defaults.Provider)
 			agent.ContextBuilder.SetVisionSupported(getSupportsImages(lr.al.cfg(), sessionModel, providerName))
 		}
@@ -503,13 +507,33 @@ func (lr *llmRunnerImpl) runGoalContinuation(ctx context.Context, agent *AgentIn
 	}
 }
 
+// modelForTurn returns the model this turn should use: a per-turn override
+// coming from a harness custom command wins, otherwise the session model
+// (user /model selection, persisted session model, or agent default) applies.
+// The override is turn-scoped by design — it is never written to sessionModels
+// nor to the session store, so the next turn falls back to the session model.
+// Alias resolution stays with the callers, which already resolve the value they
+// get from here.
+func (lr *llmRunnerImpl) modelForTurn(agent *AgentInstance, opts processOptions) string {
+	if opts.ModelOverride != "" {
+		return opts.ModelOverride
+	}
+	if lr.al == nil || lr.al.sessionManager == nil {
+		return ""
+	}
+	return lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
+}
+
 // runLLMIteration executes the LLM call loop with tool handling.
 func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstance, messages []providers.Message, opts processOptions) (string, int, error) {
 	iteration := 0
 	var finalContent string
 	emptyRetries := 0
 	loopDetector := newLoopDetector()
-	model := lr.al.sessionManager.ModelForSession(agent, opts.SessionKey)
+	// opts.ModelOverride carries the model pinned by a harness custom command
+	// for this turn only; without it the session model (user /model selection,
+	// persisted session model, or agent default) applies as before.
+	model := lr.modelForTurn(agent, opts)
 	// Resolve model alias to ensure a provider prefix is present for routing.
 	// Persisted session models may lack the prefix (e.g., stored before alias
 	// resolution was fixed), which causes ParseModelRef to fall back to the
