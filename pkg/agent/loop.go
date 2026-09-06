@@ -37,20 +37,32 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus                  *bus.MessageBus
-	cfgPtr               atomic.Pointer[config.Config]
-	registry             *AgentRegistry
-	state                *state.Manager
-	running              atomic.Bool
-	summarizing          sync.Map
-	sessionAliases       sync.Map // base session key -> active session key
-	sessionModels        sync.Map
-	sessionAgents        sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking      sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback             *providers.FallbackChain
-	channelManager       *channels.Manager
-	verboseManager       *session.VerboseManager
-	sessionKeySeq        atomic.Uint64
+	bus             *bus.MessageBus
+	cfgPtr          atomic.Pointer[config.Config]
+	registry        *AgentRegistry
+	state           *state.Manager
+	running         atomic.Bool
+	summarizing     sync.Map
+	sessionAliases  sync.Map // base session key -> active session key
+	sessionModels   sync.Map
+	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
+	fallback        *providers.FallbackChain
+	channelManager  *channels.Manager
+	verboseManager  *session.VerboseManager
+	sessionKeySeq   atomic.Uint64
+
+	// seqSeeds is the per-base high-water mark of the chat:N conversation keys
+	// handed out so far (base session key -> last N used). It is persisted under
+	// sess:seq:<baseKey> and rehydrated at startup, because sessionKeySeq resets
+	// to 0 on every process start and would otherwise re-issue keys that already
+	// exist in SQLite with old history. seqSeedPersisted remembers what is
+	// already on disk so the value is only rewritten when it moves. seqSeedMu
+	// guards both and makes the read-modify-write in nextChatSession atomic with
+	// respect to concurrent /new calls for the same base.
+	seqSeedMu            sync.Mutex
+	seqSeeds             map[string]uint64
+	seqSeedPersisted     map[string]uint64
 	approvalManager      *channels.ApprovalManager // Manager for command approvals
 	sessionProcessing    sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
 	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
@@ -137,7 +149,7 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
-			al.subagentSessionAgent.Store(sessionKey, targetAgentID)
+			al.setSubagentSessionAgent(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -245,13 +257,6 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	return ""
 }
 
-func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
-	if baseSessionKey == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s:chat:%d", baseSessionKey, al.sessionKeySeq.Add(1))
-}
-
 func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model string) string {
 	baseSessionKey = strings.TrimSpace(baseSessionKey)
 	if baseSessionKey == "" {
@@ -291,7 +296,7 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 				}
 
 				if agentID != "" {
-					al.sessionAgents.Store(baseSessionKey, agentID)
+					al.setSessionAgent(baseSessionKey, agentID)
 				}
 				if model != "" {
 					al.sessionModels.Store(baseSessionKey, model)
@@ -314,10 +319,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	}
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
-	al.sessionAliases.Store(baseSessionKey, newSessionKey)
+	al.setSessionAlias(baseSessionKey, newSessionKey)
 
 	if agentID != "" {
-		al.sessionAgents.Store(newSessionKey, agentID)
+		al.setSessionAgent(newSessionKey, agentID)
 	}
 	if model != "" {
 		al.sessionModels.Store(newSessionKey, model)
@@ -484,6 +489,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	}
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
 	loop.goalLoopSessions = make(map[string]struct{})
+	// Per-base conversation-key high-water marks, restored from KV below. The
+	// maps are always non-nil so the durable helpers can write without checking
+	// even when SQLite is unavailable (memory-only mode).
+	loop.seqSeeds = make(map[string]uint64)
+	loop.seqSeedPersisted = make(map[string]uint64)
 	loop.cfgPtr.Store(cfg)
 
 	// Wire per-session folder context into every agent's ContextBuilder. The
@@ -572,7 +582,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
-			loop.subagentSessionAgent.Store(sessionKey, targetAgentID)
+			loop.setSubagentSessionAgent(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return loop.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -624,6 +634,12 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	loop.providable = newAgentProvidable(loop)
 	loop.stopSessionCleanup = stopCleanup
+
+	// Rehydrate durable per-session routing state (aliases, agent overrides and
+	// conversation-key seeds). Runs last so dbStore, the registry and the shared
+	// session manager are all wired; without it a restart would silently move
+	// every session back to its pre-restart conversation and agent.
+	loop.loadDurableSessionState()
 
 	return loop
 }
