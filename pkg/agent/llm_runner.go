@@ -8,7 +8,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -177,6 +176,23 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 		// assistant messages with no content and no tool calls are dropped
 		// from the history (and rewritten to the store) so the model cannot
 		// imitate them into a fresh empty-response loop.
+		// Heal sessions contaminated by the legacy tool-call persistence bug:
+		// assistant messages whose tool calls carry invalid arguments ("null",
+		// empty, a duplicate top-level object) or no tool name are rewritten to
+		// the canonical shape (and orphaned tool results dropped). Left alone,
+		// such a message makes every provider reject the request with 400 and
+		// the session never recovers on its own.
+		if healed, changed := healAssistantToolCalls(history); changed {
+			logger.WarnCF("agent", "Healed malformed assistant tool calls in session history",
+				map[string]interface{}{
+					"agent_id":     agent.ID,
+					"session_key":  opts.SessionKey,
+					"before_count": len(history),
+					"after_count":  len(healed),
+				})
+			history = healed
+			agent.Sessions.SetHistory(opts.SessionKey, history)
+		}
 		if cleaned, removed := dropBlankAssistantMessages(history); removed {
 			logger.WarnCF("agent", "Dropped blank assistant messages from session history",
 				map[string]interface{}{
@@ -827,19 +843,50 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 			Content:          response.Content,
 			ReasoningContent: response.ReasoningContent,
 		}
-		for _, tc := range response.ToolCalls {
-			argumentsJSON, _ := json.Marshal(tc.Arguments)
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: &providers.FunctionCall{
-					Name:      tc.Name,
-					Arguments: string(argumentsJSON),
-				},
-				Name:      tc.Name,
-				Arguments: tc.Arguments,
-			})
+		// Canonicalize before persisting: a tool call with no name, or with
+		// arguments that are not a JSON object, must never reach the session.
+		// Replaying such a message makes every provider reject the request with
+		// 400 "function.arguments must be in JSON format", and because the
+		// message is persisted the session stays broken on every later turn.
+		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
+
+		// If nothing survived canonicalization, do not enter the tool phase:
+		// executing the raw (rejected) calls would persist tool results whose
+		// ids have no matching tool_call, which is the same 400 in a different
+		// shape. Tell the model instead and let it retry.
+		if len(assistantMsg.ToolCalls) == 0 {
+			logger.WarnCF("agent", "all tool calls from response were invalid, requesting a retry",
+				map[string]interface{}{
+					"iteration":   iteration,
+					"rejected":    len(response.ToolCalls),
+					"agent_id":    agent.ID,
+					"session_key": opts.SessionKey,
+				})
+			// Keep the assistant turn in the live context so the guidance below
+			// stays a valid user message (providers reject two consecutive
+			// messages of the same role), but never persist a tool-call message
+			// that has no tool calls in it.
+			if strings.TrimSpace(response.Content) != "" {
+				messages = append(messages, assistantMsg)
+				agent.Sessions.AddFullMessage(opts.SessionKey, assistantMsg)
+			} else {
+				messages = append(messages, providers.Message{
+					Role:             "assistant",
+					Content:          response.Content,
+					ReasoningContent: response.ReasoningContent,
+				})
+			}
+			guidanceMsg := providers.Message{
+				Role: "user",
+				Content: "⚠️ Your previous tool call was malformed and could not be parsed " +
+					"(a tool name and a valid JSON object of arguments are required). " +
+					"Please retry using a proper function call.",
+			}
+			messages = append(messages, guidanceMsg)
+			agent.Sessions.AddMessage(opts.SessionKey, "user", guidanceMsg.Content)
+			continue
 		}
+
 		messages = append(messages, assistantMsg)
 
 		// Save assistant message with tool calls to session
@@ -856,7 +903,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		}
 		var execResults []toolExecResult
 		var execErr error // tracks the first execution error encountered
-		for _, tc := range response.ToolCalls {
+		// Execute the canonical list, not the raw one: every tool result must
+		// reference a tool_call id that was actually persisted above.
+		for _, tc := range assistantMsg.ToolCalls {
 			if execErr != nil || ctx.Err() != nil {
 				// Already errored or cancelled — add placeholder for remaining tools
 				execResults = append(execResults, toolExecResult{

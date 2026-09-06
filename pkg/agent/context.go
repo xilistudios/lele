@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -403,16 +404,10 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		Content: systemPrompt,
 	})
 
-	// --- Strip orphaned leading tool messages ---
-	for len(history) > 0 && history[0].Role == "tool" {
-		logger.DebugCF("agent", "Removing orphaned tool message from history to prevent LLM error",
-			map[string]interface{}{"role": history[0].Role})
-		history = history[1:]
-	}
-
-	contextMessages := filterContextMessages(history)
-	contextMessages = sanitizeToolMessages(contextMessages)
-	messages = append(messages, contextMessages...)
+	// Pairing is repaired at the call site (llmCaller.call), not here: every
+	// provider request goes through that one function, including the group-turn
+	// and subagent loops that build their messages without this builder.
+	messages = append(messages, filterContextMessages(history)...)
 
 	if summary != "" && !hasSummaryMessage(history, summary) {
 		messages = append(messages, buildSummaryMessage(summary))
@@ -483,163 +478,6 @@ func filterContextMessages(history []providers.Message) []providers.Message {
 	return filtered
 }
 
-// sanitizeToolMessages repairs tool_use/tool_result pairing in message history.
-// It removes orphaned tool_results (without matching tool_use) and adds placeholder
-// tool_results for missing ones. This prevents 400 errors from Anthropic/AWS Bedrock
-// when tool execution is cancelled mid-way or when summarization breaks pairing.
-//
-// It also strips malformed tool_call entries that lack a function name. Some
-// OpenAI-compatible providers (e.g. Xiaomi MiMo) reject assistant messages with
-// `tool_calls[i] is missing a function name` (HTTP 400). This can happen when a
-// historical message was persisted with an incomplete tool_call (e.g. a streaming
-// interruption that captured only an ID, or a provider that emitted a tool_call
-// placeholder without a name).
-func sanitizeToolMessages(history []providers.Message) []providers.Message {
-	if len(history) == 0 {
-		return history
-	}
-
-	// First pass: collect ALL tool_use IDs from ALL assistant messages.
-	allToolUseIDs := make(map[string]bool)
-	for _, msg := range history {
-		if msg.Role == "assistant" {
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" {
-					allToolUseIDs[tc.ID] = true
-				}
-			}
-		}
-	}
-
-	output := make([]providers.Message, 0, len(history))
-	i := 0
-	for i < len(history) {
-		msg := history[i]
-
-		if msg.Role == "tool" {
-			// Remove orphaned tool_results whose ToolCallID has no matching tool_use.
-			if msg.ToolCallID != "" && !allToolUseIDs[msg.ToolCallID] {
-				logger.DebugCF("agent", "Removing orphaned tool_result message",
-					map[string]interface{}{"tool_call_id": msg.ToolCallID})
-				i++
-				continue
-			}
-			output = append(output, msg)
-			i++
-			continue
-		}
-
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			// Strip tool_call entries that lack a function name. Some providers
-			// reject assistant messages whose tool_calls omit the function name
-			// (HTTP 400 "tool_calls[i] is missing a function name"). This can
-			// occur in history from a streaming interruption or a provider that
-			// emitted a tool_call placeholder without a name.
-			if cleaned := stripNamelessToolCalls(msg.ToolCalls); len(cleaned) != len(msg.ToolCalls) {
-				logger.DebugCF("agent", "Stripping tool_call entries missing a function name",
-					map[string]interface{}{
-						"removed": len(msg.ToolCalls) - len(cleaned),
-						"kept":    len(cleaned),
-					})
-				msg.ToolCalls = cleaned
-			}
-
-			// Collect tool_call IDs from this assistant message.
-			assistantToolCallIDs := make(map[string]bool)
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" {
-					assistantToolCallIDs[tc.ID] = true
-				}
-			}
-
-			// Collect tool_result IDs from consecutive following tool messages.
-			resultIDs := make(map[string]bool)
-			j := i + 1
-			for j < len(history) && history[j].Role == "tool" {
-				if history[j].ToolCallID != "" {
-					resultIDs[history[j].ToolCallID] = true
-				}
-				j++
-			}
-
-			// Determine which tool_use IDs are missing results.
-			missingIDs := []string{}
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" && !resultIDs[tc.ID] {
-					missingIDs = append(missingIDs, tc.ID)
-				}
-			}
-
-			if len(missingIDs) == len(msg.ToolCalls) {
-				// ALL tool_use blocks are missing results — strip them.
-				logger.DebugCF("agent", "All tool results missing, stripping tool_use blocks from assistant message",
-					map[string]interface{}{"missing_count": len(missingIDs)})
-				msg.ToolCalls = nil
-				if msg.Content == "" && msg.ReasoningContent == "" {
-					// Nothing left in this message, skip it entirely.
-					i = j
-					continue
-				}
-				output = append(output, msg)
-			} else if len(missingIDs) > 0 {
-				// SOME tool results are missing — keep assistant message and add placeholders.
-				logger.DebugCF("agent", "Some tool results missing, adding placeholder tool_result messages",
-					map[string]interface{}{"missing_count": len(missingIDs)})
-				output = append(output, msg)
-				// Append existing tool_result messages.
-				for k := i + 1; k < j; k++ {
-					output = append(output, history[k])
-				}
-				// Add placeholders for missing IDs.
-				for _, id := range missingIDs {
-					output = append(output, providers.Message{
-						Role:       "tool",
-						Content:    "[Tool execution was cancelled]",
-						ToolCallID: id,
-					})
-				}
-			} else {
-				// All results present — keep as-is.
-				output = append(output, msg)
-				for k := i + 1; k < j; k++ {
-					output = append(output, history[k])
-				}
-			}
-			i = j
-			continue
-		}
-
-		// Regular message — keep as-is.
-		output = append(output, msg)
-		i++
-	}
-
-	return output
-}
-
-// stripNamelessToolCalls removes tool_call entries that lack a function name.
-// A valid tool_call must have either a top-level Name or a Function.Name.
-// Malformed entries (e.g. from a streaming interruption that captured only an
-// ID, or a provider that emitted a placeholder without a name) cause HTTP 400
-// errors on OpenAI-compatible APIs and must be filtered out before sending.
-func stripNamelessToolCalls(toolCalls []providers.ToolCall) []providers.ToolCall {
-	if len(toolCalls) == 0 {
-		return toolCalls
-	}
-	cleaned := make([]providers.ToolCall, 0, len(toolCalls))
-	for _, tc := range toolCalls {
-		name := tc.Name
-		if name == "" && tc.Function != nil {
-			name = tc.Function.Name
-		}
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		cleaned = append(cleaned, tc)
-	}
-	return cleaned
-}
-
 // dropBlankAssistantMessages removes persisted assistant messages that carry
 // neither content nor tool calls. Such blanks are the footprint of an older
 // bug (empty responses were saved to the session before the empty-retry
@@ -664,6 +502,143 @@ func dropBlankAssistantMessages(history []providers.Message) ([]providers.Messag
 		return history, false
 	}
 	return cleaned, true
+}
+
+// healAssistantToolCalls rewrites persisted assistant tool calls into the
+// canonical wire shape and drops the ones that can never be canonicalised
+// (a tool call without a tool name).
+//
+// Older builds saved whatever the provider streamed, so sessions on disk
+// contain tool calls that make every subsequent request fail:
+//
+//   - function.arguments:"null" (400 invalid_parameter_error: the parameter
+//     must be in JSON format), and
+//   - a duplicate top-level "arguments" object, rejected by strict gateways.
+//
+// Because the poisoned message is replayed on every turn, the session is stuck
+// permanently: the agent stops answering and only a /new recovers it. Repairing
+// in place keeps the conversation - the alternative is losing the whole session.
+//
+// A nameless tool call cannot be repaired (there is no tool to name) so it is
+// dropped, and its matching tool-result message is dropped with it: an orphan
+// tool message referencing a call the model never made is itself a 400.
+//
+// Returns the healed history and whether anything changed, so the caller can
+// skip rewriting an untouched session.
+func healAssistantToolCalls(history []providers.Message) ([]providers.Message, bool) {
+	droppedIDs := make(map[string]struct{})
+	changed := false
+
+	cleaned := make([]providers.Message, len(history))
+	for i, m := range history {
+		if m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			cleaned[i] = m
+			continue
+		}
+		canonical := providers.CanonicalToolCalls(m.ToolCalls)
+
+		// Record calls that disappeared during canonicalisation.
+		if len(canonical) != len(m.ToolCalls) {
+			kept := make(map[string]struct{}, len(canonical))
+			for _, tc := range canonical {
+				if tc.ID != "" {
+					kept[tc.ID] = struct{}{}
+				}
+			}
+			for _, tc := range m.ToolCalls {
+				if _, ok := kept[tc.ID]; !ok && tc.ID != "" {
+					droppedIDs[tc.ID] = struct{}{}
+				}
+			}
+			changed = true
+		}
+
+		// Detect in-place repairs (arguments normalised, fields populated) by
+		// comparing the canonical serialisation with the stored one.
+		if len(canonical) == len(m.ToolCalls) && !sameToolCalls(m.ToolCalls, canonical) {
+			changed = true
+		}
+
+		nm := m
+		nm.ToolCalls = canonical
+		cleaned[i] = nm
+	}
+
+	if len(droppedIDs) == 0 {
+		if !changed {
+			return history, false
+		}
+		return cleaned, true
+	}
+
+	// Second pass: remove the orphaned tool results of dropped calls.
+	final := make([]providers.Message, 0, len(cleaned))
+	for _, m := range cleaned {
+		if m.Role == "tool" && m.ToolCallID != "" {
+			if _, ok := droppedIDs[m.ToolCallID]; ok {
+				continue
+			}
+		}
+		// An assistant message left with neither tool calls nor text is the
+		// blank the empty-response guard already refuses to persist.
+		if m.Role == "assistant" && len(m.ToolCalls) == 0 && strings.TrimSpace(m.TextContent()) == "" {
+			continue
+		}
+		final = append(final, m)
+	}
+	return final, true
+}
+
+// sameToolCalls reports whether a stored tool-call slice already matches the
+// canonical one field by field, using the raw stored values rather than their
+// normalised form. Comparing raw values is what makes the check useful: a
+// session that holds function.arguments:"null" is only repaired once it is
+// rewritten, so the difference must be visible here or the store never gets
+// cleaned. Sessions that are already canonical return true, which keeps every
+// turn from rewriting (and bumping the epoch of) the history it loads.
+func sameToolCalls(stored, canonical []providers.ToolCall) bool {
+	for i := range stored {
+		a, b := stored[i], canonical[i]
+		if a.ID != b.ID || a.Type != b.Type || a.Name != b.Name {
+			return false
+		}
+		if a.ThoughtSignature != b.ThoughtSignature {
+			return false
+		}
+		if rawArguments(a) != rawArguments(b) {
+			return false
+		}
+		if len(a.Arguments) != len(b.Arguments) {
+			return false
+		}
+		for k, v := range b.Arguments {
+			av, ok := a.Arguments[k]
+			if !ok || !jsonEqual(av, v) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// rawArguments returns the stored function.arguments string without touching
+// its content, or the sentinel "\x00nil" when there is no Function at all.
+func rawArguments(tc providers.ToolCall) string {
+	if tc.Function == nil {
+		return "\x00nil"
+	}
+	return tc.Function.Arguments
+}
+
+// jsonEqual compares two decoded JSON values by their encoding, which avoids
+// the float/interface pitfalls of reflect.DeepEqual for this purpose.
+func jsonEqual(a, b interface{}) bool {
+	ab, err1 := json.Marshal(a)
+	bb, err2 := json.Marshal(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return string(ab) == string(bb)
 }
 
 // ensureSummaryMaterialized ensures the summary is materialized as a message in the history.

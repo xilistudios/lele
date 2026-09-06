@@ -30,6 +30,13 @@ type SessionRecorder interface {
 	Save(sessionKey string) error
 }
 
+// recordMessage persists msg to the subagent session when a recorder is wired.
+func recordMessage(config ToolLoopConfig, msg providers.Message) {
+	if config.SessionRecorder != nil && config.SessionKey != "" {
+		config.SessionRecorder.AddFullMessage(config.SessionKey, msg)
+	}
+}
+
 // SessionCompactor applies a loop-compaction result to the persisted session
 // of a subagent. It is implemented by *session.Manager (CompactSession) and
 // keeps the persisted summary/exclusion state in sync with the in-memory
@@ -397,9 +404,21 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		// The provider prefix (e.g., "openrouter:") is for internal routing only
 		// and must not be sent to the external LLM API.
 		apiModel := providers.StripProviderPrefix(config.Model)
+
 		var response *providers.LLMResponse
 		var err error
 		for {
+			// Heal dangling tool-call pairs on the way to the provider. This
+			// sits inside the retry loop on purpose: reactive compaction below
+			// can cut a call from its result and then re-issues the request, so
+			// every outgoing slice must pass here. It also covers history
+			// inherited from a persisted session where a turn died mid-flight.
+			// Left unhealed, strict providers answer with a 400 that replays on
+			// every turn and bricks the session.
+			if healed, changed := providers.HealToolCallPairs(messages); changed {
+				messages = healed
+			}
+
 			if config.Retry != nil {
 				response, err = ChatWithRetry(ctx, config.Provider, messages, providerToolDefs, apiModel, llmOpts, *config.Retry)
 			} else {
@@ -570,26 +589,43 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			Content:          response.Content,
 			ReasoningContent: response.ReasoningContent,
 		}
-		for _, tc := range response.ToolCalls {
-			argumentsJSON, _ := json.Marshal(tc.Arguments)
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: &providers.FunctionCall{
-					Name:      tc.Name,
-					Arguments: string(argumentsJSON),
-				},
-				Name: tc.Name,
+		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
+
+		// Nothing survived canonicalization: do not run the tool phase, or the
+		// tool results would reference ids absent from the persisted assistant
+		// message (the same 400, different shape). Ask for a retry instead.
+		if len(assistantMsg.ToolCalls) == 0 {
+			logger.WarnCF("toolloop", "all tool calls from response were invalid, requesting a retry", map[string]any{
+				"iteration": iteration,
+				"rejected":  len(response.ToolCalls),
 			})
+			if strings.TrimSpace(response.Content) != "" {
+				messages = append(messages, assistantMsg)
+				recordMessage(config, assistantMsg)
+			} else {
+				messages = append(messages, providers.Message{
+					Role:             "assistant",
+					Content:          response.Content,
+					ReasoningContent: response.ReasoningContent,
+				})
+			}
+			guidanceMsg := providers.Message{
+				Role: "user",
+				Content: "\u26a0\ufe0f Your previous tool call was malformed and could not be parsed " +
+					"(a tool name and a valid JSON object of arguments are required). " +
+					"Please retry using a proper function call.",
+			}
+			messages = append(messages, guidanceMsg)
+			recordMessage(config, guidanceMsg)
+			continue
 		}
+
 		messages = append(messages, assistantMsg)
+		recordMessage(config, assistantMsg)
 
-		if config.SessionRecorder != nil && config.SessionKey != "" {
-			config.SessionRecorder.AddFullMessage(config.SessionKey, assistantMsg)
-		}
-
-		// 7. Execute tool calls
-		for _, tc := range response.ToolCalls {
+		// 7. Execute tool calls (canonical list, so result ids match the
+		// tool_calls that were appended and recorded above).
+		for _, tc := range assistantMsg.ToolCalls {
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)
 			logger.InfoCF("toolloop", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
