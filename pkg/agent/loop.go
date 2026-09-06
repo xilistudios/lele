@@ -957,6 +957,12 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 		// The caller's budget (the shutdown coordinator's per-hook timeout) is
 		// spent while turns are still running. Those goroutines are left alone
 		// on purpose: Stop(), which runs after every hook, joins them properly.
+		//
+		// The `drained` goroutine above is intentionally not cancelled here: it
+		// blocks only on al.wg.Wait(), which Stop() is guaranteed to satisfy
+		// (Stop cancels goalStopCtx and joins the same WaitGroup). So this
+		// goroutine is bounded — it exits as soon as Stop drains the work, well
+		// before the process exits — and does not need its own lifecycle handle.
 		logger.WarnCF("agent", "Agent loop drain timed out", map[string]interface{}{
 			"error": ctx.Err().Error(),
 		})

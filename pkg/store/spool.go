@@ -116,6 +116,18 @@ func (r *SpoolRepo) Enqueue(direction, channel, chatID, sessionKey, msgID, paylo
 // against; it is converted to UTC before being stored, so any zone is
 // safe. A limit of zero or less claims nothing and returns an empty slice
 // without error.
+//
+// Contract on the returned slice: it holds AT MOST limit items, and the
+// claim (the UPDATE) and the read-back (the SELECT) are separate
+// statements — the read happens after the commit, so in a hypothetical
+// multi-instance deployment another holder could Complete (delete) or
+// ReleaseClaims one of the just-claimed rows in that window, making the
+// returned slice a subset of the rows this call actually claimed. Callers
+// must therefore treat the result as "the items I now own that are still
+// present", never as an exact mirror of the claim. Today the gateway is
+// single-instance and the spool has no production consumer yet (Phase 2),
+// so the window is theoretical; this documents the guarantee so a future
+// replay handler does not assume more than it gets.
 func (r *SpoolRepo) ClaimBatch(direction string, limit int, instanceID string, now time.Time) ([]SpoolItem, error) {
 	if !validSpoolDirection(direction) {
 		return nil, fmt.Errorf("%w %q", ErrUnknownDirection, direction)

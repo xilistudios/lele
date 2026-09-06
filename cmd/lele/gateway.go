@@ -466,8 +466,8 @@ func gatewayCmd() {
 		configWatcher.Stop()
 		return nil
 	})
-	coord.Register("http-stop", 5*time.Second, func(context.Context) error {
-		return srv.Stop(context.Background())
+	coord.Register("http-stop", 5*time.Second, func(hookCtx context.Context) error {
+		return srv.Stop(hookCtx)
 	})
 	coord.Register("channels-stop", 5*time.Second, func(hookCtx context.Context) error {
 		return channelManager.StopAll(hookCtx)
@@ -507,9 +507,13 @@ func gatewayCmd() {
 var teardownOnce sync.Map // *update.ShutdownCoordinator -> *sync.Once
 
 // teardownGuard returns the sync.Once owned by coord, creating it on first use.
+// It fast-paths a Load so the steady state (the guard already exists) does not
+// allocate a throwaway Once on every call.
 func teardownGuard(coord *update.ShutdownCoordinator) *sync.Once {
-	once := &sync.Once{}
-	actual, _ := teardownOnce.LoadOrStore(coord, once)
+	if actual, ok := teardownOnce.Load(coord); ok {
+		return actual.(*sync.Once)
+	}
+	actual, _ := teardownOnce.LoadOrStore(coord, &sync.Once{})
 	return actual.(*sync.Once)
 }
 
