@@ -6,6 +6,7 @@
  * and GroupSnapshot → GroupInfo conversion.
  */
 import type { ChatMessage, GroupInfo, GroupSnapshot } from '../../lib/types'
+import type { MessageEventContext } from './types'
 
 /** Convert a GroupSnapshot (from WS/HTTP) into the internal GroupInfo shape. */
 export function snapshotToGroupInfo(s: GroupSnapshot): GroupInfo {
@@ -92,6 +93,33 @@ export function isSessionMismatch(
     return true
   }
   return false
+}
+
+/**
+ * Effective UI session key for an event that belongs to the current session.
+ *
+ * After /new or /agent the backend maps `base` -> `base:chat:N` and emits
+ * EVERY event of the turn (message.ack/stream/complete AND tool.executing /
+ * tool.result / subagent.result — see `dispatchOutboundMessage` in
+ * pkg/channels/native.go, which calls agentLoop.ResolveSessionKey) with the
+ * resolved conversation alias. The frontend must re-tag those events with the
+ * CURRENT session key because all UI state — streamingMessages, the typewriter
+ * queues and the history cache — lives keyed by the session currently on
+ * screen; an aliased key would be hidden by the strict sessionKey filter in
+ * useChatHistory (tool cards vanish live and only reappear after a reload,
+ * when messages come back from REST history).
+ *
+ * Shared by the streaming handlers and the tool handlers: the invariant is
+ * that EVERY transient streaming message is tagged with the current UI key.
+ */
+export function effectiveSessionKey(
+  ctx: Pick<MessageEventContext, 'currentSessionKeyRef'>,
+  eventSessionKey?: string,
+): string {
+  const current = ctx.currentSessionKeyRef.current
+  if (!eventSessionKey) return current ?? ''
+  if (current && sessionKeysLooselyMatch(eventSessionKey, current)) return current
+  return eventSessionKey
 }
 
 export function findToolMessageIndex(
