@@ -407,6 +407,38 @@ func (m *Manager) GetChannel(name string) (Channel, bool) {
 	return channel, ok
 }
 
+// SetInboundSpooler wires the durable inbound spooler into every registered
+// channel, so all inbound messages are backed by the spool before publish.
+// Call after channels are constructed and before StartAll.
+//
+// Channels are matched through the spoolerSetter interface rather than by
+// name, so a channel added later is covered without touching this loop:
+// every channel in this package either embeds *BaseChannel - whose setter is
+// promoted to the outer type - or forwards to its base explicitly, as
+// NativeChannel does because it keeps the base in a named field. Anything that
+// implements neither (a custom channel registered by an embedder) is skipped
+// silently: its messages simply stay unpersisted, which is exactly the
+// behaviour before durability existed.
+//
+// s may be nil, which turns spooling off again for every channel.
+func (m *Manager) SetInboundSpooler(s InboundSpooler) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, channel := range m.channels {
+		if setter, ok := channel.(spoolerSetter); ok {
+			setter.SetInboundSpooler(s)
+		}
+	}
+}
+
+// spoolerSetter is the seam Manager.SetInboundSpooler uses to reach a channel's
+// BaseChannel without enumerating channel types. Satisfied by *BaseChannel and
+// therefore by every channel that embeds it.
+type spoolerSetter interface {
+	SetInboundSpooler(s InboundSpooler)
+}
+
 // SetNativeClientStore wires the SQLite native client repository into the
 // native channel's auth manager. No-op if the native channel is not enabled.
 func (m *Manager) SetNativeClientStore(repo *store.NativeClientRepo) {

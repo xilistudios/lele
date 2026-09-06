@@ -108,67 +108,64 @@ func NewInbound(repo *store.SpoolRepo, publish func(bus.InboundMessage) bool) *I
 // InstanceID returns the id this instance claims spool rows under.
 func (d *Inbound) InstanceID() string { return d.instanceID }
 
-// EnqueueAndPublish persists msg to the spool (unless it already carries a
-// SpoolID) and then publishes it. It returns the message with SpoolID and
-// DedupeID filled in, which is what the caller must hand to Finish once the
-// turn completes.
+// Enqueue persists msg to the spool and sets msg.DedupeID and msg.SpoolID in
+// place. It NEVER publishes: the caller keeps its own publish path so it can
+// react to a full bus with its rollback hook (a channel that already showed a
+// typing indicator must be able to undo it, which a blind publish-and-log
+// cannot express here).
 //
-// Availability wins over durability: if the write fails the message is still
-// published, because dropping a live user message is worse than losing it on
-// a crash that may never happen. Conversely, if the write succeeded but the
-// bus is full, the row is deliberately left in the spool - the pump will
-// republish it - and the returned SpoolID lets the caller roll back any
-// user-visible side effects it had already started.
-func (d *Inbound) EnqueueAndPublish(msg bus.InboundMessage) bus.InboundMessage {
-	if msg.DedupeID == "" {
-		msg.DedupeID = dedupeIDFor(msg)
+// It returns true only if the row was durably written. It returns false,
+// leaving msg untouched, when durability is off (nil receiver or nil repo),
+// when msg already carries a SpoolID (it is backed by a row already, so
+// spooling it again would duplicate it), or when the write fails. A false
+// answer is never fatal: it means "this message is not persisted", and the
+// caller still publishes it, because dropping a live user message is worse
+// than losing it on a crash that may never happen.
+//
+// msg must not be nil. DedupeID is assigned before the write so the key that
+// lands in the row is exactly the key the consumer echoes back to Finish.
+func (d *Inbound) Enqueue(msg *bus.InboundMessage) bool {
+	// Durability off, or nothing to back.
+	if d == nil || d.repo == nil || msg == nil {
+		return false
 	}
 
-	// Durability off, or this message is already backed by a row (a replay,
-	// or a channel that re-publishes): publish as-is. EnqueueAndPublish is
-	// idempotent so a caller cannot double-spool by accident.
-	if d.repo == nil || msg.SpoolID != 0 {
-		d.push(msg)
-		return msg
+	// Already backed by a row: a replay, or a channel that re-publishes.
+	// Idempotent, so a caller cannot double-spool by accident.
+	if msg.SpoolID != 0 {
+		return false
+	}
+
+	if msg.DedupeID == "" {
+		msg.DedupeID = dedupeIDFor(*msg)
 	}
 
 	// SpoolID is tagged json:"-", so marshalling here cannot bake a stale row
 	// id into the payload; the replay reads it back from the row it claimed.
-	payload, err := json.Marshal(msg)
+	payload, err := json.Marshal(*msg)
 	if err != nil {
-		logger.WarnCF(logComponent, "Durable inbound marshal failed; publishing unpersisted",
+		logger.WarnCF(logComponent, "Durable inbound marshal failed",
 			map[string]interface{}{
 				"channel": msg.Channel,
 				"chat_id": msg.ChatID,
 				"error":   err.Error(),
 			})
-		d.push(msg)
-		return msg
+		return false
 	}
 
 	id, err := d.repo.Enqueue(store.SpoolInbound, msg.Channel, msg.ChatID, msg.SessionKey, msg.DedupeID, string(payload))
 	if err != nil {
-		logger.WarnCF(logComponent, "Durable inbound enqueue failed; publishing unpersisted",
+		logger.WarnCF(logComponent, "Durable inbound enqueue failed",
 			map[string]interface{}{
 				"channel": msg.Channel,
 				"chat_id": msg.ChatID,
 				"error":   err.Error(),
 			})
-	} else {
-		msg.SpoolID = id
+		return false
 	}
 
-	if !d.push(msg) && msg.SpoolID != 0 {
-		// The row stays pending on purpose: it is the only copy left, and the
-		// pump republishes it. Do not Complete it here or the message is lost.
-		logger.WarnCF(logComponent, "Bus full after durable enqueue; leaving spool row for the pump",
-			map[string]interface{}{
-				"channel":  msg.Channel,
-				"chat_id":  msg.ChatID,
-				"spool_id": msg.SpoolID,
-			})
-	}
-	return msg
+	msg.SpoolID = id
+	return true
 }
 
 // ShouldSkip reports whether msg was already fully processed, i.e. this is a

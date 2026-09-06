@@ -169,9 +169,9 @@ func newDurableInboundTestLoop(t *testing.T, provider providers.LLMProvider) (*A
 	return al, msgBus
 }
 
-// spooledMessage is an inbound message as the gateway hands it over after
-// EnqueueAndPublish: external channel, real session key, and the spool identity
-// (SpoolID + DedupeID) the loop must echo back on Finish.
+// spooledMessage is an inbound message as the channel hands it over after
+// durable.Inbound.Enqueue: external channel, real session key, and the spool
+// identity (SpoolID + DedupeID) the loop must echo back on Finish.
 func spooledMessage() bus.InboundMessage {
 	return bus.InboundMessage{
 		Channel:    "telegram",

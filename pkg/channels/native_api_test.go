@@ -523,6 +523,7 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	}
 
 	channel := &NativeChannel{
+		base:             NewBaseChannel(ChannelName, cfg.Channels.Native, msgBus, []string{}),
 		cfg:              &cfg.Channels.Native,
 		auth:             auth,
 		bus:              msgBus,
@@ -608,6 +609,7 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	}
 
 	channel := &NativeChannel{
+		base:             NewBaseChannel(ChannelName, cfg.Channels.Native, msgBus, []string{}),
 		cfg:              &cfg.Channels.Native,
 		auth:             auth,
 		bus:              msgBus,
@@ -2259,6 +2261,7 @@ func TestCheckOrigin(t *testing.T) {
 	}
 
 	channel := &NativeChannel{
+		base:             NewBaseChannel(ChannelName, cfg.Channels.Native, msgBus, []string{}),
 		cfg:              &cfg.Channels.Native,
 		auth:             auth,
 		bus:              msgBus,

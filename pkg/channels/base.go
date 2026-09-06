@@ -35,6 +35,31 @@ type BaseChannel struct {
 	// without additional synchronization. Nil-safe: the hook is only called
 	// when set.
 	InboundDroppedHook func(msg bus.InboundMessage)
+	// InboundSpooler backs every inbound message with a durable spool row
+	// before it reaches the bus, so a message this channel accepted survives a
+	// crash or a self-restart. See publishInbound.
+	//
+	// Like InboundDroppedHook it must be assigned before the channel starts
+	// processing updates (typically through Manager.SetInboundSpooler, which
+	// runs after construction and before StartAll) and must not be mutated
+	// afterwards: update-handling goroutines read it without additional
+	// synchronization. Nil-safe: nil means "durability off" and messages are
+	// published exactly as before this field existed.
+	InboundSpooler InboundSpooler
+}
+
+// InboundSpooler persists an inbound message to the durable spool before it is
+// published. Implemented by *durable.Inbound, which pkg/channels deliberately
+// does not import: the gateway owns the storage wiring and hands the
+// implementation in, so the channel layer depends only on this one method and
+// stays free of any database knowledge.
+//
+// Enqueue is expected to be non-blocking apart from its own write, to mutate
+// msg in place (tagging SpoolID and DedupeID on success) and to return false
+// rather than fail loudly when persistence is unavailable or disabled. A false
+// answer never stops the message from being published.
+type InboundSpooler interface {
+	Enqueue(msg *bus.InboundMessage) bool
 }
 
 func NewBaseChannel(name string, config interface{}, bus *bus.MessageBus, allowList []string) *BaseChannel {
@@ -45,6 +70,13 @@ func NewBaseChannel(name string, config interface{}, bus *bus.MessageBus, allowL
 		allowList: allowList,
 		running:   false,
 	}
+}
+
+// SetInboundSpooler wires the durable inbound spooler into the channel. Call
+// it after construction and before the channel starts handling updates; like
+// the field itself it is not safe to call concurrently with traffic.
+func (c *BaseChannel) SetInboundSpooler(s InboundSpooler) {
+	c.InboundSpooler = s
 }
 
 func (c *BaseChannel) Name() string {
@@ -133,8 +165,23 @@ func (c *BaseChannel) HandleMessageWithAttachments(senderID, chatID, content str
 		Metadata:    metadata,
 	}
 
-	if !c.bus.PublishInbound(msg) {
-		c.onInboundDropped(msg)
+	c.publishInbound(&msg)
+}
+
+// publishInbound backs msg with the durable spool (if a spooler is wired),
+// then publishes it. On a rejected publish it runs the channel's rollback
+// hook. When the spool write succeeds but the bus is full, the row is
+// deliberately LEFT pending - the pump republishes it - and onInboundDropped
+// still fires so the channel can undo any user-visible side effect.
+//
+// This is the single chokepoint every channel inbound goes through; native
+// publishers reach it via BaseChannel.publishInbound too.
+func (c *BaseChannel) publishInbound(msg *bus.InboundMessage) {
+	if c.InboundSpooler != nil {
+		c.InboundSpooler.Enqueue(msg) // best-effort; false just means unpersisted
+	}
+	if !c.bus.PublishInbound(*msg) {
+		c.onInboundDropped(*msg)
 	}
 }
 
