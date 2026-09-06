@@ -37,20 +37,32 @@ import (
 
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
-	bus                  *bus.MessageBus
-	cfgPtr               atomic.Pointer[config.Config]
-	registry             *AgentRegistry
-	state                *state.Manager
-	running              atomic.Bool
-	summarizing          sync.Map
-	sessionAliases       sync.Map // base session key -> active session key
-	sessionModels        sync.Map
-	sessionAgents        sync.Map // sessionKey -> agentID for agent switching
-	sessionThinking      sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
-	fallback             *providers.FallbackChain
-	channelManager       *channels.Manager
-	verboseManager       *session.VerboseManager
-	sessionKeySeq        atomic.Uint64
+	bus             *bus.MessageBus
+	cfgPtr          atomic.Pointer[config.Config]
+	registry        *AgentRegistry
+	state           *state.Manager
+	running         atomic.Bool
+	summarizing     sync.Map
+	sessionAliases  sync.Map // base session key -> active session key
+	sessionModels   sync.Map
+	sessionAgents   sync.Map // sessionKey -> agentID for agent switching
+	sessionThinking sync.Map // sessionKey -> reasoning effort ("off", "low", "medium", "high")
+	fallback        *providers.FallbackChain
+	channelManager  *channels.Manager
+	verboseManager  *session.VerboseManager
+	sessionKeySeq   atomic.Uint64
+
+	// seqSeeds is the per-base high-water mark of the chat:N conversation keys
+	// handed out so far (base session key -> last N used). It is persisted under
+	// sess:seq:<baseKey> and rehydrated at startup, because sessionKeySeq resets
+	// to 0 on every process start and would otherwise re-issue keys that already
+	// exist in SQLite with old history. seqSeedPersisted remembers what is
+	// already on disk so the value is only rewritten when it moves. seqSeedMu
+	// guards both and makes the read-modify-write in nextChatSession atomic with
+	// respect to concurrent /new calls for the same base.
+	seqSeedMu            sync.Mutex
+	seqSeeds             map[string]uint64
+	seqSeedPersisted     map[string]uint64
 	approvalManager      *channels.ApprovalManager // Manager for command approvals
 	sessionProcessing    sync.Map                  // sessionKey -> chan struct{} (semaphore per session)
 	subagentSessionAgent sync.Map                  // subagent session key -> agent ID (O(1) lookup, not O(N))
@@ -69,6 +81,12 @@ type AgentLoop struct {
 	dbStore            *store.Store         // SQLite state store (nil if not available)
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
+
+	// stopOnce makes Stop idempotent: its cleanup steps (cancel the goal loop,
+	// close the session-cleanup stop channel, join in-flight turns, close the
+	// SQLite store) run exactly once, so calling Stop after Shutdown — or twice
+	// by mistake — can never panic on a double close or double-close the store.
+	stopOnce sync.Once
 
 	// goalStopCtx is the parent context for goal continuation loops. Cancelling
 	// it (via goalStopCancel, called on Stop) aborts any in-flight /goal
@@ -137,7 +155,7 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
-			al.subagentSessionAgent.Store(sessionKey, targetAgentID)
+			al.setSubagentSessionAgent(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return al.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -245,13 +263,6 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	return ""
 }
 
-func (al *AgentLoop) nextConversationSessionKey(baseSessionKey string) string {
-	if baseSessionKey == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s:chat:%d", baseSessionKey, al.sessionKeySeq.Add(1))
-}
-
 func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model string) string {
 	baseSessionKey = strings.TrimSpace(baseSessionKey)
 	if baseSessionKey == "" {
@@ -291,7 +302,7 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 				}
 
 				if agentID != "" {
-					al.sessionAgents.Store(baseSessionKey, agentID)
+					al.setSessionAgent(baseSessionKey, agentID)
 				}
 				if model != "" {
 					al.sessionModels.Store(baseSessionKey, model)
@@ -314,10 +325,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	}
 
 	newSessionKey := al.nextConversationSessionKey(baseSessionKey)
-	al.sessionAliases.Store(baseSessionKey, newSessionKey)
+	al.setSessionAlias(baseSessionKey, newSessionKey)
 
 	if agentID != "" {
-		al.sessionAgents.Store(newSessionKey, agentID)
+		al.setSessionAgent(newSessionKey, agentID)
 	}
 	if model != "" {
 		al.sessionModels.Store(newSessionKey, model)
@@ -484,6 +495,11 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 	}
 	loop.goalStopCtx, loop.goalStopCancel = context.WithCancel(context.Background())
 	loop.goalLoopSessions = make(map[string]struct{})
+	// Per-base conversation-key high-water marks, restored from KV below. The
+	// maps are always non-nil so the durable helpers can write without checking
+	// even when SQLite is unavailable (memory-only mode).
+	loop.seqSeeds = make(map[string]uint64)
+	loop.seqSeedPersisted = make(map[string]uint64)
 	loop.cfgPtr.Store(cfg)
 
 	// Wire per-session folder context into every agent's ContextBuilder. The
@@ -572,7 +588,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 			if targetAgentID == "" {
 				targetAgentID = id
 			}
-			loop.subagentSessionAgent.Store(sessionKey, targetAgentID)
+			loop.setSubagentSessionAgent(sessionKey, targetAgentID)
 		})
 		sm.SetRegisterSessionCancelCallback(func(sessionKey string, cancel context.CancelFunc) func() {
 			return loop.sessionManager.RegisterSessionCancel(sessionKey, cancel)
@@ -624,6 +640,12 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus) *AgentLoop {
 
 	loop.providable = newAgentProvidable(loop)
 	loop.stopSessionCleanup = stopCleanup
+
+	// Rehydrate durable per-session routing state (aliases, agent overrides and
+	// conversation-key seeds). Runs last so dbStore, the registry and the shared
+	// session manager are all wired; without it a restart would silently move
+	// every session back to its pre-restart conversation and agent.
+	loop.loadDurableSessionState()
 
 	return loop
 }
@@ -880,21 +902,95 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 	return nil
 }
 
+// Shutdown stops accepting new inbound work and waits up to the caller's
+// deadline for turns already in flight to finish. Unlike Stop it does NOT close
+// the SQLite store, so it is safe to run before the rest of shutdown.
+//
+// Follow-up design decision (to be implemented in a later commit):
+//
+//	Draining `al.wg` can only be bounded if the work it tracks is itself
+//	bounded, and today a turn inherits the root context that the gateway
+//	cancels *after* this function returns. The plan is therefore to commit each
+//	turn to a shutdown-owned context — context.WithoutCancel(rootCtx) plus its
+//	own cancel registered through the existing
+//	al.sessionManager.RegisterSessionCancel — but to do so ONLY AFTER the turn
+//	has acquired the per-session semaphore at
+//	pkg/agent/llm_runner.go:227-236 (the cap-1 `chan struct{}` per sessionKey
+//	stored in al.sessionProcessing).
+//
+//	Why after the acquisition and not before: if a turn were made
+//	uncancellable while it was merely WAITING for the semaphore, shutdown could
+//	never drain, because the current holder may run for minutes (a long LLM
+//	loop, or a tool that ignores cancellation) and the queued turn would sit
+//	there uninterruptibly. Waiting for the semaphore must stay cancellable —
+//	the durable spool replays such a turn — while work that is already underway
+//	must not be killed mid-call. Acquiring first, then detaching from the root
+//	cancellation, is the only ordering that satisfies both.
+//
+//	Goal-continuation loops (/goal) are tracked by al.wg but run under
+//	goalStopCtx, which Shutdown deliberately does NOT cancel — only Stop does,
+//	after every hook. The consequence: an in-flight goal turn is allowed to
+//	progress during the drain, so a self-restart can hand off to the new
+//	binary without interrupting it. If it has not finished when the drain budget
+//	is spent, Shutdown returns DeadlineExceeded and Stop cancels goalStopCtx;
+//	the goal is then left paused and the user resumes it with /goal resume (goals
+//	are not auto-resumed at startup). The shutdown budget is therefore sized so a
+//	normal turn fits, and a long-running goal is an accepted, bounded loss rather
+//	than something to drain unconditionally.
+func (al *AgentLoop) Shutdown(ctx context.Context) error {
+	// Stop taking new inbound messages: Run's loop re-checks this flag, and the
+	// backlog left in the bus is harmless because channels re-deliver after the
+	// process comes back up.
+	al.running.Store(false)
+
+	drained := make(chan struct{})
+	go func() {
+		al.wg.Wait()
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		logger.InfoC("agent", "Agent loop drained: no turn in flight at shutdown")
+		return nil
+	case <-ctx.Done():
+		// The caller's budget (the shutdown coordinator's per-hook timeout) is
+		// spent while turns are still running. Those goroutines are left alone
+		// on purpose: Stop(), which runs after every hook, joins them properly.
+		//
+		// The `drained` goroutine above is intentionally not cancelled here: it
+		// blocks only on al.wg.Wait(), which Stop() is guaranteed to satisfy
+		// (Stop cancels goalStopCtx and joins the same WaitGroup). So this
+		// goroutine is bounded — it exits as soon as Stop drains the work, well
+		// before the process exits — and does not need its own lifecycle handle.
+		logger.WarnCF("agent", "Agent loop drain timed out", map[string]interface{}{
+			"error": ctx.Err().Error(),
+		})
+		return ctx.Err()
+	}
+}
+
 // Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
-	if al.goalStopCancel != nil {
-		al.goalStopCancel()
-	}
-	if al.stopSessionCleanup != nil {
-		al.stopSessionCleanup()
-	}
-	al.wg.Wait()
-	if al.dbStore != nil {
-		if err := al.dbStore.Close(); err != nil {
-			logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
+	al.stopOnce.Do(func() {
+		if al.goalStopCancel != nil {
+			al.goalStopCancel()
 		}
-	}
+		// stopSessionCleanup is func(){ close(stop) } (see
+		// session.StartCleanupGoroutine), so a second call would panic. It is
+		// guarded together with the store close below by stopOnce, which makes
+		// Stop safe both after Shutdown and when called twice.
+		if al.stopSessionCleanup != nil {
+			al.stopSessionCleanup()
+		}
+		al.wg.Wait()
+		if al.dbStore != nil {
+			if err := al.dbStore.Close(); err != nil {
+				logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
+			}
+		}
+	})
 }
 
 // markGoalLoopActive records that the session is inside an active goal

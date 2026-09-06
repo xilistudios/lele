@@ -14,6 +14,9 @@ func TestStartFreshConversation_CreatesCleanSession(t *testing.T) {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
+	// Isolate the SQLite store (and thus durable session state) in a throwaway
+	// config dir so this test never reads or writes the real ~/.lele/lele.db.
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
 
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{

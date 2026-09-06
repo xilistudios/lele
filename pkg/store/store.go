@@ -19,6 +19,7 @@ type Store struct {
 	auth     *AuthRepo
 	clients  *NativeClientRepo
 	sessions *SessionRepo
+	spool    *SpoolRepo
 }
 
 // Open opens (or creates) the SQLite database at path, applies any
@@ -65,6 +66,7 @@ func Open(path string) (*Store, error) {
 		auth:     &AuthRepo{db: db},
 		clients:  &NativeClientRepo{db: db},
 		sessions: &SessionRepo{db: db},
+		spool:    &SpoolRepo{db: db},
 	}, nil
 }
 
@@ -107,6 +109,11 @@ func (s *Store) NativeClients() *NativeClientRepo {
 // Sessions returns the sessions repository.
 func (s *Store) Sessions() *SessionRepo {
 	return s.sessions
+}
+
+// Spool returns the durable message spool repository.
+func (s *Store) Spool() *SpoolRepo {
+	return s.spool
 }
 
 // Close closes the underlying database connection.

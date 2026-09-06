@@ -1079,6 +1079,90 @@ func (sm *SessionManager) Save(key string) error {
 	return sm.saveUnlocked(key)
 }
 
+// SaveAll persists every session currently resident in memory and returns the
+// number of sessions saved. Sessions already evicted by the LRU/TTL path are
+// not resident and are therefore already durable, so they are skipped.
+//
+// It is intended for graceful shutdown: it guarantees no in-memory mutation
+// survives only in RAM when the process exits. A save failure for one session
+// is logged and does not abort the others — shutdown must always be able to
+// proceed — so the error return only reports a count of failures.
+func (sm *SessionManager) SaveAll() (saved int, failed int) {
+	sm.ensureLoaded()
+
+	if sm.store == nil {
+		// Nothing to flush to: ensureLoaded already warned once about the
+		// missing store. Report (0, 0) so shutdown can proceed unblocked.
+		logger.DebugCF("session", "SaveAll skipped: SessionManager has no store", nil)
+		return 0, 0
+	}
+
+	// Snapshot the resident keys and release the lock before any disk I/O.
+	// saveUnlocked releases sm.mu while it writes and re-acquires it
+	// afterwards (comparing saveEpoch to detect concurrent mutation), so
+	// holding the lock across this loop would deadlock against that inner
+	// re-acquire — same reason evictIfNeeded/saveForEviction drop the lock.
+	keys := sm.residentKeys()
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		persisted, err := sm.saveIfResident(key)
+		if err != nil {
+			failed++
+			logger.WarnCF("session", "SaveAll failed to persist session", map[string]interface{}{
+				"session_key": key,
+				"error":       err.Error(),
+			})
+			continue
+		}
+		if persisted {
+			saved++
+		}
+	}
+
+	logger.InfoCF("session", "SaveAll flushed resident sessions", map[string]interface{}{
+		"resident": len(keys),
+		"saved":    saved,
+		"failed":   failed,
+	})
+	return saved, failed
+}
+
+// residentKeys returns the keys of the sessions currently held in memory.
+// The result is not sorted; callers that need a stable order must sort it.
+func (sm *SessionManager) residentKeys() []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	keys := make([]string, 0, len(sm.sessions))
+	for key := range sm.sessions {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// saveIfResident persists key through the standard save path, but only while
+// the session is still resident. A concurrent eviction may have dropped it
+// between the SaveAll snapshot and this call; an evicted session was saved by
+// the eviction path, so it is skipped (persisted=false) rather than reloaded
+// into memory. Returns persisted=true when the session was written (or was
+// already clean, which is equally durable).
+//
+// The write lock is taken here and handed to saveUnlocked, which owns
+// releasing it for the duration of its disk I/O — exactly like Save does.
+func (sm *SessionManager) saveIfResident(key string) (persisted bool, err error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if _, ok := sm.sessions[key]; !ok {
+		return false, nil
+	}
+	if err := sm.saveUnlocked(key); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // loadSessionMetadataFromSQLite loads session metadata from the SQLite store.
 func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
 	repo := sm.store.Sessions()

@@ -90,7 +90,7 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 		}
 	}
 
-	ap.al.sessionAgents.Store(resolvedKey, agentID)
+	ap.al.setSessionAgent(resolvedKey, agentID)
 	ap.al.sessionModels.Delete(resolvedKey)
 
 	// Clear the persisted model override in the shared session store.
@@ -186,7 +186,7 @@ func (ap *agentProvidableImpl) GetHistoryView(sessionKey string) []providers.Mes
 			history := agent.Sessions.GetHistoryView(resolvedSessionKey)
 			if len(history) > 0 {
 				// Cache this mapping for future O(1) lookups
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return history
 			}
 		}
@@ -217,7 +217,7 @@ func (ap *agentProvidableImpl) GetEvictedMessageCount(sessionKey string) int {
 				continue
 			}
 			if count := agent.Sessions.GetEvictedMessageCount(resolvedSessionKey); count > 0 {
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return count
 			}
 		}
@@ -248,7 +248,7 @@ func (ap *agentProvidableImpl) GetTotalMessageCount(sessionKey string) int {
 				continue
 			}
 			if count := agent.Sessions.GetTotalMessageCount(resolvedSessionKey); count > 0 {
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return count
 			}
 		}
@@ -281,7 +281,7 @@ func (ap *agentProvidableImpl) HasMessages(sessionKey string) bool {
 				continue
 			}
 			if agent.Sessions.HasMessages(resolvedSessionKey) {
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return true
 			}
 		}
@@ -1119,7 +1119,7 @@ func (ap *agentProvidableImpl) LoadEvictedMessagesPage(sessionKey string, before
 				continue
 			}
 			if page := agent.Sessions.LoadMessagesWindow(resolvedSessionKey, before, after, limit); page != nil {
-				ap.al.subagentSessionAgent.Store(resolvedSessionKey, agent.ID)
+				ap.al.setSubagentSessionAgent(resolvedSessionKey, agent.ID)
 				return page
 			}
 		}
