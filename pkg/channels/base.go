@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
 )
 
 type Channel interface {
@@ -188,7 +189,7 @@ func (c *BaseChannel) HandleMessageWithAttachments(senderID, chatID, content str
 // publishers reach it via BaseChannel.publishInbound too.
 func (c *BaseChannel) publishInbound(msg *bus.InboundMessage) {
 	if c.InboundSpooler != nil {
-		c.InboundSpooler.Enqueue(msg) // best-effort; false just means unpersisted
+		c.InboundSpooler.Enqueue(msg) // best-effort; false means unpersisted (and so unclaimed)
 	}
 	if !c.bus.PublishInbound(*msg) {
 		// The bus refused a message that may already be spooled. Hand that one
@@ -196,7 +197,20 @@ func (c *BaseChannel) publishInbound(msg *bus.InboundMessage) {
 		// claimed-and-in-flight for a turn that will never run. Then let the
 		// channel undo any side effect (a typing indicator, etc.).
 		if c.InboundSpooler != nil {
-			c.InboundSpooler.Release(msg)
+			if !c.InboundSpooler.Release(msg) && msg.SpoolID != 0 {
+				// The row exists (Enqueue wrote it) but could not be handed
+				// back to pending. It stays claimed by this instance and the
+				// turn that would have finished it never runs, so the message
+				// is only recovered when shutdown's blanket release (or a
+				// stale reclaim after a crash) frees it for a successor. Log so
+				// this gap is observable rather than silent. A false return
+				// with SpoolID 0 simply means nothing was spooled: not a fault.
+				logger.WarnCF("channels", "Durable inbound rollback failed; row stays claimed until shutdown",
+					map[string]interface{}{
+						"channel":  c.name,
+						"spool_id": msg.SpoolID,
+					})
+			}
 		}
 		c.onInboundDropped(*msg)
 	}
