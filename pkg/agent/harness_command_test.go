@@ -615,6 +615,7 @@ func TestAgentProvidable_ExposesHarnessCommands(t *testing.T) {
 		}
 	}
 }
+
 // TestHarnessFingerprintTriStateByValue guards D4: the fingerprint must
 // depend on the VALUE of the per-command *bool, not on the pointer address.
 // Re-parsing the same config allocates new pointers; if the hash used %v the

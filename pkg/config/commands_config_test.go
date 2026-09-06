@@ -214,6 +214,7 @@ func TestCommandsAbsentByDefault(t *testing.T) {
 		t.Errorf("default doc Commands = %v, want empty", doc.Commands)
 	}
 }
+
 // TestPerCommandTriStateRoundTrip closes the D5 gap: the per-command
 // allow_absolute_files tri-state (nil / true / false) must survive the full
 // editable-document cycle config -> doc -> save -> reload. A false here would
