@@ -1235,7 +1235,7 @@ func TestSpoolReclaimStaleNonUTCNow(t *testing.T) {
 	for i, zone := range []*time.Location{
 		time.FixedZone("Asia/Seoul", 9*60*60),
 		time.FixedZone("America/Bogota", -5*60*60),
-		time.Local,
+		time.Local, //nolint:gosmopolitan // deliberately the host's local zone: this test proves the store normalises ANY zone, including the machine's own, to UTC
 	} {
 		id := mustEnqueue(t, repo, SpoolInbound, "telegram:main", "m", `{"z":`+string(rune('0'+i))+`}`)
 		claimedAt := testNow()

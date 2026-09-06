@@ -144,27 +144,35 @@ func (r *SpoolRepo) ClaimBatch(direction string, limit int, instanceID string, n
 
 	// Pick the next FIFO candidates. The partial index on claimed_by = ''
 	// keeps this scan cheap no matter how many rows are in flight.
+	//
+	// The rows iterator is closed inside its own scope (defer) before the
+	// claim UPDATE reuses the same transaction, which sqlclosecheck requires and
+	// a single-connection pool demands.
 	var ids []int64
-	rows, err := tx.Query(
-		`SELECT id FROM spool WHERE direction = ? AND claimed_by = '' ORDER BY id LIMIT ?`,
-		direction, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("store: claim spool %s: select ids: %w", direction, err)
-	}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("store: claim spool %s: select ids: scan: %w", direction, err)
+	err = func() error {
+		rows, err := tx.Query(
+			`SELECT id FROM spool WHERE direction = ? AND claimed_by = '' ORDER BY id LIMIT ?`,
+			direction, limit,
+		)
+		if err != nil {
+			return fmt.Errorf("store: claim spool %s: select ids: %w", direction, err)
 		}
-		ids = append(ids, id)
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("store: claim spool %s: select ids: scan: %w", direction, err)
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("store: claim spool %s: select ids: rows: %w", direction, err)
+		}
+		return nil
+	}()
+	if err != nil {
+		return nil, err
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("store: claim spool %s: select ids: rows: %w", direction, err)
-	}
-	rows.Close()
 
 	if len(ids) == 0 {
 		if err := tx.Commit(); err != nil {
