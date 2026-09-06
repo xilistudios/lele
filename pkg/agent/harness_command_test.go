@@ -615,3 +615,27 @@ func TestAgentProvidable_ExposesHarnessCommands(t *testing.T) {
 		}
 	}
 }
+// TestHarnessFingerprintTriStateByValue guards D4: the fingerprint must
+// depend on the VALUE of the per-command *bool, not on the pointer address.
+// Re-parsing the same config allocates new pointers; if the hash used %v the
+// fingerprint would change on every re-parse and trigger spurious rebuilds.
+func TestHarnessFingerprintTriStateByValue(t *testing.T) {
+	yes1, yes2 := true, true
+	no1 := false
+	defs := func(p *bool) map[string]harness.CommandDef {
+		return map[string]harness.CommandDef{"a": {Template: "t", AllowAbsoluteFiles: p}}
+	}
+	fp := func(p *bool) string {
+		return harnessFingerprint(false, false, defs(p), "/ws", "/lele", "")
+	}
+
+	if fp(nil) == fp(&no1) {
+		t.Error("nil and explicit false must fingerprint differently (tri-state semantics)")
+	}
+	if fp(&yes1) == fp(nil) || fp(&yes1) == fp(&no1) {
+		t.Error("true must fingerprint differently from nil and false")
+	}
+	if fp(&yes1) != fp(&yes2) {
+		t.Error("same value through different pointers must fingerprint the same")
+	}
+}

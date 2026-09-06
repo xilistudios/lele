@@ -80,11 +80,24 @@ func harnessFingerprint(allowShell, allowAbs bool, defs map[string]harness.Comma
 	names := slices.Sorted(maps.Keys(defs))
 	for _, name := range names {
 		d := defs[name]
-		// %v on the *bool hashes nil/true/false distinctly, so flipping the
-		// tri-state absolute-files flag changes the fingerprint.
-		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%v\n", name, d.Description, d.Agent, d.Model, d.Template, d.AllowShell, d.AllowAbsoluteFiles)
+		// triState() renders the *bool by VALUE: %v on a *bool prints the
+		// pointer address, which changes every time the config is re-parsed
+		// and would trigger spurious rebuilds.
+		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\n", name, d.Description, d.Agent, d.Model, d.Template, d.AllowShell, triState(d.AllowAbsoluteFiles))
 	}
 	return fmt.Sprintf("%t|%t|%x|%s|%s|%s", allowShell, allowAbs, h.Sum64(), workspace, leleDir, dir)
+}
+
+// triState renders an optional bool as "nil", "true" or "false" so hashes
+// depend on the value, not on where the pointer lives.
+func triState(p *bool) string {
+	if p == nil {
+		return "nil"
+	}
+	if *p {
+		return "true"
+	}
+	return "false"
 }
 
 // HarnessCommands returns the currently available custom commands (all four

@@ -214,3 +214,43 @@ func TestCommandsAbsentByDefault(t *testing.T) {
 		t.Errorf("default doc Commands = %v, want empty", doc.Commands)
 	}
 }
+// TestPerCommandTriStateRoundTrip closes the D5 gap: the per-command
+// allow_absolute_files tri-state (nil / true / false) must survive the full
+// editable-document cycle config -> doc -> save -> reload. A false here would
+// silently flip a trusted command into blocked mode (or vice versa).
+func TestPerCommandTriStateRoundTrip(t *testing.T) {
+	yes, no := true, false
+	src := &Config{}
+	src.Commands = map[string]CommandDefinition{
+		"inherits": {Template: "t1"},
+		"forced":   {Template: "t2", AllowAbsoluteFiles: &yes},
+		"vetoed":   {Template: "t3", AllowAbsoluteFiles: &no},
+	}
+	doc := editableDocumentFromConfig(src)
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := SaveEditableDocument(path, doc); err != nil {
+		t.Fatalf("SaveEditableDocument: %v", err)
+	}
+	reloaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	checks := map[string]*bool{
+		"inherits": nil,
+		"forced":   &yes,
+		"vetoed":   &no,
+	}
+	for name, want := range checks {
+		got := reloaded.Commands[name].AllowAbsoluteFiles
+		switch {
+		case want == nil && got != nil:
+			t.Errorf("%s: AllowAbsoluteFiles = %v, want nil", name, *got)
+		case want != nil && got == nil:
+			t.Errorf("%s: AllowAbsoluteFiles = nil, want %v", name, *want)
+		case want != nil && got != nil && *want != *got:
+			t.Errorf("%s: AllowAbsoluteFiles = %v, want %v", name, *got, *want)
+		}
+	}
+}
