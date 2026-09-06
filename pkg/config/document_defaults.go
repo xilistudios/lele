@@ -137,6 +137,7 @@ func defaultEditableDocument() *EditableDocument {
 			CompactionThresholdPercent: defaults.Session.CompactionThresholdPercent,
 			CompactionModel:            defaults.Session.CompactionModel,
 			EvictExcludedFromMemory:    defaults.Session.EvictExcludedFromMemory,
+			DurableInbound:             defaults.Session.DurableInbound,
 		},
 		Bindings: []AgentBinding{},
 		Channels: EditableChannelsConfig{
