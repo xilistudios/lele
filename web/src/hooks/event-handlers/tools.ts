@@ -12,12 +12,24 @@ import {
 } from '../../lib/chatMessageBuilder'
 import type { ToolStatus } from '../../lib/types'
 import { computeToolInsertIndex } from '../messageInsertion'
-import { findToolMessageIndex, getSessionKey, isSessionMismatch } from './helpers'
+import {
+  effectiveSessionKey,
+  findToolMessageIndex,
+  getSessionKey,
+  isSessionMismatch,
+} from './helpers'
 import type { MessageEventContext } from './types'
 
 export function handleToolExecuting(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'tool.executing')) return
+
+  // Re-tag aliased events with the current key (see effectiveSessionKey in
+  // ./helpers): the backend resolves the conversation alias (`base:chat:N`)
+  // before publishing tool events too, and useChatHistory filters streaming
+  // messages strictly by session key — an aliased key here hides the tool
+  // card live until a reload restores it from REST history.
+  const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
 
   ctx.setToolStatus(data as unknown as ToolStatus)
 
@@ -30,7 +42,7 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
     id: toolCallId
       ? createDeterministicToolMessageId('ws', toolCallId)
       : createToolMessageId(data.tool as string),
-    sessionKey: (eventSessionKey ?? ctx.currentSessionKeyRef.current ?? undefined) as string,
+    sessionKey,
     toolName: data.tool as string,
     toolArgs: toolArgsStr,
     toolStatus: 'executing',

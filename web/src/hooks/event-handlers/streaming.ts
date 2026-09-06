@@ -29,6 +29,7 @@ import {
   updateChatHistoryFromRaw,
 } from '../useChatHistory'
 import {
+  effectiveSessionKey,
   getSessionKey,
   isSessionMismatch,
   sessionKeysLooselyMatch,
@@ -83,22 +84,8 @@ export function handleWelcome(ctx: MessageEventContext, data: Record<string, unk
 /**
  * Effective UI session key for an event that belongs to the current session.
  *
- * After /new or /agent the backend maps `base` -> `base:chat:N` and emits
- * message.ack — and every subsequent event (stream/complete/history) — with the
- * resolved conversation alias (pkg/channels/websocket.go calls
- * agentLoop.ResolveSessionKey before publishing the ack). The frontend re-tags
- * those events with the CURRENT session key because all UI state —
- * streamingMessages, the typewriter queues and the history cache — lives keyed
- * by the session currently on screen; an aliased key would be hidden by
- * mergeMessages (which filters strictly by sessionKey) and the loading state
- * would never clear.
+ * See `effectiveSessionKey` in ./helpers (shared with the tool handlers).
  */
-function effectiveSessionKey(ctx: MessageEventContext, eventSessionKey?: string): string {
-  const current = ctx.currentSessionKeyRef.current
-  if (!eventSessionKey) return current ?? ''
-  if (current && sessionKeysLooselyMatch(eventSessionKey, current)) return current
-  return eventSessionKey
-}
 
 export function handleMessageStream(ctx: MessageEventContext, data: Record<string, unknown>) {
   const eventSessionKey = getSessionKey(data)

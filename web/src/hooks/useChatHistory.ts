@@ -9,6 +9,7 @@ import type {
   GroupSnapshot,
   HistoryToolCall,
 } from '../lib/types'
+import { sessionKeysLooselyMatch } from './event-handlers/helpers'
 import { snapshotToGroupInfo } from './messageEventHandlers'
 
 const DEFAULT_LIMIT = 50
@@ -176,7 +177,11 @@ export function useChatHistory(
       // reconcile. Scoped to sessionKey so an unrelated session streaming in
       // the background doesn't keep this query polling. Uses a ref to avoid
       // stale closures during batched state updates.
-      if (streamingMessagesRef.current.some((m) => m.streaming && m.sessionKey === sessionKey))
+      if (
+        streamingMessagesRef.current.some(
+          (m) => m.streaming && sessionKeysLooselyMatch(m.sessionKey, sessionKey),
+        )
+      )
         return 4000
       return false
     },
@@ -270,8 +275,15 @@ export function useChatHistory(
   // Without this, messages from the previous session can briefly appear when
   // switching chats because clearStreaming() runs asynchronously (in useEffect)
   // while the URL/sessionKey changes immediately.
+  // Matching is alias-tolerant: handlers re-tag transient messages with the
+  // current key (effectiveSessionKey), but a stray `base:chat:N` event that
+  // predates a session-key switch must still render for its own conversation
+  // instead of silently vanishing (see sessionKeysLooselyMatch).
   const sessionStreamingMessages = useMemo(
-    () => (sessionKey ? streamingMessages.filter((m) => m.sessionKey === sessionKey) : []),
+    () =>
+      sessionKey
+        ? streamingMessages.filter((m) => sessionKeysLooselyMatch(m.sessionKey, sessionKey))
+        : [],
     [streamingMessages, sessionKey],
   )
 
