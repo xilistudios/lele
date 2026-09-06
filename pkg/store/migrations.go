@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -122,6 +122,44 @@ ALTER TABLE sessions ADD COLUMN first_in_memory_seq INTEGER NOT NULL DEFAULT 0;
 -- Its absolute path + first-level listing are injected into the session's
 -- system prompt. Empty string means "no folder selected".
 ALTER TABLE sessions ADD COLUMN folder TEXT NOT NULL DEFAULT '';
+`,
+	},
+	{
+		Version: 5,
+		DDL: `
+-- Durable message spool: an at-least-once queue for inbound and outbound
+-- chat messages. Without it, anything in flight when the gateway stops is
+-- lost (user messages never answered, replies never delivered). Persisting
+-- it means a restart replays exactly the work that was still pending.
+--
+-- processed_messages is the dedupe ledger that turns at-least-once delivery
+-- into exactly-once *processing*: a consumer that replays a message it has
+-- already handled finds the (channel, msg_id) pair here and skips it.
+--
+-- Rows are deleted on completion rather than flagged as done, so the table
+-- only ever holds live work; the partial index on claimed_by = '' therefore
+-- stays small and the pending scan (direction, id) remains cheap.
+CREATE TABLE spool (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    direction   TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+    channel     TEXT NOT NULL DEFAULT '',
+    chat_id     TEXT NOT NULL DEFAULT '',
+    session_key TEXT NOT NULL DEFAULT '',
+    msg_id      TEXT NOT NULL DEFAULT '',
+    payload     TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    claimed_by  TEXT NOT NULL DEFAULT '',
+    claimed_at  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX idx_spool_pending ON spool(direction, id) WHERE claimed_by = '';
+
+CREATE TABLE processed_messages (
+    channel      TEXT NOT NULL,
+    msg_id       TEXT NOT NULL,
+    processed_at TEXT NOT NULL,
+    PRIMARY KEY (channel, msg_id)
+);
 `,
 	},
 }

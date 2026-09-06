@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -78,8 +79,8 @@ func TestMigrations_Idempotent(t *testing.T) {
 	).Scan(&version); err != nil {
 		t.Fatalf("read schema_version failed: %v", err)
 	}
-	if version != "4" {
-		t.Errorf("schema_version = %q, want %q", version, "4")
+	if want := strconv.Itoa(SchemaVersion); version != want {
+		t.Errorf("schema_version = %q, want %q", version, want)
 	}
 }
 
