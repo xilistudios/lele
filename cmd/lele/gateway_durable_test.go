@@ -248,7 +248,8 @@ func TestSetupDurableInboundAcceptsNilConsumers(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // TestDurableInboundDrainReplaysPersistedRow is the crash scenario the feature
-// exists for: a message was accepted by a channel and written to the spool but
+// exists for: a message was accepted by a channel, written to the spool, and
+// handed back (the bus was full, or the process left its claims at shutdown) but
 // never consumed. Drain must put it back on the bus and clear the row.
 func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	f := newDurableFixture(t, true)
@@ -266,8 +267,14 @@ func TestDurableInboundDrainReplaysPersistedRow(t *testing.T) {
 	if msg.SpoolID == 0 || msg.DedupeID == "" {
 		t.Fatalf("Enqueue tagged spool id %d / dedupe id %q, want both set", msg.SpoolID, msg.DedupeID)
 	}
+	// A live Enqueue claims its row, so the leftover of a previous process has
+	// to be handed back before any pass can see it - exactly what Release does
+	// when the bus refuses the publish, and what shutdown does for the rest.
+	if !f.di.inbound.Release(&msg) {
+		t.Fatal("Release reported the row was not handed back")
+	}
 	if got := f.pending(t); got != 1 {
-		t.Fatalf("pending rows after enqueue = %d, want 1", got)
+		t.Fatalf("pending rows after release = %d, want 1", got)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -323,7 +330,8 @@ func TestDurableInboundDrainSkipsAlreadyProcessedRow(t *testing.T) {
 
 // TestDurableInboundPumpRecoversPendingRow covers the steady-state path the
 // gateway starts after Run: a row that never reached the bus (a full buffer at
-// publish time) is picked up by the pump on its own, with no drain involved.
+// publish time) is handed back to pending by Release and picked up by the pump
+// on its own, with no drain involved.
 func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -335,6 +343,10 @@ func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 	msg := bus.InboundMessage{Channel: "telegram", ChatID: "7", Content: "refused by a full bus"}
 	if !f.di.inbound.Enqueue(&msg) {
 		t.Fatal("Enqueue reported the row was not persisted")
+	}
+	// What publishInbound does when the bus rejects the message.
+	if !f.di.inbound.Release(&msg) {
+		t.Fatal("Release reported the row was not handed back")
 	}
 
 	got, ok := recvInbound(t, f.msgBus, 5*time.Second)
@@ -356,7 +368,8 @@ func TestDurableInboundPumpRecoversPendingRow(t *testing.T) {
 // TestDurableInboundShutdownReleasesClaims pins what a self-restart depends on:
 // rows this instance claimed but had not finished go back to the pending set, so
 // the successor replays them at once instead of waiting out the stale-claim
-// timeout.
+// timeout. Live traffic is already claimed by Enqueue, which is exactly the set
+// the blanket release at shutdown has to hand over.
 func TestDurableInboundShutdownReleasesClaims(t *testing.T) {
 	f := newDurableFixture(t, true)
 
@@ -367,15 +380,8 @@ func TestDurableInboundShutdownReleasesClaims(t *testing.T) {
 		}
 	}
 
-	items, err := f.repo.ClaimBatch(store.SpoolInbound, 10, f.di.inbound.InstanceID(), time.Now())
-	if err != nil {
-		t.Fatalf("ClaimBatch: %v", err)
-	}
-	if len(items) != 2 {
-		t.Fatalf("claimed %d rows, want 2", len(items))
-	}
 	if got := f.claimed(t); got != 2 {
-		t.Fatalf("claimed rows = %d, want 2", got)
+		t.Fatalf("claimed rows = %d, want 2 (live rows are born claimed)", got)
 	}
 
 	if err := f.di.Shutdown(); err != nil {
@@ -412,6 +418,9 @@ func TestDurableInboundShutdownStopsPump(t *testing.T) {
 	if !f.di.inbound.Enqueue(&msg) {
 		t.Fatal("Enqueue reported the row was not persisted")
 	}
+	if !f.di.inbound.Release(&msg) {
+		t.Fatal("Release reported the row was not handed back")
+	}
 
 	// Several pump intervals' worth of time, and the row must still be there.
 	time.Sleep(4 * durable.PumpInterval)
@@ -439,6 +448,9 @@ func TestDurableInboundStartPumpIsSingleton(t *testing.T) {
 	if !f.di.inbound.Enqueue(&msg) {
 		t.Fatal("Enqueue reported the row was not persisted")
 	}
+	if !f.di.inbound.Release(&msg) {
+		t.Fatal("Release reported the row was not handed back")
+	}
 	if _, ok := recvInbound(t, f.msgBus, 5*time.Second); !ok {
 		t.Fatal("the pump started by the first call is not working")
 	}
@@ -452,6 +464,9 @@ func TestDurableInboundStartPumpIsSingleton(t *testing.T) {
 	again := bus.InboundMessage{Channel: "telegram", ChatID: "11", Content: "after shutdown"}
 	if !f.di.inbound.Enqueue(&again) {
 		t.Fatal("Enqueue reported the row was not persisted")
+	}
+	if !f.di.inbound.Release(&again) {
+		t.Fatal("Release reported the row was not handed back")
 	}
 	time.Sleep(4 * durable.PumpInterval)
 	if got, ok := recvInbound(t, f.msgBus, 200*time.Millisecond); ok {
@@ -470,7 +485,12 @@ func TestDurableInboundDrainReclaimsStaleClaims(t *testing.T) {
 		t.Fatal("Enqueue reported the row was not persisted")
 	}
 
-	// Claim it as a different instance, in the past, like a dead predecessor.
+	// Hand the row back to pending and claim it as a different instance, in the
+	// past, like a dead predecessor: a live Enqueue claims its own row, so the
+	// orphan a crash leaves behind has to be staged through the pending set.
+	if !f.di.inbound.Release(&msg) {
+		t.Fatal("Release reported the row was not handed back")
+	}
 	old := time.Now().Add(-2 * durable.StaleClaimTimeout)
 	items, err := f.repo.ClaimBatch(store.SpoolInbound, 10, "lele-dead-predecessor", old)
 	if err != nil {
@@ -499,29 +519,19 @@ func TestDurableInboundDrainReclaimsStaleClaims(t *testing.T) {
 	}
 }
 
-// TestDurableInboundPumpRepublishesInFlightLiveMessage is a CHARACTERIZATION
-// test: it pins what the wiring does today, not what it should do. It exists
-// because the design premise "a live message stays pending until Finish, so the
-// pump never re-claims it" does not hold, and a passing test that asserted the
-// opposite would have hidden a message-duplication bug behind a green CI.
+// TestDurableInboundPumpDoesNotReplayInFlightLiveMessage is the hard
+// no-double-delivery guarantee: a message that a channel spooled and published
+// normally, and whose turn is still in flight (nothing has been Finished), must
+// never be published a second time by the pump.
 //
-// The mechanism: Enqueue writes a row whose claimed_by is empty, the channel
-// publishes it, and the row stays in exactly that state until the agent loop
-// answers and calls Finish. SpoolRepo.ClaimBatch selects on an empty
-// claimed_by and nothing else, so a pending row left by a dead process and a
-// pending row this process is still working on are indistinguishable. With the
-// pump ticking every durable.PumpInterval (250 ms), any turn slower than that
-// gets re-published.
-//
-// The consumer cannot absorb the extra copy either: Inbound.ShouldSkip consults
-// the processed ledger, which is only written by Finish - which has not run yet.
-//
-// When the spool protocol learns to tell the two apart (for example by having
-// Enqueue claim its own row and hand it back when the bus refuses the publish)
-// this test skips with a message pointing at the fix. That skip is the signal
-// to invert the assertion below into a hard "no duplicate" guarantee - do not
-// delete it, and do not leave it skipping.
-func TestDurableInboundPumpRepublishesInFlightLiveMessage(t *testing.T) {
+// The mechanism that makes this true is the claim on the live row: Enqueue
+// writes it already claimed by this instance, and SpoolRepo.ClaimBatch only
+// selects rows whose claimed_by is empty, so the pump cannot see a message the
+// agent loop is working on. Before that, a live row and a row left behind by a
+// dead process were indistinguishable and any turn slower than one pump tick got
+// re-published - the consumer's ledger could not absorb the copy either, because
+// ShouldSkip only answers "already finished" and Finish had not run yet.
+func TestDurableInboundPumpDoesNotReplayInFlightLiveMessage(t *testing.T) {
 	f := newDurableFixture(t, true)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -555,18 +565,21 @@ func TestDurableInboundPumpRepublishesInFlightLiveMessage(t *testing.T) {
 		t.Fatalf("live delivery spool id = %d, want %d", first.SpoolID, msg.SpoolID)
 	}
 
+	// Several pump ticks go by while the turn is still in flight. This sleep is
+	// the test: a negative assertion needs the pump to have had every chance to
+	// re-claim the row and must not be shortened.
 	time.Sleep(4 * durable.PumpInterval)
 	second, dup := recvInbound(t, f.msgBus, time.Second)
 
-	if !dup {
-		t.Skip("the pump no longer replays in-flight live rows: the spool protocol was " +
-			"fixed, rewrite this test to assert the absence of the duplicate instead")
+	if dup {
+		t.Fatalf("the pump re-published in-flight spool row %d (message %q): a live row must "+
+			"stay invisible to ClaimBatch until Finish deletes it or Release hands it back",
+			second.SpoolID, second.Content)
 	}
-	if second.Content != first.Content || second.SpoolID != first.SpoolID {
-		t.Fatalf("unexpected second delivery: %q (spool %d), want a copy of %q (spool %d)",
-			second.Content, second.SpoolID, first.Content, first.SpoolID)
+	if got := f.claimed(t); got != 1 {
+		t.Errorf("claimed rows while the turn is in flight = %d, want 1 (the live row)", got)
 	}
-	t.Logf("KNOWN DEFECT: one %s turn produced a duplicate delivery of spool row %d; "+
-		"durable inbound must not be enabled until pkg/durable distinguishes in-flight rows",
-		4*durable.PumpInterval, first.SpoolID)
+	if got := f.pending(t); got != 0 {
+		t.Errorf("pending rows while the turn is in flight = %d, want 0", got)
+	}
 }

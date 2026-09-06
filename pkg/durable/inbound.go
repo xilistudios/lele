@@ -114,6 +114,14 @@ func (d *Inbound) InstanceID() string { return d.instanceID }
 // typing indicator must be able to undo it, which a blind publish-and-log
 // cannot express here).
 //
+// The row is BORN CLAIMED by this instance (claimed_by = instanceID), which is
+// what keeps a live message in flight: ClaimBatch only selects rows whose
+// claimed_by is empty, so the steady pump cannot see this row and cannot
+// re-publish something the agent loop is already working on. The row leaves the
+// claimed state in exactly two ways - Release hands it back to the pending set
+// when the bus refused the publish (so the pump retries it on the next tick),
+// and Finish deletes it when the turn is over.
+//
 // It returns true only if the row was durably written. It returns false,
 // leaving msg untouched, when durability is off (nil receiver or nil repo),
 // when msg already carries a SpoolID (it is backed by a row already, so
@@ -153,7 +161,7 @@ func (d *Inbound) Enqueue(msg *bus.InboundMessage) bool {
 		return false
 	}
 
-	id, err := d.repo.Enqueue(store.SpoolInbound, msg.Channel, msg.ChatID, msg.SessionKey, msg.DedupeID, string(payload))
+	id, err := d.repo.EnqueueClaimed(store.SpoolInbound, msg.Channel, msg.ChatID, msg.SessionKey, msg.DedupeID, string(payload), d.instanceID, time.Now())
 	if err != nil {
 		logger.WarnCF(logComponent, "Durable inbound enqueue failed",
 			map[string]interface{}{
@@ -244,6 +252,31 @@ func (d *Inbound) Finish(msg bus.InboundMessage) {
 				})
 		}
 	}
+}
+
+// Release hands a single in-flight row back to the pending set so the pump can
+// retry it. The channel calls it when the bus refuses a message it had already
+// spooled: the row was born claimed by this instance (see Enqueue), and without
+// this it would sit claimed until StaleClaimTimeout even though the process is
+// alive and simply needs to try the publish again. Best-effort: a nil receiver,
+// a nil repo, a message with no SpoolID, or a database error all return false
+// and change nothing; a false return never stops the caller from having already
+// published-or-dropped the message.
+func (d *Inbound) Release(msg *bus.InboundMessage) bool {
+	if d == nil || d.repo == nil || msg == nil || msg.SpoolID == 0 {
+		return false
+	}
+	released, err := d.repo.ReleaseIDs([]int64{msg.SpoolID}, d.instanceID)
+	if err != nil {
+		logger.WarnCF(logComponent, "Durable inbound release failed",
+			map[string]interface{}{
+				"channel":  msg.Channel,
+				"spool_id": msg.SpoolID,
+				"error":    err.Error(),
+			})
+		return false
+	}
+	return released > 0
 }
 
 // Drain replays the spool at startup, before live consumption begins: it
@@ -421,19 +454,28 @@ type passResult struct {
 // is full, so claiming more would only pile up failures - the pump retries
 // them on the next tick.
 //
-// The pass owns an invariant: when it returns, it holds no claims at all.
-// Every row it claimed is either deleted (published, duplicate, dead-lettered)
-// or handed back to the pending set by the deferred release below. That is what
-// makes the pump's "nothing pending, nothing to do" check sound - a row left
-// claimed would be invisible to every later pass on this instance, because
-// ClaimBatch only selects unclaimed rows and pumpOnce only looks at the pending
-// count.
+// The pass owns an invariant: when it returns, it holds no claims OF ITS OWN.
+// Every row this pass claimed is either deleted (published, duplicate,
+// dead-lettered) or handed back to the pending set by the scoped release below,
+// which is limited to the ids ClaimBatch returned. That is what makes the pump's
+// "nothing pending, nothing to do" check sound - a row left claimed would be
+// invisible to every later pass on this instance, because ClaimBatch only
+// selects unclaimed rows and pumpOnce only looks at the pending count.
+//
+// The release is deliberately scoped instead of a blanket ReleaseClaims for the
+// instance: live traffic spooled by Enqueue is claimed by this very instance and
+// is being answered right now, so a blanket release would hand those rows back
+// to the pending set and the next tick would publish them a second time.
 func (d *Inbound) claimPass(ctx context.Context) (passResult, error) {
 	var total passResult
 	var batchErr error
+	var claimedIDs []int64
 
 	defer func() {
-		handedBack, err := d.repo.ReleaseClaims(d.instanceID)
+		if len(claimedIDs) == 0 {
+			return
+		}
+		handedBack, err := d.repo.ReleaseIDs(claimedIDs, d.instanceID)
 		if err != nil {
 			logger.WarnCF(logComponent, "Spool claim release failed",
 				map[string]interface{}{"error": err.Error()})
@@ -456,6 +498,15 @@ func (d *Inbound) claimPass(ctx context.Context) (passResult, error) {
 		}
 		if len(items) == 0 {
 			break
+		}
+
+		// Record ownership of the whole batch BEFORE republishing any of it:
+		// ClaimBatch handed every one of these rows to this instance, and the
+		// release below must cover them all even when a republish error breaks
+		// out of the loop early. A row whose delete already succeeded is simply
+		// not matched by ReleaseIDs any more.
+		for _, item := range items {
+			claimedIDs = append(claimedIDs, item.ID)
 		}
 
 		var batch passResult

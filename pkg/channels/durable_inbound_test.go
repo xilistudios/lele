@@ -13,14 +13,15 @@ package channels
 // spooler has been offered the chance to back it, and that the spooler stays
 // invisible to the rest of the flow:
 //
-//	spooler wired + write succeeds -> row exists before the bus sees the message
+//	spooler wired + write succeeds -> row exists (claimed) before the bus sees it
 //	spooler wired + write fails    -> message is published anyway (availability)
-//	spooler wired + bus rejects    -> rollback hook fires, row is LEFT pending
+//	spooler wired + bus rejects    -> rollback hook fires AND that one row is
+//	                                  released back to pending for the pump
 //	spooler nil                    -> behaviour identical to before the feature
 //
-// Nobody here completes or reverts a row: Finish belongs to the consumer (the
-// agent loop), and undoing a spool write after a rejected publish would delete
-// the only copy of a message the pump could otherwise replay.
+// Nobody here completes or deletes a row: Finish belongs to the consumer (the
+// agent loop), and after a rejected publish the row is the only copy of the
+// message left, so the most the publisher may do is hand it back to pending.
 
 import (
 	"context"
@@ -41,8 +42,10 @@ import (
 
 // fakeSpooler stands in for *durable.Inbound. It tags SpoolID/DedupeID in place
 // exactly like the real Enqueue and keeps a snapshot of every row it accepted,
-// so a test can check that nothing reverts it. messageBus is optional: when
-// set, Enqueue also samples how deep the inbound queue is at that instant,
+// so a test can check that nothing deletes it. Release is the other half of the
+// real protocol: it marks exactly the row it is handed as handed back to the
+// pump, which is what a rejected publish must trigger. messageBus is optional:
+// when set, Enqueue also samples how deep the inbound queue is at that instant,
 // which is what proves the write happened before the publish.
 type fakeSpooler struct {
 	mu       sync.Mutex
@@ -50,9 +53,10 @@ type fakeSpooler struct {
 	nextID   int64
 	fail     bool
 
-	calls  int
-	rows   []bus.InboundMessage
-	depths []int64
+	calls   int
+	rows    []bus.InboundMessage
+	depths  []int64
+	release []int64
 }
 
 func newFakeSpooler(messageBus *bus.MessageBus) *fakeSpooler {
@@ -86,6 +90,27 @@ func (f *fakeSpooler) Enqueue(msg *bus.InboundMessage) bool {
 	f.nextID++
 	f.rows = append(f.rows, *msg)
 	return true
+}
+
+// Release mirrors durable.Inbound.Release: only a message Enqueue actually
+// backed (non-zero SpoolID) has a row to hand back, and the call is scoped to
+// exactly that one id.
+func (f *fakeSpooler) Release(msg *bus.InboundMessage) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if msg == nil || msg.SpoolID == 0 {
+		return false
+	}
+	f.release = append(f.release, msg.SpoolID)
+	return true
+}
+
+// released returns the ids Release was asked to hand back, under the lock.
+func (f *fakeSpooler) released() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.release...)
 }
 
 // snapshot returns the recorded state under the lock.
@@ -216,11 +241,13 @@ func TestPublishInboundStillPublishesWhenSpoolFails(t *testing.T) {
 	}
 }
 
-// The interesting combination: the row was written, then the bus rejected the
-// publish. The rollback hook must fire (the user may already see a typing
-// indicator) but publishInbound must NOT undo the spool write - the pending row
-// is the only copy left and the pump is what replays it.
-func TestPublishInboundRejectedKeepsSpoolRowPending(t *testing.T) {
+// The interesting combination: the row was written (and claimed), then the bus
+// rejected the publish. The rollback hook must fire (the user may already see a
+// typing indicator) and publishInbound must hand exactly that one row back to
+// the pump with Release: it is the only copy of the message, so deleting it
+// would lose it and leaving it claimed would stall it until the stale-claim
+// timeout.
+func TestPublishInboundRejectedReleasesSpoolRowForPump(t *testing.T) {
 	messageBus := bus.NewMessageBus()
 	defer messageBus.Close()
 
@@ -258,6 +285,11 @@ func TestPublishInboundRejectedKeepsSpoolRowPending(t *testing.T) {
 	}
 	if msg.SpoolID == 0 {
 		t.Error("caller SpoolID = 0, want the row id the spooler assigned")
+	}
+
+	// The rollback is scoped to exactly that row: no other id, no second call.
+	if got := spooler.released(); len(got) != 1 || got[0] != msg.SpoolID {
+		t.Errorf("Release called for %v, want exactly [%d]", got, msg.SpoolID)
 	}
 }
 

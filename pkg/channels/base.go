@@ -51,15 +51,23 @@ type BaseChannel struct {
 // InboundSpooler persists an inbound message to the durable spool before it is
 // published. Implemented by *durable.Inbound, which pkg/channels deliberately
 // does not import: the gateway owns the storage wiring and hands the
-// implementation in, so the channel layer depends only on this one method and
+// implementation in, so the channel layer depends only on these two methods and
 // stays free of any database knowledge.
 //
 // Enqueue is expected to be non-blocking apart from its own write, to mutate
 // msg in place (tagging SpoolID and DedupeID on success) and to return false
 // rather than fail loudly when persistence is unavailable or disabled. A false
-// answer never stops the message from being published.
+// answer never stops the message from being published. It also CLAIMS the row it
+// writes for its own instance, so the replay pump cannot pick up a message that
+// is being answered right now.
+//
+// Release is the rollback for that claim: it hands a row Enqueue accepted back
+// to the pending set when the bus refused the publish, so the pump retries it
+// instead of the row sitting claimed for a turn that never runs. Like Enqueue it
+// is best-effort and returns false when there is nothing to undo.
 type InboundSpooler interface {
 	Enqueue(msg *bus.InboundMessage) bool
+	Release(msg *bus.InboundMessage) bool
 }
 
 func NewBaseChannel(name string, config interface{}, bus *bus.MessageBus, allowList []string) *BaseChannel {
@@ -169,10 +177,12 @@ func (c *BaseChannel) HandleMessageWithAttachments(senderID, chatID, content str
 }
 
 // publishInbound backs msg with the durable spool (if a spooler is wired),
-// then publishes it. On a rejected publish it runs the channel's rollback
-// hook. When the spool write succeeds but the bus is full, the row is
-// deliberately LEFT pending - the pump republishes it - and onInboundDropped
-// still fires so the channel can undo any user-visible side effect.
+// then publishes it. Enqueue claims the row it writes for the spooler's own
+// instance, so the replay pump leaves it alone while this message is in flight.
+// On a rejected publish the rollback hook fires (the user may already see a
+// typing indicator) AND the single row is handed back to pending with Release,
+// which is what lets the pump retry it on the next tick instead of waiting out
+// the stale-claim timeout.
 //
 // This is the single chokepoint every channel inbound goes through; native
 // publishers reach it via BaseChannel.publishInbound too.
@@ -181,6 +191,13 @@ func (c *BaseChannel) publishInbound(msg *bus.InboundMessage) {
 		c.InboundSpooler.Enqueue(msg) // best-effort; false just means unpersisted
 	}
 	if !c.bus.PublishInbound(*msg) {
+		// The bus refused a message that may already be spooled. Hand that one
+		// row back to pending so the pump retries it, instead of leaving it
+		// claimed-and-in-flight for a turn that will never run. Then let the
+		// channel undo any side effect (a typing indicator, etc.).
+		if c.InboundSpooler != nil {
+			c.InboundSpooler.Release(msg)
+		}
 		c.onInboundDropped(*msg)
 	}
 }

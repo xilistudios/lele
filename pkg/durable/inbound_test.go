@@ -204,6 +204,65 @@ func payloadFor(t *testing.T, m bus.InboundMessage) string {
 	return string(data)
 }
 
+// peekRow reads one spool row straight from the table. ClaimBatch cannot be
+// used for that any more on the live path: Enqueue claims the row it writes, so
+// a test that wants to look at an in-flight row has to go around the claim
+// protocol.
+func peekRow(t *testing.T, f *spoolFixture, id int64) store.SpoolItem {
+	t.Helper()
+
+	rows, err := f.s.DB().Query(
+		`SELECT id, direction, channel, chat_id, session_key, msg_id, payload, attempts, created_at
+		 FROM spool WHERE id = ?`, id,
+	)
+	if err != nil {
+		t.Fatalf("read spool row %d failed: %v", id, err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatalf("spool row %d does not exist", id)
+	}
+	var item store.SpoolItem
+	var createdAt string
+	if err := rows.Scan(
+		&item.ID, &item.Direction, &item.Channel, &item.ChatID,
+		&item.SessionKey, &item.MsgID, &item.Payload, &item.Attempts, &createdAt,
+	); err != nil {
+		t.Fatalf("scan spool row %d failed: %v", id, err)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read spool row %d: %v", id, err)
+	}
+	return item
+}
+
+// claimedBy returns the distinct non-empty claimed_by values in the spool
+// table, so a test can assert who holds a row without going through the claim
+// protocol (which cannot see claimed rows at all).
+func claimedBy(t *testing.T, s *store.Store) []string {
+	t.Helper()
+
+	rows, err := s.DB().Query(`SELECT DISTINCT claimed_by FROM spool WHERE claimed_by <> ''`)
+	if err != nil {
+		t.Fatalf("read claimed_by failed: %v", err)
+	}
+	defer rows.Close()
+
+	var owners []string
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			t.Fatalf("scan claimed_by failed: %v", err)
+		}
+		owners = append(owners, owner)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read claimed_by: %v", err)
+	}
+	return owners
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Durability off (nil repo): Enqueue declines and the caller publishes anyway
 // ──────────────────────────────────────────────────────────────────────────────
@@ -294,13 +353,27 @@ func TestNilPublisherNeverPanics(t *testing.T) {
 		t.Error("SpoolID = 0, want a row even when the publisher is missing")
 	}
 	// Enqueue never touches the bus, so a missing publisher cannot lose the
-	// message: the row is the only copy left and must survive for the pump.
-	if st := statsOf(t, repo); st.PendingInbound != 1 {
-		t.Errorf("PendingInbound = %d, want 1", st.PendingInbound)
+	// message: the row is the only copy left, and it must survive.
+	if st := statsOf(t, repo); st.PendingInbound+st.ClaimedInbound != 1 {
+		t.Errorf("spool holds %d inbound rows, want 1", st.PendingInbound+st.ClaimedInbound)
+	}
+	// It is claimed by this instance (the live in-flight protocol), not pending.
+	if st := statsOf(t, repo); st.PendingInbound != 0 || st.ClaimedInbound != 1 {
+		t.Errorf("stats = %+v, want the row claimed by this instance, not pending", st)
 	}
 
-	// The replay path is where a missing publisher is actually exercised; it
-	// must degrade to a deferral rather than a panic.
+	// The live row is claimed by this instance, so a replay pass must not see
+	// it at all: nothing panics and nothing is republished.
+	if n, err := d.Drain(context.Background()); n != 0 || err != nil {
+		t.Errorf("Drain() = (%d, %v), want (0, nil): a live in-flight claim is invisible to a pass", n, err)
+	}
+
+	// The replay path is where a missing publisher is actually exercised: once
+	// the row is handed back (what a channel does when the bus refuses the
+	// publish), a pass must degrade to a deferral rather than a panic.
+	if !d.Release(&got) {
+		t.Fatal("Release() = false, want the row handed back to the pending set")
+	}
 	if _, err := d.Drain(context.Background()); err != nil {
 		t.Errorf("Drain() with no publisher failed: %v", err)
 	}
@@ -336,27 +409,28 @@ func TestEnqueueWritesRowAndFillsIDs(t *testing.T) {
 		t.Errorf("publish called %d times, want 0 (Enqueue must not publish)", b.callCount())
 	}
 
-	items, err := repo.ClaimBatch(store.SpoolInbound, 10, "peek", time.Now())
-	if err != nil {
+	// Enqueue claims its row for this instance, so no pass can see it: the
+	// assertions read the row straight from the table.
+	if st := statsOf(t, repo); st.PendingInbound != 0 {
+		t.Fatalf("PendingInbound = %d, want 0: a live row must not be claimable", st.PendingInbound)
+	}
+	if items, err := repo.ClaimBatch(store.SpoolInbound, 10, "peek", time.Now()); err != nil {
 		t.Fatalf("ClaimBatch() failed: %v", err)
+	} else if len(items) != 0 {
+		t.Fatalf("claimed %d rows, want 0: a live in-flight row is invisible to a pass", len(items))
 	}
-	if len(items) != 1 {
-		t.Fatalf("claimed %d rows, want 1", len(items))
+	row := peekRow(t, f, got.SpoolID)
+	if row.MsgID != "m-1" {
+		t.Errorf("row msg_id = %q, want %q", row.MsgID, "m-1")
 	}
-	if items[0].ID != got.SpoolID {
-		t.Errorf("row id = %d, want %d", items[0].ID, got.SpoolID)
-	}
-	if items[0].MsgID != "m-1" {
-		t.Errorf("row msg_id = %q, want %q", items[0].MsgID, "m-1")
-	}
-	if items[0].Channel != "telegram" || items[0].SessionKey != "telegram:chat-1" {
-		t.Errorf("row = %+v, want telegram/telegram:chat-1", items[0])
+	if row.Channel != "telegram" || row.SessionKey != "telegram:chat-1" {
+		t.Errorf("row = %+v, want telegram/telegram:chat-1", row)
 	}
 
 	// SpoolID is json:"-", so the payload must not bake in a row id that would
 	// be stale after a replay.
 	var decoded bus.InboundMessage
-	if err := json.Unmarshal([]byte(items[0].Payload), &decoded); err != nil {
+	if err := json.Unmarshal([]byte(row.Payload), &decoded); err != nil {
 		t.Fatalf("payload is not a valid message: %v", err)
 	}
 	if decoded.SpoolID != 0 {
@@ -365,8 +439,8 @@ func TestEnqueueWritesRowAndFillsIDs(t *testing.T) {
 	if decoded.DedupeID != "m-1" {
 		t.Errorf("payload DedupeID = %q, want %q", decoded.DedupeID, "m-1")
 	}
-	if strings.Contains(items[0].Payload, "spool_id") {
-		t.Errorf("payload leaks a spool id: %s", items[0].Payload)
+	if strings.Contains(row.Payload, "spool_id") {
+		t.Errorf("payload leaks a spool id: %s", row.Payload)
 	}
 
 	// The identity the caller publishes is the identity the consumer must echo
@@ -511,17 +585,24 @@ func TestFullBusLeavesRowForPump(t *testing.T) {
 		t.Fatal("SpoolID = 0, want the row id so the caller can roll back")
 	}
 
-	// The caller's publish is rejected. The row stays pending on purpose: it is
-	// the only copy left, so nobody may Complete it here.
+	// The caller's publish is rejected. The row survives on purpose: it is the
+	// only copy left, so nobody may Complete it here. It is still claimed by
+	// this instance, which is exactly why the caller must undo that claim.
 	if b.publish(got) {
 		t.Fatal("publish() = true, want a full bus to reject the message")
 	}
 	st := statsOf(t, repo)
-	if st.PendingInbound != 1 {
-		t.Errorf("PendingInbound = %d, want 1 (row must survive a full bus)", st.PendingInbound)
+	if st.PendingInbound != 0 {
+		t.Errorf("PendingInbound = %d, want 0: the rejected row is still claimed", st.PendingInbound)
 	}
-	if st.ClaimedInbound != 0 {
-		t.Errorf("ClaimedInbound = %d, want 0", st.ClaimedInbound)
+	if st.ClaimedInbound != 1 {
+		t.Errorf("ClaimedInbound = %d, want 1 (row must survive a full bus)", st.ClaimedInbound)
+	}
+	if !d.Release(&got) {
+		t.Fatal("Release() = false, want the row handed back to the pending set")
+	}
+	if st := statsOf(t, repo); st.PendingInbound != 1 {
+		t.Fatalf("PendingInbound = %d after Release, want 1", st.PendingInbound)
 	}
 
 	// The pump is what recovers it once there is room.
@@ -617,9 +698,167 @@ func TestFinishLedgerFailureKeepsRow(t *testing.T) {
 	d.Finish(got) // best-effort: logs, never panics
 
 	// Reopen the same file to confirm the row survived.
-	if st := statsOf(t, f.reopen(t).Spool()); st.PendingInbound != 1 {
-		t.Errorf("PendingInbound = %d, want 1 (row kept when the ledger write failed)",
-			st.PendingInbound)
+	if st := statsOf(t, f.reopen(t).Spool()); st.PendingInbound+st.ClaimedInbound != 1 {
+		t.Errorf("inbound rows = %d pending + %d claimed, want 1 (row kept when the ledger write failed)",
+			st.PendingInbound, st.ClaimedInbound)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Release: the rollback of a live claim
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestEnqueueClaimsItsOwnRow is the invariant the whole in-flight protocol rests
+// on: the row Enqueue writes belongs to this instance from the moment it exists,
+// so no replay pass can see a message the agent loop is working on.
+func TestEnqueueClaimsItsOwnRow(t *testing.T) {
+	f := openSpool(t)
+	repo := f.repo
+	b := newFakeBus(8)
+	d := NewInbound(repo, b.publish)
+
+	got := msg("hello", "m-1")
+	if !d.Enqueue(&got) {
+		t.Fatal("Enqueue() = false, want the message persisted")
+	}
+
+	st := statsOf(t, repo)
+	if st.PendingInbound != 0 {
+		t.Errorf("PendingInbound = %d, want 0: a live row is never pending", st.PendingInbound)
+	}
+	if st.ClaimedInbound != 1 {
+		t.Errorf("ClaimedInbound = %d, want 1", st.ClaimedInbound)
+	}
+
+	// Not even another instance can claim it.
+	if items, err := repo.ClaimBatch(store.SpoolInbound, 10, "other-instance", time.Now()); err != nil {
+		t.Fatalf("ClaimBatch() failed: %v", err)
+	} else if len(items) != 0 {
+		t.Errorf("ClaimBatch(other) = %d rows, want 0", len(items))
+	}
+	if owners := claimedBy(t, f.s); len(owners) != 1 || owners[0] != d.InstanceID() {
+		t.Errorf("claimed_by = %v, want [%s]", owners, d.InstanceID())
+	}
+}
+
+// TestReleaseHandsRowBackToPump is the other half: when the bus refuses a live
+// message, Release makes exactly that row pending again and the pump replays it.
+func TestReleaseHandsRowBackToPump(t *testing.T) {
+	f := openSpool(t)
+	repo := f.repo
+
+	got := msg("hello", "m-1")
+	d := NewInbound(repo, func(bus.InboundMessage) bool { return false }) // bus full
+	if !d.Enqueue(&got) {
+		t.Fatal("Enqueue() = false, want the row written")
+	}
+	if !d.Release(&got) {
+		t.Fatal("Release() = false, want the row handed back to pending")
+	}
+	if st := statsOf(t, repo); st.PendingInbound != 1 || st.ClaimedInbound != 0 {
+		t.Errorf("stats = %+v, want 1 pending / 0 claimed after Release", st)
+	}
+
+	// Releasing twice is not an error, there is simply nothing left to release.
+	if d.Release(&got) {
+		t.Error("Release() = true the second time, want false (row no longer claimed here)")
+	}
+	// Nothing to back: a nil message, a message with no row, a nil service.
+	if d.Release(nil) {
+		t.Error("Release(nil) = true, want false")
+	}
+	if d.Release(&bus.InboundMessage{Channel: "telegram"}) {
+		t.Error("Release(unspooled message) = true, want false")
+	}
+	var noService *Inbound
+	if noService.Release(&got) {
+		t.Error("(*Inbound)(nil).Release() = true, want false")
+	}
+
+	// A pass with room on the bus now picks it up.
+	b := newFakeBus(4)
+	NewInbound(repo, b.publish).pumpOnce(context.Background())
+	pub := b.waitPublished(t, 1, time.Second)
+	if pub[0].Content != "hello" {
+		t.Errorf("pumped content = %q, want %q", pub[0].Content, "hello")
+	}
+	if pub[0].SpoolID != got.SpoolID {
+		t.Errorf("pumped spool id = %d, want %d", pub[0].SpoolID, got.SpoolID)
+	}
+	if st := statsOf(t, repo); st.PendingInbound+st.ClaimedInbound != 0 {
+		t.Errorf("spool holds %+v after the replay, want nothing left", st)
+	}
+}
+
+// TestClaimPassDoesNotReleaseForeignLiveRows is the anti-regression test for the
+// double-delivery bug. claimPass used to finish with a blanket ReleaseClaims for
+// its own instance, which also handed back every LIVE row that Enqueue had
+// claimed - and the next tick published those a second time. Now the pass only
+// releases the ids it claimed itself.
+func TestClaimPassDoesNotReleaseForeignLiveRows(t *testing.T) {
+	f := openSpool(t)
+	repo := f.repo
+
+	// One service plays both roles, exactly as the gateway does: the channel
+	// path spools live rows through it and the pump replays through it too, so
+	// the live claims and the pass claims carry the SAME instance id. That is
+	// the only case a blanket release got wrong.
+	d := NewInbound(repo, func(bus.InboundMessage) bool { return false }) // bus always full
+
+	first := msg("live-1", "m-live-1")
+	second := msg("live-2", "m-live-2")
+	for _, m := range []*bus.InboundMessage{&first, &second} {
+		if !d.Enqueue(m) {
+			t.Fatalf("Enqueue(%q) = false, want the row written", m.Content)
+		}
+	}
+	pendingID := rawEnqueue(t, repo, "telegram", "m-pending", payloadFor(t, msg("pending", "m-pending")))
+
+	// A pass whose bus is full: it claims the pending row, defers it, and must
+	// hand back ONLY that row. A short context keeps the retry budget from
+	// turning the deferral into a five second wait.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	res, err := d.claimPass(ctx)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("claimPass() failed: %v", err)
+	}
+	if res.deferred != 1 {
+		t.Errorf("claimPass() deferred %d rows, want 1", res.deferred)
+	}
+
+	st := statsOf(t, repo)
+	if st.PendingInbound != 1 {
+		t.Errorf("PendingInbound = %d, want 1: the deferred row goes back for the next tick", st.PendingInbound)
+	}
+	if st.ClaimedInbound != 2 {
+		t.Errorf("ClaimedInbound = %d, want 2: the two live rows must still be held", st.ClaimedInbound)
+	}
+	if owners := claimedBy(t, f.s); len(owners) != 1 || owners[0] != d.InstanceID() {
+		t.Errorf("claimed_by = %v, want only this instance's live claims", owners)
+	}
+	if counts, err := repo.PendingBySession(store.SpoolInbound); err != nil {
+		t.Fatalf("PendingBySession() failed: %v", err)
+	} else if counts["telegram:chat-1"] != 1 {
+		t.Errorf("pending rows per session = %v, want just the deferred one", counts)
+	}
+
+	// The two live rows are still there, still claimed, and invisible to any
+	// pass: which is what stops the pump from delivering them twice.
+	for _, id := range []int64{first.SpoolID, second.SpoolID} {
+		if id == pendingID || id == 0 {
+			t.Fatalf("fixture broken: live row id %d collides with the pending row %d", id, pendingID)
+		}
+		if row := peekRow(t, f, id); row.Attempts != 0 {
+			t.Errorf("live row %d attempts = %d, want 0: a pass must never touch it", id, row.Attempts)
+		}
+	}
+
+	// A second instance can only ever reach the row that really is pending.
+	if items, err := repo.ClaimBatch(store.SpoolInbound, 10, "other-instance", time.Now()); err != nil {
+		t.Fatalf("ClaimBatch() failed: %v", err)
+	} else if len(items) != 1 || items[0].ID != pendingID {
+		t.Errorf("ClaimBatch(other) returned %d rows, want only row %d", len(items), pendingID)
 	}
 }
 
@@ -1005,7 +1244,9 @@ func TestRestartReplaysExactlyOnce(t *testing.T) {
 	}
 	first.Finish(m1)
 
-	// A second message arrives but the process dies before it is answered.
+	// A second message arrives but the process dies before it is answered. Its
+	// row stays claimed by the dead instance: that is what a crash leaves behind
+	// now that live rows are born claimed.
 	m2 := msg("second", "m-2")
 	if !first.Enqueue(&m2) {
 		t.Fatal("Enqueue() = false for the second message")
@@ -1018,6 +1259,13 @@ func TestRestartReplaysExactlyOnce(t *testing.T) {
 	reopened := f.reopen(t)
 	bus2 := newFakeBus(4)
 	second := NewInbound(reopened.Spool(), bus2.publish)
+
+	// The stale-claim reclaim Drain performs is time-based, so stand in for the
+	// timeout elapsing by running that same step against a clock far enough in
+	// the future: the successor's own Drain then sees a pending row.
+	if n, err := reopened.Spool().ReclaimStale(StaleClaimTimeout, time.Now().Add(2*StaleClaimTimeout)); err != nil || n != 1 {
+		t.Fatalf("ReclaimStale() = (%d, %v), want the orphaned claim handed back", n, err)
+	}
 
 	if n, err := second.Drain(context.Background()); err != nil || n != 1 {
 		t.Fatalf("Drain() = (%d, %v), want 1 replayed message", n, err)

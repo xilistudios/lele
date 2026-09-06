@@ -456,11 +456,10 @@ func gatewayCmd() {
 	go agentLoop.Run(ctx)
 
 	// The pump exists to catch rows a full bus refused while the gateway was
-	// live. Read the WARNING on setupDurableInbound first: with the current
-	// spool protocol the pump cannot tell such a row from one whose turn is
-	// still in flight, so it duplicates slow messages. That is why this feature
-	// ships flag-off, and why the flag must stay off until pkg/durable owns an
-	// in-flight marker.
+	// live. Such a row is handed back to the pending set by
+	// BaseChannel.publishInbound (spooler Release), and a live in-flight row is
+	// born claimed, so the pump only ever sees rows nobody is working on and
+	// cannot duplicate a message whose turn is still running.
 	di.StartPump(ctx)
 
 	// --- Graceful teardown plan -------------------------------------------
@@ -569,18 +568,16 @@ type durableInbound struct {
 // through it while REPLAYING a row it claimed, while live traffic is spooled
 // and published by BaseChannel.publishInbound.
 //
-// WARNING - the two paths are NOT disjoint as wired today, and this is a
-// spool-protocol gap, not a wiring mistake. A live message is spooled as a
-// PENDING row and stays pending until the agent loop calls Finish at the end
-// of its turn, seconds later, while SpoolRepo.ClaimBatch selects every row
-// whose claimed_by is empty - it cannot tell a row left by a dead process from
-// one this process is still working on. So a pump tick landing inside that window
-// re-publishes the live message. TestDurableInboundPumpRepublishesInFlight-
-// LiveMessage pins the duplication. The consumer's ledger does not absorb it:
-// ShouldSkip only answers "already finished", and Finish has not run yet.
-// Fixing this belongs in pkg/durable and pkg/channels (e.g. Enqueue claiming
-// the row for this instance and publishing it back to pending when the bus
-// refuses it), which is why it is reported rather than patched here.
+// The two paths are disjoint because of how the live row is claimed. Enqueue
+// writes the row already claimed by this instance, so ClaimBatch - which only
+// selects rows whose claimed_by is empty - never sees a message the agent loop
+// is working on and cannot double-publish it. If the bus refuses that live
+// publish, the channel calls Release, which hands exactly that one row back to
+// the pending set for the pump to retry on its next tick. A replay pass only
+// ever releases the ids it claimed itself, so it cannot touch a live row
+// either. The blanket ReleaseClaims at shutdown stays: the pump is already
+// stopped by then, so every claim still held is genuinely orphaned work for the
+// successor to replay.
 //
 // Both setters must run before their consumer starts: SetInboundSpooler before
 // channelManager.StartAll (channels read the field without a lock once they
