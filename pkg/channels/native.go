@@ -166,6 +166,23 @@ func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop 
 	}, nil
 }
 
+// SetInboundSpooler wires the durable inbound spooler into the channel.
+//
+// NativeChannel holds its BaseChannel in a named field instead of embedding it,
+// so the setter is not promoted and Manager.SetInboundSpooler would otherwise
+// skip this channel silently - which would leave every web, desktop and REST
+// inbound message unpersisted. This forwards to the base, which owns the single
+// publish chokepoint used by the native publishers.
+//
+// Same contract as BaseChannel.SetInboundSpooler: call before Start, never while
+// traffic is flowing.
+func (n *NativeChannel) SetInboundSpooler(s InboundSpooler) {
+	if n == nil || n.base == nil {
+		return
+	}
+	n.base.SetInboundSpooler(s)
+}
+
 func (n *NativeChannel) Name() string {
 	return ChannelName
 }

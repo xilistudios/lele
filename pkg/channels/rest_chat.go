@@ -50,7 +50,7 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 	attachments := n.processAttachments(req.Attachments, sessionKey)
 
-	n.bus.PublishInbound(bus.InboundMessage{
+	msg := bus.InboundMessage{
 		Channel:     ChannelName,
 		SenderID:    clientID,
 		ChatID:      sessionKey,
@@ -58,7 +58,8 @@ func (n *NativeChannel) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		Attachments: attachments,
 		SessionKey:  sessionKey,
 		Metadata:    map[string]string{"message_id": messageID},
-	})
+	}
+	n.base.publishInbound(&msg)
 
 	writeJSON(w, http.StatusCreated, ChatSendResponse{
 		MessageID:  messageID,

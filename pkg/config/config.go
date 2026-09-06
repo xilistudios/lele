@@ -313,6 +313,19 @@ type SessionConfig struct {
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
 	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
+	// DurableInbound persists every external inbound message to the spool
+	// table before publishing it to the bus, and replays whatever is still
+	// unprocessed after a restart. It is tri-state like
+	// CommandDefinition.AllowAbsoluteFiles: nil means "not configured", which
+	// DurableInboundEnabled resolves to false. Off by default until the path
+	// has been hardened in production.
+	DurableInbound *bool `json:"durable_inbound,omitempty"`
+}
+
+// DurableInboundEnabled reports whether durable inbound replay is on.
+// An unset flag is false: durability is opt-in.
+func (s SessionConfig) DurableInboundEnabled() bool {
+	return s.DurableInbound != nil && *s.DurableInbound
 }
 
 const DefaultEphemeralThresholdSeconds = 560
