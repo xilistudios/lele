@@ -8,6 +8,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -257,18 +258,26 @@ func TestHarnessManager_ConcurrentRebuild(t *testing.T) {
 		}()
 	}
 	// Mutate the config (fingerprint changes -> rebuilds) while readers run.
-	// Each iteration publishes a NEW map: a real hot-reload replaces the whole
-	// Config, and mutating the shared map in place would be a test-only race.
+	// Each iteration publishes a NEW Config: a real hot-reload replaces the
+	// whole struct, and mutating the shared map in place would be a test-only
+	// race. The clone goes through JSON because Config embeds a RWMutex (vet
+	// forbids copying it with *cfg).
 	for n := 1; n <= 30; n++ {
-		cfg := al.cfg()
-		next := make(map[string]config.CommandDefinition, len(cfg.Commands)+1)
-		for k, v := range cfg.Commands {
+		raw, err := json.Marshal(al.cfg())
+		if err != nil {
+			t.Fatalf("marshal config: %v", err)
+		}
+		mutated := &config.Config{}
+		if err := json.Unmarshal(raw, mutated); err != nil {
+			t.Fatalf("unmarshal config: %v", err)
+		}
+		next := make(map[string]config.CommandDefinition, len(mutated.Commands)+1)
+		for k, v := range mutated.Commands {
 			next[k] = v
 		}
 		next[fmt.Sprintf("cmd%d", n)] = config.CommandDefinition{Template: "t"}
-		mutated := *cfg
 		mutated.Commands = next
-		al.cfgPtr.Store(&mutated)
+		al.cfgPtr.Store(mutated)
 	}
 	close(stop)
 	wg.Wait()

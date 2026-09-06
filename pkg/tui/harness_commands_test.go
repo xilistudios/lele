@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/harness"
@@ -328,4 +331,89 @@ func containsName(names []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestQueueFlush_CustomCommandReachesBackendExpanded is the integration pin
+// for the queued-custom-command path: enqueue while busy, flush when idle, and
+// verify (a) the TUI publishes the RAW "/hola mundo" text (no prefix or
+// rewrite that could block expansion) and (b) the real backend loop expands it
+// and emits command.applied with the harness metadata. Steps (a) and (b) are
+// each covered in isolation elsewhere; this test pins the seam between them.
+//
+// It deliberately does NOT reuse newTestModelWithConfig: that helper cancels
+// the loop context when it returns, so no test could ever observe the backend
+// processing a message.
+func TestQueueFlush_CustomCommandReachesBackendExpanded(t *testing.T) {
+	cfg := testModelConfig(t)
+	cfg.Commands = map[string]config.CommandDefinition{
+		"hola": {Description: "Saluda", Template: "hola $ARGUMENTS"},
+	}
+	msgBus := bus.NewMessageBus()
+	al := agent.NewAgentLoop(cfg, msgBus)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go al.Run(ctx)
+
+	m := NewModel(cfg, al, al.SessionManager())
+	m.onboardingActive = false
+
+	if cmd := m.executeCommand("/new"); cmd != nil {
+		if r := cmd(); r != nil {
+			updated, _ := m.Update(r)
+			m = updated.(*Model)
+		}
+	}
+	if m.currentKey == "" {
+		t.Fatal("/new did not create a session")
+	}
+
+	// Busy: the custom command must land in the queue, not on the bus.
+	m.processing = true
+	if cmd := m.executeCommand("/hola mundo"); cmd == nil {
+		t.Fatal("expected tick command for queued message")
+	}
+	q := m.messageQueue[m.currentKey]
+	if len(q) != 1 || q[0].Content != "/hola mundo" {
+		t.Fatalf("queue = %+v, want raw '/hola mundo'", q)
+	}
+
+	// Idle again: flush pops the raw text and publishes it. The returned cmd
+	// may legitimately be nil (the tick chain armed at enqueue time still
+	// counts as pending), so assert on the publish side effects instead.
+	m.processing = false
+	m.startTime = time.Time{}
+	if cmd := m.maybeFlushQueue(); cmd != nil {
+		if r := cmd(); r != nil {
+			updated, _ := m.Update(r)
+			m = updated.(*Model)
+		}
+	}
+
+	if m.pendingUserMessage != "/hola mundo" {
+		t.Errorf("pendingUserMessage = %q, want raw '/hola mundo'", m.pendingUserMessage)
+	}
+	if len(m.messageQueue[m.currentKey]) != 0 {
+		t.Errorf("queue not drained: %+v", m.messageQueue[m.currentKey])
+	}
+
+	// The real agent loop consumes the inbound message, applyHarnessCommand
+	// expands it, and command.applied shows up on the outbound bus.
+	mb := m.agentLoop.MessageBus()
+	deadline := time.After(8 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		msg, ok := mb.SubscribeOutbound(ctx)
+		cancel()
+		if ok && msg.Event == "command.applied" {
+			if msg.Metadata["command"] != "hola" || msg.Metadata["args"] != "mundo" || msg.Metadata["source"] != "config" {
+				t.Errorf("command.applied metadata = %+v, want command=hola args=mundo source=config", msg.Metadata)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for command.applied from the backend")
+		default:
+		}
+	}
 }
