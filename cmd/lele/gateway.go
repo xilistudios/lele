@@ -450,10 +450,12 @@ func gatewayCmd() {
 	// rest: the process must never keep the instance lock because one stop step
 	// returned an error.
 
-	// Registered first => runs last.
+	// Registered first => runs last. Critical: the lock release must not be
+	// skipped by budget exhaustion, or a restarting child would have to steal a
+	// still-held lock and fall back to the stale-timeout path.
 	if desktop && instanceLock != nil {
 		lock := instanceLock
-		coord.Register("lock-release", 2*time.Second, func(context.Context) error {
+		coord.RegisterCritical("lock-release", 2*time.Second, func(context.Context) error {
 			return lock.Release()
 		})
 	}

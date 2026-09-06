@@ -22,9 +22,10 @@ var ErrShutdownBudgetExceeded = errors.New("shutdown budget exceeded")
 
 // hook is a single registered shutdown step.
 type hook struct {
-	name    string
-	timeout time.Duration
-	fn      func(context.Context) error
+	name     string
+	timeout  time.Duration
+	fn       func(context.Context) error
+	critical bool
 }
 
 // ShutdownCoordinator runs registered shutdown hooks in LIFO order, each with
@@ -87,12 +88,42 @@ func (c *ShutdownCoordinator) Register(name string, timeout time.Duration, fn fu
 	c.hooks = append(c.hooks, hook{name: name, timeout: timeout, fn: fn})
 }
 
+// RegisterCritical adds a hook that MUST run even if the overall budget has
+// already been spent by the non-critical hooks. Critical hooks run after the
+// budgeted LIFO pass (so still after everything else), in LIFO order among
+// themselves, each still bounded by its own timeout.
+//
+// It exists for the one teardown step that must never be skipped: releasing the
+// desktop instance lock. If budget exhaustion skipped it, the process would rely
+// on the implicit invariant "the parent always exits so the child steals the
+// now-stale lock" — a fragile guarantee to encode in a lock handoff. Running it
+// unconditionally makes the release a property of the coordinator, not of the
+// surrounding code's control flow.
+func (c *ShutdownCoordinator) RegisterCritical(name string, timeout time.Duration, fn func(context.Context) error) {
+	if fn == nil {
+		logger.WarnCF("shutdown", "Ignoring critical shutdown hook with nil function", map[string]interface{}{"hook": name})
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.started {
+		logger.WarnCF("shutdown", "Ignoring critical shutdown hook registered after shutdown started", map[string]interface{}{
+			"hook": name,
+		})
+		return
+	}
+	c.hooks = append(c.hooks, hook{name: name, timeout: timeout, fn: fn, critical: true})
+}
+
 // RunAll executes all hooks once. It is idempotent: a second call returns the
 // recorded results without re-running (and a concurrent second call waits for
 // the first to finish). It NEVER inherits a cancelled context — the caller's
 // ctx is used only for the overall deadline, and if it is already cancelled
 // RunAll still runs the hooks with their own timeouts derived from
-// context.Background(). Returns name -> error (nil error means success).
+// context.Background(). Non-critical hooks are subject to the overall budget;
+// critical hooks (RegisterCritical) always run afterwards. Returns
+// name -> error (nil error means success).
 func (c *ShutdownCoordinator) RunAll(ctx context.Context) map[string]error {
 	c.mu.Lock()
 	if c.started {
@@ -126,9 +157,16 @@ func (c *ShutdownCoordinator) RunAll(ctx context.Context) map[string]error {
 		"budget": total.String(),
 	})
 
-	// LIFO: the last registered hook runs first.
+	// Phase 1 (budgeted): non-critical hooks run in LIFO order and stop being
+	// started once the overall budget is spent.
+	// Phase 2 (guaranteed): critical hooks run afterwards regardless of budget,
+	// each still bounded by its own timeout. This keeps the instance-lock
+	// release from ever being skipped by budget exhaustion.
 	for i := len(hooks) - 1; i >= 0; i-- {
 		h := hooks[i]
+		if h.critical {
+			continue
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			results[h.name] = ErrShutdownBudgetExceeded
@@ -141,6 +179,21 @@ func (c *ShutdownCoordinator) RunAll(ctx context.Context) map[string]error {
 		timeout := h.timeout
 		if timeout <= 0 || timeout > remaining {
 			timeout = remaining
+		}
+		results[h.name] = runHook(h, timeout)
+	}
+
+	// Critical hooks are guaranteed to run. They still respect their own
+	// timeout so a hung critical hook cannot wedge the process indefinitely; a
+	// non-positive timeout falls back to the full budget as a ceiling.
+	for i := len(hooks) - 1; i >= 0; i-- {
+		h := hooks[i]
+		if !h.critical {
+			continue
+		}
+		timeout := h.timeout
+		if timeout <= 0 {
+			timeout = total
 		}
 		results[h.name] = runHook(h, timeout)
 	}

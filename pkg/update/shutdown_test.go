@@ -194,6 +194,51 @@ func TestRunAllBudgetExceeded(t *testing.T) {
 	}
 }
 
+// TestRunAllCriticalHookRunsAfterBudget asserts a critical hook runs even when
+// the overall budget has already been spent by the non-critical pass. This is
+// the guarantee that keeps the instance-lock release from being skipped.
+func TestRunAllCriticalHookRunsAfterBudget(t *testing.T) {
+	c := NewShutdownCoordinator(100 * time.Millisecond)
+
+	var mu sync.Mutex
+	ran := []string{}
+	slow := func(name string, d time.Duration) func(context.Context) error {
+		return func(ctx context.Context) error {
+			mu.Lock()
+			ran = append(ran, name)
+			mu.Unlock()
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+			}
+			return nil
+		}
+	}
+
+	// lock-release is registered first => runs last in LIFO, and is critical.
+	c.RegisterCritical("lock-release", time.Second, slow("lock", 10*time.Millisecond))
+	// This non-critical hook burns the entire budget.
+	c.Register("burn", time.Second, slow("burn", 5*time.Second))
+
+	results := c.RunAll(context.Background())
+
+	// "burn" got started (its timeout was clamped to the budget) and is recorded
+	// as a deadline-exceeded timeout.
+	if err := results["burn"]; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hook \"burn\" error = %v, want a deadline-exceeded timeout", err)
+	}
+	// The critical hook must have run to completion despite the budget being gone.
+	if err := results["lock-release"]; err != nil {
+		t.Fatalf("critical hook \"lock-release\" error = %v, want nil (must run regardless of budget)", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(ran, ",") != "burn,lock" {
+		t.Fatalf("hooks that ran = %v, want [burn lock]: the critical hook must not be skipped", ran)
+	}
+}
+
 // TestRunAllSurvivesPanic asserts a panicking hook is recorded as an error and
 // the remaining hooks still run.
 func TestRunAllSurvivesPanic(t *testing.T) {

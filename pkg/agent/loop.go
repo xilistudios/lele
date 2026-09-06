@@ -926,6 +926,17 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 //	the durable spool replays such a turn — while work that is already underway
 //	must not be killed mid-call. Acquiring first, then detaching from the root
 //	cancellation, is the only ordering that satisfies both.
+//
+//	Goal-continuation loops (/goal) are tracked by al.wg but run under
+//	goalStopCtx, which Shutdown deliberately does NOT cancel — only Stop does,
+//	after every hook. The consequence: an in-flight goal turn is allowed to
+//	progress during the drain, so a self-restart can hand off to the new
+//	binary without interrupting it. If it has not finished when the drain budget
+//	is spent, Shutdown returns DeadlineExceeded and Stop cancels goalStopCtx;
+//	the goal is then left paused and the user resumes it with /goal resume (goals
+//	are not auto-resumed at startup). The shutdown budget is therefore sized so a
+//	normal turn fits, and a long-running goal is an accepted, bounded loss rather
+//	than something to drain unconditionally.
 func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	// Stop taking new inbound messages: Run's loop re-checks this flag, and the
 	// backlog left in the bus is harmless because channels re-deliver after the
