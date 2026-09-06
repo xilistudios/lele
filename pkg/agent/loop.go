@@ -35,6 +35,30 @@ import (
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
+// InboundDurability is the consumer-side view of the durable inbound spool
+// (implemented by *durable.Inbound, which the gateway wires in).
+//
+// pkg/agent deliberately does not import pkg/durable: the gateway owns the
+// storage wiring and hands the implementation in through SetInboundDurability,
+// so the loop depends only on this narrow contract and stays free of any
+// database knowledge. It only ever asks "was this already handled?" and
+// "this turn is over, release the row".
+//
+// Both methods must be safe to call from the message goroutines and must never
+// block on I/O for long; the implementations in pkg/durable are best-effort and
+// log instead of returning errors.
+type InboundDurability interface {
+	// ShouldSkip reports whether msg has already been fully processed, i.e.
+	// this delivery is a replay after a restart and the turn must not run a
+	// second time.
+	ShouldSkip(msg bus.InboundMessage) bool
+	// Finish records that the turn for msg is over: the spool row is completed
+	// and msg is entered in the dedupe ledger. It is a no-op for messages that
+	// were never spooled (empty DedupeID and SpoolID 0 - TUI, synthetic events,
+	// durability off).
+	Finish(msg bus.InboundMessage)
+}
+
 // AgentLoop is the main agent loop structure that orchestrates message processing.
 type AgentLoop struct {
 	bus             *bus.MessageBus
@@ -107,6 +131,13 @@ type AgentLoop struct {
 	harnessMgr   *harness.Manager
 	harnessCfgFP string
 	harnessMu    sync.Mutex
+
+	// inboundDurability completes the durable spool row for every turn this
+	// loop runs. nil means durability is off: no dedupe check, no Finish, and
+	// the message goroutine behaves exactly as before the feature existed.
+	// Written only by SetInboundDurability, which must be called once at
+	// startup before Run, so no synchronisation is needed here.
+	inboundDurability InboundDurability
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -839,6 +870,18 @@ func (al *AgentLoop) publishTurnEnd(m bus.InboundMessage) {
 	al.bus.PublishOutbound(msg)
 }
 
+// SetInboundDurability wires the durable inbound spool into the loop so every
+// turn completes its spool row and replays are deduplicated.
+//
+// Call it exactly once, at startup and BEFORE Run: the field is read by every
+// message goroutine without a lock, and swapping the implementation mid-flight
+// would let old and new rows be completed by different owners. Passing nil
+// turns durability off again, which is the state a loop built without the
+// feature flag starts in.
+func (al *AgentLoop) SetInboundDurability(d InboundDurability) {
+	al.inboundDurability = d
+}
+
 // Run starts the main agent loop.
 func (al *AgentLoop) Run(ctx context.Context) error {
 	al.running.Store(true)
@@ -865,9 +908,79 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				// which already performed the cleanup itself.
 				defer al.publishTurnEnd(m)
 
+				// Durable inbound: a replay after a restart may deliver a
+				// message the previous process already answered. The ledger is
+				// the authority, so the turn is skipped entirely - but the
+				// deferred turn.end above still fires, which is intentional: it
+				// is idempotent and the channel needs the terminal signal for
+				// anything it had already started for this message id.
+				//
+				// Messages that were never spooled (TUI input, synthetic events,
+				// durability off) carry an empty DedupeID and SpoolID 0, and
+				// pkg/durable's own guards make ShouldSkip false and Finish a
+				// no-op for them, so this path never touches the ledger.
+				dur := al.inboundDurability
+				if dur != nil && dur.ShouldSkip(m) {
+					logger.InfoCF("durable", "Skipping already-processed inbound replay",
+						map[string]interface{}{
+							"channel":     m.Channel,
+							"chat_id":     m.ChatID,
+							"session_key": m.SessionKey,
+							"spool_id":    m.SpoolID,
+						})
+					return
+				}
+
+				// Finish must run on every exit path that actually consumed the
+				// message, and must NOT run when the turn was killed by gateway
+				// teardown, so the row survives for the successor process to
+				// replay. A single defer plus this flag keeps that rule in one
+				// place instead of duplicating Finish across branches.
+				//
+				// The two cancellation sources look identical from here (both
+				// surface as context.Canceled) and are told apart by
+				// al.running:
+				//   - user /cancel: llm_runner.go cancels the session context
+				//     while the loop is still running -> running is true -> the
+				//     turn is done as far as the user is concerned -> Finish.
+				//   - Shutdown: it stores running=false BEFORE the shutdown
+				//     hooks cancel any context, so a false flag means the
+				//     gateway is tearing the process down mid-turn -> do NOT
+				//     Finish; the spool row is replayed after the restart.
+				finishTurn := true
+				if dur != nil {
+					defer func() {
+						if !finishTurn {
+							return
+						}
+						// Runs after the final PublishOutbound below (defers
+						// unwind LIFO and the response is published from the
+						// goroutine body), so the row is only completed once the
+						// answer is queued for delivery. The accepted
+						// at-least-once window: a crash between that publish and
+						// this Finish leaves the row pending, and the next
+						// replay delivers a duplicate answer. Losing the message
+						// outright is the worse failure, so the ordering favours
+						// completing late.
+						dur.Finish(m)
+					}()
+				}
+
 				response, err := al.messageProcessor.processMessage(ctx, m)
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
+						if !al.running.Load() {
+							// Gateway teardown, not a user stop: keep the row
+							// pending so the successor process replays it.
+							finishTurn = false
+							logger.WarnCF("durable", "Inbound turn cancelled by shutdown; spool row left for replay",
+								map[string]interface{}{
+									"channel":     m.Channel,
+									"chat_id":     m.ChatID,
+									"session_key": m.SessionKey,
+									"spool_id":    m.SpoolID,
+								})
+						}
 						logger.InfoCF("agent", "Message processing canceled",
 							map[string]interface{}{
 								"channel":     m.Channel,
@@ -878,6 +991,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						// turn.end is the only thing that can stop typing.
 						return
 					}
+					// Provider/tool failure: the user is told below, so the
+					// message is handled and its row must be completed - a
+					// replay would only answer them twice.
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
 
@@ -894,7 +1010,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					al.bus.PublishOutbound(outboundMsg)
 				}
 				// Empty response: nothing was published above, yet the turn is
-				// over. The deferred turn.end still fires.
+				// over. The deferred turn.end still fires, and so does Finish:
+				// an empty answer is still an answer the user got.
 			}(msg)
 		}
 	}
