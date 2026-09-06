@@ -71,4 +71,43 @@ describe('SlashCommandMenu', () => {
     expect(getByTestId('slash-command-menu')).toBeTruthy()
     expect(queryAllByRole('option')).toHaveLength(0)
   })
+
+  // ── Custom (harness) commands ───────────────────────────────────────────
+
+  const review: SlashCommandInfo = {
+    name: '/review',
+    description: 'Review the current diff',
+    usage: '/review [args]',
+    source: 'workspace',
+  }
+
+  test('renders custom commands with their description and source badge', () => {
+    const { getAllByRole } = render(
+      <SlashCommandMenu items={[clear, review]} activeIndex={1} onSelect={mock(() => {})} />,
+    )
+
+    const options = getAllByRole('option')
+    expect(options[1].textContent).toContain('/review')
+    expect(options[1].textContent).toContain('Review the current diff')
+    expect(options[1].textContent).toContain('workspace')
+  })
+
+  test('built-in rows carry no source badge', () => {
+    const { getAllByRole, queryByTestId } = render(
+      <SlashCommandMenu items={[clear]} activeIndex={0} onSelect={mock(() => {})} />,
+    )
+
+    expect(getAllByRole('option')).toHaveLength(1)
+    expect(queryByTestId('slash-command-source-/clear')).toBeNull()
+  })
+
+  test('selecting a custom command hands the whole entry to the composer', () => {
+    const onSelect = mock(() => {})
+    const { getAllByRole } = render(
+      <SlashCommandMenu items={[review]} activeIndex={0} onSelect={onSelect} />,
+    )
+
+    fireEvent.mouseDown(getAllByRole('option')[0])
+    expect(onSelect).toHaveBeenCalledWith(review)
+  })
 })

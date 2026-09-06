@@ -50,4 +50,28 @@ describe('useSlashCommands', () => {
     expect(result.current.loading).toBe(true)
     expect(result.current.commands).toEqual([])
   })
+
+  test('custom commands (with source) flow through untouched', async () => {
+    const builtin: SlashCommandInfo = { name: '/clear', description: 'Clear.', usage: '/clear' }
+    const custom: SlashCommandInfo = {
+      name: '/review',
+      description: 'Review the current diff',
+      usage: '/review [args]',
+      source: 'workspace',
+    }
+    const mockApi = {
+      chatCommands: mock(() => Promise.resolve({ commands: [builtin, custom] })),
+    }
+
+    const { result } = renderHook(() => useSlashCommands(mockApi as never))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    // The hook must not whitelist fields: `source` reaches the palette as-is
+    // (built-ins keep it undefined, custom ones carry their discovery level).
+    expect(result.current.commands).toEqual([builtin, custom])
+    expect(result.current.commands[0].source).toBeUndefined()
+    expect(result.current.commands[1].source).toBe('workspace')
+    expect(result.current.commands[1].usage).toBe('/review [args]')
+  })
 })

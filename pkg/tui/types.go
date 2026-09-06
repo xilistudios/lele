@@ -224,6 +224,11 @@ type Model struct {
 	autocompleteItems []commandInfo
 	autocompleteIdx   int
 
+	// Custom (harness) slash commands discovered by the backend, cached for
+	// customCommandsRefreshTTL. Names already include the leading slash.
+	customCmds   []commandInfo
+	customCmdsAt time.Time
+
 	// Selection modals
 	modalMode         modalType
 	modalItems        []string

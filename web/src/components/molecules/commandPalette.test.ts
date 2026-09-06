@@ -92,3 +92,46 @@ describe('completeDraft', () => {
     expect(isPaletteTrigger(completeDraft('/c', clear))).toBe(false)
   })
 })
+
+// ── Custom (harness-defined) commands ───────────────────────────────────────
+// The backend now merges user-defined commands into /api/v1/chat/commands with
+// the same shape plus `source`. Nothing may filter them out: the palette is
+// their only discovery surface.
+
+const review: SlashCommandInfo = {
+  name: '/review',
+  description: 'Review the current diff',
+  usage: '/review [args]',
+  source: 'workspace',
+}
+const hola: SlashCommandInfo = {
+  name: '/hola',
+  description: 'Saluda',
+  usage: '/hola [args]',
+  source: 'directory',
+}
+
+describe('custom commands in the palette', () => {
+  test('custom entries survive filtering (no whitelist on name/source)', () => {
+    const all = [...commands, review, hola]
+    expect(filterCommands(all, '/r')).toEqual([review])
+    expect(filterCommands(all, '/')).toEqual(all)
+  })
+
+  test('unknown source values still render (source is display-only)', () => {
+    const exotic: SlashCommandInfo = { ...review, source: 'future-level' }
+    expect(filterCommands([...commands, exotic], '/rev')).toEqual([exotic])
+  })
+
+  test('accepting a custom command leaves a trailing space for args', () => {
+    expect(completeDraft('/rev', review)).toBe('/review ')
+    expect(completeDraft('/h', hola)).toBe('/hola ')
+  })
+
+  test('the completed custom draft hides the palette and is ready for args', () => {
+    const draft = completeDraft('/rev', review)
+    expect(isPaletteTrigger(draft)).toBe(false)
+    // Typing args after the completion keeps the command in use.
+    expect(filterCommands([...commands, review], `${draft}src/main.go`)).toEqual([])
+  })
+})

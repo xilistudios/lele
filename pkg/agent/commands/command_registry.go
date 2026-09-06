@@ -18,13 +18,22 @@
 // TestCommandRegistry_ReexportMatchesSource in pkg/agent.
 package commands
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // CommandInfo describes a backend-dispatched slash command for UI clients.
 type CommandInfo struct {
 	Name        string `json:"name"`        // e.g. "/clear"
 	Description string `json:"description"` // short human-readable description (English)
 	Usage       string `json:"usage"`       // e.g. "/clear" or "/compact"
+	// Source is where the definition came from: empty for built-ins (the
+	// registry above) and one of the harness discovery levels ("config",
+	// "global", "workspace", "directory") for user-defined commands. It is
+	// omitempty so built-ins stay byte-identical on the wire and UIs can tell
+	// the two apart without a name allowlist.
+	Source string `json:"source,omitempty"` // "" = built-in; else harness.Source
 }
 
 // webUICommands is the source of truth for the commands UI-visible clients may
@@ -63,4 +72,64 @@ func WebUICommands() []CommandInfo {
 	copy(out, webUICommands)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// CustomCommandInfo describes a user-defined (harness) slash command for UI
+// clients. It is the harness counterpart of CommandInfo: Name/Description/Usage
+// follow the same shape so clients can render both kinds uniformly, plus Source
+// which tells where the definition came from ("config", "global", "workspace"
+// or "directory") so UIs can badge custom entries.
+type CustomCommandInfo struct {
+	Name        string `json:"name"`        // e.g. "/review"
+	Description string `json:"description"` // short human-readable description
+	Usage       string `json:"usage"`       // e.g. "/review $ARGUMENTS"
+	Source      string `json:"source"`      // discovery level (harness.Source)
+}
+
+// WithCustom merges custom commands into a base (built-in) command list for UI
+// presentation. Built-ins win name collisions: a custom command shadowed by a
+// dispatched built-in is dropped, because the backend would never reach it.
+//
+// Names are normalized to a leading slash and compared case-insensitively, so
+// "/Review" and "review" collide with "/review". The result is always a fresh
+// slice sorted by name; neither input is mutated.
+func WithCustom(base []CommandInfo, custom []CustomCommandInfo) []CommandInfo {
+	out := make([]CommandInfo, 0, len(base)+len(custom))
+	seen := make(map[string]struct{}, len(base)+len(custom))
+
+	for _, c := range base {
+		out = append(out, c)
+		seen[normalizeCommandName(c.Name)] = struct{}{}
+	}
+
+	for _, c := range custom {
+		key := normalizeCommandName(c.Name)
+		if key == "" || key == "/" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, CommandInfo{
+			Name:        key,
+			Description: c.Description,
+			Usage:       c.Usage,
+			Source:      c.Source,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// normalizeCommandName makes a command name comparable and presentable:
+// lowercase, with exactly one leading slash.
+func normalizeCommandName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.TrimLeft(n, "/")
+	if n == "" {
+		return ""
+	}
+	return "/" + n
 }

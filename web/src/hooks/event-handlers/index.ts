@@ -38,6 +38,14 @@ export {
 } from './tools'
 
 export {
+  COMMAND_TOOL_NAME,
+  buildCommandAppliedArgs,
+  buildCommandAppliedMessage,
+  buildCommandAppliedToolArgs,
+  handleCommandApplied,
+} from './command'
+
+export {
   handleApprovalRequest,
   handleApproveResult,
   handleCancelAck,
@@ -59,6 +67,7 @@ import {
   handleCancelAck,
   handleSubscribeAck,
 } from './approvals'
+import { handleCommandApplied } from './command'
 import { handleGroupComplete, handleGroupStatus, handleGroupTool, handleGroupTurn } from './groups'
 import {
   handleAttachments,
@@ -89,6 +98,7 @@ const HANDLERS: Record<string, (ctx: MessageEventContext, event: ClientEvent) =>
   'messages.catchup': (ctx, e) => handleMessagesCatchup(ctx, e.data as Record<string, unknown>),
   attachments: (ctx, e) => handleAttachments(ctx, e),
   'tool.executing': (ctx, e) => handleToolExecuting(ctx, e.data as Record<string, unknown>),
+  'command.applied': (ctx, e) => handleCommandApplied(ctx, e.data as Record<string, unknown>),
   'tool.result': (ctx, e) => handleToolResult(ctx, e.data as Record<string, unknown>),
   'subagent.result': (ctx, e) => handleSubagentResult(ctx, e.data as Record<string, unknown>),
   'approval.request': (ctx, e) => handleApprovalRequest(ctx, e),

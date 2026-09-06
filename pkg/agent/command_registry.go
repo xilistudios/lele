@@ -29,3 +29,17 @@ type CommandInfo = commands.CommandInfo
 func WebUICommands() []CommandInfo {
 	return commands.WebUICommands()
 }
+
+// CustomCommandInfo describes a user-defined (harness) slash command for UI
+// clients. Alias of commands.CustomCommandInfo, mirroring CommandInfo: the
+// registry lives in the leaf package so both pkg/agent and pkg/channels can
+// reach it.
+type CustomCommandInfo = commands.CustomCommandInfo
+
+// WithCustom merges custom commands into a built-in command list, built-ins
+// winning name collisions, returning a fresh slice sorted by name.
+//
+// Delegates to commands.WithCustom, the single source of truth.
+func WithCustom(base []CommandInfo, custom []CustomCommandInfo) []CommandInfo {
+	return commands.WithCustom(base, custom)
+}

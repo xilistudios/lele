@@ -24,6 +24,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/group"
+	"github.com/xilistudios/lele/pkg/harness"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -80,6 +81,14 @@ type AgentLoop struct {
 	// judge-evaluation gap between turns.
 	goalLoopMu       sync.Mutex
 	goalLoopSessions map[string]struct{}
+
+	// harnessMgr lazily holds the custom slash-command manager built from the
+	// current config. harnessCfgFP fingerprints the config inputs the manager
+	// depends on; when it changes the manager is rebuilt (config hot-reload).
+	// harnessMu guards both.
+	harnessMgr   *harness.Manager
+	harnessCfgFP string
+	harnessMu    sync.Mutex
 }
 
 func (al *AgentLoop) cfg() *config.Config {
@@ -346,6 +355,10 @@ type processOptions struct {
 	MessageID       string
 	SkipUserMessage bool
 	SkipGoalLoop    bool // true when called from goal continuation (prevents recursion)
+	// ModelOverride is a per-turn model selected by a harness custom command
+	// (config/markdown "model:" field). It wins over the session model for this
+	// turn only and is NEVER persisted into sessionModels or the session store.
+	ModelOverride string
 }
 
 // SummarizeStats contains statistics about a summarization operation.

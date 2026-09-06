@@ -672,6 +672,21 @@ func (n *NativeChannel) dispatchOutboundMessage(msg bus.OutboundMessage) {
 			Reason:  msg.Metadata["reason"],
 		}, "")
 		return
+	case "command.applied":
+		// A user-defined (harness) slash command was expanded into the prompt
+		// for this turn. Every field arrives pre-resolved in Metadata (see
+		// messageProcessorImpl.publishCommandApplied), so this branch needs no
+		// agent loop at all — only the sessionKey Send already computed.
+		n.emitNativeEvent(sessionKey, "command.applied", WSCommandAppliedPayload{
+			SessionKey:  sessionKey,
+			Command:     msg.Metadata["command"],
+			Description: msg.Metadata["description"],
+			Args:        msg.Metadata["args"],
+			Agent:       msg.Metadata["agent"],
+			Model:       msg.Metadata["model"],
+			Source:      msg.Metadata["source"],
+		}, "")
+		return
 	case "turn.end":
 		// turn.end exists for channels that show transient "the bot is
 		// working" state (Telegram's typing indicator). The WebUI derives its

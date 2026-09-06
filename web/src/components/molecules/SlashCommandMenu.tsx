@@ -41,6 +41,15 @@ function CommandRow({ command, active, rowId, onSelect, onHover, index }: RowPro
     >
       <code className="flex-shrink-0 font-mono text-[11px] font-semibold">{command.name}</code>
       <span className="min-w-0 truncate text-[11px] text-text-tertiary">{command.description}</span>
+      {/* Custom (harness-defined) commands carry `source`; built-ins do not. */}
+      {command.source ? (
+        <span
+          data-testid={`slash-command-source-${command.name}`}
+          className="ml-auto flex-shrink-0 rounded-md border border-border bg-background-tertiary px-1 py-0.5 text-[9px] font-medium uppercase text-text-tertiary"
+        >
+          {command.source}
+        </span>
+      ) : null}
     </div>
   )
 }

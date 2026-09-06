@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/harness"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -147,12 +148,148 @@ func (m *Model) publishUserMessage(content string) tea.Cmd {
 	return m.tickCmd()
 }
 
+// customCommandsRefreshTTL is how long the snapshot of backend custom (harness)
+// slash commands stays valid before the TUI asks the agent loop again. Custom
+// commands are defined in markdown files that users can edit at any time, so a
+// short TTL keeps the palette fresh without hitting the registry on every
+// keystroke.
+const customCommandsRefreshTTL = 30 * time.Second
+
+// harnessCommandSource is the subset of the agent loop the TUI needs to list
+// custom slash commands. It is asserted dynamically (not declared on Model) so
+// the TUI keeps working against backends that predate the harness.
+type harnessCommandSource interface {
+	HarnessCommands() []*harness.Command
+}
+
+// customCommands returns the backend-defined slash commands (config.json,
+// ~/.lele/commands, <workspace>/commands, ./.lele/commands) as commandInfo
+// entries whose names include the leading slash. The result is cached for
+// customCommandsRefreshTTL and is nil when the agent loop is unavailable or
+// does not support harness commands.
+func (m *Model) customCommands() []commandInfo {
+	if m.agentLoop == nil {
+		return nil
+	}
+	if m.customCmds != nil && time.Since(m.customCmdsAt) < customCommandsRefreshTTL {
+		return m.customCmds
+	}
+
+	src, ok := interface{}(m.agentLoop).(harnessCommandSource)
+	if !ok {
+		m.customCmds = []commandInfo{}
+		m.customCmdsAt = time.Now()
+		return nil
+	}
+
+	cmds := src.HarnessCommands()
+	list := make([]commandInfo, 0, len(cmds))
+	for _, c := range cmds {
+		if c == nil || c.Name == "" {
+			continue
+		}
+		list = append(list, commandInfo{name: "/" + c.Name, description: harnessCommandDescription(c)})
+	}
+
+	// Non-nil slice (even empty) so the cache is honoured between refreshes.
+	m.customCmds = list
+	m.customCmdsAt = time.Now()
+	return list
+}
+
+// harnessCommandDescription builds the one-line palette description for a
+// custom command, appending its agent/model overrides when set.
+func harnessCommandDescription(c *harness.Command) string {
+	desc := c.Description
+	var suffix []string
+	if c.Agent != "" {
+		suffix = append(suffix, "agent: "+c.Agent)
+	}
+	if c.Model != "" {
+		suffix = append(suffix, "model: "+c.Model)
+	}
+	if len(suffix) > 0 {
+		if desc != "" {
+			desc += " · "
+		}
+		desc += strings.Join(suffix, " · ")
+	}
+	return desc
+}
+
+// commandAppliedArgsRunes caps how many runes of the raw command arguments are
+// shown on the "command applied" activity line.
+const commandAppliedArgsRunes = 60
+
+// formatCommandApplied renders the single-line activity entry for a
+// "command.applied" bus event (custom slash command expanded by the backend).
+// It is a pure function of the event metadata so it can be unit-tested without
+// a bubbletea runtime. Shape: "⚡ /name args · agent: X · model: Y".
+func formatCommandApplied(meta map[string]string) string {
+	name := meta["command"]
+	if name == "" {
+		return ""
+	}
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	line := "⚡ " + name + " applied"
+
+	args := strings.TrimSpace(meta["args"])
+	if args != "" {
+		if len([]rune(args)) > commandAppliedArgsRunes {
+			args = truncateRunes(args, commandAppliedArgsRunes) + "…"
+		}
+		line += " " + args
+	}
+	if agent := meta["agent"]; agent != "" {
+		line += " · agent: " + agent
+	}
+	if model := meta["model"]; model != "" {
+		line += " · model: " + model
+	}
+	return line
+}
+
+// isCustomCommand reports whether name (with or without leading slash, any
+// case) matches one of the custom commands.
+func (m *Model) isCustomCommand(name string) bool {
+	want := strings.ToLower(strings.TrimPrefix(name, "/"))
+	if want == "" {
+		return false
+	}
+	for _, c := range m.customCommands() {
+		if strings.ToLower(strings.TrimPrefix(c.name, "/")) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) filterAutocomplete(val string) {
 	m.autocompleteItems = nil
 	for _, cmd := range allCommands {
 		if strings.HasPrefix(cmd.name, val) {
 			m.autocompleteItems = append(m.autocompleteItems, cmd)
 		}
+	}
+	// Then the backend custom commands. Built-ins win on name collision, and
+	// the registry already returns them sorted by name.
+	for _, cmd := range m.customCommands() {
+		if !strings.HasPrefix(cmd.name, val) {
+			continue
+		}
+		builtin := false
+		for _, b := range allCommands {
+			if b.name == cmd.name {
+				builtin = true
+				break
+			}
+		}
+		if builtin {
+			continue
+		}
+		m.autocompleteItems = append(m.autocompleteItems, cmd)
 	}
 	if m.autocompleteIdx >= len(m.autocompleteItems) {
 		m.autocompleteIdx = 0

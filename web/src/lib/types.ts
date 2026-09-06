@@ -563,6 +563,13 @@ export type SlashCommandInfo = {
   name: string
   description: string
   usage: string
+  /**
+   * Where the command was defined. Absent (undefined) for built-ins; set for
+   * user-defined harness commands (pkg/harness.Source). Drives the palette
+   * badge and the "[args]" usage hint — never a filter, so unknown future
+   * sources still render.
+   */
+  source?: string
 }
 
 export type ChatCommandsResponse = {
@@ -773,6 +780,22 @@ export type ToolStatus = {
   action: string
   arguments?: Record<string, unknown>
   subagent_session_key?: string
+}
+
+/**
+ * Payload of the `command.applied` WS event, emitted when the backend expands a
+ * user-defined slash command (pkg/harness) into its prompt. Mirrors Go
+ * channels.WSCommandAppliedPayload. `command` has NO leading slash; the UI adds
+ * it. `agent`/`model` are the per-turn overrides ("" when unset).
+ */
+export type WSCommandAppliedPayload = {
+  session_key: string
+  command: string
+  description: string
+  args: string
+  agent: string
+  model: string
+  source: 'config' | 'global' | 'workspace' | 'directory' | string
 }
 
 export type ApprovalRequest = {
@@ -988,6 +1011,7 @@ export type ClientEvent =
       }
     }
   | { event: 'tool.executing'; data: ToolStatus & { tool_call_id?: string } }
+  | { event: 'command.applied'; data: WSCommandAppliedPayload }
   | {
       event: 'tool.result' | 'subagent.result'
       data: {
