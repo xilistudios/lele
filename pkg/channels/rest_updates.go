@@ -18,6 +18,14 @@ func (n *NativeChannel) SetUpdateService(us *update.Updater) {
 	n.updateService = us
 }
 
+// GetUpdateService returns the self-update service, or nil if none was set.
+// The gateway uses it to attach its graceful-shutdown callback to the service's
+// Restarter, which is the only way to reach the Restarter the API actually
+// calls: it is owned by the Updater, not by the gateway.
+func (n *NativeChannel) GetUpdateService() *update.Updater {
+	return n.getUpdateService()
+}
+
 // handleSystemVersion returns build and runtime information.
 func (n *NativeChannel) handleSystemVersion(w http.ResponseWriter, r *http.Request) {
 	us := n.getUpdateService()
@@ -123,6 +131,9 @@ func (n *NativeChannel) handleUpdatesApply(w http.ResponseWriter, r *http.Reques
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	// The pipeline may end in a self-exec restart that exits this process; make
+	// sure the ack is on the wire before the goroutine can get there.
+	flushAck(w)
 }
 
 // handleUpdatesStatus returns the current pipeline state.
@@ -168,6 +179,11 @@ func (n *NativeChannel) handleSystemRestart(w http.ResponseWriter, r *http.Reque
 
 	// Acknowledge first, then restart shortly after so the response lands.
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+	// Flush the ack explicitly: on the self-exec path Restart() terminates this
+	// process (os.Exit), so a buffered 202 body that has not reached the socket
+	// would be lost and the client would see a dropped connection instead of
+	// the acknowledgement it is waiting for.
+	flushAck(w)
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
@@ -178,6 +194,15 @@ func (n *NativeChannel) handleSystemRestart(w http.ResponseWriter, r *http.Reque
 		}
 		n.broadcastAll("update.progress", update.State{Phase: update.PhaseRestarting, Error: method})
 	}()
+}
+
+// flushAck pushes any buffered response body out to the client. ResponseWriter
+// only guarantees flushing when it implements http.Flusher (it does for the
+// net/http one), so the type assertion is the documented pattern.
+func flushAck(w http.ResponseWriter) {
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (n *NativeChannel) getUpdateService() *update.Updater {

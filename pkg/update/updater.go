@@ -200,6 +200,12 @@ func (u *Updater) Apply(ctx context.Context, opts Options) (string, error) {
 	}
 
 	// 5. Restart (optional).
+	//
+	// Note on the self-exec path: Restarter.Restart spawns the replacement
+	// process, runs OnRestart (the gateway wires its shutdown coordinator) and
+	// then terminates this process, so the lines below may never be reached —
+	// that is intended, the new binary reports the updated version. The systemd
+	// paths return normally because systemd SIGTERMs us.
 	if opts.Restart {
 		u.emit(opts, State{Phase: PhaseRestarting, From: u.CurrentVersion, To: rel.Version(), StartedAt: started})
 		if _, err := u.Restarter.Restart(); err != nil {

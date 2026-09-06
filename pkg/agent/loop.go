@@ -82,6 +82,12 @@ type AgentLoop struct {
 	providable         *agentProvidableImpl // AgentProvidable interface implementation
 	stopSessionCleanup func()               // stops the background session cleanup goroutine
 
+	// stopOnce makes Stop idempotent: its cleanup steps (cancel the goal loop,
+	// close the session-cleanup stop channel, join in-flight turns, close the
+	// SQLite store) run exactly once, so calling Stop after Shutdown — or twice
+	// by mistake — can never panic on a double close or double-close the store.
+	stopOnce sync.Once
+
 	// goalStopCtx is the parent context for goal continuation loops. Cancelling
 	// it (via goalStopCancel, called on Stop) aborts any in-flight /goal
 	// continuation loop.
@@ -896,21 +902,78 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 	return nil
 }
 
+// Shutdown stops accepting new inbound work and waits up to the caller's
+// deadline for turns already in flight to finish. Unlike Stop it does NOT close
+// the SQLite store, so it is safe to run before the rest of shutdown.
+//
+// Follow-up design decision (to be implemented in a later commit):
+//
+//	Draining `al.wg` can only be bounded if the work it tracks is itself
+//	bounded, and today a turn inherits the root context that the gateway
+//	cancels *after* this function returns. The plan is therefore to commit each
+//	turn to a shutdown-owned context — context.WithoutCancel(rootCtx) plus its
+//	own cancel registered through the existing
+//	al.sessionManager.RegisterSessionCancel — but to do so ONLY AFTER the turn
+//	has acquired the per-session semaphore at
+//	pkg/agent/llm_runner.go:227-236 (the cap-1 `chan struct{}` per sessionKey
+//	stored in al.sessionProcessing).
+//
+//	Why after the acquisition and not before: if a turn were made
+//	uncancellable while it was merely WAITING for the semaphore, shutdown could
+//	never drain, because the current holder may run for minutes (a long LLM
+//	loop, or a tool that ignores cancellation) and the queued turn would sit
+//	there uninterruptibly. Waiting for the semaphore must stay cancellable —
+//	the durable spool replays such a turn — while work that is already underway
+//	must not be killed mid-call. Acquiring first, then detaching from the root
+//	cancellation, is the only ordering that satisfies both.
+func (al *AgentLoop) Shutdown(ctx context.Context) error {
+	// Stop taking new inbound messages: Run's loop re-checks this flag, and the
+	// backlog left in the bus is harmless because channels re-deliver after the
+	// process comes back up.
+	al.running.Store(false)
+
+	drained := make(chan struct{})
+	go func() {
+		al.wg.Wait()
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		logger.InfoC("agent", "Agent loop drained: no turn in flight at shutdown")
+		return nil
+	case <-ctx.Done():
+		// The caller's budget (the shutdown coordinator's per-hook timeout) is
+		// spent while turns are still running. Those goroutines are left alone
+		// on purpose: Stop(), which runs after every hook, joins them properly.
+		logger.WarnCF("agent", "Agent loop drain timed out", map[string]interface{}{
+			"error": ctx.Err().Error(),
+		})
+		return ctx.Err()
+	}
+}
+
 // Stop stops the agent loop and waits for in-flight message goroutines to finish.
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
-	if al.goalStopCancel != nil {
-		al.goalStopCancel()
-	}
-	if al.stopSessionCleanup != nil {
-		al.stopSessionCleanup()
-	}
-	al.wg.Wait()
-	if al.dbStore != nil {
-		if err := al.dbStore.Close(); err != nil {
-			logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
+	al.stopOnce.Do(func() {
+		if al.goalStopCancel != nil {
+			al.goalStopCancel()
 		}
-	}
+		// stopSessionCleanup is func(){ close(stop) } (see
+		// session.StartCleanupGoroutine), so a second call would panic. It is
+		// guarded together with the store close below by stopOnce, which makes
+		// Stop safe both after Shutdown and when called twice.
+		if al.stopSessionCleanup != nil {
+			al.stopSessionCleanup()
+		}
+		al.wg.Wait()
+		if al.dbStore != nil {
+			if err := al.dbStore.Close(); err != nil {
+				logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
+			}
+		}
+	})
 }
 
 // markGoalLoopActive records that the session is inside an active goal
