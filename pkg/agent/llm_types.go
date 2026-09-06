@@ -7,11 +7,8 @@
 package agent
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
-
-	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // messageSignature tracks repeated LLM responses to detect loops
@@ -91,27 +88,4 @@ func containsPlainToolCall(content string, agent *AgentInstance) bool {
 	}
 
 	return false
-}
-
-// buildAssistantMessageWithToolCalls creates an assistant message from an LLM response with tool calls
-func buildAssistantMessageWithToolCalls(response *providers.LLMResponse) providers.Message {
-	msg := providers.Message{
-		Role:             "assistant",
-		Content:          response.Content,
-		ReasoningContent: response.ReasoningContent,
-	}
-	for _, tc := range response.ToolCalls {
-		argumentsJSON, _ := json.Marshal(tc.Arguments)
-		msg.ToolCalls = append(msg.ToolCalls, providers.ToolCall{
-			ID:   tc.ID,
-			Type: "function",
-			Function: &providers.FunctionCall{
-				Name:      tc.Name,
-				Arguments: string(argumentsJSON),
-			},
-			Name:      tc.Name,
-			Arguments: tc.Arguments,
-		})
-	}
-	return msg
 }

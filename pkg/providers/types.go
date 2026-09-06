@@ -25,6 +25,13 @@ const (
 	OptPromptCacheTTL = protocoltypes.OptPromptCacheTTL
 )
 
+// Tool-call canonicalization helpers (see protocoltypes/toolcall_wire.go for
+// why the wire shape matters). Re-exported so every assistant-message builder
+// can reach them through the providers facade.
+var (
+	CanonicalToolCalls = protocoltypes.CanonicalToolCalls
+)
+
 type LLMProvider interface {
 	Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error)
 	GetDefaultModel() string

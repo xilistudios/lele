@@ -187,6 +187,32 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 
 // call performs the LLM call with optional streaming, fallback chain
 func (lc *llmCaller) call(opts llmCallOptions) (*providers.LLMResponse, error) {
+	// Every provider request the agent loop makes leaves through this function -
+	// main loop, group turns, retries and the fallback chain - so tool-call
+	// pairing is guaranteed for all of them here, once. The one path that does
+	// not come through is the subagent tool loop (pkg/tools/toolloop.go), which
+	// calls the provider directly and heals its own requests.
+	//
+	// A turn that dies mid-flight (interrupted, crashed, or a result that never
+	// landed) leaves an assistant call with no matching tool result, and
+	// excluding a result from context while keeping its assistant block does the
+	// same. Strict providers answer either with a 400, and since the history is
+	// replayed on every later turn the session never recovers on its own.
+	//
+	// Healing the outgoing request rather than the stored history keeps real
+	// tool output in the session - the UI and any later full read still see what
+	// actually happened - and costs nothing when the pairing is already valid.
+	if healed, changed := providers.HealToolCallPairs(opts.messages); changed {
+		logger.WarnCF("agent", "Healed broken tool-call pairing before provider call",
+			map[string]interface{}{
+				"session_key": opts.sessionKey,
+				"iteration":   opts.iteration,
+				"before":      len(opts.messages),
+				"after":       len(healed),
+			})
+		opts.messages = healed
+	}
+
 	llmOptions := lc.buildLLMOptions(opts)
 
 	// Strip provider prefix from model for API calls.

@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/logger"
@@ -187,24 +188,49 @@ func (lr *llmRunnerImpl) runGroupTurn(ctx context.Context, req group.TurnRequest
 			Content:          response.Content,
 			ReasoningContent: response.ReasoningContent,
 		}
-		for _, tc := range response.ToolCalls {
-			argumentsJSON, _ := json.Marshal(tc.Arguments)
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
-				Function: &providers.FunctionCall{
-					Name:      tc.Name,
-					Arguments: string(argumentsJSON),
-				},
-				Name:      tc.Name,
-				Arguments: tc.Arguments,
+		assistantMsg.ToolCalls = providers.CanonicalToolCalls(response.ToolCalls)
+
+		// Every call was rejected by canonicalisation. Running them anyway
+		// would append tool results whose ids match nothing in the assistant
+		// message above, and the next iteration would be sent a request the
+		// provider rejects outright. Ask for a retry instead.
+		if len(assistantMsg.ToolCalls) == 0 {
+			logger.WarnCF("agent", "group turn returned only invalid tool calls",
+				map[string]interface{}{
+					"speaker":     req.Speaker,
+					"group_id":    req.GroupID,
+					"iteration":   iteration,
+					"rejected":    len(response.ToolCalls),
+					"session_key": sessionKey,
+				})
+			// Keep the assistant turn in the live context so the guidance below
+			// stays a valid user message: providers reject two consecutive
+			// messages of the same role. A blank assistant is kept in memory
+			// only, mirroring the empty-response handling in the main loop.
+			if strings.TrimSpace(response.Content) != "" {
+				messages = append(messages, assistantMsg)
+			} else {
+				messages = append(messages, providers.Message{
+					Role:             "assistant",
+					Content:          response.Content,
+					ReasoningContent: response.ReasoningContent,
+				})
+			}
+			messages = append(messages, providers.Message{
+				Role: "user",
+				Content: "Your previous tool call was malformed and could not be parsed " +
+					"(a tool name and a valid JSON object of arguments are required). " +
+					"Please retry using a proper function call.",
 			})
+			continue
 		}
+
 		messages = append(messages, assistantMsg)
 
-		// Execute each tool call and collect results.
+		// Execute each tool call and collect results. Iterating the canonical
+		// list keeps every tool result aligned with a persisted tool_call id.
 		executor := newToolExecutor(lr.al)
-		for _, tc := range response.ToolCalls {
+		for _, tc := range assistantMsg.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return "", totalTokens, err
 			}

@@ -860,14 +860,16 @@ func TestBuildMessages_WithOrphanedToolMessages(t *testing.T) {
 
 	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "", "")
 
-	// Should have system + 2 history (orphaned tool removed) + current = 4
-	if len(messages) != 4 {
-		t.Errorf("Expected 4 messages after removing orphaned tool, got %d", len(messages))
+	// BuildMessages no longer repairs pairing: it hands the history over as it
+	// is, and the single repair point is the provider call (llmCaller.call).
+	// Healing here too would mean two rules for the same defect, and the ones
+	// that disagree would silently drop real tool output.
+	// system + 3 history + current = 5
+	if len(messages) != 5 {
+		t.Errorf("Expected 5 messages (history passed through), got %d", len(messages))
 	}
-
-	// First non-system message should be user (tool was removed)
-	if messages[1].Role != "user" {
-		t.Errorf("Expected first history message to be user, got %s", messages[1].Role)
+	if messages[1].Role != "tool" || messages[1].ToolCallID != "call-1" {
+		t.Errorf("Expected the orphaned tool message to be passed through, got %+v", messages[1])
 	}
 }
 
@@ -1216,14 +1218,16 @@ func TestBuildMessages_MultipleOrphanedTools(t *testing.T) {
 
 	messages := cb.BuildMessages(history, "", "Current", nil, "", "", "", "")
 
-	// Should have system + 1 history (both tools removed) + current = 3
-	if len(messages) != 3 {
-		t.Errorf("Expected 3 messages after removing orphaned tools, got %d", len(messages))
+	// Both orphans pass through unhealed - see the note in
+	// TestBuildMessages_WithOrphanedToolMessages: pairing is repaired once, at
+	// the provider call.
+	// system + 3 history + current = 5
+	if len(messages) != 5 {
+		t.Errorf("Expected 5 messages (history passed through), got %d", len(messages))
 	}
-
-	// First non-system message should be user
-	if messages[1].Role != "user" {
-		t.Errorf("Expected first history message to be user, got %s", messages[1].Role)
+	if messages[1].Role != "tool" || messages[2].Role != "tool" {
+		t.Errorf("Expected both orphaned tool messages to be passed through, got %s/%s",
+			messages[1].Role, messages[2].Role)
 	}
 }
 
