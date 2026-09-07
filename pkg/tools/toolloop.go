@@ -90,6 +90,15 @@ type ToolLoopConfig struct {
 	// loops (subagents, sync subagent tool) must set it explicitly.
 	OwnerAgentID    string
 	OwnerSessionKey string
+	// OnTokenUsage, when set, is called with the (input, output) token counts
+	// of every successful LLM response produced by this loop, as computed by
+	// providers.ResponseTokenCounts. It is the hook through which loops that
+	// have no session manager of their own - subagent tool loops - bill their
+	// spend to their owner. The call happens after each response (not once at
+	// the end) so work done before an error, cancellation or timeout is still
+	// accounted for. It must be cheap and non-blocking; implementations that
+	// mutate shared state do so under their own locks.
+	OnTokenUsage func(inputTokens, outputTokens int)
 }
 
 // syncCompactionToSession persists a loop-compaction result to the subagent's
@@ -479,6 +488,15 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 					"error":     err.Error(),
 				})
 			return nil, fmt.Errorf("LLM call failed: %w", err)
+		}
+
+		// 3b. Bill this response's tokens to whoever owns the loop (subagent
+		// runners pass a reporter that charges the parent session). Called
+		// per response, before any branch below can error out or break, so a
+		// run that dies mid-flight still pays for the LLM calls it made.
+		if config.OnTokenUsage != nil {
+			in, out := providers.ResponseTokenCounts(messages, response)
+			config.OnTokenUsage(in, out)
 		}
 
 		// 4. If no tool calls, we're done

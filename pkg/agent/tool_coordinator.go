@@ -665,6 +665,11 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// excluded-message state survive restarts, and the persisted session
 	// does not grow unbounded across long-running tasks.
 	subagentManager.SetSessionCompactor(agent.Sessions)
+	// Bill subagent LLM consumption to the session that spawned them, so the
+	// cumulative token counters (TUI status, /status, WebUI context
+	// indicator) include subagent work instead of showing only the main
+	// agent's own responses.
+	subagentManager.SetTokenUsageReporter(newSubagentTokenReporter(agent.Sessions))
 	subagentManager.SetCompactionConfig(
 		cfg.SessionCompactionThresholdPercent(),
 		cfg.CompactionModel(),

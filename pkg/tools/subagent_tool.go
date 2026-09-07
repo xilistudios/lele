@@ -111,6 +111,20 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 	// Owning session for cancellation attribution (#230).
 	ownerAgentID, ownerSessionKey := AgentToolContextFromCtx(ctx)
 
+	// Read the usage reporter under the manager lock (same pattern as the
+	// async runner): subagent spend is billed to the session of the agent
+	// loop that invoked this tool, keeping the parent's cumulative counters
+	// honest for synchronous subagent runs too.
+	sm.mu.RLock()
+	tokenUsage := sm.tokenUsageReporter
+	sm.mu.RUnlock()
+	billTokens := func(in, out int) {
+		if tokenUsage == nil || ownerSessionKey == "" {
+			return
+		}
+		tokenUsage(ownerSessionKey, in, out)
+	}
+
 	// Use a background context to decouple the subagent from the parent agent's
 	// lifecycle. This prevents the subagent from being killed by parent context
 	// cancellation (e.g., timeouts, /stop commands). The subagent should run
@@ -144,6 +158,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]interface{})
 		// belongs to the caller's session for cancellation purposes (#230).
 		OwnerAgentID:    ownerAgentID,
 		OwnerSessionKey: ownerSessionKey,
+		OnTokenUsage:    billTokens,
 	}, messages, originChannel, originChatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)
