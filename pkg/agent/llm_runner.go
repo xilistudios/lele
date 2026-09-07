@@ -689,6 +689,14 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		var err error
 
 		for transientAttempt := 0; ; transientAttempt++ {
+			// Checkpoint "an actual provider request is outstanding" right
+			// before the call, inside the transient-retry loop: each attempt
+			// may rebuild the messages (context-overflow compaction inside
+			// executeWithRetry), and a crash during any of them must be
+			// resumable. Update-only (see writeTurnMarker): turns that did not
+			// come through a spooled inbound never have a marker to advance,
+			// so ProcessDirect/goal/cron paths stay untouched.
+			lr.al.writeTurnMarker(opts.SessionKey, turnPhaseLLMWait, iteration, nil)
 			response, messages, err = llmCallerInstance.executeWithRetry(callOpts, messages)
 			if err == nil {
 				break
@@ -894,6 +902,13 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 
 		// Execute tool calls
 		executor := newToolExecutor(lr.al)
+
+		// Checkpoint "tools are executing" before Phase 1 starts. The
+		// assistant message with its tool_calls is already persisted above,
+		// so a crash from here on leaves a resumable state: the replayed turn
+		// re-enters with HealToolCallPairs synthesizing results for whatever
+		// never completed.
+		lr.al.writeTurnMarker(opts.SessionKey, turnPhaseToolsRun, iteration, nil)
 
 		// Phase 1: Execute all tools and collect results
 		type toolExecResult struct {

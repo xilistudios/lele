@@ -107,6 +107,12 @@ type EditableSessionConfig struct {
 	// so an unconfigured file keeps writing no key instead of pinning the
 	// default off.
 	DurableOutbound *bool `json:"durable_outbound,omitempty"`
+
+	// Resume mirrors SessionConfig.Resume. It stays tri-state so an
+	// unconfigured file keeps writing no key instead of pinning the default
+	// off. Keep it last: EditableSessionConfig(cfg.Session) is a direct struct
+	// conversion and relies on identical field order.
+	Resume *bool `json:"resume_enabled,omitempty"`
 }
 
 // EditableChannelsConfig represents channels in editable mode.

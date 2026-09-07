@@ -324,6 +324,13 @@ type SessionConfig struct {
 	// publicarla en el bus y reenvía lo no entregado tras un restart. Tri-state
 	// como DurableInbound: nil = "no configurado" = false.
 	DurableOutbound *bool `json:"durable_outbound,omitempty"`
+	// Resume checkpoints every in-flight inbound turn so a gateway restart
+	// mid-turn can resume it (see pkg/agent/turn_state.go) instead of
+	// re-running it from scratch. It is tri-state like DurableInbound: nil
+	// means "not configured", which ResumeEnabled resolves to false. Off by
+	// default. Prerequisite: the resume trigger is the durable inbound
+	// replay, so resuming inbound turns only works with DurableInbound on.
+	Resume *bool `json:"resume_enabled,omitempty"`
 }
 
 // DurableInboundEnabled reports whether durable inbound replay is on.
@@ -336,6 +343,14 @@ func (s SessionConfig) DurableInboundEnabled() bool {
 // An unset flag is false: durability is opt-in.
 func (s SessionConfig) DurableOutboundEnabled() bool {
 	return s.DurableOutbound != nil && *s.DurableOutbound
+}
+
+// ResumeEnabled reports whether active-turn resume is on. An unset flag is
+// false: resume is opt-in. Even when on, resuming inbound turns requires
+// DurableInboundEnabled, because the replay of the spooled message is what
+// triggers the resume.
+func (s SessionConfig) ResumeEnabled() bool {
+	return s.Resume != nil && *s.Resume
 }
 
 const DefaultEphemeralThresholdSeconds = 560

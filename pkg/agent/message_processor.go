@@ -146,6 +146,32 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		messageID = msg.Metadata["message_id"]
 		replyTo = msg.Metadata["message_id"]
 	}
+
+	// Checkpoint the inbound turn (session.resume_enabled + durable_inbound).
+	// The clear-then-write resets any marker left behind by an abandoned turn
+	// so this turn starts from a clean inbound_start phase. All of it is
+	// gated inside writeTurnMarker; with the feature off these are no-ops.
+	//
+	// The marker is managed here and not in Run's defer finishTurn: the defer
+	// closes the spool row but does not know the resolved sessionKey, and the
+	// marker must live exactly as long as the turn's resumability window.
+	// finishTurn's durable Finish stays untouched for the spool side.
+	mp.al.clearTurnMarker(sessionKey, "")
+	agentID := ""
+	if agent != nil {
+		agentID = agent.ID
+	}
+	mp.al.writeTurnMarker(sessionKey, turnPhaseInbound, 0, func(m *TurnMarker) {
+		m.SessionKey = sessionKey
+		m.DedupeID = msg.DedupeID
+		m.SpoolID = msg.SpoolID
+		m.Channel = msg.Channel
+		m.ChatID = msg.ChatID
+		m.MsgID = messageID
+		m.AgentID = agentID
+		m.Model = turnModelOverride
+	})
+
 	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
@@ -177,6 +203,12 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		}
 		return errMsg, nil
 	}
+	// The turn reached a normal end: its checkpoint is no longer needed.
+	// Passing msg.DedupeID makes the delete conditional on the marker still
+	// describing THIS turn (a newer turn's marker must survive). Error and
+	// cancellation paths return above without clearing, which is exactly the
+	// point: an interrupted turn keeps its marker so a replay can resume it.
+	mp.al.clearTurnMarker(sessionKey, msg.DedupeID)
 	// Caller-side goal continuation trigger. runAgentLoop has returned and
 	// released the per-session semaphore, so the continuation loop can run its
 	// recursive turns safely. Only triggered on the main processMessage path.
