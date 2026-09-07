@@ -183,3 +183,210 @@ func TestMessageBus_SubscribeOutboundWithContextCancel(t *testing.T) {
 		t.Error("expected SubscribeOutbound to return false on cancelled context")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Outbound spooler seam (B1-B4)
+// ──────────────────────────────────────────────────────────────────────────────
+
+// fakeOutboundSpooler records every call the bus makes on the seam. tag is
+// the stand-in for "this implementation wrote a row": when it is true Enqueue
+// assigns a fresh SpoolID, when it is false the message is left untouched
+// exactly as an ineligible or durability-off Enqueue behaves.
+type fakeOutboundSpooler struct {
+	mu       sync.Mutex
+	tag      bool
+	enqueued []OutboundMessage
+	released []int64
+	nextID   int64
+	// enqueueOrder, when set, is called while Enqueue runs so a test can
+	// observe the bus state at that instant.
+	enqueueOrder func()
+}
+
+func (f *fakeOutboundSpooler) Enqueue(msg *OutboundMessage) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueued = append(f.enqueued, *msg)
+	if f.enqueueOrder != nil {
+		f.enqueueOrder()
+	}
+	if !f.tag {
+		return false
+	}
+	f.nextID++
+	msg.SpoolID = f.nextID
+	return true
+}
+
+func (f *fakeOutboundSpooler) Release(msg *OutboundMessage) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.released = append(f.released, msg.SpoolID)
+	return true
+}
+
+func (f *fakeOutboundSpooler) calls() (enq, rel int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.enqueued), len(f.released)
+}
+
+func (f *fakeOutboundSpooler) releasedIDs() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.released...)
+}
+
+// B1: without a spooler the outbound path is exactly what it always was.
+func TestMessageBus_PublishOutboundWithoutSpoolerUnchanged(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "a"})
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "b", Event: "stream_end"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first, ok := mb.SubscribeOutbound(ctx)
+	if !ok || first.Content != "a" {
+		t.Fatalf("SubscribeOutbound() = (%+v, %v), want the first message", first, ok)
+	}
+	second, ok := mb.SubscribeOutbound(ctx)
+	if !ok || second.Content != "b" {
+		t.Fatalf("SubscribeOutbound() = (%+v, %v), want the second message", second, ok)
+	}
+	if second.SpoolID != 0 {
+		t.Errorf("SpoolID = %d without a spooler, want 0", second.SpoolID)
+	}
+	if _, _, _, _, _, dropped := mb.Stats(); dropped != 0 {
+		t.Errorf("droppedOutbound = %d, want 0", dropped)
+	}
+}
+
+// B2: Enqueue runs before the channel handoff and the SpoolID it tags reaches
+// the consumer, because msg is a value parameter and the tagged copy is what
+// goes into the queue.
+func TestMessageBus_PublishOutboundEnqueuesBeforeChannel(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	sp := &fakeOutboundSpooler{tag: true, enqueueOrder: func() {
+		// At this instant nothing has been queued yet.
+		if _, _, _, outLen, _, _ := mb.Stats(); outLen != 0 {
+			t.Errorf("outbound queue length = %d during Enqueue, want 0", outLen)
+		}
+	}}
+	mb.SetOutboundSpooler(sp)
+
+	mb.PublishOutbound(OutboundMessage{Channel: "test", ChatID: "c1", Content: "hello"})
+
+	if enq, _ := sp.calls(); enq != 1 {
+		t.Fatalf("Enqueue called %d times, want 1", enq)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got, ok := mb.SubscribeOutbound(ctx)
+	if !ok {
+		t.Fatal("SubscribeOutbound() = false, want the message")
+	}
+	if got.SpoolID != 1 {
+		t.Errorf("consumer saw SpoolID = %d, want 1 (the tagged copy must be queued)", got.SpoolID)
+	}
+}
+
+// B3: a full queue releases the row the spooler wrote, so the replay pump -
+// not the silent drop counter - owns the message.
+func TestMessageBus_PublishOutboundReleasesOnFullQueue(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	sp := &fakeOutboundSpooler{tag: true}
+	mb.SetOutboundSpooler(sp)
+
+	for i := 0; i < cap(mb.outbound); i++ {
+		mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "fill"})
+	}
+	_, _, _, outLen, outCap, _ := mb.Stats()
+	if outLen != outCap {
+		t.Fatalf("queue = %d/%d, want it full before the overflow publish", outLen, outCap)
+	}
+
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "overflow"})
+
+	if _, rel := sp.calls(); rel != 1 {
+		t.Fatalf("Release called %d times, want 1 for the dropped message", rel)
+	}
+	ids := sp.releasedIDs()
+	if len(ids) != 1 || ids[0] == 0 {
+		t.Errorf("released SpoolIDs = %v, want exactly the non-zero id of the dropped row", ids)
+	}
+	if _, _, _, _, _, dropped := mb.Stats(); dropped != 1 {
+		t.Errorf("droppedOutbound = %d, want 1", dropped)
+	}
+}
+
+// B4: after Close the row is released too. Close() takes mu.Lock, so this also
+// pins down that the spooler call never happens under mu.
+func TestMessageBus_PublishOutboundReleasesWhenClosed(t *testing.T) {
+	mb := NewMessageBus()
+
+	sp := &fakeOutboundSpooler{tag: true}
+	mb.SetOutboundSpooler(sp)
+	mb.Close()
+
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "late"})
+
+	if _, rel := sp.calls(); rel != 1 {
+		t.Fatalf("Release called %d times after Close, want 1", rel)
+	}
+	if ids := sp.releasedIDs(); len(ids) != 1 || ids[0] != 1 {
+		t.Errorf("released SpoolIDs = %v, want [1]", ids)
+	}
+}
+
+// A spooler that declines (durability off, or an ineligible message) leaves
+// SpoolID at 0, so even a dropped publish must not call Release: there is no
+// row to hand back.
+func TestMessageBus_PublishOutboundDeclinedSkipsRelease(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	sp := &fakeOutboundSpooler{tag: false}
+	mb.SetOutboundSpooler(sp)
+
+	for i := 0; i < cap(mb.outbound); i++ {
+		mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "fill"})
+	}
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "overflow"})
+
+	enq, rel := sp.calls()
+	if enq != cap(mb.outbound)+1 {
+		t.Fatalf("Enqueue called %d times, want one per publish", enq)
+	}
+	if rel != 0 {
+		t.Errorf("Release called %d times, want 0: no row was ever written", rel)
+	}
+}
+
+// A nil spooler wired explicitly is the same as wiring nothing.
+func TestMessageBus_SetNilSpoolerKeepsOldPath(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	mb.SetOutboundSpooler(&fakeOutboundSpooler{tag: true})
+	mb.SetOutboundSpooler(nil)
+
+	mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "hello"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got, ok := mb.SubscribeOutbound(ctx)
+	if !ok {
+		t.Fatal("SubscribeOutbound() = false, want the message")
+	}
+	if got.SpoolID != 0 {
+		t.Errorf("SpoolID = %d with a nil spooler, want 0", got.SpoolID)
+	}
+}
