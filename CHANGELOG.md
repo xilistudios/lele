@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Session
+- Active turn resume (`session.resume_enabled`, default off) — when the gateway restarts mid-turn, the durable inbound replay now *resumes* the interrupted turn from a checkpoint instead of re-running it from scratch. Each in-flight inbound turn is checkpointed to the session-state KV (`sess:turn:<key>`: phase, iteration, agent, model, dedupe id); a replayed message whose dedupe id matches its checkpoint re-enters the loop with the user message already in history (no double-append, no duplicate work). Turns interrupted mid-tool-execution continue safely: pending tool calls are healed into "no recorded result" tool messages and the model decides whether to re-run them, instead of the executor blindly repeating side effects. Subagents that died with the process are snapshotted alongside the checkpoint and the model is warned on resume that their results are unavailable. Requires `session.durable_inbound` (the replay is the resume trigger).
+
 ## [0.7.9] - 2026-08-21
 
 ### Fixed
