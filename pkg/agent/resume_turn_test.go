@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // Resume-branch tests (R-2.x): processMessage must route a durable replay
@@ -444,4 +446,246 @@ func TestResume_NoticeFlagPersistedBeforePublishReturns(t *testing.T) {
 	_ = al.Shutdown(drainCtx)
 	cancelRun()
 	<-done
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// R-4.x: live-subagent snapshot + interruption warning (T2.4)
+// ──────────────────────────────────────────────────────────────────────────────
+
+// addLiveSubagent registers a fake running task owned by spawnerKey on the
+// loop's real coordinator, and returns it.
+func addLiveSubagent(t *testing.T, al *AgentLoop, id, label, task, spawnerKey string) {
+	t.Helper()
+	sm, ok := al.GetSubagents()["main"]
+	if !ok {
+		t.Fatal("no subagent manager for agent main")
+	}
+	_, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sm.AddTaskForTest(&tools.SubagentTask{
+		ID:                id,
+		Label:             label,
+		Task:              task,
+		Status:            tools.SubagentStatusRunning,
+		SpawnerSessionKey: spawnerKey,
+		Created:           time.Now().UnixMilli(),
+		Updated:           time.Now().UnixMilli(),
+	}, func() { cancel() })
+}
+
+// turnSubsKV reads the raw snapshot row straight from the KV store.
+func turnSubsKV(t *testing.T, al *AgentLoop, sessionKey string) (string, bool) {
+	t.Helper()
+	raw, ok, err := al.sessionStateKV().Get(turnSubsKeyPrefix + sessionKey)
+	if err != nil {
+		t.Fatalf("kv get: %v", err)
+	}
+	return raw, ok
+}
+
+// R-4.1: only tasks related to the session are snapshotted (foreign sessions
+// excluded), each task text is rune-truncated, and the cap bounds the list.
+func TestResumeSubagents_SnapshotFiltersAndTruncates(t *testing.T) {
+	al, _ := resumeTestLoop(t)
+	resumeOn(t, al)
+
+	long := strings.Repeat("ñ", 250) // multibyte on purpose: truncation is rune-safe
+	addLiveSubagent(t, al, "task-mine-1", "alfa", long, "telegram:123")
+	addLiveSubagent(t, al, "task-mine-2", "", "tarea corta", "telegram:123")
+	addLiveSubagent(t, al, "task-other", "ajeno", "de otra sesión", "discord:999")
+
+	al.writeTurnSubagentSnapshot("telegram:123")
+
+	subs := al.readTurnSubagentSnapshot("telegram:123")
+	if len(subs) != 2 {
+		t.Fatalf("snapshot has %d entries, want 2 (foreign session must be excluded): %+v", len(subs), subs)
+	}
+	for _, s := range subs {
+		if s.ID == "task-other" {
+			t.Fatal("foreign-session task leaked into the snapshot")
+		}
+	}
+	for _, s := range subs {
+		if s.ID == "task-mine-1" {
+			r := []rune(s.Task)
+			if len(r) != maxSnapshotTaskRunes+1 || r[maxSnapshotTaskRunes] != '…' {
+				t.Fatalf("task not rune-truncated to %d+ellipsis: %q", maxSnapshotTaskRunes, s.Task)
+			}
+		}
+	}
+
+	// Cap: 12 more tasks -> snapshot keeps at most maxSnapshottedSubagents.
+	for i := 0; i < 12; i++ {
+		addLiveSubagent(t, al, fmt.Sprintf("task-more-%02d", i), "", "x", "telegram:123")
+	}
+	al.writeTurnSubagentSnapshot("telegram:123")
+	if subs := al.readTurnSubagentSnapshot("telegram:123"); len(subs) != maxSnapshottedSubagents {
+		t.Fatalf("snapshot len = %d, want cap %d", len(subs), maxSnapshottedSubagents)
+	}
+}
+
+// R-4.1b: zero live tasks deletes the row (no stale snapshot can be read
+// back as "current"), and the feature gate keeps the KV untouched when off.
+func TestResumeSubagents_EmptySnapshotDeletesAndGate(t *testing.T) {
+	al, _ := resumeTestLoop(t)
+	resumeOn(t, al)
+	addLiveSubagent(t, al, "task-a", "A", "tarea", "telegram:123")
+	al.writeTurnSubagentSnapshot("telegram:123")
+	if _, ok := turnSubsKV(t, al, "telegram:123"); !ok {
+		t.Fatal("snapshot row missing after writing one task")
+	}
+
+	// The task finishes -> next snapshot write must remove the row.
+	sm := al.GetSubagents()["main"]
+	if !sm.StopTask("task-a") {
+		t.Fatal("StopTask: task not found")
+	}
+	al.writeTurnSubagentSnapshot("telegram:123")
+	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
+		t.Fatal("snapshot row survived after the last task went terminal")
+	}
+
+	// Gate: with resume off the writer is a no-op, even with a live task.
+	no := false
+	cfg := al.cfg()
+	cfg.Session.Resume = &no
+	al.cfgPtr.Store(cfg)
+	addLiveSubagent(t, al, "task-b", "B", "tarea", "telegram:123")
+	al.writeTurnSubagentSnapshot("telegram:123")
+	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
+		t.Fatal("snapshot written with resume disabled")
+	}
+}
+
+// R-4.2: resuming a turn whose snapshot lists subagents injects the warning
+// (user role, visible in context) BEFORE the provider request, and the
+// snapshot row is gone afterwards so replays cannot duplicate the warning.
+func TestResumeSubagents_WarningInjectedOnce(t *testing.T) {
+	provider := &resumeMockProvider{}
+	al, _ := resumeTestLoop(t)
+	agent := providerForAgent(al, provider)
+	agent.Sessions.AddMessage("telegram:123", "user", "orquestra tareas")
+
+	addLiveSubagent(t, al, "task-w1", "vigía", "mirar el faro", "telegram:123")
+	addLiveSubagent(t, al, "task-w2", "", "sin etiqueta", "telegram:123")
+	// The snapshot the crashed process left behind.
+	al.writeTurnSubagentSnapshot("telegram:123")
+
+	seedMarker(t, al, TurnMarker{
+		SessionKey: "telegram:123", DedupeID: "X", Phase: turnPhaseToolsRun, Iter: 1,
+		Channel: "telegram", ChatID: "123", AgentID: "main",
+	})
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), resumeMessage("X", "orquestra tareas")); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+
+	messages, _ := provider.last()
+	var warnings []providers.Message
+	for _, m := range messages {
+		if m.Role == "user" && strings.Contains(m.Content, "subagente(s) en curso") {
+			warnings = append(warnings, m)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("provider saw %d interruption warnings, want exactly 1", len(warnings))
+	}
+	w := warnings[0].Content
+	if !strings.Contains(w, "vigía: mirar el faro") {
+		t.Errorf("warning lost the labelled task: %q", w)
+	}
+	// Untitled tasks fall back to the ID.
+	if !strings.Contains(w, "task-w2: sin etiqueta") {
+		t.Errorf("warning missing id-fallback for unlabeled task: %q", w)
+	}
+	// The warning sits AFTER the original user message (it is the last user
+	// turn before the model continues).
+	idxWarn, idxUser := -1, -1
+	for i, m := range messages {
+		if m.Role == "user" {
+			if strings.Contains(m.Content, "orquestra tareas") {
+				idxUser = i
+			}
+			if strings.Contains(m.Content, "subagente(s) en curso") {
+				idxWarn = i
+			}
+		}
+	}
+	if idxWarn < idxUser {
+		t.Fatalf("warning (idx %d) must follow the original user message (idx %d)", idxWarn, idxUser)
+	}
+
+	// Snapshot consumed: a second replay cannot re-inject.
+	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
+		t.Fatal("snapshot row survived injection")
+	}
+}
+
+// R-4.3: a resume without a snapshot adds no warning to the history.
+func TestResumeSubagents_NoSnapshotNoWarning(t *testing.T) {
+	provider := &resumeMockProvider{}
+	al, _ := resumeTestLoop(t)
+	agent := providerForAgent(al, provider)
+	agent.Sessions.AddMessage("telegram:123", "user", "hola")
+	seedMarker(t, al, TurnMarker{
+		SessionKey: "telegram:123", DedupeID: "X", Phase: turnPhaseLLMWait,
+		Channel: "telegram", ChatID: "123", AgentID: "main",
+	})
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), resumeMessage("X", "hola")); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+	messages, _ := provider.last()
+	for _, m := range messages {
+		if strings.Contains(m.Content, "subagente(s) en curso") {
+			t.Fatalf("warning injected without a snapshot: %q", m.Content)
+		}
+	}
+}
+
+// R-4.4: a completed FRESH turn clears both KV rows (marker + snapshot).
+func TestResumeSubagents_FreshTurnClearsBothRows(t *testing.T) {
+	provider := &resumeMockProvider{}
+	al, _ := resumeTestLoop(t)
+	providerForAgent(al, provider)
+	addLiveSubagent(t, al, "task-c1", "vivo", "todavía corre", "telegram:123")
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), resumeMessage("D", "hola")); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+	if _, ok := turnMarkerKV(t, al, "telegram:123"); ok {
+		t.Fatal("marker survived a completed turn")
+	}
+	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
+		t.Fatal("snapshot survived a completed turn")
+	}
+}
+
+// R-4.5: a corrupt snapshot row must not break the resume: the row is
+// dropped and the turn resumes without a warning.
+func TestResumeSubagents_CorruptSnapshotSurvived(t *testing.T) {
+	provider := &resumeMockProvider{}
+	al, _ := resumeTestLoop(t)
+	agent := providerForAgent(al, provider)
+	agent.Sessions.AddMessage("telegram:123", "user", "hola")
+	seedMarker(t, al, TurnMarker{
+		SessionKey: "telegram:123", DedupeID: "X", Phase: turnPhaseLLMWait,
+		Channel: "telegram", ChatID: "123", AgentID: "main",
+	})
+	if err := al.sessionStateKV().Set(turnSubsKeyPrefix+"telegram:123", "{no es json"); err != nil {
+		t.Fatalf("kv set: %v", err)
+	}
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), resumeMessage("X", "hola")); err != nil {
+		t.Fatalf("resume with corrupt snapshot must not error, got: %v", err)
+	}
+	if _, ok := turnSubsKV(t, al, "telegram:123"); ok {
+		t.Fatal("corrupt snapshot row survived the read")
+	}
+	messages, _ := provider.last()
+	for _, m := range messages {
+		if strings.Contains(m.Content, "subagente(s) en curso") {
+			t.Fatalf("corrupt snapshot produced a bogus warning: %q", m.Content)
+		}
+	}
 }

@@ -151,13 +151,16 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 				Content: "⚡ El gateway se reinició a mitad de una tarea; reanudando desde el último paso completado…",
 			})
 		}
+		// Tell the model about subagents that died with the process BEFORE
+		// the resumed loop runs, so it never assumes their results exist.
+		mp.injectSubagentInterruptionWarning(agent, sessionKey)
 		response, err := mp.ContinueTurn(ctx, marker, msg, sessionKey)
 		if err != nil {
 			return "", err
 		}
 		// Same conditional clear as the normal path: only THIS turn's marker
 		// goes away, and only once its answer is out.
-		mp.al.clearTurnMarker(sessionKey, msg.DedupeID)
+		mp.al.clearTurnState(sessionKey, msg.DedupeID)
 		return response, nil
 	}
 
@@ -206,11 +209,13 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		return errMsg, nil
 	}
 	// The turn reached a normal end: its checkpoint is no longer needed.
-	// Passing msg.DedupeID makes the delete conditional on the marker still
-	// describing THIS turn (a newer turn's marker must survive). Error and
-	// cancellation paths return above without clearing, which is exactly the
-	// point: an interrupted turn keeps its marker so a replay can resume it.
-	mp.al.clearTurnMarker(sessionKey, msg.DedupeID)
+	// Passing msg.DedupeID makes the marker delete conditional on the marker
+	// still describing THIS turn (a newer turn's marker must survive). Error
+	// and cancellation paths return above without clearing, which is exactly
+	// the point: an interrupted turn keeps its marker so a replay can resume
+	// it. The subagent snapshot goes with it - keeping it would warn about
+	// tasks on a turn that already finished.
+	mp.al.clearTurnState(sessionKey, msg.DedupeID)
 	// Caller-side goal continuation trigger. runAgentLoop has returned and
 	// released the per-session semaphore, so the continuation loop can run its
 	// recursive turns safely. Only triggered on the main processMessage path.
@@ -279,6 +284,49 @@ func (mp *messageProcessorImpl) seedInboundTurnMarker(sessionKey string, agent *
 		m.AgentID = agentID
 		m.Model = modelOverride
 	})
+	// Checkpoint the session's live subagents alongside the marker: they are
+	// memory-only and die with the process, so this is the only trace a
+	// resume can warn about. Fresh inbound turns can have stragglers from an
+	// earlier turn still running, hence the write here and not only at
+	// tools_running.
+	mp.al.writeTurnSubagentSnapshot(sessionKey)
+}
+
+// injectSubagentInterruptionWarning adds the "your subagents died" notice to
+// the session history before the resumed turn rebuilds its context, so the
+// model sees it as user-visible session text and does not wait for results
+// that will never arrive. It is persisted (not ExcludeFromContext): the
+// warning must be part of the prompt.
+//
+// The snapshot is deleted right after injection, which makes the whole step
+// idempotent across repeated replays of the same crashed turn: the warning
+// already lives in the history, so a second resume needs nothing more.
+func (mp *messageProcessorImpl) injectSubagentInterruptionWarning(agent *AgentInstance, sessionKey string) {
+	subs := mp.al.readTurnSubagentSnapshot(sessionKey)
+	if len(subs) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚠ El gateway se reinició con %d subagente(s) en curso que fueron interrumpidos y ya no existen:", len(subs))
+	for _, s := range subs {
+		name := s.Label
+		if name == "" {
+			name = s.ID
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", name, s.Task)
+	}
+	b.WriteString("\nSus resultados no están disponibles. Re-lánzalos si la tarea sigue siendo necesaria; no asumas que se completaron.")
+
+	if agent != nil && agent.Sessions != nil {
+		agent.Sessions.AddMessage(sessionKey, "user", b.String())
+		if err := agent.Sessions.Save(sessionKey); err != nil {
+			logger.WarnCF("session", "resume: failed to persist subagent interruption warning", map[string]any{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+	}
+	mp.al.clearTurnSubagentSnapshot(sessionKey)
 }
 
 // ContinueTurn resumes an interrupted turn from persisted session state. The

@@ -909,6 +909,9 @@ func (lr *llmRunnerImpl) runLLMIteration(ctx context.Context, agent *AgentInstan
 		// re-enters with HealToolCallPairs synthesizing results for whatever
 		// never completed.
 		lr.al.writeTurnMarker(opts.SessionKey, turnPhaseToolsRun, iteration, nil)
+		// Re-checkpoint live subagents: a spawn tool from the previous
+		// iteration may have added tasks since inbound_start.
+		lr.al.writeTurnSubagentSnapshot(opts.SessionKey)
 
 		// Phase 1: Execute all tools and collect results
 		type toolExecResult struct {

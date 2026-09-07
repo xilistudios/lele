@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // TurnMarker checkpoints an in-flight inbound turn so a restart can resume it.
@@ -235,4 +236,169 @@ func (al *AgentLoop) setResumeNoticeSent(sessionKey string) {
 			"error":       err.Error(),
 		})
 	}
+}
+
+// ── Live-subagent snapshot (T2.4) ────────────────────────────────────────────
+
+// turnSubsKeyPrefix keys the per-session snapshot of subagents that were
+// running when the turn was last checkpointed.
+const turnSubsKeyPrefix = "sess:turnsubs:"
+
+// maxSnapshottedSubagents bounds the KV payload; a turn fanning out more
+// tasks than this is rare, and the warning only needs to convey that work
+// was lost, not enumerate an unbounded list.
+const maxSnapshottedSubagents = 10
+
+// maxSnapshotTaskRunes truncates each task description so a snapshot of
+// large prompts cannot bloat the session-state KV.
+const maxSnapshotTaskRunes = 200
+
+// TurnSubagent is one entry of the snapshot. Subagents live only in memory
+// and die with the process, so the resume path cannot recover them - the
+// snapshot exists purely to warn the model that their results are gone.
+type TurnSubagent struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+	Task  string `json:"task,omitempty"`
+}
+
+// snapshotRunningSubagents returns the running/paused subagent tasks owned by
+// a session (and its key aliases), using the same ownership rule as
+// cancellation (tools.TaskBelongsToSession) so the snapshot and /stop always
+// agree on which tasks belong to the session.
+func (tc *toolCoordinatorImpl) snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask {
+	if tc == nil || sessionKey == "" {
+		return nil
+	}
+	keys := tc.sessionCancellationKeys(sessionKey)
+	var out []*tools.SubagentTask
+	for _, task := range tc.listRunningSubagentTasks() {
+		if tools.TaskBelongsToSession(task, keys) {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+// snapshotRunningSubagents is the AgentLoop-side accessor: a nil coordinator
+// (unit-test loops) simply owns no tasks.
+func (al *AgentLoop) snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask {
+	if al == nil || al.toolCoordinator == nil {
+		return nil
+	}
+	return al.toolCoordinator.snapshotRunningSubagents(sessionKey)
+}
+
+// writeTurnSubagentSnapshot checkpoints the session's live subagents next to
+// the turn marker. Called at inbound_start and tools_running - the moments a
+// spawn can plausibly be in flight - never at llm_wait, where the task set
+// cannot have changed since the previous write.
+//
+// Zero tasks DELETES the key rather than storing "[]": readTurnSubagentSnapshot
+// then cannot confuse a stale snapshot with the current turn's state.
+func (al *AgentLoop) writeTurnSubagentSnapshot(sessionKey string) {
+	if al == nil || sessionKey == "" || !al.turnMarkerEnabled() {
+		return
+	}
+	repo := al.sessionStateKV()
+	if repo == nil {
+		return
+	}
+	key := turnSubsKeyPrefix + sessionKey
+	tasks := al.snapshotRunningSubagents(sessionKey)
+	if len(tasks) == 0 {
+		if err := repo.Delete(key); err != nil {
+			logger.WarnCF("session", "resume: failed to clear subagent snapshot", map[string]any{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+		return
+	}
+	if len(tasks) > maxSnapshottedSubagents {
+		tasks = tasks[:maxSnapshottedSubagents]
+	}
+	subs := make([]TurnSubagent, 0, len(tasks))
+	for _, t := range tasks {
+		subs = append(subs, TurnSubagent{ID: t.ID, Label: t.Label, Task: truncateRunes(t.Task, maxSnapshotTaskRunes)})
+	}
+	data, err := json.Marshal(subs)
+	if err != nil {
+		return
+	}
+	if err := repo.Set(key, string(data)); err != nil {
+		logger.WarnCF("session", "resume: failed to persist subagent snapshot", map[string]any{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+	}
+}
+
+// readTurnSubagentSnapshot returns the checkpointed subagents, or nil when
+// the feature is off, no snapshot exists, or the payload is corrupt (a
+// corrupt row is deleted - it can never be turned into a warning).
+func (al *AgentLoop) readTurnSubagentSnapshot(sessionKey string) []TurnSubagent {
+	if al == nil || sessionKey == "" {
+		return nil
+	}
+	repo := al.sessionStateKV()
+	if repo == nil {
+		return nil
+	}
+	raw, ok, err := repo.Get(turnSubsKeyPrefix + sessionKey)
+	if err != nil || !ok || raw == "" {
+		return nil
+	}
+	var subs []TurnSubagent
+	if err := json.Unmarshal([]byte(raw), &subs); err != nil {
+		logger.WarnCF("session", "resume: corrupt subagent snapshot, dropping", map[string]any{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+		_ = repo.Delete(turnSubsKeyPrefix + sessionKey)
+		return nil
+	}
+	return subs
+}
+
+// clearTurnSubagentSnapshot removes the snapshot row. Safe on missing keys.
+func (al *AgentLoop) clearTurnSubagentSnapshot(sessionKey string) {
+	if al == nil || sessionKey == "" {
+		return
+	}
+	repo := al.sessionStateKV()
+	if repo == nil {
+		return
+	}
+	if err := repo.Delete(turnSubsKeyPrefix + sessionKey); err != nil {
+		logger.WarnCF("session", "resume: failed to clear subagent snapshot", map[string]any{
+			"session_key": sessionKey,
+			"error":       err.Error(),
+		})
+	}
+}
+
+// clearTurnState removes everything the resume design checkpointed for a
+// finished turn: the marker and the subagent snapshot, under the SAME guard.
+// A non-empty dedupeID that does not match the marker means a newer turn
+// owns the checkpoint, so neither row may be touched by the older turn that
+// is finishing.
+func (al *AgentLoop) clearTurnState(sessionKey, dedupeID string) {
+	if dedupeID != "" {
+		if m, ok := al.getTurnMarker(sessionKey); ok && m.DedupeID != "" && m.DedupeID != dedupeID {
+			return
+		}
+	}
+	al.clearTurnMarker(sessionKey, dedupeID)
+	al.clearTurnSubagentSnapshot(sessionKey)
+}
+
+// truncateRunes cuts s to max runes, appending an ellipsis. Rune-safe: task
+// descriptions are user text and may be multi-byte.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }

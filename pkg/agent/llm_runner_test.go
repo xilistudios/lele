@@ -320,6 +320,9 @@ func (m *llmRunnerMockToolCoordinator) cancelAll() int { return 0 }
 func (m *llmRunnerMockToolCoordinator) cancelSession(sessionKey string) {}
 
 func (m *llmRunnerMockToolCoordinator) listRunningSubagentTasks() []*tools.SubagentTask { return nil }
+func (m *llmRunnerMockToolCoordinator) snapshotRunningSubagents(string) []*tools.SubagentTask {
+	return nil
+}
 
 func (m *llmRunnerMockToolCoordinator) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
 	return nil, false
