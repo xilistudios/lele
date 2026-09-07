@@ -53,6 +53,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		EvictExcludedFromMemory:    doc.Session.EvictExcludedFromMemory,
 		DurableInbound:             doc.Session.DurableInbound,
 		DurableOutbound:            doc.Session.DurableOutbound,
+		Resume:                     doc.Session.Resume,
 	}
 
 	// Copiar bindings
@@ -274,7 +275,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 
 	// Session.
 	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 || doc.Session.CompactionModel != "" || doc.Session.EvictExcludedFromMemory ||
-		doc.Session.DurableInbound != nil || doc.Session.DurableOutbound != nil {
+		doc.Session.DurableInbound != nil || doc.Session.DurableOutbound != nil || doc.Session.Resume != nil {
 		session := map[string]interface{}{
 			"ephemeral":                    doc.Session.Ephemeral,
 			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
@@ -289,6 +290,9 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		}
 		if doc.Session.DurableOutbound != nil {
 			session["durable_outbound"] = *doc.Session.DurableOutbound
+		}
+		if doc.Session.Resume != nil {
+			session["resume_enabled"] = *doc.Session.Resume
 		}
 		if doc.Session.DMScope != "" {
 			session["dm_scope"] = doc.Session.DMScope

@@ -36,6 +36,9 @@ type toolCoordinator interface {
 	cancelSession(sessionKey string)
 	markSessionSubagentsDelivered(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
+	// snapshotRunningSubagents filters listRunningSubagentTasks down to the
+	// tasks owned by a session (alias-aware), for the resume checkpoint.
+	snapshotRunningSubagents(sessionKey string) []*tools.SubagentTask
 	getSubagentTask(taskID string) (*tools.SubagentTask, bool)
 	markSubagentDelivered(taskID string) bool
 	stopSubagentTask(taskID string) bool

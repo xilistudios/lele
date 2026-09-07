@@ -1101,6 +1101,10 @@ func (m *commandHandlerSubagentCoordinatorStub) listRunningSubagentTasks() []*to
 	return nil
 }
 
+func (m *commandHandlerSubagentCoordinatorStub) snapshotRunningSubagents(string) []*tools.SubagentTask {
+	return nil
+}
+
 func (m *commandHandlerSubagentCoordinatorStub) getSubagentTask(taskID string) (*tools.SubagentTask, bool) {
 	return nil, false
 }

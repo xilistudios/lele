@@ -119,23 +119,63 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 
 	// Keep session model in sync with the active/session-selected agent unless user
 	// explicitly changed model with /model.
-	resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
-	if _, hasSessionModel := mp.al.sessionModels.Load(resolvedSessionKey); !hasSessionModel && agent != nil {
-		// Check persisted session model before falling back to agent default.
-		// This prevents the model from silently changing when continuing an
-		// existing session whose in-memory entry was lost (e.g. after restart).
-		persistedModel := ""
-		if agent.Sessions != nil {
-			persistedModel = agent.Sessions.GetModel(resolvedSessionKey)
+	mp.syncSessionModel(agent, sessionKey)
+
+	// Resume branch (session.resume_enabled + durable_inbound). The durable
+	// inbound replay is the resume trigger: after a gateway restart, di.Drain
+	// re-publishes the unfinished spool row and it lands here carrying the
+	// SAME DedupeID the turn checkpointed before dying. That identity match is
+	// what distinguishes "resume this exact turn" from "a new turn on a
+	// session with a stale marker" - a mismatched or absent marker simply
+	// takes the normal path below and overwrites the checkpoint.
+	//
+	// Resuming is strictly better than the plain replay: the user message is
+	// already in the history from the original turn, so ContinueTurn re-enters
+	// the loop with SkipUserMessage and the interrupted turn continues from
+	// the last persisted step instead of being re-run from scratch.
+	//
+	// The branch runs before the ephemeral check on purpose: a resume must
+	// never reset the history it is resuming from. The idle window that trips
+	// the reset is measured from the original user message (the last real
+	// activity), and the replay can land minutes after the crash — long past
+	// the threshold — while the interrupted turn is exactly what must survive.
+	if marker, ok := mp.al.getTurnMarker(sessionKey); ok && marker.DedupeID != "" && marker.DedupeID == msg.DedupeID {
+		if !marker.ResumeNoticeSent {
+			// Persist the flag BEFORE publishing: a crash between the two
+			// loses at most the notice, while the reverse order would repeat
+			// it on every replay of this turn.
+			mp.al.setResumeNoticeSent(sessionKey)
+			mp.al.bus.PublishOutbound(bus.OutboundMessage{
+				Channel: marker.Channel,
+				ChatID:  marker.ChatID,
+				Content: "⚡ El gateway se reinició a mitad de una tarea; reanudando desde el último paso completado…",
+			})
 		}
-		if persistedModel != "" {
-			persistedModel = mp.al.cfg().Providers.ResolveModelAlias(persistedModel, mp.al.cfg().Agents.Defaults.Provider)
-			mp.al.sessionModels.Store(resolvedSessionKey, persistedModel)
-		} else if agent.Model != "" {
-			mp.al.sessionModels.Store(resolvedSessionKey, agent.Model)
-		} else {
-			mp.al.sessionModels.Store(resolvedSessionKey, mp.al.cfg().Agents.Defaults.Model)
+		// Tell the model about subagents that died with the process BEFORE
+		// the resumed loop runs, so it never assumes their results exist.
+		mp.injectSubagentInterruptionWarning(agent, sessionKey)
+		response, err := mp.ContinueTurn(ctx, marker, msg, sessionKey)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				// Cancelled again (another stop/shutdown mid-resume): keep the
+				// marker so the next replay resumes from the same checkpoint.
+				return "", err
+			}
+			// Terminal resume error (provider/tool failure): hand Run a
+			// user-facing message exactly as the normal path below does. The
+			// marker stays for the same reason the normal path keeps it: if the
+			// process dies before Finish closes the row, the next replay resumes
+			// (and retries) the turn instead of re-running it from scratch.
+			errMsg := fmt.Sprintf("❌ Error resuming message: %v", err)
+			if len(errMsg) > 4000 {
+				errMsg = errMsg[:3997] + "..."
+			}
+			return errMsg, nil
 		}
+		// Same conditional clear as the normal path: only THIS turn's marker
+		// goes away, and only once its answer is out.
+		mp.al.clearTurnState(sessionKey, msg.DedupeID)
+		return response, nil
 	}
 
 	// Delegate to llmRunner for processing
@@ -146,6 +186,11 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		messageID = msg.Metadata["message_id"]
 		replyTo = msg.Metadata["message_id"]
 	}
+
+	// Checkpoint the fresh inbound turn (see the resume branch above for the
+	// feature gates; with the feature off the writes are no-ops).
+	mp.seedInboundTurnMarker(sessionKey, agent, msg, messageID, turnModelOverride)
+
 	response, err := mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
 		Channel:         msg.Channel,
@@ -177,6 +222,14 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		}
 		return errMsg, nil
 	}
+	// The turn reached a normal end: its checkpoint is no longer needed.
+	// Passing msg.DedupeID makes the marker delete conditional on the marker
+	// still describing THIS turn (a newer turn's marker must survive). Error
+	// and cancellation paths return above without clearing, which is exactly
+	// the point: an interrupted turn keeps its marker so a replay can resume
+	// it. The subagent snapshot goes with it - keeping it would warn about
+	// tasks on a turn that already finished.
+	mp.al.clearTurnState(sessionKey, msg.DedupeID)
 	// Caller-side goal continuation trigger. runAgentLoop has returned and
 	// released the per-session semaphore, so the continuation loop can run its
 	// recursive turns safely. Only triggered on the main processMessage path.
@@ -192,6 +245,147 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		return ephemeralNotice, nil
 	}
 	return ephemeralNotice + "\n\n" + response, nil
+}
+
+// syncSessionModel keeps the session model in sync with the active or
+// session-selected agent unless the user explicitly changed it with /model.
+// Extracted from processMessage so ContinueTurn rebuilds the exact same
+// model state a fresh turn would have after a restart (the in-memory
+// sessionModels map is gone by then).
+func (mp *messageProcessorImpl) syncSessionModel(agent *AgentInstance, sessionKey string) {
+	resolvedSessionKey := mp.al.ResolveSessionKey(sessionKey)
+	if _, hasSessionModel := mp.al.sessionModels.Load(resolvedSessionKey); !hasSessionModel && agent != nil {
+		// Check persisted session model before falling back to agent default.
+		// This prevents the model from silently changing when continuing an
+		// existing session whose in-memory entry was lost (e.g. after restart).
+		persistedModel := ""
+		if agent.Sessions != nil {
+			persistedModel = agent.Sessions.GetModel(resolvedSessionKey)
+		}
+		if persistedModel != "" {
+			persistedModel = mp.al.cfg().Providers.ResolveModelAlias(persistedModel, mp.al.cfg().Agents.Defaults.Provider)
+			mp.al.sessionModels.Store(resolvedSessionKey, persistedModel)
+		} else if agent.Model != "" {
+			mp.al.sessionModels.Store(resolvedSessionKey, agent.Model)
+		} else {
+			mp.al.sessionModels.Store(resolvedSessionKey, mp.al.cfg().Agents.Defaults.Model)
+		}
+	}
+}
+
+// seedInboundTurnMarker checkpoints a fresh inbound turn at phase
+// inbound_start. The clear-then-write resets any marker left behind by an
+// abandoned turn so this turn starts from a clean phase; every write is
+// gated inside writeTurnMarker, so with the feature off this is a no-op.
+//
+// The marker is managed here and not in Run's defer finishTurn: the defer
+// closes the spool row but does not know the resolved sessionKey, and the
+// marker must live exactly as long as the turn's resumability window.
+// finishTurn's durable Finish stays untouched for the spool side.
+func (mp *messageProcessorImpl) seedInboundTurnMarker(sessionKey string, agent *AgentInstance, msg bus.InboundMessage, messageID, modelOverride string) {
+	mp.al.clearTurnMarker(sessionKey, "")
+	agentID := ""
+	if agent != nil {
+		agentID = agent.ID
+	}
+	mp.al.writeTurnMarker(sessionKey, turnPhaseInbound, 0, func(m *TurnMarker) {
+		m.SessionKey = sessionKey
+		m.DedupeID = msg.DedupeID
+		m.SpoolID = msg.SpoolID
+		m.Channel = msg.Channel
+		m.ChatID = msg.ChatID
+		m.MsgID = messageID
+		m.AgentID = agentID
+		m.Model = modelOverride
+	})
+	// Checkpoint the session's live subagents alongside the marker: they are
+	// memory-only and die with the process, so this is the only trace a
+	// resume can warn about. Fresh inbound turns can have stragglers from an
+	// earlier turn still running, hence the write here and not only at
+	// tools_running.
+	mp.al.writeTurnSubagentSnapshot(sessionKey)
+}
+
+// injectSubagentInterruptionWarning adds the "your subagents died" notice to
+// the session history before the resumed turn rebuilds its context, so the
+// model sees it as user-visible session text and does not wait for results
+// that will never arrive. It is persisted (not ExcludeFromContext): the
+// warning must be part of the prompt.
+//
+// The snapshot is deleted right after injection, which makes the whole step
+// idempotent across repeated replays of the same crashed turn: the warning
+// already lives in the history, so a second resume needs nothing more.
+func (mp *messageProcessorImpl) injectSubagentInterruptionWarning(agent *AgentInstance, sessionKey string) {
+	subs := mp.al.readTurnSubagentSnapshot(sessionKey)
+	if len(subs) == 0 {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚠ El gateway se reinició con %d subagente(s) en curso que fueron interrumpidos y ya no existen:", len(subs))
+	for _, s := range subs {
+		name := s.Label
+		if name == "" {
+			name = s.ID
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", name, s.Task)
+	}
+	b.WriteString("\nSus resultados no están disponibles. Re-lánzalos si la tarea sigue siendo necesaria; no asumas que se completaron.")
+
+	if agent != nil && agent.Sessions != nil {
+		agent.Sessions.AddMessage(sessionKey, "user", b.String())
+		if err := agent.Sessions.Save(sessionKey); err != nil {
+			logger.WarnCF("session", "resume: failed to persist subagent interruption warning", map[string]any{
+				"session_key": sessionKey,
+				"error":       err.Error(),
+			})
+		}
+	}
+	mp.al.clearTurnSubagentSnapshot(sessionKey)
+}
+
+// ContinueTurn resumes an interrupted turn from persisted session state. The
+// user message is NOT re-appended (already in history from the original turn).
+// It re-enters runAgentLoop with SkipUserMessage=true so the system prompt and
+// context window rebuild exactly as a normal turn; HealToolCallPairs
+// (llm_caller.go) synthesizes missing tool results, so a turn interrupted
+// mid-tools continues as if pending tools failed and the model decides.
+//
+// It deliberately does not touch the spool or the dedupe ledger: Run's defer
+// dur.Finish(m) closes the row for whatever path consumed the message, and
+// processMessage clears the marker on success. The error paths return without
+// clearing, keeping the turn resumable after yet another crash.
+func (mp *messageProcessorImpl) ContinueTurn(ctx context.Context, marker TurnMarker, msg bus.InboundMessage, sessionKey string) (string, error) {
+	agent, ok := mp.al.registry.GetAgent(marker.AgentID)
+	if !ok {
+		// The agent that owned the turn is gone (config changed while the
+		// gateway was down). Falling back to the default agent keeps the
+		// session answering; the history is shared, only the persona/model
+		// defaults may differ.
+		logger.WarnCF("session", "resume: unknown agent in turn marker, using default", map[string]any{
+			"session_key": sessionKey,
+			"agent_id":    marker.AgentID,
+		})
+		agent = mp.al.registry.GetDefaultAgent()
+	}
+
+	// Rebuild the per-session model state a fresh turn would have (the map is
+	// in memory and died with the process), then honor the model the
+	// interrupted turn resolved to. A marker model is a per-turn override, so
+	// it travels through ModelOverride exactly like on the normal path.
+	mp.syncSessionModel(agent, sessionKey)
+
+	return mp.al.llmRunner.runAgentLoop(ctx, agent, processOptions{
+		SessionKey:      sessionKey,
+		Channel:         marker.Channel,
+		ChatID:          marker.ChatID,
+		DefaultResponse: "I've completed processing but have no response to give.",
+		EnableSummary:   true,
+		SendResponse:    true,
+		SkipUserMessage: true,
+		ReplyTo:         marker.MsgID,
+		MessageID:       marker.MsgID,
+		ModelOverride:   marker.Model,
+	})
 }
 
 // processSystemMessage handles messages from the system channel.
