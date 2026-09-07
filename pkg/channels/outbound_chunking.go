@@ -81,13 +81,33 @@ func outboundChannelSeparatesAttachments(channel string) bool {
 	}
 }
 
-func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundMessage) error {
-	for _, chunk := range splitOutboundMessage(msg) {
+// sendResult says how far a whole-message send got, which decides what the
+// durable spool does with the backing row: Delivered completes it,
+// NotStarted releases it for replay, Partial must be forgotten because
+// re-sending would duplicate the chunks already on the wire.
+type sendResult int
+
+const (
+	sendDelivered  sendResult = iota // every chunk reached the channel
+	sendNotStarted                   // failed before the first successful chunk
+	sendPartial                      // >=1 chunk out, then failed: never retry
+)
+
+// sendOutboundMessage splits msg the way the channel needs it and sends every
+// chunk. The returned sendResult is the tri-state above; the error is the first
+// chunk failure, if any. Callers that own a spool row must map the result to
+// Complete/Release/Forget - only Release is safe to replay.
+func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundMessage) (sendResult, error) {
+	chunks := splitOutboundMessage(msg)
+	for i, chunk := range chunks {
 		if err := sendChunkWithRetry(ctx, channel, chunk); err != nil {
-			return err
+			if i == 0 {
+				return sendNotStarted, err
+			}
+			return sendPartial, err
 		}
 	}
-	return nil
+	return sendDelivered, nil
 }
 
 func sendChunkWithRetry(ctx context.Context, channel Channel, msg bus.OutboundMessage) error {

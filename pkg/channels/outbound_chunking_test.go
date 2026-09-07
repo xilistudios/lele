@@ -225,8 +225,12 @@ func TestSendOutboundMessage_SendsExpandedChunksInOrder(t *testing.T) {
 		Attachments: []bus.FileAttachment{{Name: "report.txt", Path: "/tmp/report.txt"}},
 	}
 
-	if err := sendOutboundMessage(context.Background(), channel, msg); err != nil {
+	res, err := sendOutboundMessage(context.Background(), channel, msg)
+	if err != nil {
 		t.Fatalf("sendOutboundMessage returned error: %v", err)
+	}
+	if res != sendDelivered {
+		t.Fatalf("sendOutboundMessage result = %v, want sendDelivered", res)
 	}
 	if len(channel.messages) != 3 {
 		t.Fatalf("expected 3 sends, got %d", len(channel.messages))
@@ -250,11 +254,39 @@ func TestSendOutboundMessage_StopsOnChunkError(t *testing.T) {
 		Content: strings.Repeat("d", telegramTextChunkMaxLen+250),
 	}
 
-	err := sendOutboundMessage(context.Background(), channel, msg)
+	res, err := sendOutboundMessage(context.Background(), channel, msg)
 	if err == nil {
 		t.Fatal("expected an error when a chunk send fails")
 	}
+	// The first chunk made it out, so this is the partial case: the spool must
+	// Forget the row rather than Release it, or chunk 1 would be sent twice.
+	if res != sendPartial {
+		t.Fatalf("sendOutboundMessage result = %v, want sendPartial", res)
+	}
 	if len(channel.messages) != 1 {
 		t.Fatalf("expected to stop after the first successful send, got %d sends", len(channel.messages))
+	}
+}
+
+// The third arm of the tri-state: a channel that refuses the very first chunk
+// must report sendNotStarted, because nothing reached the wire and the spool is
+// allowed to replay the whole message.
+func TestSendOutboundMessage_NotStartedWhenFirstChunkFails(t *testing.T) {
+	channel := &recordingChannel{failAt: 1}
+	msg := bus.OutboundMessage{
+		Channel: "telegram",
+		ChatID:  "123",
+		Content: strings.Repeat("e", telegramTextChunkMaxLen+250),
+	}
+
+	res, err := sendOutboundMessage(context.Background(), channel, msg)
+	if err == nil {
+		t.Fatal("expected an error when the first chunk send fails")
+	}
+	if res != sendNotStarted {
+		t.Fatalf("sendOutboundMessage result = %v, want sendNotStarted", res)
+	}
+	if len(channel.messages) != 0 {
+		t.Fatalf("expected no successful sends, got %d", len(channel.messages))
 	}
 }
