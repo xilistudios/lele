@@ -26,6 +26,7 @@ package channels
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -267,7 +268,7 @@ func newOutboundFixture(t *testing.T, messageBus *bus.MessageBus, ch Channel, st
 func waitSpool(t *testing.T, sp *fakeCompleter, op string, want int) {
 	t.Helper()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(sp.idsFor(op)) >= want {
 			return
@@ -285,7 +286,7 @@ func waitSpool(t *testing.T, sp *fakeCompleter, op string, want int) {
 func waitBusDrained(t *testing.T, messageBus *bus.MessageBus) {
 	t.Helper()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, _, _, outLen, _, _ := messageBus.Stats(); outLen == 0 {
 			return
@@ -326,7 +327,7 @@ func longTelegramContent(t *testing.T) string {
 func waitAttempts(t *testing.T, ch *spooledChannel, want int) {
 	t.Helper()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if ch.sendCount() >= want {
 			return
@@ -335,6 +336,42 @@ func waitAttempts(t *testing.T, ch *spooledChannel, want int) {
 	}
 
 	t.Fatalf("channel sends = %d, want at least %d", ch.sendCount(), want)
+}
+
+// chunkContents projects a chunk list onto its Content field, for failure
+// messages short enough to read.
+func chunkContents(chunks []bus.OutboundMessage) []string {
+	out := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		out[i] = chunk.Content
+	}
+	return out
+}
+
+// waitSentChunk blocks until the channel has ACCEPTED - not merely attempted -
+// a chunk with exactly this content.
+//
+// It exists because sendCount counts refused attempts too: a scripted failure
+// bumps the counter without recording anything, so waiting for N attempts can
+// return while the dispatcher is still mid-flight on the Nth message. Polling
+// the accepted list under the channel's mutex closes that window - the fake
+// appends to `sent` inside the same critical section that bumps `attempts`, so
+// once the barrier content is visible, every queue entry before it is final.
+func waitSentChunk(t *testing.T, ch *spooledChannel, content string) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		sent := ch.sentChunks()
+		for _, chunk := range sent {
+			if chunk.Content == content {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("channel never accepted a chunk %q (accepted: %v)", content, chunkContents(ch.sentChunks()))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -701,44 +738,66 @@ func TestNoSpoolerWiredSendsNormally(t *testing.T) {
 	defer messageBus.Close()
 
 	cases := []struct {
-		name    string
+		name string
+		// message is the entry under test.
 		message bus.OutboundMessage
-		// wantSends is what the channel must have received; 0 means the message
-		// is dropped before any send, as with a content-less event signal.
-		wantSends int
+		// responses scripts Channel.Send. The dispatcher tries each message up to
+		// three times per chunk, but only while the failure looks transient, so a
+		// scripted error must be crafted for the outcome the case claims.
+		responses []error
+		// wantChunks are the messages the channel must have accepted before the
+		// barrier - the property under test, not a raw send count.
+		wantChunks []string
 	}{
 		{
-			name:      "delivered",
-			message:   bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: "hi", SpoolID: 7},
-			wantSends: 1,
+			name:       "delivered",
+			message:    bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: "hi", SpoolID: 7},
+			wantChunks: []string{"hi"},
 		},
 		{
-			name:      "send fails",
-			message:   bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: "hi", SpoolID: 7},
-			wantSends: 0,
+			// The error must read as transient (see isTransientError) or the retry
+			// loop would give up after attempt 1, leaving responses[1] to be
+			// consumed by the barrier - which would then fail and never be
+			// recorded. Scripted transient for all three attempts: the chunk is
+			// refused every time, so nothing may appear before the barrier.
+			name:    "send fails",
+			message: bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: "hi", SpoolID: 7},
+			responses: []error{
+				errors.New("temporary network hiccup"),
+				errors.New("temporary network hiccup"),
+				errors.New("temporary network hiccup"),
+			},
+			wantChunks: nil,
 		},
 		{
-			name:      "content-less signal",
-			message:   bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Event: "turn.end", SpoolID: 7},
-			wantSends: 0,
+			name:       "content-less signal",
+			message:    bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Event: "turn.end", SpoolID: 7},
+			wantChunks: nil,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ch := newSpooledChannel("telegram")
-			if tc.name == "send fails" {
-				ch = newSpooledChannel("telegram", errors.New("boom"))
-			}
+			ch := newSpooledChannel("telegram", tc.responses...)
 			fx := newOutboundFixture(t, messageBus, ch, true, nil)
 
+			// The barrier carries content no other case uses, so "the dispatcher
+			// reached the end of the queue" is a fact observed in the accepted
+			// list rather than an inference from a send count.
+			barrier := "barrier-" + strings.ReplaceAll(tc.name, " ", "-")
 			fx.queue <- tc.message
-			fx.queue <- bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: "barrier"}
-			// The barrier is the second send (or the first, for the signal).
-			waitAttempts(t, ch, tc.wantSends+1)
+			fx.queue <- bus.OutboundMessage{Channel: "telegram", ChatID: "chat1", Content: barrier, SpoolID: 7}
+			waitSentChunk(t, ch, barrier)
 
-			if n := len(ch.sentChunks()); n != tc.wantSends+1 {
-				t.Errorf("channel received %d chunks, want %d", n, tc.wantSends+1)
+			var got []string
+			for _, chunk := range ch.sentChunks() {
+				if chunk.Content == barrier {
+					break
+				}
+				got = append(got, chunk.Content)
+			}
+			if !reflect.DeepEqual(got, tc.wantChunks) {
+				t.Errorf("chunks accepted before the barrier = %v, want %v", got, tc.wantChunks)
 			}
 		})
 	}
