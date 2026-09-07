@@ -106,7 +106,8 @@ export type AppStreamingContextValue = {
   typingIndicator: UseApp['typingIndicator']
 }
 
-const AppLogicContext = createContext<AppLogicContextValue | null>(null)
+// Exported for tests that need to mount a consumer without the full provider tree.
+export const AppLogicContext = createContext<AppLogicContextValue | null>(null)
 const AppStreamingContext = createContext<AppStreamingContextValue | null>(null)
 
 export function AppLogicProvider({ children }: { children: ReactNode }) {
