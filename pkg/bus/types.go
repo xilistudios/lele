@@ -46,6 +46,11 @@ type OutboundMessage struct {
 	TextMode       string            `json:"text_mode,omitempty"`       // "markdown" (default) or "html"
 	PlainText      string            `json:"plain_text,omitempty"`      // Fallback plain text if formatting fails
 	LinkPreview    *bool             `json:"link_preview,omitempty"`    // Enable/disable link previews (nil = default true)
+	// SpoolID is the internal handle of the durable spool row backing this
+	// message, or 0 when durability is off or the row was not written. Never
+	// serialized: the id belongs to the database, not the wire (mirror of
+	// InboundMessage.SpoolID).
+	SpoolID int64 `json:"-"`
 }
 
 // MessageHandler is a function that handles incoming messages

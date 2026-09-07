@@ -692,6 +692,32 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 		"flushed":         flushed,
 		"skipped_stream":  skipped,
 	})
+
+	// Durability: the peer is live again, so wake the outbound pump to replay
+	// the rows that piled up while it was gone. This sits AFTER the pendingMsgs
+	// flush on purpose - in-memory buffer first, durable spool second - so a
+	// message that was only buffered is not overtaken by an older spooled row.
+	n.kickOutboundFlush(client)
+}
+
+// kickOutboundFlush signals the durable outbound pump that client's peer is
+// reachable again. It is a wake-up only: FlushPeer never claims or delivers a
+// row, the pump does, so a spurious or duplicate kick is harmless.
+//
+// Extracted from sendReconnected because the reconnect path needs a live
+// websocket.Conn to be driven end to end, while the wake-up itself depends on
+// nothing but the client's session key and the wired flusher - so this way the
+// ordering contract has a unit test.
+//
+// The flusher is read under n.mu and called outside it: FlushPeer may take the
+// pump's own locks and must never run while the client map is held.
+func (n *NativeChannel) kickOutboundFlush(client *WSClient) {
+	f := n.outboundFlusherSnapshot()
+	if f == nil {
+		return
+	}
+	// The spool keys native peers by ChatID, which is the session key.
+	f.FlushPeer(ChannelName, client.SessionKey)
 }
 
 func (n *NativeChannel) sendError(client *WSClient, code, message string) {

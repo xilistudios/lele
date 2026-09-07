@@ -52,6 +52,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		CompactionModel:            doc.Session.CompactionModel,
 		EvictExcludedFromMemory:    doc.Session.EvictExcludedFromMemory,
 		DurableInbound:             doc.Session.DurableInbound,
+		DurableOutbound:            doc.Session.DurableOutbound,
 	}
 
 	// Copiar bindings
@@ -273,7 +274,7 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 
 	// Session.
 	if doc.Session.DMScope != "" || doc.Session.Ephemeral || len(doc.Session.IdentityLinks) > 0 || doc.Session.CompactionModel != "" || doc.Session.EvictExcludedFromMemory ||
-		doc.Session.DurableInbound != nil {
+		doc.Session.DurableInbound != nil || doc.Session.DurableOutbound != nil {
 		session := map[string]interface{}{
 			"ephemeral":                    doc.Session.Ephemeral,
 			"ephemeral_threshold":          doc.Session.EphemeralThreshold,
@@ -285,6 +286,9 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		// untouched file keeps inheriting the code default.
 		if doc.Session.DurableInbound != nil {
 			session["durable_inbound"] = *doc.Session.DurableInbound
+		}
+		if doc.Session.DurableOutbound != nil {
+			session["durable_outbound"] = *doc.Session.DurableOutbound
 		}
 		if doc.Session.DMScope != "" {
 			session["dm_scope"] = doc.Session.DMScope
