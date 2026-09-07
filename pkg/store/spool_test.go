@@ -312,6 +312,105 @@ func TestSpoolReleaseClaims(t *testing.T) {
 	}
 }
 
+// TestSpoolEnqueueClaimedIsInvisibleToClaimBatch pins the reason
+// EnqueueClaimed exists: a row born claimed is not pending, so a replay pass
+// cannot pick it up and cannot double-publish the live message behind it.
+func TestSpoolEnqueueClaimedIsInvisibleToClaimBatch(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	// The claim is at INSERT time, so there is no window in which the row is
+	// pending and a steady pump could see it.
+	if _, err := repo.EnqueueClaimed(SpoolInbound, "telegram", "chat-1", "sess", "m1", "payload", "instA", time.Now()); err != nil {
+		t.Fatalf("EnqueueClaimed() failed: %v", err)
+	}
+
+	got, err := repo.ClaimBatch(SpoolInbound, 10, "instB", testNow())
+	if err != nil {
+		t.Fatalf("ClaimBatch(instB) failed: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ClaimBatch(instB) = %v, want no rows: the row belongs to instA", spoolIDs(got))
+	}
+	checkStats(t, repo, SpoolStats{ClaimedInbound: 1})
+	if owners := claimedBy(t, s); !reflect.DeepEqual(owners, []string{"instA"}) {
+		t.Errorf("claimed_by = %v, want [instA]", owners)
+	}
+
+	// An unknown direction is rejected before anything is written, exactly like
+	// Enqueue does.
+	if _, err := repo.EnqueueClaimed("sideways", "telegram", "chat-1", "sess", "m", "p", "instA", testNow()); !errors.Is(err, ErrUnknownDirection) {
+		t.Errorf("EnqueueClaimed(sideways) error = %v, want ErrUnknownDirection", err)
+	}
+	if n, err := repo.PendingBySession(SpoolInbound); err != nil || len(n) != 0 {
+		t.Errorf("pending after a rejected enqueue = (%v, %v), want (empty, nil)", n, err)
+	}
+}
+
+// TestSpoolReleaseIDsScopedToInstance is the half of the protocol that lets a
+// caller undo its own claim: the release is limited both to the given ids and to
+// rows the given instance still holds.
+func TestSpoolReleaseIDsScopedToInstance(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	id, err := repo.EnqueueClaimed(SpoolInbound, "telegram", "chat-1", "sess", "m1", "payload", "instA", testNow())
+	if err != nil {
+		t.Fatalf("EnqueueClaimed() failed: %v", err)
+	}
+
+	// Another instance cannot hand back a row it does not own.
+	if n, err := repo.ReleaseIDs([]int64{id}, "instB"); err != nil || n != 0 {
+		t.Fatalf("ReleaseIDs(%d, instB) = (%d, %v), want (0, nil)", id, n, err)
+	}
+	if got, err := repo.ClaimBatch(SpoolInbound, 10, "instB", testNow()); err != nil || len(got) != 0 {
+		t.Errorf("ClaimBatch(instB) = (%v, %v), want nothing: the row is still held by instA", spoolIDs(got), err)
+	}
+	if owners := claimedBy(t, s); !reflect.DeepEqual(owners, []string{"instA"}) {
+		t.Fatalf("claimed_by = %v, want still [instA] after a foreign release", owners)
+	}
+
+	// The owner can, and then anybody may claim it again.
+	if n, err := repo.ReleaseIDs([]int64{id}, "instA"); err != nil || n != 1 {
+		t.Fatalf("ReleaseIDs(%d, instA) = (%d, %v), want (1, nil)", id, n, err)
+	}
+	reclaimed, err := repo.ClaimBatch(SpoolInbound, 10, "instC", testNow())
+	if err != nil {
+		t.Fatalf("ClaimBatch(instC) failed: %v", err)
+	}
+	if got, want := spoolIDs(reclaimed), []int64{id}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ClaimBatch(instC) = %v, want %v", got, want)
+	}
+	if st := mustStats(t, repo); st.PendingInbound != 0 || st.ClaimedInbound != 1 {
+		t.Errorf("stats after the re-claim = %+v, want 0 pending / 1 claimed by instC", st)
+	}
+}
+
+// TestSpoolReleaseIDsEmptyIsNoop keeps a caller from having to guard its own
+// slice: releasing nothing must not touch the database or fail.
+func TestSpoolReleaseIDsEmptyIsNoop(t *testing.T) {
+	s := openTestStore(t)
+	repo := s.Spool()
+
+	// A row claimed by somebody else, so a no-op release cannot be confused
+	// with a release that matched nothing by accident.
+	held, err := repo.EnqueueClaimed(SpoolInbound, "telegram", "chat-1", "sess", "m1", "p", "instA", testNow())
+	if err != nil {
+		t.Fatalf("EnqueueClaimed() failed: %v", err)
+	}
+
+	if n, err := repo.ReleaseIDs(nil, "instA"); err != nil || n != 0 {
+		t.Errorf("ReleaseIDs(nil) = (%d, %v), want (0, nil)", n, err)
+	}
+	if n, err := repo.ReleaseIDs([]int64{}, "instA"); err != nil || n != 0 {
+		t.Errorf("ReleaseIDs(empty) = (%d, %v), want (0, nil)", n, err)
+	}
+	if n, err := repo.ReleaseIDs([]int64{held, 1 << 40}, "nobody"); err != nil || n != 0 {
+		t.Errorf("ReleaseIDs(unknown owner) = (%d, %v), want (0, nil)", n, err)
+	}
+	checkStats(t, repo, SpoolStats{ClaimedInbound: 1})
+}
+
 func TestSpoolReclaimStale(t *testing.T) {
 	s := openTestStore(t)
 	repo := s.Spool()

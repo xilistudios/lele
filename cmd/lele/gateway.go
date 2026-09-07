@@ -26,11 +26,13 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/devices"
+	"github.com/xilistudios/lele/pkg/durable"
 	"github.com/xilistudios/lele/pkg/heartbeat"
 	"github.com/xilistudios/lele/pkg/lockfile"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/server"
 	"github.com/xilistudios/lele/pkg/state"
+	"github.com/xilistudios/lele/pkg/store"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/update"
 	"github.com/xilistudios/lele/pkg/voice"
@@ -212,6 +214,18 @@ func gatewayCmd() {
 		// Wire SQLite store into native channel for client persistence.
 		channelManager.SetNativeClientStore(s.NativeClients())
 	}
+
+	// Durable inbound spool (feature-flagged). Built here, after the channel
+	// manager exists and before StartAll, because the two setters it calls
+	// must run before channels accept traffic and before the agent loop
+	// starts consuming. Returns nil when the flag is off or there is no
+	// store, in which case every di.* call below is a no-op and the gateway
+	// behaves exactly as it did before this feature existed.
+	var spoolRepo *store.SpoolRepo
+	if s := agentLoop.Store(); s != nil {
+		spoolRepo = s.Spool()
+	}
+	di := setupDurableInbound(cfg.Session.DurableInboundEnabled(), spoolRepo, msgBus, agentLoop, channelManager)
 
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {
@@ -411,6 +425,14 @@ func gatewayCmd() {
 		fmt.Fprintln(gatewayOut, "✓ Device event service started")
 	}
 
+	// Replay everything the previous process left in the spool BEFORE the
+	// channels accept any traffic. Ordering matters twice over: the restored
+	// messages must reach the loop ahead of new ones, and once channels are
+	// live every message they spool is a pending row that this pass would
+	// happily replay as if it were left over from a dead process. Drain on a
+	// nil di (feature off) is a no-op.
+	di.Drain(ctx)
+
 	if err := channelManager.StartAll(ctx); err != nil {
 		fmt.Fprintf(gatewayOut, "Error starting channels: %v\n", err)
 	}
@@ -433,6 +455,13 @@ func gatewayCmd() {
 
 	go agentLoop.Run(ctx)
 
+	// The pump exists to catch rows a full bus refused while the gateway was
+	// live. Such a row is handed back to the pending set by
+	// BaseChannel.publishInbound (spooler Release), and a live in-flight row is
+	// born claimed, so the pump only ever sees rows nobody is working on and
+	// cannot duplicate a message whose turn is still running.
+	di.StartPump(ctx)
+
 	// --- Graceful teardown plan -------------------------------------------
 	//
 	// The coordinator runs hooks LIFO (last registered, first to run), so the
@@ -440,11 +469,12 @@ func gatewayCmd() {
 	// Effective order on shutdown:
 	//
 	//	1. agent-drain     : let in-flight turns finish (10s budget)
-	//	2. sessions-save   : persist every session to disk
-	//	3. channels-stop   : stop accepting new inbound messages
-	//	4. http-stop       : stop the unified server (API + Web UI)
-	//	5. services-stop   : stop watchers/schedulers that may enqueue work
-	//	6. lock-release    : last, so a restarting child never sees a live holder
+	//	2. durable-inbound-shutdown : stop the pump, release our spool claims
+	//	3. sessions-save   : persist every session to disk
+	//	4. channels-stop   : stop accepting new inbound messages
+	//	5. http-stop       : stop the unified server (API + Web UI)
+	//	6. services-stop   : stop watchers/schedulers that may enqueue work
+	//	7. lock-release    : last, so a restarting child never sees a live holder
 	//
 	// A hook that fails is recorded by the coordinator and does not abort the
 	// rest: the process must never keep the instance lock because one stop step
@@ -482,6 +512,13 @@ func gatewayCmd() {
 		}
 		return nil
 	})
+	// Registered before agent-drain => runs second, right after in-flight
+	// turns have finished their spool rows and before sessions are persisted.
+	// Stopping the pump first is what makes the release meaningful: a pump
+	// still ticking could claim rows again after they were handed back.
+	coord.Register("durable-inbound-shutdown", 3*time.Second, func(context.Context) error {
+		return di.Shutdown()
+	})
 	// Registered last => runs first.
 	coord.Register("agent-drain", 10*time.Second, func(hookCtx context.Context) error {
 		return agentLoop.Shutdown(hookCtx)
@@ -494,6 +531,167 @@ func gatewayCmd() {
 	fmt.Fprintln(gatewayOut, "\nShutting down...")
 	runGracefulShutdown(coord, agentLoop, cancel)
 	fmt.Fprintln(gatewayOut, "✓ Gateway stopped")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Durable inbound wiring
+// ──────────────────────────────────────────────────────────────────────────────
+
+// durableInbound is the gateway's handle on the durable inbound spool: the
+// service itself plus the pump's lifecycle. Every method is nil-safe, so the
+// gateway can call Drain/StartPump/Shutdown unconditionally and a nil handle
+// (feature off, no store) simply means "nothing happens".
+//
+// The pump is owned here rather than inside setupDurableInbound so the wiring
+// step stays free of background goroutines: a unit test can build the handle
+// and assert on it without a hidden ticker writing to the spool, and the
+// gateway decides when replay starts and when the pump may run.
+type durableInbound struct {
+	inbound *durable.Inbound
+
+	// mu guards the pump lifecycle. StartPump runs on the gateway goroutine
+	// while Shutdown can arrive from the self-restart callback inside the
+	// native channel, so the two must not read and clear cancel/done at the
+	// same time.
+	mu     sync.Mutex
+	cancel context.CancelFunc // cancels the pump's context; nil until StartPump
+	done   chan struct{}      // closed when StartPump returns; nil until StartPump
+}
+
+// setupDurableInbound wires the durable inbound spool into the agent loop and
+// the channel manager. It returns nil when the feature is off, which is the
+// signal for the gateway to keep its pre-durability behaviour: nothing is
+// touched on agentLoop or channelManager in that case.
+//
+// The publish function handed to durable.NewInbound is the bus's own
+// PublishInbound, and that is deliberate: NewInbound only ever publishes
+// through it while REPLAYING a row it claimed, while live traffic is spooled
+// and published by BaseChannel.publishInbound.
+//
+// The two paths are disjoint because of how the live row is claimed. Enqueue
+// writes the row already claimed by this instance, so ClaimBatch - which only
+// selects rows whose claimed_by is empty - never sees a message the agent loop
+// is working on and cannot double-publish it. If the bus refuses that live
+// publish, the channel calls Release, which hands exactly that one row back to
+// the pending set for the pump to retry on its next tick. A replay pass only
+// ever releases the ids it claimed itself, so it cannot touch a live row
+// either. The blanket ReleaseClaims at shutdown stays: the pump is already
+// stopped by then, so every claim still held is genuinely orphaned work for the
+// successor to replay.
+//
+// Both setters must run before their consumer starts: SetInboundSpooler before
+// channelManager.StartAll (channels read the field without a lock once they
+// accept traffic) and SetInboundDurability before agentLoop.Run, for the same
+// reason. This function only writes fields; it starts no goroutines and touches
+// no rows.
+func setupDurableInbound(
+	enabled bool,
+	spool *store.SpoolRepo,
+	msgBus *bus.MessageBus,
+	agentLoop *agent.AgentLoop,
+	channelManager *channels.Manager,
+) *durableInbound {
+	// Flag off, no persistence, or no bus: leave both consumers untouched.
+	if !enabled || spool == nil || msgBus == nil {
+		return nil
+	}
+
+	d := durable.NewInbound(spool, msgBus.PublishInbound)
+	if agentLoop != nil {
+		agentLoop.SetInboundDurability(d)
+	}
+	if channelManager != nil {
+		channelManager.SetInboundSpooler(d)
+	}
+
+	logger.InfoCF("durable", "Durable inbound enabled", map[string]interface{}{
+		"instance": d.InstanceID(),
+	})
+	return &durableInbound{inbound: d}
+}
+
+// Drain replays persisted-but-unconsumed rows. The gateway calls it once, after
+// the channels are wired and before channelManager.StartAll, so restored
+// traffic reaches the loop ahead of anything new and no live message can be
+// mistaken for a leftover mid-replay. The count it returns is logged inside
+// durable.Inbound.Drain; a failed replay leaves the rows in the spool for the
+// pump, so there is nothing for the caller to handle.
+func (di *durableInbound) Drain(ctx context.Context) {
+	if di == nil {
+		return
+	}
+	if _, err := di.inbound.Drain(ctx); err != nil {
+		logger.WarnCF("durable", "Durable inbound drain reported an error; the pump will retry",
+			map[string]interface{}{"error": err.Error()})
+	}
+}
+
+// StartPump launches the background pump that re-publishes rows a full bus
+// refused, and returns immediately. It derives its own cancellable context from
+// ctx so Shutdown can stop the pump without tearing down the gateway root
+// context, and records the channel that lets Shutdown wait for the goroutine to
+// actually leave. Calling it twice is a bug, not a supported state: the second
+// pump would race the first over the same claims, so it is refused.
+func (di *durableInbound) StartPump(ctx context.Context) {
+	if di == nil {
+		return
+	}
+
+	di.mu.Lock()
+	if di.done != nil {
+		di.mu.Unlock()
+		logger.WarnC("durable", "Durable inbound pump already started; ignoring duplicate start")
+		return
+	}
+	pumpCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	di.cancel = cancel
+	di.done = done
+	di.mu.Unlock()
+
+	go func() {
+		defer close(done)
+		di.inbound.StartPump(pumpCtx)
+	}()
+}
+
+// Shutdown stops the pump, waits for its goroutine to exit, and returns this
+// instance's claims to the pending set so the next process re-drains them
+// immediately instead of waiting out durable.StaleClaimTimeout. It is safe to
+// call when the pump never started or when called twice.
+//
+// The order matters: releasing before the pump is gone would let a tick in
+// flight re-claim the rows this shutdown is handing back.
+func (di *durableInbound) Shutdown() error {
+	if di == nil {
+		return nil
+	}
+
+	// Hand the pump's handles over to this caller alone, then stop waiting on
+	// them without holding the lock: a concurrent StartPump must not be able
+	// to claim rows behind our back, and a second Shutdown finds nothing to
+	// wait for.
+	di.mu.Lock()
+	cancel, done := di.cancel, di.done
+	di.cancel, di.done = nil, nil
+	di.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+
+	released, err := di.inbound.ReleaseClaims()
+	if err != nil {
+		logger.WarnCF("durable", "Releasing inbound claims at shutdown failed",
+			map[string]interface{}{"count": released, "error": err.Error()})
+		return err
+	}
+	logger.InfoCF("durable", "Released inbound claims at shutdown",
+		map[string]interface{}{"count": released})
+	return nil
 }
 
 // teardownOnce maps a coordinator to the sync.Once that guards its teardown.

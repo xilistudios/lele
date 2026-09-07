@@ -160,7 +160,7 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	}
 	flusher.Flush()
 
-	n.bus.PublishInbound(bus.InboundMessage{
+	msg := bus.InboundMessage{
 		Channel:     ChannelName,
 		SenderID:    clientID,
 		ChatID:      sessionKey,
@@ -168,7 +168,8 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		Attachments: attachments,
 		SessionKey:  sessionKey,
 		Metadata:    map[string]string{"message_id": messageID},
-	})
+	}
+	n.base.publishInbound(&msg)
 
 	// Stream events to the client until the message is complete,
 	// an error occurs, the client disconnects, or the deadline expires.

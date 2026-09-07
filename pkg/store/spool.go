@@ -107,6 +107,36 @@ func (r *SpoolRepo) Enqueue(direction, channel, chatID, sessionKey, msgID, paylo
 	return id, nil
 }
 
+// EnqueueClaimed writes a spool row that is born claimed by claimedBy, i.e. it
+// is in flight for that instance from the moment it exists. The durable inbound
+// path uses it so a live message is invisible to ClaimBatch (which selects on an
+// empty claimed_by) until either Finish deletes it or Release hands it back.
+// Claiming at insert time is deliberate: a separate UPDATE after a pending
+// INSERT would leave a window in which the steady pump could re-claim the row
+// and double-publish it.
+func (r *SpoolRepo) EnqueueClaimed(direction, channel, chatID, sessionKey, msgID, payload, claimedBy string, now time.Time) (int64, error) {
+	if !validSpoolDirection(direction) {
+		return 0, fmt.Errorf("%w %q", ErrUnknownDirection, direction)
+	}
+
+	stamp := now.UTC().Format(spoolTimeLayout)
+	res, err := r.db.Exec(
+		`INSERT INTO spool(direction, channel, chat_id, session_key, msg_id,
+		 payload, attempts, claimed_by, claimed_at, created_at)
+		 VALUES(?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		direction, channel, chatID, sessionKey, msgID, payload, claimedBy, stamp, stamp,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: enqueue claimed spool %s session %q: %w", direction, sessionKey, err)
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("store: enqueue claimed spool %s session %q: last insert id: %w", direction, sessionKey, err)
+	}
+	return id, nil
+}
+
 // ClaimBatch atomically claims up to limit unclaimed rows of direction,
 // oldest id first (FIFO), on behalf of instanceID. Claimed rows are
 // invisible to later claims, by this or any other instance, until they
@@ -251,6 +281,39 @@ func (r *SpoolRepo) ReleaseClaims(instanceID string) (int, error) {
 	affected, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("store: release spool claims %q: rows affected: %w", instanceID, err)
+	}
+	return int(affected), nil
+}
+
+// ReleaseIDs hands back exactly the given rows, and only those still held by
+// instanceID, so a caller can undo its own claims without disturbing rows the
+// same instance is still working on. It returns the number of rows released.
+// Completing or releasing an unknown id is not an error; an empty or nil slice
+// is a no-op that returns 0.
+func (r *SpoolRepo) ReleaseIDs(ids []int64, instanceID string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	placeholders, idArgs := spoolIDArgs(ids)
+	args := make([]any, 0, len(idArgs)+1)
+	args = append(args, instanceID)
+	args = append(args, idArgs...)
+
+	res, err := r.db.Exec(
+		fmt.Sprintf(
+			`UPDATE spool SET claimed_by = '', claimed_at = ''
+			 WHERE claimed_by = ? AND id IN (%s)`,
+			placeholders,
+		),
+		args...,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: release spool ids for %q: %w", instanceID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: release spool ids for %q: rows affected: %w", instanceID, err)
 	}
 	return int(affected), nil
 }

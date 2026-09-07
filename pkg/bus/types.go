@@ -20,6 +20,16 @@ type InboundMessage struct {
 	Attachments []FileAttachment  `json:"attachments,omitempty"`
 	SessionKey  string            `json:"session_key"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
+	// SpoolID is the internal handle of the durable spool row that backs this
+	// message, or 0 when durability is disabled or the row could not be
+	// written. It is never serialised: the id belongs to the database, not to
+	// the wire, and the replay path re-attaches it from the row it claimed.
+	SpoolID int64 `json:"-"`
+	// DedupeID is the idempotency key this message is recorded under in the
+	// processed_messages ledger. Unlike SpoolID it must survive JSON
+	// round-trips: it travels inside the durable spool payload, so a replayed
+	// message can still be recognised as a duplicate.
+	DedupeID string `json:"dedupe_id,omitempty"`
 }
 
 type OutboundMessage struct {

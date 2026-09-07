@@ -298,7 +298,7 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 
 	attachments := n.processAttachments(payload.Attachments, sessionKey)
 
-	n.bus.PublishInbound(bus.InboundMessage{
+	msg := bus.InboundMessage{
 		Channel:     ChannelName,
 		SenderID:    client.ClientInfo.ClientID,
 		ChatID:      sessionKey,
@@ -306,7 +306,8 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 		Attachments: attachments,
 		SessionKey:  sessionKey,
 		Metadata:    map[string]string{"message_id": messageID},
-	})
+	}
+	n.base.publishInbound(&msg)
 
 	// The ack must carry the same alias-resolved session_key that stream/complete
 	// events are emitted with (see dispatchOutboundMessage), otherwise the frontend

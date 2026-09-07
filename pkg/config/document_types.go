@@ -97,6 +97,11 @@ type EditableSessionConfig struct {
 	CompactionThresholdPercent int                 `json:"compaction_threshold_percent,omitempty"`
 	CompactionModel            string              `json:"compaction_model,omitempty"`
 	EvictExcludedFromMemory    bool                `json:"evict_excluded_from_memory,omitempty"`
+
+	// DurableInbound mirrors SessionConfig.DurableInbound. It stays tri-state
+	// so an unconfigured file keeps writing no key instead of pinning the
+	// default off.
+	DurableInbound *bool `json:"durable_inbound,omitempty"`
 }
 
 // EditableChannelsConfig represents channels in editable mode.
