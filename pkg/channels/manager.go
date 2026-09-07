@@ -473,7 +473,14 @@ type SendOutcome struct {
 	// Err - a chunk that failed is the only way to be partway out - which is what
 	// lets callers report o.Err.Error() unguarded.
 	SentAnyChunk bool
-	// Err is the first chunk failure, nil when Delivered.
+	// Err is the first chunk failure. It is nil only when Delivered. A non-nil
+	// Err with SentAnyChunk=false is a transient failure nobody has seen a piece
+	// of yet - the row is retryable and the caller Releases it; a non-nil Err
+	// with SentAnyChunk=true is a partial send that replay would duplicate -
+	// the caller Forgets the row instead. Note the direction: SentAnyChunk
+	// implies Err, never the other way round - sendNotStarted returns Err with
+	// SentAnyChunk=false - which is what lets callers report o.Err.Error()
+	// unguarded on the SentAnyChunk path.
 	Err error
 }
 
@@ -572,16 +579,31 @@ func (m *Manager) completeOutbound(msg bus.OutboundMessage) {
 // is logged here, which keeps the dispatcher's long-standing "Error sending
 // message to channel" line on exactly the paths that used to print it. No-op
 // without a spooler or a row.
+//
+// The level follows whoever owns the retry. When the row survives this call -
+// SpoolID set and a spooler wired - Release puts it back in pending and the pump
+// will send it again, so the line is a WARN: an ERROR on every retry tick would
+// cry wolf at the operator while the queue is healthy and working. Without a
+// durable row nobody is going to retry, and the ERROR stands exactly as before,
+// which also keeps the flag-off contract byte-identical.
 func (m *Manager) releaseOutbound(msg bus.OutboundMessage, err error) {
 	m.mu.RLock()
 	sp := m.outboundSpooler
 	m.mu.RUnlock()
 
 	if err != nil {
-		logger.ErrorCF("channels", "Error sending message to channel", map[string]interface{}{
-			"channel": msg.Channel,
-			"error":   err.Error(),
-		})
+		if msg.SpoolID != 0 && sp != nil {
+			logger.WarnCF("channels", "Error sending message to channel", map[string]interface{}{
+				"channel":         msg.Channel,
+				"error":           err.Error(),
+				"durable_release": true,
+			})
+		} else {
+			logger.ErrorCF("channels", "Error sending message to channel", map[string]interface{}{
+				"channel": msg.Channel,
+				"error":   err.Error(),
+			})
+		}
 	}
 	if sp == nil || msg.SpoolID == 0 {
 		return
