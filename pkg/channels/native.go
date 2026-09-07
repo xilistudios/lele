@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -55,6 +56,13 @@ type NativeChannel struct {
 	cronService      CronProvidable
 	keyringService   *keyring.Service
 	updateService    *update.Updater
+
+	// outboundFlusher wakes the durable outbound pump when a native peer comes
+	// back. Set through SetOutboundFlusher by Manager.SetOutboundSpooler; nil
+	// means durability is off, which must leave Send exactly as it was.
+	// Guarded by mu: Send reads it on every dispatched message while the
+	// manager writes it at wiring time.
+	outboundFlusher PeerFlusher
 }
 
 // CronProvidable is the interface for managing cron jobs via the API.
@@ -183,6 +191,41 @@ func (n *NativeChannel) SetInboundSpooler(s InboundSpooler) {
 	n.base.SetInboundSpooler(s)
 }
 
+// ErrPeerNotReady reports that a durable outbound message was handed to the
+// native channel while no live client was subscribed to its peer.
+//
+// The dispatcher treats every Channel.Send error as sendNotStarted - nothing
+// reached the wire, so the spool row is Released back to pending and the pump
+// retries it - which is exactly why Send must raise this BEFORE dispatching:
+// once a single event is emitted the message is half-out, and a retry would
+// duplicate it. Emitting nothing and returning this error keeps the row whole.
+var ErrPeerNotReady = errors.New("native: no live client for peer")
+
+// SetOutboundFlusher wires the durable outbound pump wake-up. Called by
+// Manager.SetOutboundSpooler through the outboundFlushSetter capability.
+func (n *NativeChannel) SetOutboundFlusher(f PeerFlusher) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.outboundFlusher = f
+}
+
+// hasOutboundFlusher reports whether durability is wired. When it is not, Send
+// skips the pre-flight gate entirely so the flag-off path stays the old code.
+func (n *NativeChannel) hasOutboundFlusher() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.outboundFlusher != nil
+}
+
+// outboundFlusherSnapshot returns the current flusher under the read lock so a
+// caller can invoke it without holding n.mu: FlushPeer may be reached from the
+// reconnect path, which must not keep the client map locked.
+func (n *NativeChannel) outboundFlusherSnapshot() PeerFlusher {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.outboundFlusher
+}
+
 func (n *NativeChannel) Name() string {
 	return ChannelName
 }
@@ -289,6 +332,26 @@ func (n *NativeChannel) runUploadCleanup(ctx context.Context) {
 }
 
 func (n *NativeChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
+	sessionKey := msg.ChatID
+	if n.agentLoop != nil {
+		sessionKey = n.agentLoop.ResolveSessionKey(sessionKey)
+	}
+
+	// Durability pre-flight, and it is a pre-flight: nothing may be emitted
+	// before it. A message that carries a spool row has a second life - the
+	// pump will replay it if the send fails - and a replay is only safe while
+	// the row is whole. With no live client the dispatch below would drop the
+	// reply into the void (or into a reconnecting client's in-memory buffer,
+	// which dies with the process), so the send must be refused before it
+	// starts. Requiring a non-nil flusher keeps the gate off whenever
+	// durability is off: without it Send behaves exactly as it always did,
+	// which is the whole flag-off contract. ResolveSessionKey is repeated here
+	// on purpose - one map read under a read lock is cheaper than threading
+	// the resolved key through dispatchOutboundMessage's signature.
+	if msg.SpoolID != 0 && n.hasOutboundFlusher() && !n.hasLiveClientFor(sessionKey) {
+		return ErrPeerNotReady
+	}
+
 	n.dispatchOutboundMessage(msg)
 	return nil
 }
@@ -931,6 +994,48 @@ drained:
 	})
 
 	return buffered
+}
+
+// hasLiveClientFor reports whether some connected, non-reconnecting client is
+// subscribed to sessionKey. It mirrors broadcastToSession's targeting rules -
+// sessionKeyMatches on the client's own key, then Subscriptions, then the
+// ResolveSessionKey fallback (skipped when there is no agent loop, exactly as
+// broadcastToSession skips it) - but ALSO requires !reconnecting and !closed
+// under client.mu. That extra bar is the point: a reconnecting client's
+// pendingMsgs buffer is in-memory and dies with the process, so counting it as
+// live would let Send "succeed" on a message that is really lost, and the
+// durable row would be completed instead of retried. O(#clients), typically
+// 1-3.
+func (n *NativeChannel) hasLiveClientFor(sessionKey string) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	for _, client := range n.wsClients {
+		matches := sessionKeyMatches(client.SessionKey, sessionKey)
+		if !matches && client.Subscriptions != nil {
+			for subKey := range client.Subscriptions {
+				if sessionKeyMatches(subKey, sessionKey) {
+					matches = true
+					break
+				}
+			}
+		}
+		if !matches && n.agentLoop != nil && client.SessionKey != "" {
+			resolved := n.agentLoop.ResolveSessionKey(client.SessionKey)
+			matches = sessionKeyMatches(resolved, sessionKey)
+		}
+		if !matches {
+			continue
+		}
+
+		client.mu.Lock()
+		live := !client.reconnecting && !client.closed
+		client.mu.Unlock()
+		if live {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data interface{}) {
