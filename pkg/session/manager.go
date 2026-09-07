@@ -472,38 +472,7 @@ func (sm *SessionManager) GetOrCreate(key string) *Session {
 	sm.ensureLoaded()
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-
-	// Try in-memory first
-	if session, ok := sm.sessions[key]; ok {
-		sm.touchSession(key)
-		return session
-	}
-
-	// Try loading from disk
-	if session, ok := sm.loadSessionFromDisk(key); ok {
-		sm.touchSession(key)
-		return session
-	}
-
-	// Create new session
-	session := &Session{
-		Key:              key,
-		Messages:         []providers.Message{},
-		Created:          time.Now(),
-		Updated:          time.Now(),
-		lastPersistedSeq: -1,
-	}
-	sm.evictIfNeeded()
-	sm.sessions[key] = session
-	sm.accessTimes[key] = time.Now()
-	// Register in metadata
-	sm.sessionMeta[key] = &sessionMetadata{
-		Key:     key,
-		Mode:    session.Mode,
-		Created: session.Created,
-		Updated: session.Updated,
-	}
-	return session
+	return sm.getOrCreateUnlocked(key)
 }
 
 func generateSessionName(content string) string {
@@ -552,21 +521,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[sessionKey]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(sessionKey)
-		if !ok {
-			session = &Session{
-				Key:              sessionKey,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[sessionKey] = session
-		}
-	}
-	sm.touchSession(sessionKey)
+	session := sm.getOrCreateUnlocked(sessionKey)
 
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
 		session.Name = generateSessionName(msg.Content)
@@ -844,20 +799,7 @@ func (sm *SessionManager) SetName(key string, name string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.Name = strings.TrimSpace(name)
 	session.Updated = time.Now()
@@ -1242,21 +1184,7 @@ func (sm *SessionManager) SetVerboseMode(key string, enabled bool) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			// Create session if it doesn't exist
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.VerboseMode = enabled
 	session.Updated = time.Now()
@@ -1299,21 +1227,7 @@ func (sm *SessionManager) SetVerboseLevel(key string, level string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			// Create session if it doesn't exist
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.VerboseLevel = level
 	session.Updated = time.Now()
@@ -1347,21 +1261,7 @@ func (sm *SessionManager) SetModel(key string, model string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			// Create session if it doesn't exist
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.Model = model
 	session.Updated = time.Now()
@@ -1402,21 +1302,7 @@ func (sm *SessionManager) SetFolder(key string, folder string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			// Create session if it doesn't exist
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.Folder = folder
 	session.Updated = time.Now()
@@ -1478,21 +1364,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			// Create session if it doesn't exist
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.Mode = mode
 	session.Updated = time.Now()
@@ -1586,18 +1458,7 @@ func (sm *SessionManager) SetThinkingLevel(key string, level string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			session = &Session{
-				Key:     key,
-				Created: time.Now(),
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.ThinkingLevel = level
 	session.Updated = time.Now()
@@ -1631,20 +1492,7 @@ func (sm *SessionManager) AddTokenCounts(key string, inputTokens, outputTokens i
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.InputTokens += inputTokens
 	session.OutputTokens += outputTokens
@@ -1682,20 +1530,7 @@ func (sm *SessionManager) IncrementCompactionCount(key string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	session, ok := sm.sessions[key]
-	if !ok {
-		session, ok = sm.loadSessionFromDisk(key)
-		if !ok {
-			session = &Session{
-				Key:              key,
-				Messages:         []providers.Message{},
-				Created:          time.Now(),
-				lastPersistedSeq: -1,
-			}
-			sm.evictIfNeeded()
-			sm.sessions[key] = session
-		}
-	}
+	session := sm.getOrCreateUnlocked(key)
 
 	session.CompactionCount++
 	session.Updated = time.Now()
@@ -2386,15 +2221,26 @@ func (sm *SessionManager) GetInProgressAssistant(key string) *providers.Message 
 
 // getOrCreateUnlocked returns or creates a session (caller must hold mu).
 // Uses lazy loading to load sessions from disk on demand.
+//
+// It is the single place where a session becomes resident in memory, and it
+// guarantees the invariant "resident ⇒ present in sessionMeta": the metadata
+// index is what ListSessions (and therefore the WebUI session-history
+// endpoints) use for sessions that are not resident, and loadSessionFromDisk
+// refuses to reload a session that has no metadata entry. Any path that
+// materializes a session must go through here — hand-rolling the
+// sessions[key] assignment silently drops the session from every listing as
+// soon as it is evicted (this was the cron-spawn/subagent invisibility bug).
 func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 	session, ok := sm.sessions[key]
 	if !ok {
 		session, ok = sm.loadSessionFromDisk(key)
 		if !ok {
+			now := time.Now()
 			session = &Session{
 				Key:              key,
 				Messages:         []providers.Message{},
-				Created:          time.Now(),
+				Created:          now,
+				Updated:          now,
 				lastPersistedSeq: -1,
 			}
 			sm.evictIfNeeded()
@@ -2600,6 +2446,17 @@ func (sm *SessionManager) foldEvictedIntoSummary(session *Session, evicted []pro
 // EvictSession removes a session from the in-memory map.
 // The session data remains on disk and can be reloaded on demand.
 // Returns true if the session was found and evicted.
+//
+// sessionMeta is deliberately NOT removed — not even for subagent sessions.
+// It is the in-memory mirror of the persisted sessions row (which eviction
+// keeps, and which nothing ever deletes), and two listing paths depend on
+// that mirror: ListSessions reports metadata-only sessions (the WebUI
+// session-history / cron-spawn views), and loadSessionFromDisk refuses to
+// reload a session without a metadata entry. Dropping it here made finished
+// cron-spawn/subagent sessions invisible until the next restart — the exact
+// asymmetry "Run now" did not suffer, because the native client tracked the
+// key independently. If subagent retention is ever wanted, delete the row in
+// SQLite first (store.DeleteSession) so mirror and source stay consistent.
 func (sm *SessionManager) EvictSession(key string) bool {
 	sm.ensureLoaded()
 	sm.mu.Lock()
@@ -2622,24 +2479,17 @@ func (sm *SessionManager) EvictSession(key string) bool {
 		}
 	}
 
-	// For subagent sessions (key contains ":subagent-"), also remove
-	// sessionMeta to prevent unbounded metadata growth. Subagent sessions
-	// are transient — once evicted, they should not be reloaded.
-	if strings.Contains(key, ":subagent-") {
-		delete(sm.sessionMeta, key)
-	}
-
 	return ok
 }
 
 // SessionExists reports whether a session exists for the given key in any
 // layer: in-memory, metadata index, or on disk. The disk check matters
-// because EvictSession removes subagent sessions from both memory and the
-// metadata index but deliberately leaves the persisted file behind.
+// because a session created before the metadata mirror was fixed (or by a
+// concurrent process) can exist in SQLite without an in-memory entry.
 //
 // This is used to detect subagent session-key collisions (e.g. after a
 // restart, when in-memory ID counters reset). It only performs a cheap
-// os.Stat — it never loads the session.
+// query — it never loads the session.
 func (sm *SessionManager) SessionExists(key string) bool {
 	if key == "" {
 		return false
