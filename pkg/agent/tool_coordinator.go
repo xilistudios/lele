@@ -636,16 +636,26 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	syncGroupChatTool(agent, cfg, registry, currentAgentID, groupManager)
 
 	// Subagents get all tools except send_file (user-facing) and the
-	// subagent-management tools (prevent recursive wait/list overhead),
-	// and background exec management tools (each subagent gets its own).
+	// subagent-management tools (prevent recursive wait/list overhead).
+	//
+	// The background-exec tools (list_background_execs,
+	// get_background_exec_output, stop_background_exec) ARE included. They
+	// are bound to the agent's single BackgroundProcessManager and
+	// CloneWithout shares tool instances, so a subagent's backgrounded
+	// commands land in that same manager regardless — excluding the tools
+	// never isolated anything, it only left the subagent blind to (and
+	// unable to stop) processes it started itself.
+	//
+	// Isolation is per-session, not per-registry: every process records its
+	// OwnerSessionKey at Register time and the tools filter results through
+	// BackgroundProcess.VisibleTo, so a subagent sees the processes of its
+	// own session family (its own + its parent's, per #230's cascade design)
+	// while foreign sessions' processes report "not found".
 	subagentManager.SetTools(agent.Tools.CloneWithout(
 		"send_file",
 		"wait_for_subagent",
 		"list_active_subagents",
 		"cancel_subagent",
-		"list_background_execs",
-		"get_background_exec_output",
-		"stop_background_exec",
 	))
 	subagentManager.SetSessionRecorder(agent.Sessions)
 	// Sync subagent loop compaction to the persisted session: summary +

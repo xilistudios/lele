@@ -434,6 +434,11 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		defer cleanup()
 	}
 
+	// The session key this loop's work is attributed to. A subagent's tools
+	// are scoped by it: background-exec visibility treats an empty caller key
+	// as "operator, show everything", so the loop must never run unscoped.
+	loopOwner := subagentLoopOwner(task, sessionKey)
+
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
 		Provider:                   agentProvider,
 		Model:                      agentModel,
@@ -443,7 +448,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		SessionRecorder:            recorder,
 		SessionKey:                 sessionKey,
 		OwnerAgentID:               sm.ownerAgentID(task),
-		OwnerSessionKey:            taskOwnershipKey(task),
+		OwnerSessionKey:            loopOwner,
 		Retry:                      retryConfigPtr(),
 		ContextWindow:              agentContextWindow,
 		CompactionThresholdPercent: compactionThreshold,

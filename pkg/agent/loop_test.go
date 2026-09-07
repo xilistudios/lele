@@ -1428,15 +1428,6 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 		if _, ok := defaultAgent.Tools.Get("list_active_subagents"); ok {
 			expectedTools--
 		}
-		if _, ok := defaultAgent.Tools.Get("list_background_execs"); ok {
-			expectedTools--
-		}
-		if _, ok := defaultAgent.Tools.Get("get_background_exec_output"); ok {
-			expectedTools--
-		}
-		if _, ok := defaultAgent.Tools.Get("stop_background_exec"); ok {
-			expectedTools--
-		}
 		if _, ok := defaultAgent.Tools.Get("cancel_subagent"); ok {
 			expectedTools--
 		}
@@ -1448,10 +1439,22 @@ func TestSubagentManager_InheritsParentTools(t *testing.T) {
 	}
 
 	// Verificar que el subagente no tiene las tools excluidas
-	excludedTools := []string{"send_file", "wait_for_subagent", "list_active_subagents", "list_background_execs", "get_background_exec_output", "stop_background_exec", "cancel_subagent"}
+	excludedTools := []string{"send_file", "wait_for_subagent", "list_active_subagents", "cancel_subagent"}
 	for _, toolName := range excludedTools {
 		if subagentManager.HasTool(toolName) {
 			t.Errorf("Subagent should not have the %s tool", toolName)
+		}
+	}
+
+	// The background-exec tools must be inherited. They are bound to the
+	// agent's single BackgroundProcessManager and CloneWithout shares tool
+	// instances, so a subagent's backgrounded commands register in that
+	// manager anyway; withholding the tools only made the subagent unable to
+	// observe or stop its own processes. Per-session isolation is enforced by
+	// OwnerSessionKey/VisibleTo inside the tools, not by registry exclusion.
+	for _, toolName := range []string{"list_background_execs", "get_background_exec_output", "stop_background_exec"} {
+		if !subagentManager.HasTool(toolName) {
+			t.Errorf("Subagent should have the %s tool (visibility is scoped per-session by the tool itself)", toolName)
 		}
 	}
 

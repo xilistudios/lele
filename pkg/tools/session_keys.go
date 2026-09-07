@@ -120,3 +120,17 @@ func taskOwnershipKey(task *SubagentTask) string {
 	}
 	return task.OriginSessionKey
 }
+
+// subagentLoopOwner is the session key a subagent's tool loop is attributed
+// to. It is taskOwnershipKey with a guaranteed non-empty result: a caller
+// without a session key is treated as an unscoped operator view by
+// BackgroundProcess.VisibleTo, and a subagent loop must never be that caller.
+// When both the spawner and the origin keys are missing (tasks built outside
+// a real turn), the subagent's own child session key still scopes it to its
+// own session family.
+func subagentLoopOwner(task *SubagentTask, childSessionKey string) string {
+	if owner := taskOwnershipKey(task); owner != "" {
+		return owner
+	}
+	return childSessionKey
+}

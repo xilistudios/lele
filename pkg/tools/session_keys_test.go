@@ -190,3 +190,53 @@ func TestTaskOwnershipKey(t *testing.T) {
 		t.Errorf("taskOwnershipKey(nil) = %q, want empty", got)
 	}
 }
+
+// TestSubagentLoopOwner pins the guarantee the background-exec tools rely on:
+// a subagent tool loop is never attributed to an empty session key, because
+// VisibleTo treats an empty caller as an unscoped operator view that sees
+// every process in the manager.
+func TestSubagentLoopOwner(t *testing.T) {
+	tests := []struct {
+		name  string
+		task  *SubagentTask
+		child string
+		want  string
+	}{
+		{
+			name:  "spawner key wins",
+			task:  &SubagentTask{SpawnerSessionKey: "agent:main:native:u", OriginSessionKey: "native:u"},
+			child: "native:u:subagent-1",
+			want:  "agent:main:native:u",
+		},
+		{
+			name:  "origin key fallback",
+			task:  &SubagentTask{OriginSessionKey: "native:u"},
+			child: "native:u:subagent-1",
+			want:  "native:u",
+		},
+		{
+			name:  "child key when task has no identity",
+			task:  &SubagentTask{},
+			child: "native:u:subagent-1",
+			want:  "native:u:subagent-1",
+		},
+		{
+			name:  "nil task falls back to child key",
+			task:  nil,
+			child: "cli:direct:subagent-9",
+			want:  "cli:direct:subagent-9",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := subagentLoopOwner(tt.task, tt.child)
+			if got != tt.want {
+				t.Errorf("subagentLoopOwner = %q, want %q", got, tt.want)
+			}
+			if got == "" {
+				t.Error("subagent loop owner must never be empty: an unscoped loop sees every session's processes")
+			}
+		})
+	}
+}
