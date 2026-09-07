@@ -102,6 +102,11 @@ type EditableSessionConfig struct {
 	// so an unconfigured file keeps writing no key instead of pinning the
 	// default off.
 	DurableInbound *bool `json:"durable_inbound,omitempty"`
+
+	// DurableOutbound mirrors SessionConfig.DurableOutbound. It stays tri-state
+	// so an unconfigured file keeps writing no key instead of pinning the
+	// default off.
+	DurableOutbound *bool `json:"durable_outbound,omitempty"`
 }
 
 // EditableChannelsConfig represents channels in editable mode.

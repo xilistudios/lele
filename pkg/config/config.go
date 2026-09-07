@@ -320,12 +320,22 @@ type SessionConfig struct {
 	// DurableInboundEnabled resolves to false. Off by default until the path
 	// has been hardened in production.
 	DurableInbound *bool `json:"durable_inbound,omitempty"`
+	// DurableOutbound persiste cada respuesta del agente al spool antes de
+	// publicarla en el bus y reenvía lo no entregado tras un restart. Tri-state
+	// como DurableInbound: nil = "no configurado" = false.
+	DurableOutbound *bool `json:"durable_outbound,omitempty"`
 }
 
 // DurableInboundEnabled reports whether durable inbound replay is on.
 // An unset flag is false: durability is opt-in.
 func (s SessionConfig) DurableInboundEnabled() bool {
 	return s.DurableInbound != nil && *s.DurableInbound
+}
+
+// DurableOutboundEnabled reports whether durable outbound replay is on.
+// An unset flag is false: durability is opt-in.
+func (s SessionConfig) DurableOutboundEnabled() bool {
+	return s.DurableOutbound != nil && *s.DurableOutbound
 }
 
 const DefaultEphemeralThresholdSeconds = 560

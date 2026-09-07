@@ -227,6 +227,21 @@ func gatewayCmd() {
 	}
 	di := setupDurableInbound(cfg.Session.DurableInboundEnabled(), spoolRepo, msgBus, agentLoop, channelManager)
 
+	// Durable outbound spool (feature-flagged), the mirror of the block above.
+	// Same construction point on purpose: msgBus and channelManager both exist,
+	// and the two setters setupDurableOutbound calls must run before anything
+	// publishes an outbound message. The spool repo is NOT gated by the inbound
+	// flag - it is store-gated only - so one store backs both directions.
+	// deliver is the single place in the system where the two vocabularies meet:
+	// durable knows a Delivery, the channel layer knows a SendOutcome, and the
+	// pump only ever has the channel NAME from the queued row, so the closure
+	// goes through SendToPeer rather than SendNow.
+	deliver := func(ctx context.Context, msg bus.OutboundMessage) durable.Delivery {
+		o := channelManager.SendToPeer(ctx, msg.Channel, msg)
+		return durable.Delivery{Delivered: o.Delivered, SentAnyChunk: o.SentAnyChunk, Err: o.Err}
+	}
+	do := setupDurableOutbound(cfg.Session.DurableOutboundEnabled(), spoolRepo, msgBus, channelManager, deliver)
+
 	var transcriber *voice.GroqTranscriber
 	if cfg.Providers.Groq.APIKey != "" {
 		transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
@@ -437,6 +452,18 @@ func gatewayCmd() {
 		fmt.Fprintf(gatewayOut, "Error starting channels: %v\n", err)
 	}
 
+	// Replay replies the previous process never got out. This is the DUAL of the
+	// inbound Drain above and it sits on the other side of StartAll on purpose:
+	// an inbound row only has to reach the bus, so it must be replayed BEFORE
+	// channels accept traffic (ordering vs. new messages), while an outbound row
+	// has to reach a CHANNEL, so replaying it before StartAll would just fail
+	// every send against a channel that is not running yet and leave the rows for
+	// the pump. Double delivery is still impossible: Enqueue writes a live row
+	// already claimed by this instance and ClaimBatch only selects unclaimed
+	// rows, so nothing published after the wiring step can be seen by this pass.
+	// Drain on a nil do (feature off) is a no-op.
+	do.Drain(ctx)
+
 	configWatcher := config.NewConfigWatcher(getConfigPath())
 	go func() {
 		if err := configWatcher.Start(ctx, func(updated *config.Config) error {
@@ -462,6 +489,11 @@ func gatewayCmd() {
 	// cannot duplicate a message whose turn is still running.
 	di.StartPump(ctx)
 
+	// Same job on the reply side: rows a full outbound queue or a transient send
+	// failure handed back to the pending set get picked up on the next tick, and
+	// FlushPeer wakes this pump the moment a native peer reconnects.
+	do.StartPump(ctx)
+
 	// --- Graceful teardown plan -------------------------------------------
 	//
 	// The coordinator runs hooks LIFO (last registered, first to run), so the
@@ -469,12 +501,24 @@ func gatewayCmd() {
 	// Effective order on shutdown:
 	//
 	//	1. agent-drain     : let in-flight turns finish (10s budget)
-	//	2. durable-inbound-shutdown : stop the pump, release our spool claims
-	//	3. sessions-save   : persist every session to disk
-	//	4. channels-stop   : stop accepting new inbound messages
-	//	5. http-stop       : stop the unified server (API + Web UI)
-	//	6. services-stop   : stop watchers/schedulers that may enqueue work
-	//	7. lock-release    : last, so a restarting child never sees a live holder
+	//	2. durable-outbound-shutdown : stop the pump, release our spool claims
+	//	3. durable-inbound-shutdown  : stop the pump, release our spool claims
+	//	4. sessions-save   : persist every session to disk
+	//	5. channels-stop   : stop accepting new inbound messages
+	//	6. http-stop       : stop the unified server (API + Web UI)
+	//	7. services-stop   : stop watchers/schedulers that may enqueue work
+	//	8. lock-release    : last, so a restarting child never sees a live holder
+	//
+	// Outbound releases before inbound. Both hooks do the same three things
+	// (stop pump, wait for the goroutine, ReleaseClaims) and both directions
+	// share one spool table whose stale-reclaim path, ReclaimStale, is
+	// direction-agnostic: it frees ANY claim older than StaleClaimTimeout,
+	// whoever held it. So whenever two instances do overlap - a chained restart
+	// whose predecessor is still tearing down while the successor already
+	// drains - the successor can grab rows the predecessor is still sending.
+	// Freeing the reply rows first shrinks that double-claim window to the
+	// inbound hook's own duration (hooks run one at a time) instead of the full
+	// timeout, which is what a chain of restarts would otherwise compound.
 	//
 	// A hook that fails is recorded by the coordinator and does not abort the
 	// rest: the process must never keep the instance lock because one stop step
@@ -512,12 +556,21 @@ func gatewayCmd() {
 		}
 		return nil
 	})
-	// Registered before agent-drain => runs second, right after in-flight
-	// turns have finished their spool rows and before sessions are persisted.
+	// Registered before agent-drain and after durable-outbound-shutdown => runs
+	// third, right after in-flight turns have finished their spool rows and the
+	// reply rows have been handed back, and before sessions are persisted.
 	// Stopping the pump first is what makes the release meaningful: a pump
 	// still ticking could claim rows again after they were handed back.
 	coord.Register("durable-inbound-shutdown", 3*time.Second, func(context.Context) error {
 		return di.Shutdown()
+	})
+	// Registered after durable-inbound-shutdown => runs second (LIFO), directly
+	// after agent-drain has let the in-flight turns complete their rows, so the
+	// only claims left here are genuinely ours: the outbound pump's and any row
+	// the dispatcher is still holding. Same stop-then-wait-then-release shape as
+	// the inbound hook.
+	coord.Register("durable-outbound-shutdown", 3*time.Second, func(context.Context) error {
+		return do.Shutdown()
 	})
 	// Registered last => runs first.
 	coord.Register("agent-drain", 10*time.Second, func(hookCtx context.Context) error {
@@ -690,6 +743,178 @@ func (di *durableInbound) Shutdown() error {
 		return err
 	}
 	logger.InfoCF("durable", "Released inbound claims at shutdown",
+		map[string]interface{}{"count": released})
+	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Durable outbound wiring
+// ──────────────────────────────────────────────────────────────────────────────
+
+// durableOutbound is the gateway's handle on the durable outbound spool: the
+// service itself plus the pump's lifecycle. It is deliberately its own type
+// rather than a second instance of durableInbound even though the two are
+// structurally identical today: they are two separate LIFO shutdown hooks and
+// they will diverge (outbound wants pruning of dead-lettered rows and a send
+// backoff, inbound does not), and cloning now keeps that divergence from
+// turning one hook's change into the other's regression.
+//
+// Every method is nil-safe, so the gateway calls Drain/StartPump/Shutdown
+// unconditionally and a nil handle (feature off, no store) means "nothing
+// happens".
+//
+// As on the inbound side, the pump is owned here rather than inside
+// setupDurableOutbound so the wiring step starts no goroutines: a unit test can
+// build the handle and assert on it without a hidden ticker writing to the spool.
+type durableOutbound struct {
+	outbound *durable.Outbound
+
+	// mu guards the pump lifecycle. StartPump runs on the gateway goroutine
+	// while Shutdown can arrive from the self-restart callback inside the native
+	// channel, so the two must not read and clear cancel/done at the same time.
+	mu     sync.Mutex
+	cancel context.CancelFunc // cancels the pump's context; nil until StartPump
+	done   chan struct{}      // closed when StartPump returns; nil until StartPump
+}
+
+// setupDurableOutbound wires the durable outbound spool into the message bus
+// (producer side: every PublishOutbound writes its row first) and into the
+// channel manager (consumer side: the dispatcher completes or forgets the row
+// behind what it sent, and a reconnecting peer wakes the pump). It returns nil
+// when the feature is off, which is the signal for the gateway to keep its
+// pre-durability behaviour: neither consumer is touched in that case.
+//
+// The row lifecycle it relies on, and why no message is sent twice:
+//
+//   - Enqueue writes the row BORN CLAIMED by this instance, so a live reply is
+//     invisible to ClaimBatch and neither Drain nor the pump can replay it.
+//   - The bus hands a refused publish back with Release; the dispatcher deletes
+//     a fully delivered row with Complete and dead-letters a partial one with
+//     Forget, which is what keeps a replay from re-sending chunks already out.
+//   - A replay pass only ever releases the ids it claimed itself, so it cannot
+//     disturb a live row either.
+//
+// Both setters must run before their consumer starts: SetOutboundSpooler on the
+// bus before anything publishes, and on the manager before StartAll spawns the
+// dispatchers. This function only writes fields; it starts no goroutines and
+// touches no rows.
+func setupDurableOutbound(
+	enabled bool,
+	spool *store.SpoolRepo,
+	msgBus *bus.MessageBus,
+	channelManager *channels.Manager,
+	deliver durable.DeliverFunc,
+) *durableOutbound {
+	if !enabled {
+		return nil
+	}
+
+	// The spool repo is store-gated and independent of the inbound flag, so the
+	// only way to get here without one is a store-less installation. Say so
+	// loudly: silently running without the durability the user asked for is the
+	// failure mode a log line exists to prevent.
+	if spool == nil {
+		logger.WarnCF("gateway", "Durable outbound requested but spool unavailable",
+			map[string]interface{}{"reason": "no SQLite store configured; outbound stays non-durable"})
+		return nil
+	}
+	if msgBus == nil || channelManager == nil || deliver == nil {
+		return nil
+	}
+
+	d := durable.NewOutbound(spool, deliver)
+	msgBus.SetOutboundSpooler(d)
+	channelManager.SetOutboundSpooler(d, d)
+
+	logger.InfoCF("durable", "Durable outbound enabled", map[string]interface{}{
+		"instance": d.InstanceID(),
+	})
+	return &durableOutbound{outbound: d}
+}
+
+// Drain replays persisted-but-undelivered replies. The gateway calls it once,
+// AFTER channelManager.StartAll, because unlike an inbound row a reply is only
+// done when a live channel has accepted it: draining before the channels run
+// would fail every send and leave the rows for the pump. Rows that still fail
+// here are left pending for the pump, so there is nothing for the caller to
+// handle, and a row this instance is already sending cannot be picked up
+// because it is born claimed.
+func (do *durableOutbound) Drain(ctx context.Context) {
+	if do == nil {
+		return
+	}
+	if _, err := do.outbound.Drain(ctx); err != nil {
+		logger.WarnCF("durable", "Durable outbound drain reported an error; the pump will retry",
+			map[string]interface{}{"error": err.Error()})
+	}
+}
+
+// StartPump launches the background pump that delivers rows a full outbound
+// queue or a failed send left behind, and returns immediately. It derives its
+// own cancellable context from ctx so Shutdown can stop the pump without
+// tearing down the gateway root context, and records the channel that lets
+// Shutdown wait for the goroutine to actually leave. Calling it twice is a bug,
+// not a supported state: the second pump would race the first over the same
+// claims and double-send, so it is refused.
+func (do *durableOutbound) StartPump(ctx context.Context) {
+	if do == nil {
+		return
+	}
+
+	do.mu.Lock()
+	if do.done != nil {
+		do.mu.Unlock()
+		logger.WarnC("durable", "Durable outbound pump already started; ignoring duplicate start")
+		return
+	}
+	pumpCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	do.cancel = cancel
+	do.done = done
+	do.mu.Unlock()
+
+	go func() {
+		defer close(done)
+		do.outbound.StartPump(pumpCtx)
+	}()
+}
+
+// Shutdown stops the pump, waits for its goroutine to exit, and returns this
+// instance's outbound claims to the pending set so the next process re-drains
+// them at once instead of waiting out durable.StaleClaimTimeout. It is safe to
+// call when the pump never started or when called twice.
+//
+// The order matters: releasing before the pump is gone would let a tick in
+// flight re-claim the rows this shutdown is handing back - and on the outbound
+// side a re-claim can mean a second send of a message a peer is about to get.
+func (do *durableOutbound) Shutdown() error {
+	if do == nil {
+		return nil
+	}
+
+	// Hand the pump's handles over to this caller alone, then stop waiting on
+	// them without holding the lock: a concurrent StartPump must not be able to
+	// claim rows behind our back, and a second Shutdown finds nothing to wait
+	// for.
+	do.mu.Lock()
+	cancel, done := do.cancel, do.done
+	do.cancel, do.done = nil, nil
+	do.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		<-done
+	}
+
+	released, err := do.outbound.ReleaseClaims()
+	if err != nil {
+		logger.WarnCF("durable", "Releasing outbound claims at shutdown failed",
+			map[string]interface{}{"count": released, "error": err.Error()})
+		return err
+	}
+	logger.InfoCF("durable", "Released outbound claims at shutdown",
 		map[string]interface{}{"count": released})
 	return nil
 }
