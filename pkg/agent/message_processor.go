@@ -156,7 +156,21 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		mp.injectSubagentInterruptionWarning(agent, sessionKey)
 		response, err := mp.ContinueTurn(ctx, marker, msg, sessionKey)
 		if err != nil {
-			return "", err
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				// Cancelled again (another stop/shutdown mid-resume): keep the
+				// marker so the next replay resumes from the same checkpoint.
+				return "", err
+			}
+			// Terminal resume error (provider/tool failure): hand Run a
+			// user-facing message exactly as the normal path below does. The
+			// marker stays for the same reason the normal path keeps it: if the
+			// process dies before Finish closes the row, the next replay resumes
+			// (and retries) the turn instead of re-running it from scratch.
+			errMsg := fmt.Sprintf("❌ Error resuming message: %v", err)
+			if len(errMsg) > 4000 {
+				errMsg = errMsg[:3997] + "..."
+			}
+			return errMsg, nil
 		}
 		// Same conditional clear as the normal path: only THIS turn's marker
 		// goes away, and only once its answer is out.
