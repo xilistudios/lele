@@ -407,6 +407,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	compactionThreshold := sm.compactionThresholdPercent
 	compactionModel := sm.compactionModel
 	evictExcluded := sm.evictExcludedFromMemory
+	tokenUsage := sm.tokenUsageReporter
 	sm.mu.RUnlock()
 
 	// Build subagent session key: {origin_session_key}:{task_id}
@@ -439,6 +440,20 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	// as "operator, show everything", so the loop must never run unscoped.
 	loopOwner := subagentLoopOwner(task, sessionKey)
 
+	// Bill the subagent's LLM consumption to its owner session (the parent
+	// agent that spawned it) so cumulative token counters shown by the TUI,
+	// /status and the WebUI include subagent work. Nested spawns bill to the
+	// same owner because the parent subagent's loop propagates its owner key
+	// through the tool context - each loop reports only its own responses, so
+	// nothing is counted twice. Retried attempts (runTask) bill per attempt,
+	// matching the real spend.
+	billTokens := func(in, out int) {
+		if tokenUsage == nil || loopOwner == "" {
+			return
+		}
+		tokenUsage(loopOwner, in, out)
+	}
+
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
 		Provider:                   agentProvider,
 		Model:                      agentModel,
@@ -460,6 +475,7 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 		CompactionModel:         compactionModel,
 		SessionCompactor:        sessionCompactor,
 		EvictExcludedFromMemory: evictExcluded,
+		OnTokenUsage:            billTokens,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	duration := time.Since(startTime)

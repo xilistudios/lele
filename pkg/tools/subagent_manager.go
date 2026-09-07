@@ -52,6 +52,10 @@ type SubagentManager struct {
 	sessionCompactor        SessionCompactor  // syncs loop compaction to the persisted subagent session
 	compactionModel         string            // dedicated compaction model (empty = agent model)
 	evictExcludedFromMemory bool              // evict excluded messages from in-memory session cache on compaction sync
+	// tokenUsageReporter bills subagent LLM consumption to the owning
+	// (parent) session so cumulative token counters include subagent work.
+	// Set via SetTokenUsageReporter; nil = subagent spend is not tracked.
+	tokenUsageReporter func(sessionKey string, inputTokens, outputTokens int)
 }
 
 // SpawnOptions holds optional parameters for spawning a subagent.
@@ -198,6 +202,21 @@ func (sm *SubagentManager) SetSessionRecorder(rec SessionRecorder) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.sessionRecorder = rec
+}
+
+// SetTokenUsageReporter attaches a callback that bills token consumption
+// produced inside subagent loops to the session that owns them. It receives
+// the parent (owner) session key plus the input/output token delta of a single
+// LLM response. Implemented at wiring time by the agent layer with
+// SessionManager.AddTokenCounts (see pkg/agent/tool_coordinator.go).
+//
+// Without it, subagent spend is invisible: RunToolLoop has no session manager
+// of its own, so only the main agent loop's own responses would ever reach the
+// cumulative counters the TUI, /status and the WebUI report.
+func (sm *SubagentManager) SetTokenUsageReporter(report func(sessionKey string, inputTokens, outputTokens int)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.tokenUsageReporter = report
 }
 
 // SetSessionCompactor attaches a session compactor used to sync loop
