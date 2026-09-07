@@ -7,7 +7,7 @@ import type { AuthSession } from '../lib/types'
 export const defaultApiUrlFromWindow = () =>
   import.meta.env.VITE_LELE_API_URL ?? window.location.origin
 
-type AuthContextValue = {
+export type AuthContextValue = {
   api: ReturnType<typeof createApiClient>
   apiUrl: string
   session: AuthSession | null
@@ -18,7 +18,8 @@ type AuthContextValue = {
   isLoading: boolean
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null)
+// Exported for tests that need to mount a consumer without the full provider tree.
+export const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({
   children,

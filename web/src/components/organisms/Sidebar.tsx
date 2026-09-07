@@ -38,7 +38,7 @@ type SidebarProps = {
   onClose: () => void
 }
 
-export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
+export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
@@ -55,6 +55,15 @@ export function Sidebar({ collapsed, mobileOpen, onClose }: SidebarProps) {
     onLogout,
   } = useAppLogicContext()
   const isMobile = useIsMobile()
+
+  // `collapsed` is a desktop-only preference (persisted in localStorage) that
+  // renders the rail: 60px wide, icons only, labels revealed via hover
+  // tooltips. On mobile the sidebar is an overlay drawer: a hover tooltip
+  // cannot be triggered by touch, so a collapsed drawer shows a strip of
+  // unlabeled icons the user cannot read. Therefore the drawer always renders
+  // full (280px, labels visible); the preference only applies from md up,
+  // where the sidebar is static and hover works.
+  const collapsed = collapsedPref && !isMobile
 
   const deviceName = session?.device_name ?? 'lele'
 
