@@ -635,28 +635,35 @@ func (ap *agentProvidableImpl) GetEffectiveThinkLevel(sessionKey string) string 
 }
 
 // SetThinkLevel sets the reasoning effort level for a session.
+//
+// Accepted levels are the canonical thinking levels from
+// config.NormalizeThinkingLevel: "off", "low", "medium", "high", and the
+// "default" aliases "default" / "none" (both clear the override so the agent's
+// configured thinking_level applies again). An empty string is rejected: an
+// unset level is ambiguous, callers must ask for it explicitly. Anything else
+// returns false and leaves the current level untouched.
 func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return false
 	}
-	validLevels := map[string]bool{"default": true, "off": true, "low": true, "medium": true, "high": true}
-	if !validLevels[level] {
+	if level == "" {
 		return false
 	}
-	if level == "off" || level == "default" {
+	normalized, ok := config.NormalizeThinkingLevel(level)
+	if !ok {
+		return false
+	}
+	// normalized == "" means "no override" ("default" / "none").
+	if normalized == "" || normalized == "off" {
 		ap.al.sessionThinking.Delete(sessionKey)
 	} else {
-		ap.al.sessionThinking.Store(sessionKey, level)
+		ap.al.sessionThinking.Store(sessionKey, normalized)
 	}
 	// Persist to survive restarts
 	agent := ap.al.agentForSession(sessionKey)
 	if agent != nil && agent.Sessions != nil {
-		persistLevel := level
-		if level == "default" {
-			persistLevel = "" // "default" means "no override"
-		}
-		agent.Sessions.SetThinkingLevel(sessionKey, persistLevel)
+		agent.Sessions.SetThinkingLevel(sessionKey, normalized)
 	}
 	return true
 }

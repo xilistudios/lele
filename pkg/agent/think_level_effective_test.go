@@ -197,3 +197,96 @@ func TestResetAgentSession_ClearsPersistedModelAndThink(t *testing.T) {
 		t.Fatalf("reasoning key emitted after reset: %v", got["reasoning"])
 	}
 }
+
+// TestSetThinkLevel_CanonicalLevels locks the review fix: SetThinkLevel must
+// validate against config.NormalizeThinkingLevel instead of a duplicated
+// inline whitelist, keeping strict parity for the empty string (rejected) while
+// accepting "none" as an alias of "default" (clears the override, persists "").
+func TestSetThinkLevel_CanonicalLevels(t *testing.T) {
+	tests := []struct {
+		name        string
+		level       string
+		wantOK      bool
+		wantGet     string // GetThinkLevel after the call
+		wantPersist string // persisted session-meta value
+	}{
+		{"empty rejected", "", false, "default", ""},
+		{"bogus rejected", "bogus", false, "default", ""},
+		{"off accepted", "off", true, "off", "off"},
+		{"low accepted", "low", true, "low", "low"},
+		{"medium accepted", "medium", true, "medium", "medium"},
+		{"high accepted", "high", true, "high", "high"},
+		{"default clears override", "default", true, "default", ""},
+		{"none clears override", "none", true, "default", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			al, agent := newThinkLevelTestLoop(t, "high")
+			providable := al.GetProvidable()
+			const sessionKey = "telegram:5000"
+
+			// Start from a real override so "clear" cases are meaningful.
+			if !providable.SetThinkLevel(sessionKey, "low") {
+				t.Fatal("precondition: SetThinkLevel(low) failed")
+			}
+
+			ok := providable.SetThinkLevel(sessionKey, tc.level)
+			if ok != tc.wantOK {
+				t.Fatalf("SetThinkLevel(%q) = %v, want %v", tc.level, ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				// Rejected calls must leave the previous override untouched.
+				if got := providable.GetThinkLevel(sessionKey); got != "low" {
+					t.Errorf("rejected SetThinkLevel(%q) mutated state: GetThinkLevel = %q, want \"low\"", tc.level, got)
+				}
+				return
+			}
+			if got := providable.GetThinkLevel(sessionKey); got != tc.wantGet {
+				t.Errorf("GetThinkLevel() = %q, want %q", got, tc.wantGet)
+			}
+			if got := agent.Sessions.GetThinkingLevel(sessionKey); got != tc.wantPersist {
+				t.Errorf("persisted thinking = %q, want %q", got, tc.wantPersist)
+			}
+			// An override-free session must fall through to the agent level.
+			wantEffective := tc.wantGet
+			if wantEffective == "default" {
+				wantEffective = "high"
+			}
+			if got := providable.GetEffectiveThinkLevel(sessionKey); got != wantEffective {
+				t.Errorf("GetEffectiveThinkLevel() = %q, want %q", got, wantEffective)
+			}
+		})
+	}
+}
+
+// TestThinkCommand_AcceptsNoneAlias guards the user-facing half of the "none"
+// alias: /think none must clear the override and report it (not "Unknown think
+// level"), and the rejection message must list "default" among valid levels.
+func TestThinkCommand_AcceptsNoneAlias(t *testing.T) {
+	al, agent := newThinkLevelTestLoop(t, "medium")
+	ch, ok := al.commandHandler.(*commandHandlerImpl)
+	if !ok {
+		t.Fatal("command handler is not *commandHandlerImpl")
+	}
+	const sessionKey = "telegram:5100"
+	providable := al.GetProvidable()
+
+	if !providable.SetThinkLevel(sessionKey, "high") {
+		t.Fatal("precondition: SetThinkLevel(high) failed")
+	}
+
+	if resp := ch.handleThinkCommand(sessionKey, []string{"none"}); !strings.Contains(resp, "DEFAULT") {
+		t.Errorf("/think none did not report a cleared override: %q", resp)
+	}
+	if got := providable.GetThinkLevel(sessionKey); got != "default" {
+		t.Errorf("after /think none, GetThinkLevel = %q, want \"default\"", got)
+	}
+	if got := agent.Sessions.GetThinkingLevel(sessionKey); got != "" {
+		t.Errorf("after /think none, persisted thinking = %q, want \"\"", got)
+	}
+
+	if resp := ch.handleThinkCommand(sessionKey, []string{"bogus"}); !strings.Contains(resp, "Valid levels: default, off, low, medium, high") {
+		t.Errorf("/think bogus error message does not list default: %q", resp)
+	}
+}

@@ -295,7 +295,7 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 	if len(args) > 0 {
 		level := strings.ToLower(args[0])
 		if !providable.SetThinkLevel(sessionKey, level) {
-			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: off, low, medium, high", args[0])
+			return fmt.Sprintf("❌ Unknown think level: %s\nValid levels: default, off, low, medium, high", args[0])
 		}
 		return thinkLevelResponse(level)
 	}
@@ -315,6 +315,8 @@ func (ch *commandHandlerImpl) handleThinkCommand(sessionKey string, args []strin
 
 func thinkLevelResponse(level string) string {
 	switch level {
+	case "default", "none":
+		return "🧠 Think mode **DEFAULT**\nOverride cleared; using thinking level from agent configuration."
 	case "off":
 		return "🧠 Think mode **OFF**\nUsing default reasoning level from agent configuration."
 	case "low":
