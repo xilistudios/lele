@@ -547,6 +547,11 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	subagentManager.SetCompactionThresholdPercent(cfg.SessionCompactionThresholdPercent())
 	subagentManager.SetRedactor(keyring.NewRedactor(keyringSvc))
 	subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+	// Manager-level fallback thinking level: the PARENT's resolved config level.
+	// Only used when a task has no agent-context callback (standalone/cron
+	// managers). The parent's per-session /think override is deliberately NOT
+	// propagated here — it belongs to the parent's user conversation.
+	subagentManager.SetThinkingLevel(agent.ThinkingLevel)
 	// Resolve per-task model overrides (e.g. from cron spawn jobs) into providers.
 	subagentManager.SetModelOverrideResolver(func(model string) (providers.LLMProvider, string, int, error) {
 		resolvedModel := cfg.Providers.ResolveModelAlias(model, cfg.Agents.Defaults.Provider)
@@ -601,6 +606,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 				MaxTokens:     targetAgent.MaxTokens,
 				Temperature:   targetAgent.Temperature,
 				ContextWindow: targetAgent.ContextWindow,
+				ThinkingLevel: targetAgent.ThinkingLevel,
 			}
 		}
 		// Fallback: use subagent model override if configured, otherwise parent agent's config
@@ -614,6 +620,7 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 			MaxTokens:     agent.MaxTokens,
 			Temperature:   agent.Temperature,
 			ContextWindow: subagentDefaultContextWindow,
+			ThinkingLevel: agent.ThinkingLevel,
 		}
 	})
 	spawnTool := tools.NewSpawnTool(subagentManager)

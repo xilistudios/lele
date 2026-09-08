@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 )
@@ -51,6 +52,7 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	defaultTemperature := sm.temperature
 	defaultHasMaxTokens := sm.hasMaxTokens
 	defaultHasTemperature := sm.hasTemperature
+	defaultThinkingLevel := sm.thinkingLevel
 	sm.mu.RUnlock()
 
 	// Start with manager defaults
@@ -59,6 +61,7 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 	temperature := defaultTemperature
 	hasMaxTokens := defaultHasMaxTokens
 	hasTemperature := defaultHasTemperature
+	thinking := defaultThinkingLevel
 
 	var agentWorkspace string
 	var agentName string
@@ -90,6 +93,14 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 			temperature = ctxInfo.Temperature
 			hasTemperature = true
 		}
+		// The thinking level is NOT a "0 means default" scalar like max_tokens:
+		// the target agent's resolved level always wins, even when it is empty.
+		// An empty ThinkingLevel means the target has no config level at all —
+		// resolveAgentThinkingLevel already folded agents.defaults.thinking_level
+		// into the value it publishes here — so emitting the manager (parent)
+		// default would let the parent's config override a target that
+		// deliberately has no level. Hence the unconditional assignment.
+		thinking = ctxInfo.ThinkingLevel
 
 		if ctxInfo.Context != "" {
 			agentWorkspace = ctxInfo.Workspace
@@ -113,8 +124,25 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 		provider = defaultManagerProvider
 	}
 
-	// Build LLM options
-	if hasMaxTokens || hasTemperature {
+	// Build LLM options.
+	//
+	// Reasoning level -> wire options, mirroring the main-agent switch in
+	// pkg/agent/llm_caller.go buildLLMOptions so both paths speak identical
+	// semantics:
+	//   - "off":            explicit {"enabled": false} so transparent proxies
+	//                       cannot re-enable reasoning server-side.
+	//   - "low|medium|high": {"effort": level, "enabled": true} — providers that
+	//                       gate emission on `enabled` (anthropic_messages) must
+	//                       not drop the level on the floor.
+	//   - "":               key absent, today's behavior (model ReasoningConfig
+	//                       decides at the provider layer).
+	// Stored values are normalized by config validation and
+	// resolveAgentThinkingLevel, so an invalid level cannot occur in practice;
+	// NormalizeThinkingLevel is applied defensively anyway and anything unknown
+	// is treated as "" (no opinion).
+	reasoningOpts := thinkingReasoningOptions(thinking)
+
+	if hasMaxTokens || hasTemperature || reasoningOpts != nil {
 		llmOptions = map[string]any{}
 		if hasMaxTokens {
 			llmOptions["max_tokens"] = maxTokens
@@ -122,9 +150,30 @@ func (sm *SubagentManager) resolveAgentConfig(agentID string) (
 		if hasTemperature {
 			llmOptions["temperature"] = temperature
 		}
+		if reasoningOpts != nil {
+			llmOptions["reasoning"] = reasoningOpts
+		}
 	}
 
 	return provider, model, systemPrompt, maxIter, llmOptions, contextWindow
+}
+
+// thinkingReasoningOptions maps a normalized thinking level to the "reasoning"
+// entry of the subagent LLM options, or nil when the level carries no opinion
+// ("" or invalid). See resolveAgentConfig for the semantics.
+func thinkingReasoningOptions(level string) map[string]any {
+	normalized, ok := config.NormalizeThinkingLevel(level)
+	if !ok {
+		normalized = ""
+	}
+	switch normalized {
+	case "":
+		return nil
+	case "off":
+		return map[string]any{"enabled": false}
+	default: // "low", "medium", "high"
+		return map[string]any{"effort": normalized, "enabled": true}
+	}
 }
 
 // ownerAgentID returns the agent identity to attribute a task's tool loop to.
