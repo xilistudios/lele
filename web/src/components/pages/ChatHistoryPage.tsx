@@ -14,6 +14,13 @@ type KindTab = 'all' | SessionKind
 
 const KIND_TABS: KindTab[] = ['all', 'chat', 'heartbeat', 'cron', 'cron-spawn', 'subagent']
 
+// Number of chats fetched per request. Matches the backend default in
+// parsePagination (pkg/channels/rest_system.go), which caps a page at 200 and
+// falls back to 50 when the client sends no limit. The remaining chats stay on
+// the server and are pulled by the "Load more" button, so the first paint of a
+// large history stays cheap.
+export const CHAT_PAGE_SIZE = 50
+
 export function ChatHistoryPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -38,8 +45,6 @@ export function ChatHistoryPage() {
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
 
-  const PAGE_SIZE = 200 // backend max
-
   // Fetch the first page of persisted sessions on mount or when kind filter changes.
   useEffect(() => {
     let cancelled = false
@@ -50,7 +55,7 @@ export function ChatHistoryPage() {
     setTotal(0)
     const kindParam = activeKind === 'all' ? undefined : activeKind
     api
-      .sessions(undefined, kindParam, true, { offset: 0, limit: PAGE_SIZE })
+      .sessions(undefined, kindParam, true, { offset: 0, limit: CHAT_PAGE_SIZE })
       .then((data) => {
         if (!cancelled) {
           setAllFetchedSessions(data?.sessions ?? [])
@@ -76,7 +81,7 @@ export function ChatHistoryPage() {
       const kindParam = activeKind === 'all' ? undefined : activeKind
       const data = await api.sessions(undefined, kindParam, true, {
         offset: allFetchedSessions.length,
-        limit: PAGE_SIZE,
+        limit: CHAT_PAGE_SIZE,
       })
       if (data?.sessions?.length) {
         setAllFetchedSessions((prev) => [...prev, ...data.sessions])
