@@ -285,9 +285,9 @@ func TestFindAgent(t *testing.T) {
 func TestLoadAgentDetailDefaults(t *testing.T) {
 	m := newAgentsTestModel(t)
 	m.loadAgentDetail("")
-	// Defaults view has 9 rows
-	if len(m.modalItems) != 9 {
-		t.Fatalf("expected 9 defaults rows, got %d", len(m.modalItems))
+	// Defaults view has 10 rows (9 fields + thinking level)
+	if len(m.modalItems) != 10 {
+		t.Fatalf("expected 10 defaults rows, got %d", len(m.modalItems))
 	}
 	if !strings.Contains(m.modalItems[1], "test-model") {
 		t.Errorf("model row should show value: %q", m.modalItems[1])
@@ -331,15 +331,15 @@ func TestLoadAgentDetailSubagentsSplit(t *testing.T) {
 	}
 	m.loadAgentDetail("coder")
 
-	// 11 rows: 9 fields + set-as-default + delete
-	if len(m.modalItems) != 11 {
-		t.Fatalf("expected 11 rows, got %d: %v", len(m.modalItems), m.modalItems)
+	// 12 rows: 10 fields (incl. Thinking) + set-as-default + delete
+	if len(m.modalItems) != 12 {
+		t.Fatalf("expected 12 rows, got %d: %v", len(m.modalItems), m.modalItems)
 	}
-	if !strings.Contains(m.modalItems[7], "writer") {
-		t.Errorf("subagents allow row should list writer: %q", m.modalItems[7])
+	if !strings.Contains(m.modalItems[agentFieldSubagentsAllow], "writer") {
+		t.Errorf("subagents allow row should list writer: %q", m.modalItems[agentFieldSubagentsAllow])
 	}
-	if !strings.Contains(m.modalItems[8], "3") {
-		t.Errorf("subagents maxconcurrent row should show 3: %q", m.modalItems[8])
+	if !strings.Contains(m.modalItems[agentFieldSubagentsMaxConcurrent], "3") {
+		t.Errorf("subagents maxconcurrent row should show 3: %q", m.modalItems[agentFieldSubagentsMaxConcurrent])
 	}
 }
 
@@ -590,5 +590,299 @@ func TestHandleDefaultsEditEnterModelAlwaysSelector(t *testing.T) {
 	}
 	if m.settingsSelectorField != "defaultModel" {
 		t.Fatalf("expected selector field defaultModel, got %q", m.settingsSelectorField)
+	}
+}
+
+// ── Thinking level (per-agent + defaults) ──────────────────────────────
+
+// TestAgentDetailRowIndexAlignment guards the classic row-misalignment bug:
+// every agentField* constant must address the row whose label starts with the
+// field it names, and the action rows must remain the last two. If a row is
+// inserted in loadAgentDetail without bumping the iota block (or vice versa),
+// this test fails.
+func TestAgentDetailRowIndexAlignment(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.loadAgentDetail("coder")
+
+	// Prefix each constant with the expected "Label: " of its row.
+	wantPrefix := map[int]string{
+		agentFieldID:                     "ID:",
+		agentFieldName:                   "Name:",
+		agentFieldDescription:            "Description:",
+		agentFieldWorkspace:              "Workspace:",
+		agentFieldModel:                  "Model:",
+		agentFieldTemperature:            "Temperature:",
+		agentFieldThinkingLevel:          "Thinking:",
+		agentFieldSkills:                 "Skills:",
+		agentFieldSubagentsAllow:         "Subagents Allow:",
+		agentFieldSubagentsMaxConcurrent: "Subagents MaxConcurrent:",
+		agentFieldSetDefault:             "★",
+		agentFieldDelete:                 "🗑",
+	}
+	if len(m.modalItems) != len(wantPrefix) {
+		t.Fatalf("agent view has %d rows but %d field constants defined: %v",
+			len(m.modalItems), len(wantPrefix), m.modalItems)
+	}
+	for idx, prefix := range wantPrefix {
+		if !strings.HasPrefix(m.modalItems[idx], prefix) {
+			t.Errorf("row %d = %q, want prefix %q", idx, m.modalItems[idx], prefix)
+		}
+	}
+}
+
+// TestDefaultsDetailRowIndexAlignment is the same guard for the defaults view
+// (defaultsField* constants vs loadAgentDetail("") rows).
+func TestDefaultsDetailRowIndexAlignment(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.loadAgentDetail("")
+
+	wantPrefix := map[int]string{
+		defaultsFieldProvider:              "Provider:",
+		defaultsFieldModel:                 "Model:",
+		defaultsFieldMaxTokens:             "MaxTokens:",
+		defaultsFieldTemperature:           "Temperature:",
+		defaultsFieldThinkingLevel:         "Thinking:",
+		defaultsFieldMaxToolIterations:     "MaxToolIterations:",
+		defaultsFieldMaxReadLines:          "MaxReadLines:",
+		defaultsFieldSubagentTimeout:       "SubagentTimeout:",
+		defaultsFieldSubagentMaxConcurrent: "SubagentMaxConcurrent:",
+		defaultsFieldLLMLoopTimeout:        "LLMLoopTimeout:",
+	}
+	if len(m.modalItems) != len(wantPrefix) {
+		t.Fatalf("defaults view has %d rows but %d field constants defined: %v",
+			len(m.modalItems), len(wantPrefix), m.modalItems)
+	}
+	for idx, prefix := range wantPrefix {
+		if !strings.HasPrefix(m.modalItems[idx], prefix) {
+			t.Errorf("row %d = %q, want prefix %q", idx, m.modalItems[idx], prefix)
+		}
+	}
+}
+
+// TestThinkingLevelRowDisplay checks the row renders "default" when unset and
+// the explicit level otherwise, in both views.
+func TestThinkingLevelRowDisplay(t *testing.T) {
+	m := newAgentsTestModel(t)
+
+	m.loadAgentDetail("writer")
+	if got := m.modalItems[agentFieldThinkingLevel]; got != "Thinking: default" {
+		t.Errorf("nil level should render default: %q", got)
+	}
+
+	high := "high"
+	m.findAgent("writer").ThinkingLevel = &high
+	m.loadAgentDetail("writer")
+	if got := m.modalItems[agentFieldThinkingLevel]; got != "Thinking: high" {
+		t.Errorf("explicit level should render value: %q", got)
+	}
+
+	// Defaults view
+	m.loadAgentDetail("")
+	if got := m.modalItems[defaultsFieldThinkingLevel]; got != "Thinking: default" {
+		t.Errorf("defaults nil level should render default: %q", got)
+	}
+	m.cfg.Agents.Defaults.ThinkingLevel = &high
+	m.loadAgentDetail("")
+	if got := m.modalItems[defaultsFieldThinkingLevel]; got != "Thinking: high" {
+		t.Errorf("defaults explicit level should render value: %q", got)
+	}
+}
+
+// TestHandleAgentEditEnterThinkingOpensSelector verifies Enter on the Thinking
+// row opens the selector with 5 options and pre-selects the current value
+// (nil → "(default)" at index 0; "medium" → index 4).
+func TestHandleAgentEditEnterThinkingOpensSelector(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "coder"
+	m.loadAgentDetail("coder")
+
+	m.modalSelectedIdx = agentFieldThinkingLevel
+	m.handleAgentEditEnter()
+
+	if !m.settingsSelectorActive {
+		t.Fatal("expected thinking-level selector to be active")
+	}
+	if m.settingsSelectorField != "agentThinkingLevel" {
+		t.Fatalf("selector field = %q, want agentThinkingLevel", m.settingsSelectorField)
+	}
+	if len(m.settingsSelectorValues) != 5 || len(m.settingsSelectorItems) != 5 {
+		t.Fatalf("expected 5 options, got %d/%d: %v / %v",
+			len(m.settingsSelectorItems), len(m.settingsSelectorValues),
+			m.settingsSelectorItems, m.settingsSelectorValues)
+	}
+	// Unset value pre-selects "(default)".
+	if m.settingsSelectorIdx != 0 {
+		t.Errorf("nil level should pre-select index 0, got %d", m.settingsSelectorIdx)
+	}
+	m.closeSettingsSelector()
+
+	// Explicit value pre-selects its row.
+	medium := "medium"
+	m.findAgent("coder").ThinkingLevel = &medium
+	m.modalSelectedIdx = agentFieldThinkingLevel
+	m.handleAgentEditEnter()
+	if m.settingsSelectorIdx != 3 {
+		t.Errorf("medium should pre-select index 3, got %d", m.settingsSelectorIdx)
+	}
+}
+
+// TestSelectorConfirmThinkingLevelEndToEnd drives the full selector path
+// (Enter → pick option → handleSelectorConfirm) the same way the real key
+// handler does, including modalMode, and checks the value lands in config.
+func TestSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.resetModal(ModalSettingsAgentEdit)
+	m.settingsAgentID = "writer"
+	m.loadAgentDetail("writer")
+
+	m.modalSelectedIdx = agentFieldThinkingLevel
+	m.handleAgentEditEnter()
+
+	// Pick "off" (index 1: values are "", "off", "low", "medium", "high").
+	m.settingsSelectorIdx = 1
+	m.handleSelectorConfirm()
+
+	if m.settingsSelectorActive {
+		t.Fatal("selector should be closed after confirm")
+	}
+	ag := m.findAgent("writer")
+	if ag.ThinkingLevel == nil || *ag.ThinkingLevel != "off" {
+		t.Fatalf("expected thinking level off, got %v", ag.ThinkingLevel)
+	}
+
+	// Pick "(default)" (index 0) → clears back to nil (field is not sticky).
+	m.modalSelectedIdx = agentFieldThinkingLevel
+	m.handleAgentEditEnter()
+	m.settingsSelectorIdx = 0
+	m.handleSelectorConfirm()
+
+	ag = m.findAgent("writer")
+	if ag.ThinkingLevel != nil {
+		t.Fatalf("(default) must clear the field to nil, got %q", *ag.ThinkingLevel)
+	}
+}
+
+// TestHandleAgentFieldEditThinkingLevel covers the edit handler directly:
+// "" clears to nil, valid levels are stored, invalid ones error and leave the
+// field untouched (mirrors the temperature conventions).
+func TestHandleAgentFieldEditThinkingLevel(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "writer"
+
+	// Valid value.
+	m.settingsEditField = "agentThinkingLevel"
+	m.handleAgentSettingsInput("high")
+	ag := m.findAgent("writer")
+	if ag.ThinkingLevel == nil || *ag.ThinkingLevel != "high" {
+		t.Fatalf("expected high, got %v", ag.ThinkingLevel)
+	}
+	if m.formError != "" {
+		t.Errorf("unexpected error: %q", m.formError)
+	}
+
+	// Invalid value must not clobber the previous one.
+	m.settingsEditField = "agentThinkingLevel"
+	m.handleAgentSettingsInput("bogus")
+	if m.formError == "" {
+		t.Fatal("expected invalid-thinking-level error")
+	}
+	ag = m.findAgent("writer")
+	if ag.ThinkingLevel == nil || *ag.ThinkingLevel != "high" {
+		t.Fatalf("invalid input must leave field unchanged, got %v", ag.ThinkingLevel)
+	}
+
+	// Empty value clears to nil (the "(default)" sentinel).
+	m.settingsEditField = "agentThinkingLevel"
+	m.handleAgentSettingsInput("")
+	ag = m.findAgent("writer")
+	if ag.ThinkingLevel != nil {
+		t.Fatalf("expected nil after clear, got %q", *ag.ThinkingLevel)
+	}
+	if m.formError != "" {
+		t.Errorf("clear must not set an error: %q", m.formError)
+	}
+}
+
+// TestHandleAgentFieldEditThinkingLevelNormalized checks that mixed-case /
+// padded input is canonicalized through config.NormalizeThinkingLevel before
+// being stored.
+func TestHandleAgentFieldEditThinkingLevelNormalized(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = "writer"
+	m.settingsEditField = "agentThinkingLevel"
+	m.handleAgentSettingsInput("  MeDiUm ")
+	ag := m.findAgent("writer")
+	if ag.ThinkingLevel == nil || *ag.ThinkingLevel != "medium" {
+		t.Fatalf("expected normalized medium, got %v", ag.ThinkingLevel)
+	}
+}
+
+// TestHandleDefaultsThinkingLevel covers the defaults view: Enter on the
+// Thinking row opens the selector, and the edit handler writes
+// m.cfg.Agents.Defaults.ThinkingLevel with the same validation semantics.
+func TestHandleDefaultsThinkingLevel(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.settingsAgentID = ""
+	m.loadAgentDetail("")
+
+	// Row Enter opens the selector wired to defaultThinkingLevel.
+	m.modalSelectedIdx = defaultsFieldThinkingLevel
+	m.handleDefaultsEditEnter()
+	if !m.settingsSelectorActive {
+		t.Fatal("expected defaults thinking selector to be active")
+	}
+	if m.settingsSelectorField != "defaultThinkingLevel" {
+		t.Fatalf("selector field = %q, want defaultThinkingLevel", m.settingsSelectorField)
+	}
+	if len(m.settingsSelectorValues) != 5 {
+		t.Fatalf("expected 5 options, got %d", len(m.settingsSelectorValues))
+	}
+	m.closeSettingsSelector()
+
+	// Set a level.
+	m.settingsEditField = "defaultThinkingLevel"
+	m.handleDefaultsFieldEdit("low")
+	d := m.cfg.Agents.Defaults.ThinkingLevel
+	if d == nil || *d != "low" {
+		t.Fatalf("expected defaults low, got %v", d)
+	}
+
+	// Invalid value errors and preserves.
+	m.settingsEditField = "defaultThinkingLevel"
+	m.handleDefaultsFieldEdit("nope")
+	if m.formError == "" {
+		t.Fatal("expected invalid-thinking-level error")
+	}
+	d = m.cfg.Agents.Defaults.ThinkingLevel
+	if d == nil || *d != "low" {
+		t.Fatalf("invalid input must leave defaults unchanged, got %v", d)
+	}
+
+	// Clear back to inherit.
+	m.settingsEditField = "defaultThinkingLevel"
+	m.handleDefaultsFieldEdit("")
+	if m.cfg.Agents.Defaults.ThinkingLevel != nil {
+		t.Fatalf("expected nil after clear, got %q", *m.cfg.Agents.Defaults.ThinkingLevel)
+	}
+}
+
+// TestDefaultsSelectorConfirmThinkingLevelEndToEnd runs the defaults selector
+// confirm path through handleAgentSettingsInput (which falls through to
+// handleDefaultsFieldEdit when settingsAgentID has no matching agent).
+func TestDefaultsSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.resetModal(ModalSettingsAgentEdit)
+	m.settingsAgentID = ""
+	m.loadAgentDetail("")
+
+	m.modalSelectedIdx = defaultsFieldThinkingLevel
+	m.handleAgentEditEnter() // routes to handleDefaultsEditEnter (empty ID)
+
+	m.settingsSelectorIdx = 1 // "off"
+	m.handleSelectorConfirm()
+
+	d := m.cfg.Agents.Defaults.ThinkingLevel
+	if d == nil || *d != "off" {
+		t.Fatalf("expected defaults off, got %v", d)
 	}
 }
