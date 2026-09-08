@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -334,5 +335,220 @@ func TestRunLLMIteration_ReadImageHiddenWhenPrimaryLacksVision(t *testing.T) {
 		if def.Function.Name == "read_image" {
 			t.Fatal("Expected read_image tool to be hidden when primary model does not support vision")
 		}
+	}
+}
+
+// ============================================================================
+// buildLLMOptions — reasoning / thinking option resolution
+// ============================================================================
+//
+// These tests lock the semantics of the per-session thinking override
+// (`/think off|low|medium|high`) against the agent-level reasoning config.
+//
+// The bug they guard against: `/think off` used to emit NO `reasoning` key at
+// all. A transparent proxy (llmproxy) then applied its own server-side default
+// — thinking ON — so disabling reasoning was indistinguishable from enabling
+// it. The fix makes "off" send an explicit `{"enabled": false}` (same payload
+// the goal judge ships in production, see goal.go).
+
+func strPtr(s string) *string { return &s }
+
+func TestBuildLLMOptions_Reasoning(t *testing.T) {
+	// maxTok is referenced by the low-with-config merge case.
+	maxTok := 2048
+
+	tests := []struct {
+		name string
+		// sessionLevel is the in-memory per-session override stored in
+		// al.sessionThinking ("" means no override).
+		sessionLevel string
+		// persistedLevel, when non-empty, is written to the session manager
+		// instead of the in-memory map to exercise the persisted fallback path
+		// (the path that survives a gateway restart).
+		persistedLevel string
+		reasoning      *config.ReasoningConfig
+		model          string
+
+		// wantReasoning, when non-nil, is compared against the whole
+		// `reasoning` map (exact key set and values).
+		wantReasoning map[string]interface{}
+		// wantReasoningAbsent asserts the `reasoning` key is not emitted.
+		wantReasoningAbsent bool
+		// wantThinking, when non-nil, is compared against `thinking`.
+		wantThinking interface{}
+		// wantThinkingAbsent asserts the DeepSeek `thinking` key is not emitted.
+		wantThinkingAbsent bool
+	}{
+		// --- off: explicit disable, unconditional -------------------------
+		{
+			name:          "off without agent config emits explicit disable",
+			sessionLevel:  "off",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"enabled": false},
+		},
+		{
+			name:          "off does not leak config effort",
+			sessionLevel:  "off",
+			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"enabled": false},
+		},
+		{
+			name:               "off suppresses DeepSeek thinking adapter",
+			sessionLevel:       "off",
+			reasoning:          &config.ReasoningConfig{Enable: true},
+			model:              "deepseek-chat",
+			wantReasoning:      map[string]interface{}{"enabled": false},
+			wantThinkingAbsent: true,
+		},
+
+		// --- no override: config path unchanged ---------------------------
+		{
+			name:                "no override and no config emits no reasoning",
+			sessionLevel:        "",
+			reasoning:           nil,
+			model:               "test-model",
+			wantReasoningAbsent: true,
+		},
+		{
+			name:          "no override keeps config default path",
+			sessionLevel:  "",
+			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("medium")},
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"enabled": true, "effort": "medium"},
+		},
+		{
+			name:         "no override keeps DeepSeek thinking adapter",
+			sessionLevel: "",
+			reasoning:    &config.ReasoningConfig{Enable: true},
+			model:        "deepseek-chat",
+			// Config path emits enabled:true (no effort configured)...
+			wantReasoning: map[string]interface{}{"enabled": true},
+			// ...plus the DeepSeek wire adapter.
+			wantThinking: true,
+		},
+
+		// --- session override low/medium/high -----------------------------
+		{
+			name:          "low without config still emits enabled true",
+			sessionLevel:  "low",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "low", "enabled": true},
+		},
+		{
+			name:         "low merges config max_tokens",
+			sessionLevel: "low",
+			reasoning:    &config.ReasoningConfig{Enable: true, MaxTokens: &maxTok},
+			model:        "test-model",
+			wantReasoning: map[string]interface{}{
+				"effort":     "low",
+				"enabled":    true,
+				"max_tokens": maxTok,
+			},
+		},
+		{
+			name:          "high overrides config enable false",
+			sessionLevel:  "high",
+			reasoning:     &config.ReasoningConfig{Enable: false},
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "high", "enabled": true},
+		},
+
+		// --- persisted fallback (survives restarts) -----------------------
+		{
+			name:           "persisted off emits explicit disable",
+			persistedLevel: "off",
+			reasoning:      nil,
+			model:          "test-model",
+			wantReasoning:  map[string]interface{}{"enabled": false},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			al, tmpDir := createLLMRunnerTestAgentLoop(t)
+			defer os.RemoveAll(tmpDir)
+			agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+			agent.Reasoning = tc.reasoning
+
+			// buildLLMOptions resolves the override through the loop's
+			// registry, so the agent under test must be the one the loop
+			// returns for the session key.
+			al.registry.mu.Lock()
+			al.registry.agents["main"] = agent
+			al.registry.mu.Unlock()
+
+			const sessionKey = "test-session"
+			switch {
+			case tc.sessionLevel != "":
+				al.sessionThinking.Store(sessionKey, tc.sessionLevel)
+			case tc.persistedLevel != "":
+				if err := agent.Sessions.SetThinkingLevel(sessionKey, tc.persistedLevel); err != nil {
+					t.Fatalf("SetThinkingLevel: %v", err)
+				}
+			}
+
+			caller := newLLMCaller(al)
+			opts := llmCallOptions{
+				ctx:        context.Background(),
+				agent:      agent,
+				messages:   []providers.Message{{Role: "user", Content: "hi"}},
+				model:      tc.model,
+				sessionKey: sessionKey,
+			}
+
+			got := caller.buildLLMOptions(opts)
+
+			// reasoning map
+			reasoningRaw, hasReasoning := got["reasoning"]
+			if tc.wantReasoningAbsent {
+				if hasReasoning {
+					t.Fatalf("reasoning key present, want absent: %v", reasoningRaw)
+				}
+			} else {
+				if !hasReasoning {
+					t.Fatalf("reasoning key absent, want %v", tc.wantReasoning)
+				}
+				reasoning, ok := reasoningRaw.(map[string]interface{})
+				if !ok {
+					t.Fatalf("reasoning is %T, want map[string]interface{}", reasoningRaw)
+				}
+				if len(reasoning) != len(tc.wantReasoning) {
+					t.Fatalf("reasoning = %v (len %d), want %v (len %d)",
+						reasoning, len(reasoning), tc.wantReasoning, len(tc.wantReasoning))
+				}
+				for k, want := range tc.wantReasoning {
+					gv, ok := reasoning[k]
+					if !ok {
+						t.Fatalf("reasoning missing key %q (got %v)", k, reasoning)
+					}
+					if !reflect.DeepEqual(gv, want) {
+						t.Errorf("reasoning[%q] = %#v, want %#v", k, gv, want)
+					}
+				}
+			}
+
+			// thinking key (DeepSeek wire adapter)
+			thinkingRaw, hasThinking := got["thinking"]
+			switch {
+			case tc.wantThinkingAbsent:
+				if hasThinking {
+					t.Fatalf("thinking key present (%v), want absent", thinkingRaw)
+				}
+			case tc.wantThinking != nil:
+				if !hasThinking {
+					t.Fatalf("thinking key absent, want %v", tc.wantThinking)
+				}
+				if !reflect.DeepEqual(thinkingRaw, tc.wantThinking) {
+					t.Errorf("thinking = %#v, want %#v", thinkingRaw, tc.wantThinking)
+				}
+			default:
+				if hasThinking {
+					t.Errorf("unexpected thinking key: %#v", thinkingRaw)
+				}
+			}
+		})
 	}
 }

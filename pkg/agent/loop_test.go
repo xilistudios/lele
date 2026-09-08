@@ -1150,6 +1150,146 @@ func TestResetAgentSession_ClearsTokenCounts(t *testing.T) {
 	}
 }
 
+// newThinkingClearTestLoop builds an AgentLoop with a default agent and no
+// reasoning config, isolated in a throwaway LELE_CONFIG_DIR so persisted
+// session meta (SQLite) never touches the real store.
+func newThinkingClearTestLoop(t *testing.T) (*AgentLoop, *AgentInstance) {
+	t.Helper()
+	tmpDir, err := os.MkdirTemp("", "agent-thinking-clear-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         tmpDir,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+		},
+	}
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+	agent := al.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("No default agent found")
+	}
+	if agent.Reasoning != nil {
+		t.Fatal("Test requires an agent with no reasoning config (nil)")
+	}
+	return al, agent
+}
+
+// TestResetAgentSession_ClearsPersistedThinking locks the fix for the
+// "/clear resurrection" bug: resetAgentSession used to delete only the
+// in-memory sessionThinking entry, so buildLLMOptions' persisted-meta
+// fallback (Sessions.GetThinkingLevel) brought the old level — including
+// "off" — back on the very next turn.
+func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
+	// Both priors matter: "high" (a level the user set) and "off" (the
+	// explicit-disable sentinel). /clear must wipe either one.
+	for _, prior := range []string{"high", "off"} {
+		t.Run("prior_"+prior, func(t *testing.T) {
+			al, agent := newThinkingClearTestLoop(t)
+			sessionKey := "telegram:999999"
+
+			if err := agent.Sessions.SetThinkingLevel(sessionKey, prior); err != nil {
+				t.Fatalf("SetThinkingLevel(%q): %v", prior, err)
+			}
+			if got := agent.Sessions.GetThinkingLevel(sessionKey); got != prior {
+				t.Fatalf("precondition: persisted level = %q, want %q", got, prior)
+			}
+			// Mirror what SetThinkLevel does: the in-memory entry is the
+			// primary source, persisted meta is the fallback.
+			al.sessionThinking.Store(sessionKey, prior)
+
+			if err := al.resetAgentSession(agent, sessionKey); err != nil {
+				t.Fatalf("resetAgentSession failed: %v", err)
+			}
+
+			if got := agent.Sessions.GetThinkingLevel(sessionKey); got != "" {
+				t.Fatalf("persisted thinking level after reset = %q, want \"\" (no override)", got)
+			}
+			if _, ok := al.sessionThinking.Load(sessionKey); ok {
+				t.Fatal("in-memory sessionThinking entry survived reset")
+			}
+
+			// No resurrection: with the override cleared and no agent
+			// reasoning config, buildLLMOptions must not emit a "reasoning"
+			// key at all (and in particular must not emit {"enabled":false}
+			// from a stale persisted "off").
+			caller := newLLMCaller(al)
+			opts := llmCallOptions{
+				ctx:        context.Background(),
+				agent:      agent,
+				messages:   []providers.Message{{Role: "user", Content: "hi"}},
+				model:      "test-model",
+				sessionKey: sessionKey,
+			}
+			if got := caller.buildLLMOptions(opts); got["reasoning"] != nil {
+				t.Fatalf("reasoning key emitted after reset: %v", got["reasoning"])
+			}
+		})
+	}
+}
+
+// TestStartFreshConversation_LegacyKeyClearsPersistedThinking covers the
+// backward-compatible native:<uuid>:<digits> in-place-reset branch of
+// startFreshConversation, which resets the session on the existing key. The
+// persisted thinking override must be cleared there too, not just the
+// in-memory entry.
+func TestStartFreshConversation_LegacyKeyClearsPersistedThinking(t *testing.T) {
+	al, agent := newThinkingClearTestLoop(t)
+	const legacyKey = "native:11112222-3333-4444-5555-666677778888:123"
+
+	agent.Sessions.AddMessage(legacyKey, "user", "old")
+	if err := agent.Sessions.SetThinkingLevel(legacyKey, "high"); err != nil {
+		t.Fatalf("SetThinkingLevel: %v", err)
+	}
+	al.sessionThinking.Store(legacyKey, "high")
+
+	gotKey := al.startFreshConversation(legacyKey, "", "")
+	if gotKey != legacyKey {
+		t.Fatalf("legacy branch must reset in place, returned key %q, want %q", gotKey, legacyKey)
+	}
+
+	if got := len(agent.Sessions.GetHistory(legacyKey)); got != 0 {
+		t.Fatalf("history after legacy reset = %d messages, want 0", got)
+	}
+	if got := agent.Sessions.GetThinkingLevel(legacyKey); got != "" {
+		t.Fatalf("persisted thinking level after legacy reset = %q, want \"\"", got)
+	}
+	if _, ok := al.sessionThinking.Load(legacyKey); ok {
+		t.Fatal("in-memory sessionThinking entry survived legacy reset")
+	}
+
+	caller := newLLMCaller(al)
+	opts := llmCallOptions{
+		ctx:        context.Background(),
+		agent:      agent,
+		messages:   []providers.Message{{Role: "user", Content: "hi"}},
+		model:      "test-model",
+		sessionKey: legacyKey,
+	}
+	if got := caller.buildLLMOptions(opts); got["reasoning"] != nil {
+		t.Fatalf("reasoning key emitted after legacy reset: %v", got["reasoning"])
+	}
+
+	// Contrast: the new-key branch rotates to a key with no persisted meta,
+	// so nothing needs clearing there — GetThinkingLevel must simply report
+	// "" for the fresh key.
+	newKey := al.startFreshConversation("telegram:4242", "", "")
+	if newKey == "" || newKey == "telegram:4242" {
+		t.Fatalf("expected a rotated new key, got %q", newKey)
+	}
+	if got := agent.Sessions.GetThinkingLevel(newKey); got != "" {
+		t.Fatalf("fresh rotated key has persisted thinking level %q, want \"\"", got)
+	}
+}
+
 func TestProcessMessage_EphemeralSessionResetsTokenCounts(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LELE_CONFIG_DIR", tmpDir)

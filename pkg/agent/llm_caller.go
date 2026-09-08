@@ -113,10 +113,22 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 	}
 
 	if sessionEffort == "off" {
-		// Explicitly disabled for this session – do not send reasoning.
+		// Explicitly disabled for this session — send an explicit disable so
+		// transparent proxies don't fall back to their server-side default
+		// (same pattern as the goal judge, goal.go). Omitting the key would
+		// make `/think off` behave exactly like thinking-on.
+		// Config fields (max_tokens/exclude/summary) are deliberately NOT
+		// merged here: they are meaningless with reasoning disabled and strict
+		// endpoints could reject them.
+		llmOptions["reasoning"] = map[string]interface{}{"enabled": false}
 	} else if sessionEffort != "" {
+		// A session-level override is an explicit user request to reason, so
+		// `enabled: true` must not depend on the agent config: providers that
+		// gate emission on `enabled` (anthropic_messages) would otherwise drop
+		// `/think high` on the floor.
 		reasoningMap := map[string]interface{}{
-			"effort": sessionEffort,
+			"effort":  sessionEffort,
+			"enabled": true,
 		}
 		// Merge other reasoning fields from agent config (if any)
 		if opts.agent.Reasoning != nil {
@@ -128,9 +140,6 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 			}
 			if opts.agent.Reasoning.Summary != nil {
 				reasoningMap["summary"] = *opts.agent.Reasoning.Summary
-			}
-			if opts.agent.Reasoning.Enable {
-				reasoningMap["enabled"] = true
 			}
 		}
 		llmOptions["reasoning"] = reasoningMap
@@ -171,7 +180,9 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 
 	// Enable thinking mode for DeepSeek models if reasoning is enabled.
 	// For OpenRouter, thinking is handled via reasoning.enabled / reasoning.effort.
-	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable {
+	// An explicit session-level "off" wins over the agent config: otherwise the
+	// DeepSeek wire adapter would re-enable thinking the user just disabled.
+	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable && sessionEffort != "off" {
 		if isDeepSeekModel(opts.model) {
 			llmOptions["thinking"] = true
 			logger.DebugCF("agent", "Thinking mode enabled for DeepSeek model",

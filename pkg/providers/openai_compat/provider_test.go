@@ -673,6 +673,185 @@ func TestProviderChat_ReasoningConfigEnabled(t *testing.T) {
 	}
 }
 
+// capturedRequest records both the raw bytes and the decoded JSON of the single
+// request a provider call sends, so tests can assert on the exact wire payload.
+type capturedRequest struct {
+	raw     []byte
+	decoded map[string]interface{}
+}
+
+// newReasoningCaptureServer starts an httptest server that records the request
+// body and answers with a minimal completion. When stream is true it replies
+// with an SSE body (for ChatStream), otherwise with a JSON body (for Chat).
+func newReasoningCaptureServer(t *testing.T, stream bool, got *capturedRequest) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var decoded map[string]interface{}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		got.raw = body
+		got.decoded = decoded
+
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data:{\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"))
+			_, _ = w.Write([]byte("data:[DONE]\n\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+}
+
+// assertReasoningEnabledFalse pins the /think off contract: the request must
+// carry a reasoning object whose "enabled" key exists, is a bool, and is false.
+// A refactor of the passthrough from `if enabled, ok := ...; ok` to
+// `if enabled, ok := ...; ok && enabled` drops the key entirely and fails here.
+// It returns the reasoning object for further field assertions.
+func assertReasoningEnabledFalse(t *testing.T, got *capturedRequest) map[string]interface{} {
+	t.Helper()
+
+	if got.decoded == nil {
+		t.Fatal("no request body was captured")
+	}
+
+	reasoning, ok := got.decoded["reasoning"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected reasoning object in request body, got %#v", got.decoded)
+	}
+	value, isSet := reasoning["enabled"]
+	if !isSet {
+		t.Fatalf("reasoning.enabled key missing from request body: %#v", reasoning)
+	}
+	enabled, isBool := value.(bool)
+	if !isBool {
+		t.Fatalf("reasoning.enabled type = %T, want bool", value)
+	}
+	if enabled {
+		t.Fatalf("reasoning.enabled = true, want false")
+	}
+
+	// The decoded assertions above could be satisfied by a transport-level
+	// default; the raw bytes prove the field really reached the wire.
+	if !strings.Contains(string(got.raw), `"enabled":false`) {
+		t.Fatalf("raw request body does not contain \"enabled\":false: %s", got.raw)
+	}
+
+	return reasoning
+}
+
+func TestProviderChat_ReasoningDisabledExplicitly(t *testing.T) {
+	var got capturedRequest
+
+	server := newReasoningCaptureServer(t, false, &got)
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"enabled": false,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	assertReasoningEnabledFalse(t, &got)
+}
+
+func TestProviderChatStream_ReasoningDisabledExplicitly(t *testing.T) {
+	var got capturedRequest
+
+	server := newReasoningCaptureServer(t, true, &got)
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	out, err := p.ChatStream(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"enabled": false,
+			},
+		},
+		func(chunk string, done bool) {},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatStream() error = %v", err)
+	}
+	// Guard: with a nil onChunk, ChatStream delegates to Chat, which would
+	// silently skip the streaming request-builder copy of the passthrough.
+	if got.decoded["stream"] != true {
+		t.Fatalf("stream = %v, want true (request must go through ChatStream)", got.decoded["stream"])
+	}
+	if out.Content != "ok" {
+		t.Fatalf("Content = %q, want ok", out.Content)
+	}
+
+	assertReasoningEnabledFalse(t, &got)
+}
+
+func TestProviderChat_ReasoningDisabledWithEffortPassthrough(t *testing.T) {
+	var got capturedRequest
+
+	server := newReasoningCaptureServer(t, false, &got)
+	defer server.Close()
+
+	p := NewProvider("key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]interface{}{
+			"reasoning": map[string]interface{}{
+				"enabled": false,
+				"effort":  "high",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	// Current provider semantics: every field in options["reasoning"] is
+	// forwarded independently - enabled:false does NOT suppress effort.
+	// This is passthrough only, not a recommended wire payload: the agent loop
+	// intentionally never sends effort alongside off (buildLLMOptions in
+	// pkg/agent/llm_caller.go emits {"enabled": false} alone for a session
+	// thinking level of "off"), so no real request looks like this today.
+	reasoning := assertReasoningEnabledFalse(t, &got)
+	if reasoning["effort"] != "high" {
+		t.Fatalf("reasoning.effort = %v, want high", reasoning["effort"])
+	}
+
+	// applyThinkingMode must stay out of the way: it only acts when
+	// options["thinking"] is true, which is absent here.
+	if _, ok := got.decoded["thinking"]; ok {
+		t.Fatalf("thinking must not be sent when options[\"thinking\"] is unset: %#v", got.decoded)
+	}
+	if _, ok := got.decoded["reasoning_effort"]; ok {
+		t.Fatalf("top-level reasoning_effort must not be derived from options[\"reasoning\"]: %#v", got.decoded)
+	}
+}
+
 func TestProviderChat_ReasoningSummaryOnlySentToOpenAI(t *testing.T) {
 	var requestBody map[string]interface{}
 
