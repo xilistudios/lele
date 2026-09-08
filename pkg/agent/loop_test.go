@@ -1192,7 +1192,6 @@ func TestResetAgentSession_ClearsPersistedThinking(t *testing.T) {
 	// Both priors matter: "high" (a level the user set) and "off" (the
 	// explicit-disable sentinel). /clear must wipe either one.
 	for _, prior := range []string{"high", "off"} {
-		prior := prior
 		t.Run("prior_"+prior, func(t *testing.T) {
 			al, agent := newThinkingClearTestLoop(t)
 			sessionKey := "telegram:999999"
