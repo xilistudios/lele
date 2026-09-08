@@ -112,22 +112,35 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 		}
 	}
 
-	if sessionEffort == "off" {
-		// Explicitly disabled for this session — send an explicit disable so
-		// transparent proxies don't fall back to their server-side default
-		// (same pattern as the goal judge, goal.go). Omitting the key would
-		// make `/think off` behave exactly like thinking-on.
+	// Layer the resolved per-agent config default under the session override:
+	// session wins when set, otherwise the agent's thinking_level applies. The
+	// two layers feed the SAME switch so "off" semantics (explicit wire-level
+	// disable) are identical regardless of where the level came from. "" means
+	// neither layer has an opinion and we fall back to the model ReasoningConfig.
+	effort := sessionEffort
+	if effort == "" {
+		effort = opts.agent.ThinkingLevel
+	}
+
+	switch {
+	case effort == "off":
+		// Explicitly disabled for this session or agent — send an explicit
+		// disable so transparent proxies don't fall back to their server-side
+		// default (same pattern as the goal judge, goal.go). Omitting the key
+		// would make "off" behave exactly like thinking-on. An agent-level
+		// "off" fires here too, which is required so a proxy's server-side
+		// default can't re-enable reasoning the operator turned off.
 		// Config fields (max_tokens/exclude/summary) are deliberately NOT
 		// merged here: they are meaningless with reasoning disabled and strict
 		// endpoints could reject them.
 		llmOptions["reasoning"] = map[string]interface{}{"enabled": false}
-	} else if sessionEffort != "" {
-		// A session-level override is an explicit user request to reason, so
-		// `enabled: true` must not depend on the agent config: providers that
-		// gate emission on `enabled` (anthropic_messages) would otherwise drop
-		// `/think high` on the floor.
+	case effort != "":
+		// An explicit level (session or agent config) is an explicit request
+		// to reason, so `enabled: true` must not depend on the agent config:
+		// providers that gate emission on `enabled` (anthropic_messages) would
+		// otherwise drop the level on the floor.
 		reasoningMap := map[string]interface{}{
-			"effort":  sessionEffort,
+			"effort":  effort,
 			"enabled": true,
 		}
 		// Merge other reasoning fields from agent config (if any)
@@ -143,12 +156,17 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 			}
 		}
 		llmOptions["reasoning"] = reasoningMap
-		logger.DebugCF("agent", "Session reasoning override applied", map[string]interface{}{
+		source := "agent_config"
+		if sessionEffort != "" {
+			source = "session"
+		}
+		logger.DebugCF("agent", "Reasoning effort applied", map[string]interface{}{
 			"agent_id":    opts.agent.ID,
 			"session_key": opts.sessionKey,
-			"effort":      sessionEffort,
+			"effort":      effort,
+			"source":      source,
 		})
-	} else if opts.agent.Reasoning != nil {
+	case opts.agent.Reasoning != nil:
 		reasoningMap := map[string]interface{}{}
 		if opts.agent.Reasoning.Effort != nil {
 			reasoningMap["effort"] = *opts.agent.Reasoning.Effort
@@ -180,9 +198,10 @@ func (lc *llmCaller) buildLLMOptions(opts llmCallOptions) map[string]interface{}
 
 	// Enable thinking mode for DeepSeek models if reasoning is enabled.
 	// For OpenRouter, thinking is handled via reasoning.enabled / reasoning.effort.
-	// An explicit session-level "off" wins over the agent config: otherwise the
-	// DeepSeek wire adapter would re-enable thinking the user just disabled.
-	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable && sessionEffort != "off" {
+	// An explicit "off" at either layer (session override or agent config) wins
+	// over the model ReasoningConfig: otherwise the DeepSeek wire adapter would
+	// re-enable thinking the user or operator just disabled.
+	if opts.agent.Reasoning != nil && opts.agent.Reasoning.Enable && effort != "off" {
 		if isDeepSeekModel(opts.model) {
 			llmOptions["thinking"] = true
 			logger.DebugCF("agent", "Thinking mode enabled for DeepSeek model",

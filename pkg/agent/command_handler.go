@@ -423,15 +423,13 @@ func (ch *commandHandlerImpl) formatStatusResponse(agent *AgentInstance, session
 		contextPercent = 100
 	}
 
-	// Get think level for session
-	thinkLevel := "default"
-	if v, ok := ch.al.sessionThinking.Load(sessionKey); ok {
-		if s, ok := v.(string); ok && s != "" {
-			thinkLevel = s
-		}
-	} else if agent.Reasoning != nil && agent.Reasoning.Effort != nil {
-		thinkLevel = *agent.Reasoning.Effort
-	}
+	// Get think level for session. GetEffectiveThinkLevel mirrors exactly what
+	// buildLLMOptions will apply (session override → agent.ThinkingLevel →
+	// "default"), so /status can never lie about the wire payload. The old
+	// code read only the in-memory sync.Map and fell back to
+	// agent.Reasoning.Effort, a third definition of "current level" that
+	// ignored both the persisted override and the agent thinking_level.
+	thinkLevel := ch.al.GetProvidable().GetEffectiveThinkLevel(sessionKey)
 
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
 		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)

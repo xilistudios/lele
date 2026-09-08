@@ -379,7 +379,17 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	}
 	// Check reasoning config — computed from provider model config
 	newReasoning := getReasoningConfig(cfg, newModel, newProvider)
-	return !reasoningConfigsEqual(existing.Reasoning, newReasoning)
+	if !reasoningConfigsEqual(existing.Reasoning, newReasoning) {
+		return true
+	}
+	// Check thinking level — same resolution logic as NewAgentInstance:
+	// agent config overrides defaults, invalid/unset resolves to "". Without
+	// this, saving a new thinking_level in config.json + ReloadRegistry would
+	// keep the old instance and the stale level.
+	if existing.ThinkingLevel != resolveAgentThinkingLevel(ac, defaults) {
+		return true
+	}
+	return false
 }
 
 // stringSlicesEqual returns true if both slices have the same length and elements.

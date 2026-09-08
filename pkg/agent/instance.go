@@ -40,6 +40,7 @@ type AgentInstance struct {
 	ContextWindow         int
 	SupportsImages        bool
 	Reasoning             *config.ReasoningConfig  // Reasoning configuration for the model
+	ThinkingLevel         string                   // resolved per-agent default reasoning effort ("", "off", "low", "medium", "high")
 	PromptCache           config.PromptCacheConfig // Explicit prompt-cache breakpoints (Anthropic-style providers)
 	Provider              providers.LLMProvider
 	Sessions              *session.SessionManager
@@ -268,6 +269,7 @@ func NewAgentInstance(
 		ContextWindow:         getContextWindow(cfg, model, providerName),
 		SupportsImages:        getSupportsImages(cfg, model, providerName),
 		Reasoning:             getReasoningConfig(cfg, model, providerName),
+		ThinkingLevel:         resolveAgentThinkingLevel(agentCfg, defaults),
 		PromptCache:           defaults.PromptCache,
 		Provider:              provider,
 		Sessions:              sessionsManager,
@@ -332,6 +334,34 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 		return resolve(agentCfg.Model.Fallbacks)
 	}
 	return resolve(defaults.ModelFallbacks)
+}
+
+// resolveAgentThinkingLevel returns the effective config-level thinking
+// default for an agent: agent-specific value wins over the global default.
+// Invalid values are treated as unset (logged).
+//
+// Returns one of "", "off", "low", "medium", "high". "" means "no explicit
+// level": buildLLMOptions then falls back to the model's ReasoningConfig
+// (legacy behavior). Resolution happens once here (in NewAgentInstance),
+// following the same pattern as Temperature/Model/Fallbacks, so
+// buildLLMOptions only has to layer the per-session override on top.
+func resolveAgentThinkingLevel(agentCfg *config.AgentConfig, defaults *config.AgentDefaults) string {
+	raw := ""
+	if defaults != nil && defaults.ThinkingLevel != nil {
+		raw = *defaults.ThinkingLevel
+	}
+	if agentCfg != nil && agentCfg.ThinkingLevel != nil {
+		raw = *agentCfg.ThinkingLevel
+	}
+	normalized, ok := config.NormalizeThinkingLevel(raw)
+	if !ok {
+		logger.WarnCF("agent", "Invalid thinking_level in config, treating as unset",
+			map[string]interface{}{
+				"raw_value": raw,
+			})
+		return ""
+	}
+	return normalized
 }
 
 // resolveAvailableSubagents builds the list of subagents that an agent can

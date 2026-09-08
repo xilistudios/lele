@@ -428,3 +428,43 @@ func TestAgentConfigChanged_ContextWindow(t *testing.T) {
 		t.Errorf("expected context window 256000, got %d", reloaded.ContextWindow)
 	}
 }
+
+// TestAgentConfigChanged_ThinkingLevel locks the hot-reload path: saving a new
+// thinking_level in config.json must make ReloadRegistry recreate the instance
+// (agentConfigChanged=true), otherwise the stale resolved level survives until
+// gateway restart.
+func TestAgentConfigChanged_ThinkingLevel(t *testing.T) {
+	cfg := testCfg(t, []config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+	if original.ThinkingLevel != "" {
+		t.Fatalf("precondition: initial ThinkingLevel = %q, want \"\"", original.ThinkingLevel)
+	}
+
+	// Change ONLY the thinking level — everything else stays identical.
+	newCfg := testCfg(t, []config.AgentConfig{
+		{ID: "alpha", Default: true, ThinkingLevel: strPtr("medium")},
+	})
+	registry.ReloadAgents(newCfg)
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded == original {
+		t.Fatal("expected new agent instance when thinking_level changed, got same instance")
+	}
+	if reloaded.ThinkingLevel != "medium" {
+		t.Errorf("expected thinking level medium, got %q", reloaded.ThinkingLevel)
+	}
+
+	// Same effective level expressed differently (defaults vs agent field)
+	// must NOT trigger a pointless recreate.
+	sameCfg := testCfg(t, []config.AgentConfig{
+		{ID: "alpha", Default: true},
+	})
+	sameCfg.Agents.Defaults.ThinkingLevel = strPtr("medium")
+	registry.ReloadAgents(sameCfg)
+	if again, _ := registry.GetAgent("alpha"); again != reloaded {
+		t.Error("expected instance preserved when effective thinking level is unchanged")
+	}
+}

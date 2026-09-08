@@ -261,3 +261,106 @@ func TestNewAgentInstance_RegistersReadImageToolWithModelAlias(t *testing.T) {
 		t.Fatal("expected SupportsImages to be true")
 	}
 }
+
+// ============================================================================
+// resolveAgentThinkingLevel
+// ============================================================================
+
+func TestResolveAgentThinkingLevel(t *testing.T) {
+	tests := []struct {
+		name     string
+		agentCfg *config.AgentConfig
+		defaults *config.AgentDefaults
+		want     string
+	}{
+		{
+			name:     "both unset",
+			agentCfg: nil,
+			defaults: nil,
+			want:     "",
+		},
+		{
+			name:     "nil agent config uses defaults",
+			agentCfg: nil,
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("low")},
+			want:     "low",
+		},
+		{
+			name:     "agent wins over defaults",
+			agentCfg: &config.AgentConfig{ThinkingLevel: strPtr("high")},
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("low")},
+			want:     "high",
+		},
+		{
+			name:     "agent unset inherits defaults",
+			agentCfg: &config.AgentConfig{},
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("medium")},
+			want:     "medium",
+		},
+		{
+			name:     "agent off overrides defaults",
+			agentCfg: &config.AgentConfig{ThinkingLevel: strPtr("off")},
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("high")},
+			want:     "off",
+		},
+		{
+			name:     "normalizes case and whitespace",
+			agentCfg: &config.AgentConfig{ThinkingLevel: strPtr(" HIGH ")},
+			defaults: nil,
+			want:     "high",
+		},
+		{
+			name:     "default sentinel resolves to unset",
+			agentCfg: &config.AgentConfig{ThinkingLevel: strPtr("default")},
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("high")},
+			want:     "",
+		},
+		{
+			name:     "invalid value resolves to unset",
+			agentCfg: &config.AgentConfig{ThinkingLevel: strPtr("ultra")},
+			defaults: nil,
+			want:     "",
+		},
+		{
+			name:     "invalid defaults value resolves to unset",
+			agentCfg: nil,
+			defaults: &config.AgentDefaults{ThinkingLevel: strPtr("nope")},
+			want:     "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveAgentThinkingLevel(tc.agentCfg, tc.defaults); got != tc.want {
+				t.Errorf("resolveAgentThinkingLevel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNewAgentInstance_SetsThinkingLevel pins the wiring: the value stored on
+// the instance must be the resolved one (agent over defaults), because
+// buildLLMOptions relies on it being pre-resolved.
+func TestNewAgentInstance_SetsThinkingLevel(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-think-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := createTestConfig(tmpDir)
+	cfg.Agents.Defaults.ThinkingLevel = strPtr("low")
+
+	// Defaults path (nil agent config = default agent).
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg)
+	if agent.ThinkingLevel != "low" {
+		t.Fatalf("ThinkingLevel = %q, want %q (defaults)", agent.ThinkingLevel, "low")
+	}
+
+	// Agent-specific path wins over defaults.
+	agentCfg := &config.AgentConfig{ID: "main", Default: true, ThinkingLevel: strPtr(" HIGH ")}
+	agent = NewAgentInstance(agentCfg, &cfg.Agents.Defaults, cfg)
+	if agent.ThinkingLevel != "high" {
+		t.Fatalf("ThinkingLevel = %q, want %q (agent wins, normalized)", agent.ThinkingLevel, "high")
+	}
+}
