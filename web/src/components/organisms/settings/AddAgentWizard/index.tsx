@@ -102,6 +102,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
   const [primaryModel, setPrimaryModel] = useState('')
   const [fallbacks, setFallbacks] = useState<string[]>([])
   const [temperature, setTemperature] = useState(0.7)
+  const [thinkingLevel, setThinkingLevel] = useState('')
   const [skills, setSkills] = useState<string[]>([])
 
   const resetForm = () => {
@@ -114,6 +115,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
     setPrimaryModel('')
     setFallbacks([])
     setTemperature(0.7)
+    setThinkingLevel('')
     setSkills([])
   }
 
@@ -144,6 +146,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
           ? { fallbacks }
           : undefined,
       temperature: temperature !== 0.7 ? temperature : undefined,
+      thinking_level: thinkingLevel || undefined,
     }
 
     updateField('agents.list', [...list, newAgent])
@@ -222,7 +225,12 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 />
               )}
               {step === 3 && (
-                <BehaviorStep temperature={temperature} setTemperature={setTemperature} />
+                <BehaviorStep
+                  temperature={temperature}
+                  setTemperature={setTemperature}
+                  thinkingLevel={thinkingLevel}
+                  setThinkingLevel={setThinkingLevel}
+                />
               )}
               {step === 4 && <SkillsStep skills={skills} setSkills={setSkills} />}
             </div>

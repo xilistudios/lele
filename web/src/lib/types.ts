@@ -156,6 +156,8 @@ export type EditableAgentDefaults = {
   image_model_fallbacks?: string[]
   max_tokens: number
   temperature?: number
+  /** "off" | "low" | "medium" | "high"; absent = inherit from model configuration. */
+  thinking_level?: string
   max_tool_iterations: number
   max_read_lines: number
 }
@@ -180,6 +182,8 @@ export type EditableAgentConfig = {
   skills?: string[]
   subagents?: SubagentsConfig
   temperature?: number
+  /** "off" | "low" | "medium" | "high"; absent = inherit from model configuration. */
+  thinking_level?: string
   reasoning?: ReasoningConfig
   max_iterations?: number
   max_tokens?: number

@@ -1,4 +1,5 @@
 import { useSettings } from '../../../../contexts/SettingsContext'
+import { thinkingLevelLabel } from '../../../../lib/thinkingLevel'
 
 const DEFAULT_AVATARS = ['🤖', '🔧', '💻', '🎨', '⚡', '🔍', '📊', '⚙️']
 
@@ -9,6 +10,8 @@ type Props = {
   primaryModel: string
   fallbacks: string[]
   temperature: number
+  /** Per-agent thinking level; ''/undefined = inherit (row hidden). */
+  thinkingLevel?: string
   skills: string[]
   enableThinking: boolean
   supportsImages: boolean
@@ -21,6 +24,7 @@ export function AgentPreview({
   primaryModel,
   fallbacks,
   temperature,
+  thinkingLevel,
   skills,
   enableThinking,
   supportsImages,
@@ -109,6 +113,18 @@ export function AgentPreview({
             </span>
           </div>
         </div>
+
+        {/* Thinking level (only when explicitly set; '' = inherit) */}
+        {thinkingLevel && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-text-tertiary">
+              {t('settings.fields.agentThinkingLevel')}
+            </span>
+            <span className="text-xs text-text-primary font-medium">
+              {thinkingLevelLabel(t, thinkingLevel)}
+            </span>
+          </div>
+        )}
 
         {/* Features badges */}
         <div className="flex flex-wrap gap-1.5 pt-1">
