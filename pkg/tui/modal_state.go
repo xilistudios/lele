@@ -1,7 +1,5 @@
 package tui
 
-import ()
-
 // Modal lifecycle helpers: state reset and modal-kind classification.
 func (m *Model) resetModal(mode modalType) {
 	m.modalMode = mode

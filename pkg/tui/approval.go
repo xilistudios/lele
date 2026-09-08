@@ -1,10 +1,11 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/tools"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
-	"strings"
 )
 
 // Command-approval interaction: user decision handling and whitelist

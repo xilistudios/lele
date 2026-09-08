@@ -1,10 +1,11 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"regexp"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Mouse/escape-sequence sanitization for the TUI input.
