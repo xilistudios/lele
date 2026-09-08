@@ -330,6 +330,10 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 					sessionAgent.Sessions.ResetTokenCounts(baseSessionKey)
 					sessionAgent.Sessions.TruncateHistory(baseSessionKey, 0)
 					sessionAgent.Sessions.SetSummary(baseSessionKey, "")
+					// Clear the persisted thinking override as well — the
+					// in-memory delete below alone would let buildLLMOptions
+					// resurrect the old level from session meta.
+					sessionAgent.Sessions.SetThinkingLevel(baseSessionKey, "")
 				}
 
 				if agentID != "" {
@@ -364,6 +368,8 @@ func (al *AgentLoop) startFreshConversation(baseSessionKey, agentID, model strin
 	if model != "" {
 		al.sessionModels.Store(newSessionKey, model)
 	}
+	// No persisted-meta clear needed for newSessionKey: the rotated key has no
+	// session meta yet and GetThinkingLevel returns "" for unknown keys.
 	al.sessionThinking.Delete(newSessionKey)
 
 	if sessionAgent != nil {
@@ -1303,6 +1309,9 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	// Clear any session-specific model and thinking overrides
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
+	// Clear the persisted override too — otherwise the next buildLLMOptions
+	// fallback resurrects the old level from session meta after /clear.
+	agent.Sessions.SetThinkingLevel(sessionKey, "")
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		agent.Sessions.SetHistory(sessionKey, previousHistory)
 		agent.Sessions.SetSummary(sessionKey, previousSummary)

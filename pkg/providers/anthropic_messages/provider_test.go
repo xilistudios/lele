@@ -197,6 +197,160 @@ func TestBuildRequestBody(t *testing.T) {
 	}
 }
 
+// TestBuildRequestBodyReasoningThinking locks the mapping from the internal
+// "reasoning" option to the Anthropic thinking/output_config request fields.
+// The "enabled" flag is tri-state:
+//
+//	enabled:false (explicit) -> thinking {"type":"disabled"}, NO output_config
+//	enabled:true             -> thinking {"type":"adaptive"} + output_config.effort
+//	"enabled" key absent     -> neither field, even when effort is present
+//	no reasoning option      -> neither field (unchanged behaviour)
+//
+// Assertions use whole-body equality, so the presence AND absence of both keys
+// is locked exactly (reflect.DeepEqual on maps compares key sets).
+func TestBuildRequestBodyReasoningThinking(t *testing.T) {
+	// baseBody returns the expected request body for the fixed one-message
+	// input used by every case, with the given extra keys merged in.
+	baseBody := func(extra map[string]any) map[string]any {
+		want := map[string]any{
+			"model":      "test-model",
+			"max_tokens": int64(8192),
+			"messages": []any{
+				map[string]any{"role": "user", "content": "Hi"},
+			},
+		}
+		for k, v := range extra {
+			want[k] = v
+		}
+		return want
+	}
+
+	tests := []struct {
+		name    string
+		options map[string]any
+		want    map[string]any
+	}{
+		{
+			// The regression this guards: explicit false used to fall through
+			// silently, leaving thinking at the server default.
+			name:    "explicit disabled emits thinking disabled",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": false}},
+			want:    baseBody(map[string]any{"thinking": map[string]any{"type": "disabled"}}),
+		},
+		{
+			name: "explicit disabled ignores effort",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{
+				"enabled": false,
+				"effort":  "high",
+			}},
+			want: baseBody(map[string]any{"thinking": map[string]any{"type": "disabled"}}),
+		},
+		{
+			name: "explicit disabled ignores non-string effort",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{
+				"enabled": false,
+				"effort":  7,
+			}},
+			want: baseBody(map[string]any{"thinking": map[string]any{"type": "disabled"}}),
+		},
+		{
+			name:    "enabled with effort emits adaptive and effort",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": true, "effort": "low"}},
+			want: baseBody(map[string]any{
+				"thinking":      map[string]any{"type": "adaptive"},
+				"output_config": map[string]any{"effort": "low"},
+			}),
+		},
+		{
+			name:    "enabled without effort defaults to high",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": true}},
+			want: baseBody(map[string]any{
+				"thinking":      map[string]any{"type": "adaptive"},
+				"output_config": map[string]any{"effort": "high"},
+			}),
+		},
+		{
+			name: "enabled with empty effort defaults to high",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{
+				"enabled": true,
+				"effort":  "",
+			}},
+			want: baseBody(map[string]any{
+				"thinking":      map[string]any{"type": "adaptive"},
+				"output_config": map[string]any{"effort": "high"},
+			}),
+		},
+		{
+			// Conservative rule: absence means "server default", never "off".
+			name:    "enabled absent with effort emits nothing",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"effort": "medium"}},
+			want:    baseBody(nil),
+		},
+		{
+			name:    "enabled absent and empty reasoning emits nothing",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{}},
+			want:    baseBody(nil),
+		},
+		{
+			name:    "no reasoning option emits nothing",
+			options: map[string]any{"max_tokens": 8192},
+			want:    baseBody(nil),
+		},
+		{
+			// A non-bool "enabled" is not an explicit disable; stay conservative.
+			name:    "non-bool enabled is treated as absent",
+			options: map[string]any{"max_tokens": 8192, "reasoning": map[string]any{"enabled": "false"}},
+			want:    baseBody(nil),
+		},
+		{
+			name:    "non-map reasoning is ignored",
+			options: map[string]any{"max_tokens": 8192, "reasoning": true},
+			want:    baseBody(nil),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildRequestBody(
+				[]Message{{Role: "user", Content: "Hi"}},
+				nil,
+				"test-model",
+				tt.options,
+			)
+			if err != nil {
+				t.Fatalf("buildRequestBody() unexpected error: %v", err)
+			}
+
+			// Lock presence/absence of the two keys first: these failures are
+			// far easier to read than a whole-body diff.
+			gotThinking, hasThinking := got["thinking"]
+			wantThinking, wantHasThinking := tt.want["thinking"]
+			if hasThinking != wantHasThinking {
+				t.Errorf("thinking key present = %v (value %#v), want present = %v",
+					hasThinking, gotThinking, wantHasThinking)
+			} else if hasThinking && !reflect.DeepEqual(gotThinking, wantThinking) {
+				t.Errorf("thinking = %#v, want %#v", gotThinking, wantThinking)
+			}
+
+			gotOut, hasOut := got["output_config"]
+			wantOut, wantHasOut := tt.want["output_config"]
+			if hasOut != wantHasOut {
+				t.Errorf("output_config key present = %v (value %#v), want present = %v",
+					hasOut, gotOut, wantHasOut)
+			} else if hasOut && !reflect.DeepEqual(gotOut, wantOut) {
+				t.Errorf("output_config = %#v, want %#v", gotOut, wantOut)
+			}
+
+			// Whole-body equality catches any unrelated drift in the block.
+			if !reflect.DeepEqual(got, tt.want) {
+				gotJSON, _ := json.MarshalIndent(got, "", "  ")
+				wantJSON, _ := json.MarshalIndent(tt.want, "", "  ")
+				t.Errorf("buildRequestBody() mismatch:\ngot:\n%s\nwant:\n%s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
 func TestParseResponseBody(t *testing.T) {
 	tests := []struct {
 		name    string

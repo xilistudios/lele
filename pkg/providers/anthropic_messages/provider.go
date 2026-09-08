@@ -254,20 +254,31 @@ func buildRequestBody(
 		"messages":   []any{},
 	}
 
-	// Add thinking config for models with reasoning enabled
+	// Add thinking config from reasoning options. The "enabled" flag is treated
+	// as tri-state:
+	//   - explicit true  -> adaptive thinking + output_config.effort
+	//   - explicit false -> an explicit disable request (see below)
+	//   - absent         -> emit nothing; omission means "server default"
 	if reasonOpts, hasReasoning := options["reasoning"].(map[string]any); hasReasoning {
-		if enabled, _ := reasonOpts["enabled"].(bool); enabled {
-			thinking := map[string]any{
-				"type": "adaptive",
-			}
-			result["thinking"] = thinking
+		if enabled, isSet := reasonOpts["enabled"].(bool); isSet {
+			if enabled {
+				result["thinking"] = map[string]any{
+					"type": "adaptive",
+				}
 
-			effort := "high" // default
-			if e, ok := reasonOpts["effort"].(string); ok && e != "" {
-				effort = e
-			}
-			result["output_config"] = map[string]any{
-				"effort": effort,
+				effort := "high" // default
+				if e, ok := reasonOpts["effort"].(string); ok && e != "" {
+					effort = e
+				}
+				result["output_config"] = map[string]any{
+					"effort": effort,
+				}
+			} else {
+				// Explicit session-level disable: tell the API to turn thinking off
+				// rather than omitting the field (absence = server default).
+				result["thinking"] = map[string]any{
+					"type": "disabled",
+				}
 			}
 		}
 	}
