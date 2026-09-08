@@ -36,6 +36,7 @@ Today the project is more than a minimal CLI bot. It includes a configurable age
 - File attachments in native/web flows
 - Session persistence and optional ephemeral sessions
 - Named agents, bindings, and model fallbacks
+- Per-agent reasoning effort via `thinking_level`, overridable per session with `/think`
 
 ### Interfaces
 
@@ -244,7 +245,7 @@ config/config.example.json
 
 Core areas you can configure:
 
-- `agents.defaults`: workspace, provider, model, token limits, tool limits
+- `agents.defaults`: workspace, provider, model, token limits, tool limits, reasoning effort (`thinking_level`)
 - `session`: ephemeral session behavior and identity links
 - `channels`: gateway and messaging integrations
 - `providers`: direct providers and named OpenAI-compatible backends
