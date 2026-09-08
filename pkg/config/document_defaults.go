@@ -35,6 +35,12 @@ func applyDefaults(doc *EditableDocument) *EditableDocument {
 		doc.Agents.Defaults.LLMLoopTimeoutMinutes = defaults.Agents.Defaults.LLMLoopTimeoutMinutes
 	}
 
+	// NOTE: ThinkingLevel is intentionally NOT defaulted here. Like Temperature
+	// (a pointer field), absent must stay absent: nil means "inherit the
+	// provider-model reasoning config". Inventing a code default would make
+	// every config explicitly pin a thinking level and break the inheritance
+	// chain (agents.defaults.thinking_level -> model ReasoningConfig).
+
 	// Defaults for the native channel.
 	if doc.Channels.Native.Host == "" {
 		doc.Channels.Native.Host = defaults.Channels.Native.Host

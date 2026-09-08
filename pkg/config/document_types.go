@@ -57,22 +57,25 @@ type EditableAgentsConfig struct {
 
 // EditableAgentDefaults represents agent defaults in editable mode.
 type EditableAgentDefaults struct {
-	Workspace              string   `json:"workspace"`
-	RestrictToWorkspace    bool     `json:"restrict_to_workspace"`
-	Provider               string   `json:"provider"`
-	Model                  string   `json:"model"`
-	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
-	ImageModel             string   `json:"image_model,omitempty"`
-	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens              int      `json:"max_tokens"`
-	Temperature            *float64 `json:"temperature,omitempty"`
-	MaxToolIterations      int      `json:"max_tool_iterations"`
-	MaxReadLines           int      `json:"max_read_lines"`
-	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes,omitempty"`
-	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent,omitempty"`
-	SubagentMaxRetries     int      `json:"subagent_max_retries,omitempty"`
-	SubagentMaxIterations  int      `json:"subagent_max_iterations,omitempty"`
-	LLMLoopTimeoutMinutes  int      `json:"llm_loop_timeout_minutes,omitempty"`
+	Workspace           string   `json:"workspace"`
+	RestrictToWorkspace bool     `json:"restrict_to_workspace"`
+	Provider            string   `json:"provider"`
+	Model               string   `json:"model"`
+	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
+	ImageModel          string   `json:"image_model,omitempty"`
+	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
+	MaxTokens           int      `json:"max_tokens"`
+	Temperature         *float64 `json:"temperature,omitempty"`
+	// ThinkingLevel mirrors AgentDefaults.ThinkingLevel: per-document default
+	// reasoning effort ("off", "low", "medium", "high"); nil = inherit.
+	ThinkingLevel          *string `json:"thinking_level,omitempty"`
+	MaxToolIterations      int     `json:"max_tool_iterations"`
+	MaxReadLines           int     `json:"max_read_lines"`
+	SubagentTimeoutMinutes int     `json:"subagent_timeout_minutes,omitempty"`
+	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent,omitempty"`
+	SubagentMaxRetries     int     `json:"subagent_max_retries,omitempty"`
+	SubagentMaxIterations  int     `json:"subagent_max_iterations,omitempty"`
+	LLMLoopTimeoutMinutes  int     `json:"llm_loop_timeout_minutes,omitempty"`
 }
 
 // EditableAgentConfig represents an agent in editable mode.
@@ -86,6 +89,9 @@ type EditableAgentConfig struct {
 	Skills      []string          `json:"skills,omitempty"`
 	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
 	Temperature *float64          `json:"temperature,omitempty"`
+	// ThinkingLevel mirrors AgentConfig.ThinkingLevel: per-agent default
+	// reasoning effort ("off", "low", "medium", "high"); nil = inherit.
+	ThinkingLevel *string `json:"thinking_level,omitempty"`
 }
 
 // EditableSessionConfig represents session in editable mode.
