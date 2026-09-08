@@ -121,6 +121,11 @@ const TOOL_ICONS: Record<string, IconConfig> = {
     icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
     color: 'text-brand-amarillo',
   },
+  // /goal autonomous-loop review — target.
+  goal: {
+    icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z M12 6v6l4 2',
+    color: 'text-accent-primary',
+  },
 }
 
 const GENERIC_ICON =
@@ -170,6 +175,7 @@ function getToolLabel(toolName: string | undefined, t: (key: string) => string):
     list_active_subagents: t('toolCalls.listSubagents'),
     send_file: t('toolCalls.sendFile'),
     command: t('toolCalls.commandApplied'),
+    goal: t('toolCalls.goal'),
   }
 
   const key = toolName.toLowerCase()

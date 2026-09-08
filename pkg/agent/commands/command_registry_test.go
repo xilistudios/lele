@@ -93,7 +93,7 @@ func TestWithCustom_EmptyInputs(t *testing.T) {
 // TestWebUICommands_StillStaticList guards the untouched source of truth.
 func TestWebUICommands_StillStaticList(t *testing.T) {
 	got := WebUICommands()
-	if len(got) != 2 || got[0].Name != "/clear" || got[1].Name != "/compact" {
+	if len(got) != 3 || got[0].Name != "/clear" || got[1].Name != "/compact" || got[2].Name != "/goal" {
 		t.Fatalf("unexpected built-in list: %+v", got)
 	}
 }

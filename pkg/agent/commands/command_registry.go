@@ -49,7 +49,9 @@ type CommandInfo struct {
 // TestWebUICommands_MatchDispatchedCommands in pkg/agent guards that drift.
 //
 // Only commands that are safe to run from the WebUI belong here: dispatched by
-// handleCommand, session-scoped, and usable with no arguments.
+// handleCommand, session-scoped, and gracefully degraded without arguments
+// (a bare invocation must never error or require input — /goal, for example,
+// prints its usage/status when sent with no argument).
 var webUICommands = []CommandInfo{
 	{
 		Name:        "/clear",
@@ -60,6 +62,14 @@ var webUICommands = []CommandInfo{
 		Name:        "/compact",
 		Description: "Summarize and compact the conversation history (needs 5+ messages).",
 		Usage:       "/compact",
+	},
+	// Unlike the two above, /goal takes an argument (bare /goal only prints
+	// usage/current status), so its Usage advertises "<text>" to tell palette
+	// clients that arguments are expected.
+	{
+		Name:        "/goal",
+		Description: "Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).",
+		Usage:       "/goal <text>",
 	},
 }
 

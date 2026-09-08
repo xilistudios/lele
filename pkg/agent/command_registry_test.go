@@ -37,17 +37,18 @@ func testCommandHandler(t *testing.T) *commandHandlerImpl {
 }
 
 // TestWebUICommands_ReturnsClearAndCompactSorted asserts the registry exposes
-// exactly the two commands the WebUI palette should show, in stable order.
+// exactly the commands the WebUI palette should show, in stable order.
 func TestWebUICommands_ReturnsClearAndCompactSorted(t *testing.T) {
 	got := WebUICommands()
 
-	if len(got) != 2 {
-		t.Fatalf("WebUICommands() returned %d entries, want 2: %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("WebUICommands() returned %d entries, want 3: %+v", len(got), got)
 	}
 
 	want := []CommandInfo{
 		{Name: "/clear", Description: "Clear the conversation history for this session.", Usage: "/clear"},
 		{Name: "/compact", Description: "Summarize and compact the conversation history (needs 5+ messages).", Usage: "/compact"},
+		{Name: "/goal", Description: "Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).", Usage: "/goal <text>"},
 	}
 
 	for i := range want {
@@ -77,10 +78,10 @@ func TestWebUICommands_ReturnsCopy(t *testing.T) {
 	_ = append(first, CommandInfo{Name: "/injected", Description: "injected", Usage: "/injected"})
 
 	second := WebUICommands()
-	if len(second) != 2 {
+	if len(second) != 3 {
 		t.Fatalf("registry length changed after mutating a copy: %d", len(second))
 	}
-	if second[0].Name != "/clear" || second[1].Name != "/compact" {
+	if second[0].Name != "/clear" || second[1].Name != "/compact" || second[2].Name != "/goal" {
 		t.Errorf("registry mutated through a returned copy: %+v", second)
 	}
 	for _, c := range second {
@@ -109,10 +110,10 @@ func TestWebUICommands_MatchDispatchedCommands(t *testing.T) {
 		}
 	}
 
-	// The two commands the WebUI must expose today; if handleCommand grows a new
-	// session-scoped argument-free command, decide explicitly whether to register
-	// it here (and in the registry).
-	for _, name := range []string{"/clear", "/compact"} {
+	// The commands the WebUI must expose today; if handleCommand grows a new
+	// session-scoped command, decide explicitly whether to register it here (and
+	// in the registry).
+	for _, name := range []string{"/clear", "/compact", "/goal"} {
 		found := false
 		for _, c := range WebUICommands() {
 			if c.Name == name {

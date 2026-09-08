@@ -48,8 +48,8 @@ func commandsGet(t *testing.T, ts *nativeTestServer, method string) (int, []byte
 }
 
 // TestChatCommandsEndpoint_GetReturnsRegistry drives the real mux and asserts
-// the palette payload: 200, decodes, both commands present with every field
-// populated, in stable (sorted) order.
+// the palette payload: 200, decodes, every built-in command present with each
+// field populated, in stable (sorted) order.
 func TestChatCommandsEndpoint_GetReturnsRegistry(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -63,11 +63,11 @@ func TestChatCommandsEndpoint_GetReturnsRegistry(t *testing.T) {
 		t.Fatalf("decode payload: %v (body=%s)", err, body)
 	}
 
-	if len(payload.Commands) != 2 {
-		t.Fatalf("got %d commands, want 2: %s", len(payload.Commands), body)
+	if len(payload.Commands) != 3 {
+		t.Fatalf("got %d commands, want 3: %s", len(payload.Commands), body)
 	}
 
-	wantNames := []string{"/clear", "/compact"}
+	wantNames := []string{"/clear", "/compact", "/goal"}
 	for i, cmd := range payload.Commands {
 		if cmd.Name != wantNames[i] {
 			t.Errorf("commands[%d].name = %q, want %q", i, cmd.Name, wantNames[i])
@@ -81,8 +81,10 @@ func TestChatCommandsEndpoint_GetReturnsRegistry(t *testing.T) {
 	}
 
 	// The exact wire format the WebUI consumes (writeJSON terminates with a
-	// newline, so trim it before comparing).
-	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"}]}`
+	// newline, so trim it before comparing). Note the \u003c/\u003e: writeJSON uses
+	// the default json.Encoder, which HTML-escapes < and >, so the "<text>" in
+	// /goal's Usage reaches the wire escaped (any JSON client decodes it back).
+	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"},{"name":"/goal","description":"Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).","usage":"/goal \u003ctext\u003e"}]}`
 	if got := strings.TrimSuffix(string(body), "\n"); got != want {
 		t.Errorf("payload mismatch:\n got %s\nwant %s", got, want)
 	}
@@ -142,8 +144,8 @@ func TestHandleChatCommands_WorksWithoutAgentLoop(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v (body=%s)", err, rec.Body.String())
 	}
-	if len(payload.Commands) != 2 {
-		t.Fatalf("got %d commands, want 2", len(payload.Commands))
+	if len(payload.Commands) != 3 {
+		t.Fatalf("got %d commands, want 3", len(payload.Commands))
 	}
 }
 
@@ -229,7 +231,9 @@ func TestChatCommandsEndpoint_LoopWithoutProviderServesBuiltinsOnly(t *testing.T
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want %d (body=%s)", status, http.StatusOK, body)
 	}
-	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"}]}`
+	// Byte-identical built-in payload, including the \u003ctext\u003e HTML escaping
+	// that the default json.Encoder applies (see the note in the GET test above).
+	const want = `{"commands":[{"name":"/clear","description":"Clear the conversation history for this session.","usage":"/clear"},{"name":"/compact","description":"Summarize and compact the conversation history (needs 5+ messages).","usage":"/compact"},{"name":"/goal","description":"Set a persistent goal the agent works toward autonomously, or check/pause/resume/clear it (/goal status|pause|resume|clear).","usage":"/goal \u003ctext\u003e"}]}`
 	if got := strings.TrimSuffix(string(body), "\n"); got != want {
 		t.Errorf("payload mismatch:\n got %s\nwant %s", got, want)
 	}
@@ -257,12 +261,12 @@ func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 		t.Errorf("HarnessCommands called %d times, want exactly 1", provider.calls)
 	}
 
-	if len(got) != 3 {
-		t.Fatalf("got %d commands, want 3 (built-ins + /review): %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d commands, want 4 (built-ins + /review): %+v", len(got), got)
 	}
 
 	// Sorted, built-in collision dropped.
-	wantNames := []string{"/clear", "/compact", "/review"}
+	wantNames := []string{"/clear", "/compact", "/goal", "/review"}
 	for i, cmd := range got {
 		if cmd.Name != wantNames[i] {
 			t.Errorf("commands[%d].name = %q, want %q", i, cmd.Name, wantNames[i])
@@ -273,11 +277,11 @@ func TestChatCommandsEndpoint_MergesHarnessCommands(t *testing.T) {
 	if got[0].Description != "Clear the conversation history for this session." || got[0].Source != "" {
 		t.Errorf("/clear = %+v, want the built-in entry with empty source", got[0])
 	}
-	if got[1].Source != "" {
-		t.Errorf("/compact source = %q, want empty for built-ins", got[1].Source)
+	if got[1].Source != "" || got[2].Source != "" {
+		t.Errorf("/compact and /goal sources = %q/%q, want empty for built-ins", got[1].Source, got[2].Source)
 	}
 
-	custom := got[2]
+	custom := got[3]
 	if custom.Description != "Review the current diff" {
 		t.Errorf("/review description = %q", custom.Description)
 	}
@@ -299,14 +303,14 @@ func TestChatCommandsEndpoint_CustomNameIsNormalized(t *testing.T) {
 	)
 
 	got := chatCommandsGet(t, ts)
-	if len(got) != 3 {
-		t.Fatalf("got %d commands, want 3: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d commands, want 4: %+v", len(got), got)
 	}
-	if got[2].Name != "/review" {
-		t.Errorf("custom name = %q, want %q", got[2].Name, "/review")
+	if got[3].Name != "/review" {
+		t.Errorf("custom name = %q, want %q", got[3].Name, "/review")
 	}
-	if got[2].Usage != "/review [args]" {
-		t.Errorf("custom usage = %q, want %q", got[2].Usage, "/review [args]")
+	if got[3].Usage != "/review [args]" {
+		t.Errorf("custom usage = %q, want %q", got[3].Usage, "/review [args]")
 	}
 	// "/CLEAR" (custom) must not displace the built-in "/clear".
 	if got[0].Name != "/clear" || got[0].Source != "" {
@@ -320,15 +324,15 @@ func TestChatCommandsEndpoint_CustomNameIsNormalized(t *testing.T) {
 func TestChatCommandsEndpoint_EmptyAndJunkCustomCommands(t *testing.T) {
 	t.Run("nil slice", func(t *testing.T) {
 		ts, _ := newHarnessCommandsServer(t)
-		if got := chatCommandsGet(t, ts); len(got) != 2 {
-			t.Fatalf("got %d commands, want the 2 built-ins: %+v", len(got), got)
+		if got := chatCommandsGet(t, ts); len(got) != 3 {
+			t.Fatalf("got %d commands, want the 3 built-ins: %+v", len(got), got)
 		}
 	})
 
 	t.Run("empty slice", func(t *testing.T) {
 		ts, _ := newHarnessCommandsServer(t, []*harness.Command{}...)
-		if got := chatCommandsGet(t, ts); len(got) != 2 {
-			t.Fatalf("got %d commands, want the 2 built-ins: %+v", len(got), got)
+		if got := chatCommandsGet(t, ts); len(got) != 3 {
+			t.Fatalf("got %d commands, want the 3 built-ins: %+v", len(got), got)
 		}
 	})
 
@@ -339,11 +343,11 @@ func TestChatCommandsEndpoint_EmptyAndJunkCustomCommands(t *testing.T) {
 			&harness.Command{Name: "ok", Template: "t", Source: harness.SourceConfig},
 		)
 		got := chatCommandsGet(t, ts)
-		if len(got) != 3 {
-			t.Fatalf("got %d commands, want 3: %+v", len(got), got)
+		if len(got) != 4 {
+			t.Fatalf("got %d commands, want 4: %+v", len(got), got)
 		}
-		if got[2].Name != "/ok" {
-			t.Errorf("last command = %q, want %q", got[2].Name, "/ok")
+		if got[3].Name != "/ok" {
+			t.Errorf("last command = %q, want %q", got[3].Name, "/ok")
 		}
 	})
 }
