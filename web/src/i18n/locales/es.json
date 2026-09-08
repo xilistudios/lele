@@ -685,6 +685,7 @@
     "listSubagents": "Subagentes activos",
     "sendFile": "Enviando archivo",
     "commandApplied": "Comando aplicado",
+    "goal": "Revisión de objetivo",
     "genericAction": "Acción"
   },
   "sidebar": {
