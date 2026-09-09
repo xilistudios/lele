@@ -112,9 +112,10 @@ func gatewayCmd() {
 
 	setupFileLogging(cfg)
 
-	// Root context for every long-running gateway service. It is cancelled
-	// only AFTER the graceful teardown has run (see runGracefulShutdown):
-	// cancelling it before the hooks fire is what used to kill in-flight turns
+	// Root context for every long-running gateway service. The graceful
+	// teardown runs its hooks first and only then cancels this context (see
+	// runGracefulShutdown), so in-flight turns get the drain budget before
+	// being interrupted; cancelling before the hooks is what used to kill them
 	// mid-request, because the agent loop derives its work from this context.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -940,16 +941,37 @@ func teardownGuard(coord *update.ShutdownCoordinator) *sync.Once {
 	return actual.(*sync.Once)
 }
 
+// turnJoiner is the part of the agent loop the teardown needs: the bounded
+// final join on in-flight turns. *agent.AgentLoop implements it; tests can
+// substitute a fake to pin the ordering around the join.
+type turnJoiner interface {
+	StopWithin(grace time.Duration) error
+}
+
 // runGracefulShutdown performs the gateway's ordered teardown exactly once:
 // first every registered shutdown hook (LIFO, budget-bounded, failures recorded
-// and never fatal), then AgentLoop.Stop, and only then cancel, which releases
-// the root context. Cancelling before the hooks would abort the in-flight turns
-// the agent-drain hook exists to let finish.
+// and never fatal), then the root context is cancelled, and only then the
+// in-flight turns are joined for a last bounded grace.
+//
+// The position of the cancel is the whole point. A turn runs on the root
+// context, so cancelling it is the only way to release a turn that outlived the
+// agent-drain budget; and the join is the only thing that waits for that turn.
+// Cancelling after the join therefore deadlocks: the join waits for the turn,
+// the turn waits for the cancel, and the cancel sits behind the join. That
+// deadlock is what made the service hang for exactly TimeoutStopUSec and get
+// SIGKILLed on every self-update restart with a busy agent.
+//
+// Hooks still run before the cancel, so an ordinary turn keeps the graceful
+// handoff the drain was built for; only turns that blew the drain budget are
+// interrupted here, and they leave their inbound spool row for the successor
+// process to replay (see AgentLoop.Run).
 //
 // Idempotent per coordinator: a repeat call (the SIGTERM path firing right
-// after a self-restart did the teardown) skips RunAll and Stop but still calls
-// cancel, since context.CancelFunc is safe to call more than once.
-func runGracefulShutdown(coord *update.ShutdownCoordinator, al *agent.AgentLoop, cancel func()) {
+// after a self-restart did the teardown) skips the hooks, the cancel and the
+// join. sync.Once.Do blocks that second caller until the first teardown has
+// returned, so the process never races two stop sequences - and never waits on
+// a turn the first sequence already released.
+func runGracefulShutdown(coord *update.ShutdownCoordinator, al turnJoiner, cancel func()) {
 	once := teardownGuard(coord)
 	once.Do(func() {
 		results := coord.RunAll(context.Background())
@@ -962,14 +984,35 @@ func runGracefulShutdown(coord *update.ShutdownCoordinator, al *agent.AgentLoop,
 				})
 			}
 		}
+		// Release the turns the drain could not finish before joining them.
+		// sync.Once.Do blocks a concurrent second caller until this function
+		// returns, so the cancel lives inside the once: every path that runs
+		// the teardown cancels exactly once, and no path can skip it.
+		if cancel != nil {
+			cancel()
+		}
 		if al != nil {
-			al.Stop()
+			if err := al.StopWithin(finalTurnJoinGrace); err != nil {
+				logger.WarnCF("gateway", "Graceful teardown finished with turns still in flight", map[string]interface{}{
+					"error": err.Error(),
+				})
+			}
 		}
 	})
-	if cancel != nil {
-		cancel()
-	}
 }
+
+// finalTurnJoinGrace bounds the last join on in-flight turns, run after the
+// hooks and after the root context was cancelled. It is a safety net for a turn
+// that ignores cancellation entirely (a blocking tool call, a subagent with its
+// own context), so the process must not wait on it indefinitely.
+//
+// Sized against the restart budget: DefaultShutdownBudget (15 s) plus this
+// grace stays well under systemd's TimeoutStopUSec (90 s) and does not delay
+// the desktop lock handoff, which is released by the "lock-release" hook inside
+// RunAll, before this join begins.
+//
+// A var (not a const) so tests can shrink it, matching instanceLockHandoffTimeout.
+var finalTurnJoinGrace = 5 * time.Second
 
 // instanceLockHandoffTimeout bounds how long a self-restart child waits for the
 // previous instance to release the desktop lock. It must comfortably exceed the
