@@ -403,6 +403,10 @@ type AgentCatalogSkill struct {
 	Description string `json:"description"`
 	Source      string `json:"source"`
 	Enabled     bool   `json:"enabled"`
+	// Deletable is computed server-side: true only for a skill installed in
+	// THIS agent's workspace dir. The UI hides the remove control when false
+	// instead of letting a click fail on the server.
+	Deletable bool `json:"deletable"`
 }
 
 // AgentCatalogResponse is the payload of GET /api/v1/agents/{agentID}/catalog.
@@ -412,6 +416,10 @@ type AgentCatalogResponse struct {
 	AgentID string              `json:"agent_id"`
 	Tools   []AgentCatalogTool  `json:"tools"`
 	Skills  []AgentCatalogSkill `json:"skills"`
+	// Workspace is the directory whose skills/ subfolder this agent installs
+	// into and reads workspace-scoped skills from ("" when unknown). The
+	// install dialog shows it so the scope choice is never abstract.
+	Workspace string `json:"workspace"`
 }
 
 type ConfigResponse struct {

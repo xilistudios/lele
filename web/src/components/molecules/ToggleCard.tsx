@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from 'react'
+import { type MouseEvent, type ReactNode, useId } from 'react'
 
 /**
  * ToggleCard (spec §7.3) — shared base of the Skills and Tools grids.
@@ -25,6 +25,13 @@ type Props = {
   descriptionLines?: 1 | 2
   /** Source / "not installed" / "disabled globally" badge slot. */
   badge?: ReactNode
+  /**
+   * Controls rendered in the title row (enable/disable, delete…). The card root
+   * is a <label>, so a click anywhere inside it activates the checkbox —
+   * `CardActions` below cancels that default, which is why actions MUST be
+   * passed through this prop instead of being painted over the card.
+   */
+  actions?: ReactNode
   /** Inline hint, wired to the input through aria-describedby. */
   warning?: string
   disabled?: boolean
@@ -53,6 +60,31 @@ const CHECK_BASE_CLS = 'flex flex-none items-center justify-center rounded-md bo
 const CHECK_ON_CLS = 'border-interaction-primary bg-interaction-primary text-text-on-accent'
 const CHECK_OFF_CLS = 'border-border-strong bg-background-primary'
 
+/**
+ * Keeps a click on a card action from toggling the card's checkbox.
+ *
+ * The card is a <label> wrapping an sr-only input, and label activation is the
+ * DEFAULT ACTION of the click event: React's stopPropagation cannot cancel it
+ * (the native event has already reached the label by the time React dispatches
+ * synthetic handlers). preventDefault() does — it is the documented way to stop
+ * a label from forwarding the click to its control.
+ */
+function CardActions({ children }: { children: ReactNode }) {
+  const swallow = (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  return (
+    // The wrapper itself is not interactive: its children are real buttons that
+    // handle their own keyboard activation. These mouse handlers only cancel the
+    // label's default activation, so no key handler belongs here.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: non-interactive click canceller, see above
+    <span className="flex flex-none items-center gap-1" onClick={swallow} onMouseDown={swallow}>
+      {children}
+    </span>
+  )
+}
+
 export function ToggleCard({
   id,
   checked,
@@ -62,6 +94,7 @@ export function ToggleCard({
   description,
   descriptionLines = 1,
   badge,
+  actions,
   warning,
   disabled = false,
   size = 'md',
@@ -103,6 +136,7 @@ export function ToggleCard({
             {title}
           </span>
           {badge ? <span className="flex-none">{badge}</span> : null}
+          {actions ? <CardActions>{actions}</CardActions> : null}
         </span>
 
         {description ? (

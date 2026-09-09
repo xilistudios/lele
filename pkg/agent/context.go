@@ -135,6 +135,31 @@ func (cb *ContextBuilder) SetSkillsFilter(filter []string) {
 	cb.initialMu.Unlock()
 }
 
+// SkillsLoader returns the skills loader bound to this agent's workspace. It
+// is the same instance that backs the <skills> block of the system prompt, so
+// callers that list or toggle skills through it act on exactly what the agent
+// sees. The loader is created with the context builder and never reassigned,
+// so no lock is needed.
+func (cb *ContextBuilder) SkillsLoader() *skills.SkillsLoader {
+	return cb.skillsLoader
+}
+
+// InvalidatePromptCache drops the cached static prompt (identity + bootstrap
+// files + skills summary) and the cached harness context so the next turn
+// rebuilds them from disk. Call it after anything the prompt reads changes at
+// runtime — installing or removing a skill on disk, or toggling a skill in the
+// workspace config.
+func (cb *ContextBuilder) InvalidatePromptCache() {
+	cb.initialMu.Lock()
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+
+	cb.harnessMu.Lock()
+	cb.harnessContext = ""
+	cb.harnessContextValid = false
+	cb.harnessMu.Unlock()
+}
+
 // GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
 // to be loaded at session start. This ensures consistent context across /new and subagents.
 func (cb *ContextBuilder) GetInitialContext() string {

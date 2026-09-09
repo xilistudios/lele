@@ -17,6 +17,20 @@ export const endpoints = {
       const base = `/api/v1/agents/${encodeURIComponent(agentId)}/files`
       return fileName ? `${base}/${encodeURIComponent(fileName)}` : base
     },
+    /**
+     * Skills of THIS agent's workspace. Reading is `catalog` (it carries
+     * source/enabled/deletable per skill, resolved from the agent's own
+     * loader), so only the mutating routes live here.
+     */
+    skills: {
+      toggle: (agentId: string, name: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(name)}/toggle`,
+      remove: (agentId: string, name: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(name)}`,
+      install: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install`,
+      installBatch: (agentId: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install-batch`,
+    },
   },
   chat: {
     send: '/api/v1/chat/send',

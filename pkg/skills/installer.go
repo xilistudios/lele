@@ -30,6 +30,13 @@ func NewSkillInstaller(workspace string) *SkillInstaller {
 	}
 }
 
+// Workspace returns the base directory this installer writes into. Skills land
+// in <workspace>/skills. Exposed so callers (and tests) can verify an installer
+// was pointed at the right directory before anything is written.
+func (si *SkillInstaller) Workspace() string {
+	return si.workspace
+}
+
 func (si *SkillInstaller) InstallFromGitHub(ctx context.Context, repo string) error {
 	skillDir := filepath.Join(si.workspace, "skills", filepath.Base(repo))
 

@@ -2,6 +2,7 @@ import type {
   AgentCatalogResponse,
   AgentDetails,
   AgentFilesResponse,
+  AgentSkillMutationResponse,
   AgentStatusResponse,
   AgentsResponse,
   ApproveResponse,
@@ -53,6 +54,7 @@ import type {
   SessionThinkingResponse,
   SkillInstallBatchResponse,
   SkillInstallResponse,
+  SkillInstallScope,
   SkillRemoveResponse,
   SkillsResponse,
   StreamMessageState,
@@ -455,6 +457,40 @@ export const createApiClient = (baseUrl: string) => {
      */
     getAgentCatalog: (agentId: string): Promise<AgentCatalogResponse> =>
       request<AgentCatalogResponse>(endpoints.agents.catalog(agentId), { method: 'GET' }),
+    /**
+     * Per-agent skill administration. These routes act on the AGENT's own
+     * workspace (its <workspace>/skills dir and its workspace.json), unlike the
+     * global /api/v1/skills routes which are anchored on the default workspace.
+     * Reading is done through getAgentCatalog, which resolves the same loader.
+     */
+    agentToggleSkill: (agentId: string, name: string, enabled: boolean) =>
+      request<AgentSkillMutationResponse>(endpoints.agents.skills.toggle(agentId, name), {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
+    agentRemoveSkill: (agentId: string, name: string) =>
+      request<AgentSkillMutationResponse>(endpoints.agents.skills.remove(agentId, name), {
+        method: 'DELETE',
+      }),
+    /**
+     * Install one skill into the agent. `scope` defaults server-side to
+     * 'workspace' (the agent's own dir); pass 'global' for the shared dir.
+     */
+    agentInstallSkill: (agentId: string, url: string, scope?: SkillInstallScope) =>
+      request<SkillInstallResponse>(endpoints.agents.skills.install(agentId), {
+        method: 'POST',
+        body: JSON.stringify({ url, scope }),
+      }),
+    agentInstallSkillsBatch: (
+      agentId: string,
+      repo: string,
+      skills: string[],
+      scope?: SkillInstallScope,
+    ) =>
+      request<SkillInstallBatchResponse>(endpoints.agents.skills.installBatch(agentId), {
+        method: 'POST',
+        body: JSON.stringify({ repo, skills, scope }),
+      }),
     agentFile: (agentId: string, fileName: string) =>
       request<AgentFilesResponse>(endpoints.agents.files(agentId, fileName), { method: 'GET' }),
     agentFileSave: (agentId: string, fileName: string, content: string) =>

@@ -943,22 +943,46 @@ export type AgentToolCatalogEntry = {
 /**
  * One entry of the per-agent skill catalog. Unlike SkillInfo (GET /api/v1/skills)
  * it has no id/installed: the catalog only lists skills the loader resolved.
+ *
+ * `enabled` is the state of the skill in THIS agent's workspace config (the
+ * file its loader reads), and `deletable` is decided server-side: true only for
+ * a skill installed in this agent's own workspace. The UI must trust both and
+ * never derive them from `source`.
  */
 export type AgentSkillCatalogEntry = {
   name: string
   description: string
   source: SkillSource
   enabled: boolean
+  deletable: boolean
 }
 
 /**
  * Payload of GET /api/v1/agents/{agentID}/catalog.
  * Both arrays are always present (backend guarantees [] not null) and sorted by name.
+ *
+ * `workspace` is the directory this agent's workspace skills live in (and the
+ * target of a workspace-scoped install). Empty string when the server cannot
+ * resolve it — the install dialog then hides the workspace option rather than
+ * guessing a path.
  */
 export type AgentCatalogResponse = {
   agent_id: string
   tools: AgentToolCatalogEntry[]
   skills: AgentSkillCatalogEntry[]
+  workspace: string
+}
+
+/** Where an install writes: the agent's own workspace or the shared global dir. */
+export type SkillInstallScope = 'workspace' | 'global'
+
+/** Response of the per-agent skill mutations (toggle / remove / install). */
+export type AgentSkillMutationResponse = {
+  message?: string
+  agent_id?: string
+  name?: string
+  enabled?: boolean
+  skill_id?: string
 }
 
 export type AvailableSkill = {

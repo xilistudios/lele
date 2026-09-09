@@ -35,6 +35,7 @@ const CATALOG: AgentCatalogResponse = {
     { name: 'web_search', description: 'Search the web' },
   ],
   skills: [],
+  workspace: '/home/u/.lele/workspace-coder',
 }
 
 const ALL_NAMES = CATALOG.tools.map((tool) => tool.name)
@@ -55,6 +56,7 @@ function makeApi(catalog: Partial<AgentCatalogResponse> | 'fail' = CATALOG): Api
       agent_id: 'coder',
       tools: [],
       skills: [],
+      workspace: '',
       ...catalog,
     }),
   } as unknown as ApiClient
