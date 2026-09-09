@@ -12,6 +12,7 @@ export const endpoints = {
     list: '/api/v1/agents',
     info: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}`,
     status: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/status`,
+    catalog: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/catalog`,
     files: (agentId: string, fileName?: string) => {
       const base = `/api/v1/agents/${encodeURIComponent(agentId)}/files`
       return fileName ? `${base}/${encodeURIComponent(fileName)}` : base

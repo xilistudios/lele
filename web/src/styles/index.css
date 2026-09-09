@@ -281,7 +281,6 @@
   --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06);
 }
 
-
 html,
 body,
 #root {
@@ -567,6 +566,86 @@ pre,
   .card-base:hover {
     background: var(--color-surface-tertiary);
     border-color: var(--color-border-light);
+  }
+
+  /* --- Temperature slider (spec §9: the only new CSS of the agents feature) ---
+   * Tailwind cannot target ::-webkit-slider-thumb / ::-moz-range-thumb without a
+   * plugin, so the native <input type="range"> is styled here once and shared.
+   * Colors come exclusively from existing tokens. */
+  .lele-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--color-bg-tertiary);
+    outline: none;
+    cursor: pointer;
+    transition: opacity 150ms ease;
+  }
+
+  .lele-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: var(--color-bg-primary);
+    border: 2px solid var(--color-interaction-primary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: transform 150ms ease, border-color 150ms ease;
+  }
+
+  .lele-range::-moz-range-thumb {
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: var(--color-bg-primary);
+    border: 2px solid var(--color-interaction-primary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: transform 150ms ease, border-color 150ms ease;
+  }
+
+  .lele-range:hover::-webkit-slider-thumb {
+    border-color: var(--color-interaction-hover);
+    transform: scale(1.05);
+  }
+
+  .lele-range:hover::-moz-range-thumb {
+    border-color: var(--color-interaction-hover);
+    transform: scale(1.05);
+  }
+
+  .lele-range:active::-webkit-slider-thumb {
+    transform: scale(1.1);
+  }
+
+  .lele-range:active::-moz-range-thumb {
+    transform: scale(1.1);
+  }
+
+  /* §10.1: the thumb is small, so it gets a ring on top of the global outline. */
+  .lele-range:focus-visible {
+    outline: 2px solid var(--color-interaction-primary);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px rgba(23, 179, 184, 0.3);
+  }
+
+  .lele-range:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Value not set: the thumb shows the model default, dimmed and dashed. */
+  .lele-range--inherit {
+    opacity: 0.6;
+  }
+
+  .lele-range--inherit::-webkit-slider-thumb {
+    border-style: dashed;
+  }
+
+  .lele-range--inherit::-moz-range-thumb {
+    border-style: dashed;
   }
 }
 

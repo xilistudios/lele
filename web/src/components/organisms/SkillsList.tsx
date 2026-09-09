@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+// Source badge palette lives in lib/skillSource.ts (single source of truth,
+// spec §4.5.3): the per-agent Skills tab renders the exact same badge.
+import { sourceBadgeClassNames, sourceBadgeLabel } from '../../lib/skillSource'
 import type { SkillInfo } from '../../lib/types'
 import { IconButton } from '../atoms/IconButton'
 
@@ -9,18 +12,6 @@ type Props = {
   isRemoving: string | null
   onRemove: (name: string) => void
   onToggle?: (name: string, enabled: boolean) => void
-}
-
-const SOURCE_COLORS: Record<string, string> = {
-  workspace: 'bg-state-info-light text-state-info border-state-info/30',
-  global: 'bg-state-success-light text-state-success border-state-success/30',
-  builtin: 'bg-surface-muted text-text-tertiary border-border/50',
-}
-
-const SOURCE_LABELS: Record<string, string> = {
-  workspace: 'Workspace',
-  global: 'Global',
-  builtin: 'Built-in',
 }
 
 export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }: Props) {
@@ -123,53 +114,50 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
               )}
 
               {/* Remove button */}
-              {skill.source !== 'builtin' && (
-                <>
-                  {confirmRemove === skill.name ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmRemove(skill.name)}
-                        disabled={isRemoving === skill.name}
-                        className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        {isRemoving === skill.name ? (
-                          <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
-                        ) : (
-                          t('skills.removeConfirmYes', 'Yes, remove')
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmRemove(null)}
-                        className="rounded px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
-                      >
-                        {t('skills.removeConfirmNo', 'No')}
-                      </button>
-                    </div>
-                  ) : (
-                    <IconButton
-                      onClick={() => handleRemoveClick(skill.name, skill.source)}
+              {skill.source !== 'builtin' &&
+                (confirmRemove === skill.name ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmRemove(skill.name)}
                       disabled={isRemoving === skill.name}
-                      variant="danger"
-                      title={t('skills.removeSkill', 'Remove')}
+                      className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
                     >
-                      <svg
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <title>Delete</title>
-                        <path d="M3 6h18" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    </IconButton>
-                  )}
-                </>
-              )}
+                      {isRemoving === skill.name ? (
+                        <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
+                      ) : (
+                        t('skills.removeConfirmYes', 'Yes, remove')
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemove(null)}
+                      className="rounded px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+                    >
+                      {t('skills.removeConfirmNo', 'No')}
+                    </button>
+                  </div>
+                ) : (
+                  <IconButton
+                    onClick={() => handleRemoveClick(skill.name, skill.source)}
+                    disabled={isRemoving === skill.name}
+                    variant="danger"
+                    title={t('skills.removeSkill', 'Remove')}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <title>Delete</title>
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </IconButton>
+                ))}
             </div>
           </div>
 
@@ -179,10 +167,8 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
 
           <div className="mt-auto pt-3 flex items-center gap-2">
             {skill.source && (
-              <span
-                className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${SOURCE_COLORS[skill.source] || 'bg-surface-muted text-text-tertiary border-border/50'}`}
-              >
-                {SOURCE_LABELS[skill.source] || skill.source}
+              <span className={sourceBadgeClassNames(skill.source)}>
+                {sourceBadgeLabel(skill.source)}
               </span>
             )}
             <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">

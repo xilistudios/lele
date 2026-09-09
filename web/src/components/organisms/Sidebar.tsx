@@ -112,7 +112,15 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
     navigate('/pair', { replace: true })
   }, [onLogout, navigate, isMobile, onClose])
 
-  const isActiveRoute = (path: string) => location.pathname === path
+  // A nav item stays active on its own route AND on nested routes below it
+  // (e.g. "Agents" on /agents/coder/tools). The trailing '/' in the prefix
+  // keeps the match segment-aligned, so sibling paths that merely share a
+  // textual prefix cannot light up: '/chats' does NOT match '/chat/…'
+  // (startsWith('/chats/') is false) and '/background-exec' does not match
+  // a hypothetical '/background-exec-foo'. Verified against every navItems
+  // path: /chats /agents /providers /skills /background-exec /cron /secrets.
+  const isActiveRoute = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`)
 
   const navItems = [
     {
