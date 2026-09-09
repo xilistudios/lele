@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/providers"
 )
 
 // --- Shutdown / Stop -------------------------------------------------------
@@ -349,4 +351,81 @@ func TestAgentLoop_GatewayTeardownSequenceReleasesTurn(t *testing.T) {
 			t.Error("store still open after a completed join")
 		}
 	}
+}
+
+// --- Integration: a real turn through the gateway teardown ------------------
+
+// blockingProvider stands in for an LLM that is mid-request: it signals that a
+// turn has reached it and then waits to be cancelled, exactly like a real
+// provider request on a context that is about to be torn down.
+type blockingProvider struct {
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingProvider) Chat(ctx context.Context, _ []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+	p.once.Do(func() { close(p.entered) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (p *blockingProvider) GetDefaultModel() string { return "mock-blocking-model" }
+
+// TestAgentLoop_RealTurnSurvivesGatewayTeardown runs the hang scenario against
+// production code end to end: a real message through AgentLoop.Run, a real turn
+// goroutine on the real WaitGroup, a real provider request in flight, and then
+// the exact teardown sequence the gateway performs - drain, cancel, bounded
+// join.
+//
+// Unlike the other tests here, nothing about the turn is simulated: if the
+// gateway joined before cancelling, the provider would never observe
+// cancellation, wg.Wait() would never return, and StopWithin would report the
+// abandoned join instead of nil.
+func TestAgentLoop_RealTurnSurvivesGatewayTeardown(t *testing.T) {
+	provider := &blockingProvider{entered: make(chan struct{})}
+	al, msgBus := newDurableInboundTestLoop(t, provider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() { runDone <- al.Run(ctx) }()
+
+	if !msgBus.PublishInbound(spooledMessage()) {
+		t.Fatal("inbound publish rejected")
+	}
+
+	// Wait until the turn is actually inside the provider request.
+	select {
+	case <-provider.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never reached the provider")
+	}
+
+	// 1. The drain hook: the turn is blocked on the provider, so it cannot fit.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer drainCancel()
+	if err := al.Shutdown(drainCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("drain Shutdown() = %v, want context.DeadlineExceeded", err)
+	}
+
+	// 2. The gateway releases the root context, then 3. joins with a grace.
+	cancel()
+
+	joinErr := make(chan error, 1)
+	go func() { joinErr <- al.StopWithin(5 * time.Second) }()
+
+	select {
+	case err := <-joinErr:
+		if err != nil {
+			t.Fatalf("StopWithin() = %v, want nil: the cancelled turn should have been joined", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("teardown hung on a real in-flight turn: cancel must precede the join")
+	}
+
+	// The turn ran to completion of the teardown without being abandoned. That
+	// it also leaves its inbound spool row pending for the successor process is
+	// pinned by TestRun_DurableInbound_ShutdownCancelLeavesRowForReplay; this
+	// test only covers the join, which is where the hang lived.
+	stopRun(t, cancel, runDone)
 }
