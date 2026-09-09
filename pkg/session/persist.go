@@ -108,6 +108,7 @@ func sessionMetaFromSession(s *Session) store.SessionMeta {
 		Model:            s.Model,
 		ThinkingLevel:    s.ThinkingLevel,
 		Folder:           s.Folder,
+		SubagentStatus:   s.SubagentStatus,
 		InputTokens:      s.InputTokens,
 		OutputTokens:     s.OutputTokens,
 		CompactionCount:  s.CompactionCount,

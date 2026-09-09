@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/tools"
 )
 
 // agentProvidableImpl implements the channels.AgentProvidable interface.
@@ -727,12 +728,21 @@ func (ap *agentProvidableImpl) GetSessionSubagents(sessionKey string) []channels
 			// Determine a human-readable summary
 			summary := past.Summary
 
+			// Status: the terminal status persisted on the session at task
+			// completion. Empty for sessions predating subagent_status
+			// persistence — fall back to "completed", the historical
+			// hard-coded value, so old rows stay consistent.
+			status := past.Status
+			if status == "" {
+				status = tools.SubagentStatusCompleted
+			}
+
 			result = append(result, channels.SubagentTaskInfo{
 				TaskID:     past.TaskID,
 				SessionKey: past.Key,
 				Label:      past.Name, // session Name doubles as label fallback
 				AgentID:    agentID,   // owning agent of the session storage
-				Status:     "completed",
+				Status:     status,
 				Summary:    summary,
 				Created:    past.Created.UnixMilli(),
 				Updated:    past.Updated.UnixMilli(),

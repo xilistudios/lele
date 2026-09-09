@@ -64,6 +64,41 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 	sm.touchSession(key)
 }
 
+// SetSubagentStatus records the terminal status of a subagent session
+// ("completed", "failed", "not_done", "cancelled", "needs_context") and
+// persists it immediately. It creates no session when the key is unknown:
+// the runner only calls it for sessions it already recorded via the
+// SessionRecorder, so there is nothing legitimate to materialize here.
+// Failures are best-effort: the in-memory task keeps the authoritative
+// status until eviction/restart regardless of this call's result.
+func (sm *SessionManager) SetSubagentStatus(key string, status string) {
+	sm.ensureLoaded()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	session, ok := sm.sessions[key]
+	if !ok {
+		session, ok = sm.loadSessionFromDisk(key)
+		if !ok {
+			return
+		}
+	}
+
+	session.SubagentStatus = status
+	session.metaDirty = true
+	session.bumpEpoch()
+	if meta, ok := sm.sessionMeta[key]; ok {
+		meta.SubagentStatus = status
+	}
+	sm.touchSession(key)
+
+	// Best-effort persistence: ignore errors, the in-memory task holds the
+	// authoritative status until eviction/restart regardless.
+	if sm.store != nil {
+		_ = sm.saveMetaOnlyUnlocked(key)
+	}
+}
+
 func (sm *SessionManager) SetName(key string, name string) error {
 	sm.ensureLoaded()
 	sm.mu.Lock()

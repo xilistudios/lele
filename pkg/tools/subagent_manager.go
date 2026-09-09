@@ -37,6 +37,7 @@ type SubagentManager struct {
 	sessionKeyCallback         func(sessionKey, agentID string)                          // called when subagent session key is created
 	registerSessionCancel      func(sessionKey string, cancel context.CancelFunc) func() // registers cancel function on session manager
 	sessionEvictCallback       func(sessionKey string)                                   // called when a terminal task is cleaned up to evict its session from memory
+	sessionStatusCallback      func(sessionKey, status string)                           // called when a task reaches a terminal status, to persist it on the subagent session
 	sessionExists              func(sessionKey string) bool                              // reports whether a session key already exists (memory, metadata, or disk); nil = no check
 	maxConcurrent              int                                                       // max concurrent running tasks (0 = unlimited)
 	defaultMaxRetries          int                                                       // default max retry attempts for transient failures
@@ -280,6 +281,29 @@ func (sm *SubagentManager) SetSessionEvictCallback(callback func(sessionKey stri
 	sm.sessionEvictCallback = callback
 }
 
+// SetSessionStatusCallback sets a callback that is called when a task reaches
+// a terminal status. The callback persists the status on the subagent's
+// session so the WebUI can show the real outcome after eviction or restart,
+// instead of falling back to "completed".
+func (sm *SubagentManager) SetSessionStatusCallback(callback func(sessionKey, status string)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.sessionStatusCallback = callback
+}
+
+// persistTerminalStatus reports a terminal status transition to the session
+// layer via the status callback. Best-effort: it is called with sm.mu held,
+// so the callback itself must not re-enter the manager.
+func (sm *SubagentManager) persistTerminalStatus(task *SubagentTask) {
+	if sm.sessionStatusCallback == nil {
+		return
+	}
+	sessionKey := task.OriginSessionKey + ":" + task.ID
+	if sessionKey != "" && task.Status != "" {
+		sm.sessionStatusCallback(sessionKey, task.Status)
+	}
+}
+
 // SetSessionExistsCallback sets a callback that reports whether a session key
 // already exists (in memory, metadata, or on disk). It is used at spawn time
 // to avoid reusing a task ID whose session already exists — which can happen
@@ -497,13 +521,20 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 				case <-taskCtx.Done():
 					// Task was cancelled while waiting for dependencies
 					sm.mu.Lock()
+					cancelledWhilePending := false
 					if subagentTask.Status == SubagentStatusPending {
 						subagentTask.Status = SubagentStatusCancelled
 						subagentTask.Summary = "Task cancelled while waiting for dependencies"
 						subagentTask.Result = "Task cancelled while waiting for dependencies"
 						subagentTask.Updated = time.Now().UnixMilli()
+						cancelledWhilePending = true
 					}
 					sm.mu.Unlock()
+					if cancelledWhilePending {
+						// This task never runs, so nothing else persists its
+						// terminal status for it.
+						sm.reportTerminalStatus(subagentTask)
+					}
 					return
 				case <-ticker.C:
 					sm.mu.Lock()
@@ -613,6 +644,25 @@ func (sm *SubagentManager) MarkDelivered(taskID string) bool {
 	return false // First delivery
 }
 
+// reportTerminalStatus persists a task's terminal status on its session via
+// the status callback, so the WebUI shows the real outcome (failed,
+// cancelled, ...) after the in-memory task is evicted or the server restarts.
+// It must be called WITHOUT holding sm.mu: the callback takes the
+// SessionManager lock and does disk I/O, and holding sm.mu across it recreates
+// the lock-ordering hazard documented in CleanupTerminalTasks.
+func (sm *SubagentManager) reportTerminalStatus(task *SubagentTask) {
+	sm.mu.RLock()
+	callback := sm.sessionStatusCallback
+	status := task.Status
+	sessionKey := task.OriginSessionKey + ":" + task.ID
+	sm.mu.RUnlock()
+
+	if callback == nil || status == "" || sessionKey == ":" {
+		return
+	}
+	callback(sessionKey, status)
+}
+
 // CleanupTerminalTasks removes tasks that have been in a terminal state
 // (completed, failed, cancelled, not_done) for longer than the retention
 // period. This prevents the tasks map from growing indefinitely.
@@ -691,15 +741,20 @@ func (sm *SubagentManager) StopTask(taskID string) bool {
 	if ok && cancel != nil {
 		cancel()
 	}
+	if canStop {
+		// canStop tasks may have had no running goroutine (needs_context /
+		// pending waiters), so nothing else reports the status for them.
+		sm.reportTerminalStatus(task)
+	}
 	return ok || canStop
 }
 
 // StopAll stops all running subagent tasks.
 func (sm *SubagentManager) StopAll() int {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	stoppedCount := 0
+	cancelled := make([]*SubagentTask, 0, len(sm.cancels))
 	handled := make(map[string]struct{}, len(sm.cancels))
 	for taskID, cancel := range sm.cancels {
 		if cancel != nil {
@@ -714,6 +769,7 @@ func (sm *SubagentManager) StopAll() int {
 			task.ContextRequest = ""
 			task.Updated = time.Now().UnixMilli()
 			task.SignalDone()
+			cancelled = append(cancelled, task)
 		}
 		delete(sm.cancels, taskID)
 	}
@@ -731,7 +787,16 @@ func (sm *SubagentManager) StopAll() int {
 		task.ContextRequest = ""
 		task.Updated = time.Now().UnixMilli()
 		task.SignalDone()
+		cancelled = append(cancelled, task)
 		stoppedCount++
+	}
+	sm.mu.Unlock()
+
+	// Persist the cancellations outside sm.mu (SessionManager I/O; see
+	// reportTerminalStatus for the lock-ordering rationale). Running tasks
+	// report their own cancellation through runTask's context path.
+	for _, task := range cancelled {
+		sm.reportTerminalStatus(task)
 	}
 
 	return stoppedCount

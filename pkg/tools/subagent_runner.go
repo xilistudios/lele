@@ -259,6 +259,10 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 		if task.Status != SubagentStatusFailed || task.MaxRetries <= 0 ||
 			task.RetryCount >= task.MaxRetries || !isTransientFailure(task.lastErr) {
 			sm.mu.Unlock()
+			// Final state of this run chain: persist it on the subagent's
+			// session so the WebUI keeps seeing the real outcome after the
+			// in-memory task is gone. No-op when the callback is unset.
+			sm.reportTerminalStatus(task)
 			return
 		}
 
@@ -296,6 +300,7 @@ func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, call
 			task.Updated = time.Now().UnixMilli()
 			sm.mu.Unlock()
 			task.SignalDone()
+			sm.reportTerminalStatus(task)
 			return
 		case <-retrySleep(backoff):
 		}

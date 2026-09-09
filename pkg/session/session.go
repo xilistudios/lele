@@ -31,9 +31,14 @@ type Session struct {
 	// folder picker). Its absolute path plus a first-level listing are injected
 	// into the session's system prompt by ContextBuilder's folder resolver.
 	// Empty means "no folder selected".
-	Folder             string    `json:"folder,omitempty"`
-	Created            time.Time `json:"created"`
-	Updated            time.Time `json:"updated"`
+	Folder string `json:"folder,omitempty"`
+	// SubagentStatus is the terminal status of a subagent session
+	// ("completed", "failed", "not_done", "cancelled", "needs_context"),
+	// persisted so the WebUI can show the real outcome after eviction or
+	// restart. Empty for non-subagent sessions.
+	SubagentStatus string `json:"subagent_status,omitempty"`
+	Created        time.Time `json:"created"`
+	Updated        time.Time `json:"updated"`
 	lastStreamFlush    time.Time // throttle for stream persistence (not persisted)
 	hadStreamedContent bool      // tracks if content was delivered via streaming this turn (not persisted)
 	lastPersistedSeq   int       // last message seq persisted to SQLite (-1 = none)
@@ -74,12 +79,13 @@ type Session struct {
 // fully loaded into memory. This allows listing sessions without
 // deserializing their entire message history.
 type sessionMetadata struct {
-	Key     string    `json:"key"`
-	Name    string    `json:"name"`
-	Mode    string    `json:"mode,omitempty"`
-	Folder  string    `json:"folder,omitempty"`
-	Created time.Time `json:"created"`
-	Updated time.Time `json:"updated"`
+	Key            string    `json:"key"`
+	Name           string    `json:"name"`
+	Mode           string    `json:"mode,omitempty"`
+	Folder         string    `json:"folder,omitempty"`
+	SubagentStatus string    `json:"subagent_status,omitempty"`
+	Created        time.Time `json:"created"`
+	Updated        time.Time `json:"updated"`
 }
 
 func generateSessionName(content string) string {

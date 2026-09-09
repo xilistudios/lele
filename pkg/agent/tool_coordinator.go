@@ -689,6 +689,14 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		agent.Sessions.EvictSession(sessionKey)
 	})
 
+	// Persist the terminal status of each subagent on its session, so the
+	// WebUI subagents sidebar shows the real outcome (failed, not_done,
+	// needs_context, cancelled) after eviction or restart instead of the
+	// historical hard-coded "completed".
+	subagentManager.SetSessionStatusCallback(func(sessionKey, status string) {
+		agent.Sessions.SetSubagentStatus(sessionKey, status)
+	})
+
 	// Let the subagent manager detect existing session keys at spawn time, so it
 	// never reuses a task ID whose session already exists (e.g. after a restart,
 	// when the in-memory ID counter resets but persisted session files remain).

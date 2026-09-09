@@ -598,7 +598,14 @@ export type SubagentTaskInfo = {
   session_key: string
   label: string
   agent_id: string
-  status: 'running' | 'completed' | 'not_done' | 'needs_context' | 'failed' | 'cancelled'
+  status:
+    | 'running'
+    | 'completed'
+    | 'not_done'
+    | 'needs_context'
+    | 'failed'
+    | 'cancelled'
+    | 'pending'
   summary: string
   created: number
   updated: number
