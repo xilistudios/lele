@@ -18,14 +18,14 @@ type SessionRepo struct {
 
 // SessionMeta holds lightweight session metadata (no messages).
 type SessionMeta struct {
-	Key              string
-	Name             string
-	Mode             string
-	Summary          string
-	VerboseLevel     string
-	Model            string
-	ThinkingLevel    string
-	Folder           string
+	Key           string
+	Name          string
+	Mode          string
+	Summary       string
+	VerboseLevel  string
+	Model         string
+	ThinkingLevel string
+	Folder        string
 	// SubagentStatus persists the terminal status of subagent sessions
 	// ("completed", "failed", ...). Empty for non-subagent sessions and
 	// rows created before migration v6.

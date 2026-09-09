@@ -36,9 +36,9 @@ type Session struct {
 	// ("completed", "failed", "not_done", "cancelled", "needs_context"),
 	// persisted so the WebUI can show the real outcome after eviction or
 	// restart. Empty for non-subagent sessions.
-	SubagentStatus string `json:"subagent_status,omitempty"`
-	Created        time.Time `json:"created"`
-	Updated        time.Time `json:"updated"`
+	SubagentStatus     string    `json:"subagent_status,omitempty"`
+	Created            time.Time `json:"created"`
+	Updated            time.Time `json:"updated"`
 	lastStreamFlush    time.Time // throttle for stream persistence (not persisted)
 	hadStreamedContent bool      // tracks if content was delivered via streaming this turn (not persisted)
 	lastPersistedSeq   int       // last message seq persisted to SQLite (-1 = none)

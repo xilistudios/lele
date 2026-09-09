@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 )
 
 // Tests for subagent status persistence (WebUI sidebar shows the real
@@ -179,4 +178,3 @@ func TestSetSubagentStatus_DoesNotClobberMessageContent(t *testing.T) {
 		t.Fatalf("second message changed: %+v", hist[1])
 	}
 }
-
