@@ -291,3 +291,62 @@ func TestAgentLoop_StopWithin_Idempotent(t *testing.T) {
 		t.Errorf("session cleanup stopper called %d times, want 1", stopped)
 	}
 }
+
+// TestAgentLoop_GatewayTeardownSequenceReleasesTurn is the end-to-end shape of
+// the self-update restart hang, run against a real loop and a real WaitGroup.
+//
+// It replays the exact sequence cmd/lele's runGracefulShutdown performs:
+// Shutdown with a drain budget the turn does not fit, then cancel the root
+// context the turn runs on, then the bounded final join. The turn below is a
+// faithful stand-in for processMessage: it is tracked on al.wg and can only be
+// ended by the root context, which is precisely the dependency that deadlocked
+// when the gateway joined before cancelling.
+func TestAgentLoop_GatewayTeardownSequenceReleasesTurn(t *testing.T) {
+	al := newShutdownTestLoop(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	turnFinished := make(chan struct{})
+	al.running.Store(true)
+	al.wg.Add(1)
+	go func() {
+		defer al.wg.Done()
+		defer close(turnFinished)
+		<-ctx.Done() // what processMessage does between LLM/tool iterations
+	}()
+
+	// 1. The drain hook loses the race, as it does for any turn longer than its
+	//    budget. This is the state in which the hang used to begin.
+	drainCtx, drainCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer drainCancel()
+	if err := al.Shutdown(drainCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("drain Shutdown() = %v, want context.DeadlineExceeded", err)
+	}
+
+	// 2+3. Cancel, then join. Done in the other order this blocks forever.
+	cancel()
+	joined := make(chan error, 1)
+	go func() { joined <- al.StopWithin(5 * time.Second) }()
+
+	select {
+	case err := <-joined:
+		if err != nil {
+			t.Fatalf("StopWithin() = %v, want nil: the cancelled turn should have exited", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("teardown hung: the turn was not released by the root cancel")
+	}
+
+	select {
+	case <-turnFinished:
+	default:
+		t.Error("the in-flight turn was abandoned instead of released")
+	}
+	// A clean join means the store was closed normally, not abandoned open.
+	if al.dbStore != nil {
+		if err := al.dbStore.DB().Ping(); err == nil {
+			t.Error("store still open after a completed join")
+		}
+	}
+}
