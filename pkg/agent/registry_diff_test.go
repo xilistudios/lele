@@ -366,3 +366,89 @@ func TestReloadAgents_UnchangedSkillsKeepsInstance(t *testing.T) {
 		t.Error("expected instance preserved when only the skills ORDER differs")
 	}
 }
+
+// TestAgentConfigChanged_IdentityFieldsRecreate covers the WebUI agent pages:
+// name, description and the default flag are editable and surface through
+// GetAgentInfo, which reads the live instance. Without these comparisons an
+// agent renamed from the UI kept reporting its stale name until a full
+// restart, and toggling `default` alone left the wrong agent reported as the
+// default one.
+func TestAgentConfigChanged_IdentityFieldsRecreate(t *testing.T) {
+	cases := []struct {
+		name   string
+		before config.AgentConfig
+		after  config.AgentConfig
+		check  func(t *testing.T, got *AgentInstance)
+	}{
+		{
+			name:   "name",
+			before: config.AgentConfig{ID: "alpha", Default: true, Name: "Alpha"},
+			after:  config.AgentConfig{ID: "alpha", Default: true, Name: "Renamed"},
+			check:  func(t *testing.T, got *AgentInstance) { assertStr(t, "Name", got.Name, "Renamed") },
+		},
+		{
+			name:   "description",
+			before: config.AgentConfig{ID: "alpha", Default: true, Description: "old"},
+			after:  config.AgentConfig{ID: "alpha", Default: true, Description: "new"},
+			check:  func(t *testing.T, got *AgentInstance) { assertStr(t, "Description", got.Description, "new") },
+		},
+		{
+			name:   "default flag moves to another agent",
+			before: config.AgentConfig{ID: "alpha", Default: true},
+			after:  config.AgentConfig{ID: "alpha"},
+			check:  func(t *testing.T, got *AgentInstance) { assertBool(t, "IsDefault", got.IsDefault, false) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg(t, []config.AgentConfig{tc.before})
+			registry := NewAgentRegistry(cfg)
+			original, _ := registry.GetAgent("alpha")
+
+			registry.ReloadAgents(testCfg(t, []config.AgentConfig{tc.after}))
+
+			reloaded, ok := registry.GetAgent("alpha")
+			if !ok {
+				t.Fatal("agent alpha missing after reload")
+			}
+			if reloaded == original {
+				t.Fatalf("expected instance recreate when %s changed, got same pointer", tc.name)
+			}
+			tc.check(t, reloaded)
+		})
+	}
+}
+
+// TestAgentConfigChanged_IdentityUnchangedDoesNotRecreate is the other half of
+// the contract: identical identity fields must NOT recreate on every reload
+// (the reconciler runs on every config PUT).
+func TestAgentConfigChanged_IdentityUnchangedDoesNotRecreate(t *testing.T) {
+	agents := []config.AgentConfig{
+		{ID: "alpha", Default: true, Name: "Alpha", Description: "same"},
+	}
+	cfg := testCfg(t, agents)
+	registry := NewAgentRegistry(cfg)
+	original, _ := registry.GetAgent("alpha")
+
+	registry.ReloadAgents(testCfg(t, agents))
+
+	reloaded, _ := registry.GetAgent("alpha")
+	if reloaded != original {
+		t.Fatal("unchanged identity fields must preserve the instance, got a recreate")
+	}
+}
+
+func assertStr(t *testing.T, field, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s = %q, want %q", field, got, want)
+	}
+}
+
+func assertBool(t *testing.T, field string, got, want bool) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s = %v, want %v", field, got, want)
+	}
+}

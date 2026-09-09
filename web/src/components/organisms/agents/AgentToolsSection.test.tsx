@@ -181,13 +181,17 @@ describe('AgentToolsSection — mode derived from the value (§4.6.1)', () => {
     )
   })
 
-  test('an empty array stays custom (restricted agent with nothing allowed)', async () => {
+  // "Zero tools" is not expressible on the backend (an empty allowlist keeps
+  // every tool and `omitempty` would drop the key), so a legacy `tools: []`
+  // must render as unrestricted rather than lie about access.
+  test('an empty array renders as ALL mode (backend semantics: empty = no restriction)', async () => {
     const u = await ready(setup({ tools: [] }))
+    const all = u.getByRole('radio', { name: tr('settings.agentPage.toolsModeAll') })
     const custom = u.getByRole('radio', { name: tr('settings.agentPage.toolsModeCustom') })
-    expect(custom.getAttribute('aria-checked')).toBe('true')
-    expect(u.getByTestId('tools-count').textContent).toContain(
-      tr('settings.agentPage.toolsCount', { active: 0, total: 5 }),
-    )
+    expect(all.getAttribute('aria-checked')).toBe('true')
+    expect(custom.getAttribute('aria-checked')).toBe('false')
+    expect(u.getByTestId('tools-all-banner')).toBeTruthy()
+    expect(u.queryByTestId('tools-toolbar')).toBeNull()
   })
 
   test('segmented control to custom writes the whole catalog; back to all writes undefined', async () => {
@@ -228,6 +232,14 @@ describe('AgentToolsSection — toggling and batch (§4.6.2, §4.6.3)', () => {
     ])
   })
 
+  test('deselecting the LAST selected tool returns the agent to all mode', async () => {
+    const u = await ready(setup({ tools: ['exec'] }))
+    fireEvent.click(u.checkboxFor('exec'))
+    const write = u.lastWrite('agents.list.1.tools')
+    expect(write).toBeTruthy()
+    expect(write?.[1]).toBeUndefined()
+  })
+
   test('unchecking a selected tool removes it, sorted again', async () => {
     const u = await ready(setup({ tools: [...ALL_NAMES] }))
     fireEvent.click(u.checkboxFor('spawn'))
@@ -251,10 +263,15 @@ describe('AgentToolsSection — toggling and batch (§4.6.2, §4.6.3)', () => {
     expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual(['exec', 'read_file', 'web_search'])
   })
 
-  test('batch None writes [] and batch All writes the full catalog', async () => {
+  // Clearing the selection writes `undefined`, never `[]`: the backend maps an
+  // empty allowlist to "all tools", so persisting `[]` would store a value the
+  // UI could not honestly re-render.
+  test('batch None writes undefined (back to unrestricted) and batch All writes the full catalog', async () => {
     const u = await ready(setup({ tools: ['exec'] }))
     fireEvent.click(u.getByTestId('tools-batch-none'))
-    expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual([])
+    const none = u.lastWrite('agents.list.1.tools')
+    expect(none).toBeTruthy()
+    expect(none?.[1]).toBeUndefined()
     fireEvent.click(u.getByTestId('tools-batch-all'))
     expect(u.lastWrite('agents.list.1.tools')?.[1]).toEqual([...ALL_NAMES].sort())
   })

@@ -27,10 +27,12 @@ import { ToggleCard } from '../../molecules/ToggleCard'
  *   preview of what "all" grants. Unchecking a card here is the natural entry
  *   point to restriction: it writes the catalog minus that tool, and the mode
  *   (derived from the value, §4.6.1) flips to `custom`.
- * - `custom` → the value is an array: only the listed tools stay registered.
- *   Switching through the segmented control pre-selects the whole catalog (a
- *   no-op restriction the user then trims down); switching back writes
- *   `undefined`.
+ * - `custom` → the value is a NON-empty array: only the listed tools stay
+ *   registered. Switching through the segmented control pre-selects the whole
+ *   catalog (a no-op restriction the user then trims down); switching back
+ *   writes `undefined`. Clearing every selection also writes `undefined` —
+ *   "no tools at all" is not a state the backend can represent (an empty
+ *   allowlist keeps everything), so the UI never pretends otherwise.
  *
  * The tool list comes from `GET /agents/{id}/catalog` — the agent's LIVE tool
  * registry, not the static category map. Allowlisted names that are no longer
@@ -74,8 +76,15 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
   const draftAgent = draftConfig?.agents?.list?.[index]
   const current: EditableAgentConfig = draftAgent && draftAgent.id === agent.id ? draftAgent : agent
 
-  const allowlist = Array.isArray(current.tools) ? current.tools : undefined
-  // §4.6.1: the mode is derived from the value, never stored separately.
+  // §4.6.1: the mode is derived from the value, never stored separately. An
+  // EMPTY array is normalized to `all` because "zero tools" is not an
+  // expressible state on the backend: applyToolsAllowlist keeps EVERY tool
+  // when the allowlist is empty (TestApplyToolsAllowlist_EmptyPreservesAll)
+  // and the config field is `omitempty`, so a legacy `tools: []` must render
+  // as unrestricted — showing it as custom-with-0 would lie about what the
+  // agent can actually do.
+  const allowlist =
+    Array.isArray(current.tools) && current.tools.length > 0 ? current.tools : undefined
   const mode: ToolsMode = allowlist ? 'custom' : 'all'
   const selected = new Set(allowlist ?? [])
 
@@ -101,7 +110,14 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
   const total = entries.length
   const active = mode === 'custom' ? entries.filter((e) => selected.has(e.name)).length : total
 
-  const writeTools = (next: string[]) => updateField(path, sortTools(next))
+  const writeTools = (next: string[]) => {
+    // An emptied allowlist is written as `undefined`, not `[]`: the backend
+    // treats an empty allowlist as "no restriction" (and `omitempty` would
+    // drop `[]` anyway), so normalizing here keeps the saved config, the
+    // derived mode and the banner honest. The path is still marked dirty, so
+    // the tab dot and Save behave as with any other change.
+    updateField(path, next.length > 0 ? sortTools(next) : undefined)
+  }
 
   const handleModeChange = (next: ToolsMode) => {
     if (next === mode) return

@@ -377,6 +377,19 @@ func agentConfigChanged(existing *AgentInstance, ac *config.AgentConfig, default
 	if extractProviderFromModel(existing.Model, defaults.Provider) != newProvider {
 		return true
 	}
+	// Identity fields are editable from the WebUI agent pages and surface
+	// through GetAgentInfo (runtime), so a change here must recreate the
+	// instance; otherwise the UI keeps showing a stale name/description and
+	// the wrong agent is reported as default until restart.
+	if existing.Name != ac.Name {
+		return true
+	}
+	if existing.Description != ac.Description {
+		return true
+	}
+	if existing.IsDefault != ac.Default {
+		return true
+	}
 	// Check max iterations
 	newMaxIter := defaults.MaxToolIterations
 	if newMaxIter == 0 {
