@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -339,11 +340,24 @@ func (tc *toolCoordinatorImpl) GetStartupInfo() map[string]interface{} {
 }
 
 // RegisterTool registers a tool to all agents.
+//
+// B2b: tools added after startup (today: cron, wired by the gateway once the
+// agent loop exists) bypass registerSharedToolsForAgent, so the per-agent
+// allowlist has to be honoured here as well — otherwise a restricted agent would
+// regain any tool registered later. An agent with no allowlist (or an empty one)
+// keeps receiving everything, which is the default behaviour.
 func (tc *toolCoordinatorImpl) RegisterTool(tool tools.Tool) {
+	cfg := tc.al.cfg()
+	name := tool.Name()
 	for _, agentID := range tc.al.registry.ListAgentIDs() {
-		if agent, ok := tc.al.registry.GetAgent(agentID); ok {
-			agent.Tools.Register(tool)
+		agent, ok := tc.al.registry.GetAgent(agentID)
+		if !ok {
+			continue
 		}
+		if !allowlistKeeps(agentConfigForID(cfg, agentID), name) {
+			continue
+		}
+		agent.Tools.Register(tool)
 	}
 }
 
@@ -430,8 +444,61 @@ func (tc *toolCoordinatorImpl) stopBackgroundExec(id string) error {
 	return fmt.Errorf("background process not found: %s", id)
 }
 
+// agentConfigForID looks up the config entry of an agent by (already normalized)
+// id, exactly the way the registry keys its instances: NewAgentRegistry /
+// ReloadAgents store every cfg.Agents.List[i] under routing.NormalizeAgentID(ac.ID).
+// The incoming agentID is normalized defensively so a caller that passes a raw
+// config id still matches; NormalizeAgentID is idempotent.
+//
+// Returns nil when the agent has no config entry, which happens for the implicit
+// "main" instance created when agents.list is empty. Callers must treat nil as
+// "no per-agent overrides", i.e. keep every tool.
+func agentConfigForID(cfg *config.Config, agentID string) *config.AgentConfig {
+	if cfg == nil {
+		return nil
+	}
+	want := routing.NormalizeAgentID(agentID)
+	for i := range cfg.Agents.List {
+		if routing.NormalizeAgentID(cfg.Agents.List[i].ID) == want {
+			return &cfg.Agents.List[i]
+		}
+	}
+	return nil
+}
+
+// allowlistKeeps reports whether a tool name survives an agent's per-agent
+// allowlist. It mirrors applyToolsAllowlist for a single name: no config entry,
+// no allowlist, or one made only of blank entries keeps everything; otherwise the
+// name must be listed (surrounding whitespace ignored, like the helper), because
+// the registry keys tools case-sensitively.
+func allowlistKeeps(agentCfg *config.AgentConfig, name string) bool {
+	if agentCfg == nil || len(agentCfg.Tools) == 0 {
+		return true
+	}
+	known := false
+	for _, allowed := range agentCfg.Tools {
+		trimmed := strings.TrimSpace(allowed)
+		if trimmed == "" {
+			continue
+		}
+		known = true
+		if trimmed == name {
+			return true
+		}
+	}
+	// An allowlist made only of blank entries means "no allowlist" — the same
+	// reading applyToolsAllowlist takes when it returns before touching the
+	// registry. Otherwise the name was absent from a real allowlist: drop it.
+	return !known
+}
+
 // registerSharedToolsForAgent registers all shared tools (web, hardware, file, exec, spawn, group_chat)
 // for a single agent. Returns the created SubagentManager.
+//
+// It is also the enforcement point of the per-agent tools allowlist (B2b): the
+// shared registrations are filtered against agents.list[].tools at the end of the
+// function, before the subagent tool clone is taken, so neither the agent nor its
+// subagents can see a tool its config excluded.
 func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBus *bus.MessageBus, registry *AgentRegistry, approvalManager *channels.ApprovalManager, agentID string, subagents map[string]*tools.SubagentManager, bgManagers map[string]*tools.BackgroundProcessManager, groupManager *group.GroupManager, keyringSvc *keyring.Service) *tools.SubagentManager {
 	// Web tools
 	if searchTool := tools.NewWebSearchTool(tools.WebSearchToolOptions{
@@ -645,6 +712,28 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	// Registration is gated by cfg.Groups.Enabled (B10) — see syncGroupChatTool.
 	syncGroupChatTool(agent, cfg, registry, currentAgentID, groupManager)
 
+	// B2b: enforce the per-agent tools allowlist over the SHARED tools too.
+	//
+	// NewAgentInstance already filters the registry it builds, but every tool
+	// registered above (web_search, web_fetch, secret, i2c, spi, send_file,
+	// exec, the background-exec trio, spawn and the subagent-management tools,
+	// sleep, group_chat) is added AFTER that filter, so without this second pass
+	// an agent configured with tools: ["read_file"] still ended up with
+	// exec/spawn/web.
+	//
+	// Placement matters: it must run after the last registration (so the whole
+	// shared set is visible) and before the CloneWithout below (so a restricted
+	// agent's subagents inherit the restricted set instead of the full one).
+	// It is idempotent — an empty allowlist is a no-op and re-applying the same
+	// allowlist removes nothing new — which makes it safe on both reload paths:
+	// a recreated agent arrives here with an already filtered base registry, and
+	// a preserved agent skips this function entirely (updateSharedToolsForAgent
+	// early-returns while spawn is registered, so its toolset is untouched and
+	// stays consistent with what the first registration produced).
+	if agentCfg := agentConfigForID(cfg, agentID); agentCfg != nil {
+		applyToolsAllowlist(agent.Tools, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
+	}
+
 	// Subagents get all tools except send_file (user-facing) and the
 	// subagent-management tools (prevent recursive wait/list overhead).
 	//
@@ -709,6 +798,14 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 // when the flag is toggled at runtime.
 func syncGroupChatTool(agent *AgentInstance, cfg *config.Config, registry *AgentRegistry, agentID string, groupManager *group.GroupManager) {
 	if !cfg.GroupsFeatureEnabled() || groupManager == nil {
+		agent.Tools.Unregister("group_chat")
+		return
+	}
+	// B2b: the allowlist wins over the feature gate. This also covers the reload
+	// path, where updateSharedToolsForAgent early-returns (spawn already present)
+	// and only re-syncs this tool — without the check it would hand group_chat
+	// back to an agent whose allowlist had it removed at first registration.
+	if !allowlistKeeps(agentConfigForID(cfg, agentID), "group_chat") {
 		agent.Tools.Unregister("group_chat")
 		return
 	}

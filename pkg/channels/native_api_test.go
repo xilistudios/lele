@@ -36,6 +36,7 @@ type nativeTestAgentLoop struct {
 	sessionAliasesMu   sync.RWMutex
 	subagentParents    map[string]string // subagent_key -> parent_key
 	workspace          string            // Override workspace path for GetAgentInfo (default: "/tmp/workspace")
+	agentTools         []AgentToolInfo   // Override for ListAgentTools ("main" only; default: non-empty fake registry)
 	sessionNames       map[string]string
 	sessionThinkLevels map[string]string
 	sessionSubagents   map[string][]SubagentTaskInfo // sessionKey -> subagent tasks
@@ -106,6 +107,22 @@ func (m *nativeTestAgentLoop) GetAgentInfo(agentID string) (AgentBasicInfo, bool
 		Name:      "Main Agent",
 		Workspace: workspace,
 		Model:     "gpt-4",
+	}, true
+}
+
+// ListAgentTools mirrors GetAgentInfo: only "main" exists in the fake. When a
+// test doesn't set agentTools, it returns a small non-empty registry so catalog
+// handlers can be exercised without per-test setup.
+func (m *nativeTestAgentLoop) ListAgentTools(agentID string) ([]AgentToolInfo, bool) {
+	if agentID != "main" {
+		return nil, false
+	}
+	if m.agentTools != nil {
+		return m.agentTools, true
+	}
+	return []AgentToolInfo{
+		{Name: "exec", Description: "Execute a shell command"},
+		{Name: "read_file", Description: "Read the contents of a file"},
 	}, true
 }
 

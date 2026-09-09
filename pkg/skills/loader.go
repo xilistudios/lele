@@ -271,17 +271,37 @@ func (sl *SkillsLoader) LoadSkillsForContext(skillNames []string) string {
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
-func (sl *SkillsLoader) BuildSkillsSummary() string {
+// BuildSkillsSummary renders the <skills> block injected into the system
+// prompt: one <skill> entry per enabled installed skill (name, description,
+// SKILL.md path, source).
+//
+// filter limits the block to an allowlist of skill names and backs the
+// per-agent `skills:` config (AgentInstance.SkillsFilter):
+//   - nil / empty → every enabled skill is listed (the pre-filter behaviour,
+//     so callers without a per-agent allowlist pass nil);
+//   - non-empty → only skills whose name matches an entry, case-sensitively,
+//     compared after trimming surrounding whitespace on both sides. Names in
+//     the filter that are not installed are simply absent; that is not an
+//     error (a skill may be uninstalled elsewhere).
+//
+// Returns "" when there is nothing to list, so the caller drops the whole
+// "# Skills" section instead of emitting an empty block.
+func (sl *SkillsLoader) BuildSkillsSummary(filter []string) string {
 	allSkills := sl.ListSkills()
 	if len(allSkills) == 0 {
 		return ""
 	}
 
+	allowed := skillNameSet(filter)
+
 	var lines []string
-	lines = append(lines, "<skills>")
 	for _, s := range allSkills {
 		// Skip disabled skills in summary
 		if !s.Enabled {
+			continue
+		}
+		// Skip skills outside the per-agent allowlist (nil set = no filtering)
+		if allowed != nil && !allowed[normalizeSkillName(s.Name)] {
 			continue
 		}
 
@@ -296,9 +316,60 @@ func (sl *SkillsLoader) BuildSkillsSummary() string {
 		lines = append(lines, fmt.Sprintf("    <source>%s</source>", s.Source))
 		lines = append(lines, "  </skill>")
 	}
+	if len(lines) == 0 {
+		return ""
+	}
+
+	lines = append([]string{"<skills>"}, lines...)
 	lines = append(lines, "</skills>")
 
 	return strings.Join(lines, "\n")
+}
+
+// skillNameSet turns an allowlist of skill names into a lookup set. It returns
+// nil for a nil/empty allowlist, which callers read as "no filtering", keeping
+// the "all skills" vs. "only these" distinction in one place. Entries that are
+// empty after trimming are dropped.
+func skillNameSet(filter []string) map[string]bool {
+	if len(filter) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(filter))
+	for _, name := range filter {
+		name = normalizeSkillName(name)
+		if name == "" {
+			continue
+		}
+		set[name] = true
+	}
+	return set
+}
+
+// normalizeSkillName canonicalises a skill name for allowlist comparison.
+// Names come from SKILL.md frontmatter or from user-written config, so stray
+// whitespace must not silently break a match.
+func normalizeSkillName(name string) string {
+	return strings.TrimSpace(name)
+}
+
+// SkillAllowed reports whether name passes the per-agent allowlist filter.
+// It is the exported, single source of truth for the matching semantics used
+// by BuildSkillsSummary, so other renderers (e.g. the agent context builder's
+// skill-content path) stay consistent with the system prompt.
+//
+// An empty filter allows everything (back-compat); otherwise the comparison is
+// case-sensitive and whitespace-trimmed on both sides.
+func SkillAllowed(filter []string, name string) bool {
+	if len(filter) == 0 {
+		return true
+	}
+	name = normalizeSkillName(name)
+	for _, f := range filter {
+		if normalizeSkillName(f) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (sl *SkillsLoader) getSkillMetadata(skillPath string) *SkillMetadata {

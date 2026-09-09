@@ -24,6 +24,11 @@ type AgentProvidable interface {
 	AgentSessionManager
 	// GetAgentInfo devuelve información básica de un agente
 	GetAgentInfo(agentID string) (AgentBasicInfo, bool)
+	// ListAgentTools devuelve las herramientas registradas en la instancia del
+	// agente (nombre + descripción legible), ordenadas por nombre. ok=false si
+	// el agente no existe. La lista se deriva del ToolRegistry real del agente,
+	// nunca se hardcodea.
+	ListAgentTools(agentID string) ([]AgentToolInfo, bool)
 	// GetSessionHistory devuelve el historial persistido de una sesión
 	GetSessionHistory(sessionKey string) []providers.Message
 	// GetHistoryView returns the history slice without copying. The caller
@@ -199,6 +204,15 @@ type AgentBasicInfo struct {
 	SkillsFilter   []string
 	Reasoning      *config.ReasoningConfig
 	SupportsImages bool
+}
+
+// AgentToolInfo describes one tool registered in an agent's tool registry.
+// It is the wire shape used by the per-agent catalog endpoint: Name is the
+// identifier the LLM calls (Tool.Name()) and Description is the human-readable
+// text the model itself receives (Tool.Description()).
+type AgentToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // SubagentTaskInfo contains information about a subagent task for the API.

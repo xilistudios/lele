@@ -426,6 +426,7 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/agents", withAuth(n.handleAgents))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}", withAuth(n.handleAgentInfo))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/status", withAuth(n.handleAgentStatus))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/catalog", withAuth(n.handleAgentCatalog))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/files", withAuth(n.handleAgentFiles))
 	mux.HandleFunc("GET /api/v1/agents/{agentID}/files/{fileName}", withAuth(n.handleAgentFileRead))
 	mux.HandleFunc("PUT /api/v1/agents/{agentID}/files/{fileName}", withAuth(applyBodyLimit(n.handleAgentFileSave)))

@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/xilistudios/lele/pkg/skills"
 )
 
 func TestHandleAgents(t *testing.T) {
@@ -234,5 +237,192 @@ func TestHandleAgentFiles_AgentNotFound(t *testing.T) {
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+// --- B4: per-agent catalog endpoint (GET /api/v1/agents/{id}/catalog) -------
+
+func TestHandleAgentCatalog_OK(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	resp, err := http.DefaultClient.Do(newAuthedRequest(t, http.MethodGet,
+		ts.server.URL+"/api/v1/agents/main/catalog", ts.token))
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload AgentCatalogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+
+	if payload.AgentID != "main" {
+		t.Fatalf("agent_id = %q, want %q", payload.AgentID, "main")
+	}
+	// Tools must be non-empty and every entry must carry a readable name and
+	// description (that is the whole point of the endpoint for the frontend).
+	if len(payload.Tools) == 0 {
+		t.Fatal("expected non-empty tools")
+	}
+	for _, tool := range payload.Tools {
+		if tool.Name == "" || tool.Description == "" {
+			t.Fatalf("tool entry has empty field: %+v", tool)
+		}
+	}
+	// Deterministic ordering by name (frontend renders without sorting).
+	for i := 1; i < len(payload.Tools); i++ {
+		if payload.Tools[i-1].Name > payload.Tools[i].Name {
+			t.Fatalf("tools not sorted by name: %q after %q",
+				payload.Tools[i-1].Name, payload.Tools[i].Name)
+		}
+	}
+	// Skills must always be present in the payload ([] when none installed).
+	if payload.Skills == nil {
+		t.Fatal("skills must be non-nil (empty array, not null)")
+	}
+}
+
+func TestHandleAgentCatalog_ToolsDerivedFromRegistry(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	// Override the fake agent's "registry": the endpoint must echo exactly
+	// what the agent loop reports (proving nothing is hardcoded server-side).
+	ts.loop.agentTools = []AgentToolInfo{
+		{Name: "zeta_tool", Description: "zeta does things"},
+		{Name: "alpha_tool", Description: "alpha does things"},
+	}
+
+	resp, err := http.DefaultClient.Do(newAuthedRequest(t, http.MethodGet,
+		ts.server.URL+"/api/v1/agents/main/catalog", ts.token))
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload AgentCatalogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Tools) != 2 {
+		t.Fatalf("tools = %d, want 2 (%+v)", len(payload.Tools), payload.Tools)
+	}
+	want := [][2]string{{"alpha_tool", "alpha does things"}, {"zeta_tool", "zeta does things"}}
+	for i, w := range want {
+		if payload.Tools[i].Name != w[0] || payload.Tools[i].Description != w[1] {
+			t.Fatalf("tools[%d] = %+v, want {%s, %s}", i, payload.Tools[i], w[0], w[1])
+		}
+	}
+}
+
+func TestHandleAgentCatalog_Skills(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	// Build a real skills loader over a temp workspace with two skills, one
+	// disabled via the workspace config — the catalog must report both, with
+	// the correct enabled flag and source.
+	workspace := t.TempDir()
+	writeTestSkill(t, workspace, "alpha-skill", "Alpha does things")
+	writeTestSkill(t, workspace, "beta-skill", "Beta does things")
+	if err := os.MkdirAll(filepath.Join(workspace, ".lele"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfgJSON := `{"skills":{"disabled":["beta-skill"]}}`
+	if err := os.WriteFile(filepath.Join(workspace, ".lele", "workspace.json"), []byte(cfgJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ts.channel.skillsLoader = skills.NewSkillsLoader(workspace, "", "")
+
+	resp, err := http.DefaultClient.Do(newAuthedRequest(t, http.MethodGet,
+		ts.server.URL+"/api/v1/agents/main/catalog", ts.token))
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var payload AgentCatalogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if len(payload.Skills) != 2 {
+		t.Fatalf("skills = %d, want 2 (%+v)", len(payload.Skills), payload.Skills)
+	}
+	byName := map[string]AgentCatalogSkill{}
+	for _, s := range payload.Skills {
+		byName[s.Name] = s
+	}
+	alpha, ok := byName["alpha-skill"]
+	if !ok {
+		t.Fatalf("alpha-skill missing from %+v", payload.Skills)
+	}
+	if alpha.Description != "Alpha does things" || alpha.Source != "workspace" || !alpha.Enabled {
+		t.Fatalf("alpha-skill = %+v, want {desc=Alpha does things, source=workspace, enabled=true}", alpha)
+	}
+	beta, ok := byName["beta-skill"]
+	if !ok {
+		t.Fatalf("beta-skill missing from %+v", payload.Skills)
+	}
+	if beta.Enabled {
+		t.Fatalf("beta-skill should be disabled: %+v", beta)
+	}
+}
+
+func TestHandleAgentCatalog_AgentNotFound(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	resp, err := http.DefaultClient.Do(newAuthedRequest(t, http.MethodGet,
+		ts.server.URL+"/api/v1/agents/nonexistent/catalog", ts.token))
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	var payload APIError
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if payload.Code != "agent_not_found" {
+		t.Fatalf("error code = %q, want %q", payload.Code, "agent_not_found")
+	}
+}
+
+// newAuthedRequest builds a GET/PUT request with a bearer token header.
+func newAuthedRequest(t *testing.T, method, url, token string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(%s %s): %v", method, url, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
+}
+
+// writeTestSkill creates workspace/skills/<name>/SKILL.md with a minimal
+// frontmatter so the skills loader picks it up.
+func writeTestSkill(t *testing.T, workspace, name, description string) {
+	t.Helper()
+	dir := filepath.Join(workspace, "skills", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", dir, err)
+	}
+	body := "---\nname: " + name + "\ndescription: " + description + "\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile SKILL.md: %v", err)
 	}
 }

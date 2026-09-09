@@ -281,6 +281,12 @@ type AgentConfig struct {
 	// "medium", "high"). nil/absent = inherit: agents.defaults.thinking_level
 	// first, then the provider-model ReasoningConfig. See NormalizeThinkingLevel.
 	ThinkingLevel *string `json:"thinking_level,omitempty"`
+	// Tools is the per-agent allowlist of tool names (e.g. "read_file",
+	// "exec"). nil/empty = all registered tools are available to the agent
+	// (default behavior). Unknown names are ignored with a warning at
+	// instance-build time; a non-empty list restricts the agent to exactly
+	// the known names it contains.
+	Tools []string `json:"tools,omitempty"`
 }
 
 type SubagentsConfig struct {

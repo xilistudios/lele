@@ -50,6 +50,13 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 			// in the editor was invisible to anything validating from Config.
 			Temperature:   agent.Temperature,
 			ThinkingLevel: agent.ThinkingLevel,
+			// Tools must be carried too: this hand-written copy block is the
+			// editable->runtime conversion (WebUI save path). A new field
+			// that is not copied here is invisible to runtime consumers.
+			// (Note: today ToConfig() returns `validated`, rebuilt from
+			// toSerializable(), so this block is effectively dead — kept in
+			// lockstep anyway so it stays correct if ever revived.)
+			Tools: agent.Tools,
 		})
 	}
 

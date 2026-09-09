@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -56,6 +57,70 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 		Workspace:   info.Workspace,
 		Model:       info.Model,
 		Default:     info.ID == n.agentLoop.GetDefaultAgentID(),
+	})
+}
+
+// handleAgentCatalog serves GET /api/v1/agents/{agentID}/catalog.
+//
+// It reports what the agent CAN actually use right now, derived from live
+// runtime state (never hardcoded):
+//   - tools:  the agent instance's real ToolRegistry via agentLoop.ListAgentTools
+//   - skills: the same loader that backs GET /api/v1/skills (n.skillsLoader),
+//     so both endpoints always agree on what is installed/enabled.
+//
+// Returns 404 when the agent does not exist (same pattern as handleAgentInfo).
+func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentID")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent id required", "agent_id_missing")
+		return
+	}
+
+	// 404 if the agent doesn't exist. GetAgentInfo is the existence check used
+	// by every other /agents/{id} endpoint.
+	if _, ok := n.agentLoop.GetAgentInfo(agentID); !ok {
+		writeError(w, http.StatusNotFound, "agent not found", "agent_not_found")
+		return
+	}
+
+	// Resolve the catalog from the agent's live tool registry. The existence
+	// check above passed, so a missing/false result here means the agent loop
+	// implementation cannot expose tools; treat it as 404 rather than 500 so
+	// clients see a stable "unknown agent" answer.
+	agentTools, ok := n.agentLoop.ListAgentTools(agentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "agent not found", "agent_not_found")
+		return
+	}
+
+	tools := make([]AgentCatalogTool, 0, len(agentTools))
+	for _, t := range agentTools {
+		tools = append(tools, AgentCatalogTool{Name: t.Name, Description: t.Description})
+	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+
+	// Skills come from the shared loader (see handleSkills in rest_system.go).
+	var skills []AgentCatalogSkill
+	if n.skillsLoader != nil {
+		loaded := n.skillsLoader.ListSkills()
+		skills = make([]AgentCatalogSkill, 0, len(loaded))
+		for _, s := range loaded {
+			skills = append(skills, AgentCatalogSkill{
+				Name:        s.Name,
+				Description: s.Description,
+				Source:      s.Source,
+				Enabled:     s.Enabled,
+			})
+		}
+		sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
+	} else {
+		skills = []AgentCatalogSkill{}
+	}
+
+	writeJSON(w, http.StatusOK, AgentCatalogResponse{
+		AgentID: agentID,
+		Tools:   tools,
+		Skills:  skills,
 	})
 }
 

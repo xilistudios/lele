@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/config"
@@ -199,6 +201,12 @@ func NewAgentInstance(
 	// It will be filtered out from tool definitions if the current session model doesn't support vision.
 	toolsRegistry.Register(tools.NewReadImageTool(workspace, restrict))
 
+	// Apply the per-agent tools allowlist AFTER all default registrations so the
+	// filter always sees the complete tool set. nil/empty allowlist = all tools.
+	if agentCfg != nil {
+		applyToolsAllowlist(toolsRegistry, agentCfg.Tools, routing.NormalizeAgentID(agentCfg.ID))
+	}
+
 	// SessionManager uses SQLite for persistence. Each agent's Sessions field
 	// is replaced with a shared SessionManager instance when created through
 	// AgentLoop. This per-agent one serves as a fallback for direct
@@ -226,6 +234,8 @@ func NewAgentInstance(
 		skillsFilter = agentCfg.Skills
 		isDefault = agentCfg.Default
 	}
+
+	contextBuilder.SetSkillsFilter(skillsFilter)
 
 	// Resolve available subagents from config and inject into system prompt.
 	if subagents != nil && len(subagents.AllowAgents) > 0 {
@@ -408,6 +418,79 @@ func resolveAvailableSubagents(agentCfg *config.AgentConfig, cfg *config.Config)
 		}
 	}
 	return result
+}
+
+// applyToolsAllowlist restricts a freshly built tool registry to the per-agent
+// allowlist from config (agents.list[].tools).
+//
+// Semantics:
+//   - allowed empty/nil  -> no-op: the agent keeps every registered tool.
+//   - allowed non-empty  -> every registered tool NOT in allowed is unregistered.
+//   - a name in allowed that is not registered is only warned about (slog.Warn):
+//     a typo in config must not break the agent, and tool availability is
+//     provider/feature dependent, so unknown names are never an error.
+//   - if the allowlist would remove EVERY tool (no intersection at all), the
+//     registry is left untouched and an error is logged. An agent with zero
+//     tools is useless and silently bricked, while an agent with all tools still
+//     works — so the failure mode is deliberately biased towards "keep all".
+//
+// The "keep all" decision is taken as a pre-check on the registered snapshot,
+// which is equivalent to re-registering everything and avoids having to rebuild
+// tool instances (they need workspace/config that this helper doesn't own).
+func applyToolsAllowlist(registry *tools.ToolRegistry, allowed []string, agentID string) {
+	if registry == nil {
+		return
+	}
+
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		allowedSet[trimmed] = struct{}{}
+	}
+	// nil/empty allowlist (or one made only of blank entries) = all tools.
+	if len(allowedSet) == 0 {
+		return
+	}
+
+	registered := registry.List()
+	sort.Strings(registered)
+
+	var toRemove []string
+	var unknown []string
+	known := make(map[string]struct{}, len(registered))
+	for _, name := range registered {
+		known[name] = struct{}{}
+		if _, keep := allowedSet[name]; !keep {
+			toRemove = append(toRemove, name)
+		}
+	}
+	for _, name := range allowed {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := known[trimmed]; !ok {
+			unknown = append(unknown, trimmed)
+		}
+	}
+	if len(unknown) > 0 {
+		slog.Warn("agent tools allowlist contains unknown tool names, ignoring them",
+			"agent", agentID, "unknown_tools", unknown)
+	}
+
+	// Fail-safe: never leave the agent with zero tools.
+	if len(registered) > 0 && len(toRemove) == len(registered) {
+		slog.Error("agent tools allowlist matches no registered tool, keeping all tools",
+			"agent", agentID, "allowlist", allowed, "available_tools", registered)
+		return
+	}
+
+	for _, name := range toRemove {
+		registry.Unregister(name)
+	}
 }
 
 func expandHome(path string) string {

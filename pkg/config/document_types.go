@@ -92,6 +92,11 @@ type EditableAgentConfig struct {
 	// ThinkingLevel mirrors AgentConfig.ThinkingLevel: per-agent default
 	// reasoning effort ("off", "low", "medium", "high"); nil = inherit.
 	ThinkingLevel *string `json:"thinking_level,omitempty"`
+	// Tools mirrors AgentConfig.Tools: per-agent tool allowlist;
+	// nil/empty = all tools. Kept LAST and field-for-field identical to
+	// AgentConfig because editableDocumentFromConfig does a direct struct
+	// conversion (see document_convert.go).
+	Tools []string `json:"tools,omitempty"`
 }
 
 // EditableSessionConfig represents session in editable mode.

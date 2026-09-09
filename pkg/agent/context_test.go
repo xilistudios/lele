@@ -1934,3 +1934,172 @@ func TestSubagentsInSystemPrompt_Invalidation(t *testing.T) {
 		t.Error("Second build should contain new-agent")
 	}
 }
+
+// --- per-agent skills allowlist (AgentConfig.Skills → system prompt) --------
+
+// writeTestSkill creates workspace/skills/<name>/SKILL.md in the given
+// workspace so the ContextBuilder's loader can find it.
+func writeTestSkill(t *testing.T, tmpDir, name, description string) {
+	t.Helper()
+	skillDir := filepath.Join(tmpDir, "skills", name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatalf("Failed to create skill dir %s: %v", name, err)
+	}
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n# %s\n", name, description, name)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write SKILL.md for %s: %v", name, err)
+	}
+}
+
+// skillNamesInPrompt extracts the <name> entries of the <skills> block of a
+// rendered system prompt.
+func skillNamesInPrompt(t *testing.T, prompt string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(prompt, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "<name>") && strings.HasSuffix(line, "</name>") {
+			out = append(out, strings.TrimSuffix(strings.TrimPrefix(line, "<name>"), "</name>"))
+		}
+	}
+	return out
+}
+
+// TestSetSkillsFilter_RestrictsPromptSkills verifies AgentConfig.Skills becomes
+// real: only allowlisted skills reach the system prompt, and an empty allowlist
+// keeps listing every installed skill.
+func TestSetSkillsFilter_RestrictsPromptSkills(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skills-filter-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTestSkill(t, tmpDir, "alpha-skill", "Alpha description")
+	writeTestSkill(t, tmpDir, "beta-skill", "Beta description")
+
+	// Non-empty filter → only the allowlisted skill is rendered.
+	cb := NewContextBuilder(tmpDir)
+	cb.SetSkillsFilter([]string{"alpha-skill"})
+
+	prompt := cb.GetInitialContext()
+	if !strings.Contains(prompt, "# Skills") {
+		t.Fatal("Expected a Skills section in the prompt")
+	}
+	if !strings.Contains(prompt, "<name>alpha-skill</name>") {
+		t.Errorf("Expected alpha-skill in prompt, got names: %v", skillNamesInPrompt(t, prompt))
+	}
+	if strings.Contains(prompt, "<name>beta-skill</name>") {
+		t.Errorf("beta-skill must be filtered out, got names: %v", skillNamesInPrompt(t, prompt))
+	}
+	if strings.Contains(prompt, "Beta description") {
+		t.Error("Filtered skill description leaked into the prompt")
+	}
+
+	// Empty filter → back-compat: everything installed is rendered.
+	cbAll := NewContextBuilder(tmpDir)
+	cbAll.SetSkillsFilter([]string{})
+
+	promptAll := cbAll.GetInitialContext()
+	for _, want := range []string{"<name>alpha-skill</name>", "<name>beta-skill</name>"} {
+		if !strings.Contains(promptAll, want) {
+			t.Errorf("Expected %s with an empty filter, got names: %v", want, skillNamesInPrompt(t, promptAll))
+		}
+	}
+
+	// nil filter behaves like the empty one.
+	cbNil := NewContextBuilder(tmpDir)
+	cbNil.SetSkillsFilter(nil)
+	if got := skillNamesInPrompt(t, cbNil.GetInitialContext()); len(got) < 2 {
+		t.Errorf("Expected both skills with a nil filter, got %v", got)
+	}
+}
+
+// TestSetSkillsFilter_InvalidatesCachedContext is the regression guard for the
+// initialContext cache: GetInitialContext memoises the whole static prompt, so
+// a filter applied after the first build must clear it.
+func TestSetSkillsFilter_InvalidatesCachedContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skills-filter-invalidation-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTestSkill(t, tmpDir, "alpha-skill", "Alpha description")
+	writeTestSkill(t, tmpDir, "beta-skill", "Beta description")
+
+	cb := NewContextBuilder(tmpDir)
+
+	// Prime the cache with no filter.
+	first := cb.GetInitialContext()
+	if !strings.Contains(first, "<name>beta-skill</name>") {
+		t.Fatal("First build should list every skill")
+	}
+
+	// Narrow the allowlist after the prompt was already cached.
+	cb.SetSkillsFilter([]string{"alpha-skill"})
+	second := cb.GetInitialContext()
+	if strings.Contains(second, "<name>beta-skill</name>") {
+		t.Error("Second build must drop beta-skill: cached context was not invalidated")
+	}
+	if !strings.Contains(second, "<name>alpha-skill</name>") {
+		t.Error("Second build must keep alpha-skill")
+	}
+
+	// Widening back to "all" must invalidate as well.
+	cb.SetSkillsFilter(nil)
+	third := cb.GetInitialContext()
+	if !strings.Contains(third, "<name>beta-skill</name>") {
+		t.Error("Third build must list every skill again after clearing the filter")
+	}
+}
+
+// TestSetSkillsFilter_UnknownNameDropsSection verifies a filter naming skills
+// that are not installed is not an error: the Skills section simply disappears.
+func TestSetSkillsFilter_UnknownNameDropsSection(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skills-filter-unknown-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTestSkill(t, tmpDir, "alpha-skill", "Alpha description")
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetSkillsFilter([]string{"not-installed"})
+
+	// The only skills the loader could show are workspace-local ones plus the
+	// machine's global skills; with a filter matching none of them the section
+	// must be gone entirely (no empty <skills> block).
+	prompt := cb.GetInitialContext()
+	if strings.Contains(prompt, "<name>alpha-skill</name>") {
+		t.Error("alpha-skill must not appear when the filter excludes it")
+	}
+	if strings.Contains(prompt, "# Skills\n\nThe following skills extend") {
+		t.Errorf("Expected no Skills section when the filter matches nothing:\n%s", prompt)
+	}
+}
+
+// TestLoadSkills_AppliesSkillsFilter covers the (currently dead) full-content
+// path so it stays consistent with the summary if it is ever revived.
+func TestLoadSkills_AppliesSkillsFilter(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "load-skills-filter-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTestSkill(t, tmpDir, "alpha-skill", "Alpha description")
+	writeTestSkill(t, tmpDir, "beta-skill", "Beta description")
+
+	cb := NewContextBuilder(tmpDir)
+	cb.SetSkillsFilter([]string{"alpha-skill"})
+
+	result := cb.loadSkills()
+	if !strings.Contains(result, "### Skill: alpha-skill") {
+		t.Errorf("Expected alpha-skill body, got:\n%s", result)
+	}
+	if strings.Contains(result, "### Skill: beta-skill") {
+		t.Errorf("beta-skill body must be filtered out, got:\n%s", result)
+	}
+}
