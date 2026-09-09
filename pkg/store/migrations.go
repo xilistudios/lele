@@ -8,7 +8,7 @@ import (
 )
 
 // SchemaVersion is the latest schema version known to this build.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // migrations lists schema migrations in version order. Each entry is
 // applied atomically inside a single transaction by migrate.
@@ -160,6 +160,18 @@ CREATE TABLE processed_messages (
     processed_at TEXT NOT NULL,
     PRIMARY KEY (channel, msg_id)
 );
+`,
+	},
+	{
+		Version: 6,
+		DDL: `
+-- Persist the terminal status of subagent sessions. The WebUI subagents
+-- sidebar used to show every persisted subagent as "completed" because the
+-- real status only lived in the in-memory SubagentManager, which is lost on
+-- eviction/restart. Empty string means the session is not a subagent (or
+-- predates this column): the reader falls back to "completed" for those.
+ALTER TABLE sessions ADD COLUMN subagent_status TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_sessions_subagent_status ON sessions(subagent_status) WHERE subagent_status != '';
 `,
 	},
 }

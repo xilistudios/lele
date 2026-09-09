@@ -130,7 +130,7 @@ export function SubagentsSidebar({
                           {subagent.iterations > 0 && ` · ${subagent.iterations} iter`}
                         </p>
                       </div>
-                      {subagent.status === 'running' && (
+                      {(subagent.status === 'running' || subagent.status === 'pending') && (
                         <div className="ml-2 flex-shrink-0">
                           <Spinner size="sm" />
                         </div>
@@ -161,6 +161,7 @@ function StatusBadge({ status }: { status: string }) {
 function getStatusColor(status: string): string {
   switch (status) {
     case 'running':
+    case 'pending':
       return 'bg-state-info/15 text-state-info'
     case 'completed':
       return 'bg-state-success/15 text-state-success'

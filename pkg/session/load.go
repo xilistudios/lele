@@ -180,6 +180,7 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 		Model:            meta.Model,
 		ThinkingLevel:    meta.ThinkingLevel,
 		Folder:           meta.Folder,
+		SubagentStatus:   meta.SubagentStatus,
 		InputTokens:      meta.InputTokens,
 		OutputTokens:     meta.OutputTokens,
 		CompactionCount:  meta.CompactionCount,
@@ -210,12 +211,13 @@ func (sm *SessionManager) loadSessionMetadataFromSQLite() error {
 	sm.sessionMeta = make(map[string]*sessionMetadata, len(metas))
 	for _, meta := range metas {
 		sm.sessionMeta[meta.Key] = &sessionMetadata{
-			Key:     meta.Key,
-			Name:    meta.Name,
-			Mode:    meta.Mode,
-			Folder:  meta.Folder,
-			Created: meta.CreatedAt,
-			Updated: meta.UpdatedAt,
+			Key:            meta.Key,
+			Name:           meta.Name,
+			Mode:           meta.Mode,
+			Folder:         meta.Folder,
+			SubagentStatus: meta.SubagentStatus,
+			Created:        meta.CreatedAt,
+			Updated:        meta.UpdatedAt,
 		}
 	}
 	return nil

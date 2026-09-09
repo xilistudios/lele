@@ -32,9 +32,10 @@ export function useSubagents(sessionKey: string | null, pollIntervalMs = 5000) {
     fetchSubagents()
   }, [fetchSubagents])
 
-  // Track running state so the polling effect can react to it.
+  // Track running state so the polling effect can react to it. Pending tasks
+  // are also live work: they transition to running once dependencies clear.
   useEffect(() => {
-    setHasRunning(subagents.some((s) => s.status === 'running'))
+    setHasRunning(subagents.some((s) => s.status === 'running' || s.status === 'pending'))
   }, [subagents])
 
   // Poll every 5s while any subagent is running

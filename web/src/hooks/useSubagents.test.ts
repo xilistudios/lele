@@ -117,4 +117,46 @@ describe('useSubagents', () => {
     })
     expect(fetchMock.mock.calls.length).toBe(callsAfterMount)
   })
+
+  test('polls while a subagent is pending (live work, like running)', async () => {
+    let pending = true
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.includes('/api/v1/chat/sessions/session-1/subagents')) {
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
+      }
+      return new Response(
+        JSON.stringify(
+          mockSubagentsResponse([subagent({ status: pending ? 'pending' : 'completed' })]),
+        ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const { result } = renderHook(() => useSubagents('session-1', 50), { wrapper })
+
+    await waitFor(() => {
+      expect(result.current.subagents.length).toBe(1)
+    })
+
+    const callsAfterMount = fetchMock.mock.calls.length
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    // Pending tasks are live: polling must continue.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterMount)
+
+    pending = false
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    expect(result.current.subagents[0].status).toBe('completed')
+
+    const callsAtComplete = fetchMock.mock.calls.length
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    expect(fetchMock.mock.calls.length).toBe(callsAtComplete)
+  })
 })

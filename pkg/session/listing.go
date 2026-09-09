@@ -362,6 +362,11 @@ type SubagentSessionInfo struct {
 	Iterations int    // number of assistant messages
 	Summary    string // session summary if available
 	Name       string // session name if available
+	// Status is the persisted terminal status of the subagent task
+	// ("completed", "failed", ...). Empty means unknown (the session predates
+	// subagent_status persistence); readers fall back to "completed", the
+	// historical hard-coded value.
+	Status string
 }
 
 // FindSubagentSessions returns persisted subagent sessions whose keys start
@@ -432,6 +437,7 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 			Iterations: iterations,
 			Summary:    summary,
 			Name:       session.Name,
+			Status:     session.SubagentStatus,
 		})
 	}
 
