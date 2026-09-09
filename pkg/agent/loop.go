@@ -1079,13 +1079,13 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		// The caller's budget (the shutdown coordinator's per-hook timeout) is
 		// spent while turns are still running. Those goroutines are left alone
-		// on purpose: Stop(), which runs after every hook, joins them properly.
+		// on purpose: the gateway cancels the root context right after the
+		// hooks and then joins them again through StopWithin, which is bounded.
 		//
-		// The `drained` goroutine above is intentionally not cancelled here: it
-		// blocks only on al.wg.Wait(), which Stop() is guaranteed to satisfy
-		// (Stop cancels goalStopCtx and joins the same WaitGroup). So this
-		// goroutine is bounded — it exits as soon as Stop drains the work, well
-		// before the process exits — and does not need its own lifecycle handle.
+		// The `drained` goroutine above is intentionally not cancelled here:
+		// it blocks only on al.wg.Wait(), which Stop/StopWithin join, and the
+		// process exits as soon as that join is done or abandoned. It needs no
+		// lifecycle handle of its own.
 		logger.WarnCF("agent", "Agent loop drain timed out", map[string]interface{}{
 			"error": ctx.Err().Error(),
 		})
@@ -1093,9 +1093,33 @@ func (al *AgentLoop) Shutdown(ctx context.Context) error {
 	}
 }
 
-// Stop stops the agent loop and waits for in-flight message goroutines to finish.
+// Stop stops the agent loop and waits for in-flight message goroutines to
+// finish. It is the unbounded form of StopWithin and is meant for callers
+// (the TUI) that own the process exit and can wait as long as the work needs.
 func (al *AgentLoop) Stop() {
+	_ = al.StopWithin(0)
+}
+
+// StopWithin tears the loop down and joins the in-flight turns, giving up on
+// them after grace. grace <= 0 waits forever, which is what Stop does.
+//
+// The bounded form exists because a turn that outlived the drain can only be
+// released by cancelling the root context it runs on, and the gateway does
+// exactly that right before calling this. If a turn still refuses to exit - a
+// tool that does not observe cancellation, a subagent with its own context -
+// the join must not be what keeps the process alive: systemd's
+// TimeoutStopUSec would fire, SIGKILL would land on every turn, and a
+// self-update restart would look like a crash (this was the 90 s hang that
+// made the updater appear to "stop the service and never start it").
+//
+// When the grace expires the store is deliberately left open: closing it
+// under a live turn would pull persistence out from underneath it, and
+// SQLite recovers the WAL on the next open anyway. The returned error tells
+// the caller the join was abandoned, never that the teardown failed.
+func (al *AgentLoop) StopWithin(grace time.Duration) error {
 	al.running.Store(false)
+
+	abandoned := false
 	al.stopOnce.Do(func() {
 		if al.goalStopCancel != nil {
 			al.goalStopCancel()
@@ -1107,13 +1131,39 @@ func (al *AgentLoop) Stop() {
 		if al.stopSessionCleanup != nil {
 			al.stopSessionCleanup()
 		}
-		al.wg.Wait()
+
+		if grace > 0 {
+			// Same bounded-wait shape as Shutdown: the helper goroutine is
+			// safe to leave blocked on wg.Wait() when the grace expires
+			// because the process exits right after this returns.
+			done := make(chan struct{})
+			go func() {
+				al.wg.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(grace):
+				abandoned = true
+				logger.WarnCF("agent", "Agent loop stop timed out; abandoning in-flight turns",
+					map[string]interface{}{"grace": grace.String()})
+				return
+			}
+		} else {
+			al.wg.Wait()
+		}
+
 		if al.dbStore != nil {
 			if err := al.dbStore.Close(); err != nil {
 				logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
 			}
 		}
 	})
+
+	if abandoned {
+		return fmt.Errorf("agent loop stop timed out after %s with turns in flight", grace)
+	}
+	return nil
 }
 
 // markGoalLoopActive records that the session is inside an active goal

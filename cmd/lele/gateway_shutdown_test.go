@@ -44,10 +44,10 @@ func newGatewayTestLoop(t *testing.T) *agent.AgentLoop {
 	return agent.NewAgentLoop(cfg, bus.NewMessageBus())
 }
 
-// TestRunGracefulShutdownOrder pins the two ordering guarantees the gateway's
+// TestRunGracefulShutdownOrder pins the ordering guarantees the gateway's
 // teardown exists for: hooks run LIFO, and the root context is cancelled only
-// after every hook has returned. Cancelling earlier is precisely what used to
-// kill in-flight turns mid-request.
+// after every hook has returned. Cancelling earlier is what used to kill
+// in-flight turns mid-request.
 func TestRunGracefulShutdownOrder(t *testing.T) {
 	silenceGatewayOutput(t)
 
@@ -118,8 +118,11 @@ func TestRunGracefulShutdownIsIdempotent(t *testing.T) {
 	if ran != 1 {
 		t.Errorf("hooks ran %d times, want 1 (RunAll is idempotent)", ran)
 	}
-	if cancels != 2 {
-		t.Errorf("cancel called %d times, want 2: a CancelFunc is safe to call twice", cancels)
+	// The cancel now lives inside the once (it must run before the join, and
+	// only the first teardown performs the join), so a repeat call is fully
+	// inert: the context was already released by the first pass.
+	if cancels != 1 {
+		t.Errorf("cancel called %d times, want 1: the teardown runs exactly once", cancels)
 	}
 }
 
@@ -194,5 +197,119 @@ func TestRestarterOnRestartRunsTeardownOnce(t *testing.T) {
 	defer mu.Unlock()
 	if ran != 1 {
 		t.Errorf("hook ran %d times, want 1 across restart + signal triggers", ran)
+	}
+}
+
+// fakeTurnJoiner records when the gateway performs its final join, and can be
+// made to wait for something the teardown is supposed to do first. It stands in
+// for the AgentLoop's in-flight-turn tracking, which is unexported.
+type fakeTurnJoiner struct {
+	// release, when non-nil, is closed by the test's cancel func and StopWithin
+	// blocks until it is. This reproduces the real dependency - an in-flight
+	// turn can only end once the root context is cancelled - without reaching
+	// into the loop's unexported WaitGroup.
+	release chan struct{}
+	// joined counts the joins so a test can assert the teardown ran exactly one.
+	joined int
+}
+
+func (f *fakeTurnJoiner) StopWithin(time.Duration) error {
+	if f.release != nil {
+		<-f.release
+	}
+	f.joined++
+	return nil
+}
+
+// TestRunGracefulShutdownCancelsBeforeJoin is the regression test for the
+// self-update restart hang.
+//
+// A turn that outlived the agent-drain budget runs on the gateway's root
+// context and is tracked on the loop's WaitGroup, so the teardown can only
+// finish if it cancels that context before joining: joining first waits for the
+// turn, the turn waits for the cancel, and the cancel sits behind the join.
+// That cycle is what made systemd hit TimeoutStopUSec and SIGKILL the service
+// during an update - and, on the self-exec path, what kept the parent from ever
+// exiting so the replacement child gave up on the instance lock and died with
+// "already running".
+//
+// The fake joiner below blocks until the cancel fires, so a teardown that
+// cancels after joining hangs and this test fails by timeout.
+func TestRunGracefulShutdownCancelsBeforeJoin(t *testing.T) {
+	silenceGatewayOutput(t)
+
+	var mu sync.Mutex
+	var events []string
+	record := func(name string) {
+		mu.Lock()
+		events = append(events, name)
+		mu.Unlock()
+	}
+
+	joiner := &fakeTurnJoiner{release: make(chan struct{})}
+	coord := update.NewShutdownCoordinator(5 * time.Second)
+	// The drain hook loses the race against the turn, as it does in production
+	// for any turn longer than its budget.
+	coord.Register("agent-drain", time.Second, func(context.Context) error {
+		record("hook")
+		return nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runGracefulShutdown(coord, joiner, func() {
+			record("cancel")
+			close(joiner.release)
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runGracefulShutdown deadlocked: it joined the in-flight turn before cancelling the root context")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(events, ","); got != "hook,cancel" {
+		t.Errorf("teardown order = %q, want %q", got, "hook,cancel")
+	}
+	// The join ran, and it could only run after the cancel: StopWithin blocks
+	// until the cancel func closes joiner.release, so runGracefulShutdown
+	// returning at all is the proof that the root context was released first.
+	if joiner.joined != 1 {
+		t.Errorf("final join ran %d times, want 1", joiner.joined)
+	}
+}
+
+// TestRunGracefulShutdownJoinsOnlyOnceAcrossTriggers pins that the restart path
+// and the signal path share one teardown, so a turn is never joined twice and
+// the store is never closed under a second Stop.
+func TestRunGracefulShutdownJoinsOnlyOnceAcrossTriggers(t *testing.T) {
+	silenceGatewayOutput(t)
+
+	joiner := &fakeTurnJoiner{}
+	coord := update.NewShutdownCoordinator(5 * time.Second)
+	hooks := 0
+	coord.Register("hook", time.Second, func(context.Context) error {
+		hooks++
+		return nil
+	})
+
+	cancelled := 0
+	cancel := func() { cancelled++ }
+
+	runGracefulShutdown(coord, joiner, cancel)
+	runGracefulShutdown(coord, joiner, cancel)
+
+	if cancelled != 1 {
+		t.Errorf("cancel called %d times, want 1", cancelled)
+	}
+	if hooks != 1 {
+		t.Errorf("hooks ran %d times, want 1", hooks)
+	}
+	if joiner.joined != 1 {
+		t.Errorf("final join ran %d times, want 1", joiner.joined)
 	}
 }

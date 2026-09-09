@@ -204,3 +204,90 @@ func TestAgentLoop_StopAfterShutdown(t *testing.T) {
 		t.Fatal("Stop() returned before the in-flight turn finished")
 	}
 }
+
+// --- StopWithin ------------------------------------------------------------
+
+// TestAgentLoop_StopWithin_Graceful verifies the bounded join returns nil and
+// closes the store when the in-flight turn exits inside the grace.
+func TestAgentLoop_StopWithin_Graceful(t *testing.T) {
+	al := newShutdownTestLoop(t)
+
+	finished := make(chan struct{})
+	al.wg.Add(1)
+	go func() {
+		defer al.wg.Done()
+		defer close(finished)
+		time.Sleep(80 * time.Millisecond)
+	}()
+
+	if err := al.StopWithin(5 * time.Second); err != nil {
+		t.Fatalf("StopWithin() = %v, want nil (turn exited inside the grace)", err)
+	}
+	select {
+	case <-finished:
+	default:
+		t.Fatal("StopWithin returned before the in-flight turn finished")
+	}
+	if al.dbStore != nil {
+		if err := al.dbStore.DB().Ping(); err == nil {
+			t.Error("Store is still open after a graceful StopWithin; the join must close it")
+		}
+	}
+}
+
+// TestAgentLoop_StopWithin_TimeoutAbandonsJoin is the guard against the 90 s
+// systemd SIGKILL: a turn that ignores cancellation must NOT be able to hold
+// the teardown hostage. StopWithin gives up after the grace, reports it, and
+// leaves the store open for the abandoned turn instead of closing it mid-write.
+func TestAgentLoop_StopWithin_TimeoutAbandonsJoin(t *testing.T) {
+	al := newShutdownTestLoop(t)
+
+	release := make(chan struct{})
+	al.wg.Add(1)
+	go func() {
+		defer al.wg.Done()
+		<-release // never observes any context: the worst-case tool
+	}()
+	t.Cleanup(func() { close(release) })
+
+	start := time.Now()
+	err := al.StopWithin(50 * time.Millisecond)
+	if err == nil {
+		t.Fatal("StopWithin() = nil, want an error: the join was abandoned")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("StopWithin took %v; the abandoned join must return at the grace", elapsed)
+	}
+	if al.running.Load() {
+		t.Error("Expected running to be false after a timed-out StopWithin")
+	}
+	// The abandoned turn may still write: the store must stay open.
+	if al.dbStore != nil {
+		if perr := al.dbStore.DB().Ping(); perr != nil {
+			t.Errorf("Store was closed while a turn was still in flight: %v", perr)
+		}
+	}
+}
+
+// TestAgentLoop_StopWithin_Idempotent pins that Stop and StopWithin share one
+// stopOnce: the gateway's bounded join and any later unbounded Stop (defer in
+// the TUI, a second teardown trigger) must not double-close channels or panic.
+func TestAgentLoop_StopWithin_Idempotent(t *testing.T) {
+	al := newShutdownTestLoop(t)
+
+	cleanupStop := make(chan struct{})
+	stopped := 0
+	al.stopSessionCleanup = func() {
+		stopped++
+		close(cleanupStop)
+	}
+
+	if err := al.StopWithin(time.Second); err != nil {
+		t.Fatalf("StopWithin() = %v, want nil on an idle loop", err)
+	}
+	al.Stop() // the unbounded form must be a no-op afterwards
+
+	if stopped != 1 {
+		t.Errorf("session cleanup stopper called %d times, want 1", stopped)
+	}
+}
