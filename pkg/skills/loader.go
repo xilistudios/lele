@@ -92,6 +92,20 @@ func (sl *SkillsLoader) GetConfigManager() *WorkspaceConfigManager {
 	return sl.configMgr
 }
 
+// WorkspaceDir returns the workspace this loader scans for workspace-scoped
+// skills (the directory whose "skills" subfolder receives new installs). It is
+// the same value the loader was built with, so callers can construct a
+// SkillInstaller that writes exactly where this loader reads.
+func (sl *SkillsLoader) WorkspaceDir() string {
+	return sl.workspace
+}
+
+// GlobalSkillsDir returns the shared (user-wide) skills directory this loader
+// reads, if any.
+func (sl *SkillsLoader) GlobalSkillsDir() string {
+	return sl.globalSkills
+}
+
 func (sl *SkillsLoader) ListSkills() []SkillInfo {
 	skills := make([]SkillInfo, 0)
 

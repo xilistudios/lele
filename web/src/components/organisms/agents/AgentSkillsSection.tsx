@@ -1,10 +1,23 @@
 /**
  * AgentSkillsSection — "Skills" tab panel of /agents/:agentId (spec §4.5).
  *
- * Renders the per-agent skills allowlist (`agents.list.{i}.skills`) as a grid
- * of ToggleCards fed by `GET /api/v1/agents/{agentId}/catalog` (react-query,
- * same pattern as `ModelSearchInput`; the app-level QueryClientProvider lives
- * in main.tsx and AgentConfigPage already mounts SettingsProvider).
+ * Two kinds of state meet on this panel and must not be confused:
+ *
+ *  - ALLOWLIST (config, `agents.list.{i}.skills`): which skills this agent may
+ *    use. Written through `updateField` and saved with the rest of the config —
+ *    the card checkbox, the None/All buttons.
+ *  - WORKSPACE (disk, this agent's `<workspace>/skills` + its
+ *    `.lele/workspace.json`): which skills are INSTALLED and ENABLED for it.
+ *    Written through the per-agent REST endpoints immediately — the power and
+ *    trash buttons and "Add skill" — with no Save involved.
+ *
+ * Both read from the same endpoint, `GET /api/v1/agents/{agentId}/catalog`,
+ * which the backend resolves against the agent's live skills loader, so the
+ * grid can never show a different skill set than the one the agent's system
+ * prompt advertises.
+ *
+ * (react-query; the app-level QueryClientProvider lives in main.tsx and
+ * AgentConfigPage already mounts SettingsProvider.)
  *
  * Contract with the parent (AgentConfigPage):
  * - `agentId` is passed explicitly as a prop: this component must NOT re-derive
@@ -26,17 +39,29 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useSettings } from '../../../contexts/SettingsContext'
+import { agentCatalogQueryKey, useAgentSkills } from '../../../hooks/useAgentSkills'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
 import { isSectionDirty } from '../../../lib/agentDirty'
 import { sourceBadgeClassNames, sourceBadgeLabel } from '../../../lib/skillSource'
 import type { EditableAgentConfig, SkillSource } from '../../../lib/types'
 import { Badge } from '../../atoms/Badge'
 import { Button } from '../../atoms/Button'
-import { CloseIcon, LockIcon, SearchIcon } from '../../atoms/Icons'
+import { IconButton } from '../../atoms/IconButton'
+import {
+  CloseIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LockIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from '../../atoms/Icons'
 import { RemoveButton } from '../../atoms/RemoveButton'
 import { ToggleCard } from '../../molecules/ToggleCard'
+import { AgentSkillInstallDialog } from './AgentSkillInstallDialog'
 
 type Props = {
   /** The agent being edited (draft copy from the settings context). */
@@ -47,15 +72,16 @@ type Props = {
   agentId: string
 }
 
-/** Query key of the per-agent catalog (tools + skills). Exported for tests/invalidation. */
-export const agentCatalogQueryKey = (agentId: string) => ['agentCatalog', agentId] as const
-
 /** One catalog skill as the grid needs it. */
 type CatalogSkill = {
   name: string
   description: string
   source: SkillSource
   enabled: boolean
+  /** Server-decided: the skill lives in THIS agent's workspace dir, so it may
+   * be installed/removed through the agent. Global/built-in skills are shared
+   * with every other agent and must not be removable from here. */
+  deletable: boolean
 }
 
 /** Alphabetical by name (§4.5.5: selected entries do NOT float up — no
@@ -110,9 +136,128 @@ function ToggleCardSkeleton() {
   )
 }
 
+/**
+ * Enable/disable and delete, rendered inside a skill card.
+ *
+ * Both act on the agent's WORKSPACE (disk + its workspace.json), not on the
+ * config allowlist, and take effect immediately — which is why each shows its
+ * own pending state instead of waiting for the page's Save.
+ *
+ * Delete is offered only when the server said `deletable` (the skill lives in
+ * this agent's own workspace). Global and built-in skills are shared with every
+ * other agent, so removing them from here would be a surprising side effect;
+ * the Skills page owns that.
+ *
+ * Confirmation is inline (same pattern as `organisms/SkillsList`) because a
+ * delete is the one action here that cannot be undone by discarding the form.
+ */
+function SkillCardActions({
+  name,
+  enabled,
+  deletable,
+  pendingToggle,
+  pendingRemove,
+  confirmingRemove,
+  onAskRemove,
+  onCancelRemove,
+  onConfirmRemove,
+  onToggle,
+}: {
+  name: string
+  enabled: boolean
+  deletable: boolean
+  pendingToggle: boolean
+  pendingRemove: boolean
+  confirmingRemove: boolean
+  onAskRemove: (name: string) => void
+  onCancelRemove: () => void
+  onConfirmRemove: (name: string) => void
+  onToggle: (enabled: boolean) => void
+}) {
+  const { t } = useTranslation()
+
+  if (confirmingRemove) {
+    return (
+      <span
+        data-testid={`skill-remove-confirm-${name}`}
+        className="flex items-center gap-1.5 text-[11px]"
+      >
+        <span className="text-text-secondary">
+          {t('settings.agentPage.skillsConfirmRemove', { defaultValue: 'Remove?' })}
+        </span>
+        <Button
+          variant="danger"
+          size="sm"
+          data-testid={`skill-remove-yes-${name}`}
+          disabled={pendingRemove}
+          onClick={() => onConfirmRemove(name)}
+        >
+          {t('common.delete', { defaultValue: 'Delete' })}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancelRemove}>
+          {t('common.cancel', { defaultValue: 'Cancel' })}
+        </Button>
+      </span>
+    )
+  }
+
+  return (
+    <>
+      {/* Enabled/disabled is the AGENT's own workspace.json, so it applies to
+          any skill the agent sees — disabling a shared skill for THIS agent is
+          exactly what a per-agent config is for. */}
+      <IconButton
+        dataTestId={`skill-toggle-${name}`}
+        title={
+          enabled
+            ? t('settings.agentPage.skillsDisable', { defaultValue: 'Disable in workspace' })
+            : t('settings.agentPage.skillsEnable', { defaultValue: 'Enable in workspace' })
+        }
+        ariaLabel={
+          enabled
+            ? t('settings.agentPage.skillsDisableAria', {
+                defaultValue: 'Disable {{name}} in this workspace',
+                name,
+              })
+            : t('settings.agentPage.skillsEnableAria', {
+                defaultValue: 'Enable {{name}} in this workspace',
+                name,
+              })
+        }
+        disabled={pendingToggle}
+        onClick={() => onToggle(!enabled)}
+      >
+        {enabled ? <EyeIcon size={14} /> : <EyeOffIcon size={14} />}
+      </IconButton>
+      {deletable && (
+        <IconButton
+          dataTestId={`skill-remove-${name}`}
+          variant="danger"
+          title={t('settings.agentPage.skillsRemove', { defaultValue: 'Remove from workspace' })}
+          ariaLabel={t('settings.agentPage.skillsRemoveAria', {
+            defaultValue: 'Remove {{name}} from this workspace',
+            name,
+          })}
+          disabled={pendingRemove}
+          onClick={() => onAskRemove(name)}
+        >
+          <TrashIcon size={14} />
+        </IconButton>
+      )}
+    </>
+  )
+}
+
 export function AgentSkillsSection({ agent, index, agentId }: Props) {
   const { t, updateField, dirtyPaths, validationErrors, api } = useSettings()
   const [query, setQuery] = useState('')
+
+  // Workspace administration (install / enable / remove) — immediate REST
+  // writes; see the header comment for how that differs from the allowlist.
+  const skills = useAgentSkills(api, { agentId })
+  const [installOpen, setInstallOpen] = useState(false)
+  /** Skill awaiting a delete confirmation, mirroring SkillsList's pattern. */
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null)
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: agentCatalogQueryKey(agentId),
@@ -129,6 +274,8 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
 
   const catalog: CatalogSkill[] = useMemo(() => [...(data?.skills ?? [])].sort(byName), [data])
   const catalogNames = useMemo(() => new Set(catalog.map((entry) => entry.name)), [catalog])
+  /** Directory a workspace-scoped install writes into ("" until loaded). */
+  const workspacePath = data?.workspace ?? ''
 
   /** Names in agent.skills the catalog does not know (uninstalled / removed
    *  globally). Rendered FIRST, above the grid, never hidden (§4.5.4). */
@@ -175,8 +322,27 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
   const setNone = () => writeSkills([])
   const setAll = () => writeSkills(catalog.map((entry) => entry.name))
 
+  const confirmRemove = (name: string) => {
+    setPendingRemove(null)
+    void skills.remove(name)
+  }
+
   /** Same rule as the tab dot (§5.3): any dirty path under `…skills`. */
   const sectionDirty = isSectionDirty(dirtyPaths, index, 'skills')
+
+  /**
+   * One dialog instance for the whole panel (toolbar button and empty state
+   * both open it), defined before the early returns so no branch can render a
+   * second copy with a different set of props.
+   */
+  const installDialog = (
+    <AgentSkillInstallDialog
+      agentId={agentId}
+      workspacePath={workspacePath}
+      isOpen={installOpen}
+      onClose={() => setInstallOpen(false)}
+    />
+  )
 
   // ---------- Loading (§5.1: 4 ToggleCard skeletons) ----------
   if (isLoading) {
@@ -212,16 +378,32 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
   // ---------- Empty: nothing installed AND nothing orphaned (§4.5 / §5.5) ----------
   if (catalog.length === 0 && orphans.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center">
-        <p className="text-sm text-text-secondary">
-          {t('settings.agentPage.skillsNoneInstalled', {
-            defaultValue: 'No skills installed yet. Install them from the Skills page.',
-          })}
-        </p>
-        <Link to="/skills" className="text-sm text-interaction-primary hover:underline">
-          {t('settings.agentPage.goToSkills', { defaultValue: 'Go to Skills' })}
-        </Link>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-8 text-center">
+          <p className="text-sm text-text-secondary">
+            {t('settings.agentPage.skillsNoneInstalled', {
+              defaultValue: 'No skills installed in this workspace yet.',
+            })}
+          </p>
+          {/* Two destinations, because there are two places a skill can live:
+              install here (this agent only) or manage the shared catalogue. */}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="skills-empty-add"
+              onClick={() => setInstallOpen(true)}
+            >
+              <PlusIcon size={14} />
+              {t('settings.agentPage.skillsAdd', { defaultValue: 'Add skill' })}
+            </Button>
+            <Link to="/skills" className="text-sm text-interaction-primary hover:underline">
+              {t('settings.agentPage.goToSkills', { defaultValue: 'Go to Skills' })}
+            </Link>
+          </div>
+        </div>
+        {installDialog}
+      </>
     )
   }
 
@@ -303,7 +485,30 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
         <Button variant="ghost" size="sm" data-testid="skills-batch-all" onClick={setAll}>
           {t('settings.agentPage.skillAll', { defaultValue: 'All' })}
         </Button>
+
+        {/* Workspace administration — writes immediately, no Save involved. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          data-testid="skills-add"
+          onClick={() => setInstallOpen(true)}
+        >
+          <PlusIcon size={14} />
+          {t('settings.agentPage.skillsAdd', { defaultValue: 'Add skill' })}
+        </Button>
       </div>
+
+      {/* A failed REST write has nowhere else to surface: the config form's save
+          banner is about unsaved edits, not about this panel's own actions. */}
+      {skills.error && (
+        <p
+          data-testid="skills-action-error"
+          role="alert"
+          className="mb-3 rounded-lg border border-state-error/40 bg-state-error-light px-3 py-2 text-xs text-state-error"
+        >
+          {skills.error}
+        </p>
+      )}
 
       {/* ---------- Orphans: in agent.skills, not in the catalog (§4.5.4) ---------- */}
       {orphans.length > 0 && (
@@ -384,6 +589,20 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
                         })
                       : undefined
                   }
+                  actions={
+                    <SkillCardActions
+                      name={entry.name}
+                      enabled={entry.enabled}
+                      deletable={entry.deletable}
+                      pendingToggle={skills.isToggling === entry.name}
+                      pendingRemove={skills.isRemoving === entry.name}
+                      confirmingRemove={pendingRemove === entry.name}
+                      onAskRemove={setPendingRemove}
+                      onCancelRemove={() => setPendingRemove(null)}
+                      onConfirmRemove={confirmRemove}
+                      onToggle={(next) => void skills.toggle(entry.name, next)}
+                    />
+                  }
                 />
               </div>
             )
@@ -406,6 +625,10 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
           })}
         </p>
       )}
+
+      {/* Install into this agent's workspace (or globally) — the dialog owns
+          the scope choice and invalidates the catalog on success. */}
+      {installDialog}
     </div>
   )
 }

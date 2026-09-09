@@ -26,22 +26,46 @@ import { AgentSkillsSection } from './AgentSkillsSection'
  * queries come from the render result.
  */
 
+/** Workspace the fake catalog reports; the install dialog echoes it. */
+const AGENT_WORKSPACE = '/home/u/.lele/workspace-coder'
+
+// `deletable` mirrors what the backend computes: true ONLY for a skill living
+// in this agent's own workspace dir (global/builtin are shared with others).
 const CATALOG: AgentCatalogResponse = {
   agent_id: 'coder',
+  workspace: AGENT_WORKSPACE,
   tools: [],
   skills: [
-    { name: 'weather', description: 'Get weather and forecasts', source: 'global', enabled: true },
+    {
+      name: 'weather',
+      description: 'Get weather and forecasts',
+      source: 'global',
+      enabled: true,
+      deletable: false,
+    },
     {
       name: 'chrome',
       description: 'Automate Chrome for debugging',
       source: 'workspace',
       enabled: true,
+      deletable: true,
     },
-    { name: 'memory', description: 'Organize memory files', source: 'builtin', enabled: false },
+    {
+      name: 'memory',
+      description: 'Organize memory files',
+      source: 'builtin',
+      enabled: false,
+      deletable: false,
+    },
   ],
 }
 
-const EMPTY_CATALOG: AgentCatalogResponse = { agent_id: 'coder', tools: [], skills: [] }
+const EMPTY_CATALOG: AgentCatalogResponse = {
+  agent_id: 'coder',
+  workspace: AGENT_WORKSPACE,
+  tools: [],
+  skills: [],
+}
 
 function makeApi(getCatalog: (id: string) => Promise<AgentCatalogResponse>): ApiClient {
   return {

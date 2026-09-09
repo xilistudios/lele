@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AvailableSkill, ScannedSkill } from '../../lib/types'
+import type { AvailableSkill, ScannedSkill, SkillInstallScope } from '../../lib/types'
 import { Button, Modal, Spinner } from '../atoms'
 
 type Props = {
@@ -15,6 +15,91 @@ type Props = {
   onScan: (repo: string) => Promise<ScannedSkill[] | null>
   onInstallBatch: (repo: string, skills: string[]) => void
   onClearScan: () => void
+  /**
+   * Where the install writes. Passed by the per-agent Skills tab so the same
+   * dialog can install into the agent's own workspace or the shared global
+   * directory. OMITTED = the dialog installs wherever the caller's `onInstall`
+   * already points (the Skills page's global behaviour), and no scope control
+   * is rendered — the existing consumer is untouched.
+   */
+  scope?: SkillInstallScope
+  onScopeChange?: (scope: SkillInstallScope) => void
+  /** Workspace directory shown next to the "workspace" option, so the choice
+   * is concrete instead of abstract. */
+  workspacePath?: string
+}
+
+/**
+ * ScopePicker — where the install writes.
+ *
+ * Only rendered when the caller passes `scope`/`onScopeChange` (the per-agent
+ * Skills tab). The Skills page keeps the old, single-destination behaviour and
+ * sees no control at all.
+ *
+ * The workspace option prints the agent's directory because "workspace" means
+ * nothing without knowing WHICH workspace — that ambiguity is the exact bug
+ * this feature fixes.
+ */
+function ScopePicker({
+  scope,
+  onScopeChange,
+  workspacePath,
+}: {
+  scope: SkillInstallScope
+  onScopeChange: (scope: SkillInstallScope) => void
+  workspacePath?: string
+}) {
+  const { t } = useTranslation()
+  const options: { value: SkillInstallScope; label: string; hint: string }[] = [
+    {
+      value: 'workspace',
+      label: t('skills.scopeWorkspace', "This agent's workspace"),
+      hint: workspacePath || t('skills.scopeWorkspaceNoPath', "the agent's own skills folder"),
+    },
+    {
+      value: 'global',
+      label: t('skills.scopeGlobal', 'Global (all agents)'),
+      hint: t('skills.scopeGlobalHint', 'shared ~/.lele/skills directory'),
+    },
+  ]
+
+  return (
+    <div
+      data-testid="install-scope"
+      className="flex flex-col gap-2 rounded-lg border border-border bg-background-secondary/60 p-3"
+    >
+      <span className="text-xs font-medium text-text-secondary">
+        {t('skills.installInto', 'Install into')}
+      </span>
+      <div
+        className="flex flex-wrap gap-2"
+        role="radiogroup"
+        aria-label={t('skills.installInto', 'Install into')}
+      >
+        {options.map((option) => {
+          const active = scope === option.value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              data-testid={`install-scope-${option.value}`}
+              onClick={() => onScopeChange(option.value)}
+              title={option.hint}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? 'border-brand-rosa bg-brand-rosa/10 text-brand-rosa'
+                  : 'border-border text-text-secondary hover:border-brand-rosa/30 hover:text-text-primary'
+              }`}
+            >
+              {option.label}
+              <span className="ml-1.5 font-mono text-[10px] text-text-tertiary">{option.hint}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export function InstallSkillModal({
@@ -29,6 +114,9 @@ export function InstallSkillModal({
   onScan,
   onInstallBatch,
   onClearScan,
+  scope,
+  onScopeChange,
+  workspacePath,
 }: Props) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'browse' | 'url'>('browse')
@@ -105,8 +193,15 @@ export function InstallSkillModal({
         title={t('skills.selectSkills', 'Select Skills to Install')}
         size="lg"
       >
-        <div className="flex flex-col p-6">
-          <p className="text-sm text-text-secondary mb-4">
+        <div className="flex flex-col gap-4 p-6">
+          {scope && onScopeChange && (
+            <ScopePicker
+              scope={scope}
+              onScopeChange={onScopeChange}
+              workspacePath={workspacePath}
+            />
+          )}
+          <p className="text-sm text-text-secondary">
             {t('skills.foundSkills', 'Found {{count}} skills in', { count: scanResults.length })}{' '}
             <span className="font-medium text-text-primary">{scannedRepo}</span>
           </p>
@@ -201,6 +296,17 @@ export function InstallSkillModal({
             {t('skills.installFromUrl', 'Install from URL')}
           </button>
         </div>
+
+        {/* Install destination — shared by both tabs. */}
+        {scope && onScopeChange && (
+          <div className="px-6 pt-4">
+            <ScopePicker
+              scope={scope}
+              onScopeChange={onScopeChange}
+              workspacePath={workspacePath}
+            />
+          </div>
+        )}
 
         {/* Browse tab */}
         {activeTab === 'browse' && (

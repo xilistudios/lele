@@ -12,6 +12,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/config"
 	lelectx "github.com/xilistudios/lele/pkg/context"
+	"github.com/xilistudios/lele/pkg/skills"
 )
 
 func (n *NativeChannel) handleAgents(w http.ResponseWriter, r *http.Request) {
@@ -65,8 +66,8 @@ func (n *NativeChannel) handleAgentInfo(w http.ResponseWriter, r *http.Request) 
 // It reports what the agent CAN actually use right now, derived from live
 // runtime state (never hardcoded):
 //   - tools:  the agent instance's real ToolRegistry via agentLoop.ListAgentTools
-//   - skills: the same loader that backs GET /api/v1/skills (n.skillsLoader),
-//     so both endpoints always agree on what is installed/enabled.
+//   - skills: the agent's OWN skills loader (see skillLoaderFor), so the list
+//     matches the <skills> block of this agent's system prompt.
 //
 // Returns 404 when the agent does not exist (same pattern as handleAgentInfo).
 func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Request) {
@@ -99,29 +100,46 @@ func (n *NativeChannel) handleAgentCatalog(w http.ResponseWriter, r *http.Reques
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 
-	// Skills come from the shared loader (see handleSkills in rest_system.go).
-	var skills []AgentCatalogSkill
-	if n.skillsLoader != nil {
-		loaded := n.skillsLoader.ListSkills()
-		skills = make([]AgentCatalogSkill, 0, len(loaded))
-		for _, s := range loaded {
-			skills = append(skills, AgentCatalogSkill{
-				Name:        s.Name,
-				Description: s.Description,
-				Source:      s.Source,
-				Enabled:     s.Enabled,
-			})
-		}
-		sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
-	} else {
-		skills = []AgentCatalogSkill{}
+	// Skills come from THIS agent's loader — the same instance that renders its
+	// <skills> prompt block — so the catalog can never disagree with what the
+	// agent actually sees. Before this, every agent's catalog was answered from
+	// the channel's default-workspace loader, which hid each agent's own
+	// <workspace>/skills entirely (the bug this feature fixes). skillLoaderFor
+	// falls back to that channel loader when no per-agent instance exists, so
+	// the answer degrades to the old behaviour instead of failing.
+	catalogSkills := []AgentCatalogSkill{}
+	workspace := ""
+	if loader, _, ok := n.skillLoaderFor(agentID); ok {
+		workspace = loader.WorkspaceDir()
+		catalogSkills = buildAgentCatalogSkills(loader.ListSkills(), workspace)
 	}
 
 	writeJSON(w, http.StatusOK, AgentCatalogResponse{
-		AgentID: agentID,
-		Tools:   tools,
-		Skills:  skills,
+		AgentID:   agentID,
+		Workspace: workspace,
+		Tools:     tools,
+		Skills:    catalogSkills,
 	})
+}
+
+// buildAgentCatalogSkills converts a loader's view into catalog entries,
+// marking a skill deletable only when it comes from the agent's own workspace
+// directory (global and built-in skills are shared with other agents, so they
+// must not be removable "through" one). Sorted by name; the frontend renders
+// without re-sorting.
+func buildAgentCatalogSkills(loaded []skills.SkillInfo, workspace string) []AgentCatalogSkill {
+	out := make([]AgentCatalogSkill, 0, len(loaded))
+	for _, s := range loaded {
+		out = append(out, AgentCatalogSkill{
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+			Enabled:     s.Enabled,
+			Deletable:   s.Source == "workspace" && workspace != "",
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 func (n *NativeChannel) handleAgentStatus(w http.ResponseWriter, r *http.Request) {

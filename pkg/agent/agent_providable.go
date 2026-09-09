@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 	"github.com/xilistudios/lele/pkg/session"
+	"github.com/xilistudios/lele/pkg/skills"
 	"github.com/xilistudios/lele/pkg/tools"
 )
 
@@ -160,6 +161,27 @@ func (ap *agentProvidableImpl) ListAgentTools(agentID string) ([]channels.AgentT
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	return infos, true
+}
+
+// AgentSkills returns the live skills state of an agent instance:
+//   - loader: the SAME *skills.SkillsLoader that backs the <skills> block of
+//     this agent's system prompt, so listing/toggling through it can never
+//     drift from what the agent actually sees;
+//   - invalidate: drops the agent's cached static prompt (and harness cache)
+//     so the next turn re-reads skills from disk — call it after installing,
+//     removing or toggling a skill;
+//   - ok=false when the agent ID is unknown or has no context builder.
+//
+// This is the single entry point the WebUI per-agent skills endpoints use.
+// Previously those endpoints shared one loader built on the DEFAULT agent's
+// workspace, so editing agent X listed and wrote X's sibling's skills.
+func (ap *agentProvidableImpl) AgentSkills(agentID string) (loader *skills.SkillsLoader, invalidate func(), ok bool) {
+	agent, found := ap.al.registry.GetAgent(agentID)
+	if !found || agent == nil || agent.ContextBuilder == nil {
+		return nil, nil, false
+	}
+	cb := agent.ContextBuilder
+	return cb.SkillsLoader(), cb.InvalidatePromptCache, true
 }
 
 // ============================================================================

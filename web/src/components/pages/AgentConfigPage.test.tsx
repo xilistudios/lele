@@ -27,7 +27,16 @@ const CODER: EditableAgentConfig = {
 const CATALOG: AgentCatalogResponse = {
   agent_id: 'coder',
   tools: [{ name: 'exec', description: 'Run a shell command' }],
-  skills: [{ name: 'memory', description: 'Memory files', source: 'builtin', enabled: true }],
+  skills: [
+    {
+      name: 'memory',
+      description: 'Memory files',
+      source: 'builtin',
+      enabled: true,
+      deletable: false,
+    },
+  ],
+  workspace: '/home/u/.lele/workspace-coder',
 }
 
 const api = {

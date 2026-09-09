@@ -269,7 +269,16 @@
       "filesEmpty": "Todavía no hay archivos en este workspace",
       "filesEmptyHint": "Los archivos se crean al inicializar el workspace del agente.",
       "filesLoadError": "No se pudo cargar la lista de archivos.",
-      "workspaceInherited": "Heredado de los valores por defecto"
+      "workspaceInherited": "Heredado de los valores por defecto",
+      "skillsAdd": "Añadir skill",
+      "skillsEnable": "Activar en el workspace",
+      "skillsDisable": "Desactivar en el workspace",
+      "skillsRemove": "Quitar del workspace",
+      "skillsRemoveAria": "Quitar {{name}} de este workspace",
+      "skillsConfirmRemove": "¿Quitar?",
+      "skillsInstallFailed": "No se pudo instalar la skill: {{message}}",
+      "skillsEnableAria": "Activar {{name}} en este workspace",
+      "skillsDisableAria": "Desactivar {{name}} en este workspace"
     },
     "selectModel": "Seleccionar modelo",
     "loading": "Cargando...",
@@ -869,7 +878,12 @@
       "workspace": "Workspace",
       "global": "Global",
       "builtin": "Integrado"
-    }
+    },
+    "installInto": "Instalar en",
+    "scopeWorkspace": "Workspace de este agente",
+    "scopeWorkspaceNoPath": "la carpeta de skills del agente",
+    "scopeGlobal": "Global (todos los agentes)",
+    "scopeGlobalHint": "directorio compartido ~/.lele/skills"
   },
   "mode": {
     "chat": "Chat",

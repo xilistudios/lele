@@ -19,6 +19,7 @@ type Props = {
   variant?: 'default' | 'nav' | 'nav-full' | 'danger' | 'ghost'
   className?: string
   ariaLabel?: string
+  dataTestId?: string
   children: ReactNode
 }
 
@@ -29,11 +30,13 @@ export function IconButton({
   variant = 'default',
   className = '',
   ariaLabel,
+  dataTestId,
   children,
 }: Props) {
   return (
     <button
       type="button"
+      data-testid={dataTestId}
       onClick={onClick}
       disabled={disabled}
       title={title}
