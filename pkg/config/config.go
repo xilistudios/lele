@@ -277,6 +277,10 @@ type AgentConfig struct {
 	Skills      []string          `json:"skills,omitempty"`
 	Subagents   *SubagentsConfig  `json:"subagents,omitempty"`
 	Temperature *float64          `json:"temperature,omitempty"`
+	// ThinkingLevel is the per-agent default reasoning effort ("off", "low",
+	// "medium", "high"). nil/absent = inherit: agents.defaults.thinking_level
+	// first, then the provider-model ReasoningConfig. See NormalizeThinkingLevel.
+	ThinkingLevel *string `json:"thinking_level,omitempty"`
 }
 
 type SubagentsConfig struct {
@@ -360,19 +364,24 @@ const DefaultEphemeralThresholdSeconds = 560
 const DefaultCompactionThresholdPercent = 75
 
 type AgentDefaults struct {
-	Workspace              string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace    bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	Provider               string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
-	Model                  string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
-	ModelFallbacks         []string `json:"model_fallbacks,omitempty"`
-	ImageModel             string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks    []string `json:"image_model_fallbacks,omitempty"`
-	MaxTokens              int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature            *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations      int      `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	MaxReadLines           int      `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
-	SubagentTimeoutMinutes int      `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
-	SubagentMaxConcurrent  int      `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
+	Workspace           string   `json:"workspace" env:"LELE_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace bool     `json:"restrict_to_workspace" env:"LELE_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	Provider            string   `json:"provider" env:"LELE_AGENTS_DEFAULTS_PROVIDER"`
+	Model               string   `json:"model" env:"LELE_AGENTS_DEFAULTS_MODEL"`
+	ModelFallbacks      []string `json:"model_fallbacks,omitempty"`
+	ImageModel          string   `json:"image_model,omitempty" env:"LELE_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks []string `json:"image_model_fallbacks,omitempty"`
+	MaxTokens           int      `json:"max_tokens" env:"LELE_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature         *float64 `json:"temperature,omitempty" env:"LELE_AGENTS_DEFAULTS_TEMPERATURE"`
+	// ThinkingLevel is the global default reasoning effort ("off", "low",
+	// "medium", "high"). nil/absent = inherit the provider-model
+	// ReasoningConfig; per-agent AgentConfig.ThinkingLevel overrides it.
+	// See NormalizeThinkingLevel.
+	ThinkingLevel          *string `json:"thinking_level,omitempty" env:"LELE_AGENTS_DEFAULTS_THINKING_LEVEL"`
+	MaxToolIterations      int     `json:"max_tool_iterations" env:"LELE_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	MaxReadLines           int     `json:"max_read_lines" env:"LELE_AGENTS_DEFAULTS_MAX_READ_LINES"`
+	SubagentTimeoutMinutes int     `json:"subagent_timeout_minutes" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_TIMEOUT_MINUTES"` // 0 means no timeout
+	SubagentMaxConcurrent  int     `json:"subagent_max_concurrent" env:"LELE_AGENTS_DEFAULTS_SUBAGENT_MAX_CONCURRENT"`   // max concurrent subagent tasks (0 = unlimited)
 	// SubagentMaxRetries bounds re-runs of a subagent whose LLM call failed
 	// transiently. 0 disables retries, but only when reached through config.json:
 	// LoadConfig unmarshals over DefaultConfig, so an explicit 0 in the file wins.
@@ -619,6 +628,29 @@ type ReasoningConfig struct {
 	Exclude   *bool   `json:"exclude,omitempty"`    // exclude reasoning tokens from response (OpenRouter)
 	Summary   *string `json:"summary,omitempty"`    // "auto", "detailed", "concise" (OpenAI o-series)
 	Enable    bool    `json:"enable,omitempty"`     // enables thinking/reasoning mode (e.g. DeepSeek v4)
+}
+
+// NormalizeThinkingLevel canonicalizes a thinking level string.
+// Returns ("", true) for empty/"default"/"none" (meaning: no explicit level, inherit).
+// Returns the lowercase level and true for "off","low","medium","high".
+// Returns ("", false) for anything else (invalid).
+//
+// Note: this is the semantics of agents.thinking_level / agents.defaults.thinking_level
+// (session- and agent-level reasoning effort, where "off" is a valid explicit value).
+// It is intentionally NOT shared with ReasoningConfig.Validate(), which validates the
+// per-MODEL reasoning config where "off" is not a valid effort — different semantics.
+func NormalizeThinkingLevel(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch v {
+	case "", "default", "none":
+		return "", true
+	}
+	switch v {
+	case "off", "low", "medium", "high":
+		return v, true
+	default:
+		return "", false
+	}
 }
 
 // Validate checks if the reasoning config has valid values.

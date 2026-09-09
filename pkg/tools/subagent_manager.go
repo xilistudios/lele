@@ -29,6 +29,7 @@ type SubagentManager struct {
 	temperature                float64
 	hasMaxTokens               bool
 	hasTemperature             bool
+	thinkingLevel              string        // manager-default reasoning level (parent's resolved config level); "" = no opinion, see SetThinkingLevel
 	timeout                    time.Duration // 0 means no timeout
 	retentionPeriod            time.Duration // how long to keep terminal tasks before cleanup (0 = no cleanup)
 	nextID                     int
@@ -88,6 +89,18 @@ func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.hasMaxTokens = true
 	sm.temperature = temperature
 	sm.hasTemperature = true
+}
+
+// SetThinkingLevel sets the default reasoning level for subagent LLM calls.
+// It is the owner (parent) agent's resolved config thinking_level and is used
+// only as a fallback when a task has no agent-context callback; "" means
+// "inherit" (no reasoning key is emitted). The per-session /think override of
+// the parent deliberately does NOT flow here — it belongs to the parent's user
+// conversation, not to the subagent's.
+func (sm *SubagentManager) SetThinkingLevel(level string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.thinkingLevel = level
 }
 
 // SetMaxIterations sets the maximum number of tool iterations for subagent execution.
@@ -730,6 +743,31 @@ func (sm *SubagentManager) GetToolRegistry() *ToolRegistry {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.tools
+}
+
+// AgentContextForTest invokes the agent-context callback installed by the
+// owner (see SetAgentContextCallback) and returns its result. It exists so
+// tests in other packages — specifically the agent wiring tests — can assert
+// what the callback surfaces for a given target agent without running a task.
+// Returns the zero AgentContextInfo when no callback is set.
+func (sm *SubagentManager) AgentContextForTest(agentID string) AgentContextInfo {
+	sm.mu.RLock()
+	cb := sm.getAgentContext
+	sm.mu.RUnlock()
+	if cb == nil {
+		return AgentContextInfo{}
+	}
+	return cb(agentID)
+}
+
+// ThinkingLevelForTest returns the manager-level default thinking level (see
+// SetThinkingLevel). Test-only, same rationale as AgentContextForTest: it lets
+// the agent wiring test pin that the parent's resolved level reaches the
+// manager fallback.
+func (sm *SubagentManager) ThinkingLevelForTest() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.thinkingLevel
 }
 
 // HasTool checks if a tool with the given name is available to subagents.

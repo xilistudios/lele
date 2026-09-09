@@ -11,8 +11,11 @@ import (
 )
 
 // Agent edit field indices (for ModalSettingsAgentEdit). For the agent detail
-// view the first 8 indices correspond to read-only/editable fields and the
-// last two are actions (set as default / delete).
+// view the first 10 indices correspond to read-only/editable fields and the
+// last two are actions (set as default / delete). These constants MUST stay
+// 1:1 with the row order built in loadAgentDetail's agent branch — inserting
+// or reordering a row there requires updating this block (the row-alignment
+// test in settings_agents_test.go guards it).
 const (
 	agentFieldID                     = iota // 0: ID (read-only)
 	agentFieldName                          // 1: Name
@@ -20,10 +23,38 @@ const (
 	agentFieldWorkspace                     // 3: Workspace
 	agentFieldModel                         // 4: Model (provider/alias)
 	agentFieldTemperature                   // 5: Temperature
-	agentFieldSkills                        // 6: Skills (read-only)
-	agentFieldSubagentsAllow                // 7: Subagents Allow (multi-select)
-	agentFieldSubagentsMaxConcurrent        // 8: Subagents MaxConcurrent (text input)
+	agentFieldThinkingLevel                 // 6: Thinking level (selector)
+	agentFieldSkills                        // 7: Skills (read-only)
+	agentFieldSubagentsAllow                // 8: Subagents Allow (multi-select)
+	agentFieldSubagentsMaxConcurrent        // 9: Subagents MaxConcurrent (text input)
+	agentFieldSetDefault                    // 10: Action: set as default
+	agentFieldDelete                        // 11: Action: delete agent
 )
+
+// Defaults view field indices (for ModalSettingsAgentEdit when
+// settingsAgentID is empty). These MUST stay 1:1 with the row order built in
+// loadAgentDetail's defaults branch.
+const (
+	defaultsFieldProvider      = iota // 0: Provider (selector)
+	defaultsFieldModel                // 1: Model (selector)
+	defaultsFieldMaxTokens            // 2: MaxTokens (text input)
+	defaultsFieldTemperature          // 3: Temperature (text input)
+	defaultsFieldThinkingLevel        // 4: Thinking level (selector)
+	defaultsFieldMaxToolIterations
+	defaultsFieldMaxReadLines
+	defaultsFieldSubagentTimeout
+	defaultsFieldSubagentMaxConcurrent
+	defaultsFieldLLMLoopTimeout
+)
+
+// thinkingLevelSelectorOptions returns the label/value pair lists for the
+// thinking-level selector. The first option "(default)" carries the empty
+// value, which means "inherit" (clears the field to nil) — without it the
+// field would be sticky once set (review R4).
+func thinkingLevelSelectorOptions() (labels, values []string) {
+	return []string{"(default)", "off", "low", "medium", "high"},
+		[]string{"", "off", "low", "medium", "high"}
+}
 
 // settingsAgentAddKey is the synthetic key in settingsAgentKeys that maps to
 // the "Add Agent" action row.
@@ -71,6 +102,7 @@ func (m *Model) loadAgentDetail(agentID string) {
 			fmt.Sprintf("Model: %s", valueOr(d.Model, "default")),
 			fmt.Sprintf("MaxTokens: %d", d.MaxTokens),
 			fmt.Sprintf("Temperature: %s", formatFloatPtr(d.Temperature)),
+			fmt.Sprintf("Thinking: %s", thinkingLevelStr(d.ThinkingLevel)),
 			fmt.Sprintf("MaxToolIterations: %d", d.MaxToolIterations),
 			fmt.Sprintf("MaxReadLines: %d", d.MaxReadLines),
 			fmt.Sprintf("SubagentTimeout: %dm", d.SubagentTimeoutMinutes),
@@ -100,6 +132,8 @@ func (m *Model) loadAgentDetail(agentID string) {
 		tempStr = fmt.Sprintf("%.2f", *agent.Temperature)
 	}
 
+	thinkStr := thinkingLevelStr(agent.ThinkingLevel)
+
 	skillsStr := "none"
 	if len(agent.Skills) > 0 {
 		skillsStr = strings.Join(agent.Skills, ", ")
@@ -128,6 +162,7 @@ func (m *Model) loadAgentDetail(agentID string) {
 		fmt.Sprintf("Workspace: %s", valueOr(agent.Workspace, "default")),
 		fmt.Sprintf("Model: %s", modelStr),
 		fmt.Sprintf("Temperature: %s", tempStr),
+		fmt.Sprintf("Thinking: %s", thinkStr),
 		fmt.Sprintf("Skills: %s", skillsStr),
 		fmt.Sprintf("Subagents Allow: %s", subagentsAllowStr),
 		fmt.Sprintf("Subagents MaxConcurrent: %s", subagentsMaxStr),
@@ -212,11 +247,18 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		}
 		m.textInput.SetValue(tempStr)
 		m.textInput.Focus()
-	case agentFieldSkills: // 6: Skills — not editable (managed by /skills)
+	case agentFieldThinkingLevel: // 6: Thinking level — selector with (default)/off/low/medium/high
+		current := ""
+		if agent.ThinkingLevel != nil {
+			current = *agent.ThinkingLevel
+		}
+		labels, values := thinkingLevelSelectorOptions()
+		m.startSettingsSelector("agentThinkingLevel", current, labels, values)
+	case agentFieldSkills: // 7: Skills — not editable (managed by /skills)
 		return nil
-	case agentFieldSubagentsAllow: // 7: Subagents Allow — multi-select picker
+	case agentFieldSubagentsAllow: // 8: Subagents Allow — multi-select picker
 		m.startSubagentPicker(agent)
-	case agentFieldSubagentsMaxConcurrent: // 8: Subagents MaxConcurrent — text input
+	case agentFieldSubagentsMaxConcurrent: // 9: Subagents MaxConcurrent — text input
 		m.settingsEditField = "agentSubagentsMaxConcurrent"
 		maxStr := ""
 		if agent.Subagents != nil && agent.Subagents.MaxConcurrent > 0 {
@@ -224,9 +266,9 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 		}
 		m.textInput.SetValue(maxStr)
 		m.textInput.Focus()
-	case 9: // Set as default
+	case agentFieldSetDefault: // 10: Set as default
 		m.setAgentDefault(agentID)
-	case 10: // Delete
+	case agentFieldDelete: // 11: Delete
 		m.settingsEditField = "confirmDelete"
 		m.formError = i18n.T("tui.settings.confirmDelete")
 	}
@@ -238,7 +280,7 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 	d := &m.cfg.Agents.Defaults
 	switch m.modalSelectedIdx {
-	case 0: // Provider — selector from all configured providers
+	case defaultsFieldProvider: // Provider — selector from all configured providers
 		labels, values := m.providerSelectorOptions(d.Provider)
 		if len(values) == 0 {
 			// No providers configured — fall back to text input
@@ -248,7 +290,7 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 		} else {
 			m.startSettingsSelector("defaultProvider", d.Provider, labels, values)
 		}
-	case 1: // Model — always a selector with (default) and (custom...)
+	case defaultsFieldModel: // Model — always a selector with (default) and (custom...)
 		labels, values := m.modelSelectorOptions(d.Model)
 		if len(values) == 0 {
 			// No providers configured — build minimal selector
@@ -258,31 +300,38 @@ func (m *Model) handleDefaultsEditEnter() tea.Cmd {
 		labels = append(labels, "(custom...)")
 		values = append(values, "__custom__")
 		m.startSettingsSelector("defaultModel", d.Model, labels, values)
-	case 2: // MaxTokens
+	case defaultsFieldMaxTokens: // MaxTokens
 		m.settingsEditField = "defaultMaxTokens"
 		m.textInput.SetValue(strconv.Itoa(d.MaxTokens))
 		m.textInput.Focus()
-	case 3: // Temperature
+	case defaultsFieldTemperature: // Temperature
 		m.settingsEditField = "defaultTemperature"
 		m.textInput.SetValue(formatFloatPtr(d.Temperature))
 		m.textInput.Focus()
-	case 4: // MaxToolIterations
+	case defaultsFieldThinkingLevel: // Thinking level — selector with (default)/off/low/medium/high
+		current := ""
+		if d.ThinkingLevel != nil {
+			current = *d.ThinkingLevel
+		}
+		labels, values := thinkingLevelSelectorOptions()
+		m.startSettingsSelector("defaultThinkingLevel", current, labels, values)
+	case defaultsFieldMaxToolIterations: // MaxToolIterations
 		m.settingsEditField = "defaultMaxToolIterations"
 		m.textInput.SetValue(strconv.Itoa(d.MaxToolIterations))
 		m.textInput.Focus()
-	case 5: // MaxReadLines
+	case defaultsFieldMaxReadLines: // MaxReadLines
 		m.settingsEditField = "defaultMaxReadLines"
 		m.textInput.SetValue(strconv.Itoa(d.MaxReadLines))
 		m.textInput.Focus()
-	case 6: // SubagentTimeout
+	case defaultsFieldSubagentTimeout: // SubagentTimeout
 		m.settingsEditField = "defaultSubagentTimeout"
 		m.textInput.SetValue(strconv.Itoa(d.SubagentTimeoutMinutes))
 		m.textInput.Focus()
-	case 7: // SubagentMaxConcurrent
+	case defaultsFieldSubagentMaxConcurrent: // SubagentMaxConcurrent
 		m.settingsEditField = "defaultSubagentMaxConcurrent"
 		m.textInput.SetValue(strconv.Itoa(d.SubagentMaxConcurrent))
 		m.textInput.Focus()
-	case 8: // LLMLoopTimeout
+	case defaultsFieldLLMLoopTimeout: // LLMLoopTimeout
 		m.settingsEditField = "defaultLLMLoopTimeout"
 		m.textInput.SetValue(strconv.Itoa(d.LLMLoopTimeoutMinutes))
 		m.textInput.Focus()
@@ -383,6 +432,19 @@ func (m *Model) handleAgentFieldEdit(agent *config.AgentConfig, value string) {
 			}
 			agent.Temperature = &f
 		}
+	case "agentThinkingLevel":
+		// "" comes from the "(default)" selector option (or a cleared input)
+		// and means "inherit": store nil so the key is omitted from config.
+		level, ok := config.NormalizeThinkingLevel(value)
+		if !ok {
+			m.formError = i18n.T("tui.settings.invalidThinkingLevel")
+			return
+		}
+		if level == "" {
+			agent.ThinkingLevel = nil
+		} else {
+			agent.ThinkingLevel = &level
+		}
 	case "agentSubagentsMaxConcurrent":
 		v, err := strconv.Atoi(value)
 		if err != nil || v < 0 {
@@ -427,6 +489,19 @@ func (m *Model) handleDefaultsFieldEdit(value string) {
 				return
 			}
 			d.Temperature = &f
+		}
+	case "defaultThinkingLevel":
+		// "" comes from the "(default)" selector option and means "inherit"
+		// (nil). Same normalization as the per-agent path.
+		level, ok := config.NormalizeThinkingLevel(value)
+		if !ok {
+			m.formError = i18n.T("tui.settings.invalidThinkingLevel")
+			return
+		}
+		if level == "" {
+			d.ThinkingLevel = nil
+		} else {
+			d.ThinkingLevel = &level
 		}
 	case "defaultMaxToolIterations":
 		v, err := strconv.Atoi(value)
@@ -626,4 +701,14 @@ func formatFloatPtr(f *float64) string {
 		return "default"
 	}
 	return fmt.Sprintf("%.2f", *f)
+}
+
+// thinkingLevelStr formats a *string thinking level for display; nil or empty
+// renders as "default" (meaning: inherit from the global default / model
+// reasoning config).
+func thinkingLevelStr(s *string) string {
+	if s == nil || *s == "" {
+		return "default"
+	}
+	return *s
 }

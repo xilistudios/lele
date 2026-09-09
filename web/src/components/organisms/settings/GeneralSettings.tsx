@@ -3,6 +3,7 @@ import { useTheme } from '../../../contexts/ThemeContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
 import i18n from '../../../i18n'
+import { thinkingLevelOptions } from '../../../lib/thinkingLevel'
 import {
   BooleanInput,
   NumberInput,
@@ -179,6 +180,20 @@ export function GeneralSettings() {
             min={0}
             max={2}
             step={0.1}
+          />
+        </SettingsField>
+        <SettingsField
+          label={t('settings.fields.agentThinkingLevel')}
+          path="agents.defaults.thinking_level"
+          isDirty={isDirtyPath(dirtyPaths, 'agents.defaults.thinking_level')}
+          description={t('settings.descriptions.agentThinkingLevel')}
+          error={getErrorForPath(validationErrors, 'agents.defaults.thinking_level')}
+        >
+          <SelectInput
+            id="agents.defaults.thinking_level"
+            value={config.agents.defaults.thinking_level ?? ''}
+            onChange={(v) => updateField('agents.defaults.thinking_level', v || undefined)}
+            options={thinkingLevelOptions(t)}
           />
         </SettingsField>
         <SettingsField

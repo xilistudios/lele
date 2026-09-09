@@ -28,6 +28,7 @@ Supported fields include:
 - `image_model_fallbacks`
 - `max_tokens`
 - `temperature`
+- `thinking_level`
 - `max_tool_iterations`
 - `prompt_cache`
 
@@ -60,6 +61,76 @@ re-processing it (typically 90% cheaper input tokens on cache hits).
 Providers that cache implicitly (OpenAI, OpenRouter, DeepSeek, Codex) ignore
 the setting but now report `cache_read_input_tokens` in usage, visible in
 debug-level token tracking logs.
+
+### Thinking level
+
+`thinking_level` sets the default reasoning effort for an agent. It is accepted
+both in `agents.defaults` and per agent in `agents.list`, and can also be set
+from the Web UI (agent settings, general defaults, add-agent wizard) or the TUI
+(Settings → Agents → `Thinking`).
+
+Allowed values are `"off"`, `"low"`, `"medium"` and `"high"`. The field is
+tri-state: omitting it (or clearing it back to "(default)" in the UI) means
+*inherit*, so the level is resolved from the layers below instead. It is never
+materialized as an empty string on disk.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "thinking_level": "low"
+    },
+    "list": [
+      {
+        "id": "coder",
+        "thinking_level": "high"
+      }
+    ]
+  }
+}
+```
+
+The effort actually sent to the provider is resolved from the first layer that
+has an opinion:
+
+| Priority | Layer | Source |
+| --- | --- | --- |
+| 1 (highest) | session override | `/think` command, Web UI thinking chip |
+| 2 | per-agent level | `agents.list[].thinking_level` |
+| 3 | global level | `agents.defaults.thinking_level` (`LELE_AGENTS_DEFAULTS_THINKING_LEVEL`) |
+| 4 (lowest) | model level | `providers.<name>.models.<alias>.reasoning` |
+
+Layer 2 already folds layer 3 into it at agent construction, so an agent that
+sets `thinking_level` replaces the global default rather than merging with it.
+An invalid value is rejected by config validation; at runtime it is logged and
+treated as unset (inherit) instead of failing startup.
+
+What reaches the wire depends on the resolved level:
+
+- `"off"` (from a session override or either config layer) sends an explicit
+  disable (`reasoning: {"enabled": false}`) rather than omitting the key, so
+  transparent proxies with a server-side reasoning default cannot re-enable it.
+  It also suppresses the DeepSeek `thinking` flag.
+- `"low"` / `"medium"` / `"high"` always send `enabled: true` together with the
+  effort, so providers that gate emission on `enabled` do not drop a level the
+  model's own `reasoning` config never enabled.
+- No level at any layer keeps the previous behavior: the model `reasoning`
+  config is sent as-is.
+
+Note that `"off"` is not an accepted value for the per-model
+`reasoning.effort` field; it is specific to `thinking_level` and the `/think`
+override.
+
+`/think` stays a per-session override on top of all of this. `/think default`
+clears the override and falls back to the agent level; `/think off` does not
+mean "default" — it explicitly disables reasoning. `/clear` and `/new` reset the
+override along with the rest of the session state.
+
+Subagents resolve the level from the **target** agent's configured
+`thinking_level` (falling back to the parent's configured level only when no
+agent context is available, e.g. standalone managers). The parent's per-session
+`/think` override is deliberately not propagated — it belongs to the parent's
+conversation, not to the delegated task.
 
 ### Example
 
@@ -98,6 +169,10 @@ Supported agent fields include:
 - `skills`
 - `subagents`
 - `temperature`
+- `thinking_level`
+
+See [Thinking level](#thinking-level) for how `thinking_level` resolves against
+`agents.defaults.thinking_level`, the model `reasoning` config, and `/think`.
 
 ### Model Format In Named Agents
 
@@ -332,6 +407,8 @@ Named agents can also define which target agents they are allowed to spawn and w
 - prefer aliases such as `my-openai-compatible/fast` over copying long raw model IDs everywhere
 - use per-agent workspaces only when you want real separation of files, state, or prompts
 - use explicit fallbacks for important agents instead of relying on ad-hoc manual switching
+- set `thinking_level` per agent rather than globally when only some agents do
+  deep reasoning work; it keeps the cost of the rest at the model default
 
 ## Related Docs
 

@@ -148,6 +148,7 @@ type AgentContextInfo struct {
 	MaxTokens     int                   // Agent's max tokens (0 means use SubagentManager default)
 	Temperature   float64               // Agent's temperature (0 means use SubagentManager default)
 	ContextWindow int                   // Agent's context window for compaction (0 = no compaction)
+	ThinkingLevel string                // resolved per-agent config level: "", "off", "low", "medium", "high"
 }
 
 type subagentOutcome struct {

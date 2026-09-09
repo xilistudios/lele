@@ -22,12 +22,17 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 		ImageModelFallbacks:    doc.Agents.Defaults.ImageModelFallbacks,
 		MaxTokens:              doc.Agents.Defaults.MaxTokens,
 		Temperature:            doc.Agents.Defaults.Temperature,
+		ThinkingLevel:          doc.Agents.Defaults.ThinkingLevel,
 		MaxToolIterations:      doc.Agents.Defaults.MaxToolIterations,
 		MaxReadLines:           doc.Agents.Defaults.MaxReadLines,
 		SubagentTimeoutMinutes: doc.Agents.Defaults.SubagentTimeoutMinutes,
 		SubagentMaxConcurrent:  doc.Agents.Defaults.SubagentMaxConcurrent,
 		SubagentMaxRetries:     doc.Agents.Defaults.SubagentMaxRetries,
-		LLMLoopTimeoutMinutes:  doc.Agents.Defaults.LLMLoopTimeoutMinutes,
+		// Side-fix: SubagentMaxIterations was silently dropped by both
+		// hand-written copy blocks (preexisting bug, same class as the
+		// agents-list Temperature drop); the round-trip test now guards it.
+		SubagentMaxIterations: doc.Agents.Defaults.SubagentMaxIterations,
+		LLMLoopTimeoutMinutes: doc.Agents.Defaults.LLMLoopTimeoutMinutes,
 	}
 
 	for _, agent := range doc.Agents.List {
@@ -39,6 +44,12 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 			Model:     agent.Model,
 			Skills:    agent.Skills,
 			Subagents: agent.Subagents,
+			// Side-fix: Temperature was silently dropped here even though
+			// EditableAgentConfig carries it (preexisting bug). The result of
+			// ToConfig() is used for validation, so an agent temperature set
+			// in the editor was invisible to anything validating from Config.
+			Temperature:   agent.Temperature,
+			ThinkingLevel: agent.ThinkingLevel,
 		})
 	}
 
@@ -250,24 +261,15 @@ func SaveEditableDocument(path string, doc *EditableDocument) error {
 func (doc *EditableDocument) toSerializable() map[string]interface{} {
 	result := make(map[string]interface{})
 
-	// Agents
+	// Agents.
+	// STRUCTURAL FIX: "defaults" used to be a hand-written map with hardcoded
+	// keys, which silently dropped fields on every WebUI save (max_read_lines
+	// and subagent_max_iterations were lost, and thinking_level would have
+	// been too). Serialize the whole struct instead — EditableAgentDefaults
+	// carries the correct JSON tags — exactly like the agents list below.
+	// This prevents field loss on save for any future field added to the type.
 	result["agents"] = map[string]interface{}{
-		"defaults": map[string]interface{}{
-			"workspace":                doc.Agents.Defaults.Workspace,
-			"restrict_to_workspace":    doc.Agents.Defaults.RestrictToWorkspace,
-			"provider":                 doc.Agents.Defaults.Provider,
-			"model":                    doc.Agents.Defaults.Model,
-			"model_fallbacks":          doc.Agents.Defaults.ModelFallbacks,
-			"image_model":              doc.Agents.Defaults.ImageModel,
-			"image_model_fallbacks":    doc.Agents.Defaults.ImageModelFallbacks,
-			"max_tokens":               doc.Agents.Defaults.MaxTokens,
-			"temperature":              doc.Agents.Defaults.Temperature,
-			"max_tool_iterations":      doc.Agents.Defaults.MaxToolIterations,
-			"subagent_timeout_minutes": doc.Agents.Defaults.SubagentTimeoutMinutes,
-			"subagent_max_concurrent":  doc.Agents.Defaults.SubagentMaxConcurrent,
-			"subagent_max_retries":     doc.Agents.Defaults.SubagentMaxRetries,
-			"llm_loop_timeout_minutes": doc.Agents.Defaults.LLMLoopTimeoutMinutes,
-		},
+		"defaults": doc.Agents.Defaults,
 	}
 	if len(doc.Agents.List) > 0 {
 		result["agents"].(map[string]interface{})["list"] = doc.Agents.List
@@ -551,15 +553,21 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		ImageModelFallbacks:    cfg.Agents.Defaults.ImageModelFallbacks,
 		MaxTokens:              cfg.Agents.Defaults.MaxTokens,
 		Temperature:            cfg.Agents.Defaults.Temperature,
+		ThinkingLevel:          cfg.Agents.Defaults.ThinkingLevel,
 		MaxToolIterations:      cfg.Agents.Defaults.MaxToolIterations,
 		MaxReadLines:           cfg.Agents.Defaults.MaxReadLines,
 		SubagentTimeoutMinutes: cfg.Agents.Defaults.SubagentTimeoutMinutes,
 		SubagentMaxConcurrent:  cfg.Agents.Defaults.SubagentMaxConcurrent,
 		SubagentMaxRetries:     cfg.Agents.Defaults.SubagentMaxRetries,
+		SubagentMaxIterations:  cfg.Agents.Defaults.SubagentMaxIterations, // side-fix: was dropped (see ToConfig)
 		LLMLoopTimeoutMinutes:  cfg.Agents.Defaults.LLMLoopTimeoutMinutes,
 	}
 	doc.Agents.List = make([]EditableAgentConfig, 0, len(cfg.Agents.List))
 	for _, agent := range cfg.Agents.List {
+		// Direct struct conversion: AgentConfig and EditableAgentConfig must
+		// keep identical field sets (names+types+order). New fields such as
+		// ThinkingLevel are carried automatically — extend both structs in
+		// lockstep or this conversion breaks at compile time.
 		doc.Agents.List = append(doc.Agents.List, EditableAgentConfig(agent))
 	}
 	doc.Session = EditableSessionConfig(cfg.Session)

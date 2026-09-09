@@ -585,6 +585,12 @@ func (ap *agentProvidableImpl) SetVerboseLevel(sessionKey string, level string) 
 // ============================================================================
 
 // GetThinkLevel returns the current reasoning effort level for a session.
+//
+// Contract (do not change): this is the SESSION-OVERRIDE getter used by the
+// /think cycle and the WebUI chip. It returns "default" when no override is
+// set — it does NOT resolve the agent's configured thinking_level. Consumers
+// that need the level that will actually be applied to the next request must
+// use GetEffectiveThinkLevel instead.
 func (ap *agentProvidableImpl) GetThinkLevel(sessionKey string) string {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
@@ -609,29 +615,55 @@ func (ap *agentProvidableImpl) GetThinkLevel(sessionKey string) string {
 	return "default"
 }
 
+// GetEffectiveThinkLevel returns the thinking level that will actually be
+// applied to the next request: session override if set, else the agent's
+// resolved config level (AgentInstance.ThinkingLevel), else "default".
+//
+// This mirrors what buildLLMOptions resolves (session override → agent level
+// → model ReasoningConfig) so /status and similar displays never diverge from
+// the wire payload. The model-ReasoningConfig layer is not surfaced here: when
+// both explicit layers are empty the display shows "default", same as before.
+func (ap *agentProvidableImpl) GetEffectiveThinkLevel(sessionKey string) string {
+	level := ap.GetThinkLevel(sessionKey)
+	if level != "default" {
+		return level
+	}
+	if agent := ap.al.agentForSession(ap.al.ResolveSessionKey(sessionKey)); agent != nil && agent.ThinkingLevel != "" {
+		return agent.ThinkingLevel
+	}
+	return "default"
+}
+
 // SetThinkLevel sets the reasoning effort level for a session.
+//
+// Accepted levels are the canonical thinking levels from
+// config.NormalizeThinkingLevel: "off", "low", "medium", "high", and the
+// "default" aliases "default" / "none" (both clear the override so the agent's
+// configured thinking_level applies again). An empty string is rejected: an
+// unset level is ambiguous, callers must ask for it explicitly. Anything else
+// returns false and leaves the current level untouched.
 func (ap *agentProvidableImpl) SetThinkLevel(sessionKey string, level string) bool {
 	sessionKey = ap.al.ResolveSessionKey(sessionKey)
 	if sessionKey == "" {
 		return false
 	}
-	validLevels := map[string]bool{"default": true, "off": true, "low": true, "medium": true, "high": true}
-	if !validLevels[level] {
+	if level == "" {
 		return false
 	}
-	if level == "off" || level == "default" {
+	normalized, ok := config.NormalizeThinkingLevel(level)
+	if !ok {
+		return false
+	}
+	// normalized == "" means "no override" ("default" / "none").
+	if normalized == "" || normalized == "off" {
 		ap.al.sessionThinking.Delete(sessionKey)
 	} else {
-		ap.al.sessionThinking.Store(sessionKey, level)
+		ap.al.sessionThinking.Store(sessionKey, normalized)
 	}
 	// Persist to survive restarts
 	agent := ap.al.agentForSession(sessionKey)
 	if agent != nil && agent.Sessions != nil {
-		persistLevel := level
-		if level == "default" {
-			persistLevel = "" // "default" means "no override"
-		}
-		agent.Sessions.SetThinkingLevel(sessionKey, persistLevel)
+		agent.Sessions.SetThinkingLevel(sessionKey, normalized)
 	}
 	return true
 }

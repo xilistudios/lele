@@ -217,6 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ navegar · ESPAÇO alternar · ENTER salvar · ESC cancelar",
   "tui.settings.selectorCustom": "(personalizado…)",
   "tui.settings.invalidNumber": "Insira um número positivo válido",
+  "tui.settings.invalidThinkingLevel": "Insira um nível de pensamento válido (off, low, medium, high)",
   "tui.settings.session": "Sessão",
   "tui.settings.tools": "Ferramentas",
   "tui.settings.logs": "Registros",

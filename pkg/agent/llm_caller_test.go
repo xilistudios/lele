@@ -366,8 +366,12 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 		// instead of the in-memory map to exercise the persisted fallback path
 		// (the path that survives a gateway restart).
 		persistedLevel string
-		reasoning      *config.ReasoningConfig
-		model          string
+		// agentLevel is assigned to AgentInstance.ThinkingLevel, simulating
+		// what resolveAgentThinkingLevel produced at instance construction
+		// ("off"/"low"/"medium"/"high"; "" means no config-level default).
+		agentLevel string
+		reasoning  *config.ReasoningConfig
+		model      string
 
 		// wantReasoning, when non-nil, is compared against the whole
 		// `reasoning` map (exact key set and values).
@@ -464,6 +468,56 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			model:          "test-model",
 			wantReasoning:  map[string]interface{}{"enabled": false},
 		},
+
+		// --- agent-level thinking_level (config layer) --------------------
+		{
+			name:          "agent medium without session override emits effort",
+			agentLevel:    "medium",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "medium", "enabled": true},
+		},
+		{
+			name:               "agent off emits explicit disable even with model reasoning enabled",
+			agentLevel:         "off",
+			reasoning:          &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},
+			model:              "deepseek-chat",
+			wantReasoning:      map[string]interface{}{"enabled": false},
+			wantThinkingAbsent: true,
+		},
+		{
+			name:          "session off beats agent high",
+			sessionLevel:  "off",
+			agentLevel:    "high",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"enabled": false},
+		},
+		{
+			name:          "session low beats agent high",
+			sessionLevel:  "low",
+			agentLevel:    "high",
+			reasoning:     nil,
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "low", "enabled": true},
+		},
+		{
+			name:          "agent level unset keeps legacy config path",
+			agentLevel:    "",
+			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "high", "enabled": true},
+		},
+		{
+			// An invalid config value must behave exactly like "unset":
+			// resolveAgentThinkingLevel is what NewAgentInstance stores on the
+			// instance, so run it for real here instead of hardcoding "".
+			name:          "agent invalid level falls back to legacy config path",
+			agentLevel:    resolveAgentThinkingLevel(&config.AgentConfig{ThinkingLevel: strPtr("ultra")}, &config.AgentDefaults{}),
+			reasoning:     &config.ReasoningConfig{Enable: true, Effort: strPtr("high")},
+			model:         "test-model",
+			wantReasoning: map[string]interface{}{"effort": "high", "enabled": true},
+		},
 	}
 
 	for _, tc := range tests {
@@ -472,6 +526,7 @@ func TestBuildLLMOptions_Reasoning(t *testing.T) {
 			defer os.RemoveAll(tmpDir)
 			agent := createLLMRunnerTestAgentInstance(t, tmpDir)
 			agent.Reasoning = tc.reasoning
+			agent.ThinkingLevel = tc.agentLevel
 
 			// buildLLMOptions resolves the override through the loop's
 			// registry, so the agent under test must be the one the loop

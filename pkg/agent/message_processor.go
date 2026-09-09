@@ -916,8 +916,12 @@ func (mp *messageProcessorImpl) formatStatusResponse(agent *AgentInstance, sessi
 	if contextPercent > 100 {
 		contextPercent = 100
 	}
+	// Effective think level — same source the command-handler renderer uses,
+	// so both /status variants show exactly what buildLLMOptions will send.
+	// (This used to print a hardcoded "medium", which was always a lie.)
+	thinkLevel := mp.al.GetProvidable().GetEffectiveThinkLevel(sessionKey)
 	return fmt.Sprintf("🦞 lele %s\nGateway version: %s\n🧠 Model: %s · 🔑 api-key %s\n🧮 Tokens: ~%d in / ~%d out (~%d total)\n📚 Context: ~%d/%d (%d%%)\n🧵 Session: %s\n⚙️ Runtime: %s · Think: %s",
-		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, "medium")
+		gatewayVersion(), gatewayVersion(), currentModel, apiKey, inputTokens, outputTokens, totalTokens, contextTokens, contextWindow, contextPercent, sessionKey, originChannel, thinkLevel)
 }
 
 // handleNewCommand handles the /new command.

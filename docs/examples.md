@@ -42,6 +42,7 @@ This page provides concrete configuration snippets for common setups.
         "id": "coder",
         "name": "Coding Agent",
         "workspace": "~/.lele/workspace-coder",
+        "thinking_level": "low",
         "model": {
           "primary": "my-openai-compatible/fast",
           "fallbacks": ["openrouter/auto"]
@@ -51,6 +52,8 @@ This page provides concrete configuration snippets for common setups.
   }
 }
 ```
+
+`thinking_level` (optional: `off`/`low`/`medium`/`high`) sets this agent's default reasoning effort; a session's `/think` override always wins. See `docs/config-reference.md#thinking_level`.
 
 ## OpenAI-Compatible Provider With Aliases
 

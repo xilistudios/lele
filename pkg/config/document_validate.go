@@ -69,6 +69,33 @@ func ValidateEditableDocument(doc *EditableDocument) []ValidationError {
 		})
 	}
 
+	// Validate agents.defaults.thinking_level. nil = inherit (valid, nothing
+	// to check). A non-nil pointer holding "", "default" or "none" normalizes
+	// to inherit and is also valid; only values outside the whitelist fail.
+	// Env vars are not consulted here: the document is validated as-is.
+	if v := doc.Agents.Defaults.ThinkingLevel; v != nil {
+		if _, ok := NormalizeThinkingLevel(*v); !ok {
+			errors = append(errors, ValidationError{
+				Path:    "agents.defaults.thinking_level",
+				Message: fmt.Sprintf("invalid thinking_level %q (valid: off, low, medium, high)", *v),
+				Code:    "invalid_enum",
+			})
+		}
+	}
+
+	// Validate per-agent thinking_level (same semantics as defaults).
+	for i, agent := range doc.Agents.List {
+		if v := agent.ThinkingLevel; v != nil {
+			if _, ok := NormalizeThinkingLevel(*v); !ok {
+				errors = append(errors, ValidationError{
+					Path:    fmt.Sprintf("agents.list.%d.thinking_level", i),
+					Message: fmt.Sprintf("invalid thinking_level %q (valid: off, low, medium, high)", *v),
+					Code:    "invalid_enum",
+				})
+			}
+		}
+	}
+
 	// Validate channels.telegram.verbose.
 	if doc.Channels.Telegram.Verbose != "" {
 		validVerbose := map[string]bool{"off": true, "basic": true, "full": true}

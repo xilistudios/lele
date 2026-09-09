@@ -278,10 +278,12 @@ func (m *Model) View() string {
 
 	agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
 	modelName := m.agentLoop.GetProvidable().GetSessionModel(m.currentKey)
-	thinkLevel := m.agentLoop.GetProvidable().GetThinkLevel(m.currentKey)
-	if thinkLevel == "" {
-		thinkLevel = "off"
-	}
+	// Effective level (session override → agent thinking_level → "default"),
+	// the same resolution /status shows and buildLLMOptions applies. The old
+	// override-only getter made the sidebar claim "default" while an agent with
+	// a configured thinking_level was actually reasoning at "high".
+	// GetThinkLevel/GetEffectiveThinkLevel never return "", so no fallback here.
+	thinkLevel := m.agentLoop.GetProvidable().GetEffectiveThinkLevel(m.currentKey)
 
 	var statusLine string
 	isProcessing := m.isSessionProcessing()

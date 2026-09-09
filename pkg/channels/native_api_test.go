@@ -264,6 +264,12 @@ func (m *nativeTestAgentLoop) GetThinkLevel(sessionKey string) string {
 	return "default"
 }
 
+func (m *nativeTestAgentLoop) GetEffectiveThinkLevel(sessionKey string) string {
+	// The fake has no per-agent thinking_level config, so the effective level
+	// reduces to the session override.
+	return m.GetThinkLevel(sessionKey)
+}
+
 func (m *nativeTestAgentLoop) SetThinkLevel(sessionKey string, level string) bool {
 	m.sessionThinkLevels[sessionKey] = level
 	return true

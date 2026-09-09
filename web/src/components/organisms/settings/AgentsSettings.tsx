@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSettings } from '../../../contexts/SettingsContext'
-import { getAgentModelPrimary, isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { getAgentModelPrimary, getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import { thinkingLevelOptions } from '../../../lib/thinkingLevel'
 import {
   BooleanInput,
   NamedItemCard,
   NumberInput,
   SearchableSelect,
+  SelectInput,
   SettingsField,
   SettingsSection,
   StringListEditor,
@@ -18,6 +20,7 @@ export function AgentsSettings() {
   const {
     draftConfig,
     dirtyPaths,
+    validationErrors,
     updateField,
     t,
     getOptionsForAgent,
@@ -121,6 +124,7 @@ export function AgentsSettings() {
               skills?: string[]
               subagents?: { allow_agents?: string[] }
               temperature?: number
+              thinking_level?: string
               max_iterations?: number
               max_tokens?: number
               context_window?: number
@@ -339,6 +343,26 @@ export function AgentsSettings() {
                       onChange={(v) =>
                         updateField(`agents.list.${index}.temperature`, v === 0.7 ? undefined : v)
                       }
+                    />
+                  </SettingsField>
+
+                  <SettingsField
+                    label={t('settings.fields.agentThinkingLevel')}
+                    description={t('settings.descriptions.agentThinkingLevel')}
+                    path={`agents.list.${index}.thinking_level`}
+                    isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.thinking_level`)}
+                    error={getErrorForPath(
+                      validationErrors,
+                      `agents.list.${index}.thinking_level`,
+                    )}
+                  >
+                    <SelectInput
+                      id={`agents.list.${index}.thinking_level`}
+                      value={agent.thinking_level ?? ''}
+                      onChange={(v) =>
+                        updateField(`agents.list.${index}.thinking_level`, v || undefined)
+                      }
+                      options={thinkingLevelOptions(t)}
                     />
                   </SettingsField>
                 </div>

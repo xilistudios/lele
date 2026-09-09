@@ -84,7 +84,12 @@ type AgentProvidable interface {
 	// SetVerboseLevel establece el nivel de verbose para una sesión
 	SetVerboseLevel(sessionKey string, level string) bool
 	// GetThinkLevel devuelve el nivel de razonamiento actual para una sesión
+	// (solo el override de sesión; "default" si no hay override)
 	GetThinkLevel(sessionKey string) string
+	// GetEffectiveThinkLevel devuelve el nivel que realmente se aplicará en la
+	// próxima petición: override de sesión si existe, si no el thinking_level
+	// resuelto del agente, si no "default"
+	GetEffectiveThinkLevel(sessionKey string) string
 	// SetThinkLevel establece el nivel de razonamiento para una sesión
 	SetThinkLevel(sessionKey string, level string) bool
 	// GetSubagents list los subagentes activos

@@ -1,12 +1,20 @@
 import { useSettings } from '../../../../contexts/SettingsContext'
-import { NumberInput } from '../../../molecules'
+import { thinkingLevelOptions } from '../../../../lib/thinkingLevel'
+import { NumberInput, SelectInput } from '../../../molecules'
 
 type Props = {
   temperature: number
   setTemperature: (value: number) => void
+  thinkingLevel: string
+  setThinkingLevel: (value: string) => void
 }
 
-export function BehaviorStep({ temperature, setTemperature }: Props) {
+export function BehaviorStep({
+  temperature,
+  setTemperature,
+  thinkingLevel,
+  setThinkingLevel,
+}: Props) {
   const { t } = useSettings()
 
   const getTemperatureInfo = (temp: number) => {
@@ -75,6 +83,20 @@ export function BehaviorStep({ temperature, setTemperature }: Props) {
           onChange={setTemperature}
         />
         <p className="text-xs text-text-tertiary">{tempInfo.desc}</p>
+      </div>
+
+      {/* Thinking level (per-agent default reasoning effort) */}
+      <div className="space-y-3">
+        <label htmlFor="wizard-thinking-level" className="text-sm font-medium text-text-primary">
+          {t('settings.fields.agentThinkingLevel')}
+        </label>
+        <SelectInput
+          id="wizard-thinking-level"
+          value={thinkingLevel}
+          onChange={setThinkingLevel}
+          options={thinkingLevelOptions(t)}
+        />
+        <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentThinkingLevel')}</p>
       </div>
 
       {/* Other numeric settings in a grid */}

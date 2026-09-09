@@ -217,6 +217,7 @@
   "tui.settings.subagentPickerHint": "↑/↓ navigate · SPACE toggle · ENTER save · ESC cancel",
   "tui.settings.selectorCustom": "(custom…)",
   "tui.settings.invalidNumber": "Please enter a valid positive number",
+  "tui.settings.invalidThinkingLevel": "Please enter a valid thinking level (off, low, medium, high)",
   "tui.settings.session": "Session",
   "tui.settings.tools": "Tools",
   "tui.settings.logs": "Logs",

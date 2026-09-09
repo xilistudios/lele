@@ -1306,12 +1306,19 @@ func (al *AgentLoop) resetAgentSession(agent *AgentInstance, sessionKey string) 
 	agent.Sessions.TruncateHistory(sessionKey, 0)
 	agent.Sessions.SetSummary(sessionKey, "")
 	agent.Sessions.ResetTokenCounts(sessionKey)
-	// Clear any session-specific model and thinking overrides
+	// Clear any session-specific model and thinking overrides. The in-memory
+	// delete alone is not enough: buildLLMOptions (thinking) and
+	// syncSessionModel/ModelForSession (model) fall back to the persisted
+	// session meta, so an override that survived /clear would resurrect on the
+	// very next turn. Clear both persisted values as well. (SetModel("") /
+	// SetThinkingLevel("") write the empty string, which every reader treats
+	// as "no override".)
 	al.sessionModels.Delete(sessionKey)
 	al.sessionThinking.Delete(sessionKey)
-	// Clear the persisted override too — otherwise the next buildLLMOptions
-	// fallback resurrects the old level from session meta after /clear.
-	agent.Sessions.SetThinkingLevel(sessionKey, "")
+	if agent.Sessions != nil {
+		agent.Sessions.SetThinkingLevel(sessionKey, "")
+		agent.Sessions.SetModel(sessionKey, "")
+	}
 	if err := agent.Sessions.Save(sessionKey); err != nil {
 		agent.Sessions.SetHistory(sessionKey, previousHistory)
 		agent.Sessions.SetSummary(sessionKey, previousSummary)
