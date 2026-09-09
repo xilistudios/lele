@@ -143,6 +143,28 @@ export function ChevronLeftIcon({
   )
 }
 
+export function ChevronRightIcon({
+  size = DEFAULT_ICON_SIZE,
+  className,
+}: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  )
+}
+
 export function PlusIcon({
   size = DEFAULT_ICON_SIZE,
   className,

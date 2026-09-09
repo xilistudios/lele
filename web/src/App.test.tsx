@@ -113,9 +113,20 @@ const notFoundResponse = (url: string) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
-const mockConfigResponse = () => ({
+// One agent as it appears inside `config.agents.list` — what the agent detail
+// pages read (they resolve the id from the config, not the agents endpoint).
+// Kept minimal: the pages only need identity fields to render.
+const AGENT_CONFIG_FIXTURE = {
+  id: 'coder',
+  name: 'Coder',
+  workspace: '~/.lele/workspace-coder',
+}
+
+const mockConfigResponse = (agents?: unknown[]) => ({
   config: {
     agents: {
+      // Empty by default: the agents list page then shows its own empty state.
+      ...(agents ? { list: agents } : {}),
       defaults: {
         workspace: '~/.lele',
         restrict_to_workspace: false,
@@ -578,7 +589,11 @@ describe('Routing', () => {
     globalThis.WebSocket = originalWebSocket
   })
 
-  const createFetchMock = (overrides?: { sessions?: Array<Record<string, unknown>> }) =>
+  const createFetchMock = (overrides?: {
+    sessions?: Array<Record<string, unknown>>
+    /** When set, `agents.list` in the config — what the detail pages read. */
+    configAgents?: unknown[]
+  }) =>
     mock((input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/api/v1/auth/status')) {
@@ -634,7 +649,7 @@ describe('Routing', () => {
         return Promise.resolve(jsonResponse({ tools: [] }))
       }
       if (url.endsWith('/api/v1/config')) {
-        return Promise.resolve(jsonResponse(mockConfigResponse()))
+        return Promise.resolve(jsonResponse(mockConfigResponse(overrides?.configAgents)))
       }
       if (isSessionsEndpoint(url)) {
         return Promise.resolve(
@@ -767,6 +782,91 @@ describe('Routing', () => {
       },
       { timeout: 3000 },
     )
+  })
+
+  test('renders the agents list page inside the layout at /agents', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    globalThis.fetch = createFetchMock() as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />, ['/agents'])
+
+    await waitFor(
+      () => {
+        // Config mock has no agents.list → the real page shows its empty state.
+        expect(view.container.querySelector('[data-testid="agents-search"]')).not.toBeNull()
+        expect(view.container.querySelector('[data-testid="agents-empty"]')).not.toBeNull()
+      },
+      { timeout: 3000 },
+    )
+    // Layout chrome present (Sidebar + SettingsFooter).
+    expect(view.container.querySelector('aside')).not.toBeNull()
+  })
+
+  test('renders the real agent config page with its tabs at /agents/:agentId/:tab', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    // The detail page reads `agents.list` out of the config (not the agents
+    // endpoint), so the config mock has to carry the agent for it to render it.
+    globalThis.fetch = createFetchMock({
+      configAgents: [AGENT_CONFIG_FIXTURE],
+    }) as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />, ['/agents/coder/tools'])
+
+    await waitFor(
+      () => {
+        expect(view.container.querySelector('[data-testid="agent-config-page"]')).not.toBeNull()
+      },
+      { timeout: 3000 },
+    )
+    // Six section tabs; the one the URL names is the selected one and the panel
+    // points back at it (§6).
+    expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(6)
+    const selected = view.container.querySelector('[role="tab"][aria-selected="true"]')
+    expect(selected?.id).toBe('agent-tab-tools')
+    expect(view.container.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe(
+      'agent-tab-tools',
+    )
+  })
+
+  test('an unknown agent id shows the not-found block once the config loaded', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    globalThis.fetch = createFetchMock({
+      configAgents: [AGENT_CONFIG_FIXTURE],
+    }) as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />, ['/agents/ghost/general'])
+
+    await waitFor(
+      () => {
+        expect(
+          view.container.querySelector('[data-testid="agent-config-not-found"]'),
+        ).not.toBeNull()
+      },
+      { timeout: 3000 },
+    )
+    expect(view.container.textContent).toContain('ghost')
+  })
+
+  test('keeps the Agents nav item active on nested /agents/:agentId', async () => {
+    localStorage.setItem('lele.session', JSON.stringify(authSession))
+    globalThis.fetch = createFetchMock({
+      configAgents: [AGENT_CONFIG_FIXTURE],
+    }) as unknown as typeof fetch
+
+    const view = renderWithProviders(<App />, ['/agents/coder'])
+
+    await waitFor(
+      () => {
+        // The bare route normalises itself to …/general, so the page — not the
+        // redirect — is what proves the nesting is intact.
+        expect(view.container.querySelector('[data-testid="agent-config-page"]')).not.toBeNull()
+      },
+      { timeout: 3000 },
+    )
+    const agentsBtn = Array.from(
+      view.container.querySelectorAll('aside nav button[aria-label]'),
+    ).find((b) => b.getAttribute('aria-label') === 'Agentes')
+    expect(agentsBtn?.className).toContain('bg-surface-selected')
   })
 
   test('loads specific chat via deep link /chat/:chat_id', async () => {

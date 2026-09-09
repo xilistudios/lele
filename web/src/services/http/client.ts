@@ -1,4 +1,5 @@
 import type {
+  AgentCatalogResponse,
   AgentDetails,
   AgentFilesResponse,
   AgentStatusResponse,
@@ -448,6 +449,12 @@ export const createApiClient = (baseUrl: string) => {
     },
     agentFiles: (agentId: string) =>
       request<AgentFilesResponse>(endpoints.agents.files(agentId), { method: 'GET' }),
+    /**
+     * Per-agent catalog of what the agent can actually use right now
+     * (live tool registry + resolved skills). 404 -> ApiError code 'agent_not_found'.
+     */
+    getAgentCatalog: (agentId: string): Promise<AgentCatalogResponse> =>
+      request<AgentCatalogResponse>(endpoints.agents.catalog(agentId), { method: 'GET' }),
     agentFile: (agentId: string, fileName: string) =>
       request<AgentFilesResponse>(endpoints.agents.files(agentId, fileName), { method: 'GET' }),
     agentFileSave: (agentId: string, fileName: string, content: string) =>

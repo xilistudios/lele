@@ -9,14 +9,16 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom'
+import { DesktopDisconnectOverlay } from './components/organisms/DesktopDisconnectOverlay'
+import { AgentEntityLayout } from './components/organisms/agents'
+import { AgentConfigPage } from './components/pages/AgentConfigPage'
 import { AgentFilesPage } from './components/pages/AgentFilesPage'
-import { AgentsPage } from './components/pages/AgentsPage'
+import { AgentsListPage } from './components/pages/AgentsListPage'
 import { AuthPage } from './components/pages/AuthPage'
 import { BackgroundExecsPage } from './components/pages/BackgroundExecsPage'
 import { ChatHistoryPage } from './components/pages/ChatHistoryPage'
 import { ChatPage } from './components/pages/ChatPage'
 import { CronPage } from './components/pages/CronPage'
-import { DesktopDisconnectOverlay } from './components/organisms/DesktopDisconnectOverlay'
 import { ProvidersPage } from './components/pages/ProvidersPage'
 import { SecretsPage } from './components/pages/SecretsPage'
 import { SettingsPage } from './components/pages/SettingsPage'
@@ -257,6 +259,14 @@ function SettingsRoute() {
   return <SettingsPage />
 }
 
+// Agents route layout (Sidebar + SettingsHeader/Footer + <Outlet/>).
+// Owns the single useSettingsConfig() instance shared by the agents list and
+// every agent-detail tab, so the unsaved draft survives navigation
+// (/agents <-> /agents/:agentId/:tab). See AgentEntityLayout for details.
+function AgentsRouteShell() {
+  return <AgentEntityLayout titleKey="sidebar.agents" />
+}
+
 function AppContent() {
   const { session } = useAuthContext()
   const navigate = useNavigate()
@@ -279,7 +289,11 @@ function AppContent() {
         <Route index element={<ChatRoute />} />
         <Route path="chat/:chat_id" element={<ChatRoute />} />
         <Route path="chat/:parent_chat_id/subagent/:child_chat_id" element={<ChatRoute />} />
-        <Route path="agents" element={<AgentsPage />} />
+        <Route path="agents" element={<AgentsRouteShell />}>
+          <Route index element={<AgentsListPage />} />
+          <Route path=":agentId" element={<AgentConfigPage />} />
+          <Route path=":agentId/:tab" element={<AgentConfigPage />} />
+        </Route>
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="chats" element={<ChatHistoryPage />} />

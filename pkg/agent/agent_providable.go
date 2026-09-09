@@ -138,6 +138,30 @@ func (ap *agentProvidableImpl) GetAgentInfo(agentID string) (channels.AgentBasic
 	}, true
 }
 
+// ListAgentTools returns the tools registered in the agent instance's live
+// ToolRegistry, sorted by name. Name/Description come straight from the Tool
+// interface (Tool.Name() / Tool.Description()) — the same text the LLM sees in
+// its tool definitions — so the catalog never drifts from the real registry.
+// ok=false when the agent ID is unknown.
+func (ap *agentProvidableImpl) ListAgentTools(agentID string) ([]channels.AgentToolInfo, bool) {
+	agent, ok := ap.al.registry.GetAgent(agentID)
+	if !ok || agent == nil || agent.Tools == nil {
+		return nil, false
+	}
+
+	names := agent.Tools.List()
+	infos := make([]channels.AgentToolInfo, 0, len(names))
+	for _, name := range names {
+		tool, found := agent.Tools.Get(name)
+		if !found {
+			continue
+		}
+		infos = append(infos, channels.AgentToolInfo{Name: tool.Name(), Description: tool.Description()})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
+	return infos, true
+}
+
 // ============================================================================
 // AgentProvidable Interface - Session History
 // ============================================================================

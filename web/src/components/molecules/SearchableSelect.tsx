@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { shortModelName } from '../../lib/modelName'
 
 type Option = {
   value: string
@@ -29,23 +30,13 @@ type Props = {
 
 const ANIMATION_MS = 200
 
-function formatDisplayValue(val: string): string {
-  if (!val) return val
-  const slashParts = val.split('/')
-  let name = slashParts[slashParts.length - 1]
-
-  // Clean up common provider prefixes separated by dots (e.g. anthropic.claude...)
-  const dotParts = name.split('.')
-  if (
-    dotParts.length > 1 &&
-    ['openai', 'anthropic', 'google', 'cohere', 'mistral', 'meta'].includes(
-      dotParts[0].toLowerCase(),
-    )
-  ) {
-    name = dotParts.slice(1).join('.')
-  }
-  return name
-}
+/**
+ * Display form of a model id. The implementation now lives in
+ * `lib/modelName.ts` (`shortModelName`) so the agents list/header badges and
+ * this trigger button cannot drift apart (spec §3.8). Kept as a local alias to
+ * avoid touching every call site in this file.
+ */
+const formatDisplayValue = shortModelName
 
 export function SearchableSelect({
   ariaLabel,

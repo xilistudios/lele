@@ -170,6 +170,12 @@ export type AgentModelConfig = {
 export type SubagentsConfig = {
   allow_agents?: string[]
   model?: AgentModelConfig
+  /** Minutes a subagent turn may run. 0 = no timeout (explicit, not "unset"). */
+  timeout_minutes?: number
+  /** Concurrent subagent tasks. 0 = unlimited. */
+  max_concurrent?: number
+  /** Tool iterations per subagent task. 0 = unlimited. */
+  max_iterations?: number
 }
 
 export type EditableAgentConfig = {
@@ -180,6 +186,8 @@ export type EditableAgentConfig = {
   workspace?: string
   model?: AgentModelConfig
   skills?: string[]
+  /** Per-agent tool allowlist; absent/empty = agent default registry. */
+  tools?: string[]
   subagents?: SubagentsConfig
   temperature?: number
   /** "off" | "low" | "medium" | "high"; absent = inherit from model configuration. */
@@ -914,13 +922,43 @@ export type UploadedFile = {
   size: number
 }
 
+/** Where an installed skill comes from (backend pkg/skills loader). */
+export type SkillSource = 'workspace' | 'global' | 'builtin'
+
 export type SkillInfo = {
   id: string
   name: string
   description: string
   installed: boolean
   enabled: boolean
-  source?: 'workspace' | 'global' | 'builtin'
+  source?: SkillSource
+}
+
+/** One entry of the per-agent tool catalog (GET /api/v1/agents/{id}/catalog). */
+export type AgentToolCatalogEntry = {
+  name: string
+  description: string
+}
+
+/**
+ * One entry of the per-agent skill catalog. Unlike SkillInfo (GET /api/v1/skills)
+ * it has no id/installed: the catalog only lists skills the loader resolved.
+ */
+export type AgentSkillCatalogEntry = {
+  name: string
+  description: string
+  source: SkillSource
+  enabled: boolean
+}
+
+/**
+ * Payload of GET /api/v1/agents/{agentID}/catalog.
+ * Both arrays are always present (backend guarantees [] not null) and sorted by name.
+ */
+export type AgentCatalogResponse = {
+  agent_id: string
+  tools: AgentToolCatalogEntry[]
+  skills: AgentSkillCatalogEntry[]
 }
 
 export type AvailableSkill = {

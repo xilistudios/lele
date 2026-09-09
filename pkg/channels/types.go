@@ -388,6 +388,32 @@ type AgentStatusResponse struct {
 	ActiveSessions int    `json:"active_sessions"`
 }
 
+// AgentCatalogTool is one entry of the per-agent tool catalog.
+// Derived from the agent's real ToolRegistry (Tool.Name()/Tool.Description()).
+type AgentCatalogTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// AgentCatalogSkill is one entry of the per-agent skill catalog.
+// Source is "workspace" | "global" | "builtin"; Enabled reflects the
+// workspace skill config (disabled skills are listed with enabled=false).
+type AgentCatalogSkill struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// AgentCatalogResponse is the payload of GET /api/v1/agents/{agentID}/catalog.
+// Both slices are always non-nil (they marshal as [] not null) and sorted by
+// name so the frontend can render them without extra normalization.
+type AgentCatalogResponse struct {
+	AgentID string              `json:"agent_id"`
+	Tools   []AgentCatalogTool  `json:"tools"`
+	Skills  []AgentCatalogSkill `json:"skills"`
+}
+
 type ConfigResponse struct {
 	Config   interface{}    `json:"config"`
 	Metadata ConfigMetadata `json:"meta"`

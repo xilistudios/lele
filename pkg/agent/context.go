@@ -54,6 +54,14 @@ type ContextBuilder struct {
 	// tools section. Defaults to false (safe default).
 	visionSupported bool
 
+	// skillsFilter is the per-agent allowlist of skill names (from
+	// AgentConfig.Skills) applied to the <skills> block of the system prompt.
+	// nil/empty = all enabled skills. Written once at construction via
+	// SetSkillsFilter and read by GetInitialContext, so it is guarded by
+	// initialMu: the setter takes the write lock precisely because it clears
+	// the cached prompt, which makes the read under the same lock safe.
+	skillsFilter []string
+
 	// folderResolver maps a session key to the folder the user selected for
 	// that session (WebUI "per-session folder context"). When set, the
 	// resolved folder's path + first-level listing are appended to the
@@ -111,6 +119,22 @@ func (cb *ContextBuilder) SetAvailableSubagents(subagents []subagentInfo) {
 	cb.initialMu.Unlock()
 }
 
+// SetSkillsFilter sets the per-agent allowlist of skill names rendered in the
+// <skills> block of the system prompt (sourced from AgentConfig.Skills).
+// nil or empty means "all enabled skills", which is the historical behaviour.
+//
+// Like SetAvailableSubagents it MUST invalidate the cached initial context:
+// GetInitialContext caches the whole static prompt (identity + bootstrap files +
+// skills summary) behind initialMu, so without the reset a filter set after the
+// first prompt build would never reach the LLM. The filter itself is written
+// under the same lock that GetInitialContext holds while reading it.
+func (cb *ContextBuilder) SetSkillsFilter(filter []string) {
+	cb.initialMu.Lock()
+	cb.skillsFilter = filter
+	cb.initialContext = ""
+	cb.initialMu.Unlock()
+}
+
 // GetInitialContext returns the initial context files (AGENT.md, SOUL.md, etc.)
 // to be loaded at session start. This ensures consistent context across /new and subagents.
 func (cb *ContextBuilder) GetInitialContext() string {
@@ -148,8 +172,10 @@ func (cb *ContextBuilder) GetInitialContext() string {
 		parts = append(parts, bootstrapContent)
 	}
 
-	// Skills summary
-	skillsSummary := cb.skillsLoader.BuildSkillsSummary()
+	// Skills summary — restricted to this agent's allowlist when configured.
+	// cb.skillsFilter is read here while the write lock is held (see the
+	// deferred Unlock above), which is what keeps it in step with SetSkillsFilter.
+	skillsSummary := cb.skillsLoader.BuildSkillsSummary(cb.skillsFilter)
 	if skillsSummary != "" {
 		parts = append(parts, fmt.Sprintf(`# Skills
 
@@ -728,6 +754,21 @@ func (cb *ContextBuilder) AddAssistantMessage(messages []providers.Message, cont
 	return messages
 }
 
+// currentSkillsFilter reads the skills allowlist under the guard. Callers
+// outside GetInitialContext (which already holds the write lock and must read
+// cb.skillsFilter directly to avoid a recursive lock) use this so a concurrent
+// SetSkillsFilter can never be observed mid-write.
+func (cb *ContextBuilder) currentSkillsFilter() []string {
+	cb.initialMu.RLock()
+	defer cb.initialMu.RUnlock()
+	return cb.skillsFilter
+}
+
+// loadSkills renders the full text of every skill for direct injection into
+// the context. It is currently dead code — only context_test.go exercises it,
+// the live prompt path is the <skills> summary in GetInitialContext — but it
+// honours cb.skillsFilter as well, so reviving it can never leak skills the
+// agent was not configured to see.
 func (cb *ContextBuilder) loadSkills() string {
 	allSkills := cb.skillsLoader.ListSkills()
 	if len(allSkills) == 0 {
@@ -735,8 +776,15 @@ func (cb *ContextBuilder) loadSkills() string {
 	}
 
 	var skillNames []string
+	filter := cb.currentSkillsFilter()
 	for _, s := range allSkills {
+		if !skills.SkillAllowed(filter, s.Name) {
+			continue
+		}
 		skillNames = append(skillNames, s.Name)
+	}
+	if len(skillNames) == 0 {
+		return ""
 	}
 
 	content := cb.skillsLoader.LoadSkillsForContext(skillNames)

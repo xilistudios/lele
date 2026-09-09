@@ -19,6 +19,11 @@ func parseAgentsWithPlaceholders(raw json.RawMessage, basePath string, secretsBy
 	}
 
 	// Parse list.
+	// thinking_level and tools are decoded straight from the struct tags on
+	// EditableAgentConfig (see document_types.go), the same way skills already
+	// are: an absent or JSON-null "tools" yields a nil slice, which means
+	// "all tools" downstream. An empty array means the same thing, so the
+	// editor is free to write either without changing behavior.
 	if listRaw, ok := rawMap["list"]; ok {
 		json.Unmarshal(listRaw, &cfg.List)
 	}
