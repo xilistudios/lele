@@ -171,8 +171,24 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
         aria-hidden={!mobileOpen}
       />
 
+      {/* The drawer is `fixed inset-y-0`, so its height is the viewport height
+          and every section below competes for that fixed budget. On mobile the
+          nav menu is `shrink-0` (never smaller than its natural height), which
+          (1) starved the chat-history section to zero — its `shrink-0` header
+          and "show more" button then spilled out of the section and painted
+          over the first menu entries, the "Chats / Show more (507)" overlap in
+          the bug screenshot — and (2) on short viewports pushed the last
+          entries (Secrets, device footer) past the bottom edge with nothing to
+          scroll to them. Fix: below md the drawer itself is the single scroll
+          surface (`max-md:overflow-y-auto`) and both sections keep their
+          natural height (history gets `max-md:flex-none`, the menu stays
+          `shrink-0`), so one gesture reaches everything and no section is
+          starved. Deliberately no nested `overflow-y-auto` on the sections in
+          mobile: two stacked scrollers each capture the touch gesture and the
+          drawer can no longer be scrolled past the first one. On md+ the
+          sidebar is static and the inner list scrolls as before. */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex flex-col max-md:overflow-y-auto border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
           mobileOpen ? 'glass-effect translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
@@ -298,7 +314,22 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
           </div>
         )}
 
-        <div className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3'}>
+        {/* Chat history. On desktop `flex-1 min-h-0` makes this the grow
+            section: it takes the leftover height and its inner list scrolls.
+            On mobile that same math collapsed it to whatever the `shrink-0`
+            nav menu left over — zero on a phone — and because its header and
+            "show more" button are `shrink-0`, they overflowed the section
+            bounds and painted over the first menu entries (the overlap in the
+            bug screenshot). `max-md:flex-none` gives the section its natural
+            height instead: it no longer depends on what the menu leaves, and
+            since the drawer scrolls as a whole there is no need for a second,
+            nested scroller here. The list is capped at MAX_VISIBLE_SESSIONS
+            rows until "show more" is tapped, so natural height stays bounded.
+            Mobile-only variant, so the desktop flex math is untouched. */}
+        <div
+          data-testid="sidebar-history-section"
+          className={collapsed ? 'px-2' : 'flex min-h-0 flex-1 flex-col px-3 py-3 max-md:flex-none'}
+        >
           {collapsed ? (
             <Popover
               block
@@ -430,8 +461,18 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
           )}
         </div>
 
-        {/* Agents & Providers navigation */}
+        {/* Agents & Providers navigation.
+            `shrink-0` stays: this menu must always keep its natural height,
+            otherwise the history section above squeezes it (that squeeze was
+            half of the bug). What made the last entries unreachable was that
+            nothing could absorb the leftover height on a phone, so the
+            overflow was cut off at the bottom edge of the drawer — the drawer
+            itself now scrolls (see <aside>), which keeps every entry reachable
+            with a single gesture. Deliberately no `overflow-y-auto` here: a
+            short inner scroller would capture the touch gesture and the drawer
+            could no longer be scrolled past the menu. */}
         <nav
+          data-testid="sidebar-nav-section"
           className={
             collapsed
               ? 'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2'
