@@ -407,6 +407,42 @@ type processOptions struct {
 	// (config/markdown "model:" field). It wins over the session model for this
 	// turn only and is NEVER persisted into sessionModels or the session store.
 	ModelOverride string
+	// AppliedCommand describes the harness slash command that was expanded into
+	// UserMessage for this turn (nil for plain messages). The runner persists it
+	// on the user message so the WebUI can show the original "/name args" and
+	// re-render the command chip from history.
+	AppliedCommand *appliedCommand
+}
+
+// appliedCommand is the display metadata of one expanded harness command: the
+// original text the user typed plus what the expansion recorded. It is written
+// onto the persisted user message (providers.Message.Command/DisplayContent),
+// never onto the prompt sent to the model.
+type appliedCommand struct {
+	Original    string // the raw "/name args" the user sent
+	Name        string // command name, no leading slash (harness canonical)
+	Description string
+	Args        string
+	Source      string // harness.Source of the winning command
+	Agent       string // per-turn agent override ("" = none)
+	Model       string // per-turn model override ("" = none)
+}
+
+// commandAppliedOf maps the runner-side record onto the wire type persisted on
+// the user message (providers.CommandApplied), the same shape the
+// command.applied event carries so live and history render one chip.
+func commandAppliedOf(c *appliedCommand) *providers.CommandApplied {
+	if c == nil {
+		return nil
+	}
+	return &providers.CommandApplied{
+		Name:        c.Name,
+		Description: c.Description,
+		Args:        c.Args,
+		Agent:       c.Agent,
+		Model:       c.Model,
+		Source:      c.Source,
+	}
 }
 
 // SummarizeStats contains statistics about a summarization operation.

@@ -1,4 +1,11 @@
-import type { Attachment, ChatMessage, HistoryToolCall, ToolMessageStatus } from './types'
+import type {
+  Attachment,
+  ChatMessage,
+  HistoryCommandInfo,
+  HistoryToolCall,
+  RawHistoryMessage,
+  ToolMessageStatus,
+} from './types'
 import { lookupStableId } from '../hooks/stableIdRegistry'
 
 // ---------------------------------------------------------------------------
@@ -132,6 +139,74 @@ export function formatToolCallArgs(toolCall: HistoryToolCall): string {
     : JSON.stringify(toolCall.arguments)
 }
 
+// ---------------------------------------------------------------------------
+// Harness command chip
+// ---------------------------------------------------------------------------
+
+/** Tool name of the command chip card; ToolCallDisplay maps it to ⚡/'command'. */
+export const COMMAND_TOOL_NAME = 'command'
+
+/**
+ * Normalize a persisted/live command payload into the `arguments` object
+ * rendered by ToolCallDisplay. The command name gains its leading slash here
+ * because the backend sends it bare (harness canonical form has none).
+ */
+export function normalizeCommandArgs(cmd: {
+  command: string
+  args?: string
+  agent?: string
+  model?: string
+  source?: string
+  description?: string
+}): Record<string, string> {
+  const name = (cmd.command ?? '').trim()
+  return {
+    command: name.startsWith('/') ? name : `/${name}`,
+    args: cmd.args ?? '',
+    agent: cmd.agent ?? '',
+    model: cmd.model ?? '',
+    source: cmd.source ?? '',
+    description: cmd.description ?? '',
+  }
+}
+
+/**
+ * Build the `toolArgs` string of a command chip from its persisted payload,
+ * following the `"toolName {json}"` convention of formatToolCallArgs and the
+ * live command.applied handler (hooks/event-handlers/command.ts). The shapes
+ * are identical on purpose: ToolCallDisplay.parseCommandArgs reads one parser
+ * for both sources.
+ *
+ * Exported so the event handler shares it (DRY) — the live WS payload and the
+ * history `harness_command` field carry the same information.
+ */
+export function buildCommandChipToolArgs(cmd: HistoryCommandInfo): string {
+  return `${COMMAND_TOOL_NAME} ${JSON.stringify(normalizeCommandArgs(cmd))}`
+}
+
+/**
+ * The command chip message for a command-driven history user message, or
+ * undefined when the message carries no harness_command. Rendered as a
+ * role:'tool' message right after the user bubble — the same card the live
+ * command.applied event inserts — so the chip survives refetches instead of
+ * dying with clearStreaming().
+ */
+export function buildCommandChipFromHistory(
+  message: RawHistoryMessage,
+  msgId: string,
+  sessionKey: string,
+): ChatMessage | undefined {
+  const cmd = message.harness_command
+  if (!cmd?.command) return undefined
+  return createToolMessage({
+    id: `command:${msgId}`,
+    sessionKey,
+    toolName: COMMAND_TOOL_NAME,
+    toolArgs: buildCommandChipToolArgs(cmd),
+    toolStatus: 'completed',
+  })
+}
+
 /** Builds a map of tool_call_id → HistoryToolCall from the history array. */
 export function buildToolCallMap(
   history: Array<{
@@ -245,17 +320,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
  * Handles attachment parsing, tool call mapping, and approval message formatting.
  */
 export function toChatMessages(
-  history: Array<{
-    id: string
-    role: 'user' | 'assistant' | 'tool'
-    content: string
-    reasoning_content?: string
-    tool_calls?: HistoryToolCall[]
-    tool_call_id?: string
-    tool_name?: string
-    exclude_from_context?: boolean
-    attachments?: Attachment[]
-  }>,
+  history: RawHistoryMessage[],
   sessionKey: string,
 ): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
@@ -290,7 +355,10 @@ export function toChatMessages(
     // copy of this message was confirmed into history. This keeps React
     // render keys identical across the WebSocket→HTTP transition and across
     // subsequent refetches (prevents remount flicker). See stableIdRegistry.ts.
-    const stableId = lookupStableId(message.role, messageContent)
+    // For user messages the lookup key must match what the optimistic copy
+    // registered — the text the user typed, which for command-driven turns is
+    // display_content, not the expanded content.
+    const stableId = lookupStableId(message.role, message.display_content || messageContent)
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)
@@ -308,16 +376,27 @@ export function toChatMessages(
     }
 
     if (message.role === 'user') {
-      return [
-        createUserMessage({
-          id: msgId,
-          sessionKey,
-          content: messageContent,
-          attachments: parsedAttachments,
-          excludeFromContext: message.exclude_from_context,
-          stableId,
-        }),
-      ]
+      // A harness command stores the EXPANDED prompt in content (that is what
+      // the model receives on replay); the UI shows the original "/name args"
+      // the user typed when the backend carried it.
+      const userContent = message.display_content || messageContent
+
+      // Signature-based duplicate detection above compares `message.content`
+      // (the canonical text), so display changes cannot break dedup.
+      const userMessage = createUserMessage({
+        id: msgId,
+        sessionKey,
+        content: userContent,
+        attachments: parsedAttachments,
+        excludeFromContext: message.exclude_from_context,
+        stableId,
+      })
+
+      // Command-driven turn: re-render the chip from history (the live WS card
+      // is ephemeral streaming state). The chip rides in base messages, so it
+      // survives refetches, session switches and reloads.
+      const chip = buildCommandChipFromHistory(message, msgId, sessionKey)
+      return chip ? [userMessage, chip] : [userMessage]
     }
 
     if (message.role === 'assistant') {

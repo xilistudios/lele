@@ -148,6 +148,29 @@ type Message struct {
 	// via the send_file tool) so the WebUI can list and download them from
 	// chat history. UI metadata only — never sent to LLM providers.
 	Attachments []MessageAttachment `json:"attachments,omitempty"`
+	// DisplayContent is the text a UI should show instead of Content. It exists
+	// for user messages whose stored Content was rewritten before reaching the
+	// model — today only harness slash commands, whose expanded prompt is what
+	// the LLM must see while the user's bubble should keep the original
+	// "/name args" they typed. UI metadata only — never sent to LLM providers
+	// (providers serialize from explicit fields, see common.SerializeMessages).
+	DisplayContent string `json:"display_content,omitempty"`
+	// Command records the harness slash command that produced this message, so
+	// the WebUI can re-render the command chip from history instead of only
+	// from the live command.applied event. UI metadata only.
+	Command *CommandApplied `json:"harness_command,omitempty"`
+}
+
+// CommandApplied describes a user-defined slash command (pkg/harness) that was
+// expanded into the prompt of a user message. It mirrors the payload of the
+// command.applied outbound event so live and history render the same chip.
+type CommandApplied struct {
+	Name        string `json:"command"`
+	Description string `json:"description,omitempty"`
+	Args        string `json:"args,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Source      string `json:"source,omitempty"`
 }
 
 func (m *Message) MarshalJSON() ([]byte, error) {
@@ -160,6 +183,8 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
 		Streaming          bool                `json:"streaming,omitempty"`
 		Attachments        []MessageAttachment `json:"attachments,omitempty"`
+		DisplayContent     string              `json:"display_content,omitempty"`
+		Command            *CommandApplied     `json:"harness_command,omitempty"`
 	}
 
 	content := interface{}(m.Content)
@@ -176,6 +201,8 @@ func (m *Message) MarshalJSON() ([]byte, error) {
 		ExcludeFromContext: m.ExcludeFromContext,
 		Streaming:          m.Streaming,
 		Attachments:        m.Attachments,
+		DisplayContent:     m.DisplayContent,
+		Command:            m.Command,
 	})
 }
 
@@ -189,6 +216,8 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		ExcludeFromContext bool                `json:"exclude_from_context,omitempty"`
 		Streaming          bool                `json:"streaming,omitempty"`
 		Attachments        []MessageAttachment `json:"attachments,omitempty"`
+		DisplayContent     string              `json:"display_content,omitempty"`
+		Command            *CommandApplied     `json:"harness_command,omitempty"`
 	}
 
 	var raw rawMessage
@@ -203,6 +232,8 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 	m.ExcludeFromContext = raw.ExcludeFromContext
 	m.Streaming = raw.Streaming
 	m.Attachments = raw.Attachments
+	m.DisplayContent = raw.DisplayContent
+	m.Command = raw.Command
 	m.Content = ""
 	m.ContentParts = nil
 

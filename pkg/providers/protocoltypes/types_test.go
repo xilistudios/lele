@@ -108,3 +108,49 @@ func TestMessageOmitsEmptyAttachments(t *testing.T) {
 		t.Errorf("empty attachments must be omitted from stored JSON: %s", data)
 	}
 }
+
+// TestMessageDisplayFieldsRoundTrip pins the harness-command display metadata:
+// the session store must persist DisplayContent and Command losslessly (they
+// re-render the user bubble and the command chip from history) and omit them
+// entirely from plain messages so stored JSON stays byte-compatible.
+func TestMessageDisplayFieldsRoundTrip(t *testing.T) {
+	m := Message{
+		Role:           "user",
+		Content:        "review the src dir please", // expanded prompt (what the LLM sees)
+		DisplayContent: "/review src",               // what the user typed
+		Command: &CommandApplied{
+			Name: "review", Description: "Review code", Args: "src",
+			Agent: "coder", Model: "fast", Source: "workspace",
+		},
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"display_content"`, `"harness_command"`} {
+		if !strings.Contains(string(data), key) {
+			t.Fatalf("marshal must persist %s for history rendering: %s", key, data)
+		}
+	}
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != m.Content || got.DisplayContent != m.DisplayContent {
+		t.Errorf("round-trip lost text fields: %+v", got)
+	}
+	if got.Command == nil || *got.Command != *m.Command {
+		t.Errorf("round-trip lost command metadata: %+v", got.Command)
+	}
+
+	// Plain messages must not grow the keys (omitempty contract).
+	plain, err := json.Marshal(Message{Role: "user", Content: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"display_content", "harness_command"} {
+		if strings.Contains(string(plain), key) {
+			t.Errorf("plain message must omit %s: %s", key, plain)
+		}
+	}
+}

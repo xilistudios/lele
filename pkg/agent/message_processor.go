@@ -112,6 +112,11 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	if agent != nil {
 		agentWorkspace = agent.Workspace
 	}
+	// The pre-expansion text is what the user actually typed; applyHarnessCommand
+	// overwrites msg.Content with the expanded prompt. Keep the original so the
+	// persisted user message can display it (WebUI bubble) while the model still
+	// receives the expansion.
+	originalText := msg.Content
 	mp.applyHarnessCommand(ctx, &msg, agentWorkspace)
 
 	// A custom command can pin an agent and/or a model for the turn. The
@@ -133,6 +138,23 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 			// Resolve aliases so the runner sees a provider-qualified model, the
 			// same shape ModelForSession returns for persisted values.
 			turnModelOverride = mp.al.cfg().Providers.ResolveModelAlias(m, mp.al.cfg().Agents.Defaults.Provider)
+		}
+	}
+
+	// When a harness command expanded this message, build the display metadata
+	// the runner persists on the user message (original text + chip payload).
+	// applyHarnessCommand only sets harness_command when it rewrote Content, so
+	// its presence is the authoritative "this turn was command-driven" signal.
+	var appliedCmd *appliedCommand
+	if cmdName := msg.Metadata["harness_command"]; cmdName != "" {
+		appliedCmd = &appliedCommand{
+			Original:    originalText,
+			Name:        cmdName,
+			Description: msg.Metadata["harness_description"],
+			Args:        msg.Metadata["harness_args"],
+			Source:      msg.Metadata["harness_source"],
+			Agent:       msg.Metadata["harness_agent"],
+			Model:       msg.Metadata["harness_model"],
 		}
 	}
 
@@ -222,6 +244,7 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		ReplyTo:         replyTo,
 		MessageID:       messageID,
 		ModelOverride:   turnModelOverride,
+		AppliedCommand:  appliedCmd,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {

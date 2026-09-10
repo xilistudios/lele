@@ -70,7 +70,9 @@ export function ChatComposer() {
   // "/" slash-command palette. The palette only assists composing: accepting a
   // row inserts "<name> " into the draft and the command itself runs on the
   // backend once the text is sent as a normal message (handleCommand there).
-  const { commands } = useSlashCommands(api)
+  // Scoped to the agent that will answer, because custom commands live in each
+  // agent's own workspace (the built-in half is global and unaffected).
+  const { commands } = useSlashCommands(api, currentAgent?.id)
   const [paletteIdx, setPaletteIdx] = useState(0)
   // Escape hides the palette until the next edit of the trigger text (the
   // textarea change handler re-arms it).
