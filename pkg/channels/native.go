@@ -918,17 +918,25 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 // reconnect before it fires, the client is permanently removed.
 func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 	client.mu.Lock()
-	client.reconnecting = true
-	client.disconnectedAt = time.Now()
-	client.closed = false // not closed yet, QueueSend will buffer
-	client.pendingMsgs = nil
-	client.maxPendingMsgs = wsMaxPendingMsgs
+	// A reconnect may have already replaced Conn while the old read loop was
+	// exiting. Only tear down the connection this loop was using.
+	if !client.reconnecting {
+		client.reconnecting = true
+		client.disconnectedAt = time.Now()
+		client.closed = false // not closed yet, QueueSend will buffer
+		client.pendingMsgs = nil
+		client.maxPendingMsgs = wsMaxPendingMsgs
+	}
 	// Close the old connection — the write loop goroutine is already dead.
-	if client.Conn != nil {
-		client.Conn.Close()
+	// Leave Conn alone if a newer connection is already attached.
+	oldConn := client.Conn
+	if oldConn != nil && client.reconnecting {
 		client.Conn = nil
 	}
 	client.mu.Unlock()
+	if oldConn != nil {
+		oldConn.Close()
+	}
 
 	// Start the expiry timer. If the timer fires, remove permanently.
 	client.mu.Lock()
