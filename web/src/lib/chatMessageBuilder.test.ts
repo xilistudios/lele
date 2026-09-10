@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  COMMAND_TOOL_NAME,
+  buildCommandChipToolArgs,
   buildToolCallMap,
   createAssistantMessage,
   createHistoryMessageId,
@@ -9,11 +11,12 @@ import {
   createUserMessage,
   formatToolCallArgs,
   isCompactionSummary,
+  normalizeCommandArgs,
   parseAttachmentsFromContent,
   parseSubagentSessionKey,
   toChatMessages,
 } from './chatMessageBuilder'
-import type { HistoryToolCall } from './types'
+import type { HistoryToolCall, RawHistoryMessage } from './types'
 
 describe('createHistoryMessageId', () => {
   test('genera ID determinístico para mensajes de historial', () => {
@@ -508,5 +511,96 @@ describe('toChatMessages history attachments', () => {
     const result = toChatMessages(history, sessionKey)
     expect(result[0].content).toBe('texto\n## Attachments\n- /tmp/x.png')
     expect(result[0].attachments).toBeUndefined()
+  })
+})
+
+describe('command chip (harness commands in history)', () => {
+  test('normalizeCommandArgs adds the leading slash and fills every field', () => {
+    expect(normalizeCommandArgs({ command: 'review', args: 'src', source: 'workspace' })).toEqual({
+      command: '/review',
+      args: 'src',
+      agent: '',
+      model: '',
+      source: 'workspace',
+      description: '',
+    })
+    // An already-slashed name is not doubled, and surrounding space is trimmed.
+    expect(normalizeCommandArgs({ command: ' /Review ' }).command).toBe('/Review')
+  })
+
+  test('buildCommandChipToolArgs follows the "toolName {json}" wire convention', () => {
+    const args = buildCommandChipToolArgs({ command: 'review', args: 'src' })
+    expect(args.startsWith(`${COMMAND_TOOL_NAME} `)).toBe(true)
+    expect(JSON.parse(args.slice(COMMAND_TOOL_NAME.length + 1))).toEqual(
+      normalizeCommandArgs({ command: 'review', args: 'src' }),
+    )
+  })
+
+  test('toChatMessages renders command-driven history as original text + chip', () => {
+    const history: RawHistoryMessage[] = [
+      {
+        id: '0',
+        role: 'user',
+        // Content is the EXPANDED prompt (what the model sees on replay)...
+        content: 'review the src dir please',
+        // ...while the bubble shows what the user typed.
+        display_content: '/review src',
+        harness_command: {
+          command: 'review',
+          description: 'Review code',
+          args: 'src',
+          source: 'workspace',
+        },
+      },
+      { id: '1', role: 'assistant', content: 'ok' },
+    ]
+
+    const result = toChatMessages(history, 'session:1')
+
+    expect(result[0].role).toBe('user')
+    expect(result[0].content).toBe('/review src')
+
+    // The chip is a completed 'command' tool card right after the user bubble,
+    // byte-identical to what the live command.applied event inserts.
+    expect(result[1].role).toBe('tool')
+    expect(result[1].toolName).toBe(COMMAND_TOOL_NAME)
+    expect(result[1].toolStatus).toBe('completed')
+    expect(JSON.parse((result[1].toolArgs ?? '').slice(COMMAND_TOOL_NAME.length + 1))).toEqual(
+      normalizeCommandArgs({
+        command: 'review',
+        description: 'Review code',
+        args: 'src',
+        source: 'workspace',
+      }),
+    )
+
+    expect(result[2].role).toBe('assistant')
+  })
+
+  test('plain history messages get no chip and keep content', () => {
+    const history: RawHistoryMessage[] = [{ id: '0', role: 'user', content: 'hola' }]
+    const result = toChatMessages(history, 'session:1')
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toBe('hola')
+  })
+
+  test('display_content without harness_command still shows the original text', () => {
+    // Defensive: a message could carry one field without the other (older
+    // server, partial write). The bubble must never show the raw expansion.
+    const history: RawHistoryMessage[] = [
+      { id: '0', role: 'user', content: 'expanded prompt', display_content: '/mystery' },
+    ]
+    const result = toChatMessages(history, 'session:1')
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toBe('/mystery')
+  })
+
+  test('a nameless harness_command is ignored instead of rendering an empty chip', () => {
+    const history: RawHistoryMessage[] = [
+      { id: '0', role: 'user', content: 'x', harness_command: { command: '' } },
+    ]
+    const result = toChatMessages(history, 'session:1')
+    expect(result).toHaveLength(1)
+    expect(result[0].role).toBe('user')
   })
 })

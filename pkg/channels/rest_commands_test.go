@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -505,5 +507,169 @@ func TestConsumesEventIncludesCommandApplied(t *testing.T) {
 	n := &NativeChannel{}
 	if !n.ConsumesEvent("command.applied") {
 		t.Error("NativeChannel must declare command.applied as consumed (dispatchOutboundMessage branches on it)")
+	}
+}
+
+// --- per-agent palette scoping (?agent_id=) --------------------------------
+
+// harnessCommandsLoopFake combines the multi-workspace agent fake (GetAgentInfo
+// per agent, real config snapshot) with the optional customCommandProvider
+// capability, i.e. exactly the surface of the production *agent.Loop that
+// chatCommands touches. defaultCmds models the loop-wide default-workspace view
+// used by every fallback path.
+type harnessCommandsLoopFake struct {
+	*commandsWorkspaceLoop
+	defaultCmds []*harness.Command
+}
+
+func (h *harnessCommandsLoopFake) HarnessCommands() []*harness.Command {
+	return h.defaultCmds
+}
+
+// newScopedCommandsServer gives agents "alpha" and "beta" real workspaces, each
+// with one command of its own on disk, plus a distinguishable default view.
+func newScopedCommandsServer(t *testing.T) (*nativeTestServer, *harnessCommandsLoopFake) {
+	t.Helper()
+
+	ts, dirs := newCommandsTestServer(t)
+
+	writeCommandFile(t, filepath.Join(dirs["alpha"], agentCommandsSubdir), "alpha-only.md",
+		commandMarkdown("Alpha command", "do the alpha thing"))
+	writeCommandFile(t, filepath.Join(dirs["beta"], agentCommandsSubdir), "beta-only.md",
+		commandMarkdown("Beta command", "do the beta thing"))
+
+	provider := &harnessCommandsLoopFake{
+		commandsWorkspaceLoop: &commandsWorkspaceLoop{
+			nativeTestAgentLoop: ts.loop,
+			workspaces:          map[string]string{"alpha": dirs["alpha"], "beta": dirs["beta"]},
+		},
+		defaultCmds: []*harness.Command{{
+			Name: "legacy", Description: "from the default view", Template: "t",
+			Source: harness.SourceWorkspace,
+		}},
+	}
+	ts.channel.agentLoop = provider
+	return ts, provider
+}
+
+// chatCommandsURL fetches the palette with an arbitrary query string.
+func chatCommandsURL(t *testing.T, ts *nativeTestServer, rawQuery string) []agentcommands.CommandInfo {
+	t.Helper()
+
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/chat/commands?"+rawQuery, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(): %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+ts.token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do(): %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(): %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body=%s)", resp.StatusCode, http.StatusOK, body)
+	}
+	var payload ChatCommandsResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode payload: %v (body=%s)", err, body)
+	}
+	return payload.Commands
+}
+
+// findCommand looks a command up by wire name in a palette payload.
+func findCommand(cmds []agentcommands.CommandInfo, name string) (agentcommands.CommandInfo, bool) {
+	i := slices.IndexFunc(cmds, func(c agentcommands.CommandInfo) bool { return c.Name == name })
+	if i < 0 {
+		return agentcommands.CommandInfo{}, false
+	}
+	return cmds[i], true
+}
+
+// TestChatCommandsEndpoint_AgentIDScopesCustomCommands is the core of the
+// feature: the palette must show what the ANSWERING agent can run. Commands are
+// read from that agent's own workspace on disk — not from the loop-wide default
+// view, which would show another agent's commands (or hide this agent's).
+func TestChatCommandsEndpoint_AgentIDScopesCustomCommands(t *testing.T) {
+	ts, _ := newScopedCommandsServer(t)
+
+	t.Run("alpha sees only its own custom command", func(t *testing.T) {
+		got := chatCommandsURL(t, ts, "agent_id=alpha")
+		if _, ok := findCommand(got, "/alpha-only"); !ok {
+			t.Fatalf("alpha palette missing /alpha-only: %+v", got)
+		}
+		for _, forbidden := range []string{"/beta-only", "/legacy"} {
+			if _, ok := findCommand(got, forbidden); ok {
+				t.Errorf("alpha palette leaked %q (beta or default-workspace command): %+v", forbidden, got)
+			}
+		}
+		// Built-ins ride along regardless of scope.
+		if _, ok := findCommand(got, "/clear"); !ok {
+			t.Error("alpha palette lost the built-ins")
+		}
+		if cmd, _ := findCommand(got, "/alpha-only"); cmd.Source != string(harness.SourceWorkspace) {
+			t.Errorf("/alpha-only source = %q, want %q", cmd.Source, harness.SourceWorkspace)
+		}
+	})
+
+	t.Run("beta sees a different palette", func(t *testing.T) {
+		got := chatCommandsURL(t, ts, "agent_id=beta")
+		if _, ok := findCommand(got, "/beta-only"); !ok {
+			t.Fatalf("beta palette missing /beta-only: %+v", got)
+		}
+		if _, ok := findCommand(got, "/alpha-only"); ok {
+			t.Errorf("beta palette leaked /alpha-only: %+v", got)
+		}
+	})
+
+	t.Run("agent_id is URL-decoded", func(t *testing.T) {
+		// An id with reserved characters must resolve like any other, proving
+		// the handler reads the query value and not a raw string match.
+		got := chatCommandsURL(t, ts, "agent_id=al%70ha") // "alpha" with 'p' escaped
+		if _, ok := findCommand(got, "/alpha-only"); !ok {
+			t.Errorf("escaped agent_id did not resolve to alpha's palette: %+v", got)
+		}
+	})
+}
+
+// TestChatCommandsEndpoint_AgentIDFallbacks pins the degradation contract: an
+// empty or unknown agent_id must answer with the loop-wide default view (the
+// pre-scoping behavior) instead of failing or showing an empty palette — the
+// chat must keep working even when the scope cannot be resolved.
+func TestChatCommandsEndpoint_AgentIDFallbacks(t *testing.T) {
+	ts, provider := newScopedCommandsServer(t)
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"no agent_id", ""},
+		{"empty agent_id", "agent_id="},
+		{"unknown agent_id", "agent_id=ghost"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := chatCommandsURL(t, ts, tc.query)
+			if _, ok := findCommand(got, "/legacy"); !ok {
+				t.Errorf("palette = %+v, want the default-workspace view (/legacy)", got)
+			}
+			// The workspace-scoped files must NOT leak into the fallback: that
+			// would mean the default path was silently re-discovered per agent.
+			for _, leak := range []string{"/alpha-only", "/beta-only"} {
+				if _, ok := findCommand(got, leak); ok {
+					t.Errorf("fallback palette leaked %q: %+v", leak, got)
+				}
+			}
+		})
+	}
+
+	// Sanity: the provider really is the fallback source (assertion above would
+	// pass vacuously if the handler returned built-ins only).
+	if len(provider.defaultCmds) == 0 {
+		t.Fatal("test server has no default-view commands; fallback assertions would be vacuous")
 	}
 }

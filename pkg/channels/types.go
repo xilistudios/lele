@@ -247,6 +247,12 @@ type ChatHistoryMessage struct {
 	ToolName           string                        `json:"tool_name,omitempty"`
 	ExcludeFromContext bool                          `json:"exclude_from_context,omitempty"`
 	Attachments        []providers.MessageAttachment `json:"attachments,omitempty"`
+	// DisplayContent, when set, is what the UI should render instead of
+	// Content (harness commands store the expanded prompt in Content).
+	DisplayContent string `json:"display_content,omitempty"`
+	// Command is the harness slash command that produced this message, so the
+	// UI can re-render the command chip from history. nil = not command-driven.
+	Command *providers.CommandApplied `json:"harness_command,omitempty"`
 }
 
 type HistoryToolCall struct {

@@ -983,18 +983,48 @@ export type StreamStatusResponse = {
   streams: StreamMessageState[]
 }
 
+/**
+ * Harness command that produced a user message (mirrors
+ * providers.CommandApplied / the command.applied payload). `command` has NO
+ * leading slash; the UI adds it. Present only on command-driven messages.
+ */
+export type HistoryCommandInfo = {
+  command: string
+  description?: string
+  args?: string
+  agent?: string
+  model?: string
+  source?: string
+}
+
+/**
+ * One raw message of a chat-history page as it comes off the wire. Shared by
+ * the HTTP response type, the react-query cache shape and toChatMessages so the
+ * three can never drift apart.
+ */
+export type RawHistoryMessage = {
+  id: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  reasoning_content?: string
+  tool_calls?: HistoryToolCall[]
+  tool_call_id?: string
+  tool_name?: string
+  exclude_from_context?: boolean
+  attachments?: Attachment[]
+  /**
+   * Text to render instead of `content` (harness commands store the expanded
+   * prompt in content; this keeps the original "/name args" the user typed).
+   */
+  display_content?: string
+  /** Set when the message was produced by a custom slash command. */
+  harness_command?: HistoryCommandInfo
+}
+
 export type HistoryResponse = {
   session_key: string
   processing: boolean
-  messages: Array<{
-    id: string
-    role: 'user' | 'assistant' | 'tool'
-    content: string
-    reasoning_content?: string
-    tool_calls?: HistoryToolCall[]
-    tool_call_id?: string
-    tool_name?: string
-  }>
+  messages: RawHistoryMessage[]
   has_more: boolean
   groups?: GroupSnapshot[]
 }

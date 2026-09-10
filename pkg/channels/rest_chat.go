@@ -297,6 +297,8 @@ func (b *chatHistoryBuilder) message(id string, msg providers.Message) ChatHisto
 		ToolCallID:         msg.ToolCallID,
 		ExcludeFromContext: msg.ExcludeFromContext,
 		Attachments:        msg.Attachments,
+		DisplayContent:     msg.DisplayContent,
+		Command:            msg.Command,
 	}
 	// For tool messages, look up the tool name from the assistant message that initiated the call
 	if msg.Role == "tool" && msg.ToolCallID != "" {

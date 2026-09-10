@@ -228,7 +228,19 @@ func (lr *llmRunnerImpl) runAgentLoop(ctx context.Context, agent *AgentInstance,
 
 	// 3. Save user message to session and persist immediately
 	if !opts.SkipUserMessage {
-		agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+		if opts.AppliedCommand != nil {
+			// Command-driven turn: store the expanded prompt (what the model
+			// must see on replay) but keep the original "/name args" and the
+			// command metadata for the UI. See providers.Message.DisplayContent.
+			agent.Sessions.AddFullMessage(opts.SessionKey, providers.Message{
+				Role:           "user",
+				Content:        renderedUserMessage,
+				DisplayContent: opts.AppliedCommand.Original,
+				Command:        commandAppliedOf(opts.AppliedCommand),
+			})
+		} else {
+			agent.Sessions.AddMessage(opts.SessionKey, "user", renderedUserMessage)
+		}
 	} else if opts.Channel == "system" {
 		agent.Sessions.AddMessage(opts.SessionKey, "system", renderedUserMessage)
 	}

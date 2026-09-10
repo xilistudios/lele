@@ -19,6 +19,40 @@ describe('useSlashCommands', () => {
     expect(result.current.commands).toEqual([clear, compact])
     expect(result.current.error).toBeNull()
     expect(mockApi.chatCommands).toHaveBeenCalledTimes(1)
+    // No agent selected yet -> unscoped request (server keeps the legacy view).
+    expect(mockApi.chatCommands).toHaveBeenCalledWith(undefined)
+  })
+
+  test('escopes the fetch to the selected agent', async () => {
+    const mockApi = {
+      chatCommands: mock((agentId?: string) =>
+        Promise.resolve({
+          commands: [
+            clear,
+            {
+              name: '/notes',
+              description: 'n',
+              usage: '/notes',
+              source: agentId === 'coder' ? 'workspace' : 'global',
+            },
+          ],
+        }),
+      ),
+    }
+
+    const { result, rerender } = renderHook(
+      ({ agentId }: { agentId?: string }) => useSlashCommands(mockApi as never, agentId),
+      { initialProps: { agentId: 'coder' } },
+    )
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(mockApi.chatCommands).toHaveBeenCalledWith('coder')
+
+    // Switching agents must refetch: custom commands differ per workspace.
+    rerender({ agentId: 'default' })
+    await waitFor(() => expect(mockApi.chatCommands).toHaveBeenCalledTimes(2))
+    expect(mockApi.chatCommands).toHaveBeenLastCalledWith('default')
+    await waitFor(() => expect(result.current.commands[1].source).toBe('global'))
   })
 
   test('en error degrada a lista vacía', async () => {

@@ -653,7 +653,8 @@ export const createApiClient = (baseUrl: string) => {
       request<SessionContextResponse>(endpoints.chat.session(sessionKey, 'context'), {
         method: 'GET',
       }),
-    chatCommands: () => request<ChatCommandsResponse>(endpoints.chat.commands, { method: 'GET' }),
+    chatCommands: (agentId?: string) =>
+      request<ChatCommandsResponse>(endpoints.chat.commands(agentId), { method: 'GET' }),
     sessionSubagents: (sessionKey: string) =>
       request<SessionSubagentsResponse>(endpoints.chat.session(sessionKey, 'subagents'), {
         method: 'GET',

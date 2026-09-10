@@ -85,6 +85,11 @@ func TestHarnessCommand_AppliesAndPublishes(t *testing.T) {
 	if got := msg.Metadata["harness_source"]; got != string(harness.SourceConfig) {
 		t.Errorf("metadata harness_source = %q, want %q", got, harness.SourceConfig)
 	}
+	// Description rides in metadata so the persisted user message can re-render
+	// the command chip from history (providers.Message.Command).
+	if got := msg.Metadata["harness_description"]; got != "Review code" {
+		t.Errorf("metadata harness_description = %q, want %q", got, "Review code")
+	}
 	// agent/model are only set when the command declares them.
 	if _, ok := msg.Metadata["harness_agent"]; ok {
 		t.Errorf("unexpected harness_agent metadata: %q", msg.Metadata["harness_agent"])
@@ -1239,5 +1244,146 @@ func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
 	al.providable.SetSessionAgent(sessionKey, "main")
 	if _, hasModel := al.sessionModels.Load(al.ResolveSessionKey(sessionKey)); !hasModel {
 		t.Error("re-pinning the same agent cleared the session model (early return lost)")
+	}
+}
+
+// --- harness-command persistence on the user message ------------------------
+
+// TestRunAgentLoop_AppliedCommandPersistsDisplayFields is the runner half of the
+// custom-commands-in-chat feature: for a command-driven turn the persisted user
+// message must carry the EXPANDED prompt in Content (that is what the model must
+// receive when the session is replayed) plus the original "/name args" and the
+// chip metadata, while the live LLM call still sees the expansion.
+func TestRunAgentLoop_AppliedCommandPersistsDisplayFields(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+
+	var sawMessages []providers.Message
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{Content: "done", ToolCalls: []providers.ToolCall{}},
+		onChatCalled: func(_ context.Context, messages []providers.Message, _ []providers.ToolDefinition, _ string, _ map[string]interface{}) (*providers.LLMResponse, error) {
+			sawMessages = append([]providers.Message{}, messages...)
+			return &providers.LLMResponse{Content: "done", ToolCalls: []providers.ToolCall{}}, nil
+		},
+	}
+
+	opts := processOptions{
+		SessionKey:      "cmd-persist",
+		Channel:         "webui",
+		ChatID:          "chat-1",
+		UserMessage:     "review the src dir please", // expanded prompt
+		DefaultResponse: "fallback",
+		SendResponse:    false,
+		EnableSummary:   false,
+		AppliedCommand: &appliedCommand{
+			Original: "/review src", Name: "review", Description: "Review code",
+			Args: "src", Source: "config",
+		},
+	}
+	if _, err := runner.runAgentLoop(context.Background(), agent, opts); err != nil {
+		t.Fatalf("runAgentLoop: %v", err)
+	}
+
+	history := agent.Sessions.GetHistory("cmd-persist")
+	var user *providers.Message
+	for i := range history {
+		if history[i].Role == "user" {
+			user = &history[i]
+			break
+		}
+	}
+	if user == nil {
+		t.Fatal("no user message persisted")
+	}
+	if user.Content != "review the src dir please" {
+		t.Errorf("persisted Content = %q, want the expanded prompt", user.Content)
+	}
+	if user.DisplayContent != "/review src" {
+		t.Errorf("persisted DisplayContent = %q, want %q", user.DisplayContent, "/review src")
+	}
+	if user.Command == nil {
+		t.Fatal("persisted Command is nil; the history chip would not render")
+	}
+	want := providers.CommandApplied{
+		Name: "review", Description: "Review code", Args: "src", Source: "config",
+	}
+	if *user.Command != want {
+		t.Errorf("persisted Command = %+v, want %+v", *user.Command, want)
+	}
+
+	// The model must receive the expansion, never the display text.
+	found := false
+	for _, m := range sawMessages {
+		if m.Role == "user" {
+			found = true
+			if m.Content != "review the src dir please" {
+				t.Errorf("LLM saw %q, want the expanded prompt", m.Content)
+			}
+			if m.DisplayContent != "" || m.Command != nil {
+				t.Errorf("display metadata leaked into the provider payload: %+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Error("provider never received a user message")
+	}
+}
+
+// TestRunAgentLoop_PlainMessageKeepsLegacyPersistence guards the other branch:
+// without AppliedCommand the user message goes through the plain AddMessage path
+// and grows no display fields.
+func TestRunAgentLoop_PlainMessageKeepsLegacyPersistence(t *testing.T) {
+	al, tmpDir := createLLMRunnerTestAgentLoop(t)
+	defer os.RemoveAll(tmpDir)
+
+	runner := newLLMRunner(al)
+	agent := createLLMRunnerTestAgentInstance(t, tmpDir)
+	agent.Provider = &llmRunnerMockLLMProvider{
+		response: &providers.LLMResponse{Content: "done", ToolCalls: []providers.ToolCall{}},
+	}
+
+	opts := processOptions{
+		SessionKey:      "plain-persist",
+		Channel:         "webui",
+		ChatID:          "chat-1",
+		UserMessage:     "hola",
+		DefaultResponse: "fallback",
+		SendResponse:    false,
+		EnableSummary:   false,
+	}
+	if _, err := runner.runAgentLoop(context.Background(), agent, opts); err != nil {
+		t.Fatalf("runAgentLoop: %v", err)
+	}
+
+	history := agent.Sessions.GetHistory("plain-persist")
+	for _, m := range history {
+		if m.Role != "user" {
+			continue
+		}
+		if m.Content != "hola" || m.DisplayContent != "" || m.Command != nil {
+			t.Fatalf("plain user message carries display fields: %+v", m)
+		}
+		return
+	}
+	t.Fatal("no user message persisted")
+}
+
+// TestCommandAppliedOf covers the pure record→wire mapping, including the nil
+// guard (nil AppliedCommand must not produce an empty chip on the wire).
+func TestCommandAppliedOf(t *testing.T) {
+	if commandAppliedOf(nil) != nil {
+		t.Error("nil appliedCommand must map to nil")
+	}
+	got := commandAppliedOf(&appliedCommand{
+		Original: "/x a", Name: "x", Description: "d", Args: "a",
+		Source: "global", Agent: "coder", Model: "m",
+	})
+	if got == nil || *got != (providers.CommandApplied{
+		Name: "x", Description: "d", Args: "a", Agent: "coder", Model: "m", Source: "global",
+	}) {
+		t.Errorf("commandAppliedOf mapping = %+v", got)
 	}
 }

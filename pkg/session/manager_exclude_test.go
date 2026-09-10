@@ -419,3 +419,38 @@ func TestSessionManager_HasMessages(t *testing.T) {
 		t.Fatalf("HasMessages(%q) = false, want true (evicted messages)", evictedKey)
 	}
 }
+
+// TestAddFullMessage_SessionNameUsesDisplayContent pins the session-title rule
+// for harness commands: the name is what the user sees they asked, so the first
+// user message titles the session with DisplayContent ("/name args"), not with
+// the expanded prompt stored in Content. Without DisplayContent the behavior is
+// the plain one (Content titles the session).
+func TestAddFullMessage_SessionNameUsesDisplayContent(t *testing.T) {
+	t.Run("display content wins for command-driven first message", func(t *testing.T) {
+		sm := NewSessionManager()
+		sm.AddFullMessage("test:cmdname", providers.Message{
+			Role:           "user",
+			Content:        "this is the long expanded prompt the model receives",
+			DisplayContent: "/review src",
+		})
+		if got := sm.GetOrCreate("test:cmdname").Name; got != generateSessionName("/review src") {
+			t.Errorf("session name = %q, want %q", got, generateSessionName("/review src"))
+		}
+	})
+
+	t.Run("plain message still titles from content", func(t *testing.T) {
+		sm := NewSessionManager()
+		sm.AddFullMessage("test:plain", providers.Message{Role: "user", Content: "hola mundo"})
+		if got := sm.GetOrCreate("test:plain").Name; got != generateSessionName("hola mundo") {
+			t.Errorf("session name = %q, want %q", got, generateSessionName("hola mundo"))
+		}
+	})
+
+	t.Run("assistant messages never title", func(t *testing.T) {
+		sm := NewSessionManager()
+		sm.AddFullMessage("test:asst", providers.Message{Role: "assistant", Content: "hi"})
+		if got := sm.GetOrCreate("test:asst").Name; got != "" {
+			t.Errorf("session name = %q, want empty", got)
+		}
+	})
+}

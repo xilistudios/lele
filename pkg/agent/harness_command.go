@@ -293,6 +293,7 @@ func (mp *messageProcessorImpl) applyHarnessCommand(_ context.Context, msg *bus.
 	msg.Metadata["harness_command"] = cmd.Name
 	msg.Metadata["harness_args"] = rawArgs
 	msg.Metadata["harness_source"] = string(cmd.Source)
+	msg.Metadata["harness_description"] = cmd.Description
 	if cmd.Agent != "" {
 		msg.Metadata["harness_agent"] = cmd.Agent
 	}
@@ -311,6 +312,7 @@ var harnessMetadataKeys = []string{
 	"harness_command",
 	"harness_args",
 	"harness_source",
+	"harness_description",
 	"harness_agent",
 	"harness_model",
 }

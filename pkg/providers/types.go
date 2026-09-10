@@ -14,6 +14,7 @@ type LLMResponse = protocoltypes.LLMResponse
 type UsageInfo = protocoltypes.UsageInfo
 type Message = protocoltypes.Message
 type MessageAttachment = protocoltypes.MessageAttachment
+type CommandApplied = protocoltypes.CommandApplied
 type ContentPart = protocoltypes.ContentPart
 type ImageURL = protocoltypes.ImageURL
 type ToolDefinition = protocoltypes.ToolDefinition

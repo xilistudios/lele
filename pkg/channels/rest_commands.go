@@ -47,6 +47,13 @@ type customCommandProvider interface {
 //
 //	{"commands":[{"name","description","usage","source"?},...]}
 //
+// An optional ?agent_id=<id> scopes the custom part to THAT agent: the
+// commands are discovered from the agent's own workspace (the same four
+// harness levels the Commands tab shows), so the palette matches what the
+// dispatcher would actually run for the agent answering the chat. An unknown
+// or unresolvable agent falls back to the default-workspace list instead of
+// failing — the palette degrades, chat keeps working.
+//
 // The built-in part is read straight from the command registry, which is package
 // data rather than per-session state. The custom part is read from the loop via
 // the optional customCommandProvider assertion above, so a missing loop, a loop
@@ -64,14 +71,15 @@ func (n *NativeChannel) handleChatCommands(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, ChatCommandsResponse{
-		Commands: n.chatCommands(),
+		Commands: n.chatCommands(r.URL.Query().Get("agent_id")),
 	})
 }
 
 // chatCommands builds the palette payload: built-ins plus the harness commands
-// the agent loop currently resolves (all four discovery levels, precedence
-// already applied by the harness registry).
-func (n *NativeChannel) chatCommands() []agentcommands.CommandInfo {
+// effective for agentID (all four discovery levels, precedence already applied
+// by the harness registry). agentID == "" — or one that cannot be resolved —
+// uses the agent loop's default-workspace view.
+func (n *NativeChannel) chatCommands(agentID string) []agentcommands.CommandInfo {
 	base := agentcommands.WebUICommands()
 
 	// n.agentLoop is an interface: a nil *agent.Loop stored in it would be a
@@ -80,16 +88,37 @@ func (n *NativeChannel) chatCommands() []agentcommands.CommandInfo {
 	if n.agentLoop == nil {
 		return base
 	}
-	provider, ok := n.agentLoop.(customCommandProvider)
-	if !ok || provider == nil {
-		return base
-	}
 
-	custom := provider.HarnessCommands()
+	custom := n.harnessCommandsFor(agentID)
 	if len(custom) == 0 {
 		return base
 	}
 	return agentcommands.WithCustom(base, harnessCommandsAsCustom(custom))
+}
+
+// harnessCommandsFor resolves the effective harness commands for one agent.
+// With an agentID it reads the registry of a manager built over that agent's
+// workspace (read-only path resolution — listing must not create workspaces);
+// any step that cannot resolve falls back to the loop-wide default view, which
+// is the pre-agent-scoping behavior and still beats an empty palette.
+func (n *NativeChannel) harnessCommandsFor(agentID string) []*harness.Command {
+	provider, ok := n.agentLoop.(customCommandProvider)
+	if !ok || provider == nil {
+		return nil
+	}
+	if agentID == "" {
+		return provider.HarnessCommands()
+	}
+	info, found := n.agentLoop.GetAgentInfo(agentID)
+	if !found {
+		return provider.HarnessCommands()
+	}
+	workspace, err := agentWorkspaceDir(info.Workspace)
+	if err != nil {
+		return provider.HarnessCommands()
+	}
+	mgr := agentCommandsManager(n.agentCommandsConfig(), workspace)
+	return mgr.Registry().All()
 }
 
 // harnessCommandsAsCustom maps resolved harness commands onto the wire shape.

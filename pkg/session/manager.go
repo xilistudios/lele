@@ -75,8 +75,15 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 
 	session := sm.getOrCreateUnlocked(sessionKey)
 
+	// The session name is what the user sees they asked, not what the model
+	// received: a harness command stores the expanded prompt in Content but the
+	// original "/name args" in DisplayContent.
 	if msg.Role == "user" && len(session.Messages) == 0 && session.Name == "" {
-		session.Name = generateSessionName(msg.Content)
+		name := msg.DisplayContent
+		if name == "" {
+			name = msg.Content
+		}
+		session.Name = generateSessionName(name)
 		session.bumpEpoch()
 	}
 

@@ -66,7 +66,16 @@ export const endpoints = {
     },
     sessions: '/api/v1/chat/sessions',
     sessionsMeta: '/api/v1/chat/sessions/meta',
-    commands: '/api/v1/chat/commands',
+    /**
+     * Slash-command palette list. `agentId` scopes the custom (harness) part to
+     * that agent's own workspace — the palette must show what the answering
+     * agent can actually run. Without it the server falls back to the default
+     * workspace view.
+     */
+    commands: (agentId?: string) =>
+      agentId
+        ? `/api/v1/chat/commands?agent_id=${encodeURIComponent(agentId)}`
+        : '/api/v1/chat/commands',
     session: (
       sessionKey: string,
       subresource?:
