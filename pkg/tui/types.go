@@ -128,6 +128,7 @@ var allCommands = []commandInfo{
 	{name: "/models", description: "Switch model"},
 	{name: "/clear", description: "Clear session history"},
 	{name: "/clearq", description: "Drop queued messages for this session"},
+	{name: "/flushq", description: "Send the next queued message now (cancels a busy turn after confirm)"},
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language or download packs"},
 	{name: "/subagents", description: "Switch to subagent"},
@@ -384,6 +385,10 @@ type Model struct {
 	escPressCount int
 	escLastPress  time.Time
 	escHint       bool // true when showing "press ESC again to cancel" hint
+
+	// Double-confirm for force-send while busy (alt+enter / /flushq), which
+	// also cancels the running turn including subagents.
+	flushLastPress time.Time
 
 	// Text selection state (in-app click+drag selection in the viewport)
 	selecting           bool      // whether a selection drag is in progress

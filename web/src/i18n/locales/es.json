@@ -126,6 +126,8 @@
     "commandsHint": "Escribe / para ver comandos",
     "queueHeader": "En cola · {{count}}",
     "queueRemove": "Quitar de la cola",
+    "queueSendNow": "Enviar ahora",
+    "queueSendNowBusy": "Cancelar el turno en curso (incl. subagentos) y enviar ahora",
     "queueClear": "Vaciar cola",
     "queueFull": "La cola está llena (10 mensajes). Espera a que termine el agente.",
     "deviceMenu": "Menú del dispositivo",

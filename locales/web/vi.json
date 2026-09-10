@@ -137,7 +137,9 @@
     "failedToSend": "Gửi thất bại",
     "retry": "Thử lại",
     "archivedFromContext": "Đã lưu trữ khỏi ngữ cảnh",
-    "download": "Tải xuống"
+    "download": "Tải xuống",
+    "queueSendNow": "Gửi ngay",
+    "queueSendNowBusy": "Hủy lượt đang chạy (bao gồm tác nhân con) và gửi ngay"
   },
   "connection": {
     "connected": "Đã kết nối",

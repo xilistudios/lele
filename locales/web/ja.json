@@ -137,7 +137,9 @@
     "failedToSend": "送信に失敗しました",
     "retry": "再試行",
     "archivedFromContext": "コンテキストからアーカイブ済み",
-    "download": "ダウンロード"
+    "download": "ダウンロード",
+    "queueSendNow": "今すぐ送信",
+    "queueSendNowBusy": "実行中のターン（サブエージェント含む）をキャンセルして今すぐ送信"
   },
   "connection": {
     "connected": "接続済み",

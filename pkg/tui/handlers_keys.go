@@ -148,6 +148,15 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 			return m, nil, true
 		}
 
+	case queueFlushKey:
+		// Force-send the next queued message now (cancels a busy turn).
+		// Empty composer only, so alt+enter never hijacks a multi-line
+		// draft the user meant to keep editing. An empty queue leaves the
+		// key free for the textarea's insert-newline binding.
+		if strings.TrimSpace(m.chatInput.Value()) == "" && m.queueDepth() > 0 {
+			return m, m.forceSendNextQueued(), true
+		}
+
 	case "up", "down", "pgup", "pgdown":
 		// Group mode welcome: cycle profile selection with up/down arrows
 		if (msg.String() == "up" || msg.String() == "down") &&

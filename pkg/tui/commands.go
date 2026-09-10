@@ -126,6 +126,11 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.queueFeedback = fmt.Sprintf(i18n.T("tui.queue.dropped"), n)
 		return nil
 
+	case "/flushq":
+		// Force-send the next queued message, cancelling a busy turn first.
+		// Returns the publish/tick command so the turn starts this frame.
+		return m.forceSendNextQueued()
+
 	case "/think":
 		m.resetModal(ModalThink)
 		m.modalItems = []string{"off", "low", "medium", "high"}

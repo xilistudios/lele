@@ -289,5 +289,11 @@
   "tui.languages.downloadFailed": "Impossibile scaricare il pacchetto lingua",
   "tui.languages.catalogFailed": "Impossibile caricare il catalogo delle lingue",
   "tui.languages.allInstalled": "Tutte le lingue disponibili sono già installate",
-  "tui.languages.remoteHint": "Seleziona una lingua da scaricare dal repository lele su GitHub"
+  "tui.languages.remoteHint": "Seleziona una lingua da scaricare dal repository lele su GitHub",
+  "tui.queue.empty": "la coda è vuota — niente da inviare",
+  "tui.queue.flushConfirm": "questo annulla il turno in corso (incl. sotto-agenti) — premi di nuovo per inviare",
+  "tui.queue.flushHint": " · %s annulla il turno e invia il successivo",
+  "tui.catalogNoMatches": "Nessuna corrispondenza nel catalogo — digita un ID modello personalizzato",
+  "tui.catalogPickerHint": "↑/↓ navigare · TAB accettare · ENTER selezionare · ESC nascondere · digita per filtrare",
+  "tui.catalogSuggestions": "Modelli del catalogo"
 }

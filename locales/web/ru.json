@@ -137,7 +137,9 @@
     "failedToSend": "Не удалось отправить",
     "retry": "Повторить",
     "archivedFromContext": "Архивировано из контекста",
-    "download": "Скачать"
+    "download": "Скачать",
+    "queueSendNow": "Отправить сейчас",
+    "queueSendNowBusy": "Отменить текущий ход (включая субагентов) и отправить сейчас"
   },
   "connection": {
     "connected": "Подключено",

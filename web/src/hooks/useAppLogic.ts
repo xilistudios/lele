@@ -687,6 +687,26 @@ export function useAppLogic(
   // falling edge of the session we just left.
   const prevQueueProcessingRef = useRef<{ key: string | null; value: boolean } | null>(null)
   const flushingIdRef = useRef<string | null>(null)
+  // Message the user asked to send NOW while the agent was busy: it was taken
+  // out of the FIFO and is parked here until cancel settles (isProcessing
+  // falls). Sent instead of the normal queue head on the next idle edge.
+  // sessionKey is captured at park time so a chat switch cannot deliver it
+  // into the wrong session.
+  const forceSendRef = useRef<{
+    content: string
+    attachments: string[]
+    sessionKey: string
+  } | null>(null)
+
+  // Restore a taken entry when handleSend refuses it, so the message stays
+  // visible in the queue instead of vanishing (no agent / failed session).
+  const restoreQueued = useCallback(
+    (msg: { sessionKey: string; content: string; attachments: string[] }) => {
+      queueHook.enqueueMessage(msg.sessionKey, msg.content, msg.attachments)
+    },
+    [queueHook.enqueueMessage],
+  )
+
   useEffect(() => {
     const sessionKey = sessionsHook.currentSessionKey
     const previous = prevQueueProcessingRef.current
@@ -719,14 +739,37 @@ export function useAppLogic(
     // A dequeue is already in flight (its message.ack may not have arrived yet).
     if (flushingIdRef.current) return
 
+    // Force-send wins over the FIFO head: the user already picked this message
+    // and cancelled the previous turn to make room for it. A park belonging to
+    // another session is left untouched — switching chats must never deliver it
+    // into the session now on screen.
+    const forced = forceSendRef.current
+    if (forced) {
+      if (forced.sessionKey !== sessionKey) return
+      forceSendRef.current = null
+      flushingIdRef.current = 'force-send'
+      void handleSend(forced.content, forced.attachments)
+        .then((ok) => {
+          if (!ok) restoreQueued(forced)
+        })
+        .finally(() => {
+          if (flushingIdRef.current === 'force-send') flushingIdRef.current = null
+        })
+      return
+    }
+
     const next = queueHook.peekNext(sessionKey)
     if (!next || next.sessionKey !== sessionKey) return
 
     flushingIdRef.current = next.id
     queueHook.dequeueNext(sessionKey)
-    void handleSend(next.content, next.attachments).finally(() => {
-      if (flushingIdRef.current === next.id) flushingIdRef.current = null
-    })
+    void handleSend(next.content, next.attachments)
+      .then((ok) => {
+        if (!ok) restoreQueued(next)
+      })
+      .finally(() => {
+        if (flushingIdRef.current === next.id) flushingIdRef.current = null
+      })
   }, [
     isProcessing,
     sessionsHook.currentSessionKey,
@@ -734,7 +777,44 @@ export function useAppLogic(
     handleSend,
     queueHook.peekNext,
     queueHook.dequeueNext,
+    restoreQueued,
   ])
+
+  /**
+   * Send one queued message immediately (the "Send now" button).
+   *
+   * Idle: dequeued and sent through the normal path this frame; a refused send
+   * is put back in the queue so nothing is lost.
+   * Busy: the entry is pulled out of the FIFO and parked, the current turn is
+   * cancelled, and the parked message is sent as soon as isProcessing falls
+   * (the auto-flush edge above). A second click while a park is already waiting
+   * re-queues the taken message instead of clobbering the park.
+   */
+  const sendNowQueuedMessage = useCallback(
+    (id: string) => {
+      const msg = queueHook.takeQueuedMessage(id)
+      if (!msg) return
+      if (busyRef.current) {
+        if (forceSendRef.current) {
+          // One in-flight force-send at a time. Put this one back so a double
+          // click during the cancel window cannot drop it.
+          restoreQueued(msg)
+          return
+        }
+        forceSendRef.current = {
+          content: msg.content,
+          attachments: msg.attachments,
+          sessionKey: msg.sessionKey,
+        }
+        handleCancel()
+        return
+      }
+      void handleSend(msg.content, msg.attachments).then((ok) => {
+        if (!ok) restoreQueued(msg)
+      })
+    },
+    [queueHook.takeQueuedMessage, handleCancel, handleSend, restoreQueued],
+  )
 
   return {
     error,
@@ -764,6 +844,7 @@ export function useAppLogic(
     onSend: sendOrQueue,
     queuedMessages: queueHook.queuedMessages,
     removeQueuedMessage: queueHook.removeQueuedMessage,
+    sendNowQueuedMessage,
     clearQueue: queueHook.clearQueue,
     queueCount: queueHook.queueCount,
     retryMessage: messagesHook.retryMessage,

@@ -289,5 +289,11 @@
   "tui.languages.downloadFailed": "Не удалось скачать языковой пакет",
   "tui.languages.catalogFailed": "Не удалось загрузить каталог языков",
   "tui.languages.allInstalled": "Все доступные языки уже установлены",
-  "tui.languages.remoteHint": "Выберите язык для загрузки из репозитория lele на GitHub"
+  "tui.languages.remoteHint": "Выберите язык для загрузки из репозитория lele на GitHub",
+  "tui.queue.empty": "очередь пуста — нечего отправлять",
+  "tui.queue.flushConfirm": "это отменит текущий ход (включая субагентов) — нажмите снова для отправки",
+  "tui.queue.flushHint": " · %s отменяет ход и отправляет следующий",
+  "tui.catalogNoMatches": "Совпадений в каталоге нет — введите ID пользовательской модели",
+  "tui.catalogPickerHint": "↑/↓ навигация · TAB принять · ENTER выбрать · ESC скрыть · ввод для фильтра",
+  "tui.catalogSuggestions": "Модели каталога"
 }

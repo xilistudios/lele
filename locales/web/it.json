@@ -137,7 +137,9 @@
     "failedToSend": "Impossibile inviare",
     "retry": "Riprova",
     "archivedFromContext": "Archiviato dal contesto",
-    "download": "Scarica"
+    "download": "Scarica",
+    "queueSendNow": "Invia ora",
+    "queueSendNowBusy": "Annulla il turno in corso (incl. sotto-agenti) e invia ora"
   },
   "connection": {
     "connected": "Connesso",

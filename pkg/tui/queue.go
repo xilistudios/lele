@@ -206,6 +206,52 @@ func (m *Model) popQueuedMessage(key string) (string, bool) {
 	return content, true
 }
 
+// forceSendNextQueued pops the oldest queued message and starts a turn with it
+// immediately (/flushq, alt+enter). Unlike maybeFlushQueue it does not defer
+// while the agent is busy: the current turn is cancelled first so the queued
+// message can go out at once — but only after a deliberate double press, the
+// same confirmation ESC uses for a destructive cancel. An empty queue is a
+// no-op with feedback so the command never looks like it swallowed the input.
+//
+// UI-exclusivity (modal / autocomplete / approval) is still honoured: a force
+// send must never start a turn under an open overlay, even though callers such
+// as handleNormalKey already sit outside those surfaces today.
+func (m *Model) forceSendNextQueued() tea.Cmd {
+	if m.queueDepth() == 0 {
+		m.queueFeedback = i18n.T("tui.queue.empty")
+		return nil
+	}
+	if m.modalMode != ModalNone || m.showAutocomplete || m.pendingApprovalID != "" {
+		return m.queueRetryCmd()
+	}
+	if m.isSessionProcessing() {
+		// StopAgent is destructive (subagent tree, group runs, background
+		// processes). Mirror ESC: first press only asks for confirmation.
+		now := time.Now()
+		if now.Sub(m.flushLastPress) >= escHintTimeout {
+			m.flushLastPress = now
+			m.queueFeedback = i18n.T("tui.queue.flushConfirm")
+			return nil
+		}
+		m.flushLastPress = time.Time{}
+		// Cancel the in-flight turn, then force the local busy flags off so
+		// publishUserMessage can start the queued turn without racing the
+		// (now cancelled) backend loop.
+		if m.agentLoop != nil && m.agentLoop.GetProvidable() != nil {
+			m.agentLoop.GetProvidable().StopAgent(m.currentKey)
+		}
+		m.clearStreamingState()
+		m.processing = false
+		m.startTime = time.Time{}
+	}
+	content, ok := m.popQueuedMessage(m.currentKey)
+	if !ok {
+		return nil
+	}
+	m.queueFeedback = ""
+	return m.publishUserMessage(content)
+}
+
 // clearQueue drops all pending messages for the current session (/clearq).
 // Other sessions keep their backlog and flush when they become active.
 func (m *Model) clearQueue() {
@@ -233,13 +279,19 @@ func (m *Model) queuePreview() string {
 // drift apart. bubbletea reports it as "alt+delete" (ESC [ 3 ; 3 ~).
 const queueRemoveKey = "alt+delete"
 
+// queueFlushKey is the key that force-sends the next queued message. Declared
+// next to the other queue key so the handler and the hint stay in sync.
+// bubbletea reports alt+enter (KeyEnter + Alt) as "alt+enter"; plain ctrl+enter
+// is indistinguishable from enter on most terminals.
+const queueFlushKey = "alt+enter"
+
 // queueStatusLine returns the queue strip text, or "" when there is nothing to
 // show. The count is scoped to the session on screen, so switching sessions
 // cannot display a stale depth.
 //
 // available is how many display cells the strip may occupy in the status line
 // (the rest is taken by the base status text and the goal badge). The
-// remove-key hint is only appended when it fits: view.go clamps the whole line
+// key hints are only appended when they fit: view.go clamps the whole line
 // by cells, and a hint cut in half is worse than no hint at all. The count
 // itself always stays — dropping it would hide pending messages.
 func (m *Model) queueStatusLine(available int) string {
@@ -251,9 +303,18 @@ func (m *Model) queueStatusLine(available int) string {
 		return ""
 	}
 	status := fmt.Sprintf(i18n.T("tui.queue.status"), n)
-	hint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
-	if lipgloss.Width(status)+lipgloss.Width(hint) <= available {
-		status += hint
+	removeHint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
+	flushHint := fmt.Sprintf(i18n.T("tui.queue.flushHint"), queueFlushKey)
+	if lipgloss.Width(status)+lipgloss.Width(removeHint)+lipgloss.Width(flushHint) <= available {
+		return status + removeHint + flushHint
+	}
+	// Prefer the remove hint when only one fits: the base status already names
+	// /flushq, so demoting the shorter older hint is the worse trade-off.
+	if lipgloss.Width(status)+lipgloss.Width(removeHint) <= available {
+		return status + removeHint
+	}
+	if lipgloss.Width(status)+lipgloss.Width(flushHint) <= available {
+		return status + flushHint
 	}
 	return status
 }

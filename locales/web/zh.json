@@ -137,7 +137,9 @@
     "failedToSend": "发送失败",
     "retry": "重试",
     "archivedFromContext": "已从上下文归档",
-    "download": "下载"
+    "download": "下载",
+    "queueSendNow": "立即发送",
+    "queueSendNowBusy": "取消正在运行的回合（包括子代理）并立即发送"
   },
   "connection": {
     "connected": "已连接",

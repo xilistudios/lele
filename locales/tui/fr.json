@@ -289,5 +289,11 @@
   "tui.queue.removeHint": " · %s supprime le dernier",
   "tui.queue.full": "file pleine (%d) — message non mis en file",
   "tui.queue.removed": "dernier message en file supprimé",
-  "tui.queue.dropped": "%d message(s) en file supprimé(s)"
+  "tui.queue.dropped": "%d message(s) en file supprimé(s)",
+  "tui.queue.empty": "la file d'attente est vide — rien à envoyer",
+  "tui.queue.flushConfirm": "cela annule le tour en cours (incl. sous-agents) — appuyez à nouveau pour envoyer",
+  "tui.queue.flushHint": " · %s annule le tour et envoie le suivant",
+  "tui.catalogNoMatches": "Aucune correspondance dans le catalogue — tapez un ID de modèle personnalisé",
+  "tui.catalogPickerHint": "↑/↓ naviguer · TAB accepter · ENTER sélectionner · ESC masquer · taper pour filtrer",
+  "tui.catalogSuggestions": "Modèles du catalogue"
 }

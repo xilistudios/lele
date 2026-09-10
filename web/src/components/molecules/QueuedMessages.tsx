@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
-import { CloseIcon } from '../atoms/Icons'
+import { CloseIcon, SendIcon } from '../atoms/Icons'
 
 /**
  * Strip listing the messages waiting for the current session's turn to end.
@@ -9,8 +9,17 @@ import { CloseIcon } from '../atoms/Icons'
  */
 export function QueuedMessages() {
   const { t } = useTranslation()
-  const { queuedMessages, currentSessionKey, removeQueuedMessage, clearQueue } =
-    useAppLogicContext()
+  const {
+    queuedMessages,
+    currentSessionKey,
+    isProcessing,
+    removeQueuedMessage,
+    sendNowQueuedMessage,
+    clearQueue,
+  } = useAppLogicContext()
+
+  // While the turn is live, send-now aborts it (incl. subagents) — say so.
+  const sendNowLabel = isProcessing ? t('chat.queueSendNowBusy') : t('chat.queueSendNow')
 
   if (!currentSessionKey) return null
   const sessionQueue = queuedMessages.filter((item) => item.sessionKey === currentSessionKey)
@@ -50,6 +59,16 @@ export function QueuedMessages() {
               📎{item.attachments.length}
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => sendNowQueuedMessage(item.id)}
+            title={sendNowLabel}
+            aria-label={sendNowLabel}
+            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-accent-primary transition-colors hover:bg-background-secondary hover:text-accent-hover"
+            data-testid="queued-send-now"
+          >
+            <SendIcon size={10} />
+          </button>
           <button
             type="button"
             onClick={() => removeQueuedMessage(item.id)}

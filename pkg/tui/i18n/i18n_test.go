@@ -221,9 +221,12 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.onboard.pressEnterStart",
 		"tui.queue.status",
 		"tui.queue.removeHint",
+		"tui.queue.flushHint",
 		"tui.queue.full",
 		"tui.queue.removed",
 		"tui.queue.dropped",
+		"tui.queue.empty",
+		"tui.queue.flushConfirm",
 	}
 
 	Init()
