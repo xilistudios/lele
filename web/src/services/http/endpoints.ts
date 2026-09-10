@@ -31,6 +31,22 @@ export const endpoints = {
       installBatch: (agentId: string) =>
         `/api/v1/agents/${encodeURIComponent(agentId)}/skills/install-batch`,
     },
+    /**
+     * Slash commands of THIS agent (brief §6). `list` flattens the four
+     * harness discovery levels with precedence; `one` reads the raw markdown
+     * of a global/workspace command for the editor; create/update/remove write
+     * files under <workspace>/commands (or the global dir), never config.
+     */
+    commands: {
+      list: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/commands`,
+      one: (agentId: string, name: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(name)}`,
+      create: (agentId: string) => `/api/v1/agents/${encodeURIComponent(agentId)}/commands`,
+      update: (agentId: string, name: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(name)}`,
+      remove: (agentId: string, name: string) =>
+        `/api/v1/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(name)}`,
+    },
   },
   chat: {
     send: '/api/v1/chat/send',

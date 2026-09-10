@@ -24,6 +24,11 @@ describe('SECTION_PATHS (spec §5.3 table)', () => {
     expect(SECTION_PATHS.files).toEqual([])
     expect(sectionPrefixes(2, 'files')).toEqual([])
   })
+
+  test('commands never writes config (the tab writes workspace files)', () => {
+    expect(SECTION_PATHS.commands).toEqual([])
+    expect(sectionPrefixes(2, 'commands')).toEqual([])
+  })
 })
 
 describe('isSectionDirty', () => {
@@ -66,6 +71,11 @@ describe('isSectionDirty', () => {
   test('files is always clean, even with every field dirty', () => {
     const paths = dirty('agents.list.0.name', 'agents.list.0.model', 'agents.list.0.tools')
     expect(isSectionDirty(paths, 0, 'files')).toBe(false)
+  })
+
+  test('commands is always clean, even with every field dirty', () => {
+    const paths = dirty('agents.list.0.name', 'agents.list.0.model', 'agents.list.0.tools')
+    expect(isSectionDirty(paths, 0, 'commands')).toBe(false)
   })
 
   test('empty set is clean everywhere', () => {

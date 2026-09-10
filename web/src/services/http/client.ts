@@ -1,5 +1,11 @@
 import type {
   AgentCatalogResponse,
+  AgentCommandDeleteResponse,
+  AgentCommandDetail,
+  AgentCommandMutationResponse,
+  AgentCommandUpdateRequest,
+  AgentCommandWriteRequest,
+  AgentCommandsResponse,
   AgentDetails,
   AgentFilesResponse,
   AgentSkillMutationResponse,
@@ -497,6 +503,30 @@ export const createApiClient = (baseUrl: string) => {
       request<AgentFilesResponse>(endpoints.agents.files(agentId, fileName), {
         method: 'PUT',
         body: JSON.stringify({ content }),
+      }),
+    /**
+     * Per-agent slash commands (brief §6). `content` is the FULL markdown file
+     * (frontmatter + body): the frontmatter is serialised by the frontend and
+     * validated by the Go parser server-side, so this layer only moves text.
+     * Errors arrive as the repo-standard {error, code} via parseApiError.
+     */
+    agentCommands: (agentId: string) =>
+      request<AgentCommandsResponse>(endpoints.agents.commands.list(agentId), { method: 'GET' }),
+    agentCommand: (agentId: string, name: string) =>
+      request<AgentCommandDetail>(endpoints.agents.commands.one(agentId, name), { method: 'GET' }),
+    agentCommandCreate: (agentId: string, body: AgentCommandWriteRequest) =>
+      request<AgentCommandMutationResponse>(endpoints.agents.commands.create(agentId), {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    agentCommandUpdate: (agentId: string, name: string, body: AgentCommandUpdateRequest) =>
+      request<AgentCommandMutationResponse>(endpoints.agents.commands.update(agentId, name), {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    agentCommandRemove: (agentId: string, name: string) =>
+      request<AgentCommandDeleteResponse>(endpoints.agents.commands.remove(agentId, name), {
+        method: 'DELETE',
       }),
     history: (sessionKey: string, parentSessionKey?: string, beforeId?: string, limit?: number) => {
       const params = new URLSearchParams()

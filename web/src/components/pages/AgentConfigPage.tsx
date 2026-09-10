@@ -6,6 +6,7 @@ import { getDefaultModel } from '../../hooks/useSettingsHelpers'
 import { AGENT_TABS, type AgentTab, isAgentDirty, isAgentTab } from '../../lib/agentDirty'
 import { Button } from '../atoms/Button'
 import { AgentsIcon } from '../atoms/Icons'
+import { AgentCommandsSection } from '../organisms/agents/AgentCommandsSection'
 import { AgentFilesSection } from '../organisms/agents/AgentFilesSection'
 import { AgentGeneralSection } from '../organisms/agents/AgentGeneralSection'
 import { AgentModelSection } from '../organisms/agents/AgentModelSection'
@@ -38,8 +39,8 @@ import { AgentToolsSection } from '../organisms/agents/AgentToolsSection'
  *    other section is capped at 820px so long text fields stay readable.
  */
 
-/** Sections capped at 820px (§4.1); skills/tools need the whole panel. */
-const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>(['skills', 'tools'])
+/** Sections capped at 820px (§4.1); skills/commands/tools need the whole panel. */
+const FULL_WIDTH_TABS: ReadonlySet<AgentTab> = new Set<AgentTab>(['skills', 'commands', 'tools'])
 
 /** §5.1 "Detalle": header (48px box + two bars) + four label/input pairs. */
 function DetailSkeleton() {
@@ -141,6 +142,8 @@ export function AgentConfigPage() {
         return (
           <AgentSkillsSection key={agent.id} agent={agent} index={agentIndex} agentId={agent.id} />
         )
+      case 'commands':
+        return <AgentCommandsSection key={agent.id} agent={agent} agentId={agent.id} />
       case 'tools':
         return (
           <AgentToolsSection key={agent.id} agent={agent} index={agentIndex} agentId={agent.id} />
