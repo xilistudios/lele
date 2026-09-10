@@ -312,6 +312,15 @@ type Model struct {
 	formError       string   // validation error to display
 	formConfirmMode bool     // true when showing confirmation step
 
+	// Catalog-backed model picker for /add-model and the connect-flow model
+	// name step. When active, typing filters catalog.SearchModels and a
+	// suggestion list is rendered below the form's text input.
+	addModelCatalogActive bool     // true while catalog suggestions are shown
+	addModelCatalogIDs    []string // model IDs (values), parallel to labels
+	addModelCatalogLabels []string // display labels for the suggestion list
+	addModelCatalogIdx    int      // highlighted suggestion
+	addModelCatalogThink  string   // thinking-levels hint for the selected model
+
 	// Provider-type picker state (step 2 of /connect). When true, the form
 	// shows a selectable list of known provider presets instead of a raw text
 	// input; up/down + enter pick a preset, "custom" allows a free-form type.

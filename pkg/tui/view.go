@@ -1221,6 +1221,11 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
+	// Catalog model suggestions (filter-as-you-type) on the model-name step.
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(renderCatalogSuggestions(m.addModelCatalogLabels, m.addModelCatalogIdx, m.maxModalVisible()))
+	}
+
 	// Contextual step hint (optional fields)
 	if m.modalMode == ModalAddProvider && !m.providerSavedInFlow && !m.providerTypePicker && !m.connectSuccess {
 		switch m.formStepIndex {
@@ -1236,7 +1241,9 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	}
 
 	// Hints
-	if isReviewStep {
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.catalogPickerHint")))
+	} else if isReviewStep {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectReviewHint")))
 	} else if m.providerSavedInFlow {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectModelStepsHint")))
@@ -1248,17 +1255,59 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	return modalView
 }
 
+// renderCatalogSuggestions paints the filterable catalog model list shown
+// under the form's text input on the model-name step.
+func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
+	if len(labels) == 0 {
+		return CommentColorStyle.Render("  "+i18n.T("tui.catalogNoMatches")) + "\n\n"
+	}
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	// Cap the suggestion list so the form stays readable.
+	if maxVisible > 8 {
+		maxVisible = 8
+	}
+	start := 0
+	if idx >= maxVisible {
+		start = idx - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(labels) {
+		end = len(labels)
+	}
+	var sb strings.Builder
+	sb.WriteString(SidebarHeader.Render("  "+i18n.T("tui.catalogSuggestions")) + "\n")
+	for i := start; i < end; i++ {
+		if i == idx {
+			sb.WriteString(ModalItemActive.Render("  › "+labels[i]) + "\n")
+		} else {
+			sb.WriteString(ModalItemInactive.Render("    "+labels[i]) + "\n")
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 // formStepNames returns the step names for the current form modal mode.
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
 	case ModalAddProvider:
-		return []string{
+		steps := []string{
 			"Provider name", "Provider type", "API Key", "API Base URL",
 			"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)",
 			i18n.T("tui.connectReview"),
 		}
+		if m.addModelCatalogThink != "" && len(steps) > 5 {
+			steps[5] = "Model name (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return steps
 	case ModalAddModel:
-		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
+		nameLabel := "Model name"
+		if m.addModelCatalogThink != "" {
+			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)"}
 	case ModalAddSecret:
 		return []string{
 			i18n.T("tui.secretName"),

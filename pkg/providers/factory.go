@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/xilistudios/lele/pkg/auth"
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	anthropicmessages "github.com/xilistudios/lele/pkg/providers/anthropic_messages"
 )
@@ -37,45 +38,24 @@ type providerSelection struct {
 	enableWebSearch bool
 }
 
+// defaultAPIBaseByType returns the default API base URL for a provider type.
+// The catalog is the single source of truth for known providers; a few
+// lele-specific overrides are checked first so existing behavior is preserved.
 func defaultAPIBaseByType(providerType string) string {
+	// Intentional lele overrides that must win over catalog defaults.
 	switch providerType {
-	case "groq":
-		return "https://api.groq.com/openai/v1"
-	case "openai":
-		return "https://api.openai.com/v1"
-	case "anthropic":
-		return defaultAnthropicAPIBase
-	case "openrouter":
-		return "https://openrouter.ai/api/v1"
-	case "nanogpt":
-		return "https://nano-gpt.com/api/v1"
-	case "chutes":
-		return "https://llm.chutes.ai/v1"
-	case "alibaba":
-		return "https://coding-intl.dashscope.aliyuncs.com/v1"
-	case "zhipu":
-		return "https://open.bigmodel.cn/api/paas/v4"
-	case "gemini":
-		return "https://generativelanguage.googleapis.com/v1beta"
-	case "shengsuanyun":
-		return "https://router.shengsuanyun.com/api/v1"
-	case "nvidia":
-		return "https://integrate.api.nvidia.com/v1"
-	case "moonshot":
-		return "https://api.moonshot.cn/v1"
-	case "ollama":
-		return "http://localhost:11434/v1"
-	case "deepseek":
-		return "https://api.deepseek.com/v1"
-	case "github_copilot":
+	case "github_copilot", "copilot":
 		return "localhost:4321"
+	case "alibaba":
+		// lele historically uses the international coding-plan endpoint.
+		return "https://coding-intl.dashscope.aliyuncs.com/v1"
 	case "zai_coding_plan", "zai":
 		return "https://api.z.ai/api/paas/v4"
-	case "modelark_coding_plan", "modelark":
-		return "https://ark.ap-southeast.bytepluses.com/api/coding/v3"
-	default:
-		return ""
 	}
+	if base := catalog.DefaultAPIBaseByType(providerType); base != "" {
+		return base
+	}
+	return ""
 }
 
 func selectionFromNamedProvider(cfg *config.Config, providerName, model string, named config.NamedProviderConfig) (providerSelection, error) {
@@ -168,6 +148,15 @@ func selectionFromNamedProvider(cfg *config.Config, providerName, model string, 
 		if sel.apiBase == "" {
 			sel.apiBase = "localhost:4321"
 		}
+		return sel, nil
+	}
+
+	// MiniMax publishes an Anthropic-compatible Messages API at its default
+	// /anthropic/v1 base. Any provider whose resolved base path contains
+	// /anthropic is also treated as Anthropic Messages.
+	if sel.providerType == providerTypeHTTPCompat &&
+		(typ == "minimax" || typ == "minimax_cn" || strings.Contains(sel.apiBase, "/anthropic")) {
+		sel.providerType = providerTypeAnthropic
 		return sel, nil
 	}
 
@@ -564,6 +553,12 @@ func resolveProviderSelectionByName(cfg *config.Config, providerName string, mod
 				return providerSelection{}, fmt.Errorf("no API key configured for model: %s", model)
 			}
 		}
+	}
+
+	// MiniMax / Anthropic-path bases use the Anthropic Messages transport.
+	if sel.providerType == providerTypeHTTPCompat && sel.apiBase != "" &&
+		(providerName == "minimax" || providerName == "minimax_cn" || strings.Contains(sel.apiBase, "/anthropic")) {
+		sel.providerType = providerTypeAnthropic
 	}
 
 	if sel.providerType == providerTypeHTTPCompat {

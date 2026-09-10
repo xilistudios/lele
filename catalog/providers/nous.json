@@ -1,0 +1,44 @@
+{
+  "id": "nous",
+  "name": "Nous Portal",
+  "type": "openai",
+  "api_base": "https://inference-api.nousresearch.com/v1",
+  "models": [
+    {
+      "id": "Hermes-4-405B",
+      "name": "Hermes 4 405B",
+      "context_window": 128000,
+      "max_output": 8192,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true
+    },
+    {
+      "id": "Hermes-4-70B",
+      "name": "Hermes 4 70B",
+      "context_window": 128000,
+      "max_output": 8192,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true
+    },
+    {
+      "id": "Hermes-3-Llama-3.1-405B",
+      "name": "Hermes 3 405B",
+      "context_window": 128000,
+      "max_output": 8192
+    },
+    {
+      "id": "Hermes-3-Llama-3.1-70B",
+      "name": "Hermes 3 70B",
+      "context_window": 128000,
+      "max_output": 8192
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "kimi_for_coding",
+  "name": "Kimi For Coding",
+  "type": "openai",
+  "api_base": "https://api.kimi.com/coding/v1",
+  "models": [
+    {
+      "id": "k3",
+      "name": "Kimi K3",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "k3-256k",
+      "name": "Kimi K3-256K",
+      "context_window": 262144,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-for-coding",
+      "name": "Kimi K2.7 Code",
+      "context_window": 262144,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-for-coding-highspeed",
+      "name": "Kimi For Coding HighSpeed",
+      "context_window": 262144,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

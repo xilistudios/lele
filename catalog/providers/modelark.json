@@ -1,0 +1,7 @@
+{
+  "id": "modelark",
+  "name": "ModelArk Coding Plan",
+  "type": "openai",
+  "api_base": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+  "models": []
+}

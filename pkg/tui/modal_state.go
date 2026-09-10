@@ -47,6 +47,7 @@ func (m *Model) resetModal(mode modalType) {
 	m.subagentPickerLabels = nil
 	m.subagentPickerSelected = nil
 	m.subagentPickerIdx = 0
+	m.closeCatalogPicker()
 	// Audit M2: a fresh modal is never on a secret step (formStepIndex was
 	// just reset to 0), so this also clears any stale password echo.
 	m.syncTextInputEcho()

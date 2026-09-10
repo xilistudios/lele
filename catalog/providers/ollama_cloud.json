@@ -1,0 +1,286 @@
+{
+  "id": "ollama_cloud",
+  "name": "Ollama Cloud",
+  "type": "openai",
+  "api_base": "https://ollama.com/v1",
+  "models": [
+    {
+      "id": "kimi-k2.5",
+      "name": "kimi-k2.5",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-k2.6",
+      "name": "kimi-k2.6",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-k2.7-code",
+      "name": "kimi-k2.7-code",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5:397b",
+      "name": "qwen3.5:397b",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax-m3",
+      "name": "minimax-m3",
+      "context_window": 512000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-large-3:675b",
+      "name": "mistral-large-3:675b",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax-m2.5",
+      "name": "minimax-m2.5",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax-m2.7",
+      "name": "minimax-m2.7",
+      "context_window": 196608,
+      "max_output": 196608,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gemma4:31b",
+      "name": "gemma4:31b",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM-5.3-Flash",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "kimi-k3",
+      "name": "kimi-k3",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "deepseek-v4-flash",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-flash:0731",
+      "name": "DeepSeek V4 Flash 0731",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "deepseek-v4-pro",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.1",
+      "name": "glm-5.1",
+      "context_window": 202752,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM-5.2",
+      "context_window": 976000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.3",
+      "name": "GLM-5.3",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-oss:120b",
+      "name": "gpt-oss:120b",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-oss:20b",
+      "name": "gpt-oss:20b",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "nemotron-3-nano:30b",
+      "name": "nemotron-3-nano:30b",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "nemotron-3-super",
+      "name": "nemotron-3-super",
+      "context_window": 262144,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "nemotron-3-ultra",
+      "name": "nemotron-3-ultra",
+      "context_window": 262144,
+      "max_output": 128000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}
