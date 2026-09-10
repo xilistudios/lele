@@ -126,6 +126,7 @@ var allCommands = []commandInfo{
 	{name: "/models", description: "Switch model"},
 	{name: "/clear", description: "Clear session history"},
 	{name: "/clearq", description: "Drop queued messages for this session"},
+	{name: "/flushq", description: "Send the next queued message now (cancels a busy turn)"},
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
 	{name: "/lang", description: "Change language (es/en/pt)"},
 	{name: "/subagents", description: "Switch to subagent"},

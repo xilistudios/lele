@@ -62,6 +62,8 @@ export type AppLogicContextValue = {
   handleEvent: UseApp['handleEvent']
   onSend: UseApp['onSend']
   removeQueuedMessage: UseApp['removeQueuedMessage']
+  /** Send one queued message immediately; cancels a busy turn first. */
+  sendNowQueuedMessage: UseApp['sendNowQueuedMessage']
   clearQueue: UseApp['clearQueue']
   queueCount: UseApp['queueCount']
   onRetry: (message: import('../lib/types').ChatMessage) => void
@@ -173,6 +175,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       handleEvent: app.handleEvent,
       onSend: app.onSend,
       removeQueuedMessage: app.removeQueuedMessage,
+      sendNowQueuedMessage: app.sendNowQueuedMessage,
       clearQueue: app.clearQueue,
       queueCount: app.queueCount,
       onRetry: app.retryMessage,
@@ -236,6 +239,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.handleEvent,
       app.onSend,
       app.removeQueuedMessage,
+      app.sendNowQueuedMessage,
       app.clearQueue,
       app.queueCount,
       app.retryMessage,

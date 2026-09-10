@@ -126,6 +126,7 @@
     "commandsHint": "Digite / para ver comandos",
     "queueHeader": "Na fila · {{count}}",
     "queueRemove": "Remover da fila",
+    "queueSendNow": "Enviar agora",
     "queueClear": "Limpar fila",
     "queueFull": "A fila está cheia (10 mensagens). Aguarde o agente terminar.",
     "deviceMenu": "Menu do dispositivo",

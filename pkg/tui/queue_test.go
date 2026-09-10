@@ -159,10 +159,13 @@ func TestQueueStatusLine(t *testing.T) {
 	if got := m.queueStatusLine(80); !strings.Contains(got, "1") {
 		t.Fatalf("status line %q does not mention the pending count", got)
 	}
-	// The remove-key hint rides along when there is room and is dropped when
-	// the budget is tight — the count itself must survive either way.
-	if got := m.queueStatusLine(80); !strings.Contains(got, queueRemoveKey) {
+	// Both key hints ride along when there is room and are dropped when the
+	// budget is tight — the count itself must survive either way.
+	if got := m.queueStatusLine(200); !strings.Contains(got, queueRemoveKey) {
 		t.Fatalf("status line %q lacks the %s hint despite room", got, queueRemoveKey)
+	}
+	if got := m.queueStatusLine(200); !strings.Contains(got, queueFlushKey) {
+		t.Fatalf("status line %q lacks the %s hint despite room", got, queueFlushKey)
 	}
 	m.queueFeedback = ""
 	if got := m.queueStatusLine(20); !strings.Contains(got, "1") || strings.Contains(got, queueRemoveKey) {
@@ -692,8 +695,10 @@ func TestQueueStringsAreLocalized(t *testing.T) {
 		"tui.queue.full",
 		"tui.queue.status",
 		"tui.queue.removeHint",
+		"tui.queue.flushHint",
 		"tui.queue.removed",
 		"tui.queue.dropped",
+		"tui.queue.empty",
 	}
 	for _, lang := range i18n.AvailableLanguages() {
 		i18n.InitWithLanguage(lang)
@@ -776,5 +781,147 @@ func TestReloadSessionsPrunesDeletedSessionQueue(t *testing.T) {
 	}
 	if _, ok := m.messageQueue["tui:chat:deleted"]; ok {
 		t.Fatal("queue of a session that left the list was not pruned")
+	}
+}
+
+// --- Force send (/flushq, alt+enter) ---------------------------------------
+
+// Idle session with a backlog: force-send publishes the oldest message at once
+// without waiting for a falling processing edge.
+func TestForceSendNextQueuedWhileIdle(t *testing.T) {
+	key := "tui:chat:flush-idle"
+	m := newQuietQueueModel(t, key)
+	m.enqueueMessage("now")
+	m.enqueueMessage("later")
+
+	cmd := m.forceSendNextQueued()
+	if cmd == nil {
+		t.Fatal("forceSendNextQueued returned nil on a non-empty idle queue")
+	}
+	msg := drainInbound(t, m)
+	if msg.Content != "now" {
+		t.Fatalf("published %q, want %q", msg.Content, "now")
+	}
+	if got := m.queuePreview(); got != "later" {
+		t.Fatalf("preview = %q, want the remaining head %q", got, "later")
+	}
+	if !m.processing {
+		t.Fatal("processing not set after force send")
+	}
+}
+
+// Busy session: force-send cancels the in-flight turn and still publishes the
+// queued message this frame (it does not wait for the cancel to settle).
+func TestForceSendNextQueuedWhileBusy(t *testing.T) {
+	key := "tui:chat:flush-busy"
+	m := newQuietQueueModel(t, key)
+	m.processing = true
+	m.startTime = time.Now()
+	m.enqueueMessage("urgent")
+	m.enqueueMessage("queue")
+
+	cmd := m.forceSendNextQueued()
+	if cmd == nil {
+		t.Fatal("forceSendNextQueued returned nil while busy")
+	}
+	msg := drainInbound(t, m)
+	if msg.Content != "urgent" {
+		t.Fatalf("published %q, want %q", msg.Content, "urgent")
+	}
+	if got := m.queuePreview(); got != "queue" {
+		t.Fatalf("preview = %q, want %q", got, "queue")
+	}
+	if got, want := m.queueFeedback, ""; got != want {
+		t.Fatalf("queueFeedback = %q, want empty after a successful flush", got)
+	}
+}
+
+// Empty queue: the command is a no-op that reports why instead of looking
+// like it silently swallowed the keystroke.
+func TestForceSendNextQueuedEmptyQueue(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	key := "tui:chat:flush-empty"
+	m := newQuietQueueModel(t, key)
+
+	cmd := m.forceSendNextQueued()
+	if cmd != nil {
+		t.Fatal("forceSendNextQueued returned a cmd on an empty queue")
+	}
+	expectNoInbound(t, m)
+	if got, want := m.queueFeedback, i18n.T("tui.queue.empty"); got != want {
+		t.Fatalf("queueFeedback = %q, want %q", got, want)
+	}
+}
+
+// /flushq routes through the command switch to forceSendNextQueued.
+func TestFlushqCommand(t *testing.T) {
+	key := "tui:chat:flushq-cmd"
+	m := newQuietQueueModel(t, key)
+	m.enqueueMessage("via command")
+
+	cmd := m.executeCommand("/flushq")
+	if cmd == nil {
+		t.Fatal("/flushq returned nil cmd with a pending message")
+	}
+	if msg := drainInbound(t, m); msg.Content != "via command" {
+		t.Fatalf("published %q, want %q", msg.Content, "via command")
+	}
+}
+
+// alt+enter on an empty composer force-sends. With a draft the key is not
+// consumed here, so the textarea keeps its own alt+enter binding (insert
+// newline) and the queue stays untouched.
+func TestQueueFlushKeybinding(t *testing.T) {
+	key := "tui:chat:flush-key"
+	m := newQuietQueueModel(t, key)
+	m.enqueueMessage("keyed")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updated.(*Model)
+	if msg := drainInbound(t, m); msg.Content != "keyed" {
+		t.Fatalf("published %q, want %q", msg.Content, "keyed")
+	}
+
+	// With a draft the force-send path must not fire; the queue keeps its head.
+	m.enqueueMessage("draft-blocked")
+	m.chatInput.SetValue("editing")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = updated.(*Model)
+	if got := m.queuePreview(); got != "draft-blocked" {
+		t.Fatalf("queue head = %q, want the message left queued", got)
+	}
+	// Nothing new on the bus — only the earlier "keyed" publish.
+	expectNoInbound(t, m)
+}
+
+// The status-line hint prefers flush next, then remove last, dropping whichever
+// does not fit.
+func TestQueueStatusLineIncludesFlushHint(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	m := newQueueTestModel()
+	m.enqueueMessage("hello")
+
+	status := fmt.Sprintf(i18n.T("tui.queue.status"), 1)
+	flush := fmt.Sprintf(i18n.T("tui.queue.flushHint"), queueFlushKey)
+	remove := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
+
+	wide := m.queueStatusLine(200)
+	if !strings.Contains(wide, flush) {
+		t.Fatalf("wide status = %q, want flush hint %q", wide, flush)
+	}
+	if !strings.Contains(wide, remove) {
+		t.Fatalf("wide status = %q, want remove hint %q", wide, remove)
+	}
+
+	// Room for the count + flush only: remove is dropped rather than clipped.
+	tight := m.queueStatusLine(len([]rune(status)) + len([]rune(flush)) + 1)
+	if !strings.HasPrefix(tight, status) {
+		t.Fatalf("tight status = %q, want prefix %q", tight, status)
+	}
+	if !strings.Contains(tight, flush) {
+		t.Fatalf("tight status = %q, want the flush hint to win over remove", tight)
+	}
+	if strings.Contains(tight, remove) {
+		t.Fatalf("tight status = %q, want remove dropped when it does not fit", tight)
 	}
 }

@@ -286,9 +286,11 @@
   "tui.onboard.tipChats": "  Ctrl+S   Browse chats",
   "tui.onboard.tipConnect": "  /connect Add another provider",
   "tui.onboard.pressEnterStart": "Press Enter to start chatting!",
-  "tui.queue.status": "⏳ %d queued — Enter to add, /clearq to drop",
+  "tui.queue.status": "⏳ %d queued — Enter to add, /flushq send now, /clearq drop",
   "tui.queue.removeHint": " · %s removes last",
+  "tui.queue.flushHint": " · %s sends next now",
   "tui.queue.full": "queue full (%d) — message not queued",
   "tui.queue.removed": "removed last queued message",
-  "tui.queue.dropped": "dropped %d queued message(s)"
+  "tui.queue.dropped": "dropped %d queued message(s)",
+  "tui.queue.empty": "queue is empty — nothing to send"
 }

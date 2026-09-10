@@ -206,6 +206,35 @@ func (m *Model) popQueuedMessage(key string) (string, bool) {
 	return content, true
 }
 
+// forceSendNextQueued pops the oldest queued message and starts a turn with it
+// immediately (/flushq). Unlike maybeFlushQueue it does not defer while the
+// agent is busy: the current turn is cancelled first so the queued message can
+// go out at once. An empty queue is a no-op with feedback so the command never
+// looks like it swallowed the input.
+func (m *Model) forceSendNextQueued() tea.Cmd {
+	if m.queueDepth() == 0 {
+		m.queueFeedback = i18n.T("tui.queue.empty")
+		return nil
+	}
+	if m.isSessionProcessing() {
+		// Cancel the in-flight turn, then force the local busy flags off so
+		// publishUserMessage can start the queued turn without racing the
+		// (now cancelled) backend loop.
+		if m.agentLoop != nil && m.agentLoop.GetProvidable() != nil {
+			m.agentLoop.GetProvidable().StopAgent(m.currentKey)
+		}
+		m.clearStreamingState()
+		m.processing = false
+		m.startTime = time.Time{}
+	}
+	content, ok := m.popQueuedMessage(m.currentKey)
+	if !ok {
+		return nil
+	}
+	m.queueFeedback = ""
+	return m.publishUserMessage(content)
+}
+
 // clearQueue drops all pending messages for the current session (/clearq).
 // Other sessions keep their backlog and flush when they become active.
 func (m *Model) clearQueue() {
@@ -233,13 +262,19 @@ func (m *Model) queuePreview() string {
 // drift apart. bubbletea reports it as "alt+delete" (ESC [ 3 ; 3 ~).
 const queueRemoveKey = "alt+delete"
 
+// queueFlushKey is the key that force-sends the next queued message. Declared
+// next to the other queue key so the handler and the hint stay in sync.
+// bubbletea reports alt+enter (KeyEnter + Alt) as "alt+enter"; plain ctrl+enter
+// is indistinguishable from enter on most terminals.
+const queueFlushKey = "alt+enter"
+
 // queueStatusLine returns the queue strip text, or "" when there is nothing to
 // show. The count is scoped to the session on screen, so switching sessions
 // cannot display a stale depth.
 //
 // available is how many display cells the strip may occupy in the status line
 // (the rest is taken by the base status text and the goal badge). The
-// remove-key hint is only appended when it fits: view.go clamps the whole line
+// key hints are only appended when they fit: view.go clamps the whole line
 // by cells, and a hint cut in half is worse than no hint at all. The count
 // itself always stays — dropping it would hide pending messages.
 func (m *Model) queueStatusLine(available int) string {
@@ -251,9 +286,16 @@ func (m *Model) queueStatusLine(available int) string {
 		return ""
 	}
 	status := fmt.Sprintf(i18n.T("tui.queue.status"), n)
-	hint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
-	if lipgloss.Width(status)+lipgloss.Width(hint) <= available {
-		status += hint
+	removeHint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
+	flushHint := fmt.Sprintf(i18n.T("tui.queue.flushHint"), queueFlushKey)
+	if lipgloss.Width(status)+lipgloss.Width(removeHint)+lipgloss.Width(flushHint) <= available {
+		return status + removeHint + flushHint
+	}
+	if lipgloss.Width(status)+lipgloss.Width(flushHint) <= available {
+		return status + flushHint
+	}
+	if lipgloss.Width(status)+lipgloss.Width(removeHint) <= available {
+		return status + removeHint
 	}
 	return status
 }

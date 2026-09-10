@@ -83,6 +83,23 @@ export function useMessageQueue() {
     [commit],
   )
 
+  /**
+   * Remove and return one specific entry by id. Used by "send now": the
+   * caller takes ownership of that message and must either send it or put
+   * it somewhere the auto-flush can still find it.
+   */
+  const takeQueuedMessage = useCallback(
+    (id: string): QueuedMessage | undefined => {
+      const current = queueRef.current
+      const index = current.findIndex((item) => item.id === id)
+      if (index === -1) return undefined
+      const next = current.slice(0, index).concat(current.slice(index + 1))
+      commit(next)
+      return current[index]
+    },
+    [commit],
+  )
+
   /** Drop every entry for a session (used by the "clear queue" button). */
   const clearQueue = useCallback(
     (sessionKey: string) => {
@@ -127,6 +144,7 @@ export function useMessageQueue() {
     queuedMessages,
     enqueueMessage,
     removeQueuedMessage,
+    takeQueuedMessage,
     clearQueue,
     queueCount,
     peekNext,

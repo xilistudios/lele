@@ -298,6 +298,33 @@ describe('useMessageQueue', () => {
     expect(result.current.queueCount(SESSION_B)).toBe(1)
   })
 
+  test('takeQueuedMessage extrae una entrada especifica sin tocar las demas', () => {
+    const { result } = renderHook(() => useMessageQueue())
+
+    act(() => {
+      result.current.enqueueMessage(SESSION, 'uno')
+      result.current.enqueueMessage(SESSION, 'dos')
+      result.current.enqueueMessage(SESSION, 'tres')
+    })
+
+    const middle = result.current.queuedMessages[1]
+    expect(middle.content).toBe('dos')
+
+    let taken: { content: string; attachments: string[] } | undefined
+    act(() => {
+      taken = result.current.takeQueuedMessage(middle.id)
+    })
+    expect(taken?.content).toBe('dos')
+    expect(result.current.queuedMessages.map((m) => m.content)).toEqual(['uno', 'tres'])
+    expect(result.current.peekNext(SESSION)?.content).toBe('uno')
+
+    // Unknown id is a no-op.
+    act(() => {
+      expect(result.current.takeQueuedMessage('missing')).toBeUndefined()
+    })
+    expect(result.current.queueCount(SESSION)).toBe(2)
+  })
+
   test('rechaza al alcanzar el tope y libera al eliminar', () => {
     const { result } = renderHook(() => useMessageQueue())
 
@@ -685,5 +712,93 @@ describe('cola de mensajes del composer', () => {
       })
     })
     await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', '/compact']))
+  })
+
+  test('envia ya una entrada de la cola cuando el agente esta libre', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    // Two messages queued while busy.
+    submitMessage(view, 'keep me')
+    submitMessage(view, 'send me now')
+    await waitFor(() => expect(queuedRows(view).length).toBe(2))
+
+    // End the turn but prevent auto-flush from racing: we hit send-now while
+    // still busy would cancel; here we end the turn WITHOUT completing so the
+    // session is idle... Actually after complete, auto-flush would fire.
+    // So exercise the idle path by cancelling first (processing clears), then
+    // clicking send now on the remaining row.
+    await act(async () => {
+      ws.emitJSON({
+        event: 'message.complete',
+        data: { session_key: SESSION, message_id: 'm1', content: 'reply one' },
+      })
+    })
+    // Auto-flush already sent "keep me"; one remains.
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'keep me']))
+    await waitFor(() => expect(queuedRows(view).length).toBe(1))
+    expect(queuedRows(view)[0]).toContain('send me now')
+
+    const sendNow = view.container.querySelector('[data-testid="queued-send-now"]')
+    expect(sendNow).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(sendNow as HTMLElement)
+    })
+
+    await waitFor(() =>
+      expect(sentUserMessages(ws)).toEqual(['first message', 'keep me', 'send me now']),
+    )
+    expect(view.container.querySelector('[data-testid="queued-messages"]')).toBeNull()
+  })
+
+  test('enviar ahora mientras esta ocupado cancela el turno y reenvia', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    submitMessage(view, 'leave me')
+    submitMessage(view, 'jump the queue')
+    await waitFor(() => expect(queuedRows(view).length).toBe(2))
+
+    // Click send-now on the SECOND entry (not the FIFO head).
+    const rows = Array.from(view.container.querySelectorAll('[data-testid="queued-message"]'))
+    const jumpRow = rows.find((row) => (row.textContent ?? '').includes('jump the queue'))
+    expect(jumpRow).toBeDefined()
+    const sendNow = (jumpRow as Element).querySelector('[data-testid="queued-send-now"]')
+    expect(sendNow).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(sendNow as HTMLElement)
+    })
+
+    // The chosen entry left the strip; the other stays queued.
+    await waitFor(() => {
+      const remaining = queuedRows(view)
+      expect(remaining.length).toBe(1)
+      expect(remaining[0]).toContain('leave me')
+    })
+
+    // Cancel was requested for the busy turn.
+    const cancelSent = ws.sent
+      .map((raw) => JSON.parse(raw) as { event?: string })
+      .some((payload) => payload.event === 'cancel')
+    expect(cancelSent).toBe(true)
+
+    // cancel.ack clears processing → the parked message is sent, not the head.
+    await act(async () => {
+      ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
+    })
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'jump the queue']))
+    // The FIFO head is still waiting for the next idle edge.
+    await waitFor(() => expect(queuedRows(view).length).toBe(1))
+    expect(queuedRows(view)[0]).toContain('leave me')
   })
 })

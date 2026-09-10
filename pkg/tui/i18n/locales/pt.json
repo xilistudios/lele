@@ -286,9 +286,11 @@
   "tui.onboard.tipChats": "  Ctrl+S   Ver chats",
   "tui.onboard.tipConnect": "  /connect Adicionar outro provedor",
   "tui.onboard.pressEnterStart": "Pressione Enter para começar a conversar!",
-  "tui.queue.status": "⏳ %d na fila — Enter para adicionar, /clearq para limpar",
+  "tui.queue.status": "⏳ %d na fila — Enter para adicionar, /flushq enviar agora, /clearq limpar",
   "tui.queue.removeHint": " · %s remove o último",
+  "tui.queue.flushHint": " · %s envia o próximo agora",
   "tui.queue.full": "fila cheia (%d) — mensagem não enfileirada",
   "tui.queue.removed": "última mensagem da fila removida",
-  "tui.queue.dropped": "%d mensagem(ns) removida(s) da fila"
+  "tui.queue.dropped": "%d mensagem(ns) removida(s) da fila",
+  "tui.queue.empty": "a fila está vazia — nada para enviar"
 }
