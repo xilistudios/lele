@@ -1,0 +1,7 @@
+{
+  "id": "qwen_portal",
+  "name": "Qwen Portal",
+  "type": "openai",
+  "api_base": "https://portal.qwen.ai/v1",
+  "models": []
+}

@@ -2,6 +2,7 @@ import { useSettings } from '../../../contexts/SettingsContext'
 import { useTheme } from '../../../contexts/ThemeContext'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
+import { useLanguageCatalog } from '../../../hooks/useLanguageCatalog'
 import i18n from '../../../i18n'
 import { thinkingLevelOptions } from '../../../lib/thinkingLevel'
 import {
@@ -29,6 +30,7 @@ export function GeneralSettings() {
     modelOptions,
     isLoadingModels,
   } = useSettings()
+  const { languages, loading: loadingLangs, switchLanguage } = useLanguageCatalog()
 
   if (!draftConfig) return null
   const config = draftConfig
@@ -247,15 +249,28 @@ export function GeneralSettings() {
             id="display.language"
             value={draftConfig.display?.language || i18n.language || 'es'}
             onChange={(lang) => {
-              i18n.changeLanguage(lang)
-              updateField('display.language', lang)
+              void switchLanguage(lang).then((ok) => {
+                if (ok) updateField('display.language', lang)
+              })
             }}
-            options={[
-              { value: 'es', label: 'Español' },
-              { value: 'en', label: 'English' },
-              { value: 'pt', label: 'Português' },
-            ]}
+            options={
+              languages.length
+                ? languages.map((l) => ({
+                    value: l.code,
+                    label: l.installed
+                      ? l.native_name || l.name || l.code
+                      : `${l.native_name || l.name || l.code} · ${t('settings.languageInstall')}`,
+                  }))
+                : [
+                    { value: 'es', label: 'Español' },
+                    { value: 'en', label: 'English' },
+                    { value: 'pt', label: 'Português' },
+                  ]
+            }
           />
+          {loadingLangs ? (
+            <p className="mt-1 text-xs opacity-60">{t('settings.languageLoading')}</p>
+          ) : null}
         </SettingsField>
       </SettingsSection>
     </div>

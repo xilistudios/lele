@@ -1,12 +1,15 @@
 <div align="center">
   <img src="assets/logo.png" alt="Lele" width="320">
+  <img src="assets/tui.png" alt="TUI" width="650">
 
   <h1>Lele</h1>
 
-  <p>Trợ lý AI cá nhân nhẹ và hiệu quả, viết bằng Go.</p>
-
+  <p>Trợ lý AI cá nhân nhẹ viết bằng Go — một binary, footprint nhỏ, TUI nhanh.</p>
   <p>
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+    <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
+    <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
+    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -15,131 +18,108 @@
 
 ---
 
-Lele là một dự án độc lập tập trung vào việc mang đến một trợ lý AI thực tế với dung lượng nhỏ, thời gian khởi động nhanh và mô hình triển khai đơn giản.
+Lele là trợ lý AI lấy workspace làm trung tâm, dành cho host chạy lâu dài: chat CLI và TUI, gateway đa kênh, web UI, API client gốc, skills, cron và subagent — không cần runtime JS hay stack TUI đa tiến trình.
 
-Ngày nay, dự án đã phát triển vượt xa một bot CLI tối giản. Lele bao gồm runtime agent có thể cấu hình, cổng kết nối đa kênh, giao diện web, API client原生, tác vụ đã lên lịch, subagent và mô hình tự động hóa lấy workspace làm trung tâm.
-
-## Tại Sao Chọn Lele
-
-- Triển khai Go nhẹ với mức tiêu thụ tài nguyên thấp
-- Đủ hiệu quả để chạy thoải mái trên các máy Linux và bo mạch cấu hình khiêm tốn
-- Một dự án duy nhất cho CLI, kênh chat, giao diện web và tích hợp client cục bộ
-- Định tuyến nhà cung cấp có thể cấu hình, hỗ trợ cả backend trực tiếp và tương thích OpenAI
-- Thiết kế theo triết lý workspace-first với skills, bộ nhớ, tác vụ đã lên lịch và kiểm soát sandbox
-
-## Khả Năng Hiện Tại
-
-### Agent Runtime
-
-- Chat CLI với `lele agent`
-- Vòng lặp agent sử dụng công cụ với giới hạn lặp có thể cấu hình
-- Đính kèm tệp trong luồng native/web
-- Duy trì phiên làm việc và hỗ trợ phiên tạm thời
-- Đặt tên agent, ràng buộc và dự phòng mô hình
-
-### Giao Diện
-
-- Sử dụng qua terminal với CLI
-- Chế độ gateway cho các kênh chat
-- Giao diện web tích hợp sẵn
-- Kênh client native với API REST + WebSocket và ghép đôi PIN
-
-### Tự Động Hóa
-
-- Tác vụ đã lên lịch với `lele cron`
-- Tác vụ định kỳ dựa trên heartbeat từ `HEARTBEAT.md`
-- Subagent bất đồng bộ cho công việc được ủy quyền
-- Hệ thống skills cho các quy trình làm việc tái sử dụng
-
-### An Toàn Và Vận Hành
-
-- Hỗ trợ giới hạn trong workspace
-- Mẫu từ chối lệnh nguy hiểm cho công cụ exec
-- Luồng phê duyệt cho các tác vụ nhạy cảm
-- Nhật ký, lệnh trạng thái và quản lý cấu hình
-
-## Trạng Thái Dự Án
-
-Lele là một dự án độc lập đang phát triển tích cực.
-
-Codebase hiện tại đã hỗ trợ:
-
-- Luồng gateway kiểu production
-- Đường dẫn client web/native
-- Định tuyến đa nhà cung cấp có thể cấu hình
-- Nhiều kênh nhắn tin
-- Skills, subagent và tự động hóa đã lên lịch
-
-Khoảng trống tài liệu chính là README cũ vẫn mô tả danh tính một fork trước đó và không khớp với bộ tính năng hiện tại. README này phản ánh dự án đúng như thực tế.
-
-## Bắt Đầu Nhanh
-
-### Cài Đặt Từ Nguồn
+## Bắt đầu nhanh
 
 ```bash
-git clone https://github.com/xilistudios/lele.git
-cd lele
-make deps
-make build
+# Linux / macOS / BSD
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
 ```
-
-Binary được ghi vào `build/lele`.
-
-### Thiết Lập Ban Đầu
-
 ```bash
+# Từ source
+git clone https://github.com/xilistudios/lele.git && cd lele
+make deps && make build && make install
+```
+```
+# Thiết lập ban đầu
 lele onboard
+# Giao diện agent CLI
+lele agent -m "Bạn có thể làm gì?"
+# TUI
+lele tui
 ```
 
-`onboard` tạo cấu hình cơ bản, template workspace và có thể tùy chọn bật giao diện web cũng như tạo PIN ghép đôi cho luồng client native/web.
+Script cài đặt xác minh SHA256 và mặc định cài vào `~/.local/bin`.
 
-### Sử Dụng CLI Tối Thiểu
+## Benchmark
+
+Đo trên Apple M1 / macOS arm64. Phiên TUI idle dưới PTY, không gọi model. Startup là trung bình 3 lần chạy `--version`. RSS là bộ nhớ đỉnh của process tree ~6s sau frame đầu tiên.
+
+| Công cụ | Runtime | Dung lượng cài | Startup | RSS TUI idle | Processes |
+| --- | --- | --- | --- | --- | --- |
+| **lele** | Go + Bubble Tea | **57 MB** một binary | **~25 ms** | **~42 MB** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 MB binary | ~13 ms | ~170–187 MB | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB binary | ~233 ms | ~173 MB | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB binary | ~284 ms | ~1.0 GB đỉnh | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 GB tree | ~236 ms | ~374 MB | 3–4 |
+
+Đường render (Go benches trong repo, frame 200×50): `View()` ≈ 3.4 ms · `paintFrame` ≈ 0.5 ms.
+
+Fingerprint terminal im lặng: alt-screen Bubble Tea cổ điển + mouse + bracketed paste, không spam capability hay OSC sản phẩm.
+
+**Vì sao quan trọng:** một binary tĩnh, ~42 MB khi idle, frame đầu dưới 100 ms — vừa cho host gateway và multi-session.
 
 ```bash
-lele agent -m "Bạn có thể làm gì?"
+time lele --version
+go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
 ```
 
-## Giao Diện Web Và Luồng Client Native
+## Tính năng
 
-Lele hiện bao gồm giao diện web cục bộ cùng kênh client native.
+**Runtime agent**
+- Vòng lặp agent dùng tools với giới hạn iteration
+- Agent có tên, model fallback, `thinking_level` per-agent (ghi đè bằng `/think`)
+- Lưu session (SQLite) và session ephemeral tùy chọn
+- Đính kèm file trong luồng native/web
 
-Luồng điển hình:
+**Giao diện**
+- CLI (`lele agent`) và TUI Bubble Tea đầy đủ (`lele tui`)
+- Web UI built-in + client REST/WebSocket gốc với ghép PIN
+- Gateway cho kênh chat (Telegram, Discord, Slack, WhatsApp, Feishu, Line, QQ, DingTalk, …)
 
-1. Chạy `lele onboard`
-2. Bật Web UI khi được nhắc
-3. Tạo PIN ghép đôi
-4. Khởi động dịch vụ với `lele gateway`
-5. Mở ứng dụng web trên trình duyệt và ghép đôi bằng PIN
+**Tự động hóa**
+- Job theo lịch (`lele cron`) và heartbeat task từ `HEARTBEAT.md`
+- Skills và subagent bất đồng bộ
+- Chat nhóm multi-agent (MoA / round-robin / moderator / pipeline) — xem `docs/moa-group-chat.md`
 
-Kênh native cung cấp các endpoint REST và WebSocket cho client desktop và tích hợp cục bộ.
+**An toàn**
+- Giới hạn workspace, deny pattern cho exec, luồng phê duyệt
+- Token auth cho client gốc, giới hạn upload và TTL
 
-Xem `docs/client-api.md` để biết API đầy đủ.
+## Ảnh chụp màn hình
 
-## Cấu Hình
+### TUI
 
-Tệp cấu hình chính:
 
-```text
-~/.lele/config.json
+![Chat TUI Lele đang chạy](assets/tui-chat.png)
+
+```bash
+lele tui              # session mới
+lele tui -s <id>      # resume session
 ```
 
-Template cấu hình mẫu:
+Chat streaming, visualization tool, markdown, sidebar session, context stats. Themes: `dracula` (mặc định), `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized-light` — đổi trong **Settings → Interface**, lưu ở `~/.lele/tui.json`. Ngôn ngữ qua `LELE_LANG` hoặc `/lang`.
 
-```text
-config/config.example.json
-```
+### Web UI
 
-Các khu vực cốt lõi bạn có thể cấu hình:
+![Web UI Lele](assets/webui.png)
 
-- `agents.defaults`: workspace, nhà cung cấp, mô hình, giới hạn token, giới hạn công cụ
-- `session`: hành vi phiên tạm thời và liên kết danh tính
-- `channels`: tích hợp gateway và nhắn tin
-- `providers`: nhà cung cấp trực tiếp và backend tương thích OpenAI được đặt tên
-- `tools`: tìm kiếm web, cài đặt an toàn cron và exec
-- `heartbeat`: thực thi tác vụ định kỳ
-- `gateway`, `logs`, `devices`
+![Chat Web UI Lele đang chạy](assets/webui-chat.png)
 
-### Ví Dụ Tối Thiểu
+1. `lele onboard` — bật web UI, lấy PIN ghép cặp  
+2. `lele gateway` — phục vụ `/`, `/api/v1/*`, WebSocket trên cổng `18790`  
+3. Mở trình duyệt và ghép PIN  
+
+API client đầy đủ: `docs/client-api.md`.
+
+
+## Cấu hình
+
+Cấu hình nằm ở `~/.lele/config.json` (template: `config/config.example.json`).
 
 ```json
 {
@@ -161,177 +141,37 @@ Các khu vực cốt lõi bạn có thể cấu hình:
 }
 ```
 
-## Nhà Cung Cấp (Providers)
+Các section chính: `agents.defaults`, `session`, `channels`, `providers`, `tools`, `heartbeat`, `gateway`, `logs`, `devices`.
 
-Lele hỗ trợ cả nhà cung cấp tích hợp sẵn và định nghĩa nhà cung cấp có tên.
+**Providers:** `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `nvidia`, `ollama`, `moonshot`, `deepseek`, `github_copilot`, cùng backend OpenAI-compatible có tên (`model`, `context_window`, `vision`, `reasoning`, …).
 
-Các họ nhà cung cấp tích hợp sẵn hiện có trong cấu hình/runtime bao gồm:
+**Workspace** (`~/.lele/workspace/`): `sessions/`, `memory/`, `state/`, `cron/`, `skills/`, `AGENT.md`, `HEARTBEAT.md`, `IDENTITY.md`, `SOUL.md`, `USER.md`.
 
-- `anthropic`
-- `openai`
-- `openrouter`
-- `groq`
-- `zhipu`
-- `gemini`
-- `vllm`
-- `nvidia`
-- `ollama`
-- `moonshot`
-- `deepseek`
-- `github_copilot`
+## CLI
 
-Dự án cũng hỗ trợ các mục nhà cung cấp tương thích OpenAI được đặt tên với cài đặt theo mô hình như:
-
-- `model`
-- `context_window`
-- `max_tokens`
-- `temperature`
-- `vision`
-- `reasoning`
-
-## Kênh (Channels)
-
-Gateway hiện bao gồm cấu hình cho:
-
-- `telegram`
-- `discord`
-- `whatsapp`
-- `feishu`
-- `slack`
-- `line`
-- `onebot`
-- `qq`
-- `dingtalk`
-- `maixcam`
-- `native`
-- `web`
-
-Một số kênh là tích hợp dựa trên token đơn giản, trong khi số khác yêu cầu thiết lập webhook hoặc bridge.
-
-## Bố Cục Workspace
-
-Workspace mặc định:
-
-```text
-~/.lele/workspace/
-```
-
-Nội dung điển hình:
-
-```text
-~/.lele/workspace/
-├── sessions/
-├── memory/
-├── state/
-├── cron/
-├── skills/
-├── AGENT.md
-├── HEARTBEAT.md
-├── IDENTITY.md
-├── SOUL.md
-└── USER.md
-```
-
-Bố cục lấy workspace làm trung tâm này là một phần giúp Lele trở nên thực tế và hiệu quả: trạng thái, prompts, skills và tự động hóa đều nằm ở một nơi dễ dự đoán.
-
-## Lên Lịch, Skills Và Subagents
-
-### Tác Vụ Đã Lên Lịch
-
-Sử dụng `lele cron` để tạo tác vụ một lần hoặc định kỳ.
-
-Ví dụ:
-
-```bash
-lele cron list
-lele cron add --name reminder --message "Kiểm tra sao lưu" --every "2h"
-```
-
-### Heartbeat
-
-Lele có thể định kỳ đọc `HEARTBEAT.md` từ workspace và tự động thực thi tác vụ.
-
-### Skills
-
-Các skills tích hợp sẵn và tùy chỉnh có thể được quản lý với:
-
-```bash
-lele skills list
-lele skills search
-lele skills install <skill>
-```
-
-### Subagents
-
-Lele hỗ trợ công việc bất đồng bộ được ủy quyền thông qua subagent. Điều này hữu ích cho các tác vụ chạy dài hoặc có thể song song hóa.
-
-Xem `docs/SKILL_SUBAGENTS.md` để biết chi tiết.
-
-## Mô Hình Bảo Mật
-
-Lele có thể giới hạn quyền truy cập tệp và lệnh của agent vào workspace đã cấu hình.
-
-Các kiểm soát chính bao gồm:
-
-- `restrict_to_workspace`
-- Mẫu từ chối exec
-- Luồng phê duyệt cho tác vụ nhạy cảm
-- Xác thực dựa trên token cho client native
-- Giới hạn tải lên và TTL cho tệp tải lên native
-
-Xem `docs/tools_configuration.md` và `docs/client-api.md` để biết chi tiết vận hành.
-
-## Tham Khảo CLI
-
-| Command | Description |
+| Lệnh | Mô tả |
 | --- | --- |
-| `lele onboard` | Khởi tạo cấu hình và workspace |
-| `lele agent` | Bắt đầu phiên agent tương tác |
-| `lele agent -m "..."` | Chạy prompt một lần |
-| `lele gateway` | Khởi động gateway nhắn tin |
-| `lele auth login` | Xác thực các nhà cung cấp được hỗ trợ |
-| `lele status` | Hiển thị trạng thái runtime |
-| `lele cron list` | Liệt kê tác vụ đã lên lịch |
-| `lele cron add ...` | Thêm tác vụ đã lên lịch |
-| `lele skills list` | Liệt kê skills đã cài đặt |
-| `lele client pin` | Tạo PIN ghép đôi |
-| `lele client list` | Liệt kê client native đã ghép đôi |
-| `lele version` | Hiển thị thông tin phiên bản |
+| `lele onboard` | Khởi tạo config và workspace |
+| `lele agent` / `lele agent -m "..."` | Agent tương tác hoặc one-shot |
+| `lele tui` / `lele tui -s <session>` | Giao diện terminal |
+| `lele gateway` | Messaging gateway + web UI |
+| `lele auth login` | Xác thực providers |
+| `lele status` | Trạng thái runtime |
+| `lele cron list` / `lele cron add ...` | Job theo lịch |
+| `lele skills list` | Skills đã cài |
+| `lele client pin` / `lele client list` | Ghép cặp client gốc |
+| `lele version` | Thông tin phiên bản |
 
-## Tài Liệu Bổ Sung
+## Phát triển
 
-- `docs/agents-models-providers.md`
-- `docs/architecture.md`
-- `docs/channel-setup.md`
-- `docs/cli-reference.md`
-- `docs/config-reference.md`
-- `docs/client-api.md`
-- `docs/deployment.md`
-- `docs/examples.md`
-- `docs/installation-and-onboarding.md`
-- `docs/logging-and-observability.md`
-- `docs/model-routing.md`
-- `docs/security-and-sandbox.md`
-- `docs/session-and-workspace.md`
-- `docs/skills-authoring.md`
-- `docs/tools_configuration.md`
-- `docs/troubleshooting.md`
-- `docs/web-ui.md`
-- `docs/SKILL_SUBAGENTS.md`
-- `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`
-
-## Phát Triển
-
-Các target hữu ích:
+Cần Go 1.25+, [Bun](https://bun.sh/) (web UI), và Make.
 
 ```bash
-make build
-make test
-make fmt
-make vet
-make check
+make deps web-build build   # build binary + web
+make test fmt vet           # checks
+make build-all              # cross-compile
 ```
 
-## Giấy Phép
+## Giấy phép
 
 MIT

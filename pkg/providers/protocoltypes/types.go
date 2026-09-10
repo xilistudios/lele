@@ -19,6 +19,21 @@ type ToolCall struct {
 	Arguments        map[string]interface{} `json:"arguments,omitempty"`
 	ThoughtSignature string                 `json:"thought_signature,omitempty"`
 	ExtraContent     *ExtraContent          `json:"extra_content,omitempty"`
+
+	// ArgumentsTruncated records that the arguments arrived cut off mid-write
+	// (the model hit its output token limit while streaming them) and were
+	// closed up by the repair pass. The map above therefore holds only the
+	// members that completed before the cut; anything being written at that
+	// moment - typically a large "content" field - is missing.
+	//
+	// It is never sent on the wire: it is a flag for the agent loop, which must
+	// not execute a call whose payload is known to be incomplete.
+	//
+	// json:"-" is therefore deliberate and also means the flag does not survive
+	// session persistence. That is fine: it only governs whether a call is
+	// executed, and by the time a session is replayed the call already has its
+	// recorded result.
+	ArgumentsTruncated bool `json:"-"`
 }
 
 // FunctionCall represents a function call within a ToolCall.

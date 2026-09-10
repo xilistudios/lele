@@ -269,6 +269,11 @@ func (m *Model) updateViewport() {
 	overlayContent := overlaySb.String()
 	if overlayContent != "" {
 		overlayLines := strings.Split(strings.ReplaceAll(overlayContent, "\r\n", "\n"), "\n")
+		// Overlay lines are rebuilt on every viewport update (streaming, tool
+		// status, approvals), so collapse their SGR churn here too: the merge
+		// is O(bytes) once per update, while the lines are read by
+		// lineViewport.View()/paintFrame/reapplyBackground every frame.
+		mergeLines(overlayLines)
 		m.viewport.SetOverlayLines(overlayLines)
 	} else {
 		m.viewport.SetOverlayLines(nil)
@@ -381,6 +386,17 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		m.msgRenderCacheWidth = m.viewport.Width
 	}
 
+	// Bound the cache (hallazgo P5): this is a rebuild, so prune it to the
+	// fingerprints actually used by this render window. Entries are rebuilt
+	// incrementally across message-count changes (hits below are copied into
+	// the new map, misses are rendered and stored), so the incremental-hit
+	// semantics are unchanged — but orphans left behind by compaction,
+	// eviction or history edits drop out here instead of living forever.
+	// Cost: N pointer copies per rebuild (N ≤ render window, ~200), and the
+	// fast path (shouldSkipViewportUpdate / renderedBaseValid) skips rebuilds
+	// entirely, so idle frames do no pruning work.
+	liveCache := make(map[string][]string, totalMsgs-startIdx)
+
 	// Pre-allocate result with a reasonable capacity estimate.
 	result := make([]string, 0, min(totalMsgs-startIdx, m.maxRenderedMessages)*8)
 
@@ -407,6 +423,7 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		// Compute fingerprint for per-message cache
 		fp := messageFingerprint(msg, m.viewport.Width)
 		if cachedLines, ok := m.msgRenderCacheLines[fp]; ok {
+			liveCache[fp] = cachedLines // keep in the pruned cache
 			result = append(result, cachedLines...)
 			lastRole = msg.Role
 			continue
@@ -471,10 +488,20 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		// Split into lines once and cache the lines. This avoids re-splitting
 		// on every frame when the viewport needs them.
 		msgLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
-		m.msgRenderCacheLines[fp] = msgLines // cache lines for fast assembly
+		// Collapse the redundant SGR churn glamour/chroma emit per syntax
+		// token (−82..88% bytes, −95% SGR, cell-identical output) ONCE at
+		// cache-build time so every downstream per-frame stage (viewport
+		// slice, paintFrame, reapplyBackground, Place, AppContainer) reads
+		// already-merged lines. See mergeAdjacentSGR.
+		mergeLines(msgLines)
+		liveCache[fp] = msgLines // cache lines for fast assembly
 		result = append(result, msgLines...)
 		lastRole = msg.Role
 	}
+
+	// Swap in the pruned cache (see the bound comment above): it now holds
+	// exactly the fingerprints used by this render window.
+	m.msgRenderCacheLines = liveCache
 
 	return result
 }

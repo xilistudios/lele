@@ -1,0 +1,7 @@
+{
+  "id": "vllm",
+  "name": "vLLM (local)",
+  "type": "openai",
+  "api_base": "http://localhost:8000/v1",
+  "models": []
+}

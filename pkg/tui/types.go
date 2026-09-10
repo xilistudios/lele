@@ -9,6 +9,7 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/theme"
 
@@ -84,6 +85,7 @@ const (
 	ModalModel
 	ModalThink
 	ModalLang
+	ModalLangRemote // browse downloadable language packs from GitHub
 	ModalSubagents
 	ModalBackgroundExecs
 	ModalProviders          // list of providers
@@ -128,7 +130,7 @@ var allCommands = []commandInfo{
 	{name: "/clearq", description: "Drop queued messages for this session"},
 	{name: "/flushq", description: "Send the next queued message now (cancels a busy turn after confirm)"},
 	{name: "/think", description: "Toggle thinking level (off/low/medium/high)"},
-	{name: "/lang", description: "Change language (es/en/pt)"},
+	{name: "/lang", description: "Change language or download packs"},
 	{name: "/subagents", description: "Switch to subagent"},
 	{name: "/bg", description: "View background processes"},
 	{name: "/cron", description: "Manage scheduled cron jobs"},
@@ -235,8 +237,16 @@ type Model struct {
 	modalItems        []string
 	modalSessionKeys  []string // maps modal items to session keys (for /sessions)
 	modalSubagentKeys []string // maps modal items to subagent session keys (for /subagents)
+	modalLangCodes    []string // maps modal items to language codes ("" = download-more action)
 	modalSelectedIdx  int
 	modalScrollOffset int // scroll offset for long modal lists
+
+	// localesMgr downloads language packs from GitHub on demand.
+	localesMgr *locales.Manager
+	// langInstallBusy is true while a pack download is in-flight (sync).
+	langInstallBusy bool
+	// langInstallMsg is transient feedback shown after a download attempt.
+	langInstallMsg string
 
 	// Background exec view state
 	bgExecViewMode   bool     // true when showing output of a selected process
@@ -302,6 +312,15 @@ type Model struct {
 	formValues      []string // collected values per step
 	formError       string   // validation error to display
 	formConfirmMode bool     // true when showing confirmation step
+
+	// Catalog-backed model picker for /add-model and the connect-flow model
+	// name step. When active, typing filters catalog.SearchModels and a
+	// suggestion list is rendered below the form's text input.
+	addModelCatalogActive bool     // true while catalog suggestions are shown
+	addModelCatalogIDs    []string // model IDs (values), parallel to labels
+	addModelCatalogLabels []string // display labels for the suggestion list
+	addModelCatalogIdx    int      // highlighted suggestion
+	addModelCatalogThink  string   // thinking-levels hint for the selected model
 
 	// Provider-type picker state (step 2 of /connect). When true, the form
 	// shows a selectable list of known provider presets instead of a raw text

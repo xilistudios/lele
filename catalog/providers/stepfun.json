@@ -1,0 +1,46 @@
+{
+  "id": "stepfun",
+  "name": "StepFun Step Plan (Global)",
+  "type": "openai",
+  "api_base": "https://api.stepfun.ai/step_plan/v1",
+  "models": [
+    {
+      "id": "step-3.7-flash",
+      "name": "Step 3.7 Flash",
+      "context_window": 256000,
+      "max_output": 256000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "step-3.5-flash",
+      "name": "Step 3.5 Flash",
+      "context_window": 256000,
+      "max_output": 256000,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "step-3.5-flash-2603",
+      "name": "Step 3.5 Flash 2603",
+      "context_window": 256000,
+      "max_output": 256000,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

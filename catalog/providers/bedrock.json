@@ -1,0 +1,288 @@
+{
+  "id": "bedrock",
+  "name": "Amazon Bedrock",
+  "type": "openai",
+  "api_base": "",
+  "models": [
+    {
+      "id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (AU)",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "au.anthropic.claude-sonnet-4-6",
+      "name": "AU Anthropic Claude Sonnet 4.6",
+      "context_window": 1000000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (EU)",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "eu.anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6 (EU)",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (Global)",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "global.anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6 (Global)",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "global.openai.gpt-5.6-luna",
+      "name": "GPT-5.6 Luna (Global)",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "global.openai.gpt-5.6-sol",
+      "name": "GPT-5.6 Sol (Global)",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "global.openai.gpt-5.6-terra",
+      "name": "GPT-5.6 Terra (Global)",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (JP)",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "jp.anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6 (JP)",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai.gpt-5.4",
+      "name": "GPT-5.4",
+      "context_window": 272000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai.gpt-5.5",
+      "name": "GPT-5.5",
+      "context_window": 272000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai.gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai.gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai.gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "context_window": 1050000,
+      "max_output": 128000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (US)",
+      "context_window": 200000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6 (US)",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

@@ -807,7 +807,9 @@
       "refresh": "Refresh",
       "empty": "No log entries found for this date.",
       "showing": "Showing {{returned}} of {{total}} lines"
-    }
+    },
+    "languageInstall": "install",
+    "languageLoading": "Loading languages…"
   },
   "common": {
     "loading": "Loading...",

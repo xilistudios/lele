@@ -1,0 +1,482 @@
+{
+  "id": "novita",
+  "name": "NovitaAI",
+  "type": "openai",
+  "api_base": "https://api.novita.ai/openai",
+  "models": [
+    {
+      "id": "deepseek/deepseek-r1-0528-qwen3-8b",
+      "name": "DeepSeek R1 0528 Qwen3 8B",
+      "context_window": 128000,
+      "max_output": 32000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true
+    },
+    {
+      "id": "moonshotai/kimi-k2.5",
+      "name": "Kimi K2.5",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "name": "Kimi K2.6",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "moonshotai/kimi-k2.7-code",
+      "name": "Kimi K2.7 Code",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-omni-30b-a3b-thinking",
+      "name": "Qwen3 Omni 30B A3B Thinking",
+      "context_window": 65536,
+      "max_output": 16384,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.5-122b-a10b",
+      "name": "Qwen3.5-122B-A10B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.5-27b",
+      "name": "Qwen3.5-27B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.5-35b-a3b",
+      "name": "Qwen3.5-35B-A3B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.5-397b-a17b",
+      "name": "Qwen3.5-397B-A17B",
+      "context_window": 262144,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-org/glm-4.6v",
+      "name": "GLM 4.6V",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-r1-0528",
+      "name": "DeepSeek R1 0528",
+      "context_window": 163840,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-r1-turbo",
+      "name": "DeepSeek R1 (Turbo)\t",
+      "context_window": 64000,
+      "max_output": 16000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3.1",
+      "name": "DeepSeek V3.1",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3.1-terminus",
+      "name": "Deepseek V3.1 Terminus",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3.2",
+      "name": "Deepseek V3.2",
+      "context_window": 163840,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3.2-exp",
+      "name": "Deepseek V3.2 Exp",
+      "context_window": 163840,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-org/glm-4.5v",
+      "name": "GLM 4.5V",
+      "context_window": 65536,
+      "max_output": 16384,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "moonshotai/kimi-k2-thinking",
+      "name": "Kimi K2 Thinking",
+      "context_window": 262144,
+      "max_output": 262144,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-235b-a22b-thinking-2507",
+      "name": "Qwen3 235B A22b Thinking 2507",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-next-80b-a3b-thinking",
+      "name": "Qwen3 Next 80B A3B Thinking",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.7-max",
+      "name": "Qwen3.7-Max",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-org/glm-4.6",
+      "name": "GLM 4.6",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-omni-30b-a3b-instruct",
+      "name": "Qwen3 Omni 30B A3B Instruct",
+      "context_window": 65536,
+      "max_output": 16384,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-vl-235b-a22b-instruct",
+      "name": "Qwen3 VL 235B A22B Instruct",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-vl-30b-a3b-instruct",
+      "name": "qwen/qwen3-vl-30b-a3b-instruct",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-vl-30b-a3b-thinking",
+      "name": "qwen/qwen3-vl-30b-a3b-thinking",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-vl-8b-instruct",
+      "name": "qwen/qwen3-vl-8b-instruct",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3-0324",
+      "name": "DeepSeek V3 0324",
+      "context_window": 163840,
+      "max_output": 163840,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek/deepseek-v3-turbo",
+      "name": "DeepSeek V3 (Turbo)\t",
+      "context_window": 64000,
+      "max_output": 16000,
+      "tool_call": true
+    },
+    {
+      "id": "zai-org/glm-4.5",
+      "name": "GLM-4.5",
+      "context_window": 131072,
+      "max_output": 98304,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-org/glm-4.5-air",
+      "name": "GLM 4.5 Air",
+      "context_window": 131072,
+      "max_output": 98304,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax/minimax-m2",
+      "name": "MiniMax-M2",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax/minimax-m2.5",
+      "name": "MiniMax M2.5",
+      "context_window": 204800,
+      "max_output": 131100,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax/minimax-m2.5-highspeed",
+      "name": "MiniMax M2.5 Highspeed",
+      "context_window": 204800,
+      "max_output": 131100,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax/minimax-m2.7",
+      "name": "MiniMax M2.7",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimax/minimax-m2.7-highspeed",
+      "name": "MiniMax-M2.7-highspeed",
+      "context_window": 204800,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "minimaxai/minimax-m1-80k",
+      "name": "MiniMax M1",
+      "context_window": 1000000,
+      "max_output": 40000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "moonshotai/kimi-k2-0905",
+      "name": "Kimi K2 0905",
+      "context_window": 262144,
+      "max_output": 262144,
+      "tool_call": true
+    },
+    {
+      "id": "moonshotai/kimi-k2-instruct",
+      "name": "Kimi K2 Instruct",
+      "context_window": 131072,
+      "max_output": 32768,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3-235b-a22b-instruct-2507",
+      "name": "Qwen3 235B A22B Instruct 2507",
+      "context_window": 131072,
+      "max_output": 16384,
+      "tool_call": true
+    }
+  ]
+}

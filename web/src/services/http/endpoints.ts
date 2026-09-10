@@ -117,6 +117,14 @@ export const endpoints = {
   providers: {
     models: (name: string) => `/api/v1/providers/${encodeURIComponent(name)}/models`,
   },
+  catalog: {
+    models: (provider?: string) =>
+      provider
+        ? `/api/v1/catalog/models?provider=${encodeURIComponent(provider)}`
+        : '/api/v1/catalog/models',
+    providers: '/api/v1/catalog/providers',
+    prefetch: '/api/v1/catalog/prefetch',
+  },
   files: {
     upload: '/api/v1/files/upload',
   },

@@ -53,7 +53,6 @@
   "tui.tokens": "tokens",
   "tui.used": "%.1f%% usado",
   "tui.spent": "$0.00 gasto",
-
   "tui.workspace": "Workspace",
   "tui.status": "Status",
   "tui.moreAbove": "↑ mais acima",
@@ -73,7 +72,6 @@
   "tui.backgroundProcesses": "Processos em segundo plano",
   "tui.noBgProcesses": "Nenhum processo em segundo plano",
   "tui.bgOutputHints": "ENTER: lista | S: parar | ESC: fechar",
-
   "tui.cronJobs": "Tarefas agendadas",
   "tui.noCronJobs": "Nenhuma tarefa agendada",
   "tui.cronUnavailable": "Serviço de cron indisponível",
@@ -92,7 +90,6 @@
   "tui.cronLastStatus": "Último status",
   "tui.cronLastError": "Último erro",
   "tui.cronDetailHints": "ENTER/ESC: lista | E: ativar/desativar | R: executar agora | D: excluir",
-
   "tui.secrets": "Segredos",
   "tui.secretsUnavailable": "Serviço de keyring indisponível",
   "tui.noSecrets": "Nenhum segredo armazenado",
@@ -110,7 +107,6 @@
   "tui.secretsListHints": "ENTER: ver | A: adicionar | D: excluir | ESC: voltar",
   "tui.secretsDetailHints": "R: revelar/ocultar | D: excluir | ENTER/ESC: lista",
   "tui.secretDeleteConfirm": "Excluir segredo \"%s\"? (s/n)",
-
   "tui.selectProvider": "Selecione um Provider",
   "tui.providerDetail": "Detalhes do Provider",
   "tui.addProvider": "Adicionar Provider",
@@ -142,6 +138,9 @@
   "tui.modelAdded": "Modelo adicionado com sucesso",
   "tui.modelDeleted": "Modelo removido",
   "tui.formEnter": "ENTER: próximo | ESC: cancelar",
+  "tui.catalogSuggestions": "Modelos do catálogo",
+  "tui.catalogNoMatches": "Sem correspondências no catálogo — digite um ID de modelo personalizado",
+  "tui.catalogPickerHint": "↑/↓ navegar · TAB aceitar · ENTER selecionar · ESC ocultar · digite para filtrar",
   "tui.addModelAction": "+ Adicionar modelo",
   "tui.deleteProviderAction": "- Remover provider",
   "tui.approvalRequired": "Aprovação de comando necessária",
@@ -157,7 +156,6 @@
   "tui.approvalWhitelistFailed": "Falha ao salvar comando na lista de permitidos",
   "tui.approvalViewShort": "Ver apenas resumo",
   "tui.approvalWhitelisted": "Comando adicionado à lista de permitidos e aprovado",
-
   "tui.group.layer": "Camada %d",
   "tui.group.synthesis": "Síntese final",
   "tui.group.participants": "Participantes",
@@ -169,17 +167,14 @@
   "tui.group.role.aggregator": "agregador",
   "tui.group.role.moderator": "moderador",
   "tui.group.role.critic": "crítico",
-
   "tui.modeChat": "Chat",
   "tui.modeAgent": "Agente",
   "tui.modeGroup": "Grupo",
   "tui.modeIndicator": "Modo: %s",
   "tui.tabHint": "TAB: alternar modo",
-
   "tui.groupSelectProfile": "Selecione um perfil de grupo:",
   "tui.groupTaskPlaceholder": "Digite a tarefa e pressione Enter para iniciar o grupo",
   "tui.noGroupProfiles": "Nenhum perfil de grupo configurado. Use: /group start --agents a,b --strategy moa <task>",
-
   "tui.skills": "Habilidades",
   "tui.selectSkills": "Selecionar Habilidades para Instalar",
   "tui.installSkill": "Instalar Habilidade do GitHub",
@@ -195,7 +190,6 @@
   "tui.skillScanLoading": "Escaneando repositório...",
   "tui.skillScanNoResults": "Nenhuma habilidade encontrada no repositório",
   "tui.skillRepoPlaceholder": "usuario/repo ou usuario/repo/habilidade",
-
   "tui.settings": "Configurações",
   "tui.settings.title": "Configurações",
   "tui.settings.agents": "Agentes",
@@ -256,7 +250,6 @@
   "tui.settings.agentIDDuplicate": "O ID do agente já existe",
   "tui.settings.confirmDelete": "Excluir este agente? (s/n)",
   "tui.settings.confirmDeleteHint": "Digite 's' para confirmar, Esc para cancelar",
-
   "tui.onboard.welcome": "Bem-vindo ao Lele! Vamos configurar (~1 min)",
   "tui.onboard.pressEnter": "Pressione Enter para continuar",
   "tui.onboard.escSkip": "Pressione Esc para pular a configuração",
@@ -293,5 +286,14 @@
   "tui.queue.removed": "última mensagem da fila removida",
   "tui.queue.dropped": "%d mensagem(ns) removida(s) da fila",
   "tui.queue.empty": "a fila está vazia — nada para enviar",
-  "tui.queue.flushConfirm": "isto cancela o turno em execução (incl. subagentes) — pressione de novo para enviar"
+  "tui.queue.flushConfirm": "isto cancela o turno em execução (incl. subagentes) — pressione de novo para enviar",
+  "tui.languages.downloadMore": "Baixar mais idiomas…",
+  "tui.languages.install": "instalar",
+  "tui.languages.loadingCatalog": "Carregando catálogo de idiomas do GitHub…",
+  "tui.languages.downloading": "Baixando pacote de idioma…",
+  "tui.languages.downloadOK": "Pacote de idioma instalado",
+  "tui.languages.downloadFailed": "Falha ao baixar o pacote de idioma",
+  "tui.languages.catalogFailed": "Não foi possível carregar o catálogo de idiomas",
+  "tui.languages.allInstalled": "Todos os idiomas disponíveis já estão instalados",
+  "tui.languages.remoteHint": "Selecione um idioma para baixar do repositório lele no GitHub"
 }

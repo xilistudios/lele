@@ -1,0 +1,151 @@
+{
+  "id": "alibaba_coding_plan",
+  "name": "Alibaba Coding Plan",
+  "type": "openai",
+  "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+  "models": [
+    {
+      "id": "kimi-k2.5",
+      "name": "Kimi K2.5",
+      "context_window": 262144,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-plus",
+      "name": "Qwen3.5 Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-flash",
+      "name": "Qwen3.6 Flash",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-plus",
+      "name": "Qwen3.6 Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.7-plus",
+      "name": "Qwen3.7 Plus",
+      "context_window": 1000000,
+      "max_output": 64000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.7-max",
+      "name": "Qwen3.7 Max",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "name": "MiniMax-M2.5",
+      "context_window": 196608,
+      "max_output": 24576,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-coder-next",
+      "name": "Qwen3 Coder Next",
+      "context_window": 262144,
+      "max_output": 65536,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "name": "Qwen3 Coder Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-max-2026-01-23",
+      "name": "Qwen3 Max",
+      "context_window": 262144,
+      "max_output": 32768,
+      "tool_call": true
+    },
+    {
+      "id": "glm-4.7",
+      "name": "GLM-4.7",
+      "context_window": 202752,
+      "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5",
+      "name": "GLM-5",
+      "context_window": 202752,
+      "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

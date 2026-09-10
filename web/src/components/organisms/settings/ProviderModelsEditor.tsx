@@ -1,10 +1,10 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { ProviderModelConfig } from '../../../lib/types'
 import { RemoveButton } from '../../atoms/RemoveButton'
 import { BooleanInput, NumberInput, SettingsField } from '../../molecules'
-import { ModelSearchInput, isOpenAICompatible } from './ModelSearchInput'
+import { type AddModelPayload, ModelSearchInput } from './ModelSearchInput'
 
-type ProviderModels = Record<string, import('../../../lib/types').ProviderModelConfig>
+type ProviderModels = Record<string, ProviderModelConfig>
 
 type Props = {
   name: string
@@ -13,27 +13,39 @@ type Props = {
   providerType?: string
 }
 
+const DEFAULT_CONTEXT_WINDOW = 120000
+const DEFAULT_MAX_TOKENS = 8192
+
+export function buildModelConfig(meta: AddModelPayload): ProviderModelConfig {
+  const contextWindow =
+    meta.context_window && meta.context_window > 0 ? meta.context_window : DEFAULT_CONTEXT_WINDOW
+  const maxTokens =
+    meta.max_output && meta.max_output > 0
+      ? meta.max_output
+      : Math.min(DEFAULT_MAX_TOKENS, contextWindow)
+  const supportsThinking = Boolean(meta.reasoning || meta.thinking_levels?.length)
+
+  return {
+    context_window: contextWindow,
+    max_tokens: maxTokens,
+    temperature: 0.6,
+    vision: meta.vision,
+    reasoning: supportsThinking ? { enable: true, effort: 'medium' } : undefined,
+  }
+}
+
 export function ProviderModelsEditor({ name, models, onChange, providerType }: Props) {
   const { t } = useTranslation()
-  const [newModelName, setNewModelName] = useState('')
   const modelNames = Object.keys(models)
 
-  const addModel = (key: string) => {
-    const trimmed = key.trim()
+  const addModel = (input: string | AddModelPayload) => {
+    const meta: AddModelPayload = typeof input === 'string' ? { id: input } : input
+    const trimmed = meta.id.trim()
     if (!trimmed) return
     onChange({
       ...models,
-      [trimmed]: {
-        context_window: 120000,
-        max_tokens: 10000,
-        temperature: 0.6,
-      },
+      [trimmed]: buildModelConfig({ ...meta, id: trimmed }),
     })
-  }
-
-  const addModelFromInput = () => {
-    addModel(newModelName)
-    setNewModelName('')
   }
 
   const removeModel = (key: string) => {
@@ -42,41 +54,14 @@ export function ProviderModelsEditor({ name, models, onChange, providerType }: P
     onChange(updated)
   }
 
-  const isCompat = isOpenAICompatible(providerType)
   return (
     <div className="space-y-3">
-      {isCompat ? (
-        <ModelSearchInput
-          providerName={name}
-          providerType={providerType}
-          existingModels={modelNames}
-          onAddModel={addModel}
-        />
-      ) : (
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newModelName}
-            onChange={(e) => setNewModelName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                addModelFromInput()
-              }
-            }}
-            placeholder={t('settings.modelNamePlaceholder')}
-            className="w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40"
-          />
-          <button
-            type="button"
-            onClick={addModelFromInput}
-            disabled={!newModelName.trim()}
-            className="rounded bg-cta-primary px-3 py-2 text-xs text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40"
-          >
-            {t('common.add')}
-          </button>
-        </div>
-      )}
+      <ModelSearchInput
+        providerName={name}
+        providerType={providerType}
+        existingModels={modelNames}
+        onAddModel={addModel}
+      />
 
       {modelNames.length === 0 && (
         <p className="text-xs text-text-tertiary">{t('settings.noModels')}</p>

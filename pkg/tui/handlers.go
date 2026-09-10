@@ -102,7 +102,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactResultMsg, skillsScanResultMsg, skillsInstallResultMsg,
 		skillToggleResultMsg, skillDeleteResultMsg, obVerifyResultMsg,
-		streamThrottleMsg:
+		streamThrottleMsg, langCatalogMsg, langInstallResultMsg:
 		return m.handleAsyncResult(msg, cmds)
 
 	case tea.WindowSizeMsg:

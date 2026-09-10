@@ -138,12 +138,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 
 	case "/lang":
 		m.resetModal(ModalLang)
-		// Show language names with codes
-		m.modalItems = []string{
-			"Español (es)",
-			"English (en)",
-			"Português (pt)",
-		}
+		m.modalItems, m.modalLangCodes = buildLanguageModalItems(m.cfg.Language)
 		return nil
 
 	case "/subagents":

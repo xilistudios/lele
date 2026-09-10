@@ -49,6 +49,14 @@ func (te *toolExecutor) Execute(opts toolExecOptions) (*tools.ToolResult, error)
 		return nil, err
 	}
 
+	// A call whose arguments were cut off mid-write cannot do the right thing:
+	// the value that was being written is gone. Report it to the model instead
+	// of running the tool and letting it fail on a missing parameter, which
+	// would point the model at the wrong problem.
+	if opts.tc.ArgumentsTruncated {
+		return tools.TruncatedArgumentsError(opts.tc), nil
+	}
+
 	// Defensive early return: an agent context is a hard precondition of
 	// every branch below (publishExecuting reads opts.agent.ID and both
 	// execution branches read opts.agent.Tools). Without this guard a nil

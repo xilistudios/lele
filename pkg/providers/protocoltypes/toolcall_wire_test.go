@@ -7,6 +7,7 @@ package protocoltypes
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -439,25 +440,26 @@ func TestRepairTruncatedObject_Cases(t *testing.T) {
 		name string
 		in   string
 		want string // expected canonical arguments
+		lost bool   // whether the repair had to discard a member
 	}{
-		{"cut inside a string value", `{"path":"/tmp/a","content":"hello`, `{"path":"/tmp/a"}`},
-		{"cut after a comma", `{"a":1,`, `{"a":1}`},
-		{"cut right after the brace", `{`, `{}`},
-		{"cut inside a key", `{"path":"/tmp/a","con`, `{"path":"/tmp/a"}`},
-		{"cut inside a nested object", `{"a":{"b":1,"c":2`, `{"a":{"b":1}}`},
-		{"cut inside an array", `{"files":["a","b"`, `{"files":["a"]}`},
-		{"escaped quote inside the cut string", `{"cmd":"echo \\"hi`, `{}`},
-		{"only a dangling key", `{"a":`, `{}`},
-		{"number mid-write", `{"a":12`, `{}`},
-		{"nested object completes then cuts", `{"a":{"b":1},"c":"x`, `{"a":{"b":1}}`},
-		{"array element mid-write", `{"a":[1,2,3`, `{"a":[1,2]}`},
-		{"complete object is not truncated", `{"a":1}`, `{"a":1}`},
-		{"trailing garbage after close", `{"a":1} junk`, `{"a":1}`},
-		{"mismatched brackets", `{"a":[1,2}`, `{}`},
+		{"cut inside a string value", `{"path":"/tmp/a","content":"hello`, `{"path":"/tmp/a"}`, true},
+		{"cut after a comma", `{"a":1,`, `{"a":1}`, true},
+		{"cut right after the brace", `{`, `{}`, true},
+		{"cut inside a key", `{"path":"/tmp/a","con`, `{"path":"/tmp/a"}`, true},
+		{"cut inside a nested object", `{"a":{"b":1,"c":2`, `{"a":{"b":1}}`, true},
+		{"cut inside an array", `{"files":["a","b"`, `{"files":["a"]}`, true},
+		{"escaped quote inside the cut string", `{"cmd":"echo \\"hi`, `{}`, true},
+		{"only a dangling key", `{"a":`, `{}`, true},
+		{"number mid-write", `{"a":12`, `{}`, true},
+		{"nested object completes then cuts", `{"a":{"b":1},"c":"x`, `{"a":{"b":1}}`, true},
+		{"array element mid-write", `{"a":[1,2,3`, `{"a":[1,2]}`, true},
+		{"complete object is not truncated", `{"a":1}`, `{"a":1}`, false},
+		{"trailing garbage after close", `{"a":1} junk`, `{"a":1}`, false},
+		{"mismatched brackets", `{"a":[1,2}`, `{}`, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := repairTruncatedObject(tc.in)
+			got, ok, lost := repairTruncatedObject(tc.in)
 			if tc.in[0] != '{' && !ok {
 				return
 			}
@@ -466,6 +468,9 @@ func TestRepairTruncatedObject_Cases(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("repair(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if lost != tc.lost {
+				t.Fatalf("repair(%q) reported lost=%v, want lost=%v", tc.in, lost, tc.lost)
 			}
 			if !json.Valid([]byte(got)) {
 				t.Fatalf("repair produced invalid JSON: %q", got)
@@ -479,7 +484,7 @@ func TestRepairTruncatedObject_Cases(t *testing.T) {
 func TestRepairTruncatedObject_LinearOnLargePayload(t *testing.T) {
 	body := strings.Repeat("x", 400_000)
 	in := `{"path":"/tmp/a","content":"` + body
-	got, ok := repairTruncatedObject(in)
+	got, ok, _ := repairTruncatedObject(in)
 	if !ok {
 		t.Fatal("repair refused a truncated object")
 	}
@@ -498,5 +503,143 @@ func TestNormalizeArgumentsJSON_CutInsideEscapedString(t *testing.T) {
 	got := normalizeArgumentsJSON(`{"a":"x\",\"b\":\"y`)
 	if got != emptyArgumentsJSON {
 		t.Fatalf("escaped-quote confusion produced %q", got)
+	}
+}
+
+// --- truncated-arguments flag ----------------------------------------------
+
+// The repair makes a cut-off payload valid JSON again, so nothing downstream
+// can tell that the tail is missing. The flag is what carries that knowledge to
+// the agent loop.
+func TestCanonicalToolCalls_FlagsTruncatedArguments(t *testing.T) {
+	got := CanonicalToolCalls([]ToolCall{{
+		ID:       "c1",
+		Function: &FunctionCall{Name: "write_file", Arguments: `{"path":"/tmp/a","content":"hello`},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(got))
+	}
+	if !got[0].ArgumentsTruncated {
+		t.Fatal("a repaired payload must be flagged as truncated")
+	}
+	// What survived is kept: the model already paid for it.
+	if got[0].Arguments["path"] != "/tmp/a" {
+		t.Fatalf("lost the completed argument: %#v", got[0].Arguments)
+	}
+	if _, ok := got[0].Arguments["content"]; ok {
+		t.Fatalf("the cut member must not be invented: %#v", got[0].Arguments)
+	}
+}
+
+func TestCanonicalToolCalls_CompleteArgumentsNotFlagged(t *testing.T) {
+	got := CanonicalToolCalls([]ToolCall{{
+		ID:       "c1",
+		Function: &FunctionCall{Name: "write_file", Arguments: `{"path":"/tmp/a","content":"hello"}`},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(got))
+	}
+	if got[0].ArgumentsTruncated {
+		t.Fatal("a complete payload must not be flagged")
+	}
+}
+
+// Trailing noise after a closed object loses nothing, so it must not be
+// reported as truncation: the arguments are complete and executable.
+func TestCanonicalToolCalls_TrailingJunkNotFlagged(t *testing.T) {
+	got := CanonicalToolCalls([]ToolCall{{
+		ID:       "c1",
+		Function: &FunctionCall{Name: "exec", Arguments: `{"command":"ls"} trailing`},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(got))
+	}
+	if got[0].ArgumentsTruncated {
+		t.Fatalf("complete-then-junk payload flagged as truncated: %q", got[0].Function.Arguments)
+	}
+}
+
+// A provider that already knows the stream was cut (it sees finish_reason) can
+// flag the call itself; canonicalisation must preserve that.
+func TestCanonicalToolCalls_PreservesProviderFlag(t *testing.T) {
+	got := CanonicalToolCalls([]ToolCall{{
+		ID:                 "c1",
+		Function:           &FunctionCall{Name: "exec", Arguments: `{"command":"ls"}`},
+		ArgumentsTruncated: true,
+	}})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(got))
+	}
+	if !got[0].ArgumentsTruncated {
+		t.Fatal("the provider's truncation signal was dropped")
+	}
+}
+
+// Unrecoverable payloads are still incomplete: the loop should treat them the
+// same as a repaired one rather than running a tool with no arguments.
+func TestNormalizeArgumentsJSON_FlagsUnrecoverableObject(t *testing.T) {
+	normalized, truncated := normalizeArgumentsJSONWithFlag(`{"a":[1,2}`)
+	if normalized != emptyArgumentsJSON {
+		t.Fatalf("normalized = %q, want %q", normalized, emptyArgumentsJSON)
+	}
+	if !truncated {
+		t.Fatal("an object that opened but could not be rebuilt is incomplete")
+	}
+}
+
+func TestNormalizeArgumentsJSON_AbsentPayloadNotFlagged(t *testing.T) {
+	// A tool that takes no arguments legitimately sends "". Flagging that would
+	// block every such call.
+	for _, in := range []string{"", "   ", "null", `{"a":1}`} {
+		if _, truncated := normalizeArgumentsJSONWithFlag(in); truncated {
+			t.Errorf("normalizeArgumentsJSONWithFlag(%q) reported truncation", in)
+		}
+	}
+}
+
+// The flag must never reach a provider on the wire: it is loop-internal. The
+// marshal path goes through an explicit wire struct, so pinning the exact key
+// set is what catches a future field being added there.
+func TestToolCallArgumentsTruncatedNotSerialized(t *testing.T) {
+	encoded, err := json.Marshal(ToolCall{
+		ID:                 "c1",
+		Function:           &FunctionCall{Name: "exec", Arguments: `{"command":"ls"}`},
+		ArgumentsTruncated: true,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "ArgumentsTruncated") || strings.Contains(string(encoded), "arguments_truncated") {
+		t.Fatalf("internal flag leaked to the wire: %s", encoded)
+	}
+
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &keys); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := []string{"function", "id", "type"}
+	got := make([]string, 0, len(keys))
+	for k := range keys {
+		got = append(got, k)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("wire keys = %v, want %v", got, want)
+	}
+}
+
+// Wire-shaped input (what a provider response decodes into) must set the flag
+// too, otherwise the streaming path would lose it.
+func TestToolCallUnmarshalJSON_FlagsTruncatedArguments(t *testing.T) {
+	var tc ToolCall
+	raw := []byte(`{"id":"c1","type":"function","function":{"name":"write_file","arguments":"{\"path\":\"/tmp/a\",\"content\":\"hel"}}`)
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !tc.ArgumentsTruncated {
+		t.Fatalf("cut-off arguments not flagged: %#v", tc)
+	}
+	if tc.Arguments["path"] != "/tmp/a" {
+		t.Fatalf("surviving argument lost: %#v", tc.Arguments)
 	}
 }

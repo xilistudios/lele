@@ -644,6 +644,13 @@ func (m *Model) renderObLanguage(width int) string {
 		"Español",
 		"Português",
 	}
+	// Include any downloaded packs (rare during first-run, but harmless).
+	for _, c := range i18n.InstalledLanguages() {
+		if c == "en" || c == "es" || c == "pt" {
+			continue
+		}
+		langs = append(langs, i18n.DisplayName(c)+" ("+c+")")
+	}
 	var listSb strings.Builder
 	for i, lang := range langs {
 		if i == m.modalSelectedIdx {
@@ -1116,27 +1123,63 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		if max <= 0 {
 			max = len(providerPresets) + 1
 		}
-		for i := 0; i < max; i++ {
+
+		// Window the list so long preset catalogs fit the modal frame.
+		// maxModalVisible is list-modal sized (capped by modalItems); the
+		// form picker has extra chrome, so compute from height instead.
+		maxVisible := m.height - 14
+		if maxVisible < 5 {
+			maxVisible = 5
+		}
+		if maxVisible > max {
+			maxVisible = max
+		}
+		// Reserve a row for the scroll indicator when content overflows.
+		if max > maxVisible && maxVisible > 1 {
+			maxVisible--
+		}
+
+		// Keep the highlighted preset inside the visible window.
+		if m.providerTypePickerIdx < m.modalScrollOffset {
+			m.modalScrollOffset = m.providerTypePickerIdx
+		}
+		if m.providerTypePickerIdx >= m.modalScrollOffset+maxVisible {
+			m.modalScrollOffset = m.providerTypePickerIdx - maxVisible + 1
+		}
+		if m.modalScrollOffset < 0 {
+			m.modalScrollOffset = 0
+		}
+		if maxOffset := max - maxVisible; m.modalScrollOffset > maxOffset {
+			m.modalScrollOffset = maxOffset
+		}
+
+		if m.modalScrollOffset > 0 {
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreAbove")) + "\n")
+		}
+		endIdx := m.modalScrollOffset + maxVisible
+		if endIdx > max {
+			endIdx = max
+		}
+		for i := m.modalScrollOffset; i < endIdx; i++ {
+			var label string
 			if i < len(providerPresets) {
 				p := providerPresets[i]
-				label := p.label
+				label = p.label
 				if p.apiBase != "" {
 					label += "  ·  " + p.apiBase
 				}
-				if i == m.providerTypePickerIdx {
-					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
-				} else {
-					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
-				}
 			} else {
 				// Last entry: "custom"
-				label := i18n.T("tui.connectCustomType")
-				if i == m.providerTypePickerIdx {
-					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
-				} else {
-					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
-				}
+				label = i18n.T("tui.connectCustomType")
 			}
+			if i == m.providerTypePickerIdx {
+				sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
+			} else {
+				sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
+			}
+		}
+		if endIdx < max {
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreBelow")) + "\n")
 		}
 		sb.WriteString("\n")
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectPickerHint")))
@@ -1214,6 +1257,11 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
+	// Catalog model suggestions (filter-as-you-type) on the model-name step.
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(renderCatalogSuggestions(m.addModelCatalogLabels, m.addModelCatalogIdx, m.maxModalVisible()))
+	}
+
 	// Contextual step hint (optional fields)
 	if m.modalMode == ModalAddProvider && !m.providerSavedInFlow && !m.providerTypePicker && !m.connectSuccess {
 		switch m.formStepIndex {
@@ -1229,7 +1277,9 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	}
 
 	// Hints
-	if isReviewStep {
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.catalogPickerHint")))
+	} else if isReviewStep {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectReviewHint")))
 	} else if m.providerSavedInFlow {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectModelStepsHint")))
@@ -1241,17 +1291,59 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	return modalView
 }
 
+// renderCatalogSuggestions paints the filterable catalog model list shown
+// under the form's text input on the model-name step.
+func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
+	if len(labels) == 0 {
+		return CommentColorStyle.Render("  "+i18n.T("tui.catalogNoMatches")) + "\n\n"
+	}
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	// Cap the suggestion list so the form stays readable.
+	if maxVisible > 8 {
+		maxVisible = 8
+	}
+	start := 0
+	if idx >= maxVisible {
+		start = idx - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(labels) {
+		end = len(labels)
+	}
+	var sb strings.Builder
+	sb.WriteString(SidebarHeader.Render("  "+i18n.T("tui.catalogSuggestions")) + "\n")
+	for i := start; i < end; i++ {
+		if i == idx {
+			sb.WriteString(ModalItemActive.Render("  › "+labels[i]) + "\n")
+		} else {
+			sb.WriteString(ModalItemInactive.Render("    "+labels[i]) + "\n")
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 // formStepNames returns the step names for the current form modal mode.
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
 	case ModalAddProvider:
-		return []string{
+		steps := []string{
 			"Provider name", "Provider type", "API Key", "API Base URL",
 			"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)",
 			i18n.T("tui.connectReview"),
 		}
+		if m.addModelCatalogThink != "" && len(steps) > 5 {
+			steps[5] = "Model name (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return steps
 	case ModalAddModel:
-		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
+		nameLabel := "Model name"
+		if m.addModelCatalogThink != "" {
+			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)"}
 	case ModalAddSecret:
 		return []string{
 			i18n.T("tui.secretName"),
@@ -1425,6 +1517,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.selectThinkLevel")
 	case ModalLang:
 		return i18n.T("tui.selectLanguage")
+	case ModalLangRemote:
+		return i18n.T("tui.languages.downloadMore")
 	case ModalBackgroundExecs:
 		return i18n.T("tui.backgroundProcesses")
 	case ModalCron:

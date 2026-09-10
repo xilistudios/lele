@@ -807,7 +807,9 @@
       "refresh": "Actualizar",
       "empty": "No hay entradas de log para esta fecha.",
       "showing": "Mostrando {{returned}} de {{total}} líneas"
-    }
+    },
+    "languageInstall": "instalar",
+    "languageLoading": "Cargando idiomas…"
   },
   "common": {
     "loading": "Cargando...",

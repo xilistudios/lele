@@ -1,0 +1,43 @@
+{
+  "id": "tencent_tokenhub",
+  "name": "Tencent TokenHub",
+  "type": "openai",
+  "api_base": "https://tokenhub.tencentmaas.com/v1",
+  "models": [
+    {
+      "id": "hy3",
+      "name": "Hy3",
+      "context_window": 256000,
+      "max_output": 128000,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "hy3-preview",
+      "name": "Hy3 preview",
+      "context_window": 256000,
+      "max_output": 64000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "hy4-preview",
+      "name": "Hy4 preview",
+      "context_window": 1024000,
+      "max_output": 64000,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

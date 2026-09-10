@@ -17,9 +17,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/keyring"
+	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -56,6 +58,7 @@ type NativeChannel struct {
 	cronService      CronProvidable
 	keyringService   *keyring.Service
 	updateService    *update.Updater
+	localesMgr       *locales.Manager
 
 	// outboundFlusher wakes the durable outbound pump when a native peer comes
 	// back. Set through SetOutboundFlusher by Manager.SetOutboundSpooler; nil
@@ -259,11 +262,35 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 
 	n.startTime = time.Now()
 	go n.runUploadCleanup(ctx)
+	startCatalogPrefetch()
 
 	n.running = true
 	n.base.setRunning(true)
 
 	return nil
+}
+
+// catalogPrefetchOnce guards process-wide catalog warm-up so a channel
+// that is started twice (or recreated) does not double-fetch.
+var catalogPrefetchOnce sync.Once
+
+// startCatalogPrefetch warms the GitHub-hosted model catalog in the background.
+// Disk cache is applied first so an offline start still has the last snapshot.
+// If no cache exists, a background download starts. Fully async so Start does
+// not block on disk or network I/O.
+func startCatalogPrefetch() {
+	catalogPrefetchOnce.Do(func() {
+		catalog.Ensure()
+		go func() {
+			_ = catalog.LoadDiskCache("")
+			// Refresh when the index is missing or stale (24h).
+			if !catalog.HasCachedIndex() || !catalog.IsPrefetchFresh(0) {
+				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+				defer cancel()
+				_ = catalog.Refresh(ctx, catalog.Options{})
+			}
+		}()
+	})
 }
 
 func (n *NativeChannel) Stop(ctx context.Context) error {
@@ -461,6 +488,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/tools", withAuth(n.handleTools))
 	mux.HandleFunc("GET /api/v1/models", withAuth(n.handleModels))
 	mux.HandleFunc("GET /api/v1/providers/{name}/models", withAuth(n.handleProviderModels))
+
+	// Model catalog (embedded + models.dev prefetch)
+	mux.HandleFunc("GET /api/v1/catalog/providers", withAuth(n.handleCatalogProviders))
+	mux.HandleFunc("GET /api/v1/catalog/models", withAuth(n.handleCatalogModels))
+	mux.HandleFunc("POST /api/v1/catalog/prefetch", withAuth(applyBodyLimit(n.handleCatalogPrefetch)))
+
 	mux.HandleFunc("GET /api/v1/skills", withAuth(n.handleSkills))
 	mux.HandleFunc("POST /api/v1/skills", withAuth(applyBodyLimit(n.handleSkillInstall)))
 	mux.HandleFunc("GET /api/v1/skills/available", withAuth(n.handleSkillsAvailable))
@@ -504,6 +537,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 
 	// Filesystem browsing (folder picker for the WebUI)
 	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
+
+	// Language packs (lazy download from GitHub; builtins stay embedded)
+	mux.HandleFunc("GET /api/v1/locales", withAuth(n.handleLocalesList))
+	mux.HandleFunc("POST /api/v1/locales/refresh", withAuth(n.handleLocalesRefresh))
+	mux.HandleFunc("GET /api/v1/locales/{code}", withAuth(n.handleLocaleGet))
+	mux.HandleFunc("POST /api/v1/locales/{code}/install", n.rateLimitMiddleware(n.apiLimiter, withAuth(n.handleLocaleInstall)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/locales/{code}", withAuth(n.handleLocaleUninstall))
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
