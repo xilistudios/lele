@@ -661,19 +661,32 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				if argsPreview != "" {
 					action = fmt.Sprintf("%s(%s)", tc.Name, argsPreview)
 				}
+				metadata := map[string]string{
+					"tool":      tc.Name,
+					"action":    action,
+					"arguments": string(argsJSON),
+				}
+				if tc.ArgumentsTruncated {
+					// The preview above is only what survived the cut; say so,
+					// otherwise the UI shows a plausible-looking call that is
+					// about to be rejected.
+					metadata["truncated"] = "true"
+				}
 				config.MessageBus.PublishOutbound(bus.OutboundMessage{
-					Event:   "tool.executing",
-					ChatID:  config.ChatID,
-					Content: "",
-					Metadata: map[string]string{
-						"tool":      tc.Name,
-						"action":    action,
-						"arguments": string(argsJSON),
-					},
+					Event:    "tool.executing",
+					ChatID:   config.ChatID,
+					Content:  "",
+					Metadata: metadata,
 				})
 			}
 
-			if config.Tools != nil {
+			if tc.ArgumentsTruncated {
+				// Arguments arrived cut off (output token limit hit mid-write);
+				// the payload the tool needs is not there. Executing would fail
+				// on a missing parameter and send the model chasing the wrong
+				// cause, so report the real one.
+				toolResult = TruncatedArgumentsError(tc)
+			} else if config.Tools != nil {
 				toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
 			} else {
 				toolResult = ErrorResult("No tools available")

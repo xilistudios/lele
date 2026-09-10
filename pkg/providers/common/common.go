@@ -379,16 +379,18 @@ func ParseResponse(body io.Reader) (*LLMResponse, error) {
 			thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
 		}
 
+		argsTruncated := false
 		if tc.Function != nil {
 			name = tc.Function.Name
-			arguments = DecodeToolCallArguments(tc.Function.Arguments, name)
+			arguments, argsTruncated = DecodeToolCallArgumentsTruncated(tc.Function.Arguments, name)
 		}
 
 		toolCall := ToolCall{
-			ID:               tc.ID,
-			Name:             name,
-			Arguments:        arguments,
-			ThoughtSignature: thoughtSignature,
+			ID:                 tc.ID,
+			Name:               name,
+			Arguments:          arguments,
+			ThoughtSignature:   thoughtSignature,
+			ArgumentsTruncated: argsTruncated,
 		}
 
 		if thoughtSignature != "" {
@@ -424,45 +426,68 @@ func normalizeFinishReason(reason string) string {
 
 // DecodeToolCallArguments decodes a tool call's arguments from raw JSON.
 func DecodeToolCallArguments(raw json.RawMessage, name string) map[string]any {
+	arguments, _ := DecodeToolCallArgumentsTruncated(raw, name)
+	return arguments
+}
+
+// DecodeToolCallArgumentsTruncated decodes a tool call's arguments and reports
+// whether the payload arrived cut off mid-write.
+//
+// A provider that stops the stream inside a value (the model spent its output
+// budget) leaves a JSON object that never closed. The repair pass keeps what
+// completed, so the result is valid JSON and nothing downstream can tell that
+// the tail - usually a large "content" field - is missing. The flag carries
+// that knowledge to the agent loop, which must not execute such a call.
+func DecodeToolCallArgumentsTruncated(raw json.RawMessage, name string) (map[string]any, bool) {
 	arguments := make(map[string]any)
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return arguments
+		return arguments, false
 	}
 
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		if repaired, ok := repairTruncatedJSONObject(raw); ok {
-			return repaired
+			return repaired, true
 		}
 		log.Printf("common: failed to decode tool call arguments payload for %q: %v", name, err)
-		return arguments
+		// It opened like an object but could not be rebuilt: the payload was
+		// incomplete, even though there is nothing salvageable in it.
+		return arguments, raw[0] == '{'
 	}
 
 	switch v := decoded.(type) {
 	case string:
 		if strings.TrimSpace(v) == "" {
-			return arguments
+			return arguments, false
 		}
-		if decodedArguments, ok := decodeJSONObject([]byte(v)); ok {
-			return decodedArguments
+		inner := strings.TrimSpace(v)
+		if decodedArguments, repaired := decodeJSONObjectTruncated([]byte(inner)); decodedArguments != nil {
+			return decodedArguments, repaired
 		}
 		log.Printf("common: failed to decode tool call arguments for %q", name)
-		return arguments
+		return arguments, strings.HasPrefix(inner, "{")
 	case map[string]any:
-		return v
+		return v, false
 	default:
 		log.Printf("common: unsupported tool call arguments type for %q: %T", name, decoded)
-		return arguments
+		return arguments, false
 	}
 }
 
-func decodeJSONObject(raw []byte) (map[string]any, bool) {
+// decodeJSONObjectTruncated decodes an object payload and reports whether it
+// had to be repaired because it arrived cut off.
+func decodeJSONObjectTruncated(raw []byte) (map[string]any, bool) {
 	var arguments map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(raw), &arguments); err == nil && arguments != nil {
-		return arguments, true
+	trimmed := bytes.TrimSpace(raw)
+	if err := json.Unmarshal(trimmed, &arguments); err == nil && arguments != nil {
+		return arguments, false
 	}
-	return repairTruncatedJSONObject(raw)
+	repaired, ok := repairTruncatedJSONObject(trimmed)
+	if !ok || repaired == nil {
+		return nil, false
+	}
+	return repaired, true
 }
 
 // repairTruncatedJSONObject recovers the fields from an object cut off by a

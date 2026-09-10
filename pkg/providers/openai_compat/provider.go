@@ -300,15 +300,17 @@ func parseResponse(body []byte) (*LLMResponse, error) {
 		arguments := make(map[string]interface{})
 		name := ""
 
+		truncated := false
 		if tc.Function != nil {
 			name = tc.Function.Name
-			arguments = common.DecodeToolCallArguments(tc.Function.Arguments, name)
+			arguments, truncated = common.DecodeToolCallArgumentsTruncated(tc.Function.Arguments, name)
 		}
 
 		toolCalls = append(toolCalls, ToolCall{
-			ID:        tc.ID,
-			Name:      name,
-			Arguments: arguments,
+			ID:                 tc.ID,
+			Name:               name,
+			Arguments:          arguments,
+			ArgumentsTruncated: truncated,
 		})
 	}
 
@@ -519,7 +521,9 @@ func parseSSEStream(ctx context.Context, body io.Reader, onChunk func(chunk stri
 	for i := range toolCalls {
 		tc := &toolCalls[i]
 		if tc.Function != nil && tc.Function.Arguments != "" {
-			tc.Arguments = common.DecodeToolCallArguments(json.RawMessage(tc.Function.Arguments), tc.Name)
+			arguments, truncated := common.DecodeToolCallArgumentsTruncated(json.RawMessage(tc.Function.Arguments), tc.Name)
+			tc.Arguments = arguments
+			tc.ArgumentsTruncated = truncated
 		}
 	}
 
