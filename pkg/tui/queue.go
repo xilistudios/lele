@@ -207,16 +207,33 @@ func (m *Model) popQueuedMessage(key string) (string, bool) {
 }
 
 // forceSendNextQueued pops the oldest queued message and starts a turn with it
-// immediately (/flushq). Unlike maybeFlushQueue it does not defer while the
-// agent is busy: the current turn is cancelled first so the queued message can
-// go out at once. An empty queue is a no-op with feedback so the command never
-// looks like it swallowed the input.
+// immediately (/flushq, alt+enter). Unlike maybeFlushQueue it does not defer
+// while the agent is busy: the current turn is cancelled first so the queued
+// message can go out at once — but only after a deliberate double press, the
+// same confirmation ESC uses for a destructive cancel. An empty queue is a
+// no-op with feedback so the command never looks like it swallowed the input.
+//
+// UI-exclusivity (modal / autocomplete / approval) is still honoured: a force
+// send must never start a turn under an open overlay, even though callers such
+// as handleNormalKey already sit outside those surfaces today.
 func (m *Model) forceSendNextQueued() tea.Cmd {
 	if m.queueDepth() == 0 {
 		m.queueFeedback = i18n.T("tui.queue.empty")
 		return nil
 	}
+	if m.modalMode != ModalNone || m.showAutocomplete || m.pendingApprovalID != "" {
+		return m.queueRetryCmd()
+	}
 	if m.isSessionProcessing() {
+		// StopAgent is destructive (subagent tree, group runs, background
+		// processes). Mirror ESC: first press only asks for confirmation.
+		now := time.Now()
+		if now.Sub(m.flushLastPress) >= escHintTimeout {
+			m.flushLastPress = now
+			m.queueFeedback = i18n.T("tui.queue.flushConfirm")
+			return nil
+		}
+		m.flushLastPress = time.Time{}
 		// Cancel the in-flight turn, then force the local busy flags off so
 		// publishUserMessage can start the queued turn without racing the
 		// (now cancelled) backend loop.
@@ -291,11 +308,13 @@ func (m *Model) queueStatusLine(available int) string {
 	if lipgloss.Width(status)+lipgloss.Width(removeHint)+lipgloss.Width(flushHint) <= available {
 		return status + removeHint + flushHint
 	}
-	if lipgloss.Width(status)+lipgloss.Width(flushHint) <= available {
-		return status + flushHint
-	}
+	// Prefer the remove hint when only one fits: the base status already names
+	// /flushq, so demoting the shorter older hint is the worse trade-off.
 	if lipgloss.Width(status)+lipgloss.Width(removeHint) <= available {
 		return status + removeHint
+	}
+	if lipgloss.Width(status)+lipgloss.Width(flushHint) <= available {
+		return status + flushHint
 	}
 	return status
 }

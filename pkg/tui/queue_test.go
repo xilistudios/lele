@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/agent"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
@@ -810,9 +811,11 @@ func TestForceSendNextQueuedWhileIdle(t *testing.T) {
 	}
 }
 
-// Busy session: force-send cancels the in-flight turn and still publishes the
-// queued message this frame (it does not wait for the cancel to settle).
+// Busy session: force-send asks for a double press first (StopAgent is
+// destructive), then cancels the in-flight turn and publishes the queued
+// message this frame once confirmed.
 func TestForceSendNextQueuedWhileBusy(t *testing.T) {
+	i18n.InitWithLanguage("en")
 	key := "tui:chat:flush-busy"
 	m := newQuietQueueModel(t, key)
 	m.processing = true
@@ -820,9 +823,23 @@ func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 	m.enqueueMessage("urgent")
 	m.enqueueMessage("queue")
 
+	// First press: confirmation only. Queue untouched, nothing published.
 	cmd := m.forceSendNextQueued()
+	if cmd != nil {
+		t.Fatal("first force-send while busy should confirm, not publish")
+	}
+	expectNoInbound(t, m)
+	if got := m.queuePreview(); got != "urgent" {
+		t.Fatalf("queue head after first press = %q, want %q still queued", got, "urgent")
+	}
+	if got, want := m.queueFeedback, i18n.T("tui.queue.flushConfirm"); got != want {
+		t.Fatalf("queueFeedback = %q, want confirm hint %q", got, want)
+	}
+
+	// Second press within escHintTimeout: cancel + publish.
+	cmd = m.forceSendNextQueued()
 	if cmd == nil {
-		t.Fatal("forceSendNextQueued returned nil while busy")
+		t.Fatal("forceSendNextQueued returned nil after confirming while busy")
 	}
 	msg := drainInbound(t, m)
 	if msg.Content != "urgent" {
@@ -833,6 +850,23 @@ func TestForceSendNextQueuedWhileBusy(t *testing.T) {
 	}
 	if got, want := m.queueFeedback, ""; got != want {
 		t.Fatalf("queueFeedback = %q, want empty after a successful flush", got)
+	}
+}
+
+// An open modal / approval / autocomplete must defer a force-send the same way
+// maybeFlushQueue does — never start a turn under an overlay.
+func TestForceSendNextQueuedDefersWhenUIBusy(t *testing.T) {
+	key := "tui:chat:flush-ui"
+	m := newQuietQueueModel(t, key)
+	m.enqueueMessage("wait")
+	m.modalMode = ModalSessions
+	cmd := m.forceSendNextQueued()
+	if cmd == nil {
+		t.Fatal("force-send under a modal should arm a retry tick")
+	}
+	expectNoInbound(t, m)
+	if got := m.queuePreview(); got != "wait" {
+		t.Fatalf("queue head = %q, want message left queued", got)
 	}
 }
 
@@ -913,15 +947,16 @@ func TestQueueStatusLineIncludesFlushHint(t *testing.T) {
 		t.Fatalf("wide status = %q, want remove hint %q", wide, remove)
 	}
 
-	// Room for the count + flush only: remove is dropped rather than clipped.
-	tight := m.queueStatusLine(len([]rune(status)) + len([]rune(flush)) + 1)
+	// Room for the count + remove only: flush is dropped rather than clipped
+	// (the base status already names /flushq).
+	tight := m.queueStatusLine(lipgloss.Width(status) + lipgloss.Width(remove) + 1)
 	if !strings.HasPrefix(tight, status) {
 		t.Fatalf("tight status = %q, want prefix %q", tight, status)
 	}
-	if !strings.Contains(tight, flush) {
-		t.Fatalf("tight status = %q, want the flush hint to win over remove", tight)
+	if !strings.Contains(tight, remove) {
+		t.Fatalf("tight status = %q, want the remove hint to win over flush", tight)
 	}
-	if strings.Contains(tight, remove) {
-		t.Fatalf("tight status = %q, want remove dropped when it does not fit", tight)
+	if strings.Contains(tight, flush) {
+		t.Fatalf("tight status = %q, want flush dropped when it does not fit", tight)
 	}
 }

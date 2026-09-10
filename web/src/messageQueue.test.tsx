@@ -801,4 +801,115 @@ describe('cola de mensajes del composer', () => {
     await waitFor(() => expect(queuedRows(view).length).toBe(1))
     expect(queuedRows(view)[0]).toContain('leave me')
   })
+
+  // Regression: a parked force-send must never be delivered into the session
+  // the user switched to while the cancel was settling.
+  test('no entrega un force-send aparcado a otra sesion al cambiar de chat', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    submitMessage(view, 'leaky message')
+    await waitFor(() => expect(queuedRows(view).length).toBe(1))
+
+    const sendNow = view.container.querySelector('[data-testid="queued-send-now"]')
+    expect(sendNow).toBeTruthy()
+    await act(async () => {
+      fireEvent.click(sendNow as HTMLElement)
+    })
+    // Parked and cancel requested; the entry left the strip.
+    await waitFor(() => expect(queuedRows(view).length).toBe(0))
+
+    // Switch to session 2 before cancel settles — session 2 is idle, so the
+    // auto-flush effect fires on switchedToThisSession. The park must stay
+    // bound to session 1.
+    await act(async () => {
+      fireEvent.click(view.getByText('Session 2'))
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sentUserMessages(ws)).toEqual(['first message'])
+
+    // Cancel settles while session 2 is on screen: still nothing for session 2.
+    await act(async () => {
+      ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sentUserMessages(ws)).toEqual(['first message'])
+
+    // Back to session 1: the parked message is delivered here, with this key.
+    await act(async () => {
+      fireEvent.click(view.getByText('Session 1'))
+    })
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message', 'leaky message']))
+    const flushed = ws.sent
+      .map(
+        (raw) =>
+          JSON.parse(raw) as {
+            event?: string
+            data?: { session_key?: string; content?: string }
+          },
+      )
+      .find((payload) => payload.event === 'message' && payload.data?.content === 'leaky message')
+    expect(flushed?.data?.session_key).toBe(SESSION)
+  })
+
+  // Regression: a second send-now click while a park is already waiting must
+  // re-queue the taken message instead of clobbering the park (message loss).
+  test('no descarta un segundo enviar-ahora mientras hay un turno cancelandose', async () => {
+    const { view, ws } = await openChat()
+
+    submitMessage(view, 'first message')
+    await waitFor(() => expect(sentUserMessages(ws)).toEqual(['first message']))
+    await act(async () => {
+      ws.emitJSON({ event: 'message.ack', data: { session_key: SESSION, message_id: 'm1' } })
+    })
+
+    submitMessage(view, 'alpha')
+    submitMessage(view, 'beta')
+    await waitFor(() => expect(queuedRows(view).length).toBe(2))
+
+    // Click send-now on both rows before cancel.ack arrives.
+    let sendNowButtons = Array.from(
+      view.container.querySelectorAll('[data-testid="queued-send-now"]'),
+    )
+    expect(sendNowButtons.length).toBe(2)
+    await act(async () => {
+      fireEvent.click(sendNowButtons[0] as HTMLElement)
+    })
+    // Still busy: second click on the remaining row.
+    await waitFor(() => {
+      const remaining = Array.from(
+        view.container.querySelectorAll('[data-testid="queued-message"]'),
+      )
+      expect(remaining.length).toBe(1)
+    })
+    sendNowButtons = Array.from(view.container.querySelectorAll('[data-testid="queued-send-now"]'))
+    expect(sendNowButtons.length).toBe(1)
+    await act(async () => {
+      fireEvent.click(sendNowButtons[0] as HTMLElement)
+    })
+
+    // The second message went back into the queue (tail) instead of vanishing.
+    await waitFor(() => {
+      const rows = queuedRows(view)
+      expect(rows.length).toBe(1)
+      expect(rows[0]).toContain('beta')
+    })
+
+    // Cancel settles: the first park is sent; "beta" stays queued for later.
+    await act(async () => {
+      ws.emitJSON({ event: 'cancel.ack', data: { session_key: SESSION, status: 'ok' } })
+    })
+    await waitFor(() => expect(sentUserMessages(ws)).toContain('alpha'))
+    expect(sentUserMessages(ws)).not.toContain('beta')
+    await waitFor(() => {
+      const rows = queuedRows(view)
+      expect(rows.length).toBe(1)
+      expect(rows[0]).toContain('beta')
+    })
+  })
 })

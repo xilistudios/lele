@@ -127,6 +127,7 @@
     "queueHeader": "Queued · {{count}}",
     "queueRemove": "Remove from queue",
     "queueSendNow": "Send now",
+    "queueSendNowBusy": "Cancel the running turn (incl. subagents) and send now",
     "queueClear": "Clear queue",
     "queueFull": "The queue is full (10 messages). Wait for the agent to finish.",
     "deviceMenu": "Device menu",

@@ -200,6 +200,7 @@ func TestAllKeysExist(t *testing.T) {
 		"tui.queue.removed",
 		"tui.queue.dropped",
 		"tui.queue.empty",
+		"tui.queue.flushConfirm",
 	}
 
 	Init()
