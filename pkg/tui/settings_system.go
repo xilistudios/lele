@@ -318,9 +318,12 @@ func (m *Model) handleSystemSettingsInput(value string) {
 		if value == "" {
 			m.cfg.Tools.Exec.CustomDenyPatterns = nil
 		} else {
-			patterns := strings.Split(value, ",")
-			for i := range patterns {
-				patterns[i] = strings.TrimSpace(patterns[i])
+			var patterns []string
+			for _, p := range strings.Split(value, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					patterns = append(patterns, p)
+				}
 			}
 			m.cfg.Tools.Exec.CustomDenyPatterns = patterns
 		}

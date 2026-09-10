@@ -32,7 +32,8 @@ func getGitBranch(dir string) string {
 	if err == nil {
 		return strings.TrimSpace(string(out))
 	}
-	return "main"
+	// Not a git repo (or git unavailable) — empty hides the branch line.
+	return ""
 }
 
 func wrapText(text string, limit int) string {

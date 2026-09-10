@@ -416,9 +416,14 @@ type Model struct {
 	streamRenderedJoined   string
 	thinkingRenderedJoined string
 
-	// Cached glamour renderer (keyed by width)
+	// Cached glamour renderer (keyed by width and light/dark style)
 	cachedRenderer      *glamour.TermRenderer
 	cachedRendererWidth int
+	cachedRendererStyle string // "light" or "dark"
+
+	// themeIsLight is derived from the active theme background luminance
+	// and drives glamour's markdown style selection.
+	themeIsLight bool
 
 	// Per-message render cache. Avoids re-rendering unchanged messages
 	// through glamour when the message count changes (e.g., a new message

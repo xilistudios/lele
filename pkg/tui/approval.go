@@ -9,10 +9,11 @@ import (
 )
 
 // Command-approval interaction: user decision handling and whitelist
-// persistence.
-func (m *Model) handleApproval(approved bool) {
+// persistence. handleApproval reports whether the approval manager accepted
+// the decision (false when it had already expired or been answered elsewhere).
+func (m *Model) handleApproval(approved bool) bool {
 	if m.pendingApprovalID == "" {
-		return
+		return false
 	}
 	// Capture the id before clearing the visible fields so the defensive
 	// snapshot cleanup below can verify it still refers to the same request.
@@ -44,6 +45,7 @@ func (m *Model) handleApproval(approved bool) {
 		delete(m.pendingApprovals, m.currentKey)
 	}
 	m.updateViewport()
+	return err == nil
 }
 
 // handleWhitelistApproval answers the pending approval with "approve" and
@@ -64,8 +66,12 @@ func (m *Model) handleWhitelistApproval() {
 		return
 	}
 
-	m.handleApproval(true)
-	m.approvalResult = ApprovalApproved.Render("✅ " + i18n.T("tui.approvalWhitelisted"))
+	// Only claim the live approval succeeded when HandleApproval accepted it.
+	// An expired/already-answered prompt keeps its warning; the whitelist
+	// entry is still persisted, which is correct.
+	if m.handleApproval(true) {
+		m.approvalResult = ApprovalApproved.Render("✅ " + i18n.T("tui.approvalWhitelisted"))
+	}
 	m.updateViewport()
 }
 

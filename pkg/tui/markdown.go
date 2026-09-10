@@ -9,13 +9,14 @@ import (
 )
 
 // getMarkdownRenderer returns a cached glamour.TermRenderer for the given width.
-// A new renderer is created only when the width changes.
+// A new renderer is created only when the width or the light/dark mode changes.
 func (m *Model) getMarkdownRenderer(width int) *glamour.TermRenderer {
-	if m.cachedRenderer != nil && m.cachedRendererWidth == width {
+	style := m.glamourStyleName()
+	if m.cachedRenderer != nil && m.cachedRendererWidth == width && m.cachedRendererStyle == style {
 		return m.cachedRenderer
 	}
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(style),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -23,7 +24,17 @@ func (m *Model) getMarkdownRenderer(width int) *glamour.TermRenderer {
 	}
 	m.cachedRenderer = renderer
 	m.cachedRendererWidth = width
+	m.cachedRendererStyle = style
 	return renderer
+}
+
+// glamourStyleName picks "light" or "dark" based on the active theme
+// background luminance, so light themes do not render dark-themed markdown.
+func (m *Model) glamourStyleName() string {
+	if m.themeIsLight {
+		return "light"
+	}
+	return "dark"
 }
 
 // renderMarkdown renders markdown content for terminal display.
@@ -182,7 +193,7 @@ func renderSingleLine(line string, width int) string {
 		return headerStyle.Render(text) + "\n"
 	}
 
-	if width > 0 && len(line) > width {
+	if width > 0 && ansi.StringWidth(line) > width {
 		return wrapText(line, width)
 	}
 	return line

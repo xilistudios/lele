@@ -97,6 +97,23 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Fall through to textInput forwarding below for typing.
 	}
+	// When a settings field is being edited, list navigation must not fire —
+	// j/k/up/down are regular characters in the text input. Without this
+	// guard the cursor drifts behind the invisible list and the next Enter
+	// acts on the wrong row.
+	if m.settingsEditField != "" && !m.settingsSelectorActive && !m.subagentPickerActive {
+		// Fall through to the textInput forwarding at the end of this handler.
+		// ESC/q still need to reach their normal cancel paths below, so only
+		// navigation keys are swallowed here.
+		switch msg.String() {
+		case "up", "k", "down", "j", "pgup", "pgdown":
+			if isFormModal(m.modalMode, true) {
+				var cmd tea.Cmd
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+		}
+	}
 	switch msg.String() {
 	case "up", "k":
 		if isListModal(m.modalMode) && m.modalSelectedIdx > 0 {
@@ -465,6 +482,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.formError = ""
+			// Name must be stored trimmed — trailing spaces become part of
+			// the keyring name and break later lookup/delete. The secret
+			// value (step 1) is intentionally left untrimmed.
+			if m.formStepIndex == 0 {
+				val = strings.TrimSpace(val)
+			}
 			m.formValues[m.formStepIndex] = val
 			if m.formStepIndex >= 4 {
 				// Last step — save secret
@@ -586,9 +609,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							if p, ok := snapshot.Providers.GetNamed(providerName); ok {
 								m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
 								m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-								keyDisplay := p.APIKey
-								if len(keyDisplay) > 8 {
-									keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+								// Never print raw key material — even short keys.
+								keyDisplay := maskAPIKey(p.APIKey)
+								if keyDisplay == "" {
+									keyDisplay = "(not set)"
 								}
 								m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
 							}
@@ -643,9 +667,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 								if p, ok := snapshot.Providers.GetNamed(providerName); ok {
 									m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
 									m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-									keyDisplay := p.APIKey
-									if len(keyDisplay) > 8 {
-										keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+									keyDisplay := maskAPIKey(p.APIKey)
+									if keyDisplay == "" {
+										keyDisplay = "(not set)"
 									}
 									m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
 								}
@@ -714,21 +738,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				} else if m.modalMode == ModalSkills {
-					// Handle skills list selection
-					if m.modalSelectedIdx < len(m.skillsModalKeys) {
-						selectedKey := m.skillsModalKeys[m.modalSelectedIdx]
-						if selectedKey == "__install__" {
-							// Switch to install modal
-							m.modalMode = ModalSkillInstall
-							m.textInput.SetValue("")
-							m.textInput.Placeholder = "user/repo or user/repo/skill-name"
-							m.formError = ""
-							return m, m.tickCmd()
-						} else if selectedKey != "" {
-							// Toggle skill enabled/disabled
-							return m, m.toggleSkillCmd(selectedKey)
-						}
-					}
+					// Shared with handleSkillsEnter so install/toggle cannot drift.
+					return m, m.handleSkillsEnter()
 				} else if m.modalMode == ModalSkillInstall {
 					// Submit repo URL for scanning
 					return m, m.handleSkillInstallSubmit()
@@ -849,7 +860,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, cmd
 					}
 					// Mouse toggle returns a cmd
-					if m.modalSelectedIdx == 1 {
+					if m.modalSelectedIdx == tuiSettingRowMouse {
 						return m, m.toggleTUIMouse()
 					}
 					return m, nil

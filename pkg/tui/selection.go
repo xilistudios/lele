@@ -51,8 +51,8 @@ func (m *Model) updateSelection(x, y int) {
 	if x < 0 {
 		x = 0
 	}
-	if x >= m.viewport.Width {
-		x = m.viewport.Width
+	if m.viewport.Width > 0 && x >= m.viewport.Width {
+		x = m.viewport.Width - 1
 	}
 	m.selEndX = x
 	m.selEndY = y

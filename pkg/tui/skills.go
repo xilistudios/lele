@@ -86,6 +86,7 @@ func (m *Model) loadSkillsList() {
 	allSkills := loader.ListSkills()
 	if len(allSkills) == 0 {
 		m.modalItems = append(m.modalItems, i18n.T("tui.noSkillsInstalled"))
+		m.skillsModalKeys = append(m.skillsModalKeys, "")
 	} else {
 		// Sort by name for stable display
 		sort.Slice(allSkills, func(i, j int) bool {
@@ -97,11 +98,12 @@ func (m *Model) loadSkillsList() {
 		}
 	}
 
-	// Separator + action
-	m.modalItems = append(m.modalItems, "── Actions ──")
+	// Separator + action — keys must stay 1:1 with items so Enter/D index correctly.
+	m.modalItems = append(m.modalItems, i18n.T("tui.actionsSeparator"))
 	m.skillsModalKeys = append(m.skillsModalKeys, "")
 	m.modalItems = append(m.modalItems, i18n.T("tui.installFromGitHub"))
 	m.skillsModalKeys = append(m.skillsModalKeys, "__install__")
+	m.clampModalCursor()
 }
 
 // ── handleSkillsEnter handles Enter on the skills list ──────────────────
@@ -117,7 +119,7 @@ func (m *Model) handleSkillsEnter() tea.Cmd {
 	case "__install__":
 		m.modalMode = ModalSkillInstall
 		m.textInput.SetValue("")
-		m.textInput.Placeholder = "user/repo or user/repo/skill-name"
+		m.textInput.Placeholder = i18n.T("tui.skillRepoPlaceholder")
 		m.formError = ""
 		return m.tickCmd()
 	case "":
@@ -308,9 +310,11 @@ func (m *Model) handleSkillInstallResult(msg skillsInstallResultMsg) tea.Cmd {
 	}
 
 	if len(msg.installed) == 0 {
-		m.skillsFeedback = "No new skills installed (all already exist)"
+		m.skillsFeedback = i18n.T("tui.skillScanNoResults")
 	} else {
-		m.skillsFeedback = fmt.Sprintf("Installed %d skill(s): %s", len(msg.installed), strings.Join(msg.installed, ", "))
+		m.skillsFeedback = fmt.Sprintf("%s (%s)",
+			fmt.Sprintf(i18n.T("tui.skillInstallSuccess"), len(msg.installed)),
+			strings.Join(msg.installed, ", "))
 	}
 
 	// Go back to skills list
@@ -327,11 +331,11 @@ func (m *Model) handleSkillToggleResult(msg skillToggleResultMsg) tea.Cmd {
 	if msg.err != nil {
 		m.skillsFeedback = fmt.Sprintf("Toggle failed: %v", msg.err)
 	} else {
-		state := "enabled"
+		state := i18n.T("tui.skillEnabled")
 		if !msg.enabled {
-			state = "disabled"
+			state = i18n.T("tui.skillDisabled")
 		}
-		m.skillsFeedback = fmt.Sprintf("%s: %s", msg.skillName, state)
+		m.skillsFeedback = fmt.Sprintf(i18n.T("tui.skillToggleSuccess"), msg.skillName, state)
 	}
 	m.loadSkillsList()
 	return m.tickCmd()
@@ -360,10 +364,7 @@ func formatSkillItem(name, description string, enabled bool, source string) stri
 		status = "○"
 	}
 
-	desc := description
-	if len(desc) > 50 {
-		desc = desc[:47] + "..."
-	}
+	desc := truncateRightCells(description, 50)
 
 	sourceTag := ""
 	if source != "" {
@@ -379,10 +380,7 @@ func formatPickerItem(name, description string, selected bool) string {
 		checkbox = "[x]"
 	}
 
-	desc := description
-	if len(desc) > 45 {
-		desc = desc[:42] + "..."
-	}
+	desc := truncateRightCells(description, 45)
 
 	return fmt.Sprintf("%s %-15s — %s", checkbox, name, desc)
 }

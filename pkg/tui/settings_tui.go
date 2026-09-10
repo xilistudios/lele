@@ -11,6 +11,15 @@ import (
 	"github.com/xilistudios/lele/pkg/tui/theme"
 )
 
+// Row indices in the Interface settings list. Callers must use these
+// constants so reordering loadTUISettings cannot silently break Enter.
+const (
+	tuiSettingRowTheme = iota
+	tuiSettingRowMouse
+	tuiSettingRowMaxMessages
+	tuiSettingRowStreamThrottle
+)
+
 // loadTUISettings populates the modal items for the TUI/Interface settings
 // sub-menu. The rows are: theme picker, mouse toggle, max rendered messages
 // and stream throttle interval (ms).
@@ -59,7 +68,7 @@ func (m *Model) toggleTUIMouse() tea.Cmd {
 // the theme picker opens).
 func (m *Model) handleTUISettingsEnter() tea.Cmd {
 	switch m.modalSelectedIdx {
-	case 0: // Theme — open picker
+	case tuiSettingRowTheme: // Theme — open picker
 		m.themePickerActive = true
 		m.themePreviewName = m.currentThemeName // save for Esc revert
 		m.modalSelectedIdx = 0
@@ -70,13 +79,13 @@ func (m *Model) handleTUISettingsEnter() tea.Cmd {
 			m.loadThemePickerItems()
 			return m.fetchCommunityIndexCmd()
 		}
-	case 1: // Mouse toggle
+	case tuiSettingRowMouse: // Mouse toggle
 		return nil
-	case 2: // Max messages — enter edit mode
+	case tuiSettingRowMaxMessages: // Max messages — enter edit mode
 		m.settingsEditField = "maxMessages"
 		m.textInput.SetValue(strconv.Itoa(m.maxRenderedMessages))
 		m.textInput.Focus()
-	case 3: // Stream throttle — enter edit mode
+	case tuiSettingRowStreamThrottle: // Stream throttle — enter edit mode
 		m.settingsEditField = "streamThrottle"
 		m.textInput.SetValue(strconv.Itoa(int(m.streamThrottleInterval.Milliseconds())))
 		m.textInput.Focus()

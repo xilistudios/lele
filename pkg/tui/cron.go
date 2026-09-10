@@ -61,10 +61,8 @@ func formatCronJobLine(j cron.CronJob) string {
 	if name == "" {
 		name = j.ID
 	}
-	// Truncate long names for the list view.
-	if len(name) > 40 {
-		name = name[:37] + "..."
-	}
+	// Truncate long names for the list view (rune-safe, not byte-safe).
+	name = truncateRightCells(name, 40)
 
 	sched := formatCronSchedule(j.Schedule)
 	prefix := lipgloss.NewStyle().Foreground(stateColor).Render(state)

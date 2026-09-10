@@ -31,6 +31,11 @@ func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.maybeExpandRenderWindow()
 		}
 		return m, cmd
+	case "ctrl+c":
+		// Never trap quit during an approval prompt — a wedged terminal
+		// would otherwise require SIGINT.
+		m.cancel()
+		return m, tea.Quit
 	}
 	// Block all other input while approval is pending
 	return m, nil

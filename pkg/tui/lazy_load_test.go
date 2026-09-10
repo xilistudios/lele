@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/store"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 // seedLazySession creates a session with the given number of user+assistant
@@ -56,8 +57,9 @@ func TestLazyLoad_InitialWindow(t *testing.T) {
 	// Scroll to top so the header line is visible in the rendered view.
 	m.viewport.GotoTop()
 	out := m.View()
-	if !strings.Contains(out, "↑ 120 earlier messages") {
-		t.Fatalf("expected header '↑ 120 earlier messages' in view, got:\n%s", out)
+	want := fmt.Sprintf(i18n.T("tui.earlierMessages"), 120)
+	if !strings.Contains(out, want) {
+		t.Fatalf("expected header %q in view, got:\n%s", want, out)
 	}
 }
 
@@ -85,8 +87,9 @@ func TestLazyLoad_ExpandOnScrollUp(t *testing.T) {
 		t.Fatalf("expected YOffset>0 after compensation, got %d", m.viewport.YOffset)
 	}
 	m.viewport.GotoTop()
-	if out := m.View(); !strings.Contains(out, "↑ 70 earlier messages") {
-		t.Fatalf("expected header '↑ 70 earlier messages', got:\n%s", out)
+	want70 := fmt.Sprintf(i18n.T("tui.earlierMessages"), 70)
+	if out := m.View(); !strings.Contains(out, want70) {
+		t.Fatalf("expected header %q, got:\n%s", want70, out)
 	}
 
 	// Second expansion: 70 -> 20
