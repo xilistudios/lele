@@ -82,7 +82,7 @@ export function StringListEditor({
               onChange={handleSelect}
               options={options}
               placeholder={placeholder || t('settings.selectModel')}
-              searchAriaLabel={`${id} buscar`}
+              searchAriaLabel={`${id} ${t('chat.search')}`}
               searchPlaceholder={placeholder || t('settings.selectModel')}
               value=""
             />

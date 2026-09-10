@@ -89,6 +89,7 @@ const ChatListItem = memo(function ChatListItem({
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(session.name ?? '')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const menuRef = useClickOutside<HTMLDivElement>(() => setMenuOpen(false), menuOpen)
 
   const handleRenameSubmit = useCallback(() => {
@@ -103,7 +104,10 @@ const ChatListItem = memo(function ChatListItem({
     if (!renaming && !menuOpen) onSelect(session.key)
   }, [renaming, menuOpen, onSelect, session.key])
 
-  const toggleMenu = useCallback(() => setMenuOpen((v) => !v), [])
+  const toggleMenu = useCallback(() => {
+    setConfirmingDelete(false)
+    setMenuOpen((v) => !v)
+  }, [])
 
   const startRename = useCallback(() => {
     setRenaming(true)
@@ -117,9 +121,15 @@ const ChatListItem = memo(function ChatListItem({
   }, [onClear, session.key])
 
   const handleDeleteClick = useCallback(() => {
+    // Two-step confirm, matching SessionItem: first click arms, second deletes.
+    if (!confirmingDelete) {
+      setConfirmingDelete(true)
+      return
+    }
+    setConfirmingDelete(false)
     onDelete?.(session.key)
     setMenuOpen(false)
-  }, [onDelete, session.key])
+  }, [confirmingDelete, onDelete, session.key])
 
   return (
     <div
@@ -133,20 +143,23 @@ const ChatListItem = memo(function ChatListItem({
         }
       `}
     >
-      <button type="button" className="min-w-0 flex-1 text-left" onClick={handleSelectClick}>
-        {renaming ? (
-          <div
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-            role="presentation"
-          >
-            <RenameForm
-              value={renameValue}
-              onChange={setRenameValue}
-              onSubmit={handleRenameSubmit}
-            />
-          </div>
-        ) : (
+      {/* When renaming, render the form as a sibling (not inside the select
+          button) so no interactive control is nested inside another button. */}
+      {renaming ? (
+        <div
+          className="min-w-0 flex-1"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          <RenameForm
+            value={renameValue}
+            onChange={setRenameValue}
+            onSubmit={handleRenameSubmit}
+          />
+        </div>
+      ) : (
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={handleSelectClick}>
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p
@@ -169,13 +182,13 @@ const ChatListItem = memo(function ChatListItem({
               </div>
             </div>
           </div>
-        )}
-      </button>
+        </button>
+      )}
 
       {(onDelete || onClear || onRename) && (
         <div
           ref={menuRef}
-          className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity"
+          className="relative flex items-center transition-opacity opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
         >
           <button
             type="button"
@@ -222,10 +235,13 @@ const ChatListItem = memo(function ChatListItem({
               {onDelete && (
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-warning hover:bg-background-secondary"
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-background-secondary ${
+                    confirmingDelete ? 'text-state-error' : 'text-warning'
+                  }`}
                   onClick={handleDeleteClick}
+                  onBlur={() => setConfirmingDelete(false)}
                 >
-                  {t('chat.deleteSession')}
+                  {confirmingDelete ? t('chat.confirmDelete') : t('chat.deleteSession')}
                 </button>
               )}
             </div>

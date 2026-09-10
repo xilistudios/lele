@@ -18,13 +18,17 @@ export function SettingsHeader({ configPath, title, onOpenMobileSidebar }: Props
             type="button"
             onClick={onOpenMobileSidebar}
             className="flex md:hidden items-center justify-center rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors mr-1"
-            aria-label="Toggle sidebar"
+            aria-label={t('chat.toggleSidebar')}
           >
             <SidebarToggleIcon size={20} />
           </button>
         )}
-        <h1 className="text-xl font-semibold text-text-primary">{title ?? t('chat.settings')}</h1>
-        {configPath && <span className="text-xs text-text-tertiary">{configPath}</span>}
+        <h1 className="text-base font-semibold text-text-primary md:text-xl">{title ?? t('chat.settings')}</h1>
+        {configPath && (
+          <span className="hidden max-w-[40vw] truncate text-xs text-text-tertiary md:inline" title={configPath}>
+            {configPath}
+          </span>
+        )}
       </div>
     </div>
   )

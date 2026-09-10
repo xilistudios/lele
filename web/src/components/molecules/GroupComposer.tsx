@@ -65,7 +65,10 @@ export function GroupComposer() {
 
     setIsSubmitting(true)
     try {
-      await onSend(content, [])
+      const accepted = await onSend(content, [])
+      // Keep the draft when the send was refused (queue full, missing
+      // session/agent) so the task text is not lost.
+      if (accepted === false) return
       setTask('')
       // After starting a new group, switch back to follow-up mode
       if (showNewGroupForm && hasExistingGroups) {
@@ -149,6 +152,9 @@ export function GroupComposer() {
             e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
           }}
           onKeyDown={(e) => {
+            // IME safety: while composing (CJK candidates), Enter belongs to
+            // the input method and must not submit the form.
+            if (e.nativeEvent.isComposing) return
             if (e.key === 'Enter' && !e.shiftKey && !activeProcessing) {
               e.preventDefault()
               handleSubmit()

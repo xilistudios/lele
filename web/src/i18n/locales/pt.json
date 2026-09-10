@@ -129,7 +129,15 @@
     "queueClear": "Limpar fila",
     "queueFull": "A fila está cheia (10 mensagens). Aguarde o agente terminar.",
     "deviceMenu": "Menu do dispositivo",
-    "removeAttachment": "Remover anexo"
+    "removeAttachment": "Remover anexo",
+    "attachFiles": "Anexar arquivos",
+    "uploadFailed": "Falha ao enviar o anexo",
+    "isTyping": "{{name}} está digitando...",
+    "scrollToBottom": "Rolar para baixo",
+    "failedToSend": "Falha ao enviar",
+    "retry": "Tentar novamente",
+    "archivedFromContext": "Arquivado do contexto",
+    "download": "Baixar"
   },
   "connection": {
     "connected": "Conectado",
@@ -159,7 +167,8 @@
     "authFailed": "Não foi possível autenticar",
     "sendFailed": "Não foi possível enviar a mensagem",
     "messageRequired": "A mensagem não pode estar vazia",
-    "deleteSessionFailed": "Não foi possível excluir a sessão"
+    "deleteSessionFailed": "Não foi possível excluir a sessão",
+    "network": "Não foi possível alcançar o backend do Lele. Verifique se está em execução e tente novamente."
   },
   "settings": {
     "agentPage": {
@@ -745,6 +754,10 @@
       "actions": "Ações",
       "revoke": "Revogar",
       "confirmRevoke": "Tem certeza de que deseja revogar a autorização deste dispositivo? Ele será desconectado imediatamente.",
+      "confirmRevokeTitle": "Revogar dispositivo?",
+      "revokeFailed": "Falha ao revogar o cliente",
+      "pinFailed": "Falha ao gerar o PIN",
+      "fetchFailed": "Falha ao buscar clientes nativos",
       "pairDeviceModalTitle": "Emparelhar Novo Dispositivo",
       "pairDeviceInstruction": "Insira um nome para o dispositivo que deseja emparelhar. Isso gerará um código PIN para usar no novo dispositivo.",
       "deviceNameLabel": "Nome do Dispositivo",
@@ -818,7 +831,16 @@
     "expand": "Expandir",
     "back": "Voltar",
     "copied": "Copiado",
-    "noData": "Sem dados"
+    "noData": "Sem dados",
+    "retry": "Tentar novamente",
+    "search": "Pesquisar",
+    "dismiss": "Dispensar"
+  },
+  "desktop": {
+    "disconnected": "Backend desconectado",
+    "disconnectedMessage": "O gateway do Lele parou de responder.",
+    "restart": "Reiniciar backend",
+    "restarting": "Reiniciando…"
   },
   "groups": {
     "title": "Chat em grupo",
@@ -924,11 +946,30 @@
     "command": "Comando",
     "agent": "Agente",
     "viewOutput": "Ver Saída",
-    "hideOutput": "Ocultar Saída"
+    "hideOutput": "Ocultar Saída",
+    "loadError": "Não foi possível carregar os processos em segundo plano",
+    "stopError": "Não foi possível parar o processo"
+  },
+  "agentFiles": {
+    "loadingFiles": "Carregando arquivos...",
+    "backToAgents": "Voltar aos Agentes",
+    "contextFiles": "Arquivos de contexto",
+    "discard": "Descartar",
+    "saveCurrentFile": "Salvar arquivo atual",
+    "unsavedChanges": "Você tem alterações não salvas",
+    "files": "Arquivos",
+    "fileContentPlaceholder": "Conteúdo do arquivo...",
+    "chars": "{{count}} caracteres",
+    "lines": "{{count}} linhas",
+    "loadFilesError": "Não foi possível carregar os arquivos",
+    "loadFileError": "Não foi possível carregar o arquivo",
+    "saveError": "Não foi possível salvar"
   },
   "skills": {
     "title": "Habilidades",
     "installed": "instaladas",
+    "installedCount_one": "{{count}} habilidade instalada",
+    "installedCount_other": "{{count}} habilidades instaladas",
     "noSkills": "Nenhuma habilidade instalada",
     "noSkillsDesc": "Instale habilidades para estender as capacidades do seu agente",
     "installSkill": "Instalar habilidade",

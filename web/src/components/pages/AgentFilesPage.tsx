@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
@@ -9,7 +10,8 @@ import { Sidebar } from '../organisms/Sidebar'
 type DirtyMap = Record<string, string | null> // fileName -> content if dirty, null if synced
 
 export function AgentFilesPage() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const { agentId, fileName } = useParams<{ agentId: string; fileName?: string }>()
+  const { t } = useTranslation()
   const { api } = useAuthContext()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
     useAppLogicContext()
@@ -26,8 +28,10 @@ export function AgentFilesPage() {
   // useRef for dirty content cache — avoids fragile dependency on React batching semantics.
   // Refs are always up-to-date, so effects and callbacks always see the latest cache.
   const dirtyFilesRef = useRef<DirtyMap>({})
+  // Generation counter so a slow content fetch cannot overwrite a newer selection.
+  const contentRequestRef = useRef(0)
 
-  // Load file list on mount
+  // Load file list on mount. Deep-link (`:fileName?`) wins over the first file.
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeFile is intentionally excluded to avoid re-triggering on mount
   useEffect(() => {
     if (!agentId) return
@@ -37,11 +41,12 @@ export function AgentFilesPage() {
         setError(null)
         const res = await api.agentFiles(agentId)
         setFiles(res.files)
-        if (res.files.length > 0 && !activeFile) {
-          setActiveFile(res.files[0].name)
+        if (!activeFile && res.files.length > 0) {
+          const requested = fileName ? res.files.find((f) => f.name === fileName)?.name : undefined
+          setActiveFile(requested ?? res.files[0].name)
         }
       } catch (e) {
-        setError((e as Error).message || 'Failed to load files')
+        setError((e as Error).message || t('agentFiles.loadFilesError'))
       } finally {
         setLoading(false)
       }
@@ -52,6 +57,7 @@ export function AgentFilesPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: api is stable, dirtyFilesRef is intentionally excluded
   useEffect(() => {
     if (!agentId || !activeFile) return
+    const requestId = ++contentRequestRef.current
 
     // Check if we have dirty content cached from a previous edit
     const cached = dirtyFilesRef.current[activeFile]
@@ -61,11 +67,13 @@ export function AgentFilesPage() {
         try {
           setError(null)
           const res = await api.agentFile(agentId, activeFile)
+          if (requestId !== contentRequestRef.current) return
           setOriginalContent(res.content || '')
           // Restore dirty content from cache
           setContent(cached)
         } catch (e) {
-          setError((e as Error).message || 'Failed to load file')
+          if (requestId !== contentRequestRef.current) return
+          setError((e as Error).message || t('agentFiles.loadFileError'))
         }
       })()
       return
@@ -75,10 +83,12 @@ export function AgentFilesPage() {
         setContent('')
         setError(null)
         const res = await api.agentFile(agentId, activeFile)
+        if (requestId !== contentRequestRef.current) return
         setContent(res.content || '')
         setOriginalContent(res.content || '')
       } catch (e) {
-        setError((e as Error).message || 'Failed to load file')
+        if (requestId !== contentRequestRef.current) return
+        setError((e as Error).message || t('agentFiles.loadFileError'))
       }
     })()
   }, [agentId, activeFile])
@@ -86,7 +96,7 @@ export function AgentFilesPage() {
   const isDirty = content !== originalContent
 
   const handleFileSelect = useCallback(
-    (fileName: string) => {
+    (name: string) => {
       if (isDirty) {
         // Store current dirty content in ref before switching tabs
         dirtyFilesRef.current = {
@@ -94,10 +104,15 @@ export function AgentFilesPage() {
           ...(activeFile && { [activeFile]: content !== originalContent ? content : null }),
         }
       }
-      setActiveFile(fileName)
+      setActiveFile(name)
       setShowMobileFileList(false)
+      if (agentId) {
+        navigate(`/settings/agent/${encodeURIComponent(agentId)}/${encodeURIComponent(name)}`, {
+          replace: true,
+        })
+      }
     },
-    [activeFile, isDirty, content, originalContent],
+    [activeFile, isDirty, content, originalContent, agentId, navigate],
   )
 
   const handleSave = async () => {
@@ -109,7 +124,7 @@ export function AgentFilesPage() {
       setOriginalContent(content)
       dirtyFilesRef.current = { ...dirtyFilesRef.current, [activeFile]: null }
     } catch (e) {
-      setError((e as Error).message || 'Failed to save')
+      setError((e as Error).message || t('agentFiles.saveError'))
     } finally {
       setSaving(false)
     }
@@ -122,6 +137,17 @@ export function AgentFilesPage() {
 
   const hasAnyDirty =
     isDirty || Object.values(dirtyFilesRef.current).some((v) => v !== null && v !== undefined)
+
+  // Warn on page unload while any file still has unsaved edits.
+  useEffect(() => {
+    if (!hasAnyDirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [hasAnyDirty])
 
   const btnCls = 'rounded px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
   const btnPrimary = `${btnCls} bg-cta-primary text-text-on-accent hover:bg-cta-hover`
@@ -143,7 +169,9 @@ export function AgentFilesPage() {
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="text-sm text-text-secondary">Loading files...</div>
+            <div className="text-sm text-text-secondary">
+              {t('agentFiles.loadingFiles', 'Loading files...')}
+            </div>
           </div>
         ) : error ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6">
@@ -153,7 +181,7 @@ export function AgentFilesPage() {
               onClick={() => navigate('/settings/agents')}
               className={btnSecondary}
             >
-              Back to Agents
+              {t('agentFiles.backToAgents', 'Back to Agents')}
             </button>
           </div>
         ) : (
@@ -178,13 +206,13 @@ export function AgentFilesPage() {
                     stroke="currentColor"
                     strokeWidth="2"
                   >
-                    <title>Back</title>
+                    <title>{t('common.back')}</title>
                     <polyline points="15 18 9 12 15 6" />
                   </svg>
-                  Agents
+                  {t('agentFiles.backToAgents', 'Back to Agents')}
                 </button>
                 <p className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">
-                  Context Files
+                  {t('agentFiles.contextFiles', 'Context Files')}
                 </p>
               </div>
               {files.map((f) => {
@@ -206,7 +234,7 @@ export function AgentFilesPage() {
                     {fileDirty && (
                       <span
                         className="ml-1 w-2 h-2 rounded-full bg-state-warning flex-shrink-0"
-                        title="Modified"
+                        title={t('settings.modified')}
                       />
                     )}
                   </button>
@@ -214,7 +242,6 @@ export function AgentFilesPage() {
               })}
             </div>
 
-            {/* Editor Area */}
             {/* Editor Area */}
             <div
               className={`absolute inset-y-0 right-0 w-full md:relative md:flex-1 bg-background-primary flex flex-col overflow-hidden transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-20 ${
@@ -238,22 +265,24 @@ export function AgentFilesPage() {
                       strokeWidth="2"
                       className="flex-shrink-0"
                     >
-                      <title>Back</title>
+                      <title>{t('common.back')}</title>
                       <polyline points="15 18 9 12 15 6" />
                     </svg>
-                    Files
+                    {t('agentFiles.files', 'Files')}
                   </button>
                   <span className="text-sm font-medium text-text-primary truncate">
                     {activeFile}
                   </span>
                   {isDirty && (
-                    <span className="text-xs text-state-warning flex-shrink-0">Modified</span>
+                    <span className="text-xs text-state-warning flex-shrink-0">
+                      {t('settings.modified')}
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
                   {isDirty && (
                     <button type="button" onClick={handleDiscard} className={btnDanger}>
-                      Discard
+                      {t('agentFiles.discard', 'Discard')}
                     </button>
                   )}
                   <button
@@ -262,7 +291,7 @@ export function AgentFilesPage() {
                     disabled={!isDirty || saving}
                     className={btnPrimary}
                   >
-                    {saving ? 'Saving...' : 'Save'}
+                    {saving ? t('common.saving') : t('common.save')}
                   </button>
                 </div>
               </div>
@@ -273,16 +302,18 @@ export function AgentFilesPage() {
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   className="w-full h-full resize-none bg-background-primary text-text-primary font-mono text-sm p-4 leading-relaxed outline-none border-0 focus:ring-0 placeholder-text-tertiary"
-                  placeholder="File content..."
+                  placeholder={t('agentFiles.fileContentPlaceholder', 'File content...')}
                   spellCheck={false}
                 />
               </div>
 
               {/* Status Bar */}
               <div className="flex items-center justify-between px-4 py-1.5 border-t border-border-light bg-background-secondary text-xs text-text-tertiary">
-                <span>{content.length.toLocaleString()} chars</span>
+                <span>{t('agentFiles.chars', { count: content.length })}</span>
                 <span>
-                  {content.length === 0 ? 0 : content.split(/\n/).length.toLocaleString()} lines
+                  {t('agentFiles.lines', {
+                    count: content.length === 0 ? 0 : content.split(/\n/).length,
+                  })}
                 </span>
               </div>
             </div>
@@ -292,14 +323,16 @@ export function AgentFilesPage() {
         {/* Global save bar if any file is dirty */}
         {hasAnyDirty && !loading && (
           <div className="flex items-center justify-between px-4 py-2 border-t border-state-warning/30 bg-state-warning-light">
-            <span className="text-xs text-state-warning">You have unsaved changes</span>
+            <span className="text-xs text-state-warning">
+              {t('agentFiles.unsavedChanges', 'You have unsaved changes')}
+            </span>
             <button
               type="button"
               onClick={handleSave}
               disabled={!isDirty || saving}
               className={btnPrimary}
             >
-              {saving ? 'Saving...' : 'Save Current File'}
+              {saving ? t('common.saving') : t('agentFiles.saveCurrentFile', 'Save Current File')}
             </button>
           </div>
         )}

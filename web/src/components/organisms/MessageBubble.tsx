@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   isDiffStatLine,
   isFileDiffRow,
@@ -90,6 +91,7 @@ type Props = {
 }
 
 function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRetry }: Props) {
+  const { t } = useTranslation()
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const [expanded, setExpanded] = useState(false)
@@ -213,14 +215,14 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
         {message.failed && (
           <div className="text-xs text-state-error flex items-center gap-2 mt-1">
             <span className="inline-block h-2 w-2 rounded-full bg-state-error" />
-            <span>Failed to send</span>
+            <span>{t('chat.failedToSend')}</span>
             {onRetry && (
               <button
                 type="button"
                 onClick={() => onRetry(message)}
                 className="underline hover:text-state-error/80 font-medium"
               >
-                Retry
+                {t('chat.retry')}
               </button>
             )}
           </div>
@@ -245,7 +247,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <line x1="1" y1="1" x2="23" y2="23" />
           </svg>
-          <span>Archived from context</span>
+          <span>{t('chat.archivedFromContext')}</span>
         </div>
       )}
       <div className="space-y-3">
@@ -268,7 +270,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                 <polyline points="9 18 15 12 9 6" />
               </svg>
               <span className="text-xs text-text-tertiary italic">
-                {message.streaming && message.reasoningContent ? 'Thinking…' : 'Thinking'}
+                {t('chat.thinking')}
+                {message.streaming && message.reasoningContent ? '…' : ''}
               </span>
               {message.streaming && message.reasoningContent && (
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-text-tertiary animate-pulse ml-1" />
@@ -433,8 +436,8 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                       <a
                         href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
                         download={attachment.name ?? true}
-                        aria-label={`Download ${label}`}
-                        title={`Download ${label}`}
+                        aria-label={`${t('chat.download')} ${label}`}
+                        title={`${t('chat.download')} ${label}`}
                         className="absolute right-1.5 top-1.5 inline-flex items-center justify-center rounded-md border border-border bg-background-primary/90 p-1 text-text-secondary shadow-card transition-colors hover:text-text-primary"
                       >
                         <DownloadIcon />
@@ -457,11 +460,11 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                       <a
                         href={buildDownloadUrl(apiUrl ?? '', attachment.path, attachment.name)}
                         download={attachment.name ?? true}
-                        aria-label={`Download ${label}`}
+                        aria-label={`${t('chat.download')} ${label}`}
                         className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border bg-background-primary px-2 py-1 font-medium text-text-primary transition-colors hover:text-text-secondary"
                       >
                         <DownloadIcon />
-                        <span>Download</span>
+                        <span>{t('chat.download')}</span>
                       </a>
                       <p className="mt-1 font-mono text-text-tertiary">{attachment.path}</p>
                     </>

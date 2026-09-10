@@ -97,7 +97,7 @@ export function GeneralSettings() {
             onChange={(v) => updateField('agents.defaults.model', v)}
             options={getOptionsForAgent}
             placeholder={getDefaultModel() || t('settings.selectModel')}
-            searchAriaLabel={`${t('settings.fields.model')} buscar`}
+            searchAriaLabel={`${t('settings.fields.model')} ${t('chat.search')}`}
             searchPlaceholder={t('settings.fields.model')}
             value={getDefaultModel()}
           />
@@ -133,7 +133,7 @@ export function GeneralSettings() {
             onChange={(v) => updateField('agents.defaults.image_model', v || undefined)}
             options={modelOptions}
             placeholder={getDefaultImageModel() || t('settings.selectModel')}
-            searchAriaLabel={`${t('settings.fields.imageModel')} buscar`}
+            searchAriaLabel={`${t('settings.fields.imageModel')} ${t('chat.search')}`}
             searchPlaceholder={t('settings.fields.imageModel')}
             value={getDefaultImageModel()}
           />

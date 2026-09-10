@@ -45,6 +45,7 @@ export function MessageList() {
     onRetry,
     currentSessionKey,
     isProcessing,
+    isHistoryLoading,
     loadMore,
     hasMore,
     isLoadingMore,
@@ -308,6 +309,19 @@ export function MessageList() {
 
   // ── Empty state (AFTER all hooks to satisfy Rules of Hooks) ──
   if (renderItems.length === 0) {
+    // History is still loading for this session — show a spinner instead of
+    // flashing the empty-chat state.
+    if (isHistoryLoading) {
+      return (
+        <div className="flex h-full items-center justify-center">
+          <div
+            className="h-6 w-6 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent"
+            role="status"
+            aria-label={t('common.loading')}
+          />
+        </div>
+      )
+    }
     const modeTheme = getModeTheme(chatMode)
     const EmptyIcon = modeTheme.Icon
     return (
@@ -455,7 +469,7 @@ export function MessageList() {
                       style={{ animationDelay: '300ms' }}
                     />
                   </span>
-                  <span>{typingIndicator.deviceName} is typing...</span>
+                  <span>{t('chat.isTyping', { name: typingIndicator.deviceName })}</span>
                 </div>
               )}
             </>
@@ -466,7 +480,7 @@ export function MessageList() {
         <button
           type="button"
           onClick={scrollToBottom}
-          aria-label="Scroll to bottom"
+          aria-label={t('chat.scrollToBottom')}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background-secondary shadow-md transition-opacity hover:bg-background-tertiary"
         >
           <svg

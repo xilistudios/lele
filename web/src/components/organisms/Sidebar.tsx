@@ -13,7 +13,6 @@ import {
   HistoryIcon,
   LockIcon,
   LogoutIcon,
-  MoreIcon,
   PlusCircleIcon,
   ProvidersIcon,
   SearchIcon,
@@ -21,7 +20,6 @@ import {
   SidebarToggleIcon,
   SkillsIcon,
   TerminalIcon,
-  TrashIcon,
   UserIcon,
 } from '../atoms/Icons'
 import { Logo } from '../atoms/Logo'
@@ -399,30 +397,6 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                 <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
-                <Popover
-                  tooltip={t('chat.more')}
-                  trigger={
-                    <button
-                      type="button"
-                      className="flex items-center justify-center rounded p-0.5 text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors"
-                      aria-label={t('chat.more')}
-                    >
-                      <MoreIcon size={12} />
-                    </button>
-                  }
-                  popoverWidth={200}
-                  popoverHeight={60}
-                >
-                  <div className="flex flex-col gap-1">
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 w-full whitespace-nowrap rounded-md px-3 py-2 text-sm text-red-400 hover:bg-surface-hover hover:text-red-300 transition-colors"
-                    >
-                      <TrashIcon size={14} />
-                      <span>{t('chat.deleteAllChats')}</span>
-                    </button>
-                  </div>
-                </Popover>
               </div>
               {sortedSessions.length > 0 && (
                 <>

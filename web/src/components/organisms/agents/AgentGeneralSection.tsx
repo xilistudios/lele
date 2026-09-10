@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
@@ -35,6 +35,14 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
   const { t } = useTranslation()
   const { dirtyPaths, validationErrors, updateField } = useSettings()
   const [copied, setCopied] = useState(false)
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear the "Copied" feedback timer if the component unmounts mid-toast.
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+    }
+  }, [])
 
   const path = (field: string) => `agents.list.${index}.${field}`
   const dirty = (field: string) => isDirtyPath(dirtyPaths, path(field))
@@ -48,7 +56,8 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
       // `select-all`, so the user can still copy by hand: never throw here.
     }
     setCopied(true)
-    setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS)
+    if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+    copiedTimeoutRef.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS)
   }
 
   const moreThanOneDefault = agents.filter((candidate) => candidate.default).length > 1

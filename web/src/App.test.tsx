@@ -1438,17 +1438,15 @@ describe('Auto-pairing', () => {
 
     const view = renderWithProviders(<App />, ['/pair?code=654321'])
 
-    await waitFor(() => {
-      const hasForm = view.container.querySelector('form') !== null
-      const hasNumericInput = view.container.querySelector('input[inputmode="numeric"]') !== null
-      const hasSubmitButton = view.container.querySelector('button[type="submit"]') !== null
-      expect(hasForm || hasNumericInput || hasSubmitButton).toBe(true)
-    })
-
-    const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement
-    if (pinInput) {
-      expect(pinInput.value).toBe('654321')
-    }
+    // Auto-pair runs first (spinner); after the mocked pair rejection the form
+    // must appear with the PIN pre-filled. Allow extra time under full-suite load.
+    await waitFor(
+      () => {
+        const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement
+        expect(pinInput?.value).toBe('654321')
+      },
+      { timeout: 4000 },
+    )
   })
 })
 
