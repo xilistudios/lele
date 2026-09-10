@@ -73,7 +73,11 @@ func (ch *commandHandlerImpl) handleCommand(ctx context.Context, msg bus.Inbound
 	}
 	baseSessionKey := sessionKey
 	sessionKey = ch.al.ResolveSessionKey(sessionKey)
-	if sessionAgentID := ch.al.getSessionAgent(sessionKey); sessionAgentID != "" {
+	// Only an explicit pin (from /agent or a channel API) may override the
+	// route. getSessionAgent falls back to the default agent, which would make
+	// every bound channel resolve to the default agent here — and /new would
+	// then persist that wrong agent as a pin on the fresh session key.
+	if sessionAgentID, pinned := ch.al.sessionAgentOverride(sessionKey); pinned {
 		if sessionAgent, ok := ch.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}

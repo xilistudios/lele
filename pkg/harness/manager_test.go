@@ -328,3 +328,227 @@ func TestManagerAllowAbsoluteFiles(t *testing.T) {
 		t.Error("pins must not leak into other commands")
 	}
 }
+
+// levelNames returns "source:name" pairs for one level of a Levels() map,
+// used in assertions and failure messages.
+func levelNames(levels map[Source][]*Command, src Source) []string {
+	var out []string
+	for _, c := range levels[src] {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
+// T-B2: Levels() reports every discovery level WITHOUT merging, so a name that
+// exists in two levels shows up in BOTH, while Reload()/Registry().All() keep
+// the last-write-wins precedence (workspace beats global).
+func TestManagerLevelsShowsShadowedCommands(t *testing.T) {
+	root := t.TempDir()
+	global := filepath.Join(root, "global")
+	ws := filepath.Join(root, "ws")
+	dir := filepath.Join(root, "dir")
+
+	// "dup" lives in global AND workspace (and config, lowest precedence);
+	// "solo" only in global. Template marks the level so the winner is
+	// identifiable.
+	writeCmdFile(t, filepath.Join(global, "commands"), "dup.md", cmdFileBody("g", "GLOBAL"))
+	writeCmdFile(t, filepath.Join(global, "commands"), "solo.md", cmdFileBody("g", "GLOBAL-SOLO"))
+	writeCmdFile(t, filepath.Join(ws, "commands"), "dup.md", cmdFileBody("w", "WORKSPACE"))
+	writeCmdFile(t, dir, "dup.md", cmdFileBody("d", "DIRECTORY"))
+
+	m := NewManager(ManagerConfig{
+		LeleDir:   global,
+		Workspace: ws,
+		Dir:       dir,
+		Commands:  map[string]CommandDef{"dup": {Description: "c", Template: "CONFIG"}},
+	})
+
+	levels, err := m.Levels()
+	if err != nil {
+		t.Fatalf("Levels: %v", err)
+	}
+
+	// Every level must be present as a key, even when empty.
+	for _, src := range levelOrder {
+		if _, ok := levels[src]; !ok {
+			t.Fatalf("Levels() missing key %q", src)
+		}
+	}
+
+	// dup appears in ALL FOUR levels — nothing is merged away. Each level's
+	// file carries its own level name as the template, so the entry can be
+	// attributed to the level that produced it (config uses "CONFIG" too).
+	for _, src := range levelOrder {
+		found := false
+		for _, c := range levels[src] {
+			if c.Name != "dup" {
+				continue
+			}
+			found = true
+			if c.Template != strings.ToUpper(string(src)) {
+				t.Errorf("level %q: dup template = %q, want %q", src, c.Template, strings.ToUpper(string(src)))
+			}
+			if c.Source != src {
+				t.Errorf("level %q: dup source = %q, want %q", src, c.Source, src)
+			}
+		}
+		if !found {
+			t.Errorf("level %q missing shadowed command dup, have %v", src, levelNames(levels, src))
+		}
+	}
+	// solo only exists at global level.
+	if got := levelNames(levels, SourceGlobal); len(got) != 2 {
+		t.Errorf("global level = %v, want [dup solo]", got)
+	}
+	if got := levelNames(levels, SourceWorkspace); len(got) != 1 || got[0] != "dup" {
+		t.Errorf("workspace level = %v, want [dup]", got)
+	}
+
+	// Precedence is untouched: the merged registry keeps last-write-wins
+	// (directory > workspace > global > config).
+	cmd, ok := m.Registry().Get("dup")
+	if !ok {
+		t.Fatal("dup missing from registry")
+	}
+	if cmd.Source != SourceDirectory || cmd.Template != "DIRECTORY" {
+		t.Errorf("merged dup = %q/%q, want directory/DIRECTORY", cmd.Source, cmd.Template)
+	}
+	// Registry().All() agrees with the registry view.
+	all := m.Registry().All()
+	if len(all) != 2 { // dup + solo
+		t.Fatalf("registry has %d commands (%v), want 2", len(all), registeredNames(m))
+	}
+
+	// Drop the directory level: workspace must win, and Reload() must reflect
+	// the change with the same last-write-wins rule.
+	m2 := NewManager(ManagerConfig{
+		LeleDir:   global,
+		Workspace: ws,
+		Commands:  map[string]CommandDef{"dup": {Description: "c", Template: "CONFIG"}},
+	})
+	if err := m2.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	c2, _ := m2.Registry().Get("dup")
+	if c2.Source != SourceWorkspace || c2.Template != "WORKSPACE" {
+		t.Fatalf("without dir level, dup = %q/%q, want workspace/WORKSPACE", c2.Source, c2.Template)
+	}
+	l2, err := m2.Levels()
+	if err != nil {
+		t.Fatalf("Levels after reload: %v", err)
+	}
+	if len(l2[SourceDirectory]) != 0 {
+		t.Errorf("disabled dir level should be empty, got %v", levelNames(l2, SourceDirectory))
+	}
+
+	// Levels() must not mutate the registry or the load timestamp: a stale
+	// snapshot on disk is still what Reload applied.
+	before := m.Registry().Len()
+	if _, err := m.Levels(); err != nil {
+		t.Fatal(err)
+	}
+	if m.Registry().Len() != before {
+		t.Errorf("Levels() changed the registry size")
+	}
+}
+
+// T-B3: disabled levels (empty path) map to an empty slice and never produce
+// an error, and Levels() must not create directories as a side effect.
+func TestManagerLevelsDisabledLevels(t *testing.T) {
+	root := t.TempDir()
+	ws := filepath.Join(root, "ws")
+	writeCmdFile(t, filepath.Join(ws, "commands"), "only.md", cmdFileBody("o", "ONLY"))
+
+	m := NewManager(ManagerConfig{
+		LeleDir:   "",  // global disabled
+		Workspace: ws,  // workspace enabled
+		Dir:       "",  // directory disabled
+		Commands:  nil, // config level has no entries at all
+	})
+
+	levels, err := m.Levels()
+	if err != nil {
+		t.Fatalf("disabled levels must not error, got %v", err)
+	}
+	for _, src := range []Source{SourceConfig, SourceGlobal, SourceDirectory} {
+		lv, ok := levels[src]
+		if !ok {
+			t.Fatalf("Levels() missing disabled key %q", src)
+		}
+		if lv == nil {
+			t.Errorf("disabled level %q = nil, want empty slice", src)
+		}
+		if len(lv) != 0 {
+			t.Errorf("disabled level %q = %v, want empty", src, levelNames(levels, src))
+		}
+	}
+	if got := levelNames(levels, SourceWorkspace); len(got) != 1 || got[0] != "only" {
+		t.Errorf("workspace level = %v, want [only]", got)
+	}
+
+	// A missing (not disabled) directory is also not an error.
+	m2 := NewManager(ManagerConfig{LeleDir: filepath.Join(root, "does-not-exist")})
+	levels2, err := m2.Levels()
+	if err != nil {
+		t.Fatalf("missing dir must not error, got %v", err)
+	}
+	if len(levels2[SourceGlobal]) != 0 {
+		t.Errorf("missing global dir produced commands: %v", levelNames(levels2, SourceGlobal))
+	}
+
+	// Levels() is read-only: it must not create the commands dir.
+	fresh := filepath.Join(root, "fresh-ws")
+	m3 := NewManager(ManagerConfig{Workspace: fresh})
+	if _, err := m3.Levels(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(fresh, "commands")); !os.IsNotExist(err) {
+		t.Errorf("Levels() must not create directories; stat err = %v", err)
+	}
+}
+
+// reloadLocked and Levels must agree on per-level errors: a level whose dir is
+// unreadable reports the error while the levels that loaded are still
+// returned. Uses a file where a directory is expected to force a read failure.
+func TestManagerLevelsReportsPerLevelErrors(t *testing.T) {
+	root := t.TempDir()
+	ws := filepath.Join(root, "ws")
+	writeCmdFile(t, filepath.Join(ws, "commands"), "good.md", cmdFileBody("g", "GOOD"))
+
+	// Global level: point LeleDir at a location whose "commands" entry is a
+	// regular file, so os.ReadDir(<lele>/commands) fails.
+	broken := filepath.Join(root, "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "commands"), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(ManagerConfig{LeleDir: broken, Workspace: ws})
+
+	levels, err := m.Levels()
+	if err == nil {
+		t.Fatal("Levels() must report the unreadable global level")
+	}
+	if !strings.Contains(err.Error(), "commands") {
+		t.Errorf("error should mention the failing dir: %v", err)
+	}
+	// The level that loaded is still included.
+	if got := levelNames(levels, SourceWorkspace); len(got) != 1 || got[0] != "good" {
+		t.Errorf("workspace level = %v, want [good] despite global failure", got)
+	}
+	// The failed level is empty, not partially populated.
+	if len(levels[SourceGlobal]) != 0 {
+		t.Errorf("failed level should be empty, got %v", levelNames(levels, SourceGlobal))
+	}
+
+	// reloadLocked keeps the same behaviour: Reload surfaces the joined error
+	// and the good level is still registered.
+	if err := m.Reload(); err == nil {
+		t.Fatal("Reload() must report the failing level")
+	}
+	if _, ok := m.Registry().Get("good"); !ok {
+		t.Error("good workspace command lost when the global level failed")
+	}
+}

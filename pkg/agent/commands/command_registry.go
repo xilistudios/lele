@@ -143,3 +143,36 @@ func normalizeCommandName(name string) string {
 	}
 	return "/" + n
 }
+
+// DispatcherReserved lists the slash-command names a user-defined command may
+// never take, because something upstream already answers them and the harness
+// registry is consulted last. It is the union of two groups:
+//
+//   - the switch in (*commandHandlerImpl).handleCommand, which declines nothing
+//     by name today, so a collision would leave the markdown file dead;
+//   - names a channel intercepts BEFORE the message reaches the agent loop
+//     (Telegram answers /help, /start and /models itself, see
+//     pkg/channels/telegram_messages.go).
+//
+// The switch cannot be introspected at runtime, so this list is maintained by
+// hand. TestDispatcherReserved_MatchesSource in pkg/agent fails when a
+// dispatched command is missing here or an entry stops being dispatched, which
+// is what keeps the duplication honest. Names are lowercase and without the
+// leading slash, the form both the dispatcher and the file stem use.
+func DispatcherReserved() []string {
+	out := make([]string, 0, len(dispatcherReserved)+len(channelIntercepted))
+	out = append(out, dispatcherReserved...)
+	out = append(out, channelIntercepted...)
+	sort.Strings(out)
+	return out
+}
+
+// dispatcherReserved mirrors the top-level cases of handleCommand.
+var dispatcherReserved = []string{
+	"agent", "clear", "compact", "goal", "group", "list", "model", "new",
+	"show", "status", "stop", "subagents", "switch", "think", "toggle", "verbose",
+}
+
+// channelIntercepted holds names answered by a channel before the bus, so they
+// never reach handleCommand and are invisible to the switch above.
+var channelIntercepted = []string{"help", "models", "start"}

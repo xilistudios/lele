@@ -437,6 +437,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/agents/{agentID}/skills/install", withAuth(applyBodyLimit(n.handleAgentSkillInstall)))
 	mux.HandleFunc("POST /api/v1/agents/{agentID}/skills/install-batch", withAuth(applyBodyLimit(n.handleAgentSkillInstallBatch)))
 
+	// Per-agent slash commands (workspace-scoped: the agent's own <workspace>/commands)
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/commands", withAuth(n.handleAgentCommands))
+	mux.HandleFunc("GET /api/v1/agents/{agentID}/commands/{name}", withAuth(n.handleAgentCommandDetail))
+	mux.HandleFunc("POST /api/v1/agents/{agentID}/commands", withAuth(applyBodyLimit(n.handleAgentCommandCreate)))
+	mux.HandleFunc("PUT /api/v1/agents/{agentID}/commands/{name}", withAuth(applyBodyLimit(n.handleAgentCommandUpdate)))
+	mux.HandleFunc("DELETE /api/v1/agents/{agentID}/commands/{name}", withAuth(n.handleAgentCommandDelete))
+
 	// Config
 	mux.HandleFunc("GET /api/v1/config", withAuth(n.handleGetConfig))
 	mux.HandleFunc("PUT /api/v1/config", withAuth(applyBodyLimit(n.handlePutConfig)))

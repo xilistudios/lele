@@ -48,7 +48,11 @@ func (ap *agentProvidableImpl) GetSessionAgent(sessionKey string) string {
 func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	currentAgentID := ap.GetSessionAgent(sessionKey)
-	if currentAgentID == agentID {
+	// Only an actual pin makes "already on that agent" true. GetSessionAgent
+	// falls back to the default agent, so without this guard "/agent <default>"
+	// on a session routed to someone else would return early and never store the
+	// pin, leaving the binding in place.
+	if _, pinned := ap.al.sessionAgentOverride(resolvedKey); pinned && currentAgentID == agentID {
 		return
 	}
 

@@ -29,15 +29,33 @@ var markdownExts = map[string]bool{".md": true, ".markdown": true}
 // LoadMarkdownFile parses a single command markdown file. The command name is
 // derived from the file stem (lowercased); the body after optional frontmatter
 // becomes the template. Invalid files return an error; callers such as LoadDir
-// decide whether to skip or fail.
+// decide whether to skip or fail. Parsing itself lives in
+// ParseCommandMarkdown so the exact same logic can validate bytes that never
+// touched the disk (e.g. REST request bodies).
 func LoadMarkdownFile(path string, source Source) (*Command, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("harness: read %s: %w", path, err)
 	}
+	cmd, err := ParseCommandMarkdown(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), path, raw)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Source = source
+	return cmd, nil
+}
+
+// ParseCommandMarkdown parses the contents of a command markdown file without
+// touching the filesystem. name is the file stem (filename without extension);
+// it is lowercased and validated here, matching LoadMarkdownFile's behaviour.
+// path is used only in error messages and as the returned command's Path. The
+// returned command carries no Source: the caller tags it (LoadMarkdownFile
+// does). Behaviour is identical to the disk-reading part of LoadMarkdownFile.
+func ParseCommandMarkdown(name, path string, raw []byte) (*Command, error) {
 	content := string(raw)
 
 	var def CommandDef
+	var err error
 	if m := frontmatterRe.FindStringSubmatch(content); m != nil {
 		def, err = parseFrontmatter(m[1], path)
 		if err != nil {
@@ -46,12 +64,12 @@ func LoadMarkdownFile(path string, source Source) (*Command, error) {
 		content = content[len(m[0]):]
 	}
 
-	name := strings.ToLower(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	name = strings.ToLower(name)
 	if err := validateName(name, path); err != nil {
 		return nil, err
 	}
 	def.Template = strings.TrimSpace(content)
-	return def.ToCommand(name, source, path), nil
+	return def.ToCommand(name, "", path), nil
 }
 
 // LoadDir loads every *.md / *.markdown file directly inside dir (non

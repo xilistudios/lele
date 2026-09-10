@@ -97,10 +97,34 @@ describe('AgentSettingsTabs', () => {
     cleanup()
   })
 
-  test('renders the six tabs in spec order (§1.3)', () => {
+  test('renders the seven tabs in spec order (§1.3)', () => {
     const { tabs } = setup()
     expect(AGENT_TAB_ORDER).toEqual([...AGENT_TABS])
     expect(tabs.map((tab) => tab.id)).toEqual(AGENT_TABS.map((tab) => `agent-tab-${tab}`))
+  })
+
+  test('every AGENT_TABS entry has TAB_META and an order slot (T-F1: F1-F3 sync)', () => {
+    // TAB_META is module-private; a missing entry would crash the render
+    // (`const { labelKey, Icon } = TAB_META[tab]`), so rendering all tabs and
+    // finding a translated label + icon per tab is the meta-coverage proof.
+    const { tabs } = setup()
+    // Length sync: the strip renders exactly one button per declared tab.
+    expect(tabs).toHaveLength(AGENT_TABS.length)
+    expect(AGENT_TAB_ORDER).toHaveLength(AGENT_TABS.length)
+    // commands sits between skills and tools (plan §4.1 final order).
+    expect(AGENT_TAB_ORDER).toEqual([
+      'general',
+      'model',
+      'skills',
+      'commands',
+      'tools',
+      'subagents',
+      'files',
+    ])
+    for (const tab of tabs) {
+      expect(tab.textContent?.trim().length).toBeGreaterThan(0)
+      expect(tab.querySelector('svg')).toBeTruthy()
+    }
   })
 
   test('every tab carries an icon (§4.1 diferencia 1)', () => {
@@ -133,7 +157,7 @@ describe('AgentSettingsTabs', () => {
     const { tabs, calls } = setup()
     fireEvent.click(tabs[3])
     fireEvent.click(tabs[5])
-    expect(calls).toEqual(['tools', 'files'])
+    expect(calls).toEqual(['commands', 'subagents'])
   })
 
   describe('keyboard (§6)', () => {
@@ -153,7 +177,7 @@ describe('AgentSettingsTabs', () => {
 
     test('wraps around at both ends', () => {
       const { tabs, calls } = setup({ activeTab: 'files' })
-      fireEvent.keyDown(tabs[5], { key: 'ArrowDown' })
+      fireEvent.keyDown(tabs[6], { key: 'ArrowDown' })
       expect(calls).toEqual(['general'])
       fireEvent.keyDown(tabs[0], { key: 'ArrowUp' })
       expect(calls).toEqual(['general', 'files'])
@@ -212,6 +236,11 @@ describe('AgentSettingsTabs', () => {
 
     test('files never gets a dot', () => {
       const { tabs } = setup({ dirtyPaths: new Set(['agents.list.2.files']) })
+      expect(dotted(tabs, 'dirty')).toEqual([])
+    })
+
+    test('commands never gets a dot (writes files, not config)', () => {
+      const { tabs } = setup({ dirtyPaths: new Set(['agents.list.2.commands']) })
       expect(dotted(tabs, 'dirty')).toEqual([])
     })
 

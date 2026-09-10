@@ -8,6 +8,13 @@ package agent
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/xilistudios/lele/pkg/agent/commands"
@@ -154,4 +161,131 @@ func TestCommandRegistry_ReexportMatchesSource(t *testing.T) {
 			t.Errorf("entry %d differs: agent=%+v source=%+v", i, viaAgent[i], viaSource[i])
 		}
 	}
+}
+
+// TestDispatcherReserved_MatchesSource is the guard the hand-maintained reserved
+// list needs: it reads the real dispatch sources with go/parser and compares
+// them against commands.DispatcherReserved(). Drift in either direction fails —
+// a new built-in that nobody reserved (its custom-command file would be dead)
+// and a reserved name that nothing dispatches anymore (it would block a free
+// name forever).
+func TestDispatcherReserved_MatchesSource(t *testing.T) {
+	dispatched := switchCasesOn(t, "command_handler.go", "handleCommand", "cmd")
+	if len(dispatched) == 0 {
+		t.Fatal("found no dispatched commands: the parser or the file moved")
+	}
+	intercepted := switchCasesOn(t, filepath.Join("..", "channels", "telegram_messages.go"), "", "cmd")
+	if len(intercepted) == 0 {
+		t.Fatal("found no intercepted commands: the parser or the file moved")
+	}
+
+	reserved := map[string]bool{}
+	for _, name := range commands.DispatcherReserved() {
+		reserved[name] = true
+	}
+
+	for _, cmd := range dispatched {
+		name := strings.TrimPrefix(cmd, "/")
+		if !reserved[name] {
+			t.Errorf("handleCommand dispatches %q but DispatcherReserved() does not reserve it", cmd)
+		}
+	}
+	for _, name := range commands.DispatcherReserved() {
+		if slices.Contains(dispatched, "/"+name) {
+			continue
+		}
+		if !slices.Contains(intercepted, name) && !slices.Contains(intercepted, "/"+name) {
+			t.Errorf("DispatcherReserved() reserves %q but neither handleCommand dispatches it nor Telegram intercepts it", name)
+		}
+	}
+}
+
+// TestDispatcherReserved_Shape pins the format the API relies on: lowercase, no
+// leading slash, no duplicates, sorted.
+func TestDispatcherReserved_Shape(t *testing.T) {
+	list := commands.DispatcherReserved()
+	if len(list) == 0 {
+		t.Fatal("DispatcherReserved() is empty")
+	}
+	seen := map[string]bool{}
+	for _, name := range list {
+		if name == "" || strings.HasPrefix(name, "/") {
+			t.Errorf("reserved name %q must be bare and non-empty", name)
+		}
+		if name != strings.ToLower(name) {
+			t.Errorf("reserved name %q must be lowercase", name)
+		}
+		if seen[name] {
+			t.Errorf("reserved name %q listed twice", name)
+		}
+		seen[name] = true
+	}
+	if !slices.IsSorted(list) {
+		t.Errorf("DispatcherReserved() must be sorted, got %v", list)
+	}
+	// The copy must be fresh: a caller mutating the result may not corrupt the
+	// registry for the next one.
+	list[0] = "tampered"
+	if got := commands.DispatcherReserved(); got[0] == "tampered" {
+		t.Error("DispatcherReserved() leaked its backing slice")
+	}
+}
+
+// switchCasesOn parses a Go source file and returns the string literals of every
+// `switch <varName>` case clause, optionally restricted to one function (empty
+// funcName = whole file). It is a source-level check on purpose: the dispatcher
+// is a switch statement with no reflective way to enumerate it at runtime.
+func switchCasesOn(t *testing.T, file, funcName, varName string) []string {
+	t.Helper()
+
+	// The test runs with the package dir as cwd, so the callers pass paths
+	// relative to pkg/agent.
+	path := file
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	var out []string
+	collect := func(n ast.Node) bool {
+		sw, ok := n.(*ast.SwitchStmt)
+		if !ok {
+			return true
+		}
+		if ident, ok := sw.Tag.(*ast.Ident); !ok || ident.Name != varName {
+			return true // a switch on something else (subcommands, modes, ...)
+		}
+		for _, clause := range sw.Body.List {
+			cs, ok := clause.(*ast.CaseClause)
+			if !ok {
+				continue
+			}
+			for _, expr := range cs.List {
+				lit, ok := expr.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				v, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					continue
+				}
+				out = append(out, v)
+			}
+		}
+		return true
+	}
+
+	if funcName == "" {
+		ast.Inspect(parsed, collect)
+		return out
+	}
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != funcName || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, collect)
+	}
+	return out
 }

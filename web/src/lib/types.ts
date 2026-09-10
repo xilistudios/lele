@@ -136,6 +136,98 @@ export type AgentFilesResponse = {
   content?: string
 }
 
+/**
+ * Slash commands of ONE agent (per-agent Commands tab, brief §6).
+ *
+ * Sources follow the harness discovery levels (`pkg/harness`): `config`
+ * (inline in config.json), `global` (<leleDir>/commands), `workspace`
+ * (<agent workspace>/commands) and `directory` (./.lele/commands). Precedence
+ * is config → global → workspace → directory, and the flattened `commands`
+ * list carries the winner of each name plus the losers tagged with
+ * `shadowed_by`.
+ */
+export type AgentCommandSource = 'config' | 'global' | 'workspace' | 'directory'
+
+/** Scope an explicit command write may target. */
+export type AgentCommandScope = 'workspace' | 'global'
+
+/** One row of GET /api/v1/agents/{agentID}/commands → `commands`. */
+export type AgentCommandInfo = {
+  name: string
+  description: string
+  source: AgentCommandSource
+  path: string
+  agent: string
+  model: string
+  allow_shell: boolean
+  /** Tri-state: null/absent = inherit the agent (harness) default. */
+  allow_absolute_files: boolean | null
+  /** Server-decided: true only for a workspace/global file this agent owns. */
+  deletable: boolean
+  /** Source of the command that wins precedence over this one; "" = winner. */
+  shadowed_by: string
+}
+
+/** One built-in gateway command (GET .../commands → `builtin`). */
+export type BuiltinCommandInfo = {
+  name: string
+  description: string
+  usage: string
+  source?: string
+}
+
+/** Agent-level harness permission defaults echoed by the API. */
+export type AgentCommandsHarnessConfig = {
+  allow_shell: boolean
+  allow_absolute_files: boolean
+}
+
+/** Payload of GET /api/v1/agents/{agentID}/commands. */
+export type AgentCommandsResponse = {
+  agent_id: string
+  workspace: string
+  commands_dir: string
+  commands_dir_exists: boolean
+  /** Agents sharing this workspace; > 1 → writes affect all of them. */
+  shared_by: number
+  harness: AgentCommandsHarnessConfig
+  commands: AgentCommandInfo[]
+  builtin: BuiltinCommandInfo[]
+}
+
+/** Payload of GET /api/v1/agents/{agentID}/commands/{name} (editor load). */
+export type AgentCommandDetail = {
+  name: string
+  /** Full markdown file: frontmatter + body, exactly as stored on disk. */
+  content: string
+  path: string
+  source: AgentCommandSource
+  deletable: boolean
+}
+
+/** Body of POST /api/v1/agents/{agentID}/commands (201 → {ok, command}). */
+export type AgentCommandWriteRequest = {
+  name: string
+  content: string
+  scope: AgentCommandScope
+}
+
+/** Body of PUT /api/v1/agents/{agentID}/commands/{name} (→ {ok, command}). */
+export type AgentCommandUpdateRequest = {
+  content: string
+}
+
+/** Response of the per-agent command mutations (create / update). */
+export type AgentCommandMutationResponse = {
+  ok: boolean
+  command?: AgentCommandInfo
+}
+
+/** Response of DELETE /api/v1/agents/{agentID}/commands/{name}. */
+export type AgentCommandDeleteResponse = {
+  ok: boolean
+}
+
 export type SecretMode = 'literal' | 'env' | 'empty'
 
 export type SecretValue = {

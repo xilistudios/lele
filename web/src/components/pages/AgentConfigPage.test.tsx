@@ -5,7 +5,11 @@ import { fireEvent, render } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import '../../test/i18n'
 import { SettingsProvider } from '../../contexts/SettingsContext'
-import type { AgentCatalogResponse, EditableAgentConfig } from '../../lib/types'
+import type {
+  AgentCatalogResponse,
+  AgentCommandsResponse,
+  EditableAgentConfig,
+} from '../../lib/types'
 import type { ApiClient } from '../../services/http/client'
 import { type Write, autoCleanup, makeState, settle, tr } from '../../test/agentsHarness'
 import { AgentConfigPage } from './AgentConfigPage'
@@ -39,10 +43,35 @@ const CATALOG: AgentCatalogResponse = {
   workspace: '/home/u/.lele/workspace-coder',
 }
 
+const COMMANDS: AgentCommandsResponse = {
+  agent_id: 'coder',
+  workspace: '/home/u/.lele/workspace-coder',
+  commands_dir: '/home/u/.lele/workspace-coder/commands',
+  commands_dir_exists: true,
+  shared_by: 1,
+  harness: { allow_shell: false, allow_absolute_files: false },
+  commands: [
+    {
+      name: 'review',
+      description: 'Review the current diff',
+      source: 'workspace',
+      path: '/home/u/.lele/workspace-coder/commands/review.md',
+      agent: '',
+      model: '',
+      allow_shell: false,
+      allow_absolute_files: null,
+      deletable: true,
+      shadowed_by: '',
+    },
+  ],
+  builtin: [],
+}
+
 const api = {
   models: async () => ({ models: ['gpt-4o'], model_groups: [] }),
   getAgentCatalog: async () => CATALOG,
   agentFiles: async () => ({ files: [] }),
+  agentCommands: async () => COMMANDS,
 } as unknown as ApiClient
 
 function setup(
@@ -177,6 +206,14 @@ describe('AgentConfigPage — section dispatch (§4.1)', () => {
     const u = setup('/agents/coder/subagents')
     await settle(120)
     expect(u.container.textContent).toContain(tr('settings.agentPage.subagentsEnable'))
+  })
+
+  test('commands renders the commands section, not the general fallback (T-F8)', async () => {
+    const u = setup('/agents/coder/commands')
+    await settle(200)
+    expect(u.byTestId('command-row-review')).toBeTruthy()
+    // It did NOT fall back to general: the general-only field is absent.
+    expect(u.byTestId('agent-id-field')).toBeNull()
   })
 
   test('files renders the workspace summary', async () => {

@@ -11,7 +11,15 @@
  */
 
 /** Tabs of `/agents/:agentId/:tab` (spec §1.3, same order as the tab strip). */
-export const AGENT_TABS = ['general', 'model', 'skills', 'tools', 'subagents', 'files'] as const
+export const AGENT_TABS = [
+  'general',
+  'model',
+  'skills',
+  'commands',
+  'tools',
+  'subagents',
+  'files',
+] as const
 
 export type AgentTab = (typeof AGENT_TABS)[number]
 
@@ -29,12 +37,14 @@ export function agentPathPrefix(index: number): string {
 
 /**
  * Tab -> path suffixes that belong to it, relative to `agents.list.{index}`.
- * Table §5.3. `files` has none: that tab never writes config.
+ * Table §5.3. `files` and `commands` have none: those tabs never write
+ * config — they write files (workspace markdown), not draft fields.
  */
 export const SECTION_PATHS: Record<AgentTab, string[]> = {
   general: ['name', 'description', 'default', 'workspace'],
   model: ['model', 'temperature', 'thinking_level'],
   skills: ['skills'],
+  commands: [],
   tools: ['tools'],
   subagents: ['subagents'],
   files: [],

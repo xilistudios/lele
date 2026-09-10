@@ -15,6 +15,7 @@ import {
   SettingsIcon,
   SkillsIcon,
   SubagentsIcon,
+  TerminalIcon,
 } from '../../atoms/Icons'
 
 /**
@@ -45,6 +46,7 @@ const TAB_META: Record<AgentTab, { labelKey: string; Icon: typeof SettingsIcon }
   general: { labelKey: 'settings.agentPage.tab.general', Icon: SettingsIcon },
   model: { labelKey: 'settings.agentPage.tab.model', Icon: ServerIcon },
   skills: { labelKey: 'settings.agentPage.tab.skills', Icon: SkillsIcon },
+  commands: { labelKey: 'settings.agentPage.tab.commands', Icon: TerminalIcon },
   tools: { labelKey: 'settings.agentPage.tab.tools', Icon: CodeIcon },
   subagents: { labelKey: 'settings.agentPage.tab.subagents', Icon: SubagentsIcon },
   files: { labelKey: 'settings.agentPage.tab.files', Icon: FolderIcon },
@@ -55,6 +57,7 @@ export const AGENT_TAB_ORDER: AgentTab[] = [
   'general',
   'model',
   'skills',
+  'commands',
   'tools',
   'subagents',
   'files',

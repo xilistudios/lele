@@ -24,7 +24,6 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/constants"
 	"github.com/xilistudios/lele/pkg/group"
-	"github.com/xilistudios/lele/pkg/harness"
 	"github.com/xilistudios/lele/pkg/keyring"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
@@ -124,13 +123,14 @@ type AgentLoop struct {
 	goalLoopMu       sync.Mutex
 	goalLoopSessions map[string]struct{}
 
-	// harnessMgr lazily holds the custom slash-command manager built from the
-	// current config. harnessCfgFP fingerprints the config inputs the manager
-	// depends on; when it changes the manager is rebuilt (config hot-reload).
-	// harnessMu guards both.
-	harnessMgr   *harness.Manager
-	harnessCfgFP string
-	harnessMu    sync.Mutex
+	// harnessMgrs caches the custom slash-command managers built from the
+	// current config, keyed by the absolute cleaned workspace each manager was
+	// built for (""-workspace requests map to the defaults workspace key).
+	// entry.fp fingerprints the config inputs that manager depends on; when it
+	// changes, that entry is rebuilt (config hot-reload). harnessMu guards the
+	// map and its entries.
+	harnessMgrs map[string]*harnessEntry
+	harnessMu   sync.Mutex
 
 	// inboundDurability completes the durable spool row for every turn this
 	// loop runs. nil means durability is off: no dedupe check, no Finish, and
@@ -1273,6 +1273,29 @@ func (al *AgentLoop) getSessionAgent(sessionKey string) string {
 		"default_id":  defaultID,
 	})
 	return defaultID
+}
+
+// sessionAgentOverride reports the agent explicitly pinned to a session and
+// whether such a pin exists at all. Pins come from /agent, from
+// startFreshConversation (which mirrors the previous session's pin onto the
+// rotated key) and from subagent spawns.
+//
+// It exists because getSessionAgent cannot answer "is this session pinned?":
+// it falls back to the default agent ID, so its result is never empty and a
+// caller that treats "non-empty" as "pinned" silently overrides routing.
+func (al *AgentLoop) sessionAgentOverride(sessionKey string) (string, bool) {
+	sessionKey = al.ResolveSessionKey(sessionKey)
+	if v, ok := al.sessionAgents.Load(sessionKey); ok {
+		if agentID, isString := v.(string); isString && agentID != "" {
+			return agentID, true
+		}
+	}
+	if v, ok := al.subagentSessionAgent.Load(sessionKey); ok {
+		if agentID, isString := v.(string); isString && agentID != "" {
+			return agentID, true
+		}
+	}
+	return "", false
 }
 
 // getDefaultAgentID returns the default agent ID (internal use).
