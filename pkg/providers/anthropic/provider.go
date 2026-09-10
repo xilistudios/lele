@@ -262,10 +262,12 @@ func parseResponse(resp *anthropic.Message) *LLMResponse {
 					Arguments: make(map[string]interface{}),
 				})
 			} else {
+				arguments, truncated := common.DecodeToolCallArgumentsTruncated(tu.Input, tu.Name)
 				toolCalls = append(toolCalls, ToolCall{
-					ID:        tu.ID,
-					Name:      tu.Name,
-					Arguments: common.DecodeToolCallArguments(tu.Input, tu.Name),
+					ID:                 tu.ID,
+					Name:               tu.Name,
+					Arguments:          arguments,
+					ArgumentsTruncated: truncated,
 				})
 			}
 		}

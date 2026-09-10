@@ -342,10 +342,12 @@ func parseCodexResponse(resp *responses.Response) *LLMResponse {
 				}
 			}
 		case "function_call":
+			arguments, truncated := common.DecodeToolCallArgumentsTruncated(json.RawMessage(item.Arguments), item.Name)
 			toolCalls = append(toolCalls, ToolCall{
-				ID:        item.CallID,
-				Name:      item.Name,
-				Arguments: common.DecodeToolCallArguments(json.RawMessage(item.Arguments), item.Name),
+				ID:                 item.CallID,
+				Name:               item.Name,
+				Arguments:          arguments,
+				ArgumentsTruncated: truncated,
 			})
 		}
 	}
