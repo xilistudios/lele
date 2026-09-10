@@ -289,5 +289,11 @@
   "tui.languages.downloadFailed": "Không tải được gói ngôn ngữ",
   "tui.languages.catalogFailed": "Không tải được danh mục ngôn ngữ",
   "tui.languages.allInstalled": "Tất cả ngôn ngữ khả dụng đã được cài sẵn",
-  "tui.languages.remoteHint": "Chọn ngôn ngữ để tải từ kho GitHub lele"
+  "tui.languages.remoteHint": "Chọn ngôn ngữ để tải từ kho GitHub lele",
+  "tui.queue.empty": "hàng đợi trống — không có gì để gửi",
+  "tui.queue.flushConfirm": "thao tác này hủy lượt đang chạy (bao gồm tác nhân con) — nhấn lại để gửi",
+  "tui.queue.flushHint": " · %s hủy lượt và gửi tiếp theo",
+  "tui.catalogNoMatches": "Không có kết quả trong danh mục — nhập ID mô hình tùy chỉnh",
+  "tui.catalogPickerHint": "↑/↓ di chuyển · TAB chấp nhận · ENTER chọn · ESC ẩn · gõ để lọc",
+  "tui.catalogSuggestions": "Mô hình trong danh mục"
 }

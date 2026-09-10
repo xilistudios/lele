@@ -137,7 +137,9 @@
     "failedToSend": "Échec de l'envoi",
     "retry": "Réessayer",
     "archivedFromContext": "Archivé du contexte",
-    "download": "Télécharger"
+    "download": "Télécharger",
+    "queueSendNow": "Envoyer maintenant",
+    "queueSendNowBusy": "Annuler le tour en cours (incl. sous-agents) et envoyer maintenant"
   },
   "connection": {
     "connected": "Connecté",

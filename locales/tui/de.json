@@ -289,5 +289,11 @@
   "tui.queue.removeHint": " · %s entfernt die letzte",
   "tui.queue.full": "Warteschlange voll (%d) — Nachricht nicht eingereiht",
   "tui.queue.removed": "letzte Nachricht in der Warteschlange entfernt",
-  "tui.queue.dropped": "%d Nachricht(en) in der Warteschlange verworfen"
+  "tui.queue.dropped": "%d Nachricht(en) in der Warteschlange verworfen",
+  "tui.queue.empty": "Warteschlange ist leer — nichts zu senden",
+  "tui.queue.flushConfirm": "Dies bricht den laufenden Durchgang ab (inkl. Subagenten) — erneut drücken zum Senden",
+  "tui.queue.flushHint": " · %s bricht den Durchgang ab und sendet die nächste",
+  "tui.catalogNoMatches": "Keine Katalogtreffer — geben Sie eine benutzerdefinierte Modell-ID ein",
+  "tui.catalogPickerHint": "↑/↓ navigieren · TAB übernehmen · ENTER auswählen · ESC ausblenden · Tippen zum Filtern",
+  "tui.catalogSuggestions": "Katalogmodelle"
 }

@@ -137,7 +137,9 @@
     "failedToSend": "Senden fehlgeschlagen",
     "retry": "Erneut versuchen",
     "archivedFromContext": "Aus dem Kontext archiviert",
-    "download": "Herunterladen"
+    "download": "Herunterladen",
+    "queueSendNow": "Jetzt senden",
+    "queueSendNowBusy": "Laufenden Durchgang abbrechen (inkl. Subagenten) und jetzt senden"
   },
   "connection": {
     "connected": "Verbunden",

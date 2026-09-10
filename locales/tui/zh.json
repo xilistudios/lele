@@ -289,5 +289,11 @@
   "tui.languages.downloadFailed": "语言包下载失败",
   "tui.languages.catalogFailed": "无法加载语言目录",
   "tui.languages.allInstalled": "所有可用语言均已安装",
-  "tui.languages.remoteHint": "选择要从 lele GitHub 仓库下载的语言"
+  "tui.languages.remoteHint": "选择要从 lele GitHub 仓库下载的语言",
+  "tui.queue.empty": "队列为空 — 没有可发送的内容",
+  "tui.queue.flushConfirm": "这将取消正在运行的回合（包括子代理）— 再按一次发送",
+  "tui.queue.flushHint": " · %s 取消回合并发送下一条",
+  "tui.catalogNoMatches": "目录无匹配 — 请输入自定义模型 ID",
+  "tui.catalogPickerHint": "↑/↓ 导航 · TAB 接受 · ENTER 选择 · ESC 隐藏 · 输入以筛选",
+  "tui.catalogSuggestions": "目录模型"
 }

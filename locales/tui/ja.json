@@ -289,5 +289,11 @@
   "tui.languages.downloadFailed": "言語パックのダウンロードに失敗しました",
   "tui.languages.catalogFailed": "言語カタログを読み込めませんでした",
   "tui.languages.allInstalled": "利用可能な言語はすべてインストール済みです",
-  "tui.languages.remoteHint": "lele GitHub リポジトリからダウンロードする言語を選択してください"
+  "tui.languages.remoteHint": "lele GitHub リポジトリからダウンロードする言語を選択してください",
+  "tui.queue.empty": "キューは空です — 送信するものはありません",
+  "tui.queue.flushConfirm": "実行中のターン（サブエージェント含む）をキャンセルします — もう一度押して送信",
+  "tui.queue.flushHint": " · %s でターンをキャンセルして次を送信",
+  "tui.catalogNoMatches": "カタログに一致なし — カスタムモデルIDを入力してください",
+  "tui.catalogPickerHint": "↑/↓ 移動 · TAB 受入 · ENTER 選択 · ESC 非表示 · 入力でフィルタ",
+  "tui.catalogSuggestions": "カタログモデル"
 }

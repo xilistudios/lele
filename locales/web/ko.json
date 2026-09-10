@@ -137,7 +137,9 @@
     "failedToSend": "보내지 못했습니다",
     "retry": "다시 시도",
     "archivedFromContext": "컨텍스트에서 보관됨",
-    "download": "다운로드"
+    "download": "다운로드",
+    "queueSendNow": "지금 보내기",
+    "queueSendNowBusy": "실행 중인 턴(하위 에이전트 포함)을 취소하고 지금 보내기"
   },
   "connection": {
     "connected": "연결됨",
