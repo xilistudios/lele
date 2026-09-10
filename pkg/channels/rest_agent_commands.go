@@ -628,11 +628,12 @@ func (n *NativeChannel) handleAgentCommandCreate(w http.ResponseWriter, r *http.
 		return
 	}
 	// Creating in the shared global level would silently add a command to every
-	// agent; the global Commands page owns that. Updates and deletes stay
+	// agent; there is no global-commands UI, so it is managed from the
+	// filesystem. Updates and deletes stay
 	// allowed there because the caller already sees the file.
 	if scope != string(harness.SourceWorkspace) {
 		writeError(w, http.StatusBadRequest,
-			"new commands must be created in the workspace scope; global commands are managed on the Commands page",
+			"new commands must be created in the workspace scope; the shared ~/.lele/commands level is managed from the filesystem",
 			"invalid_scope")
 		return
 	}
