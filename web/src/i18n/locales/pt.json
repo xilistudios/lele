@@ -951,7 +951,9 @@
       "builtin": "Integrado"
     },
     "installInto": "Instalar em",
+    "scopeWorkspace": "Workspace deste agente",
     "scopeWorkspaceNoPath": "a pasta de skills do agente",
+    "scopeGlobal": "Global (todos os agentes)",
     "scopeGlobalHint": "diretório compartilhado ~/.lele/skills"
   },
   "mode": {
