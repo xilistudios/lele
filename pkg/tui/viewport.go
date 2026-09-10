@@ -269,6 +269,11 @@ func (m *Model) updateViewport() {
 	overlayContent := overlaySb.String()
 	if overlayContent != "" {
 		overlayLines := strings.Split(strings.ReplaceAll(overlayContent, "\r\n", "\n"), "\n")
+		// Overlay lines are rebuilt on every viewport update (streaming, tool
+		// status, approvals), so collapse their SGR churn here too: the merge
+		// is O(bytes) once per update, while the lines are read by
+		// lineViewport.View()/paintFrame/reapplyBackground every frame.
+		mergeLines(overlayLines)
 		m.viewport.SetOverlayLines(overlayLines)
 	} else {
 		m.viewport.SetOverlayLines(nil)
@@ -471,6 +476,12 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 		// Split into lines once and cache the lines. This avoids re-splitting
 		// on every frame when the viewport needs them.
 		msgLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
+		// Collapse the redundant SGR churn glamour/chroma emit per syntax
+		// token (−82..88% bytes, −95% SGR, cell-identical output) ONCE at
+		// cache-build time so every downstream per-frame stage (viewport
+		// slice, paintFrame, reapplyBackground, Place, AppContainer) reads
+		// already-merged lines. See mergeAdjacentSGR.
+		mergeLines(msgLines)
 		m.msgRenderCacheLines[fp] = msgLines // cache lines for fast assembly
 		result = append(result, msgLines...)
 		lastRole = msg.Role

@@ -115,7 +115,10 @@ func (m *Model) getRenderedStream(width int) string {
 	// every streaming chunk.
 	for len(m.streamRenderedLines) < len(rawLines)-1 {
 		idx := len(m.streamRenderedLines)
-		renderedLine := renderSingleLine(rawLines[idx], width)
+		// mergeAdjacentSGR collapses the per-token SGR churn glamour/chroma
+		// emit (cell-identical, ~8x fewer bytes); done here because these
+		// lines are cached and re-read on every streaming frame.
+		renderedLine := mergeAdjacentSGR(renderSingleLine(rawLines[idx], width))
 		m.streamRenderedLines = append(m.streamRenderedLines, renderedLine)
 		if m.streamRenderedJoined == "" {
 			m.streamRenderedJoined = renderedLine
@@ -125,7 +128,7 @@ func (m *Model) getRenderedStream(width int) string {
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
-	renderedLastLine := renderSingleLine(lastLine, width)
+	renderedLastLine := mergeAdjacentSGR(renderSingleLine(lastLine, width))
 
 	if m.streamRenderedJoined == "" {
 		return renderedLastLine
@@ -155,7 +158,10 @@ func (m *Model) getRenderedThinking(width int) string {
 
 	for len(m.thinkingRenderedLines) < len(rawLines)-1 {
 		idx := len(m.thinkingRenderedLines)
-		renderedLine := renderSingleLine(rawLines[idx], width)
+		// mergeAdjacentSGR collapses the per-token SGR churn glamour/chroma
+		// emit (cell-identical, ~8x fewer bytes); done here because these
+		// lines are cached and re-read on every streaming frame.
+		renderedLine := mergeAdjacentSGR(renderSingleLine(rawLines[idx], width))
 		m.thinkingRenderedLines = append(m.thinkingRenderedLines, renderedLine)
 		if m.thinkingRenderedJoined == "" {
 			m.thinkingRenderedJoined = renderedLine
@@ -165,7 +171,7 @@ func (m *Model) getRenderedThinking(width int) string {
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
-	renderedLastLine := renderSingleLine(lastLine, width)
+	renderedLastLine := mergeAdjacentSGR(renderSingleLine(lastLine, width))
 
 	if m.thinkingRenderedJoined == "" {
 		return renderedLastLine
