@@ -80,6 +80,7 @@ go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
 - CLI (`lele agent`) and full Bubble Tea TUI (`lele tui`)
 - Built-in web UI + native REST/WebSocket client with PIN pairing
 - Gateway for chat channels (Telegram, Discord, Slack, WhatsApp, Feishu, Line, QQ, DingTalk, …)
+- ACP (Agent Communication Protocol) REST server — see `docs/acp.md`
 
 **Automation**
 - Scheduled jobs (`lele cron`) and `HEARTBEAT.md` heartbeat tasks
