@@ -98,24 +98,48 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	// Provider-type picker navigation (up/down within the preset list).
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
+		max := m.providerTypePickerMax
+		if max <= 0 {
+			max = len(providerPresets) + 1
+		}
 		switch msg.String() {
 		case "up", "k":
 			if m.providerTypePickerIdx > 0 {
 				m.providerTypePickerIdx--
+				if m.providerTypePickerIdx < m.modalScrollOffset {
+					m.modalScrollOffset = m.providerTypePickerIdx
+				}
 			}
 			return m, nil
 		case "down", "j":
-			max := m.providerTypePickerMax
-			if max <= 0 {
-				max = len(providerPresets) + 1
-			}
 			if m.providerTypePickerIdx < max-1 {
 				m.providerTypePickerIdx++
 			}
 			return m, nil
+		case "pgup":
+			m.providerTypePickerIdx -= 10
+			if m.providerTypePickerIdx < 0 {
+				m.providerTypePickerIdx = 0
+			}
+			m.modalScrollOffset = m.providerTypePickerIdx
+			return m, nil
+		case "pgdown":
+			m.providerTypePickerIdx += 10
+			if m.providerTypePickerIdx > max-1 {
+				m.providerTypePickerIdx = max - 1
+			}
+			return m, nil
+		case "home":
+			m.providerTypePickerIdx = 0
+			m.modalScrollOffset = 0
+			return m, nil
+		case "end":
+			m.providerTypePickerIdx = max - 1
+			return m, nil
 		case "esc":
 			// Cancel back to free-form type entry.
 			m.providerTypePicker = false
+			m.modalScrollOffset = 0
 			m.formStepIndex = 1
 			m.textInput.SetValue("")
 			m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
@@ -238,6 +262,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.textInput.Placeholder = "Provider type (e.g. openai, anthropic, openrouter)"
 					}
 					m.providerTypePicker = false
+					m.modalScrollOffset = 0
 					m.formError = ""
 					return m, nil
 				}
@@ -281,6 +306,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.formStepIndex = 1
 					m.providerTypePicker = true
 					m.providerTypePickerIdx = 0
+					m.modalScrollOffset = 0
 					// providerPresets + a trailing "custom" entry.
 					m.providerTypePickerMax = len(providerPresets) + 1
 					m.textInput.SetValue("")
@@ -1105,6 +1131,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.providerSavedInFlow = false
 			m.connectSuccess = false
 			m.providerTypePicker = false
+			m.modalScrollOffset = 0
 			// During onboarding, ESC leaves the connect flow and heads
 			// back to the provider picker (it never exits the wizard).
 			if m.onboardingActive && m.onboardingStep == obConnect {
