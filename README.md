@@ -28,13 +28,18 @@ curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | 
 
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
-
+```
+```bash
 # From source
 git clone https://github.com/xilistudios/lele.git && cd lele
 make deps && make build && make install
-
+```
+```
+# Initial setup
 lele onboard
+# CLI agent interface
 lele agent -m "What can you do?"
+# TUI
 lele tui
 ```
 
