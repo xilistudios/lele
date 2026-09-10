@@ -20,6 +20,14 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 			m.compactFeedback = msg.result
 			m.forceGotoBottom = true
 			m.reloadSessions()
+			// Compaction rewrites (or excludes) the session history, so every
+			// per-message render-cache entry keyed by a pre-compact fingerprint
+			// is unreachable. The next rebuild prunes the cache to the live
+			// window anyway (see buildRenderedHistoryLines); dropping it here
+			// is an O(1) belt-and-braces so stale entries never survive even
+			// if the rebuild path is skipped. Unconditional: a failed
+			// compaction only costs one re-render (hallazgo P5).
+			m.msgRenderCacheLines = nil
 		}
 
 	case skillsScanResultMsg:
