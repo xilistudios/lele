@@ -1,0 +1,35 @@
+{
+  "id": "cerebras",
+  "name": "Cerebras",
+  "type": "openai",
+  "api_base": "https://api.cerebras.ai/v1",
+  "models": [
+    {
+      "id": "qwen-3.8-27b",
+      "name": "Qwen3.8 27B",
+      "context_window": 65536,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "gpt-oss-120b",
+      "name": "GPT OSS 120B",
+      "context_window": 131072,
+      "max_output": 40960,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

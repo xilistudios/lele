@@ -1,0 +1,336 @@
+{
+  "id": "alibaba",
+  "name": "Alibaba",
+  "type": "openai",
+  "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+  "models": [
+    {
+      "id": "qwen3-omni-flash",
+      "name": "Qwen3-Omni Flash",
+      "context_window": 65536,
+      "max_output": 16384,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-vl-235b-a22b",
+      "name": "Qwen3-VL 235B-A22B",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-vl-30b-a3b",
+      "name": "Qwen3-VL 30B-A3B",
+      "context_window": 131072,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-vl-plus",
+      "name": "Qwen3-VL Plus",
+      "context_window": 262144,
+      "max_output": 32768,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-122b-a10b",
+      "name": "Qwen3.5 122B-A10B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-27b",
+      "name": "Qwen3.5 27B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-35b-a3b",
+      "name": "Qwen3.5 35B-A3B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-397b-a17b",
+      "name": "Qwen3.5 397B-A17B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.5-plus",
+      "name": "Qwen3.5 Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-27b",
+      "name": "Qwen3.6 27B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "name": "Qwen3.6 35B-A3B",
+      "context_window": 262144,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-flash",
+      "name": "Qwen3.6 Flash",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-plus",
+      "name": "Qwen3.6 Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.7-plus",
+      "name": "Qwen3.7 Plus",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.8-flash",
+      "name": "Qwen3.8 Flash",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.8-max",
+      "name": "Qwen3.8 Max",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-14b",
+      "name": "Qwen3 14B",
+      "context_window": 131072,
+      "max_output": 8192,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-235b-a22b",
+      "name": "Qwen3 235B-A22B",
+      "context_window": 131072,
+      "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-32b",
+      "name": "Qwen3 32B",
+      "context_window": 131072,
+      "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-8b",
+      "name": "Qwen3 8B",
+      "context_window": 131072,
+      "max_output": 8192,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-next-80b-a3b-thinking",
+      "name": "Qwen3-Next 80B-A3B (Thinking)",
+      "context_window": 131072,
+      "max_output": 32768,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.6-max-preview",
+      "name": "Qwen3.6 Max Preview",
+      "context_window": 262144,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3.7-max",
+      "name": "Qwen3.7 Max",
+      "context_window": 1000000,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-omni-flash-realtime",
+      "name": "Qwen3-Omni Flash Realtime",
+      "context_window": 65536,
+      "max_output": 16384,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen3-coder-30b-a3b-instruct",
+      "name": "Qwen3-Coder 30B-A3B Instruct",
+      "context_window": 262144,
+      "max_output": 65536,
+      "tool_call": true
+    }
+  ]
+}

@@ -1,0 +1,375 @@
+{
+  "version": 1,
+  "updated_at": "2026-09-10T21:41:15Z",
+  "source": "models.dev",
+  "providers": {
+    "alibaba": {
+      "id": "alibaba",
+      "name": "Alibaba",
+      "type": "openai",
+      "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "file": "providers/alibaba.json",
+      "model_count": 25
+    },
+    "alibaba_coding_plan": {
+      "id": "alibaba_coding_plan",
+      "name": "Alibaba Coding Plan",
+      "type": "openai",
+      "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "file": "providers/alibaba_coding_plan.json",
+      "model_count": 12
+    },
+    "anthropic": {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "type": "anthropic",
+      "api_base": "https://api.anthropic.com/v1",
+      "file": "providers/anthropic.json",
+      "model_count": 14
+    },
+    "arcee": {
+      "id": "arcee",
+      "name": "Arcee",
+      "type": "openai",
+      "api_base": "https://api.arcee.ai/api/v1",
+      "file": "providers/arcee.json",
+      "model_count": 7
+    },
+    "azure_foundry": {
+      "id": "azure_foundry",
+      "name": "Azure",
+      "type": "openai",
+      "api_base": "",
+      "file": "providers/azure_foundry.json",
+      "model_count": 20
+    },
+    "bedrock": {
+      "id": "bedrock",
+      "name": "Amazon Bedrock",
+      "type": "openai",
+      "api_base": "",
+      "file": "providers/bedrock.json",
+      "model_count": 20
+    },
+    "cerebras": {
+      "id": "cerebras",
+      "name": "Cerebras",
+      "type": "openai",
+      "api_base": "https://api.cerebras.ai/v1",
+      "file": "providers/cerebras.json",
+      "model_count": 2
+    },
+    "chutes": {
+      "id": "chutes",
+      "name": "Chutes",
+      "type": "openai",
+      "api_base": "https://llm.chutes.ai/v1",
+      "file": "providers/chutes.json",
+      "model_count": 14
+    },
+    "deepseek": {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "type": "openai",
+      "api_base": "https://api.deepseek.com/v1",
+      "file": "providers/deepseek.json",
+      "model_count": 4
+    },
+    "fireworks": {
+      "id": "fireworks",
+      "name": "Fireworks AI",
+      "type": "openai",
+      "api_base": "https://api.fireworks.ai/inference/v1",
+      "file": "providers/fireworks.json",
+      "model_count": 23
+    },
+    "gemini": {
+      "id": "gemini",
+      "name": "Google",
+      "type": "openai",
+      "api_base": "https://generativelanguage.googleapis.com/v1beta",
+      "file": "providers/gemini.json",
+      "model_count": 38
+    },
+    "github_copilot": {
+      "id": "github_copilot",
+      "name": "GitHub Copilot",
+      "type": "openai",
+      "api_base": "https://api.githubcopilot.com/v1",
+      "file": "providers/github_copilot.json",
+      "model_count": 5
+    },
+    "gmi": {
+      "id": "gmi",
+      "name": "GMI Cloud",
+      "type": "openai",
+      "api_base": "https://api.gmi-serving.com/v1",
+      "file": "providers/gmi.json",
+      "model_count": 15
+    },
+    "groq": {
+      "id": "groq",
+      "name": "Groq",
+      "type": "openai",
+      "api_base": "https://api.groq.com/openai/v1",
+      "file": "providers/groq.json",
+      "model_count": 16
+    },
+    "huggingface": {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "type": "openai",
+      "api_base": "https://router.huggingface.co/v1",
+      "file": "providers/huggingface.json",
+      "model_count": 40
+    },
+    "kimi_for_coding": {
+      "id": "kimi_for_coding",
+      "name": "Kimi For Coding",
+      "type": "openai",
+      "api_base": "https://api.kimi.com/coding/v1",
+      "file": "providers/kimi_for_coding.json",
+      "model_count": 4
+    },
+    "lmstudio": {
+      "id": "lmstudio",
+      "name": "LMStudio",
+      "type": "openai",
+      "api_base": "http://127.0.0.1:1234/v1",
+      "file": "providers/lmstudio.json",
+      "model_count": 3
+    },
+    "minimax": {
+      "id": "minimax",
+      "name": "MiniMax (minimax.io)",
+      "type": "anthropic",
+      "api_base": "https://api.minimax.io/anthropic/v1",
+      "file": "providers/minimax.json",
+      "model_count": 7
+    },
+    "minimax_cn": {
+      "id": "minimax_cn",
+      "name": "MiniMax (minimaxi.com)",
+      "type": "anthropic",
+      "api_base": "https://api.minimaxi.com/anthropic/v1",
+      "file": "providers/minimax_cn.json",
+      "model_count": 7
+    },
+    "mistral": {
+      "id": "mistral",
+      "name": "Mistral",
+      "type": "openai",
+      "api_base": "https://api.mistral.ai/v1",
+      "file": "providers/mistral.json",
+      "model_count": 25
+    },
+    "modelark": {
+      "id": "modelark",
+      "name": "ModelArk Coding Plan",
+      "type": "openai",
+      "api_base": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+      "file": "providers/modelark.json",
+      "model_count": 0
+    },
+    "moonshot": {
+      "id": "moonshot",
+      "name": "Moonshot AI (China)",
+      "type": "openai",
+      "api_base": "https://api.moonshot.cn/v1",
+      "file": "providers/moonshot.json",
+      "model_count": 4
+    },
+    "nanogpt": {
+      "id": "nanogpt",
+      "name": "NanoGPT",
+      "type": "openai",
+      "api_base": "https://nano-gpt.com/api/v1",
+      "file": "providers/nanogpt.json",
+      "model_count": 0
+    },
+    "nous": {
+      "id": "nous",
+      "name": "Nous Portal",
+      "type": "openai",
+      "api_base": "https://inference-api.nousresearch.com/v1",
+      "file": "providers/nous.json",
+      "model_count": 4
+    },
+    "novita": {
+      "id": "novita",
+      "name": "NovitaAI",
+      "type": "openai",
+      "api_base": "https://api.novita.ai/openai",
+      "file": "providers/novita.json",
+      "model_count": 40
+    },
+    "nvidia": {
+      "id": "nvidia",
+      "name": "Nvidia",
+      "type": "openai",
+      "api_base": "https://integrate.api.nvidia.com/v1",
+      "file": "providers/nvidia.json",
+      "model_count": 40
+    },
+    "ollama": {
+      "id": "ollama",
+      "name": "Ollama (local)",
+      "type": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "file": "providers/ollama.json",
+      "model_count": 8
+    },
+    "ollama_cloud": {
+      "id": "ollama_cloud",
+      "name": "Ollama Cloud",
+      "type": "openai",
+      "api_base": "https://ollama.com/v1",
+      "file": "providers/ollama_cloud.json",
+      "model_count": 22
+    },
+    "openai": {
+      "id": "openai",
+      "name": "OpenAI",
+      "type": "openai",
+      "api_base": "https://api.openai.com/v1",
+      "file": "providers/openai.json",
+      "model_count": 36
+    },
+    "opencode": {
+      "id": "opencode",
+      "name": "OpenCode Zen",
+      "type": "openai",
+      "api_base": "https://opencode.ai/zen/v1",
+      "file": "providers/opencode.json",
+      "model_count": 40
+    },
+    "opencode_go": {
+      "id": "opencode_go",
+      "name": "OpenCode Go",
+      "type": "openai",
+      "api_base": "https://opencode.ai/zen/go/v1",
+      "file": "providers/opencode_go.json",
+      "model_count": 27
+    },
+    "openrouter": {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "type": "openai",
+      "api_base": "https://openrouter.ai/api/v1",
+      "file": "providers/openrouter.json",
+      "model_count": 40
+    },
+    "perplexity": {
+      "id": "perplexity",
+      "name": "Perplexity Agent",
+      "type": "openai",
+      "api_base": "https://api.perplexity.ai/v1",
+      "file": "providers/perplexity.json",
+      "model_count": 22
+    },
+    "qwen_portal": {
+      "id": "qwen_portal",
+      "name": "Qwen Portal",
+      "type": "openai",
+      "api_base": "https://portal.qwen.ai/v1",
+      "file": "providers/qwen_portal.json",
+      "model_count": 0
+    },
+    "shengsuanyun": {
+      "id": "shengsuanyun",
+      "name": "ShengsuanYun",
+      "type": "openai",
+      "api_base": "https://router.shengsuanyun.com/api/v1",
+      "file": "providers/shengsuanyun.json",
+      "model_count": 0
+    },
+    "siliconflow": {
+      "id": "siliconflow",
+      "name": "SiliconFlow",
+      "type": "openai",
+      "api_base": "https://api.siliconflow.com/v1",
+      "file": "providers/siliconflow.json",
+      "model_count": 30
+    },
+    "stepfun": {
+      "id": "stepfun",
+      "name": "StepFun Step Plan (Global)",
+      "type": "openai",
+      "api_base": "https://api.stepfun.ai/step_plan/v1",
+      "file": "providers/stepfun.json",
+      "model_count": 3
+    },
+    "tencent_tokenhub": {
+      "id": "tencent_tokenhub",
+      "name": "Tencent TokenHub",
+      "type": "openai",
+      "api_base": "https://tokenhub.tencentmaas.com/v1",
+      "file": "providers/tencent_tokenhub.json",
+      "model_count": 3
+    },
+    "together": {
+      "id": "together",
+      "name": "Together AI",
+      "type": "openai",
+      "api_base": "https://api.together.xyz/v1",
+      "file": "providers/together.json",
+      "model_count": 26
+    },
+    "vercel": {
+      "id": "vercel",
+      "name": "Vercel AI Gateway",
+      "type": "openai",
+      "api_base": "https://ai-gateway.vercel.sh/v1",
+      "file": "providers/vercel.json",
+      "model_count": 30
+    },
+    "vllm": {
+      "id": "vllm",
+      "name": "vLLM (local)",
+      "type": "openai",
+      "api_base": "http://localhost:8000/v1",
+      "file": "providers/vllm.json",
+      "model_count": 0
+    },
+    "xai": {
+      "id": "xai",
+      "name": "xAI",
+      "type": "openai",
+      "api_base": "https://api.x.ai/v1",
+      "file": "providers/xai.json",
+      "model_count": 12
+    },
+    "xiaomi": {
+      "id": "xiaomi",
+      "name": "Xiaomi",
+      "type": "openai",
+      "api_base": "https://api.xiaomimimo.com/v1",
+      "file": "providers/xiaomi.json",
+      "model_count": 3
+    },
+    "zai": {
+      "id": "zai",
+      "name": "Z.AI",
+      "type": "openai",
+      "api_base": "https://api.z.ai/api/paas/v4",
+      "file": "providers/zai.json",
+      "model_count": 16
+    },
+    "zai_coding_plan": {
+      "id": "zai_coding_plan",
+      "name": "Z.AI Coding Plan",
+      "type": "openai",
+      "api_base": "https://api.z.ai/api/coding/paas/v4",
+      "file": "providers/zai_coding_plan.json",
+      "model_count": 7
+    },
+    "zhipu": {
+      "id": "zhipu",
+      "name": "Zhipu AI",
+      "type": "openai",
+      "api_base": "https://open.bigmodel.cn/api/paas/v4",
+      "file": "providers/zhipu.json",
+      "model_count": 15
+    }
+  }
+}

@@ -1,29 +1,22 @@
 package catalog
 
 import (
-	"embed"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 )
 
-//go:embed models.json
-var embeddedModels embed.FS
-
 // DefaultAPIBaseByType returns the default OpenAI-compatible base URL for a
 // known provider type. Empty string means the type has no built-in default.
 //
-// This is the single source of truth used by the factory, REST API, TUI
-// presets, and onboarding. Keep aliases in sync with providers.NormalizeProvider.
+// This table is intentionally hardcoded (not embedded catalog models) so
+// factory/onboard work offline before any catalog download. Disk index values
+// are preferred when present.
 func DefaultAPIBaseByType(providerType string) string {
 	t := normalizeType(providerType)
-	if p, ok := Providers()[t]; ok && p.APIBase != "" {
-		return p.APIBase
+	if base, ok := indexAPIBase(t); ok && base != "" {
+		return base
 	}
-	// Fallback table for types that may not have catalog models.
 	switch t {
 	case "openai", "gpt":
 		return "https://api.openai.com/v1"
@@ -41,8 +34,10 @@ func DefaultAPIBaseByType(providerType string) string {
 		return "https://open.bigmodel.cn/api/paas/v4"
 	case "zai", "zai_coding_plan", "z.ai":
 		return "https://api.z.ai/api/paas/v4"
-	case "moonshot", "kimi", "kimi-coding", "kimi_for_coding":
+	case "moonshot", "kimi", "kimi-coding":
 		return "https://api.moonshot.cn/v1"
+	case "kimi_for_coding":
+		return "https://api.kimi.com/coding/v1"
 	case "nvidia", "nim":
 		return "https://integrate.api.nvidia.com/v1"
 	case "ollama":
@@ -114,50 +109,83 @@ func DefaultAPIBaseByType(providerType string) string {
 }
 
 // KnownProviderTypes returns catalog provider IDs sorted for UI pickers.
+// Prefers the disk index; falls back to hardcoded known IDs.
 func KnownProviderTypes() []string {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make([]string, 0, len(snapshot.Providers))
-	for id := range snapshot.Providers {
-		out = append(out, id)
+	if idx := loadIndex(); idx != nil {
+		out := make([]string, 0, len(idx.Providers))
+		for id := range idx.Providers {
+			out = append(out, id)
+		}
+		sort.Strings(out)
+		return out
 	}
+	out := make([]string, 0, len(hardcodedProviderIDs))
+	out = append(out, hardcodedProviderIDs...)
 	sort.Strings(out)
 	return out
 }
 
-// Provider returns a catalog provider by ID/alias, or false.
+// ProviderByID returns a catalog provider by ID/alias.
+// Models are loaded lazily from the per-provider cache file.
 func ProviderByID(id string) (Provider, bool) {
 	key := normalizeType(id)
-	mu.RLock()
-	defer mu.RUnlock()
-	p, ok := snapshot.Providers[key]
-	return p, ok
+	p, ok := providerMeta(key)
+	if !ok {
+		return Provider{}, false
+	}
+	p.Models = ModelsForProvider(key)
+	return p, true
 }
 
-// Providers returns a copy of the provider map keyed by normalized ID.
+// Providers returns provider metadata (models omitted) keyed by normalized ID.
 func Providers() map[string]Provider {
-	mu.RLock()
-	defer mu.RUnlock()
-	out := make(map[string]Provider, len(snapshot.Providers))
-	for k, v := range snapshot.Providers {
-		out[k] = v
+	if idx := loadIndex(); idx != nil {
+		out := make(map[string]Provider, len(idx.Providers))
+		for k, meta := range idx.Providers {
+			out[k] = Provider{
+				ID:      meta.ID,
+				Name:    meta.Name,
+				Type:    meta.Type,
+				APIBase: meta.APIBase,
+			}
+		}
+		return out
+	}
+	out := make(map[string]Provider, len(hardcodedProviderIDs))
+	for _, id := range hardcodedProviderIDs {
+		if p, ok := providerMeta(id); ok {
+			out[id] = p
+		}
 	}
 	return out
 }
 
 // ModelsForProvider returns catalog models for a provider ID/alias.
-// Prefers the live overlay (prefetch cache) when present.
+// Loads only that provider's file from disk cache (or in-memory overlay).
 func ModelsForProvider(provider string) []Model {
 	key := normalizeType(provider)
+
 	mu.RLock()
-	defer mu.RUnlock()
 	if p, ok := liveProviders[key]; ok && len(p.Models) > 0 {
+		mu.RUnlock()
 		return p.Models
 	}
-	if p, ok := snapshot.Providers[key]; ok {
-		return p.Models
+	mu.RUnlock()
+
+	p := loadProviderFromDisk(key)
+	if p == nil {
+		// Kick a background download for this provider if nothing is cached.
+		if !offlineMode() {
+			EnsureProviderAsync(key)
+		}
+		return nil
 	}
-	return nil
+	return p.Models
+}
+
+func offlineMode() bool {
+	return envOr("LELE_CATALOG_OFFLINE", "") == "1" ||
+		envOr("LELE_CATALOG_OFFLINE", "") == "true"
 }
 
 // FindModel looks up a model by provider + model ID (case-insensitive).
@@ -167,7 +195,6 @@ func FindModel(provider, modelID string) (Model, bool) {
 		if strings.EqualFold(m.ID, modelID) || strings.EqualFold(m.Name, modelID) {
 			return m, true
 		}
-		// suffix / fuzzy match for names like "openai/gpt-4o" vs "gpt-4o"
 		if want != "" && (strings.HasSuffix(strings.ToLower(m.ID), "/"+want) ||
 			strings.HasSuffix(want, "/"+strings.ToLower(m.ID))) {
 			return m, true
@@ -193,8 +220,7 @@ func SearchModels(provider, query string) []Model {
 	return out
 }
 
-// ToProviderModelConfig maps a catalog model onto config.ProviderModelConfig fields
-// without importing pkg/config (avoids an import cycle). Callers wire the result.
+// ModelDefaults are prefill values when adding a model to config.
 type ModelDefaults struct {
 	ContextWindow  int
 	MaxTokens      int
@@ -239,8 +265,8 @@ func normalizeType(t string) string {
 		return "zhipu"
 	case "google", "google-gemini":
 		return "gemini"
-	case "kimi", "kimi-coding", "moonshot-ai":
-		return "moonshot"
+	case "kimi", "kimi-coding", "moonshot-ai", "kimi-for-coding":
+		return "kimi_for_coding"
 	case "nim", "nvidia-nim":
 		return "nvidia"
 	case "copilot", "github", "github-copilot":
@@ -283,58 +309,67 @@ func normalizeType(t string) string {
 		return "azure_foundry"
 	case "aws", "aws-bedrock", "amazon", "amazon-bedrock":
 		return "bedrock"
+	case "kimi-code":
+		return "kimi_for_coding"
 	}
 	return t
 }
 
+// hardcodedProviderIDs is the offline-known provider set (no models).
+var hardcodedProviderIDs = []string{
+	"alibaba", "alibaba_coding_plan", "anthropic", "arcee", "azure_foundry",
+	"bedrock", "cerebras", "chutes", "deepseek", "fireworks", "gemini", "gmi",
+	"github_copilot", "groq", "huggingface", "kimi_for_coding", "lmstudio",
+	"minimax", "minimax_cn", "mistral", "modelark", "moonshot", "nanogpt",
+	"novita", "nous", "nvidia", "ollama", "ollama_cloud", "opencode",
+	"opencode_go", "openai", "openrouter", "perplexity", "qwen_portal",
+	"shengsuanyun", "siliconflow", "stepfun", "tencent_tokenhub", "together",
+	"vercel", "vllm", "xiaomi", "xai", "zai", "zai_coding_plan", "zhipu",
+}
+
+func providerMeta(key string) (Provider, bool) {
+	if idx := loadIndex(); idx != nil {
+		if meta, ok := idx.Providers[key]; ok {
+			return Provider{
+				ID:      meta.ID,
+				Name:    meta.Name,
+				Type:    meta.Type,
+				APIBase: meta.APIBase,
+			}, true
+		}
+	}
+	for _, id := range hardcodedProviderIDs {
+		if id == key {
+			return Provider{
+				ID:      key,
+				Name:    key,
+				Type:    "openai",
+				APIBase: DefaultAPIBaseByType(key),
+			}, true
+		}
+	}
+	return Provider{}, false
+}
+
+func indexAPIBase(key string) (string, bool) {
+	idx := loadIndex()
+	if idx == nil {
+		return "", false
+	}
+	meta, ok := idx.Providers[key]
+	if !ok {
+		return "", false
+	}
+	return meta.APIBase, true
+}
+
 var (
 	mu            sync.RWMutex
-	snapshot      Snapshot
 	liveProviders map[string]Provider
 )
 
 func init() {
-	snapshot = Snapshot{Providers: map[string]Provider{}}
 	liveProviders = map[string]Provider{}
-	_ = loadEmbedded()
-}
-
-func loadEmbedded() error {
-	data, err := embeddedModels.ReadFile("models.json")
-	if err != nil {
-		return err
-	}
-	var s Snapshot
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-	if s.Providers == nil {
-		s.Providers = map[string]Provider{}
-	}
-	// Normalize keys.
-	norm := make(map[string]Provider, len(s.Providers))
-	for k, p := range s.Providers {
-		id := normalizeType(k)
-		p.ID = id
-		norm[id] = p
-	}
-	s.Providers = norm
-	mu.Lock()
-	snapshot = s
-	mu.Unlock()
-	return nil
-}
-
-// CacheDir returns the lele catalog cache directory (~/.lele/cache).
-func CacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return filepath.Join(os.TempDir(), "lele-cache")
-	}
-	return filepath.Join(home, ".lele", "cache")
-}
-
-// CachePath returns the models.dev prefetch cache file path.
-func CachePath() string {
-	return filepath.Join(CacheDir(), "models_dev.json")
+	// Best-effort: load index from disk if present. No network.
+	_ = LoadIndexFromCache()
 }

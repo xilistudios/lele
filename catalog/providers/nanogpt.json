@@ -1,0 +1,7 @@
+{
+  "id": "nanogpt",
+  "name": "NanoGPT",
+  "type": "openai",
+  "api_base": "https://nano-gpt.com/api/v1",
+  "models": []
+}

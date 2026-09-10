@@ -25,11 +25,3 @@ type Provider struct {
 	APIBase string  `json:"api_base,omitempty"`
 	Models  []Model `json:"models,omitempty"`
 }
-
-// Snapshot is the on-disk / embedded catalog document.
-type Snapshot struct {
-	Version   int                 `json:"version"`
-	UpdatedAt string              `json:"updated_at,omitempty"`
-	Source    string              `json:"source,omitempty"`
-	Providers map[string]Provider `json:"providers"`
-}

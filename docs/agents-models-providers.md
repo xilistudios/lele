@@ -255,7 +255,12 @@ The runtime also supports additional named provider entries beyond the built-ins
 
 ### Model catalog and prefetch
 
-`pkg/catalog` embeds a curated snapshot of models per provider with `context_window`, `max_output`, `vision`, and `thinking_levels`. On gateway start the catalog loads any disk cache (`~/.lele/cache/models_dev.json`) and asynchronously prefetches [models.dev](https://models.dev).
+`pkg/catalog` downloads a curated catalog from this repository's `catalog/` directory (not embedded in the binary):
+
+- `catalog/index.json` — provider manifest (id, name, api_base, file, model_count)
+- `catalog/providers/<id>.json` — per-provider models with `context_window`, `max_output`, `vision`, and `thinking_levels`
+
+On gateway start (and on demand) lele loads `~/.lele/cache/catalog/` and, if missing or stale, downloads the files in the background from GitHub raw (`LELE_CATALOG_BASE_URL` overrides the base). Only the requested provider file is read when listing models for one provider.
 
 HTTP API:
 
@@ -263,6 +268,13 @@ HTTP API:
 - `GET /api/v1/catalog/models?provider=<id>&q=<query>`
 - `POST /api/v1/catalog/prefetch`
 - `GET /api/v1/providers/{name}/models` — live `/v1/models` when credentials exist, enriched with catalog metadata, with offline catalog fallback
+
+CLI:
+
+- `lele models refresh` — download/update the catalog cache from GitHub
+- `lele models providers` / `lele models list [provider]` — inspect the cache
+
+The catalog files are regenerated from [models.dev](https://models.dev) by `scripts/update_model_catalog.py`. A scheduled GitHub Actions workflow (`.github/workflows/update-model-catalog.yml`) runs weekly, and opens a PR when the catalog changes.
 
 When adding a model to `providers.*.models` in the WebUI settings or TUI `/add-model`, suggestions come from this catalog and prefill context window, max tokens, vision, and reasoning defaults.
 

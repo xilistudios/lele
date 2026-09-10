@@ -270,20 +270,25 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 	return nil
 }
 
-// catalogPrefetchOnce guards process-wide models.dev prefetch so a channel
+// catalogPrefetchOnce guards process-wide catalog warm-up so a channel
 // that is started twice (or recreated) does not double-fetch.
 var catalogPrefetchOnce sync.Once
 
-// startCatalogPrefetch warms the models.dev catalog in the background.
+// startCatalogPrefetch warms the GitHub-hosted model catalog in the background.
 // Disk cache is applied first so an offline start still has the last snapshot.
-// Fully async so Start does not block on disk or network I/O.
+// If no cache exists, a background download starts. Fully async so Start does
+// not block on disk or network I/O.
 func startCatalogPrefetch() {
 	catalogPrefetchOnce.Do(func() {
+		catalog.Ensure()
 		go func() {
 			_ = catalog.LoadDiskCache("")
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			_ = catalog.Prefetch(ctx, catalog.PrefetchOptions{})
+			// Refresh when the index is missing or stale (24h).
+			if !catalog.HasCachedIndex() || !catalog.IsPrefetchFresh(0) {
+				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+				defer cancel()
+				_ = catalog.Refresh(ctx, catalog.Options{})
+			}
 		}()
 	})
 }

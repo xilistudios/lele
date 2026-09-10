@@ -19,6 +19,9 @@ import (
 func newCatalogTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	catalog.ResetLive()
+	seedCatalogProviders(t)
 	cfg := &config.Config{
 		Agents: config.AgentsConfig{
 			Defaults: config.AgentDefaults{
@@ -48,6 +51,33 @@ func newCatalogTestModel(t *testing.T) *Model {
 	ti.Focus()
 	ta := textarea.New()
 	return &Model{cfg: cfg, textInput: ti, chatInput: ta, width: 100, height: 40}
+}
+
+// seedCatalogProviders plants minimal catalog models on disk so picker tests
+// do not depend on an embedded catalog or network download.
+func seedCatalogProviders(t *testing.T) {
+	t.Helper()
+	mustSeed := func(p catalog.Provider) {
+		if err := catalog.SeedProvider(p); err != nil {
+			t.Fatalf("seed %s: %v", p.ID, err)
+		}
+	}
+	mustSeed(catalog.Provider{
+		ID: "openai", Name: "OpenAI", Type: "openai",
+		APIBase: "https://api.openai.com/v1",
+		Models: []catalog.Model{
+			{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128000, MaxOutput: 16384, Vision: true},
+			{ID: "gpt-4o-mini", Name: "GPT-4o mini", ContextWindow: 128000, MaxOutput: 16384, Vision: true},
+			{ID: "o3", Name: "o3", ContextWindow: 200000, MaxOutput: 100000, Reasoning: true, ThinkingLevels: []string{"low", "medium", "high"}},
+		},
+	})
+	mustSeed(catalog.Provider{
+		ID: "anthropic", Name: "Anthropic", Type: "anthropic",
+		APIBase: "https://api.anthropic.com/v1",
+		Models: []catalog.Model{
+			{ID: "claude-sonnet-4", Name: "Claude Sonnet 4", ContextWindow: 200000, Vision: true, ThinkingLevels: []string{"low", "medium", "high"}},
+		},
+	})
 }
 
 // openAddModelOnModelName opens /add-model against "my-openai" and advances

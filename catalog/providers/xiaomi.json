@@ -1,0 +1,48 @@
+{
+  "id": "xiaomi",
+  "name": "Xiaomi",
+  "type": "openai",
+  "api_base": "https://api.xiaomimimo.com/v1",
+  "models": [
+    {
+      "id": "mimo-v2.5",
+      "name": "MiMo-V2.5",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mimo-v2.5-pro",
+      "name": "MiMo-V2.5-Pro",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mimo-v2.5-pro-ultraspeed",
+      "name": "MiMo-V2.5-Pro-UltraSpeed",
+      "context_window": 1048576,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    }
+  ]
+}

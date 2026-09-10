@@ -15,9 +15,28 @@ import (
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
+// seedCatalogForTest plants a minimal openai catalog file so offline fallback
+// and autocomplete tests do not require network or an embedded catalog.
+func seedCatalogForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	catalog.ResetLive()
+	if err := catalog.SeedProvider(catalog.Provider{
+		ID: "openai", Name: "OpenAI", Type: "openai",
+		APIBase: "https://api.openai.com/v1",
+		Models: []catalog.Model{
+			{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128000, MaxOutput: 16384, Vision: true},
+			{ID: "gpt-4.1", Name: "GPT-4.1", ContextWindow: 1000000, MaxOutput: 32768, Vision: true},
+		},
+	}); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+}
+
 // newCatalogTestServer builds a NativeChannel test server with custom named providers.
 func newCatalogTestServer(t *testing.T, named map[string]config.NamedProviderConfig) *nativeTestServer {
 	t.Helper()
+	seedCatalogForTest(t)
 
 	cfg := config.DefaultConfig()
 	cfg.Channels.Native.Enabled = true
@@ -90,6 +109,7 @@ func catalogAuthedGet(t *testing.T, ts *nativeTestServer, path string) (*http.Re
 }
 
 func TestCatalogProvidersEndpoint(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/providers")
@@ -124,6 +144,7 @@ func TestCatalogProvidersEndpoint(t *testing.T) {
 }
 
 func TestCatalogModelsByProvider(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/models?provider=openai")
@@ -156,6 +177,7 @@ func TestCatalogModelsByProvider(t *testing.T) {
 }
 
 func TestCatalogModelsSearch(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	resp, dec := catalogAuthedGet(t, ts, "/api/v1/catalog/models?provider=openai&q=gpt")
@@ -182,6 +204,7 @@ func TestCatalogModelsSearch(t *testing.T) {
 }
 
 func TestCatalogModelsMissingProviderParam(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	resp, _ := catalogAuthedGet(t, ts, "/api/v1/catalog/models")
@@ -191,6 +214,7 @@ func TestCatalogModelsMissingProviderParam(t *testing.T) {
 }
 
 func TestCatalogModelsUnknownProvider(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	resp, _ := catalogAuthedGet(t, ts, "/api/v1/catalog/models?provider=not-a-real-provider")
@@ -200,6 +224,7 @@ func TestCatalogModelsUnknownProvider(t *testing.T) {
 }
 
 func TestCatalogPrefetchEndpointMocked(t *testing.T) {
+	seedCatalogForTest(t)
 	ts := newNativeTestServer(t)
 
 	orig := catalogPrefetchFn

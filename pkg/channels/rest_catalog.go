@@ -110,10 +110,10 @@ func (n *NativeChannel) handleCatalogModels(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleCatalogPrefetch triggers a models.dev refresh.
+// handleCatalogPrefetch triggers a GitHub catalog refresh.
 // POST /api/v1/catalog/prefetch
 func (n *NativeChannel) handleCatalogPrefetch(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	if err := catalogPrefetchFn(ctx, catalog.PrefetchOptions{}); err != nil {
@@ -127,7 +127,7 @@ func (n *NativeChannel) handleCatalogPrefetch(w http.ResponseWriter, r *http.Req
 	}
 
 	providerCount, modelCount := catalogModelStats()
-	fetchedAt, _ := catalog.LastPrefetch()
+	fetchedAt, _ := catalog.LastDownload()
 	fetched := ""
 	if !fetchedAt.IsZero() {
 		fetched = fetchedAt.UTC().Format(time.RFC3339)
