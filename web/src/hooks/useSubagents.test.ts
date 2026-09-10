@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { type ReactNode, createElement } from 'react'
 import { AuthProvider } from '../contexts/AuthContext'
 import type { SubagentTaskInfo } from '../lib/types'
-import { useSubagents } from './useSubagents'
+import { notifySubagentsChanged, useSubagents } from './useSubagents'
 
 const originalFetch = globalThis.fetch
 
@@ -158,5 +158,67 @@ describe('useSubagents', () => {
       await new Promise((r) => setTimeout(r, 200))
     })
     expect(fetchMock.mock.calls.length).toBe(callsAtComplete)
+  })
+
+  test('refetches immediately when notifySubagentsChanged fires (spawn without refresh)', async () => {
+    let list: SubagentTaskInfo[] = []
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.includes('/api/v1/chat/sessions/session-1/subagents')) {
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
+      }
+      return new Response(JSON.stringify(mockSubagentsResponse(list)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const { result } = renderHook(() => useSubagents('session-1', 60_000), { wrapper })
+
+    await waitFor(() => {
+      expect(result.current.subagents.length).toBe(0)
+    })
+    const callsAfterMount = fetchMock.mock.calls.length
+
+    // Simulate a spawn landing on the backend, then the WS event notifying us.
+    list = [subagent({ status: 'running' })]
+    await act(async () => {
+      notifySubagentsChanged()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => {
+      expect(result.current.subagents.length).toBe(1)
+      expect(result.current.subagents[0].status).toBe('running')
+    })
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterMount)
+  })
+
+  test('polls while the parent turn is active even with an empty list', async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (!url.includes('/api/v1/chat/sessions/session-1/subagents')) {
+        return new Response(JSON.stringify({ error: 'unexpected' }), { status: 404 })
+      }
+      return new Response(JSON.stringify(mockSubagentsResponse([])), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const { result } = renderHook(() => useSubagents('session-1', 50, true), { wrapper })
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    const callsAfterMount = fetchMock.mock.calls.length
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    // Empty list + active turn: keep polling so a mid-turn spawn is picked up.
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterMount)
   })
 })

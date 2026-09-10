@@ -1,9 +1,3 @@
-/**
- * Tool execution event handlers.
- *
- * Handles tool lifecycle events: execution start, result delivery,
- * and subagent result integration into the streaming message list.
- */
 import {
   createDeterministicToolMessageId,
   createToolMessage,
@@ -12,6 +6,7 @@ import {
 } from '../../lib/chatMessageBuilder'
 import type { ToolStatus } from '../../lib/types'
 import { computeToolInsertIndex } from '../messageInsertion'
+import { notifySubagentsChanged } from '../useSubagents'
 import {
   effectiveSessionKey,
   findToolMessageIndex,
@@ -32,6 +27,12 @@ export function handleToolExecuting(ctx: MessageEventContext, data: Record<strin
   const sessionKey = effectiveSessionKey(ctx, eventSessionKey)
 
   ctx.setToolStatus(data as unknown as ToolStatus)
+
+  // A spawn is starting: wake the subagents panel so the new task appears
+  // without a chat refresh (the list endpoint is the source of truth).
+  if ((data.tool as string) === 'spawn') {
+    notifySubagentsChanged()
+  }
 
   const toolCallId = data.tool_call_id as string | undefined
   const toolArgsStr = data.arguments
@@ -82,6 +83,12 @@ export function handleToolResult(ctx: MessageEventContext, data: Record<string, 
 
   ctx.setToolStatus(null)
 
+  // Spawn finished registering (or failed): refresh so the panel picks up
+  // status / session_key without waiting for the poll interval.
+  if ((data.tool as string) === 'spawn') {
+    notifySubagentsChanged()
+  }
+
   ctx.setStreamingMessages((current) => {
     const toolCallId = data.tool_call_id as string | undefined
     const targetIndex = findToolMessageIndex(current, toolCallId, (msgs) => {
@@ -126,6 +133,8 @@ export function handleSubagentResult(ctx: MessageEventContext, data: Record<stri
   const eventSessionKey = getSessionKey(data)
   if (isSessionMismatch(eventSessionKey, ctx.currentSessionKeyRef.current, 'subagent.result'))
     return
+
+  notifySubagentsChanged()
 
   ctx.setStreamingMessages((current) => {
     const toolCallId = data.tool_call_id as string | undefined
