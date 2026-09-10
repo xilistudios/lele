@@ -359,6 +359,9 @@ func TestDefaultAPIBaseByType_CatalogProviders(t *testing.T) {
 		{"siliconflow", "https://api.siliconflow.com/v1"},
 		{"perplexity", "https://api.perplexity.ai/v1"},
 		{"kimi_for_coding", "https://api.kimi.com/coding/v1"},
+		{"alibaba_token_plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
+		{"qwen-token-plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
+		{"alibaba_token_plan_cn", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
 		// Existing providers still resolve
 		{"openai", "https://api.openai.com/v1"},
 		{"anthropic", defaultAnthropicAPIBase},

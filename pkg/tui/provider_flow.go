@@ -72,6 +72,8 @@ var providerPresets = []providerPreset{
 	catalogPreset("perplexity", "Perplexity", "pplx-...", "sonar-pro..."),
 	catalogPreset("ollama_cloud", "Ollama Cloud", "API key", "kimi-k2.5..."),
 	catalogPreset("kimi_for_coding", "Kimi For Coding", "sk-...", "k3..."),
+	catalogPreset("alibaba_token_plan", "Qwen Cloud Token Plan", "API key", "qwen3.7-max, deepseek-v4-pro..."),
+	catalogPreset("alibaba_token_plan_cn", "Qwen Cloud Token Plan (CN)", "API key", "qwen3.7-max, deepseek-v4-pro..."),
 }
 
 // providerPresetByType returns the preset matching typ, or nil.

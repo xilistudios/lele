@@ -76,6 +76,10 @@ func NormalizeProvider(provider string) string {
 		return "opencode"
 	case "qwen":
 		return "qwen-portal"
+	case "alibaba-token-plan", "qwen-token-plan", "qwen-cloud-token-plan", "qwen_cloud_token_plan", "alibaba-token":
+		return "alibaba_token_plan"
+	case "alibaba-token-plan-cn", "qwen-token-plan-cn", "alibaba-token-cn":
+		return "alibaba_token_plan_cn"
 	case "kimi-code", "kimi-coding", "kimi-for-coding":
 		return "kimi_for_coding"
 	case "gpt":

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-10T21:41:15Z",
+  "updated_at": "2026-09-10T21:45:01Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -18,6 +18,22 @@
       "api_base": "https://coding-intl.dashscope.aliyuncs.com/v1",
       "file": "providers/alibaba_coding_plan.json",
       "model_count": 12
+    },
+    "alibaba_token_plan": {
+      "id": "alibaba_token_plan",
+      "name": "Alibaba Token Plan",
+      "type": "openai",
+      "api_base": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+      "file": "providers/alibaba_token_plan.json",
+      "model_count": 25
+    },
+    "alibaba_token_plan_cn": {
+      "id": "alibaba_token_plan_cn",
+      "name": "Alibaba Token Plan (China)",
+      "type": "openai",
+      "api_base": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "file": "providers/alibaba_token_plan_cn.json",
+      "model_count": 25
     },
     "anthropic": {
       "id": "anthropic",

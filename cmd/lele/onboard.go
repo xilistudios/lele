@@ -59,6 +59,8 @@ func providerRegistry() []providerInfo {
 		{name: "vllm", displayName: "VLLM", typeKey: "vllm", apiBase: "", authHeader: "Bearer"},
 		{name: "shengsuanyun", displayName: "ShengSuanYun", typeKey: "shengsuanyun", apiBase: "https://router.shengsuanyun.com/api/v1", authHeader: "Bearer"},
 		{name: "alibaba_coding_plan", displayName: "Alibaba Coding Plan", typeKey: "alibaba_coding_plan", apiBase: "https://coding-intl.dashscope.aliyuncs.com/v1", authHeader: "Bearer"},
+		{name: "alibaba_token_plan", displayName: "Qwen Cloud Token Plan", typeKey: "alibaba_token_plan", apiBase: catalogBase("alibaba_token_plan"), authHeader: "Bearer"},
+		{name: "alibaba_token_plan_cn", displayName: "Qwen Cloud Token Plan (CN)", typeKey: "alibaba_token_plan_cn", apiBase: catalogBase("alibaba_token_plan_cn"), authHeader: "Bearer"},
 		{name: "github_copilot", displayName: "GitHub Copilot", typeKey: "github_copilot", apiBase: "localhost:4321", authHeader: "Bearer"},
 		// Optional catalog-backed providers (hermes-agent pending set).
 		{name: "xai", displayName: "xAI (Grok)", typeKey: "xai", apiBase: catalogBase("xai"), authHeader: "Bearer"},
@@ -360,6 +362,10 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 		cfg.Providers.ShengSuanYun = named.ProviderConfig
 	case "alibaba_coding_plan":
 		cfg.Providers.AlibabaCodingPlan = named.ProviderConfig
+	case "alibaba_token_plan":
+		cfg.Providers.AlibabaTokenPlan = named.ProviderConfig
+	case "alibaba_token_plan_cn":
+		cfg.Providers.AlibabaTokenPlanCN = named.ProviderConfig
 	case "github_copilot":
 		cfg.Providers.GitHubCopilot = named.ProviderConfig
 	case "nanogpt":

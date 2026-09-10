@@ -52,6 +52,10 @@ func DefaultAPIBaseByType(providerType string) string {
 		return "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 	case "alibaba_coding_plan", "alibaba-coding-plan":
 		return "https://coding-intl.dashscope.aliyuncs.com/v1"
+	case "alibaba_token_plan", "alibaba-token-plan", "qwen_token_plan", "qwen-token-plan", "qwen_cloud_token_plan":
+		return "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+	case "alibaba_token_plan_cn", "alibaba-token-plan-cn", "qwen_token_plan_cn":
+		return "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 	case "xai", "grok", "x.ai", "x-ai":
 		return "https://api.x.ai/v1"
 	case "nous":
@@ -275,6 +279,10 @@ func normalizeType(t string) string {
 		return "alibaba"
 	case "alibaba-coding":
 		return "alibaba_coding_plan"
+	case "alibaba-token", "alibaba_token", "qwen_token_plan", "qwen-token-plan", "qwen_cloud_token_plan", "qwen-cloud-token-plan", "token-plan":
+		return "alibaba_token_plan"
+	case "alibaba-token-cn", "alibaba_token_cn", "qwen_token_plan_cn", "token-plan-cn":
+		return "alibaba_token_plan_cn"
 	case "grok", "x.ai", "x-ai":
 		return "xai"
 	case "lm-studio", "lm_studio":
@@ -317,7 +325,7 @@ func normalizeType(t string) string {
 
 // hardcodedProviderIDs is the offline-known provider set (no models).
 var hardcodedProviderIDs = []string{
-	"alibaba", "alibaba_coding_plan", "anthropic", "arcee", "azure_foundry",
+	"alibaba", "alibaba_coding_plan", "alibaba_token_plan", "alibaba_token_plan_cn", "anthropic", "arcee", "azure_foundry",
 	"bedrock", "cerebras", "chutes", "deepseek", "fireworks", "gemini", "gmi",
 	"github_copilot", "groq", "huggingface", "kimi_for_coding", "lmstudio",
 	"minimax", "minimax_cn", "mistral", "modelark", "moonshot", "nanogpt",

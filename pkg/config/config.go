@@ -608,6 +608,8 @@ type ProvidersConfig struct {
 	GitHubCopilot      ProviderConfig                 `json:"github_copilot"`
 	NanogPT            ProviderConfig                 `json:"nanogpt"`
 	AlibabaCodingPlan  ProviderConfig                 `json:"alibaba_coding_plan"`
+	AlibabaTokenPlan   ProviderConfig                 `json:"alibaba_token_plan"`
+	AlibabaTokenPlanCN ProviderConfig                 `json:"alibaba_token_plan_cn"`
 	ZAICodingPlan      ProviderConfig                 `json:"zai_coding_plan"`
 	ModelArkCodingPlan ProviderConfig                 `json:"modelark_coding_plan"`
 	Named              map[string]NamedProviderConfig `json:"-"`
@@ -806,6 +808,8 @@ func (p *ProvidersConfig) MarshalJSON() ([]byte, error) {
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
 	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
 	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
+	put("alibaba_token_plan", NamedProviderConfig{Type: "alibaba_token_plan", ProviderConfig: p.AlibabaTokenPlan})
+	put("alibaba_token_plan_cn", NamedProviderConfig{Type: "alibaba_token_plan_cn", ProviderConfig: p.AlibabaTokenPlanCN})
 	put("zai_coding_plan", NamedProviderConfig{Type: "zai_coding_plan", ProviderConfig: p.ZAICodingPlan})
 	put("modelark_coding_plan", NamedProviderConfig{Type: "modelark_coding_plan", ProviderConfig: p.ModelArkCodingPlan})
 
@@ -855,6 +859,8 @@ func (p *ProvidersConfig) ensureNamedDefaults() {
 	put("github_copilot", NamedProviderConfig{Type: "github_copilot", ProviderConfig: p.GitHubCopilot})
 	put("nanogpt", NamedProviderConfig{Type: "nanogpt", ProviderConfig: p.NanogPT})
 	put("alibaba_coding_plan", NamedProviderConfig{Type: "alibaba_coding_plan", ProviderConfig: p.AlibabaCodingPlan})
+	put("alibaba_token_plan", NamedProviderConfig{Type: "alibaba_token_plan", ProviderConfig: p.AlibabaTokenPlan})
+	put("alibaba_token_plan_cn", NamedProviderConfig{Type: "alibaba_token_plan_cn", ProviderConfig: p.AlibabaTokenPlanCN})
 	put("zai_coding_plan", NamedProviderConfig{Type: "zai_coding_plan", ProviderConfig: p.ZAICodingPlan})
 	put("modelark_coding_plan", NamedProviderConfig{Type: "modelark_coding_plan", ProviderConfig: p.ModelArkCodingPlan})
 }
@@ -1016,6 +1022,10 @@ func normalizeProviderKey(provider string) string {
 		return "opencode"
 	case "qwen":
 		return "qwen-portal"
+	case "alibaba-token-plan", "qwen-token-plan", "qwen-cloud-token-plan", "qwen_cloud_token_plan", "alibaba-token":
+		return "alibaba_token_plan"
+	case "alibaba-token-plan-cn", "qwen-token-plan-cn", "alibaba-token-cn":
+		return "alibaba_token_plan_cn"
 	case "kimi-code", "kimi-coding", "kimi-for-coding":
 		return "kimi_for_coding"
 	case "gpt":
