@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -351,6 +352,20 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func isAPIPath(path string) bool {
-	return len(path) >= 5 && path[:5] == "/api/" ||
-		len(path) >= 9 && path[:9] == "/webhook/"
+	if len(path) >= 5 && path[:5] == "/api/" {
+		return true
+	}
+	if len(path) >= 9 && path[:9] == "/webhook/" {
+		return true
+	}
+	// ACP (Agent Communication Protocol) endpoints must never fall through
+	// to the SPA index.html handler.
+	switch {
+	case path == "/ping",
+		path == "/agents" || strings.HasPrefix(path, "/agents/"),
+		path == "/runs" || strings.HasPrefix(path, "/runs/"),
+		strings.HasPrefix(path, "/session/"):
+		return true
+	}
+	return false
 }

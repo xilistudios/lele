@@ -223,6 +223,7 @@ func defaultEditableDocument() *EditableDocument {
 		},
 		Providers: EditableProvidersConfig{},
 		Gateway:   defaults.Gateway,
+		ACP:       defaults.ACP,
 		Tools: EditableToolsConfig{
 			Web: EditableWebToolsConfig{
 				Brave: EditableBraveConfig{
