@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,25 +32,44 @@ type obVerifyResultMsg struct {
 var obVerifyHTTPClient *http.Client
 
 func (m *Model) obVerifyKeyCmd() tea.Cmd {
-	return func() tea.Msg {
-		providers := m.cfg.Providers.ListNamed()
-		var p config.NamedProviderConfig
-		var name string
-		// Prefer a provider that is actually configured (has a key or base
-		// URL) — ListNamed() also returns empty placeholders for every known
-		// provider name, and map iteration order is random.
+	// Snapshot provider data on the update loop before the goroutine runs —
+	// reading m.cfg from the tea.Cmd goroutine races with concurrent updates.
+	// Prefer the provider the user just configured when it is known.
+	preferred := m.obProviderName
+	if preferred == "" {
+		preferred = m.providerSelectedName
+	}
+	type namedProv struct {
+		name string
+		p    config.NamedProviderConfig
+	}
+	var chosen *namedProv
+	providers := m.cfg.Providers.ListNamed()
+	if preferred != "" {
+		if prov, ok := providers[preferred]; ok && (prov.APIKey != "" || prov.APIBase != "") {
+			chosen = &namedProv{name: preferred, p: prov}
+		}
+	}
+	if chosen == nil {
+		// Deterministic fallback: pick the first configured provider by name.
+		names := make([]string, 0, len(providers))
 		for n, prov := range providers {
 			if prov.APIKey != "" || prov.APIBase != "" {
-				p = prov
-				name = n
-				break
+				names = append(names, n)
 			}
 		}
-		if name == "" {
-			// Nothing configured — nothing to validate.
-			return obVerifyResultMsg{success: true}
+		sort.Strings(names)
+		if len(names) > 0 {
+			chosen = &namedProv{name: names[0], p: providers[names[0]]}
 		}
+	}
+	if chosen == nil {
+		return func() tea.Msg { return obVerifyResultMsg{success: true} }
+	}
+	name := chosen.name
+	p := chosen.p
 
+	return func() tea.Msg {
 		// Skip validation for local providers.
 		if p.Type == "ollama" {
 			return obVerifyResultMsg{success: true, providerName: name}

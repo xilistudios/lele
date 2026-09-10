@@ -385,7 +385,7 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 	result := make([]string, 0, min(totalMsgs-startIdx, m.maxRenderedMessages)*8)
 
 	if startIdx > 0 {
-		header := CommentColorStyle.Render(fmt.Sprintf("  ↑ %d earlier messages (scroll up in session history to view)", startIdx))
+		header := CommentColorStyle.Render("  " + fmt.Sprintf(i18n.T("tui.earlierMessages"), startIdx))
 		result = append(result, header, "")
 	}
 

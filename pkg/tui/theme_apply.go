@@ -2,6 +2,8 @@ package tui
 
 import (
 	"log"
+	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/xilistudios/lele/pkg/tui/theme"
@@ -14,6 +16,7 @@ import (
 func (m *Model) applyThemeByName(name string) {
 	t := theme.Get(name, m.customThemes)
 	ApplyTheme(t)
+	m.themeIsLight = themeIsLightBackground(t.Background)
 	m.applyThemeToInputs()
 	m.invalidateRenderCache()
 	m.currentThemeName = name
@@ -31,8 +34,28 @@ func (m *Model) applyThemeByName(name string) {
 func (m *Model) previewTheme(name string) {
 	t := theme.Get(name, m.customThemes)
 	ApplyTheme(t)
+	m.themeIsLight = themeIsLightBackground(t.Background)
 	m.applyThemeToInputs()
 	m.invalidateRenderCache()
+}
+
+// themeIsLightBackground reports whether a hex/ANSI background color is
+// light enough that markdown should use glamour's "light" style. Unknown
+// formats default to dark (the historical default).
+func themeIsLightBackground(bg string) bool {
+	bg = strings.TrimSpace(bg)
+	if !strings.HasPrefix(bg, "#") || len(bg) != 7 {
+		return false
+	}
+	r, err1 := strconv.ParseInt(bg[1:3], 16, 0)
+	g, err2 := strconv.ParseInt(bg[3:5], 16, 0)
+	b, err3 := strconv.ParseInt(bg[5:7], 16, 0)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return false
+	}
+	// Rec. 709 relative luminance approximation.
+	lum := (0.2126*float64(r) + 0.7152*float64(g) + 0.0722*float64(b)) / 255
+	return lum > 0.55
 }
 
 // applyThemeToInputs re-applies foreground-only theme colors to the bubbles
@@ -91,4 +114,9 @@ func (m *Model) invalidateRenderCache() {
 	m.thinkingRenderedJoined = ""
 	m.streamRenderCacheWidth = 0
 	m.thinkingRenderCacheWidth = 0
+	// Glamour renderer is keyed by light/dark mode; drop it so the next
+	// markdown paint uses the new theme's style.
+	m.cachedRenderer = nil
+	m.cachedRendererWidth = 0
+	m.cachedRendererStyle = ""
 }
