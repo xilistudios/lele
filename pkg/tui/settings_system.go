@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
@@ -110,14 +111,58 @@ func (m *Model) loadLogsSettings() {
 	}
 }
 
-// loadLanguageSettings populates the Language sub-view. Current language is
-// marked with ✓.
-func (m *Model) loadLanguageSettings() {
-	m.modalItems = []string{
-		fmt.Sprintf("Español (es) %s", checkMark(m.cfg.Language == "es")),
-		fmt.Sprintf("English (en) %s", checkMark(m.cfg.Language == "en")),
-		fmt.Sprintf("Português (pt) %s", checkMark(m.cfg.Language == "pt")),
+// languageDownloadMoreItem is the sentinel label for "download more languages".
+const languageDownloadMoreItem = "tui.languages.downloadMore"
+
+// buildLanguageModalItems lists installed languages (builtin + downloaded)
+// plus a trailing action to browse remote packs from GitHub.
+// Returns display labels and the parallel language codes ("" for the action).
+func buildLanguageModalItems(current string) (labels []string, codes []string) {
+	langs := i18n.InstalledLanguages()
+	for _, code := range langs {
+		labels = append(labels, i18n.FormatLanguageOption(code, ""))
+		codes = append(codes, code)
 	}
+	labels = append(labels, "⬇ "+i18n.T("tui.languages.downloadMore"))
+	codes = append(codes, "")
+	return labels, codes
+}
+
+// remoteLanguageLabels builds picker rows for catalog languages that are not
+// installed yet, with an "(install)" hint.
+func remoteLanguageLabels(statuses []locales.Status) (labels []string, codes []string) {
+	installed := map[string]bool{}
+	for _, c := range i18n.InstalledLanguages() {
+		installed[c] = true
+	}
+	for _, s := range statuses {
+		if s.Installed || installed[s.Code] {
+			continue
+		}
+		name := s.NativeName
+		if name == "" {
+			name = s.Name
+		}
+		if name == "" {
+			name = s.Code
+		}
+		labels = append(labels, fmt.Sprintf("%s (%s) — %s", name, s.Code, i18n.T("tui.languages.install")))
+		codes = append(codes, s.Code)
+	}
+	return labels, codes
+}
+
+// loadLanguageSettings populates the Language sub-view. Current language is
+// marked with ✓. Downloaded packs appear alongside builtins.
+func (m *Model) loadLanguageSettings() {
+	m.modalItems = nil
+	m.modalLangCodes = nil
+	for _, code := range i18n.InstalledLanguages() {
+		m.modalItems = append(m.modalItems, i18n.FormatLanguageOption(code, checkMark(m.cfg.Language == code)))
+		m.modalLangCodes = append(m.modalLangCodes, code)
+	}
+	m.modalItems = append(m.modalItems, "⬇ "+i18n.T("tui.languages.downloadMore"))
+	m.modalLangCodes = append(m.modalLangCodes, "")
 }
 
 // loadGoalSettings populates the Goal sub-view.
@@ -233,16 +278,20 @@ func (m *Model) handleLogsEnter() tea.Cmd {
 }
 
 // handleLanguageEnter handles enter on a language selection. It persists the
-// change and switches the i18n locale immediately.
+// change and switches the i18n locale immediately. Selecting "download more"
+// opens the remote language browser.
 func (m *Model) handleLanguageEnter() tea.Cmd {
-	langs := []string{"es", "en", "pt"}
-	if m.modalSelectedIdx < len(langs) {
-		code := langs[m.modalSelectedIdx]
-		m.cfg.Language = code
-		m.saveConfigToDisk()
-		i18n.SetLanguage(code)
-		m.loadLanguageSettings()
+	if m.modalSelectedIdx >= len(m.modalLangCodes) {
+		return nil
 	}
+	code := m.modalLangCodes[m.modalSelectedIdx]
+	if code == "" {
+		return m.openRemoteLanguageBrowser()
+	}
+	m.cfg.Language = code
+	m.saveConfigToDisk()
+	i18n.SetLanguage(code)
+	m.loadLanguageSettings()
 	return nil
 }
 

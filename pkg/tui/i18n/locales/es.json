@@ -53,7 +53,6 @@
   "tui.tokens": "tokens",
   "tui.used": "%.1f%% usado",
   "tui.spent": "$0.00 gastado",
-
   "tui.workspace": "Workspace",
   "tui.status": "Estado",
   "tui.moreAbove": "↑ más arriba",
@@ -73,7 +72,6 @@
   "tui.backgroundProcesses": "Procesos en segundo plano",
   "tui.noBgProcesses": "No hay procesos en segundo plano",
   "tui.bgOutputHints": "ENTER: lista | S: detener | ESC: cerrar",
-
   "tui.cronJobs": "Tareas programadas",
   "tui.noCronJobs": "No hay tareas programadas",
   "tui.cronUnavailable": "Servicio de cron no disponible",
@@ -92,7 +90,6 @@
   "tui.cronLastStatus": "Último estado",
   "tui.cronLastError": "Último error",
   "tui.cronDetailHints": "ENTER/ESC: lista | E: activar/desactivar | R: ejecutar ahora | D: eliminar",
-
   "tui.secrets": "Secretos",
   "tui.secretsUnavailable": "Servicio de keyring no disponible",
   "tui.noSecrets": "No hay secretos guardados",
@@ -110,7 +107,6 @@
   "tui.secretsListHints": "ENTER: ver | A: añadir | D: eliminar | ESC: atrás",
   "tui.secretsDetailHints": "R: revelar/ocultar | D: eliminar | ENTER/ESC: lista",
   "tui.secretDeleteConfirm": "¿Eliminar secreto \"%s\"? (s/n)",
-
   "tui.selectProvider": "Selecciona un Provider",
   "tui.providerDetail": "Detalles del Provider",
   "tui.addProvider": "Agregar Provider",
@@ -157,7 +153,6 @@
   "tui.approvalViewFull": "Ver comando completo",
   "tui.approvalWhitelistFailed": "No se pudo guardar en la lista de permitidos",
   "tui.approvalWhitelist": "Siempre permitir",
-
   "tui.group.layer": "Capa %d",
   "tui.group.synthesis": "Síntesis final",
   "tui.group.participants": "Participantes",
@@ -169,17 +164,14 @@
   "tui.group.role.aggregator": "agregador",
   "tui.group.role.moderator": "moderador",
   "tui.group.role.critic": "crítico",
-
   "tui.modeChat": "Chat",
   "tui.modeAgent": "Agente",
   "tui.modeGroup": "Grupo",
   "tui.modeIndicator": "Modo: %s",
   "tui.tabHint": "TAB: cambiar modo",
-
   "tui.groupSelectProfile": "Seleccioná un perfil de grupo:",
   "tui.groupTaskPlaceholder": "Escribí la tarea y presioná Enter para iniciar el grupo",
   "tui.noGroupProfiles": "No hay perfiles de grupo configurados. Usá: /group start --agents a,b --strategy moa <task>",
-
   "tui.skills": "Habilidades",
   "tui.selectSkills": "Seleccionar Habilidades para Instalar",
   "tui.installSkill": "Instalar Habilidad desde GitHub",
@@ -195,7 +187,6 @@
   "tui.skillScanLoading": "Escaneando repositorio...",
   "tui.skillScanNoResults": "No se encontraron habilidades en el repositorio",
   "tui.skillRepoPlaceholder": "usuario/repo o usuario/repo/habilidad",
-
   "tui.settings": "Configuración",
   "tui.settings.title": "Configuración",
   "tui.settings.agents": "Agentes",
@@ -256,7 +247,6 @@
   "tui.settings.agentIDDuplicate": "El ID del agente ya existe",
   "tui.settings.confirmDelete": "¿Eliminar este agente? (s/n)",
   "tui.settings.confirmDeleteHint": "Escribe 's' para confirmar, Esc para cancelar",
-
   "tui.onboard.welcome": "¡Bienvenido a Lele! Vamos a configurarlo (~1 min)",
   "tui.onboard.pressEnter": "Presiona Enter para continuar",
   "tui.onboard.escSkip": "Presiona Esc para omitir la configuración",
@@ -290,5 +280,14 @@
   "tui.queue.removeHint": " · %s quita el último",
   "tui.queue.full": "cola llena (%d) — mensaje no encolado",
   "tui.queue.removed": "se quitó el último mensaje de la cola",
-  "tui.queue.dropped": "se descartaron %d mensaje(s) de la cola"
+  "tui.queue.dropped": "se descartaron %d mensaje(s) de la cola",
+  "tui.languages.downloadMore": "Descargar más idiomas…",
+  "tui.languages.install": "instalar",
+  "tui.languages.loadingCatalog": "Cargando catálogo de idiomas desde GitHub…",
+  "tui.languages.downloading": "Descargando paquete de idioma…",
+  "tui.languages.downloadOK": "Paquete de idioma instalado",
+  "tui.languages.downloadFailed": "No se pudo descargar el paquete de idioma",
+  "tui.languages.catalogFailed": "No se pudo cargar el catálogo de idiomas",
+  "tui.languages.allInstalled": "Todos los idiomas disponibles ya están instalados",
+  "tui.languages.remoteHint": "Selecciona un idioma para descargarlo del repo de lele en GitHub"
 }

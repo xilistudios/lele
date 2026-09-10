@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "updated_at": "2026-09-10",
+  "languages": [
+    {
+      "code": "es",
+      "name": "Spanish",
+      "native_name": "Español",
+      "builtin": true
+    },
+    {
+      "code": "en",
+      "name": "English",
+      "native_name": "English",
+      "builtin": true
+    },
+    {
+      "code": "pt",
+      "name": "Portuguese",
+      "native_name": "Português",
+      "builtin": true
+    },
+    {
+      "code": "fr",
+      "name": "French",
+      "native_name": "Français",
+      "builtin": false
+    },
+    {
+      "code": "de",
+      "name": "German",
+      "native_name": "Deutsch",
+      "builtin": false
+    },
+    {
+      "code": "it",
+      "name": "Italian",
+      "native_name": "Italiano",
+      "builtin": false
+    },
+    {
+      "code": "ja",
+      "name": "Japanese",
+      "native_name": "日本語",
+      "builtin": false
+    },
+    {
+      "code": "ko",
+      "name": "Korean",
+      "native_name": "한국어",
+      "builtin": false
+    },
+    {
+      "code": "zh",
+      "name": "Chinese (Simplified)",
+      "native_name": "中文",
+      "builtin": false
+    },
+    {
+      "code": "ru",
+      "name": "Russian",
+      "native_name": "Русский",
+      "builtin": false
+    },
+    {
+      "code": "vi",
+      "name": "Vietnamese",
+      "native_name": "Tiếng Việt",
+      "builtin": false
+    }
+  ]
+}

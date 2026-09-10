@@ -20,6 +20,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/keyring"
+	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/skills"
@@ -56,6 +57,7 @@ type NativeChannel struct {
 	cronService      CronProvidable
 	keyringService   *keyring.Service
 	updateService    *update.Updater
+	localesMgr       *locales.Manager
 
 	// outboundFlusher wakes the durable outbound pump when a native peer comes
 	// back. Set through SetOutboundFlusher by Manager.SetOutboundSpooler; nil
@@ -504,6 +506,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 
 	// Filesystem browsing (folder picker for the WebUI)
 	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
+
+	// Language packs (lazy download from GitHub; builtins stay embedded)
+	mux.HandleFunc("GET /api/v1/locales", withAuth(n.handleLocalesList))
+	mux.HandleFunc("POST /api/v1/locales/refresh", withAuth(n.handleLocalesRefresh))
+	mux.HandleFunc("GET /api/v1/locales/{code}", withAuth(n.handleLocaleGet))
+	mux.HandleFunc("POST /api/v1/locales/{code}/install", n.rateLimitMiddleware(n.apiLimiter, withAuth(n.handleLocaleInstall)).ServeHTTP)
+	mux.HandleFunc("DELETE /api/v1/locales/{code}", withAuth(n.handleLocaleUninstall))
 }
 
 func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {

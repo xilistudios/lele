@@ -107,9 +107,11 @@ func TestDetectLanguage(t *testing.T) {
 }
 
 func TestAvailableLanguages(t *testing.T) {
+	// Isolate from any downloaded packs on the host machine.
+	SetPackDir(t.TempDir())
 	langs := AvailableLanguages()
 	if len(langs) != 3 {
-		t.Errorf("AvailableLanguages() returned %d languages, want 3", len(langs))
+		t.Errorf("AvailableLanguages() returned %d languages, want 3 (builtins only)", len(langs))
 	}
 
 	// Check all expected languages are present
@@ -123,6 +125,30 @@ func TestAvailableLanguages(t *testing.T) {
 			t.Errorf("AvailableLanguages() missing %s", expected)
 		}
 	}
+}
+
+func TestInstalledLanguagesIncludesExternal(t *testing.T) {
+	dir := t.TempDir()
+	SetPackDir(dir)
+	// Write a fake downloaded pack.
+	if err := os.MkdirAll(dir+"/tui", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/tui/fr.json", []byte(`{"tui.title":"Lele"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	langs := InstalledLanguages()
+	found := false
+	for _, l := range langs {
+		if l == "fr" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("InstalledLanguages() = %v, want fr included", langs)
+	}
+	// Reset for other tests.
+	SetPackDir("")
 }
 
 func TestGetLanguageTag(t *testing.T) {
