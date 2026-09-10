@@ -14,6 +14,7 @@ import (
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
+	"github.com/xilistudios/lele/pkg/locales"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
@@ -26,7 +27,10 @@ import (
 )
 
 func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *session.SessionManager, initialSessionID ...string) *Model {
-	// Initialize i18n with configured language
+	// Initialize i18n with configured language. Downloaded packs live under
+	// <leleDir>/locales/tui and are merged before language detection.
+	i18n.SetPackDir(locales.JoinCacheDir(config.GetLeleDir()))
+	i18n.LoadExternalPacks()
 	i18n.InitWithLanguage(cfg.GetLanguage())
 
 	// Multi-line chat input

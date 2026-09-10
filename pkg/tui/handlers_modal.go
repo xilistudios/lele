@@ -581,14 +581,27 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.clearStreamingState()
 					}
 				} else if m.modalMode == ModalLang {
-					// Extract language code from "Name (code)" format
-					langCode := selectedVal
-					if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
-						langCode = strings.TrimRight(selectedVal[idx+1:], ")")
+					// Prefer parallel code map; fall back to "Name (code)" parse.
+					langCode := ""
+					if m.modalSelectedIdx < len(m.modalLangCodes) {
+						langCode = m.modalLangCodes[m.modalSelectedIdx]
 					}
-					m.cfg.SetLanguage(langCode)
-					i18n.SetLanguage(langCode)
-					m.chatInput.Placeholder = i18n.T("tui.placeholder")
+					if langCode == "" {
+						// "Download more" action or legacy parse.
+						if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
+							langCode = strings.TrimRight(selectedVal[idx+1:], ")")
+						}
+						if langCode == "" || strings.Contains(selectedVal, i18n.T("tui.languages.downloadMore")) {
+							return m, m.openRemoteLanguageBrowser()
+						}
+					}
+					if err := m.applyLanguage(langCode); err != nil {
+						m.queueFeedback = formatLangFeedback(langCode, err)
+					} else {
+						m.queueFeedback = ""
+					}
+				} else if m.modalMode == ModalLangRemote {
+					return m, m.handleLangInstallSelect()
 				} else if m.modalMode == ModalProviders {
 					// "+ Connect a provider" action entry.
 					if m.modalSelectedIdx < len(m.modalItems) &&

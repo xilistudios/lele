@@ -45,7 +45,21 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case obLanguage:
+		// Installed languages (builtins + any already-downloaded packs).
+		// Onboarding stays offline: only show what is already available.
 		langs := []string{"en", "es", "pt"}
+		for _, c := range i18n.InstalledLanguages() {
+			found := false
+			for _, existing := range langs {
+				if existing == c {
+					found = true
+					break
+				}
+			}
+			if !found {
+				langs = append(langs, c)
+			}
+		}
 		switch msg.String() {
 		case "up", "k":
 			if m.modalSelectedIdx > 0 {
@@ -57,8 +71,7 @@ func (m *Model) handleOnboardingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			lang := langs[m.modalSelectedIdx]
-			i18n.SetLanguage(lang)
-			m.cfg.Language = lang
+			_ = m.applyLanguage(lang)
 			m.onboardingStep = obTheme
 			m.themePreviewName = m.currentThemeName // save for Esc revert
 			// Pre-select the current theme in the picker

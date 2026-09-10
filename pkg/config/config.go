@@ -154,7 +154,7 @@ type Config struct {
 	Keyring   KeyringConfig    `json:"keyring"`
 	Updates   UpdatesConfig    `json:"updates"`
 	Goal      GoalConfig       `json:"goal"`
-	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code: "es", "en", "pt" (default: "es")
+	Language  string           `json:"language,omitempty" env:"LELE_LANG"` // Language code (builtin: "es","en","pt"; downloaded packs allowed). Default: "es"
 	TUI       TUIConfig        `json:"tui,omitempty"`                      // TUI settings (mouse/rendering/stream)
 
 	// Commands declares custom slash commands inline (lowest precedence: file

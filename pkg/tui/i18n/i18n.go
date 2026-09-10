@@ -100,6 +100,16 @@ func Init() {
 		system.translations[tag] = translations
 	}
 
+	// Merge any downloaded language packs from disk (~/.lele/locales/tui).
+	ensureExternalLoaded()
+	externalMu.RLock()
+	for code, translations := range externalLangs {
+		if tag, err := language.Parse(code); err == nil {
+			system.translations[tag] = translations
+		}
+	}
+	externalMu.RUnlock()
+
 	// Detect language from environment or config
 	lang := detectLanguage()
 	system.setLanguage(lang)
@@ -145,10 +155,7 @@ func GetLanguageTag() language.Tag {
 	return system.currentLang
 }
 
-// AvailableLanguages returns a list of supported language codes.
-func AvailableLanguages() []string {
-	return []string{"es", "en", "pt"}
-}
+// AvailableLanguages is defined in external.go (builtin + installed packs).
 
 // T implements the Localizer interface.
 func (s *i18nSystem) T(key string) string {
@@ -187,26 +194,46 @@ func (s *i18nSystem) setLanguage(lang string) {
 		case "pt", "português", "portuguese":
 			tag = language.Portuguese
 		default:
-			tag = s.fallback
+			// Downloaded packs use ISO codes; register a raw tag.
+			if _, ok := externalLangs[lang]; ok {
+				if t, perr := language.Parse(lang); perr == nil {
+					tag = t
+				} else {
+					tag = language.Make(lang)
+				}
+			} else {
+				tag = s.fallback
+			}
 		}
+	}
+
+	// Ensure a downloaded pack is present under this tag.
+	if _, ok := s.translations[tag]; !ok {
+		externalMu.RLock()
+		if pack, ok2 := externalLangs[lang]; ok2 {
+			s.translations[tag] = pack
+		} else if pack, ok2 := externalLangs[tag.String()]; ok2 {
+			s.translations[tag] = pack
+		}
+		externalMu.RUnlock()
 	}
 
 	// Check if we have translations for this language
 	if _, ok := s.translations[tag]; ok {
 		s.currentLang = tag
-	} else {
-		// Try to find a matching base language
-		for registeredTag := range s.translations {
-			regBase, _ := registeredTag.Base()
-			tagBase, _ := tag.Base()
-			if regBase == tagBase {
-				s.currentLang = registeredTag
-				return
-			}
-		}
-		// Use fallback
-		s.currentLang = s.fallback
+		return
 	}
+	// Try to find a matching base language
+	for registeredTag := range s.translations {
+		regBase, _ := registeredTag.Base()
+		tagBase, _ := tag.Base()
+		if regBase == tagBase {
+			s.currentLang = registeredTag
+			return
+		}
+	}
+	// Use fallback
+	s.currentLang = s.fallback
 }
 
 // detectLanguage detects the language from environment variables.

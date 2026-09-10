@@ -644,6 +644,13 @@ func (m *Model) renderObLanguage(width int) string {
 		"Español",
 		"Português",
 	}
+	// Include any downloaded packs (rare during first-run, but harmless).
+	for _, c := range i18n.InstalledLanguages() {
+		if c == "en" || c == "es" || c == "pt" {
+			continue
+		}
+		langs = append(langs, i18n.DisplayName(c)+" ("+c+")")
+	}
 	var listSb strings.Builder
 	for i, lang := range langs {
 		if i == m.modalSelectedIdx {
@@ -1425,6 +1432,8 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.selectThinkLevel")
 	case ModalLang:
 		return i18n.T("tui.selectLanguage")
+	case ModalLangRemote:
+		return i18n.T("tui.languages.downloadMore")
 	case ModalBackgroundExecs:
 		return i18n.T("tui.backgroundProcesses")
 	case ModalCron:

@@ -53,6 +53,12 @@ func (m *Model) handleAsyncResult(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 				return streamThrottleMsg{}
 			}))
 		}
+
+	case langCatalogMsg:
+		return m, m.handleLangCatalogMsg(msg)
+
+	case langInstallResultMsg:
+		return m, m.handleLangInstallResult(msg)
 	}
 
 	return m.finishUpdate(msg, cmds)

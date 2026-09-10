@@ -53,7 +53,6 @@
   "tui.tokens": "tokens",
   "tui.used": "%.1f%% used",
   "tui.spent": "$0.00 spent",
-
   "tui.workspace": "Workspace",
   "tui.status": "Status",
   "tui.moreAbove": "↑ more above",
@@ -73,7 +72,6 @@
   "tui.backgroundProcesses": "Background Processes",
   "tui.noBgProcesses": "No background processes",
   "tui.bgOutputHints": "ENTER: back to list | S: stop | ESC: close",
-
   "tui.cronJobs": "Scheduled Jobs",
   "tui.noCronJobs": "No scheduled jobs",
   "tui.cronUnavailable": "Cron service unavailable",
@@ -92,7 +90,6 @@
   "tui.cronLastStatus": "Last status",
   "tui.cronLastError": "Last error",
   "tui.cronDetailHints": "ENTER/ESC: back to list | E: enable/disable | R: run now | D: delete",
-
   "tui.secrets": "Secrets",
   "tui.secretsUnavailable": "Keyring service unavailable",
   "tui.noSecrets": "No secrets stored",
@@ -110,7 +107,6 @@
   "tui.secretsListHints": "ENTER: view | A: add | D: delete | ESC: back",
   "tui.secretsDetailHints": "R: reveal/hide | D: delete | ENTER/ESC: back to list",
   "tui.secretDeleteConfirm": "Delete secret \"%s\"? (y/n)",
-
   "tui.selectProvider": "Select a Provider",
   "tui.providerDetail": "Provider Details",
   "tui.addProvider": "Add Provider",
@@ -157,7 +153,6 @@
   "tui.approvalWhitelistFailed": "Failed to save command to the allowlist",
   "tui.approvalWhitelist": "Always allow",
   "tui.approvalViewShort": "View summary only",
-
   "tui.group.layer": "Layer %d",
   "tui.group.synthesis": "Final synthesis",
   "tui.group.participants": "Participants",
@@ -169,17 +164,14 @@
   "tui.group.role.aggregator": "aggregator",
   "tui.group.role.moderator": "moderator",
   "tui.group.role.critic": "critic",
-
   "tui.modeChat": "Chat",
   "tui.modeAgent": "Agent",
   "tui.modeGroup": "Group",
   "tui.modeIndicator": "Mode: %s",
   "tui.tabHint": "TAB: switch mode",
-
   "tui.groupSelectProfile": "Select group profile:",
   "tui.groupTaskPlaceholder": "Type the task and press Enter to start the group",
   "tui.noGroupProfiles": "No group profiles configured. Use: /group start --agents a,b --strategy moa <task>",
-
   "tui.skills": "Skills",
   "tui.selectSkills": "Select Skills to Install",
   "tui.installSkill": "Install Skill from GitHub",
@@ -195,7 +187,6 @@
   "tui.skillScanLoading": "Scanning repository...",
   "tui.skillScanNoResults": "No skills found in repository",
   "tui.skillRepoPlaceholder": "user/repo or user/repo/skill-name",
-
   "tui.settings": "Settings",
   "tui.settings.title": "Settings",
   "tui.settings.agents": "Agents",
@@ -256,7 +247,6 @@
   "tui.settings.agentIDDuplicate": "Agent ID already exists",
   "tui.settings.confirmDelete": "Delete this agent? (y/n)",
   "tui.settings.confirmDeleteHint": "Type 'y' to confirm, Esc to cancel",
-
   "tui.onboard.welcome": "Welcome to Lele! Let's get you set up (~1 min)",
   "tui.onboard.pressEnter": "Press Enter to continue",
   "tui.onboard.escSkip": "Press Esc to skip setup",
@@ -290,5 +280,14 @@
   "tui.queue.removeHint": " · %s removes last",
   "tui.queue.full": "queue full (%d) — message not queued",
   "tui.queue.removed": "removed last queued message",
-  "tui.queue.dropped": "dropped %d queued message(s)"
+  "tui.queue.dropped": "dropped %d queued message(s)",
+  "tui.languages.downloadMore": "Download more languages…",
+  "tui.languages.install": "install",
+  "tui.languages.loadingCatalog": "Loading language catalog from GitHub…",
+  "tui.languages.downloading": "Downloading language pack…",
+  "tui.languages.downloadOK": "Language pack installed",
+  "tui.languages.downloadFailed": "Failed to download language pack",
+  "tui.languages.catalogFailed": "Could not load language catalog",
+  "tui.languages.allInstalled": "All available languages are already installed",
+  "tui.languages.remoteHint": "Select a language to download from the lele GitHub repo"
 }
