@@ -1,12 +1,15 @@
 <div align="center">
   <img src="assets/logo.png" alt="Lele" width="320">
+  <img src="assets/tui.png" alt="TUI" width="650">
 
   <h1>Lele</h1>
 
-  <p>Goで書かれた、軽量かつ効率的なパーソナルAIアシスタント。</p>
-
+  <p>軽量なパーソナルAIアシスタント（Go）— 単一バイナリ、小さいフットプリント、高速なTUI。</p>
   <p>
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+    <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
+    <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
+    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -15,131 +18,108 @@
 
 ---
 
-Leleは、実用的なAIアシスタントの実現を目指し、フットプリントの小ささ、高速な起動、そしてシンプルなデプロイモデルに焦点を当てた独立プロジェクトです。
-
-現在のプロジェクトは、最小限のCLIボットにとどまりません。設定可能なエージェントランタイム、マルチチャネルゲートウェイ、Web UI、ネイティブクライアントAPI、スケジュールタスク、サブエージェント、ワークスペース中心のオートメーションモデルを備えています。
-
-## なぜLeleなのか
-
-- Goで実装された軽量なアーキテクチャと小さな運用フットプリント
-- 低スペックなLinuxマシンやボードでも快適に動作する効率性
-- CLI、チャットチャネル、Web UI、ローカルクライアント統合を1つのプロジェクトで提供
-- ダイレクトおよびOpenAI互換バックエンドをサポートする、設定可能なプロバイダールーティング
-- スキル、メモリ、スケジュールジョブ、サンドボックスコントロールを備えたワークスペースファースト設計
-
-## 現在の機能
-
-### エージェントランタイム
-
-- `lele agent`によるCLIチャット
-- 反復回数を設定可能なツール使用エージェントループ
-- ネイティブ/Webフローでのファイル添付
-- セッション永続化とオプションのエフェメラルセッション
-- 名前付きエージェント、バインディング、モデルフォールバック
-
-### インターフェース
-
-- CLI経由のターミナル操作
-- チャットチャネル用のゲートウェイモード
-- 組み込みWeb UI
-- REST + WebSocket APIとPINペアリングを備えたネイティブクライアントチャネル
-
-### オートメーション
-
-- `lele cron`によるスケジュールジョブ
-- `HEARTBEAT.md`に基づく定期的なタスク
-- 委譲作業のための非同期サブエージェント
-- 再利用可能なワークフローのためのスキルシステム
-
-### セキュリティと運用
-
-- ワークスペースへの制限サポート
-- execツールの危険コマンド拒否パターン
-- 機密性の高いアクションへの承認フロー
-- ログ、ステータスコマンド、設定管理
-
-## プロジェクトの現状
-
-Leleは積極的に開発が進められているスタンドアロンプロジェクトです。
-
-現在のコードベースは以下をサポートしています:
-
-- プロダクションレベルのゲートウェイフロー
-- Web/ネイティブクライアントパス
-- 設定可能なマルチプロバイダールーティング
-- 複数のメッセージングチャネル
-- スキル、サブエージェント、スケジュール自動化
-
-主なドキュメントのギャップは、以前のREADMEが古いフォークのアイデンティティを記述しており、現在の機能セットと一致していなかったことです。このREADMEは、プロジェクトの現状を反映しています。
+LeleはワークスペースファーストのAIアシスタントで、長時間稼働するホストを想定しています。CLIおよびTUIチャット、マルチチャネルゲートウェイ、Web UI、ネイティブクライアントAPI、スキル、cron、サブエージェントを備え、JSランタイムやマルチプロセスのTUIスタックは不要です。
 
 ## クイックスタート
 
-### ソースからインストール
-
 ```bash
-git clone https://github.com/xilistudios/lele.git
-cd lele
-make deps
-make build
+# Linux / macOS / BSD
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
 ```
-
-バイナリは`build/lele`に出力されます。
-
-### 初期セットアップ
-
 ```bash
+# ソースからビルド
+git clone https://github.com/xilistudios/lele.git && cd lele
+make deps && make build && make install
+```
+```
+# 初期セットアップ
 lele onboard
+# CLIエージェント
+lele agent -m "何ができますか？"
+# TUI
+lele tui
 ```
 
-`onboard`は基本設定、ワークステンプレートを作成し、オプションでWeb UIを有効にしてネイティブ/Webクライアントフロー用のペアリングPINを生成します。
+インストーラはSHA256を検証し、デフォルトでは `~/.local/bin` にインストールします。
 
-### 最小限のCLI使用法
+## ベンチマーク
+
+Apple M1 / macOS arm64で計測。アイドルTUIセッション（PTY下、モデル呼び出しなし）。起動は `--version` 3回の平均。RSSは初回描画後約6秒のプロセストリーのピークメモリ。
+
+| ツール | ランタイム | インストールサイズ | 起動 | アイドルTUI RSS | プロセス数 |
+| --- | --- | --- | --- | --- | --- |
+| **lele** | Go + Bubble Tea | **57 MB** 単一バイナリ | **~25 ms** | **~42 MB** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 MB バイナリ | ~13 ms | ~170–187 MB | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB バイナリ | ~233 ms | ~173 MB | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB バイナリ | ~284 ms | ~1.0 GB ピーク | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 GB ツリー | ~236 ms | ~374 MB | 3–4 |
+
+レンダリングパス（リポジトリ内Go benches、200×50フレーム）：`View()` ≈ 3.4 ms · `paintFrame` ≈ 0.5 ms。
+
+ターミナル指紋は静か：クラシックなBubble Tea alt-screen + マウス + ブラケットペースト。能力スパムや製品OSCはありません。
+
+**なぜ重要か：** 静的単一バイナリ、アイドル約42 MB、初フレーム100 ms未満。ゲートウェイ用ホストとマルチセッション環境向けのスケールです。
 
 ```bash
-lele agent -m "What can you do?"
+time lele --version
+go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
 ```
 
-## Web UIとネイティブクライアントフロー
+## 機能
 
-LeleにはローカルWeb UIとネイティブクライアントチャネルが含まれています。
+**エージェントランタイム**
+- 反復上限付きツール利用エージェントループ
+- 名前付きエージェント、モデルフォールバック、エージェントごとの `thinking_level`（`/think` で上書き可）
+- セッション永続化（SQLite）と任意のエフェメラルセッション
+- ネイティブ/Webフローでのファイル添付
 
-一般的なフロー:
+**インターフェース**
+- CLI（`lele agent`）とフルBubble Tea TUI（`lele tui`）
+- 内蔵Web UI + PINペアリングのネイティブREST/WebSocketクライアント
+- チャットチャネル用ゲートウェイ（Telegram、Discord、Slack、WhatsApp、Feishu、Line、QQ、DingTalkなど）
 
-1. `lele onboard`を実行
-2. プロンプトでWeb UIを有効化
-3. ペアリングPINを生成
-4. `lele gateway`でサービスを起動
-5. ブラウザでWebアプリを開き、PINでペアリング
+**自動化**
+- スケジュールジョブ（`lele cron`）と `HEARTBEAT.md` ハートビートタスク
+- スキルと非同期サブエージェント
+- マルチエージェントグループチャット（MoA / ラウンドロビン / モデレーター / パイプライン）— `docs/moa-group-chat.md` を参照
 
-ネイティブチャネルは、デスクトップクライアントやローカル統合向けのRESTおよびWebSocketエンドポイントを公開します。
+**安全性**
+- ワークスペース制限、exec拒否パターン、承認フロー
+- ネイティブクライアントのトークン認証、アップロード上限/TTL
 
-完全なAPIについては`docs/client-api.md`を参照してください。
+## スクリーンショット
+
+### TUI
+
+
+![進行中のLele TUIチャット](assets/tui-chat.png)
+
+```bash
+lele tui              # 新しいセッション
+lele tui -s <id>      # セッションの再開
+```
+
+ストリーミングチャット、ツール可視化、Markdown、セッションサイドバー、コンテキスト統計。テーマ：`dracula`（デフォルト）、`nord`、`catppuccin`、`gruvbox`、`tokyo-night`、`solarized-light` — **Settings → Interface** で切替、`~/.lele/tui.json` に保存。言語は `LELE_LANG` または `/lang` で設定。
+
+### Web UI
+
+![Lele Web UI](assets/webui.png)
+
+![進行中のLele Web UIチャット](assets/webui-chat.png)
+
+1. `lele onboard` — Web UIを有効化し、ペアリングPINを取得  
+2. `lele gateway` — ポート `18790` で `/`、`/api/v1/*`、WebSocketを提供  
+3. ブラウザで開き、PINでペアリング  
+
+フルクライアントAPI：`docs/client-api.md`。
+
 
 ## 設定
 
-メイン設定ファイル:
-
-```text
-~/.lele/config.json
-```
-
-設定テンプレートの例:
-
-```text
-config/config.example.json
-```
-
-設定可能な主要領域:
-
-- `agents.defaults`: ワークスペース、プロバイダー、モデル、トークン制限、ツール制限
-- `session`: エフェメラルセッションの動作とアイデンティティリンク
-- `channels`: ゲートウェイおよびメッセージング統合
-- `providers`: ダイレクトプロバイダーおよび名前付きOpenAI互換バックエンド
-- `tools`: Web検索、cron、execの安全性設定
-- `heartbeat`: 定期タスクの実行
-- `gateway`、`logs`、`devices`
-
-### 最小限の例
+設定は `~/.lele/config.json`（テンプレート：`config/config.example.json`）にあります。
 
 ```json
 {
@@ -161,175 +141,35 @@ config/config.example.json
 }
 ```
 
-## プロバイダー
+主なセクション：`agents.defaults`、`session`、`channels`、`providers`、`tools`、`heartbeat`、`gateway`、`logs`、`devices`。
 
-Leleは組み込みプロバイダーと名前付きプロバイダー定義の両方をサポートしています。
+**プロバイダー：** `anthropic`、`openai`、`openrouter`、`groq`、`zhipu`、`gemini`、`vllm`、`nvidia`、`ollama`、`moonshot`、`deepseek`、`github_copilot`、および名前付きOpenAI互換バックエンド（`model`、`context_window`、`vision`、`reasoning` など）。
 
-現在の設定/ランタイムに含まれる組み込みプロバイダーファミリー:
+**ワークスペース**（`~/.lele/workspace/`）：`sessions/`、`memory/`、`state/`、`cron/`、`skills/`、`AGENT.md`、`HEARTBEAT.md`、`IDENTITY.md`、`SOUL.md`、`USER.md`。
 
-- `anthropic`
-- `openai`
-- `openrouter`
-- `groq`
-- `zhipu`
-- `gemini`
-- `vllm`
-- `nvidia`
-- `ollama`
-- `moonshot`
-- `deepseek`
-- `github_copilot`
-
-また、以下のようなモデルごとの設定を持つ名前付きOpenAI互換プロバイダーエントリもサポートしています:
-
-- `model`
-- `context_window`
-- `max_tokens`
-- `temperature`
-- `vision`
-- `reasoning`
-
-## チャネル
-
-ゲートウェイは現在、以下のチャネルの設定を含んでいます:
-
-- `telegram`
-- `discord`
-- `whatsapp`
-- `feishu`
-- `slack`
-- `line`
-- `onebot`
-- `qq`
-- `dingtalk`
-- `maixcam`
-- `native`
-- `web`
-
-チャネルによってはシンプルなトークンベースの統合である一方、Webhookやブリッジのセットアップを必要とするものもあります。
-
-## ワークスペースレイアウト
-
-デフォルトのワークスペース:
-
-```text
-~/.lele/workspace/
-```
-
-典型的な内容:
-
-```text
-~/.lele/workspace/
-├── sessions/
-├── memory/
-├── state/
-├── cron/
-├── skills/
-├── AGENT.md
-├── HEARTBEAT.md
-├── IDENTITY.md
-├── SOUL.md
-└── USER.md
-```
-
-このワークスペース中心のレイアウトは、Leleを実用的で効率的なものにしている要素の一つです。状態、プロンプト、スキル、オートメーションが予測可能な場所に配置されています。
-
-## スケジュール、スキル、サブエージェント
-
-### スケジュールタスク
-
-`lele cron`を使用して、一度きりまたは定期的なジョブを作成します。
-
-例:
-
-```bash
-lele cron list
-lele cron add --name reminder --message "Check backups" --every "2h"
-```
-
-### ハートビート
-
-Leleは定期的にワークスペースから`HEARTBEAT.md`を読み取り、タスクを自動的に実行できます。
-
-### スキル
-
-組み込みおよびカスタムスキルは、以下で管理できます:
-
-```bash
-lele skills list
-lele skills search
-lele skills install <skill>
-```
-
-### サブエージェント
-
-Leleはサブエージェントによる非同期の委譲作業をサポートしています。長時間実行や並列化可能なタスクに役立ちます。
-
-詳細は`docs/SKILL_SUBAGENTS.md`を参照してください。
-
-## セキュリティモデル
-
-Leleは、エージェントのファイルおよびコマンドアクセスを設定されたワークスペースに制限できます。
-
-主なコントロール:
-
-- `restrict_to_workspace`
-- exec拒否パターン
-- 機密性の高いアクションへの承認フロー
-- ネイティブクライアント向けのトークンベース認証
-- ネイティブファイルアップロードのアップロード制限とTTL
-
-運用の詳細については`docs/tools_configuration.md`および`docs/client-api.md`を参照してください。
-
-## CLIリファレンス
+## CLI
 
 | コマンド | 説明 |
 | --- | --- |
 | `lele onboard` | 設定とワークスペースを初期化 |
-| `lele agent` | インタラクティブなエージェントセッションを開始 |
-| `lele agent -m "..."` | 一度限りのプロンプトを実行 |
-| `lele gateway` | メッセージングゲートウェイを起動 |
-| `lele auth login` | サポートされているプロバイダーで認証 |
-| `lele status` | ランタイムのステータスを表示 |
-| `lele cron list` | スケジュール済みジョブを一覧表示 |
-| `lele cron add ...` | スケジュール済みジョブを追加 |
-| `lele skills list` | インストール済みスキルを一覧表示 |
-| `lele client pin` | ペアリングPINを生成 |
-| `lele client list` | ペアリング済みネイティブクライアントを一覧表示 |
-| `lele version` | バージョン情報を表示 |
-
-## 追加ドキュメント
-
-- `docs/agents-models-providers.md`
-- `docs/architecture.md`
-- `docs/channel-setup.md`
-- `docs/cli-reference.md`
-- `docs/config-reference.md`
-- `docs/client-api.md`
-- `docs/deployment.md`
-- `docs/examples.md`
-- `docs/installation-and-onboarding.md`
-- `docs/logging-and-observability.md`
-- `docs/model-routing.md`
-- `docs/security-and-sandbox.md`
-- `docs/session-and-workspace.md`
-- `docs/skills-authoring.md`
-- `docs/tools_configuration.md`
-- `docs/troubleshooting.md`
-- `docs/web-ui.md`
-- `docs/SKILL_SUBAGENTS.md`
-- `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`
+| `lele agent` / `lele agent -m "..."` | 対話式またはワンショットエージェント |
+| `lele tui` / `lele tui -s <session>` | ターミナルUI |
+| `lele gateway` | メッセージングゲートウェイ + Web UI |
+| `lele auth login` | プロバイダーを認証 |
+| `lele status` | ランタイム状態 |
+| `lele cron list` / `lele cron add ...` | スケジュールジョブ |
+| `lele skills list` | インストール済みスキル |
+| `lele client pin` / `lele client list` | ネイティブクライアントのペアリング |
+| `lele version` | バージョン情報 |
 
 ## 開発
 
-便利なターゲット:
+Go 1.25+、[Bun](https://bun.sh/)（Web UI）、Makeが必要です。
 
 ```bash
-make build
-make test
-make fmt
-make vet
-make check
+make deps web-build build   # バイナリ + web をビルド
+make test fmt vet           # チェック
+make build-all              # クロスコンパイル
 ```
 
 ## ライセンス
