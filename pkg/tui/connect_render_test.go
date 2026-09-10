@@ -30,12 +30,78 @@ func TestRenderConnectPicker(t *testing.T) {
 	if !strings.Contains(out, "Anthropic") {
 		t.Fatalf("picker missing Anthropic preset:\n%s", out)
 	}
-	if !strings.Contains(out, "Custom") && !strings.Contains(out, "Personalizado") && !strings.Contains(out, "Personalizado") {
-		t.Fatalf("picker missing custom entry:\n%s", out)
-	}
 	// The API base should be visible for presets.
 	if !strings.Contains(out, "https://api.openai.com/v1") {
 		t.Fatalf("picker missing openai api base:\n%s", out)
+	}
+
+	// Jump to the last entry (custom) so it scrolls into view.
+	m.providerTypePickerIdx = len(providerPresets)
+	out = m.renderFormModal("Add Provider", m.formStepNames())
+	if !strings.Contains(out, "Custom") && !strings.Contains(out, "Personalizado") {
+		t.Fatalf("picker missing custom entry:\n%s", out)
+	}
+}
+
+// TestRenderConnectPickerScroll verifies the long preset list is windowed:
+// earlier items scroll out of view when the selection moves past the
+// visible page, and the custom entry becomes reachable at the end.
+func TestRenderConnectPickerScroll(t *testing.T) {
+	m := newTestModel(t)
+	m.width = 120
+	m.height = 30 // matches a typical compact TUI frame
+
+	m.executeCommand("/connect")
+	m.textInput.SetValue("my-provider")
+	m = sendKeys(m, "\r")
+	if !m.providerTypePicker {
+		t.Fatal("expected picker active")
+	}
+
+	// At the top, OpenAI is visible and the last preset is not.
+	out := m.renderFormModal("Add Provider", m.formStepNames())
+	if !strings.Contains(out, "OpenAI") {
+		t.Fatalf("expected OpenAI at top:\n%s", out)
+	}
+	lastPreset := providerPresets[len(providerPresets)-1].label
+	if strings.Contains(out, lastPreset) {
+		t.Fatalf("last preset %q should be off-screen at top:\n%s", lastPreset, out)
+	}
+	if !strings.Contains(out, i18n.T("tui.moreBelow")) {
+		t.Fatalf("expected scroll-down indicator:\n%s", out)
+	}
+
+	// Move selection to the last preset — it must scroll into view and
+	// OpenAI should scroll away.
+	m.providerTypePickerIdx = len(providerPresets) - 1
+	out = m.renderFormModal("Add Provider", m.formStepNames())
+	if !strings.Contains(out, lastPreset) {
+		t.Fatalf("expected last preset %q after scroll:\n%s", lastPreset, out)
+	}
+	if strings.Contains(out, "OpenAI") {
+		t.Fatalf("OpenAI should be off-screen after scrolling to end:\n%s", out)
+	}
+	if !strings.Contains(out, i18n.T("tui.moreAbove")) {
+		t.Fatalf("expected scroll-up indicator:\n%s", out)
+	}
+
+	// Keyboard down past the fold updates the offset so selection stays visible.
+	m.providerTypePickerIdx = 0
+	m.modalScrollOffset = 0
+	for i := 0; i < 20; i++ {
+		m = sendKeys(m, "down")
+	}
+	out = m.renderFormModal("Add Provider", m.formStepNames())
+	if m.providerTypePickerIdx != 20 {
+		t.Fatalf("expected idx 20, got %d", m.providerTypePickerIdx)
+	}
+	if m.modalScrollOffset <= 0 {
+		t.Fatalf("expected positive scroll offset after moving past fold, got %d", m.modalScrollOffset)
+	}
+	// The selected preset must be in the rendered window.
+	selLabel := providerPresets[m.providerTypePickerIdx].label
+	if !strings.Contains(out, selLabel) {
+		t.Fatalf("selected preset %q not visible:\n%s", selLabel, out)
 	}
 }
 

@@ -1123,27 +1123,63 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		if max <= 0 {
 			max = len(providerPresets) + 1
 		}
-		for i := 0; i < max; i++ {
+
+		// Window the list so long preset catalogs fit the modal frame.
+		// maxModalVisible is list-modal sized (capped by modalItems); the
+		// form picker has extra chrome, so compute from height instead.
+		maxVisible := m.height - 14
+		if maxVisible < 5 {
+			maxVisible = 5
+		}
+		if maxVisible > max {
+			maxVisible = max
+		}
+		// Reserve a row for the scroll indicator when content overflows.
+		if max > maxVisible && maxVisible > 1 {
+			maxVisible--
+		}
+
+		// Keep the highlighted preset inside the visible window.
+		if m.providerTypePickerIdx < m.modalScrollOffset {
+			m.modalScrollOffset = m.providerTypePickerIdx
+		}
+		if m.providerTypePickerIdx >= m.modalScrollOffset+maxVisible {
+			m.modalScrollOffset = m.providerTypePickerIdx - maxVisible + 1
+		}
+		if m.modalScrollOffset < 0 {
+			m.modalScrollOffset = 0
+		}
+		if maxOffset := max - maxVisible; m.modalScrollOffset > maxOffset {
+			m.modalScrollOffset = maxOffset
+		}
+
+		if m.modalScrollOffset > 0 {
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreAbove")) + "\n")
+		}
+		endIdx := m.modalScrollOffset + maxVisible
+		if endIdx > max {
+			endIdx = max
+		}
+		for i := m.modalScrollOffset; i < endIdx; i++ {
+			var label string
 			if i < len(providerPresets) {
 				p := providerPresets[i]
-				label := p.label
+				label = p.label
 				if p.apiBase != "" {
 					label += "  ·  " + p.apiBase
 				}
-				if i == m.providerTypePickerIdx {
-					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
-				} else {
-					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
-				}
 			} else {
 				// Last entry: "custom"
-				label := i18n.T("tui.connectCustomType")
-				if i == m.providerTypePickerIdx {
-					sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
-				} else {
-					sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
-				}
+				label = i18n.T("tui.connectCustomType")
 			}
+			if i == m.providerTypePickerIdx {
+				sb.WriteString(ModalItemActive.Render("  > "+label) + "\n")
+			} else {
+				sb.WriteString(ModalItemInactive.Render("    "+label) + "\n")
+			}
+		}
+		if endIdx < max {
+			sb.WriteString(CommentColorStyle.Render("  "+i18n.T("tui.moreBelow")) + "\n")
 		}
 		sb.WriteString("\n")
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectPickerHint")))
