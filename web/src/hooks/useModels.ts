@@ -53,7 +53,7 @@ export function useModels(api: ApiClient, token: string | null) {
 
       setModelState({
         current: result.model ?? '',
-        available: result.models,
+        available: result.models ?? [],
         groups: result.model_groups ?? [],
       })
       return result
@@ -70,8 +70,8 @@ export function useModels(api: ApiClient, token: string | null) {
       // model list rather than serving a stale cached list.
       queryClient.invalidateQueries({ queryKey: ['models'] })
       setModelState({
-        current: result.model,
-        available: result.models,
+        current: result.model ?? '',
+        available: result.models ?? [],
         groups: result.model_groups ?? [],
       })
       return result

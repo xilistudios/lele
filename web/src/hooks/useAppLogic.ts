@@ -289,13 +289,20 @@ export function useAppLogic(
   }, [api, wsClose, messagesHook.clearAll, persistSession])
 
   const handleSend = useCallback(
-    async (content: string, attachments: string[]) => {
+    async (content: string, attachments: string[]): Promise<boolean> => {
       let sessionKey = sessionsHook.currentSessionKey
       if (!sessionKey) {
         sessionKey = await sessionsHook.createSession(chatMode)
-        if (!sessionKey) return
+        if (!sessionKey) {
+          // Keep the draft: the caller treats false as "not accepted".
+          setError('Failed to create session')
+          return false
+        }
       }
-      if (!currentAgentId) return
+      if (!currentAgentId) {
+        setError('No agent selected')
+        return false
+      }
 
       await messagesHook.sendMessage(content, attachments, sessionKey, currentAgentId)
       messagesHook.setPendingAttachments([])
@@ -308,6 +315,7 @@ export function useAppLogic(
         .trim()
         .slice(0, 50)
       touchSession(sessionKey, title || undefined, chatMode)
+      return true
     },
     [
       sessionsHook.currentSessionKey,
@@ -351,8 +359,11 @@ export function useAppLogic(
   )
 
   const handleCancel = useCallback(() => {
-    wsSend('cancel', {})
-  }, [wsSend])
+    // Scope the cancel to the active session so a background session's turn
+    // is not aborted when the user cancels from another chat.
+    const sessionKey = sessionsHook.currentSessionKey
+    wsSend('cancel', sessionKey ? { session_key: sessionKey } : {})
+  }, [wsSend, sessionsHook.currentSessionKey])
 
   const handleSelectSession = useCallback(
     async (sessionKey: string, options?: { parentSessionKey?: string | null }) => {
@@ -403,7 +414,7 @@ export function useAppLogic(
       // WebSocket subscribe passes ownership validation on the first attempt.
       const sessionKey = await sessionsHook.createSession(targetMode)
       if (sessionKey) {
-        navigate(`/chat/${sessionKey}`, { replace: true })
+        navigate(`/chat/${encodeURIComponent(sessionKey)}`, { replace: true })
 
         // Set currentAgentId so the WebSocket subscription useEffect can fire.
         // Try to get the agent assigned to the new session; fall back to the
@@ -460,11 +471,16 @@ export function useAppLogic(
 
   const handleSelectAgent = useCallback(
     async (agentId: string) => {
+      const previousAgentId = currentAgentIdRef.current
       setCurrentAgentId(agentId)
       if (sessionsHook.currentSessionKey) {
         try {
           await api.updateSessionAgent(sessionsHook.currentSessionKey, agentId)
-        } catch {}
+        } catch (err) {
+          // Revert so the UI does not show an agent the backend never saved.
+          setCurrentAgentId(previousAgentId)
+          setError((err as Error).message)
+        }
       }
     },
     [api, sessionsHook.currentSessionKey],
@@ -646,7 +662,7 @@ export function useAppLogic(
   currentSessionKeyRef.current = sessionsHook.currentSessionKey
 
   const sendOrQueue = useCallback(
-    (content: string, attachments: string[]): boolean => {
+    async (content: string, attachments: string[]): Promise<boolean> => {
       const sessionKey = currentSessionKeyRef.current
       if (busyRef.current && sessionKey) {
         // False when this session's queue is at QUEUE_CAP: the caller keeps the
@@ -658,8 +674,7 @@ export function useAppLogic(
         if (accepted && attachments.length > 0) messagesHook.setPendingAttachments([])
         return accepted
       }
-      void handleSend(content, attachments)
-      return true
+      return handleSend(content, attachments)
     },
     [handleSend, queueHook.enqueueMessage, messagesHook.setPendingAttachments],
   )
@@ -776,6 +791,7 @@ export function useAppLogic(
     loadMore: chatHistory.loadMore,
     hasMore: chatHistory.hasMore,
     isLoadingMore: chatHistory.isLoadingMore,
+    isHistoryLoading: chatHistory.isLoading,
     typingIndicator: messagesHook.typingIndicator,
     sendTyping: messagesHook.sendTyping,
   }

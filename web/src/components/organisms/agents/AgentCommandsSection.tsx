@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSettings } from '../../../contexts/SettingsContext'
 import { useAgentCommands } from '../../../hooks/useAgentCommands'
@@ -73,6 +73,14 @@ function CommandsSkeleton() {
 function PathCopy({ value, testId }: { value: string; testId: string }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+    }
+  }, [])
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value)
@@ -81,7 +89,8 @@ function PathCopy({ value, testId }: { value: string; testId: string }) {
       // select-all so copying by hand still works.
     }
     setCopied(true)
-    setTimeout(() => setCopied(false), FEEDBACK_MS)
+    if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+    copiedTimeoutRef.current = setTimeout(() => setCopied(false), FEEDBACK_MS)
   }
   return (
     <IconButton
@@ -249,6 +258,13 @@ export function AgentCommandsSection({ agentId }: Props) {
   const [pendingRemove, setPendingRemove] = useState<string | null>(null)
   /** Transient success notice after a delete (creates/edits close the dialog). */
   const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
+    }
+  }, [])
 
   // The dialog owns its create/update errors (its own banner); the section
   // only passes the mutations through so the whole commands API stays in one
@@ -270,7 +286,8 @@ export function AgentCommandsSection({ agentId }: Props) {
 
   const showNotice = (message: string) => {
     setNotice(message)
-    setTimeout(() => setNotice(null), FEEDBACK_MS)
+    if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current)
+    noticeTimeoutRef.current = setTimeout(() => setNotice(null), FEEDBACK_MS)
   }
 
   const confirmRemove = (name: string) => {

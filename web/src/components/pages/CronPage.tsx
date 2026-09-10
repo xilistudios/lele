@@ -1,11 +1,11 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useAvailableModels } from '../../hooks/useAvailableModels'
 import { useCronJobs } from '../../hooks/useCronJobs'
 import type { Agent, CronJob, CronJobInput, CronSchedule } from '../../lib/types'
-import { Button } from '../atoms'
+import { Button, ErrorBanner } from '../atoms'
 import { Sidebar } from '../organisms/Sidebar'
 
 // ---------------------------------------------------------------------------
@@ -486,6 +486,19 @@ function JobFormModal({
   const inputCls =
     'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-interaction-primary/50'
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  // Escape closes the dialog; initial focus lands on the first field.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    dialogRef.current
+      ?.querySelector<HTMLElement>('input, select, textarea, button:not([disabled])')
+      ?.focus()
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const actionButtons: { kind: ActionKind; label: string }[] = [
     { kind: 'message', label: t('cron.actionMessage', 'Message') },
@@ -497,14 +510,20 @@ function JobFormModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
-      aria-hidden
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onClose()
+      }}
     >
       <dialog
+        ref={dialogRef}
         open
         className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-background-secondary p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Let Escape bubble to the document listener; stop other keys from
+          // closing the overlay when interacting with form controls.
+          if (e.key !== 'Escape') e.stopPropagation()
+        }}
         aria-modal="true"
         aria-label={initial ? t('cron.editJob', 'Edit Job') : t('cron.newJob', 'New Job')}
       >
@@ -798,8 +817,18 @@ export function CronPage() {
   const { t } = useTranslation()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar, agents } =
     useAppLogicContext()
-  const { jobs, status, loading, refresh, toggleEnabled, removeJob, runJob, createJob, updateJob } =
-    useCronJobs()
+  const {
+    jobs,
+    status,
+    loading,
+    error,
+    refresh,
+    toggleEnabled,
+    removeJob,
+    runJob,
+    createJob,
+    updateJob,
+  } = useCronJobs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
@@ -938,6 +967,8 @@ export function CronPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
+          {error && <ErrorBanner message={error} />}
+
           {loading && jobs.length === 0 && (
             <div className="flex items-center justify-center py-20">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />

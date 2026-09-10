@@ -93,10 +93,11 @@ export function SessionItem({
         }}
         onBlur={() => setConfirmingDelete(false)}
         aria-label={confirmingDelete ? t('chat.confirmDelete') : t('chat.deleteSession')}
-        className={`ml-auto flex items-center justify-center rounded-md p-2 transition-all ${
+        className={`ml-auto flex h-8 w-8 items-center justify-center rounded-md transition-all ${
           confirmingDelete
             ? 'opacity-100 bg-state-error-light text-state-error'
-            : 'text-text-tertiary opacity-0 hover:bg-state-error-light hover:text-state-error group-hover:opacity-100'
+            : // Always visible on touch (no hover); desktop keeps the hover reveal.
+              'text-text-tertiary opacity-100 hover:bg-state-error-light hover:text-state-error md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
         }`}
       >
         <TrashIcon size={12} />

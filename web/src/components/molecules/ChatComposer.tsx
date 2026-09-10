@@ -92,23 +92,29 @@ export function ChatComposer() {
     textareaRef.current?.focus()
   }
 
-  // The composer is not remounted on session switch, so palette state is
-  // cleared explicitly. Draft behaviour on switch is left untouched.
+  // The composer is not remounted on session switch, so draft/palette/queue
+  // state must be cleared explicitly — otherwise text typed in one chat would
+  // bleed into the next.
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentSessionKey is the trigger, not a read — the effect must run exactly when the session changes.
   useEffect(() => {
+    setDraft('')
     setPaletteIdx(0)
     setPaletteDismissed(false)
+    setQueueFullHint(false)
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
   }, [currentSessionKey])
 
-  const submit = (e?: FormEvent) => {
+  const submit = async (e?: FormEvent) => {
     e?.preventDefault()
     const content = draft.trim()
     if (!content && pendingAttachments.length === 0) return
 
     // While the agent is busy onSend enqueues instead of sending, and returns
     // false when that session's queue is full — keep the draft so nothing is
-    // silently lost.
-    const accepted = onSend(content, pendingAttachments)
+    // silently lost. Same contract applies when session/agent creation fails.
+    const accepted = await onSend(content, pendingAttachments)
     if (accepted === false) {
       setQueueFullHint(true)
       return
@@ -255,7 +261,7 @@ export function ChatComposer() {
                       onAttachmentsChange(pendingAttachments.filter((a) => a !== attachment))
                     }
                     className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
-                    title={t('chat.removeAttachment') || 'Remove attachment'}
+                    title={t('chat.removeAttachment')}
                   >
                     <CloseIcon size={10} />
                   </button>
@@ -301,7 +307,7 @@ export function ChatComposer() {
                     onAttachmentsChange(pendingAttachments.filter((a) => a !== attachment))
                   }
                   className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-text-tertiary hover:bg-background-tertiary hover:text-text-primary transition-colors"
-                  title={t('chat.removeAttachment') || 'Remove attachment'}
+                  title={t('chat.removeAttachment')}
                 >
                   <CloseIcon size={10} />
                 </button>
@@ -376,7 +382,7 @@ export function ChatComposer() {
             onChange={onSelectModel}
             options={groupedModels ? undefined : availableModels}
             placeholder={selectedModel}
-            searchAriaLabel={`${t('chat.model')} buscar`}
+            searchAriaLabel={`${t('chat.model')} ${t('chat.search')}`}
             searchPlaceholder={t('chat.model')}
             value={selectedModel}
           />
@@ -391,7 +397,7 @@ export function ChatComposer() {
               placeholder={
                 thinkOptions.find((o) => o.value === thinkLevel)?.label ?? t('chat.thinkingOff')
               }
-              searchAriaLabel={`${t('chat.thinking')} buscar`}
+              searchAriaLabel={`${t('chat.thinking')} ${t('chat.search')}`}
               searchPlaceholder={t('chat.thinking')}
               value={thinkLevel}
             />
@@ -407,7 +413,7 @@ export function ChatComposer() {
               placeholder={
                 agentsOptions.find((a) => a.value === selectedAgentId)?.label ?? t('chat.agent')
               }
-              searchAriaLabel={`${t('chat.agent')} buscar`}
+              searchAriaLabel={`${t('chat.agent')} ${t('chat.search')}`}
               searchPlaceholder={t('chat.agent')}
               value={selectedAgentId}
             />

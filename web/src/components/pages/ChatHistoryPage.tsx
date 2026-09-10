@@ -44,9 +44,12 @@ export function ChatHistoryPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [total, setTotal] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Fetch the first page of persisted sessions on mount or when kind filter changes.
+  // `refreshKey` is only a re-fetch trigger for the retry button.
   useEffect(() => {
+    void refreshKey
     let cancelled = false
     setLoading(true)
     setLoadError(null)
@@ -72,7 +75,7 @@ export function ChatHistoryPage() {
     return () => {
       cancelled = true
     }
-  }, [api, activeKind])
+  }, [api, activeKind, refreshKey])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return
@@ -202,9 +205,16 @@ export function ChatHistoryPage() {
             <div className="flex h-64 items-center justify-center">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
             </div>
-          ) : loadError ? (
-            <div className="flex h-64 items-center justify-center text-sm text-warning">
-              {t('chat.loadError', { error: loadError })}
+          ) : loadError && allSessions.length === 0 ? (
+            <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm text-warning">
+              <span>{t('chat.loadError', { error: loadError })}</span>
+              <button
+                type="button"
+                onClick={() => setRefreshKey((k) => k + 1)}
+                className="rounded-lg border border-border bg-background-secondary px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                {t('common.retry', 'Retry')}
+              </button>
             </div>
           ) : filteredSessions.length === 0 ? (
             <div className="flex h-64 items-center justify-center text-sm text-text-tertiary">
@@ -212,6 +222,21 @@ export function ChatHistoryPage() {
             </div>
           ) : (
             <div className="mx-auto max-w-4xl">
+              {loadError && (
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-2 text-xs text-state-error">
+                  <span>{t('chat.loadError', { error: loadError })}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadError(null)
+                      if (hasMore) void loadMore()
+                    }}
+                    className="shrink-0 rounded border border-state-error/40 px-2 py-1 font-medium text-state-error transition-colors hover:bg-state-error/10"
+                  >
+                    {t('common.retry', 'Retry')}
+                  </button>
+                </div>
+              )}
               <ChatListView
                 groups={grouped}
                 selectedKey={currentSessionKey}

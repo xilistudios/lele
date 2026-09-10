@@ -89,6 +89,8 @@ export type AppLogicContextValue = {
   loadMore: UseApp['loadMore']
   hasMore: UseApp['hasMore']
   isLoadingMore: UseApp['isLoadingMore']
+  /** True while the first history page for the current session is loading. */
+  isHistoryLoading: UseApp['isHistoryLoading']
 
   // For event handler ref access
   eventHandlerRef: MutableRefObject<(event: ClientEvent) => void>
@@ -198,6 +200,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       loadMore: app.loadMore,
       hasMore: app.hasMore,
       isLoadingMore: app.isLoadingMore,
+      isHistoryLoading: app.isHistoryLoading,
 
       // Ref for internal wiring
       eventHandlerRef,
@@ -258,6 +261,7 @@ export function AppLogicProvider({ children }: { children: ReactNode }) {
       app.loadMore,
       app.hasMore,
       app.isLoadingMore,
+      app.isHistoryLoading,
     ],
   )
 

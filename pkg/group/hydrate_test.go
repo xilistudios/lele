@@ -128,12 +128,22 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 	}
 
 	// The restart: a fresh manager over the same storeDir.
+	// Poll LoadHistorical: ListGroups can briefly race the deferred save on
+	// slow CI even after LoadGroup saw a terminal file.
 	rec := &mockPublisher{}
 	reader := NewGroupManager(mockResolve, (&mockExecutor{}).execute, rec.publish)
 	reader.SetStoreDir(dir)
-	n, err := reader.LoadHistorical()
-	if err != nil {
-		t.Fatalf("LoadHistorical: %v", err)
+	var n int
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		n, err = reader.LoadHistorical()
+		if err != nil {
+			t.Fatalf("LoadHistorical: %v", err)
+		}
+		if n >= 1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if n != 1 {
 		t.Fatalf("LoadHistorical count = %d, want 1", n)

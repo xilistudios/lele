@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import type { ModelGroup } from '../lib/types'
 
@@ -16,14 +16,19 @@ export function useAvailableModels(api: ApiClient | null) {
     isLoading: true,
     error: null,
   })
+  // Guards against out-of-order responses when `api` changes mid-flight.
+  const generationRef = useRef(0)
 
   useEffect(() => {
     if (!api) return
+
+    const generation = ++generationRef.current
 
     const loadModels = async () => {
       setState((prev) => ({ ...prev, isLoading: true, error: null }))
       try {
         const result = await api.models('', null)
+        if (generation !== generationRef.current) return
         setState({
           available: result.models,
           groups: result.model_groups ?? [],
@@ -31,6 +36,7 @@ export function useAvailableModels(api: ApiClient | null) {
           error: null,
         })
       } catch (err) {
+        if (generation !== generationRef.current) return
         setState((prev) => ({
           ...prev,
           isLoading: false,

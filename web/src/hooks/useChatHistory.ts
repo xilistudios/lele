@@ -195,7 +195,9 @@ export function useChatHistory(
     }
   }, [query.data, sessionKey, hydrateGroups])
 
-  const hasMore = query.data?.hasMore ?? true
+  // Default to false while there is no data yet so the UI does not flash a
+  // "load more" affordance before the first history response arrives.
+  const hasMore = query.data?.hasMore ?? false
 
   const loadMore = useCallback(async () => {
     if (!sessionKey || !token || isLoadingMoreRef.current) return
