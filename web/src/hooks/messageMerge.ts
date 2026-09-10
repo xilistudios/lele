@@ -35,7 +35,6 @@ type AssistantEntry = {
 type StreamingIndex = {
   assistants: AssistantEntry[]
   toolCallIds: Set<string>
-  toolSessions: Set<string>
   toolByCallId: Map<string, ChatMessage>
   /** Optimistic user messages (content-matched against base on confirmation). */
   optimisticUsers: Array<{ msg: ChatMessage; used: boolean }>
@@ -45,7 +44,6 @@ type StreamingIndex = {
 function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
   const assistants: AssistantEntry[] = []
   const toolCallIds = new Set<string>()
-  const toolSessions = new Set<string>()
   const toolByCallId = new Map<string, ChatMessage>()
   const optimisticUsers: Array<{ msg: ChatMessage; used: boolean }> = []
 
@@ -65,15 +63,12 @@ function indexStreaming(streamingMessages: ChatMessage[]): StreamingIndex {
         toolCallIds.add(msg.toolCallId)
         toolByCallId.set(msg.toolCallId, msg)
       }
-      if (msg.sessionKey) {
-        toolSessions.add(msg.sessionKey)
-      }
     } else if (msg.role === 'user' && msg.optimistic) {
       optimisticUsers.push({ msg, used: false })
     }
   }
 
-  return { assistants, toolCallIds, toolSessions, toolByCallId, optimisticUsers }
+  return { assistants, toolCallIds, toolByCallId, optimisticUsers }
 }
 
 // ── Turn detection ──────────────────────────────────────────────────────────
@@ -96,10 +91,16 @@ function computeBaseHasCurrentTurn(
     (m) => m.role === 'user' && !m.optimistic,
   ).length
   const baseAssistantCount = baseMessages.filter((m) => m.role === 'assistant').length
-  const optimisticUser = streamingMessages.find((m) => m.role === 'user' && m.optimistic)
+  // Multiple optimistic users can be in flight (rapid sends). Use the *smallest*
+  // snapshot so matching only starts once base has grown past every pending send —
+  // using the first one alone let a later confirm pair the wrong assistant.
+  const optimisticCounts = streamingMessages
+    .filter((m) => m.role === 'user' && m.optimistic)
+    .map((m) => m.optimisticBaseCount ?? 0)
+  const minOptimisticBaseCount = optimisticCounts.length > 0 ? Math.min(...optimisticCounts) : 0
 
   return (
-    baseUserCountNonOptimistic > (optimisticUser?.optimisticBaseCount ?? 0) &&
+    baseUserCountNonOptimistic > minOptimisticBaseCount &&
     baseAssistantCount >= baseUserCountNonOptimistic
   )
 }
@@ -142,7 +143,6 @@ type BasePassResult = {
  */
 function buildFilteredBase(
   baseMessages: ChatMessage[],
-  streamingMessages: ChatMessage[],
   index: StreamingIndex,
   matchOffset: number,
 ): BasePassResult {
@@ -195,7 +195,12 @@ function buildFilteredBase(
     if (msg.role === 'tool' && msg.toolCallId && index.toolCallIds.has(msg.toolCallId)) {
       const streamingTool = index.toolByCallId.get(msg.toolCallId)
       if (streamingTool) {
-        filteredBase.push(streamingTool)
+        // Keep the live streaming copy (same React key as what's on screen)
+        // so the card does not remount when history catches up.
+        filteredBase.push({
+          ...streamingTool,
+          stableId: streamingTool.stableId ?? streamingTool.id,
+        })
         consumedToolIds.add(msg.toolCallId)
       } else {
         filteredBase.push(msg)
@@ -203,16 +208,11 @@ function buildFilteredBase(
       continue
     }
 
-    if (
-      msg.role === 'tool' &&
-      !msg.toolCallId &&
-      msg.sessionKey &&
-      index.toolSessions.has(msg.sessionKey) &&
-      streamingMessages.some((sm) => sm.role === 'tool' && sm.sessionKey === msg.sessionKey)
-    ) {
-      // Base tool without a call-id that a streaming tool supersedes → drop.
-      continue
-    }
+    // NOTE: do NOT drop base tools that lack a toolCallId just because a
+    // streaming tool exists for the session. That rule wiped every historical
+    // tool card as soon as a new tool started executing — the "tool calls
+    // disappear" bug. Unmatched base tools stay put; the streaming copy is
+    // appended as a leftover only when it is not confirmed in base.
 
     filteredBase.push(msg)
   }
@@ -253,9 +253,25 @@ function filterStreamingLeftovers(
   return streamingMessages.filter((msg) => {
     if (msg.role === 'user') {
       if (!msg.optimistic) return true
-      // Keep the optimistic user until base has more users than it did when
-      // the message was sent (i.e. the confirmed copy hasn't landed yet).
-      return baseUserCount <= (msg.optimisticBaseCount ?? 0)
+      // Confirm an optimistic user only when BOTH hold:
+      //   1. base already contains a non-optimistic user with the same text
+      //      (content match — tolerates server normalization via prefix), AND
+      //   2. base user count has grown past the snapshot taken at send time.
+      //
+      // Content-match alone is not enough: the same text can legitimately
+      // appear earlier in the conversation. Count alone is not enough either:
+      // two rapid sends share the same optimisticBaseCount, so confirming the
+      // first used to drop the second (user message vanishes / order breaks).
+      const prefix = msg.content.slice(0, 200)
+      const contentConfirmed =
+        prefix.length > 0 &&
+        baseMessages.some(
+          (bm) => bm.role === 'user' && !bm.optimistic && bm.content.startsWith(prefix),
+        )
+      if (contentConfirmed && baseUserCount > (msg.optimisticBaseCount ?? 0)) {
+        return false
+      }
+      return true
     }
 
     if (msg.role === 'assistant') {
@@ -307,12 +323,7 @@ export function mergeMessages(
     baseHasCurrentTurn,
   )
 
-  const { filteredBase, consumedToolIds } = buildFilteredBase(
-    baseMessages,
-    streamingMessages,
-    index,
-    matchOffset,
-  )
+  const { filteredBase, consumedToolIds } = buildFilteredBase(baseMessages, index, matchOffset)
 
   const filteredStreaming = filterStreamingLeftovers(
     streamingMessages,

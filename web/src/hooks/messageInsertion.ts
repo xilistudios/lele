@@ -75,3 +75,23 @@ export function computeToolInsertIndex(current: ChatMessage[]): number {
   }
   return insertIdx
 }
+
+/**
+ * How many items were inserted *before* the previously-first message.
+ *
+ * Used by MessageList to shift Virtuoso's `firstItemIndex` after a loadMore
+ * prepend. Detecting prepends by "first id changed AND length grew" misfires
+ * when a history rebuild rewrites ids or when a stream append coincides with
+ * an id change — Virtuoso then shifts by the full length delta and the
+ * viewport jumps / old messages flicker.
+ *
+ * The correct signal is the new position of the old first item: if it moved
+ * from index 0 to index N, exactly N items were prepended. Returns 0 when the
+ * previous first key is unknown or no longer present (id rewrite without a
+ * real prepend).
+ */
+export function countPrependedItems(prevFirstKey: string | undefined, nextKeys: string[]): number {
+  if (!prevFirstKey) return 0
+  const idx = nextKeys.indexOf(prevFirstKey)
+  return idx > 0 ? idx : 0
+}

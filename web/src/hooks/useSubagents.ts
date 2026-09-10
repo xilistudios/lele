@@ -4,7 +4,29 @@ import type { SubagentTaskInfo } from '../lib/types'
 
 export type { SubagentTaskInfo as SubagentInfo }
 
-export function useSubagents(sessionKey: string | null, pollIntervalMs = 5000) {
+/**
+ * Tiny fan-out so WS spawn events can wake every `useSubagents` instance.
+ *
+ * Without this the list only refetched on mount / session change (and only
+ * polled when a subagent was already running), so a freshly spawned task
+ * stayed invisible until a full chat refresh.
+ */
+const subagentListeners = new Set<() => void>()
+
+/** Called by spawn tool handlers when a subagent is created or updated. */
+export function notifySubagentsChanged(): void {
+  for (const listener of subagentListeners) listener()
+}
+
+export function useSubagents(
+  sessionKey: string | null,
+  pollIntervalMs = 5000,
+  /**
+   * When true, keep polling even if the current list has no running/pending
+   * tasks — a spawn can appear mid-turn before the first list refresh.
+   */
+  active = false,
+) {
   const { api } = useAuthContext()
   const [subagents, setSubagents] = useState<SubagentTaskInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -32,21 +54,35 @@ export function useSubagents(sessionKey: string | null, pollIntervalMs = 5000) {
     fetchSubagents()
   }, [fetchSubagents])
 
+  // Wake on spawn / tool.result / subagent.result so a new task appears
+  // without requiring a chat refresh.
+  useEffect(() => {
+    const listener = () => {
+      void fetchSubagents()
+    }
+    subagentListeners.add(listener)
+    return () => {
+      subagentListeners.delete(listener)
+    }
+  }, [fetchSubagents])
+
   // Track running state so the polling effect can react to it. Pending tasks
   // are also live work: they transition to running once dependencies clear.
   useEffect(() => {
     setHasRunning(subagents.some((s) => s.status === 'running' || s.status === 'pending'))
   }, [subagents])
 
-  // Poll every 5s while any subagent is running
+  // Poll while any subagent is live, OR while the parent turn is live (a
+  // spawn can land before the list has been refreshed once).
+  const shouldPoll = hasRunning || active
   useEffect(() => {
-    if (!hasRunning) return
+    if (!shouldPoll) return
 
     const id = setInterval(() => {
       fetchSubagents()
     }, pollIntervalMs)
     return () => clearInterval(id)
-  }, [fetchSubagents, hasRunning, pollIntervalMs])
+  }, [fetchSubagents, shouldPoll, pollIntervalMs])
 
   return { subagents, loading, refresh: fetchSubagents }
 }

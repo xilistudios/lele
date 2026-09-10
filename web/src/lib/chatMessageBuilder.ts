@@ -1,3 +1,4 @@
+import { lookupStableId } from '../hooks/stableIdRegistry'
 import type {
   Attachment,
   ChatMessage,
@@ -6,7 +7,6 @@ import type {
   RawHistoryMessage,
   ToolMessageStatus,
 } from './types'
-import { lookupStableId } from '../hooks/stableIdRegistry'
 
 // ---------------------------------------------------------------------------
 // ID generators
@@ -308,6 +308,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
     toolCallId: props.toolCallId,
     subagentSessionKey: props.subagentSessionKey,
     excludeFromContext: props.excludeFromContext,
+    stableId: props.stableId ?? props.id,
   }
 }
 
@@ -319,10 +320,7 @@ export function createToolMessage(props: ToolMessageProps): ChatMessage {
  * Converts raw history messages from the API into ChatMessage objects.
  * Handles attachment parsing, tool call mapping, and approval message formatting.
  */
-export function toChatMessages(
-  history: RawHistoryMessage[],
-  sessionKey: string,
-): ChatMessage[] {
+export function toChatMessages(history: RawHistoryMessage[], sessionKey: string): ChatMessage[] {
   const toolCallMap = buildToolCallMap(history)
   const seenIds = new Map<string, number>()
   // Signature (role|content|tool_call_id) of the first message seen under each
@@ -358,7 +356,12 @@ export function toChatMessages(
     // For user messages the lookup key must match what the optimistic copy
     // registered — the text the user typed, which for command-driven turns is
     // display_content, not the expanded content.
-    const stableId = lookupStableId(message.role, message.display_content || messageContent)
+    // Tools additionally look up by tool_call_id (their content may be empty).
+    const stableId =
+      lookupStableId(message.role, message.display_content || messageContent) ??
+      (message.role === 'tool' && message.tool_call_id
+        ? lookupStableId('tool', `id:${message.tool_call_id}`)
+        : undefined)
 
     if (message.role === 'user') {
       const parsed = parseAttachmentsFromContent(messageContent)
@@ -458,6 +461,7 @@ export function toChatMessages(
           toolCallId: message.tool_call_id,
           subagentSessionKey,
           attachments: parsedAttachments,
+          stableId,
         }),
       ]
     }

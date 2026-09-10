@@ -1,4 +1,4 @@
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
@@ -16,15 +16,24 @@ import { SubagentsSidebar } from './SubagentsSidebar'
 export const ChatHeader = memo(function ChatHeader() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { currentAgent, wsStatus, currentSessionKey, onOpenMobileSidebar, chatMode } =
+  const { currentAgent, wsStatus, currentSessionKey, onOpenMobileSidebar, chatMode, isProcessing } =
     useAppLogicContext()
   const { apiUrl } = useAuthContext()
   const { currentSession, parentSession } = useChatPageContext()
   const [subagentsSidebarOpen, setSubagentsSidebarOpen] = useState(false)
 
-  const { subagents, loading } = useSubagents(currentSessionKey)
+  // Poll while the parent turn is live so a spawn that lands mid-turn shows
+  // up even before the first refresh has seen a running task.
+  const { subagents, loading, refresh } = useSubagents(currentSessionKey, 5000, isProcessing)
   const modeTheme = getModeTheme(chatMode)
   const ModeIcon = modeTheme.Icon
+
+  // Opening the panel always re-fetches — the list may have been idle.
+  useEffect(() => {
+    if (subagentsSidebarOpen) {
+      void refresh()
+    }
+  }, [subagentsSidebarOpen, refresh])
 
   const handleToggleSubagents = useCallback(() => {
     setSubagentsSidebarOpen((prev) => !prev)

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAppLogicContext, useAppStreamingContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
+import { countPrependedItems } from '../../hooks/messageInsertion'
 import { isCompactionSummary } from '../../lib/chatMessageBuilder'
 import { getModeTheme } from '../../lib/modeTheme'
 import type { ChatMessage, GroupInfo, GroupToolCall, GroupTurn } from '../../lib/types'
@@ -33,6 +34,14 @@ type RenderItem =
   | { type: 'group'; group: GroupInfo }
 
 const START_INDEX = 10000
+
+/**
+ * Durable render key for a message. Prefers `stableId` so keys survive the
+ * WebSocket→HTTP id flip without remounting the bubble.
+ */
+function messageKey(m: ChatMessage): string {
+  return m.stableId ?? m.id
+}
 
 export function MessageList() {
   const { t } = useTranslation()
@@ -70,8 +79,9 @@ export function MessageList() {
     [messages],
   )
 
-  const prevFirstMsgIdRef = useRef<string | undefined>(visibleMessages[0]?.id)
-  const prevMessagesLengthRef = useRef(visibleMessages.length)
+  const prevFirstMsgKeyRef = useRef<string | undefined>(
+    visibleMessages[0] ? messageKey(visibleMessages[0]) : undefined,
+  )
 
   // Track the scroll element so we can attach a reliable scroll listener
   // for triggering loadMore (Virtuoso's startReached can miss fires after
@@ -84,28 +94,24 @@ export function MessageList() {
     if (prevSessionKeyRef.current !== currentSessionKey) {
       prevSessionKeyRef.current = currentSessionKey
       setFirstItemIndex(START_INDEX)
-      prevFirstMsgIdRef.current = visibleMessages[0]?.id
-      prevMessagesLengthRef.current = visibleMessages.length
+      prevFirstMsgKeyRef.current = visibleMessages[0] ? messageKey(visibleMessages[0]) : undefined
       setAtBottom(true)
     }
   }, [currentSessionKey, visibleMessages])
 
   // When older messages are prepended (loadMore), shift firstItemIndex backward
   // so Virtuoso preserves scroll position without jumping or blanking the viewport.
+  // Detect the prepend by the *new index of the old first item*, not by a
+  // length+id heuristic — the latter also fires on append+id-change and
+  // over-shifts, which is the scroll-flicker bug.
   useEffect(() => {
     if (prevSessionKeyRef.current === currentSessionKey) {
-      const currentFirstId = visibleMessages[0]?.id
-      if (
-        prevMessagesLengthRef.current > 0 &&
-        visibleMessages.length > prevMessagesLengthRef.current &&
-        currentFirstId !== prevFirstMsgIdRef.current &&
-        prevFirstMsgIdRef.current !== undefined
-      ) {
-        const added = visibleMessages.length - prevMessagesLengthRef.current
-        setFirstItemIndex((prev) => prev - added)
+      const nextKeys = visibleMessages.map(messageKey)
+      const prepended = countPrependedItems(prevFirstMsgKeyRef.current, nextKeys)
+      if (prepended > 0) {
+        setFirstItemIndex((prev) => prev - prepended)
       }
-      prevFirstMsgIdRef.current = currentFirstId
-      prevMessagesLengthRef.current = visibleMessages.length
+      prevFirstMsgKeyRef.current = nextKeys[0]
     }
   }, [visibleMessages, currentSessionKey])
 
@@ -194,7 +200,7 @@ export function MessageList() {
       if (item.type === 'message') {
         return (
           <MessageBubble
-            key={item.message.stableId ?? item.message.id}
+            key={messageKey(item.message)}
             message={item.message}
             isLast={item.index === visibleMessages.length - 1}
             onNavigateToSession={handleNavigateToSession}
@@ -296,7 +302,7 @@ export function MessageList() {
   )
 
   const computeItemKey = useCallback((index: number, item: RenderItem) => {
-    if (item.type === 'message') return item.message.stableId ?? item.message.id ?? `msg-${index}`
+    if (item.type === 'message') return messageKey(item.message) || `msg-${index}`
     return `group-block-${item.group.groupID}`
   }, [])
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ChatMessage } from '../lib/types'
 
+import { countPrependedItems } from './messageInsertion'
 import { mergeMessages } from './useChatHistory'
 import { computeAssistantInsertIndex } from './useStreamQueues'
 
@@ -1060,6 +1061,137 @@ describe('Message ordering fixes', () => {
       expect(streaming).toBeDefined()
       // Should fall back to its own id for a stable React key.
       expect(streaming?.stableId ?? streaming?.id).toBe('a1-ws')
+    })
+  })
+
+  describe('Fix: historical tools must not vanish when a new tool starts', () => {
+    test('base tools without toolCallId are kept while a streaming tool runs', () => {
+      // Regression: buildFilteredBase used to drop EVERY base tool lacking a
+      // call-id as soon as any streaming tool existed for the session.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'hello'),
+        createTestMessage('a1', 'assistant', 'answer'),
+        createTestMessage('t-old', 'tool', 'old result', {
+          toolName: 'read_file',
+          toolStatus: 'completed',
+        }),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('t-new-ws', 'tool', '', {
+          toolName: 'exec',
+          toolStatus: 'executing',
+          toolCallId: 'call_new',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      expect(result.some((m) => m.id === 't-old')).toBe(true)
+      expect(result.some((m) => m.id === 't-new-ws')).toBe(true)
+    })
+
+    test('streaming tool confirmed in base is swapped in-place with stableId', () => {
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u1', 'user', 'hello'),
+        createTestMessage('a1', 'assistant', 'answer'),
+        createTestMessage('t-base', 'tool', 'result', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'call_1',
+        }),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('t-ws', 'tool', 'result', {
+          toolName: 'exec',
+          toolStatus: 'completed',
+          toolCallId: 'call_1',
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const tools = result.filter((m) => m.role === 'tool')
+      expect(tools).toHaveLength(1)
+      // Live copy keeps the streaming id as the render key (no remount).
+      expect(tools[0].id).toBe('t-ws')
+      expect(tools[0].stableId ?? tools[0].id).toBe('t-ws')
+    })
+  })
+
+  describe('Fix: rapid optimistic user sends stay visible and ordered', () => {
+    test('confirming the first of two rapid sends does not drop the second', () => {
+      // Both optimistic messages share optimisticBaseCount (snapshot taken
+      // before either landed). Count-only filtering used to drop both once
+      // base grew by one.
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u0', 'user', 'first ever'),
+        createTestMessage('a0', 'assistant', 'reply 0'),
+        createTestMessage('u1-base', 'user', 'hello'),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u1-opt', 'user', 'hello', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
+        createTestMessage('u2-opt', 'user', 'world', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      const userTexts = result.filter((m) => m.role === 'user').map((m) => m.content)
+      expect(userTexts).toContain('hello')
+      expect(userTexts).toContain('world')
+      // "world" must still be present as the optimistic (unconfirmed) copy.
+      expect(result.some((m) => m.id === 'u2-opt')).toBe(true)
+      // No duplicate "hello" bubble.
+      expect(userTexts.filter((t) => t === 'hello')).toHaveLength(1)
+    })
+
+    test('repeated identical user text is only dropped after count grows', () => {
+      const baseMessages: ChatMessage[] = [
+        createTestMessage('u-old', 'user', 'ping'),
+        createTestMessage('a-old', 'assistant', 'pong'),
+        createTestMessage('u-new', 'user', 'ping'),
+      ]
+      const streamingMessages: ChatMessage[] = [
+        createTestMessage('u-new-opt', 'user', 'ping', {
+          optimistic: true,
+          optimisticBaseCount: 1,
+        }),
+      ]
+
+      const result = mergeMessages(baseMessages, streamingMessages)
+      // Confirmed copy in base + count grew → optimistic dropped.
+      // Base already holds the older "ping" AND the newly confirmed one.
+      expect(result.some((m) => m.id === 'u-new-opt')).toBe(false)
+      expect(result.filter((m) => m.role === 'user' && m.content === 'ping')).toHaveLength(2)
+      expect(result.some((m) => m.id === 'u-new')).toBe(true)
+    })
+  })
+
+  describe('Fix: Virtuoso firstItemIndex prepend detection (scroll flicker)', () => {
+    test('true prepend of N items reports N', () => {
+      expect(countPrependedItems('a', ['x', 'y', 'a', 'b'])).toBe(2)
+      expect(countPrependedItems('a', ['a', 'b'])).toBe(0)
+    })
+
+    test('append at the end does not look like a prepend', () => {
+      // Old heuristic: length grew AND first id changed → false positive when
+      // a history rebuild rewrites the first id while a stream appends.
+      expect(countPrependedItems('old-first', ['old-first', 'a2', 'a3'])).toBe(0)
+      expect(countPrependedItems(undefined, ['a', 'b'])).toBe(0)
+    })
+
+    test('id rewrite without a real prepend reports 0', () => {
+      // Previous first key no longer exists (id scheme flipped). Shifting by
+      // the full length delta here was the scroll-jump bug.
+      expect(countPrependedItems('temp-uuid', ['hash-1', 'hash-2', 'hash-3'])).toBe(0)
+    })
+
+    test('stableId-keyed first item tracks a real loadMore prepend', () => {
+      const before = ['stable-a', 'stable-b']
+      const after = ['older-1', 'older-2', 'stable-a', 'stable-b']
+      expect(countPrependedItems(before[0], after)).toBe(2)
     })
   })
 })

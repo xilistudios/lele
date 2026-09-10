@@ -227,6 +227,13 @@ function isConfirmedInCache(
   msg: ChatMessage,
   cached: { messages?: ChatMessage[] } | undefined,
 ): boolean {
+  if (msg.role === 'tool' && msg.toolCallId) {
+    return (
+      cached?.messages?.some((bm) => bm.role === 'tool' && bm.toolCallId === msg.toolCallId) ??
+      false
+    )
+  }
+
   const prefix = msg.content.slice(0, 200)
   if (prefix.length === 0) return false
   return (
@@ -236,6 +243,9 @@ function isConfirmedInCache(
       }
       if (msg.role === 'assistant') {
         return bm.role === 'assistant' && bm.content.startsWith(prefix)
+      }
+      if (msg.role === 'tool') {
+        return bm.role === 'tool' && bm.content.startsWith(prefix)
       }
       return false
     }) ?? false
@@ -287,11 +297,22 @@ export function handleHistoryUpdated(ctx: MessageEventContext, data: Record<stri
       if (m.role === 'assistant' && !m.streaming && isConfirmedInCache(m, cached)) {
         registerStableId('assistant', m.content, m.id)
       }
+      if (m.role === 'tool' && m.toolStatus !== 'executing' && isConfirmedInCache(m, cached)) {
+        // Tools key on tool_call_id (content may be empty) and fall back to
+        // the result text so toChatMessages can re-attach the live id.
+        if (m.toolCallId) registerStableId('tool', `id:${m.toolCallId}`, m.id)
+        if (m.toolResult) registerStableId('tool', m.toolResult, m.id)
+      }
     }
     return current.filter((m) => {
       if (m.sessionKey !== historySessionKey) return true
       if (m.role === 'user' && m.optimistic) return !isConfirmedInCache(m, cached)
       if (m.role === 'assistant' && !m.streaming) return !isConfirmedInCache(m, cached)
+      // Completed tools confirmed in HTTP history are dropped here so merge
+      // does not have to reconcile two copies (and so the base id wins).
+      if (m.role === 'tool' && m.toolStatus !== 'executing') {
+        return !isConfirmedInCache(m, cached)
+      }
       return true
     })
   })
@@ -325,14 +346,42 @@ export function handleMessagesCatchup(ctx: MessageEventContext, data: Record<str
     ctx.parentSessionKeyRef.current ?? undefined,
   )
 
-  // Catchup provides canonical history directly into baseMessages. Remove all
-  // assistant/tool streaming messages to prevent duplicates — the catchup data
-  // is the single source of truth.
+  // Identities present in the catchup payload. Streaming copies of these are
+  // safe to drop (they are now in baseMessages); everything else must stay —
+  // catchup can miss in-flight tools/assistants, and wiping them wholesale
+  // made tool cards vanish from the live view.
+  const catchupAssistantIds = new Set(
+    catchupData.messages.filter((m) => m.role === 'assistant').map((m) => m.id ?? ''),
+  )
+  const catchupToolCallIds = new Set(
+    catchupData.messages
+      .filter((m) => m.role === 'tool' && m.tool_call_id)
+      .map((m) => m.tool_call_id as string),
+  )
+
   ctx.setStreamingMessages((current) =>
     current.filter((message) => {
       if (message.sessionKey !== targetSessionKey) return true
-      if (message.role === 'assistant') return false
-      if (message.role === 'tool') return false
+
+      if (message.role === 'assistant') {
+        // Keep actively-streaming assistants; drop completed ones only when
+        // catchup actually carries them (by id) or they are empty leftovers.
+        if (message.streaming) return true
+        if (catchupAssistantIds.has(message.id)) return false
+        // Completed assistant not in catchup — keep only if it has content
+        // (the merge layer will position-match or append it).
+        return message.content.trim() !== '' || Boolean(message.reasoningContent)
+      }
+
+      if (message.role === 'tool') {
+        // Never drop a tool that is still executing.
+        if (message.toolStatus === 'executing') return true
+        // Drop completed tools confirmed in catchup; keep the rest until the
+        // HTTP poll can confirm them.
+        if (message.toolCallId && catchupToolCallIds.has(message.toolCallId)) return false
+        return true
+      }
+
       return true
     }),
   )
