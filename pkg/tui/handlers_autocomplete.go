@@ -13,6 +13,9 @@ import (
 func (m *Model) handleAutocompleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "up", "ctrl+k":
+		if len(m.autocompleteItems) == 0 {
+			return m, nil, true
+		}
 		if m.autocompleteIdx > 0 {
 			m.autocompleteIdx--
 		} else {
@@ -20,6 +23,9 @@ func (m *Model) handleAutocompleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool)
 		}
 		return m, nil, true
 	case "down", "ctrl+j":
+		if len(m.autocompleteItems) == 0 {
+			return m, nil, true
+		}
 		if m.autocompleteIdx < len(m.autocompleteItems)-1 {
 			m.autocompleteIdx++
 		} else {
@@ -27,7 +33,10 @@ func (m *Model) handleAutocompleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool)
 		}
 		return m, nil, true
 	case "tab":
-		if len(m.autocompleteItems) > 0 {
+		if m.autocompleteIdx < 0 {
+			m.autocompleteIdx = 0
+		}
+		if m.autocompleteIdx < len(m.autocompleteItems) {
 			completed := m.autocompleteItems[m.autocompleteIdx].name
 			m.chatInput.SetValue(completed)
 			m.showAutocomplete = false
@@ -37,7 +46,10 @@ func (m *Model) handleAutocompleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool)
 		}
 		m.showAutocomplete = false
 	case "enter":
-		if len(m.autocompleteItems) > 0 {
+		if m.autocompleteIdx < 0 {
+			m.autocompleteIdx = 0
+		}
+		if m.autocompleteIdx < len(m.autocompleteItems) {
 			completed := m.autocompleteItems[m.autocompleteIdx].name
 			m.showAutocomplete = false
 			// If the user already typed arguments beyond the command

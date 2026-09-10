@@ -135,7 +135,7 @@ func TestTruncateRightCellsBasics(t *testing.T) {
 	if w := ansi.StringWidth(out); w > 5 {
 		t.Errorf("CJK width %d > 5: %q", w, out)
 	}
-	if strings.ContainsRune(ansi.Strip(out), '试') {
+	if strings.ContainsRune(ansi.Strip(out), '\u8BD5') {
 		t.Errorf("cut on grapheme boundary violated: %q", out)
 	}
 }

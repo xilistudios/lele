@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSettings } from '../../contexts/SettingsContext'
 import { isAgentDirty } from '../../lib/agentDirty'
-import { AgentAvatar } from '../atoms/AgentAvatar'
 import { Button } from '../atoms/Button'
 import { IconButton } from '../atoms/IconButton'
 import { CloseIcon, PlusIcon, SearchIcon } from '../atoms/Icons'
@@ -151,7 +150,15 @@ export function AgentsListPage() {
           data-testid="agents-empty"
           className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border px-6 py-12 text-center"
         >
-          <AgentAvatar id="empty" size="xl" />
+          <div
+            aria-hidden="true"
+            className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface-muted text-text-tertiary"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <circle cx="12" cy="8" r="3.5" />
+              <path d="M5 19c1.5-3.5 4-5 7-5s5.5 1.5 7 5" strokeLinecap="round" />
+            </svg>
+          </div>
           <h2 className="mt-4 text-base font-medium text-text-primary">
             {t('settings.agentPage.emptyTitle')}
           </h2>

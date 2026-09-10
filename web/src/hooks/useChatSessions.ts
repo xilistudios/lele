@@ -157,6 +157,7 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       if (!clientId) return null
 
       const sessionKey = generateUUID()
+      const previousSessionKey = currentSessionKeyRef.current
       const newSession: ChatSession = {
         key: sessionKey,
         created: new Date().toISOString(),
@@ -172,10 +173,18 @@ export function useChatSessions(api: ApiClient, token: string | null, clientId: 
       persistCurrentSessionKey(sessionKey)
 
       // Await the API call to ensure backend confirms session creation before navigation
-      await api.createSession(sessionKey, mode).catch((err) => {
+      try {
+        await api.createSession(sessionKey, mode)
+      } catch (err) {
         console.error('[useChatSessions] Failed to create session on backend:', err)
+        // Roll back the optimistic local session so the sidebar does not show
+        // a phantom chat that the backend never registered.
+        setSessions((current) => current.filter((s) => s.key !== sessionKey))
+        if (currentSessionKeyRef.current === sessionKey) {
+          persistCurrentSessionKey(previousSessionKey)
+        }
         return null
-      })
+      }
 
       return sessionKey
     },

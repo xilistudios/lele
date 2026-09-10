@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSettings } from '../../../contexts/SettingsContext'
 import type { SafeClientInfo } from '../../../lib/types'
-import { Modal, Spinner } from '../../atoms'
+import { ErrorBanner, Modal, Spinner } from '../../atoms'
 import { SettingsSection } from '../../molecules'
 
 export function NativeClientsSettings() {
@@ -9,12 +9,16 @@ export function NativeClientsSettings() {
   const [clients, setClients] = useState<SafeClientInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // PIN pairing state
   const [deviceName, setDeviceName] = useState('')
   const [pinLoading, setPinLoading] = useState(false)
   const [pinInfo, setPinInfo] = useState<{ pin: string; expires: string } | null>(null)
   const [showPairModal, setShowPairModal] = useState(false)
+
+  // Inline revoke confirmation (replaces window.confirm)
+  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
 
   const fetchClients = useCallback(async () => {
     try {
@@ -23,25 +27,28 @@ export function NativeClientsSettings() {
       setClients(data || [])
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch native clients')
+      setError(err instanceof Error ? err.message : t('settings.native.fetchFailed'))
     } finally {
       setLoading(false)
     }
-  }, [api])
+  }, [api, t])
 
   useEffect(() => {
     fetchClients()
   }, [fetchClients])
 
-  const handleRemoveClient = async (clientId: string) => {
-    if (!window.confirm(t('settings.native.confirmRevoke'))) return
+  const confirmRemoveClient = useCallback(async () => {
+    if (!confirmRevokeId) return
     try {
-      await api.removeClient(clientId)
-      setClients((prev) => prev.filter((c) => c.client_id !== clientId))
+      await api.removeClient(confirmRevokeId)
+      setClients((prev) => prev.filter((c) => c.client_id !== confirmRevokeId))
+      setActionError(null)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to revoke client')
+      setActionError(err instanceof Error ? err.message : t('settings.native.revokeFailed'))
+    } finally {
+      setConfirmRevokeId(null)
     }
-  }
+  }, [confirmRevokeId, api, t])
 
   const handleGeneratePIN = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -50,8 +57,9 @@ export function NativeClientsSettings() {
       setPinLoading(true)
       const resp = await api.getPIN(deviceName)
       setPinInfo(resp)
+      setActionError(null)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate PIN')
+      setActionError(err instanceof Error ? err.message : t('settings.native.pinFailed'))
     } finally {
       setPinLoading(false)
     }
@@ -82,6 +90,8 @@ export function NativeClientsSettings() {
             {t('settings.native.addClient')}
           </button>
         </div>
+
+        {actionError && <ErrorBanner message={actionError} />}
 
         {loading ? (
           <div className="flex h-32 items-center justify-center">
@@ -134,7 +144,7 @@ export function NativeClientsSettings() {
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
-                        onClick={() => handleRemoveClient(client.client_id)}
+                        onClick={() => setConfirmRevokeId(client.client_id)}
                         className="rounded bg-state-error/10 hover:bg-state-error/20 px-2 py-1 text-xs font-medium text-state-error transition-colors"
                       >
                         {t('settings.native.revoke')}
@@ -221,6 +231,33 @@ export function NativeClientsSettings() {
               </div>
             </div>
           )}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={confirmRevokeId !== null}
+        onClose={() => setConfirmRevokeId(null)}
+        title={t('settings.native.confirmRevokeTitle')}
+        size="sm"
+      >
+        <div className="space-y-4 p-6">
+          <p className="text-sm text-text-secondary">{t('settings.native.confirmRevoke')}</p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmRevokeId(null)}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-text-primary hover:bg-background-secondary transition-colors"
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={confirmRemoveClient}
+              className="rounded-md bg-state-error px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-state-error/90 transition-colors"
+            >
+              {t('settings.native.revoke')}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>

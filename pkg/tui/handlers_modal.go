@@ -65,6 +65,37 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	// Catalog model picker (filter-as-you-type) for /add-model and the
+	// connect-flow model-name step. up/down move the highlight, tab accepts
+	// the highlighted ID into the text input, esc hides suggestions without
+	// closing the form. Typing falls through to textInput and re-filters.
+	if m.addModelCatalogActive {
+		switch msg.String() {
+		case "up":
+			if m.addModelCatalogIdx > 0 {
+				m.addModelCatalogIdx--
+			}
+			return m, nil
+		case "down":
+			if m.addModelCatalogIdx < len(m.addModelCatalogIDs)-1 {
+				m.addModelCatalogIdx++
+			}
+			return m, nil
+		case "tab":
+			if m.addModelCatalogIdx < len(m.addModelCatalogIDs) {
+				m.textInput.SetValue(m.addModelCatalogIDs[m.addModelCatalogIdx])
+				m.refreshCatalogSuggestions(m.textInput.Value())
+			}
+			return m, nil
+		case "esc":
+			// Hide suggestions; a second ESC still closes the form.
+			m.closeCatalogPicker()
+			return m, nil
+		}
+		// enter and printable keys fall through — enter is handled by the
+		// form enter path below (after applyCatalogSelectionOnEnter), and
+		// printable keys reach textInput at the bottom of this handler.
+	}
 	// Provider-type picker navigation (up/down within the preset list).
 	if m.modalMode == ModalAddProvider && m.providerTypePicker {
 		switch msg.String() {
@@ -96,6 +127,23 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Fall through to textInput forwarding below for typing.
+	}
+	// When a settings field is being edited, list navigation must not fire —
+	// j/k/up/down are regular characters in the text input. Without this
+	// guard the cursor drifts behind the invisible list and the next Enter
+	// acts on the wrong row.
+	if m.settingsEditField != "" && !m.settingsSelectorActive && !m.subagentPickerActive {
+		// Fall through to the textInput forwarding at the end of this handler.
+		// ESC/q still need to reach their normal cancel paths below, so only
+		// navigation keys are swallowed here.
+		switch msg.String() {
+		case "up", "k", "down", "j", "pgup", "pgdown":
+			if isFormModal(m.modalMode, true) {
+				var cmd tea.Cmd
+				m.textInput, cmd = m.textInput.Update(msg)
+				return m, cmd
+			}
+		}
 	}
 	switch msg.String() {
 	case "up", "k":
@@ -137,6 +185,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "enter":
+		// Catalog picker: accept the highlighted suggestion (when the input
+		// is empty) and prefill context_window / max_tokens / vision from
+		// catalog metadata before the form enter handlers run.
+		if m.addModelCatalogActive {
+			m.applyCatalogSelectionOnEnter()
+		}
 		// TUI settings inline edit: save value and return to list.
 		if m.modalMode == ModalSettingsTUI && m.settingsEditField != "" {
 			m.handleTUISettingsInput(m.textInput.Value())
@@ -302,6 +356,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.formStepIndex = 4
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = "Model alias (e.g. gpt-4o)"
+					m.closeCatalogPicker()
 					if p := providerPresetByType(m.formValues[1]); p != nil && p.modelHint != "" {
 						m.textInput.Placeholder = "Model alias (" + p.modelHint + ")"
 					}
@@ -348,10 +403,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.formStepIndex <= 8 {
 				// Validate model fields before advancing
 				if m.formStepIndex == 6 || m.formStepIndex == 7 {
-					// Context window and max tokens must be integers
-					if _, err := strconv.Atoi(val); err != nil {
-						m.formError = "Must be a valid integer"
-						return m, nil
+					// Context window and max tokens must be integers when
+					// provided. Empty is allowed — catalog.DefaultsFor fills
+					// them in addModelToProvider when the model is known.
+					if val != "" {
+						if _, err := strconv.Atoi(val); err != nil {
+							m.formError = "Must be a valid integer"
+							return m, nil
+						}
 					}
 				}
 				if m.formStepIndex == 8 {
@@ -366,20 +425,30 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.formStepIndex = 9
 					m.textInput.SetValue("")
 					m.textInput.Placeholder = ""
+					m.closeCatalogPicker()
 					return m, nil
 				}
-				// Advance to next model step
+				// Advance to next model step. Show any catalog-prefilled
+				// value in the input so the user can edit or just press Enter.
 				m.formStepIndex++
-				m.textInput.SetValue("")
+				nextVal := ""
+				if m.formStepIndex < len(m.formValues) {
+					nextVal = m.formValues[m.formStepIndex]
+				}
+				m.textInput.SetValue(nextVal)
 				switch m.formStepIndex {
 				case 5:
 					m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
+					m.startCatalogPickerIfNeeded()
 				case 6:
 					m.textInput.Placeholder = "Context window (e.g. 128000)"
+					m.closeCatalogPicker()
 				case 7:
 					m.textInput.Placeholder = "Max tokens (e.g. 4096)"
+					m.closeCatalogPicker()
 				case 8:
 					m.textInput.Placeholder = "Vision support? (yes/no)"
+					m.closeCatalogPicker()
 				}
 				return m, nil
 			}
@@ -415,23 +484,49 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if m.modalMode == ModalAddModel {
 			// Form-based modal: validate and advance steps
 			val := strings.TrimSpace(m.textInput.Value())
-			if val == "" {
+			// Accept a pre-filled form value when the input is empty (catalog
+			// prefill after selecting a model, matching ModalAddProvider).
+			if val == "" && m.formStepIndex < len(m.formValues) && m.formValues[m.formStepIndex] != "" {
+				val = m.formValues[m.formStepIndex]
+			}
+			// Context window / max tokens may be omitted — catalog.DefaultsFor
+			// fills them in addModelToProvider when the model is known.
+			allowEmpty := m.formStepIndex == 2 || m.formStepIndex == 3
+			if val == "" && !allowEmpty {
 				m.formError = "This field is required"
 				return m, nil
 			}
 			m.formError = ""
 			m.formValues[m.formStepIndex] = val
-			if m.formStepIndex >= 4 {
-				// Last step — save model
-				ctxWin, err := strconv.Atoi(m.formValues[2])
-				if err != nil {
-					m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
-					return m, nil
+			if m.formStepIndex == 2 || m.formStepIndex == 3 {
+				if val != "" {
+					if _, err := strconv.Atoi(val); err != nil {
+						m.formError = fmt.Sprintf("Invalid number: %s", val)
+						return m, nil
+					}
 				}
-				maxTok, err := strconv.Atoi(m.formValues[3])
-				if err != nil {
-					m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
-					return m, nil
+			}
+			if m.formStepIndex >= 4 {
+				// Last step — save model. Empty/zero context_window and
+				// max_tokens are filled from the catalog inside
+				// addModelToProvider when the model is known.
+				ctxWin := 0
+				if s := strings.TrimSpace(m.formValues[2]); s != "" {
+					n, err := strconv.Atoi(s)
+					if err != nil {
+						m.formError = fmt.Sprintf("Invalid context window: %s", m.formValues[2])
+						return m, nil
+					}
+					ctxWin = n
+				}
+				maxTok := 0
+				if s := strings.TrimSpace(m.formValues[3]); s != "" {
+					n, err := strconv.Atoi(s)
+					if err != nil {
+						m.formError = fmt.Sprintf("Invalid max tokens: %s", m.formValues[3])
+						return m, nil
+					}
+					maxTok = n
 				}
 				vision := m.formValues[4] == "yes"
 				if err := m.addModelToProvider(m.providerSelectedName, m.formValues[0], m.formValues[1], ctxWin, maxTok, vision); err != nil {
@@ -439,21 +534,31 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.modalMode = ModalNone
+				m.closeCatalogPicker()
 				m.syncTextInputEcho() // audit M2: clear stale echo on close
 				return m, nil
 			}
-			// Advance to next step
+			// Advance to next step. Show any catalog-prefilled value in the
+			// input so the user can edit or just press Enter.
 			m.formStepIndex++
-			m.textInput.SetValue("")
+			nextVal := ""
+			if m.formStepIndex < len(m.formValues) {
+				nextVal = m.formValues[m.formStepIndex]
+			}
+			m.textInput.SetValue(nextVal)
 			switch m.formStepIndex {
 			case 1:
 				m.textInput.Placeholder = "Actual model name (e.g. gpt-4o-2024-08-06)"
+				m.startCatalogPickerIfNeeded()
 			case 2:
 				m.textInput.Placeholder = "Context window (e.g. 128000)"
+				m.closeCatalogPicker()
 			case 3:
 				m.textInput.Placeholder = "Max tokens (e.g. 4096)"
+				m.closeCatalogPicker()
 			case 4:
 				m.textInput.Placeholder = "Vision support? (yes/no)"
+				m.closeCatalogPicker()
 			}
 			return m, nil
 		} else if m.modalMode == ModalAddSecret {
@@ -465,6 +570,12 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.formError = ""
+			// Name must be stored trimmed — trailing spaces become part of
+			// the keyring name and break later lookup/delete. The secret
+			// value (step 1) is intentionally left untrimmed.
+			if m.formStepIndex == 0 {
+				val = strings.TrimSpace(val)
+			}
 			m.formValues[m.formStepIndex] = val
 			if m.formStepIndex >= 4 {
 				// Last step — save secret
@@ -558,14 +669,27 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.clearStreamingState()
 					}
 				} else if m.modalMode == ModalLang {
-					// Extract language code from "Name (code)" format
-					langCode := selectedVal
-					if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
-						langCode = strings.TrimRight(selectedVal[idx+1:], ")")
+					// Prefer parallel code map; fall back to "Name (code)" parse.
+					langCode := ""
+					if m.modalSelectedIdx < len(m.modalLangCodes) {
+						langCode = m.modalLangCodes[m.modalSelectedIdx]
 					}
-					m.cfg.SetLanguage(langCode)
-					i18n.SetLanguage(langCode)
-					m.chatInput.Placeholder = i18n.T("tui.placeholder")
+					if langCode == "" {
+						// "Download more" action or legacy parse.
+						if idx := strings.LastIndex(selectedVal, "("); idx != -1 {
+							langCode = strings.TrimRight(selectedVal[idx+1:], ")")
+						}
+						if langCode == "" || strings.Contains(selectedVal, i18n.T("tui.languages.downloadMore")) {
+							return m, m.openRemoteLanguageBrowser()
+						}
+					}
+					if err := m.applyLanguage(langCode); err != nil {
+						m.queueFeedback = formatLangFeedback(langCode, err)
+					} else {
+						m.queueFeedback = ""
+					}
+				} else if m.modalMode == ModalLangRemote {
+					return m, m.handleLangInstallSelect()
 				} else if m.modalMode == ModalProviders {
 					// "+ Connect a provider" action entry.
 					if m.modalSelectedIdx < len(m.modalItems) &&
@@ -586,9 +710,10 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 							if p, ok := snapshot.Providers.GetNamed(providerName); ok {
 								m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
 								m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-								keyDisplay := p.APIKey
-								if len(keyDisplay) > 8 {
-									keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+								// Never print raw key material — even short keys.
+								keyDisplay := maskAPIKey(p.APIKey)
+								if keyDisplay == "" {
+									keyDisplay = "(not set)"
 								}
 								m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
 							}
@@ -643,9 +768,9 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 								if p, ok := snapshot.Providers.GetNamed(providerName); ok {
 									m.modalItems = append(m.modalItems, fmt.Sprintf("Type: %s", p.Type))
 									m.modalItems = append(m.modalItems, fmt.Sprintf("API Base: %s", p.APIBase))
-									keyDisplay := p.APIKey
-									if len(keyDisplay) > 8 {
-										keyDisplay = keyDisplay[:4] + "..." + keyDisplay[len(keyDisplay)-4:]
+									keyDisplay := maskAPIKey(p.APIKey)
+									if keyDisplay == "" {
+										keyDisplay = "(not set)"
 									}
 									m.modalItems = append(m.modalItems, fmt.Sprintf("API Key: %s", keyDisplay))
 								}
@@ -714,21 +839,8 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, m.tickCmd()
 					}
 				} else if m.modalMode == ModalSkills {
-					// Handle skills list selection
-					if m.modalSelectedIdx < len(m.skillsModalKeys) {
-						selectedKey := m.skillsModalKeys[m.modalSelectedIdx]
-						if selectedKey == "__install__" {
-							// Switch to install modal
-							m.modalMode = ModalSkillInstall
-							m.textInput.SetValue("")
-							m.textInput.Placeholder = "user/repo or user/repo/skill-name"
-							m.formError = ""
-							return m, m.tickCmd()
-						} else if selectedKey != "" {
-							// Toggle skill enabled/disabled
-							return m, m.toggleSkillCmd(selectedKey)
-						}
-					}
+					// Shared with handleSkillsEnter so install/toggle cannot drift.
+					return m, m.handleSkillsEnter()
 				} else if m.modalMode == ModalSkillInstall {
 					// Submit repo URL for scanning
 					return m, m.handleSkillInstallSubmit()
@@ -849,7 +961,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						return m, cmd
 					}
 					// Mouse toggle returns a cmd
-					if m.modalSelectedIdx == 1 {
+					if m.modalSelectedIdx == tuiSettingRowMouse {
 						return m, m.toggleTUIMouse()
 					}
 					return m, nil
@@ -1001,12 +1113,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.formStepIndex = 0
 				m.onboardingStep = obProviderPicker
 				m.modalSelectedIdx = 0
+				m.closeCatalogPicker()
 				// Audit M2: leaving the form from a secret step must
 				// not leave a stale password echo on the widget.
 				m.syncTextInputEcho()
 				return m, nil
 			}
 		}
+		m.closeCatalogPicker()
 		m.modalMode = ModalNone
 		// Audit M2: ESC-close of a form modal — reset echo so a stale
 		// password mode can't affect any later text-input render.
@@ -1110,6 +1224,11 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncTextInputEcho()
 		var cmd tea.Cmd
 		m.textInput, cmd = m.textInput.Update(msg)
+		// Filter-as-you-type: re-filter catalog suggestions while the
+		// model-name field is active.
+		if m.addModelCatalogActive && m.isModelNameFormStep() {
+			m.refreshCatalogSuggestions(m.textInput.Value())
+		}
 		if m.isSessionProcessing() {
 			return m, tea.Batch(cmd, m.tickCmd())
 		}

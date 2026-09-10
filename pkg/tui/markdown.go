@@ -9,13 +9,14 @@ import (
 )
 
 // getMarkdownRenderer returns a cached glamour.TermRenderer for the given width.
-// A new renderer is created only when the width changes.
+// A new renderer is created only when the width or the light/dark mode changes.
 func (m *Model) getMarkdownRenderer(width int) *glamour.TermRenderer {
-	if m.cachedRenderer != nil && m.cachedRendererWidth == width {
+	style := m.glamourStyleName()
+	if m.cachedRenderer != nil && m.cachedRendererWidth == width && m.cachedRendererStyle == style {
 		return m.cachedRenderer
 	}
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(style),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -23,7 +24,17 @@ func (m *Model) getMarkdownRenderer(width int) *glamour.TermRenderer {
 	}
 	m.cachedRenderer = renderer
 	m.cachedRendererWidth = width
+	m.cachedRendererStyle = style
 	return renderer
+}
+
+// glamourStyleName picks "light" or "dark" based on the active theme
+// background luminance, so light themes do not render dark-themed markdown.
+func (m *Model) glamourStyleName() string {
+	if m.themeIsLight {
+		return "light"
+	}
+	return "dark"
 }
 
 // renderMarkdown renders markdown content for terminal display.
@@ -104,7 +115,10 @@ func (m *Model) getRenderedStream(width int) string {
 	// every streaming chunk.
 	for len(m.streamRenderedLines) < len(rawLines)-1 {
 		idx := len(m.streamRenderedLines)
-		renderedLine := renderSingleLine(rawLines[idx], width)
+		// mergeAdjacentSGR collapses the per-token SGR churn glamour/chroma
+		// emit (cell-identical, ~8x fewer bytes); done here because these
+		// lines are cached and re-read on every streaming frame.
+		renderedLine := mergeAdjacentSGR(renderSingleLine(rawLines[idx], width))
 		m.streamRenderedLines = append(m.streamRenderedLines, renderedLine)
 		if m.streamRenderedJoined == "" {
 			m.streamRenderedJoined = renderedLine
@@ -114,7 +128,7 @@ func (m *Model) getRenderedStream(width int) string {
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
-	renderedLastLine := renderSingleLine(lastLine, width)
+	renderedLastLine := mergeAdjacentSGR(renderSingleLine(lastLine, width))
 
 	if m.streamRenderedJoined == "" {
 		return renderedLastLine
@@ -144,7 +158,10 @@ func (m *Model) getRenderedThinking(width int) string {
 
 	for len(m.thinkingRenderedLines) < len(rawLines)-1 {
 		idx := len(m.thinkingRenderedLines)
-		renderedLine := renderSingleLine(rawLines[idx], width)
+		// mergeAdjacentSGR collapses the per-token SGR churn glamour/chroma
+		// emit (cell-identical, ~8x fewer bytes); done here because these
+		// lines are cached and re-read on every streaming frame.
+		renderedLine := mergeAdjacentSGR(renderSingleLine(rawLines[idx], width))
 		m.thinkingRenderedLines = append(m.thinkingRenderedLines, renderedLine)
 		if m.thinkingRenderedJoined == "" {
 			m.thinkingRenderedJoined = renderedLine
@@ -154,7 +171,7 @@ func (m *Model) getRenderedThinking(width int) string {
 	}
 
 	lastLine := rawLines[len(rawLines)-1]
-	renderedLastLine := renderSingleLine(lastLine, width)
+	renderedLastLine := mergeAdjacentSGR(renderSingleLine(lastLine, width))
 
 	if m.thinkingRenderedJoined == "" {
 		return renderedLastLine
@@ -182,7 +199,7 @@ func renderSingleLine(line string, width int) string {
 		return headerStyle.Render(text) + "\n"
 	}
 
-	if width > 0 && len(line) > width {
+	if width > 0 && ansi.StringWidth(line) > width {
 		return wrapText(line, width)
 	}
 	return line

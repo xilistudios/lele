@@ -114,7 +114,8 @@ func (tc *ToolCall) UnmarshalJSON(data []byte) error {
 	if argsJSON == "" {
 		argsJSON = rawArgumentsToJSONString(raw.Arguments)
 	}
-	argsJSON = normalizeArgumentsJSON(argsJSON)
+	argsJSON, truncated := normalizeArgumentsJSONWithFlag(argsJSON)
+	tc.ArgumentsTruncated = truncated
 
 	tc.Name = name
 	// Mirror thought_signature onto the top level only when it was stored there
@@ -166,40 +167,79 @@ const emptyArgumentsJSON = "{}"
 // valid JSON object string. It never returns "", "null" or malformed JSON, so
 // the value it produces can never be rejected as "must be in JSON format".
 func normalizeArgumentsJSON(raw string) string {
+	normalized, _ := normalizeArgumentsJSONWithFlag(raw)
+	return normalized
+}
+
+// normalizeArgumentsJSONWithFlag is normalizeArgumentsJSON plus a report of
+// whether the payload had to be repaired because it arrived incomplete.
+//
+// The boolean is what lets the agent loop refuse to execute a call whose
+// arguments were cut off: the repaired object is valid JSON, so nothing
+// downstream can tell that a large trailing value (a file body, for instance)
+// never made it through.
+func normalizeArgumentsJSONWithFlag(raw string) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return emptyArgumentsJSON
+		return emptyArgumentsJSON, false
 	}
 	if json.Valid([]byte(trimmed)) {
 		switch trimmed[0] {
 		case '{':
 			// A JSON object is already the canonical form.
-			return trimmed
+			return trimmed, false
 		case '"':
 			// A JSON string wrapping the payload: the double-encoded shape some
 			// providers (and the CLI tool prompt) emit. Unwrap once and keep the
 			// inner object if it is valid, otherwise discard it.
 			var inner string
 			if err := json.Unmarshal([]byte(trimmed), &inner); err == nil {
-				if unwrapped := normalizeArgumentsJSON(inner); unwrapped != emptyArgumentsJSON || strings.TrimSpace(inner) == "" {
-					return unwrapped
+				unwrapped, truncated := normalizeArgumentsJSONWithFlag(inner)
+				if unwrapped != emptyArgumentsJSON || strings.TrimSpace(inner) == "" {
+					return unwrapped, truncated
 				}
 			}
-			return emptyArgumentsJSON
+			return emptyArgumentsJSON, false
 		default:
 			// Valid JSON but not an object (null, array, number, bool). Tool
 			// arguments must be an object; treat the rest as absent.
-			return emptyArgumentsJSON
+			return emptyArgumentsJSON, false
 		}
 	}
 
 	// Malformed JSON: recover what we can rather than forwarding a payload the
 	// provider will reject. Truncated objects (cut off by max_tokens) are the
-	// common case, so close them up.
-	if repaired, ok := repairTruncatedObject(trimmed); ok {
-		return repaired
+	// common case, so close them up - and record that we did, because the
+	// member that was being written when the stream stopped is now gone.
+	if repaired, ok, lost := repairTruncatedObject(trimmed); ok {
+		return repaired, lost
 	}
-	return emptyArgumentsJSON
+	// It opened like an object but did not parse and could not be rebuilt. The
+	// payload still arrived cut off, so report it as such: the caller is about
+	// to hand the model an empty argument set, and that is exactly the case the
+	// loop needs to distinguish from a genuine "no arguments" call.
+	return emptyArgumentsJSON, strings.HasPrefix(trimmed, "{")
+}
+
+// canonicalArgumentsJSON rebuilds the arguments of a tool call for persistence
+// and reports whether the payload was incomplete.
+//
+// A provider may have flagged truncation itself (it saw the stream stop inside
+// the arguments); otherwise the shape of the payload reveals it here. Both
+// signals are ORed, so the loop cannot be fooled by whichever one is missing.
+func canonicalArgumentsJSON(tc *ToolCall) (string, bool) {
+	if tc.Function != nil {
+		normalized, truncated := normalizeArgumentsJSONWithFlag(tc.Function.Arguments)
+		if normalized != emptyArgumentsJSON || tc.Arguments == nil {
+			return normalized, truncated || tc.ArgumentsTruncated
+		}
+	}
+	encoded, err := json.Marshal(tc.Arguments)
+	if err != nil || !json.Valid(encoded) {
+		return emptyArgumentsJSON, tc.ArgumentsTruncated
+	}
+	normalized, truncated := normalizeArgumentsJSONWithFlag(string(encoded))
+	return normalized, truncated || tc.ArgumentsTruncated
 }
 
 // repairTruncatedObject closes a JSON object that was cut off mid-write,
@@ -215,12 +255,18 @@ func normalizeArgumentsJSON(raw string) string {
 // be hundreds of kilobytes and the previous "try every prefix" approach was
 // quadratic on exactly those payloads.
 //
+// The third return value reports whether the repair had to discard data: the
+// stream stopped with a member still being written, so that member is gone even
+// though the result parses. It is the signal the agent loop needs, because a
+// repaired payload is indistinguishable from a complete one once it is valid
+// JSON again.
+//
 // Returns ok=false when the input is not a truncated object at all (it does not
 // start with '{'), leaving the caller to decide the fallback.
-func repairTruncatedObject(raw string) (string, bool) {
+func repairTruncatedObject(raw string) (repaired string, ok bool, lost bool) {
 	s := strings.TrimSpace(raw)
 	if !strings.HasPrefix(s, "{") {
-		return "", false
+		return "", false, false
 	}
 
 	// Each frame is a container that is currently open: the character that
@@ -257,12 +303,12 @@ func repairTruncatedObject(raw string) (string, bool) {
 		case '}', ']':
 			if len(stack) == 0 {
 				// A closer with nothing open: the structure is not recoverable.
-				return emptyArgumentsJSON, true
+				return emptyArgumentsJSON, true, true
 			}
 			top := stack[len(stack)-1]
 			if c != top.closer {
 				// Mismatched brackets: too corrupted to guess what survived.
-				return emptyArgumentsJSON, true
+				return emptyArgumentsJSON, true, true
 			}
 			stack = stack[:len(stack)-1]
 			if len(stack) == 0 {
@@ -279,18 +325,20 @@ func repairTruncatedObject(raw string) (string, bool) {
 	}
 
 	// The root object closed cleanly; re-encoding it drops any trailing junk.
+	// Nothing was lost - the payload was complete, the noise after it is not
+	// arguments the model still owed us.
 	if rootEnd >= 0 {
 		prefix := s[:rootEnd]
 		if json.Valid([]byte(prefix)) {
-			return prefix, true
+			return prefix, true, false
 		}
-		return emptyArgumentsJSON, true
+		return emptyArgumentsJSON, true, true
 	}
 
 	if len(stack) == 0 {
 		// No frames and no root close: unreachable for input starting with '{',
 		// but kept explicit so a future change cannot index stack[0] on empty.
-		return emptyArgumentsJSON, true
+		return emptyArgumentsJSON, true, true
 	}
 
 	// Truncated: cut at the last complete member of the innermost open
@@ -304,11 +352,14 @@ func repairTruncatedObject(raw string) (string, bool) {
 	for i := len(stack) - 1; i >= 0; i-- {
 		b.WriteByte(stack[i].closer)
 	}
-	repaired := b.String()
-	if !json.Valid([]byte(repaired)) {
-		return emptyArgumentsJSON, true
+	cut := b.String()
+	if !json.Valid([]byte(cut)) {
+		return emptyArgumentsJSON, true, true
 	}
-	return repaired, true
+	// Reaching this branch means the root object never closed, so the stream
+	// stopped mid-payload: whatever member the model was writing at the cut is
+	// gone. That is the case the loop must not execute blindly.
+	return cut, true, true
 }
 
 // closingBracket returns the bracket that closes the given opener.
@@ -389,14 +440,15 @@ func CanonicalToolCalls(toolCalls []ToolCall) []ToolCall {
 			// No tool to call: replaying this would only poison the request.
 			continue
 		}
-		argsJSON := tc.ArgumentJSON()
+		argsJSON, truncated := canonicalArgumentsJSON(&tc)
 		canonical := ToolCall{
-			ID:               tc.ID,
-			Type:             "function",
-			Name:             name,
-			Arguments:        decodeArgumentsMap(argsJSON, name),
-			ThoughtSignature: tc.ThoughtSignature,
-			ExtraContent:     tc.ExtraContent,
+			ID:                 tc.ID,
+			Type:               "function",
+			Name:               name,
+			Arguments:          decodeArgumentsMap(argsJSON, name),
+			ThoughtSignature:   tc.ThoughtSignature,
+			ExtraContent:       tc.ExtraContent,
+			ArgumentsTruncated: truncated,
 		}
 		if tc.Function != nil {
 			canonical.Function = &FunctionCall{

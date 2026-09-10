@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Navigate,
   Outlet,
@@ -33,16 +34,29 @@ const defaultApiUrl = defaultApiUrlFromWindow()
 
 // Auth wrapper component to handle auto-pairing from URL params
 function AuthRoute() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const [autoAuthAttempted, setAutoAuthAttempted] = useState(false)
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null)
+  // True only while the URL-code auto-pair is in flight. Manual submit uses
+  // AuthPage's own loading state, so it must not flip this spinner.
+  const [isAutoPairing, setIsAutoPairing] = useState(false)
   const { apiUrl, session, handleAuth, isLoading } = useAuthContext()
   const [authError, setAuthError] = useState<string | null>(null)
-  const isAutoAuthenticating = isLoading && !autoAuthAttempted
+  const isAutoAuthenticating = isAutoPairing
 
   const codeFromUrl = searchParams.get('code')
   const deviceName = 'My Desktop'
+
+  // Where ProtectedRoute sent us before bouncing to /pair
+  const fromPath = (() => {
+    const from = (
+      location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
+    )?.from
+    return from ? `${from.pathname ?? '/'}${from.search ?? ''}${from.hash ?? ''}` : '/'
+  })()
 
   // Auto-pair if code is provided and no session exists
   useEffect(() => {
@@ -52,29 +66,42 @@ function AuthRoute() {
       const autoAuth = async () => {
         try {
           setAutoAuthError(null)
+          setIsAutoPairing(true)
           await handleAuth({ apiUrl, pin: codeFromUrl, deviceName })
-          // Navigate to home on success with replace to avoid back-button issues
-          navigate('/', { replace: true })
+          // Return to the originally requested path (or home) with replace
+          // to avoid back-button issues
+          navigate(fromPath, { replace: true })
         } catch (err) {
           setAutoAuthError((err as Error).message)
+        } finally {
+          setIsAutoPairing(false)
         }
       }
 
       autoAuth()
     }
-  }, [codeFromUrl, session?.token, autoAuthAttempted, isLoading, apiUrl, handleAuth, navigate])
+  }, [
+    codeFromUrl,
+    session?.token,
+    autoAuthAttempted,
+    isLoading,
+    apiUrl,
+    handleAuth,
+    navigate,
+    fromPath,
+  ])
 
   const handleAuthSubmit = useCallback(
     async (input: { apiUrl: string; pin: string; deviceName: string }) => {
       try {
         setAuthError(null)
         await handleAuth(input)
-        navigate('/', { replace: true })
+        navigate(fromPath, { replace: true })
       } catch (err) {
         setAuthError((err as Error).message)
       }
     },
-    [handleAuth, navigate],
+    [handleAuth, navigate, fromPath],
   )
 
   // Pre-fill PIN from URL if available
@@ -88,7 +115,7 @@ function AuthRoute() {
           <div className="flex items-center justify-center py-8">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
           </div>
-          <p className="text-center text-text-secondary">Connecting...</p>
+          <p className="text-center text-text-secondary">{t('auth.connecting')}</p>
         </div>
       </main>
     )
@@ -107,9 +134,10 @@ function AuthRoute() {
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session } = useAuthContext()
+  const location = useLocation()
 
   if (!session?.token) {
-    return <Navigate to="/pair" replace />
+    return <Navigate to="/pair" replace state={{ from: location }} />
   }
 
   return <>{children}</>
@@ -142,7 +170,7 @@ function ChatRoute() {
           wsDebug('[ChatRoute] createSession returned:', sessionKey)
           if (sessionKey) {
             wsDebug(`[ChatRoute] Navigating to /chat/${sessionKey}`)
-            navigate(`/chat/${sessionKey}`, { replace: true })
+            navigate(`/chat/${encodeURIComponent(sessionKey)}`, { replace: true })
             return
           }
           navigate('/')
@@ -272,12 +300,18 @@ function AppContent() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Redirect authenticated users away from /pair
+  // Redirect authenticated users away from /pair, honouring ProtectedRoute's
+  // saved location so a session restored from storage still lands on `from`.
   useEffect(() => {
     if (session?.token && location.pathname === '/pair') {
-      navigate('/', { replace: true })
+      const from = (
+        location.state as { from?: { pathname?: string; search?: string; hash?: string } } | null
+      )?.from
+      navigate(from ? `${from.pathname ?? '/'}${from.search ?? ''}${from.hash ?? ''}` : '/', {
+        replace: true,
+      })
     }
-  }, [location.pathname, session?.token, navigate])
+  }, [location.pathname, location.state, session?.token, navigate])
 
   return (
     <Routes>

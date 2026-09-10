@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/tui"
@@ -39,6 +40,10 @@ type providerInfo struct {
 }
 
 func providerRegistry() []providerInfo {
+	// catalogBase returns the catalog default API base for a provider type.
+	catalogBase := func(typ string) string {
+		return catalog.DefaultAPIBaseByType(typ)
+	}
 	return []providerInfo{
 		{name: "anthropic", displayName: "Anthropic (Claude)", typeKey: "anthropic", apiBase: "https://api.anthropic.com/v1", authHeader: "x-api-key"},
 		{name: "openai", displayName: "OpenAI (GPT)", typeKey: "openai", apiBase: "https://api.openai.com/v1", authHeader: "Bearer"},
@@ -54,7 +59,31 @@ func providerRegistry() []providerInfo {
 		{name: "vllm", displayName: "VLLM", typeKey: "vllm", apiBase: "", authHeader: "Bearer"},
 		{name: "shengsuanyun", displayName: "ShengSuanYun", typeKey: "shengsuanyun", apiBase: "https://router.shengsuanyun.com/api/v1", authHeader: "Bearer"},
 		{name: "alibaba_coding_plan", displayName: "Alibaba Coding Plan", typeKey: "alibaba_coding_plan", apiBase: "https://coding-intl.dashscope.aliyuncs.com/v1", authHeader: "Bearer"},
+		{name: "alibaba_token_plan", displayName: "Qwen Cloud Token Plan", typeKey: "alibaba_token_plan", apiBase: catalogBase("alibaba_token_plan"), authHeader: "Bearer"},
+		{name: "alibaba_token_plan_cn", displayName: "Qwen Cloud Token Plan (CN)", typeKey: "alibaba_token_plan_cn", apiBase: catalogBase("alibaba_token_plan_cn"), authHeader: "Bearer"},
 		{name: "github_copilot", displayName: "GitHub Copilot", typeKey: "github_copilot", apiBase: "localhost:4321", authHeader: "Bearer"},
+		// Optional catalog-backed providers (hermes-agent pending set).
+		{name: "xai", displayName: "xAI (Grok)", typeKey: "xai", apiBase: catalogBase("xai"), authHeader: "Bearer"},
+		{name: "nous", displayName: "Nous Portal", typeKey: "nous", apiBase: catalogBase("nous"), authHeader: "Bearer"},
+		{name: "lmstudio", displayName: "LM Studio (local)", typeKey: "lmstudio", apiBase: catalogBase("lmstudio"), authHeader: "Bearer", local: true},
+		{name: "stepfun", displayName: "StepFun", typeKey: "stepfun", apiBase: catalogBase("stepfun"), authHeader: "Bearer"},
+		{name: "minimax", displayName: "MiniMax", typeKey: "minimax", apiBase: catalogBase("minimax"), authHeader: "Bearer"},
+		{name: "vercel", displayName: "Vercel AI Gateway", typeKey: "vercel", apiBase: catalogBase("vercel"), authHeader: "Bearer"},
+		{name: "opencode", displayName: "OpenCode Zen", typeKey: "opencode", apiBase: catalogBase("opencode"), authHeader: "Bearer"},
+		{name: "huggingface", displayName: "Hugging Face", typeKey: "huggingface", apiBase: catalogBase("huggingface"), authHeader: "Bearer"},
+		{name: "novita", displayName: "NovitaAI", typeKey: "novita", apiBase: catalogBase("novita"), authHeader: "Bearer"},
+		{name: "xiaomi", displayName: "Xiaomi MiMo", typeKey: "xiaomi", apiBase: catalogBase("xiaomi"), authHeader: "Bearer"},
+		{name: "tencent_tokenhub", displayName: "Tencent TokenHub", typeKey: "tencent_tokenhub", apiBase: catalogBase("tencent_tokenhub"), authHeader: "Bearer"},
+		{name: "arcee", displayName: "Arcee", typeKey: "arcee", apiBase: catalogBase("arcee"), authHeader: "Bearer"},
+		{name: "gmi", displayName: "GMI Cloud", typeKey: "gmi", apiBase: catalogBase("gmi"), authHeader: "Bearer"},
+		{name: "cerebras", displayName: "Cerebras", typeKey: "cerebras", apiBase: catalogBase("cerebras"), authHeader: "Bearer"},
+		{name: "together", displayName: "Together AI", typeKey: "together", apiBase: catalogBase("together"), authHeader: "Bearer"},
+		{name: "fireworks", displayName: "Fireworks", typeKey: "fireworks", apiBase: catalogBase("fireworks"), authHeader: "Bearer"},
+		{name: "mistral", displayName: "Mistral", typeKey: "mistral", apiBase: catalogBase("mistral"), authHeader: "Bearer"},
+		{name: "siliconflow", displayName: "SiliconFlow", typeKey: "siliconflow", apiBase: catalogBase("siliconflow"), authHeader: "Bearer"},
+		{name: "perplexity", displayName: "Perplexity", typeKey: "perplexity", apiBase: catalogBase("perplexity"), authHeader: "Bearer"},
+		{name: "ollama_cloud", displayName: "Ollama Cloud", typeKey: "ollama_cloud", apiBase: catalogBase("ollama_cloud"), authHeader: "Bearer"},
+		{name: "kimi_for_coding", displayName: "Kimi For Coding", typeKey: "kimi_for_coding", apiBase: catalogBase("kimi_for_coding"), authHeader: "Bearer"},
 		{name: "custom", displayName: "Custom (OpenAI-compatible)", typeKey: "", apiBase: "", authHeader: "Bearer"},
 	}
 }
@@ -81,6 +110,7 @@ func printHelp() {
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("migrate"), styleOption.Render("Migrate from OpenClaw to Lele"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("skills"), styleOption.Render("Manage skills (install, list, remove)"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("client"), styleOption.Render("Manage native channel clients (pair, list, remove)"))
+	fmt.Printf("  %-11s %s\n", styleNumber.Render("models"), styleOption.Render("Model catalog (refresh, list, providers)"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("update"), styleOption.Render("Update lele to the latest release"))
 	fmt.Printf("  %-11s %s\n", styleNumber.Render("version"), styleOption.Render("Show version information"))
 }
@@ -332,6 +362,10 @@ func configureProvider(cfg *config.Config, info providerInfo) {
 		cfg.Providers.ShengSuanYun = named.ProviderConfig
 	case "alibaba_coding_plan":
 		cfg.Providers.AlibabaCodingPlan = named.ProviderConfig
+	case "alibaba_token_plan":
+		cfg.Providers.AlibabaTokenPlan = named.ProviderConfig
+	case "alibaba_token_plan_cn":
+		cfg.Providers.AlibabaTokenPlanCN = named.ProviderConfig
 	case "github_copilot":
 		cfg.Providers.GitHubCopilot = named.ProviderConfig
 	case "nanogpt":

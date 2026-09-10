@@ -50,10 +50,7 @@ func (m *Model) loadSecrets() {
 
 // formatSecretLine renders a single secret as a compact list line.
 func formatSecretLine(s keyring.SecretMeta) string {
-	name := s.Name
-	if len(name) > 36 {
-		name = name[:33] + "..."
-	}
+	name := truncateRightCells(s.Name, 36)
 
 	var parts []string
 	if len(s.Tags) > 0 {
@@ -68,10 +65,7 @@ func formatSecretLine(s keyring.SecretMeta) string {
 		line += "  " + strings.Join(parts, " ")
 	}
 	if s.Description != "" {
-		desc := s.Description
-		if len(desc) > 30 {
-			desc = desc[:27] + "..."
-		}
+		desc := truncateRightCells(s.Description, 30)
 		line += "  " + CommentColorStyle.Render(desc)
 	}
 	return line

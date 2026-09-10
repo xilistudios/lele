@@ -291,7 +291,7 @@ func (m *Model) filterAutocomplete(val string) {
 		}
 		m.autocompleteItems = append(m.autocompleteItems, cmd)
 	}
-	if m.autocompleteIdx >= len(m.autocompleteItems) {
+	if m.autocompleteIdx < 0 || m.autocompleteIdx >= len(m.autocompleteItems) {
 		m.autocompleteIdx = 0
 	}
 }

@@ -179,7 +179,6 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 }
 
 func (n *NativeChannel) wsWriteLoop(client *WSClient) {
-	conn := client.Conn
 	pingTicker := time.NewTicker(wsPingInterval)
 	defer pingTicker.Stop()
 
@@ -191,12 +190,21 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 		case data, ok := <-client.SendChan:
 			if !ok {
 				client.mu.Lock()
-				conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if conn := client.Conn; conn != nil {
+					conn.WriteMessage(websocket.CloseMessage, []byte{})
+				}
 				client.mu.Unlock()
 				return
 			}
-			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 			client.mu.Lock()
+			conn := client.Conn
+			if conn == nil {
+				// Disconnected; drop this frame rather than crashing. Reconnect
+				// flushes buffered events separately.
+				client.mu.Unlock()
+				continue
+			}
+			conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				client.mu.Unlock()
 				logger.ErrorCF("native", "WebSocket write error", map[string]interface{}{
@@ -206,8 +214,13 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 			}
 			client.mu.Unlock()
 		case <-pingTicker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			client.mu.Lock()
+			conn := client.Conn
+			if conn == nil {
+				client.mu.Unlock()
+				continue
+			}
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				client.mu.Unlock()
 				return

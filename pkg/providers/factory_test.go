@@ -329,3 +329,110 @@ func TestResolveProviderSelection_UsesNamedProviderAndModelAlias(t *testing.T) {
 		t.Fatalf("model = %q, want gpt-4o-mini", got.model)
 	}
 }
+
+func TestDefaultAPIBaseByType_CatalogProviders(t *testing.T) {
+	tests := []struct {
+		typ  string
+		want string
+	}{
+		{"xai", "https://api.x.ai/v1"},
+		{"grok", "https://api.x.ai/v1"},
+		{"nous", "https://inference-api.nousresearch.com/v1"},
+		{"lmstudio", "http://127.0.0.1:1234/v1"},
+		{"stepfun", "https://api.stepfun.ai/step_plan/v1"},
+		{"minimax", "https://api.minimax.io/anthropic/v1"},
+		{"minimax_cn", "https://api.minimaxi.com/anthropic/v1"},
+		{"vercel", "https://ai-gateway.vercel.sh/v1"},
+		{"opencode", "https://opencode.ai/zen/v1"},
+		{"opencode_go", "https://opencode.ai/zen/go/v1"},
+		{"huggingface", "https://router.huggingface.co/v1"},
+		{"novita", "https://api.novita.ai/openai"},
+		{"xiaomi", "https://api.xiaomimimo.com/v1"},
+		{"tencent_tokenhub", "https://tokenhub.tencentmaas.com/v1"},
+		{"arcee", "https://api.arcee.ai/api/v1"},
+		{"gmi", "https://api.gmi-serving.com/v1"},
+		{"ollama_cloud", "https://ollama.com/v1"},
+		{"cerebras", "https://api.cerebras.ai/v1"},
+		{"together", "https://api.together.xyz/v1"},
+		{"fireworks", "https://api.fireworks.ai/inference/v1"},
+		{"mistral", "https://api.mistral.ai/v1"},
+		{"siliconflow", "https://api.siliconflow.com/v1"},
+		{"perplexity", "https://api.perplexity.ai/v1"},
+		{"kimi_for_coding", "https://api.kimi.com/coding/v1"},
+		{"alibaba_token_plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
+		{"qwen-token-plan", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"},
+		{"alibaba_token_plan_cn", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
+		// Existing providers still resolve
+		{"openai", "https://api.openai.com/v1"},
+		{"anthropic", defaultAnthropicAPIBase},
+		{"github_copilot", "localhost:4321"},
+		{"alibaba", "https://coding-intl.dashscope.aliyuncs.com/v1"},
+		{"zai", "https://api.z.ai/api/paas/v4"},
+		{"unknown-provider-xyz", ""},
+	}
+
+	for _, tt := range tests {
+		got := defaultAPIBaseByType(tt.typ)
+		if got != tt.want {
+			t.Errorf("defaultAPIBaseByType(%q) = %q, want %q", tt.typ, got, tt.want)
+		}
+	}
+}
+
+func TestSelectionFromNamedProvider_MiniMaxUsesAnthropicTransport(t *testing.T) {
+	tests := []struct {
+		name    string
+		typ     string
+		apiBase string
+	}{
+		{"minimax default base", "minimax", ""},
+		{"minimax_cn default base", "minimax_cn", ""},
+		{"explicit anthropic path", "custom", "https://proxy.example.com/anthropic/v1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			named := config.NamedProviderConfig{
+				Type: tt.typ,
+				ProviderConfig: config.ProviderConfig{
+					APIKey:  "mm-key",
+					APIBase: tt.apiBase,
+				},
+			}
+			sel, err := selectionFromNamedProvider(cfg, "mm", "MiniMax-M3", named)
+			if err != nil {
+				t.Fatalf("selectionFromNamedProvider() error = %v", err)
+			}
+			if sel.providerType != providerTypeAnthropic {
+				t.Fatalf("providerType = %v, want providerTypeAnthropic", sel.providerType)
+			}
+			if sel.apiBase == "" {
+				t.Fatal("apiBase is empty")
+			}
+			if !strings.Contains(sel.apiBase, "/anthropic") {
+				t.Fatalf("apiBase = %q, want path containing /anthropic", sel.apiBase)
+			}
+		})
+	}
+}
+
+func TestSelectionFromNamedProvider_NonAnthropicStaysHTTPCompat(t *testing.T) {
+	cfg := config.DefaultConfig()
+	named := config.NamedProviderConfig{
+		Type: "xai",
+		ProviderConfig: config.ProviderConfig{
+			APIKey: "xai-key",
+		},
+	}
+	sel, err := selectionFromNamedProvider(cfg, "xai", "grok-4", named)
+	if err != nil {
+		t.Fatalf("selectionFromNamedProvider() error = %v", err)
+	}
+	if sel.providerType != providerTypeHTTPCompat {
+		t.Fatalf("providerType = %v, want providerTypeHTTPCompat", sel.providerType)
+	}
+	if sel.apiBase != "https://api.x.ai/v1" {
+		t.Fatalf("apiBase = %q, want https://api.x.ai/v1", sel.apiBase)
+	}
+}

@@ -24,6 +24,14 @@ export function AdvancedSettings() {
   const [copied, setCopied] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isInternalChange = useRef(false)
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear the "Copied" feedback timer if the component unmounts mid-toast.
+  useEffect(() => {
+    return () => {
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+    }
+  }, [])
 
   // Sync raw text when opening the editor or when draftConfig changes externally (not from textarea edits)
   useEffect(() => {
@@ -67,7 +75,8 @@ export function AdvancedSettings() {
     try {
       await navigator.clipboard.writeText(rawJsonText)
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 2000)
     } catch {
       // Clipboard not available
     }

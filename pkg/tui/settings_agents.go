@@ -271,6 +271,8 @@ func (m *Model) handleAgentEditEnter() tea.Cmd {
 	case agentFieldDelete: // 11: Delete
 		m.settingsEditField = "confirmDelete"
 		m.formError = i18n.T("tui.settings.confirmDelete")
+		m.textInput.SetValue("")
+		m.textInput.Focus()
 	}
 	return nil
 }

@@ -129,7 +129,15 @@
     "queueClear": "Vaciar cola",
     "queueFull": "La cola está llena (10 mensajes). Espera a que termine el agente.",
     "deviceMenu": "Menú del dispositivo",
-    "removeAttachment": "Quitar adjunto"
+    "removeAttachment": "Quitar adjunto",
+    "attachFiles": "Adjuntar archivos",
+    "uploadFailed": "No se pudo subir el archivo",
+    "isTyping": "{{name}} está escribiendo...",
+    "scrollToBottom": "Desplazarse hacia abajo",
+    "failedToSend": "Error al enviar",
+    "retry": "Reintentar",
+    "archivedFromContext": "Archivado del contexto",
+    "download": "Descargar"
   },
   "connection": {
     "connected": "Conectado",
@@ -159,7 +167,8 @@
     "authFailed": "No se pudo autenticar",
     "sendFailed": "No se pudo enviar el mensaje",
     "messageRequired": "El mensaje no puede estar vacío",
-    "deleteSessionFailed": "No se pudo eliminar la sesión"
+    "deleteSessionFailed": "No se pudo eliminar la sesión",
+    "network": "No se puede conectar con el backend de Lele. Comprueba que esté en marcha e inténtalo de nuevo."
   },
   "settings": {
     "agentPage": {
@@ -745,6 +754,10 @@
       "actions": "Acciones",
       "revoke": "Revocar",
       "confirmRevoke": "¿Estás seguro de que deseas revocar la autorización de este dispositivo? Se desconectará de inmediato.",
+      "confirmRevokeTitle": "¿Revocar dispositivo?",
+      "revokeFailed": "No se pudo revocar el cliente",
+      "pinFailed": "No se pudo generar el PIN",
+      "fetchFailed": "No se pudieron obtener los clientes nativos",
       "pairDeviceModalTitle": "Vincular Nuevo Dispositivo",
       "pairDeviceInstruction": "Ingresa un nombre para el dispositivo que deseas vincular. Esto generará un código PIN para usar en el nuevo dispositivo.",
       "deviceNameLabel": "Nombre del Dispositivo",
@@ -792,7 +805,9 @@
       "refresh": "Actualizar",
       "empty": "No hay entradas de log para esta fecha.",
       "showing": "Mostrando {{returned}} de {{total}} líneas"
-    }
+    },
+    "languageInstall": "instalar",
+    "languageLoading": "Cargando idiomas…"
   },
   "common": {
     "loading": "Cargando...",
@@ -818,7 +833,16 @@
     "expand": "Expandir",
     "back": "Atrás",
     "copied": "Copiado",
-    "noData": "Sin datos"
+    "noData": "Sin datos",
+    "retry": "Reintentar",
+    "search": "Buscar",
+    "dismiss": "Descartar"
+  },
+  "desktop": {
+    "disconnected": "Backend desconectado",
+    "disconnectedMessage": "El gateway de Lele dejó de responder.",
+    "restart": "Reiniciar backend",
+    "restarting": "Reiniciando…"
   },
   "groups": {
     "title": "Chat grupal",
@@ -924,11 +948,30 @@
     "command": "Comando",
     "agent": "Agente",
     "viewOutput": "Ver Salida",
-    "hideOutput": "Ocultar Salida"
+    "hideOutput": "Ocultar Salida",
+    "loadError": "No se pudieron cargar los procesos en segundo plano",
+    "stopError": "No se pudo detener el proceso"
+  },
+  "agentFiles": {
+    "loadingFiles": "Cargando archivos...",
+    "backToAgents": "Volver a Agentes",
+    "contextFiles": "Archivos de contexto",
+    "discard": "Descartar",
+    "saveCurrentFile": "Guardar archivo actual",
+    "unsavedChanges": "Tienes cambios sin guardar",
+    "files": "Archivos",
+    "fileContentPlaceholder": "Contenido del archivo...",
+    "chars": "{{count}} caracteres",
+    "lines": "{{count}} líneas",
+    "loadFilesError": "No se pudieron cargar los archivos",
+    "loadFileError": "No se pudo cargar el archivo",
+    "saveError": "No se pudo guardar"
   },
   "skills": {
     "title": "Habilidades",
     "installed": "instaladas",
+    "installedCount_one": "{{count}} habilidad instalada",
+    "installedCount_other": "{{count}} habilidades instaladas",
     "noSkills": "No hay habilidades instaladas",
     "noSkillsDesc": "Instala habilidades para extender las capacidades de tu agente",
     "installSkill": "Instalar habilidad",

@@ -44,7 +44,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   } = useAppLogicContext()
   const { messages, toolStatus } = useAppStreamingContext()
 
-  const hasConversation = messages.length > 0
+  const hasConversation = (messages?.length ?? 0) > 0
   const canCancel = isProcessing || Boolean(toolStatus)
   const currentSession = useMemo<ChatSession | null>(() => {
     if (!currentSessionKey) return null
@@ -70,15 +70,18 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   }, [parentSessionKey, sessions])
 
   const availableModels = useMemo(() => {
-    return modelState.available.length > 0
-      ? modelState.available.map((model) => ({ value: model, label: model }))
+    const available = modelState.available ?? []
+    return available.length > 0
+      ? available.map((model) => ({ value: model, label: model }))
       : currentAgent?.model
         ? [{ value: currentAgent.model, label: currentAgent.model }]
         : [{ value: t('chat.default'), label: t('chat.default') }]
   }, [modelState.available, currentAgent?.model, t])
 
   const groupedModels: GroupedModels = useMemo(() => {
-    const groups = modelState.groups.filter((group) => group.models.length > 0)
+    const groups = (modelState.groups ?? []).filter(
+      (group) => (group.models?.length ?? 0) > 0,
+    )
     if (groups.length === 0) return undefined
 
     return groups.map((group) => ({

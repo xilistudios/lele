@@ -1,0 +1,139 @@
+{
+  "id": "groq",
+  "name": "Groq",
+  "type": "openai",
+  "api_base": "https://api.groq.com/openai/v1",
+  "models": [
+    {
+      "id": "qwen/qwen3.6-27b",
+      "name": "Qwen3.6 27B",
+      "context_window": 131072,
+      "max_output": 16384,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "qwen/qwen3.8-27b",
+      "name": "Qwen3.8 27B",
+      "context_window": 131042,
+      "max_output": 16384,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "llama-3.3-70b-versatile",
+      "name": "Llama 3.3 70B",
+      "context_window": 131072,
+      "max_output": 32768,
+      "tool_call": true
+    },
+    {
+      "id": "openai/gpt-oss-120b",
+      "name": "GPT OSS 120B",
+      "context_window": 131072,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "name": "GPT OSS 20B",
+      "context_window": 131072,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "openai/gpt-oss-safeguard-20b",
+      "name": "Safety GPT OSS 20B",
+      "context_window": 131072,
+      "max_output": 65536,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "llama-3.1-8b-instant",
+      "name": "Llama 3.1 8B",
+      "context_window": 131072,
+      "max_output": 131072,
+      "tool_call": true
+    },
+    {
+      "id": "allam-2-7b",
+      "name": "ALLaM-2-7b",
+      "context_window": 4096,
+      "max_output": 4096
+    },
+    {
+      "id": "canopylabs/orpheus-arabic-saudi",
+      "name": "Canopy Labs Orpheus Arabic Saudi",
+      "context_window": 4000,
+      "max_output": 50000
+    },
+    {
+      "id": "canopylabs/orpheus-v1-english",
+      "name": "Canopy Labs Orpheus V1 English",
+      "context_window": 4000,
+      "max_output": 50000
+    },
+    {
+      "id": "groq/compound",
+      "name": "Compound",
+      "context_window": 131072,
+      "max_output": 8192
+    },
+    {
+      "id": "groq/compound-mini",
+      "name": "Compound Mini",
+      "context_window": 131072,
+      "max_output": 8192
+    },
+    {
+      "id": "meta-llama/llama-prompt-guard-2-22m",
+      "name": "Llama Prompt Guard 2 22M",
+      "context_window": 512,
+      "max_output": 512
+    },
+    {
+      "id": "meta-llama/llama-prompt-guard-2-86m",
+      "name": "Prompt Guard 2 86M",
+      "context_window": 512,
+      "max_output": 512
+    },
+    {
+      "id": "whisper-large-v3",
+      "name": "Whisper"
+    },
+    {
+      "id": "whisper-large-v3-turbo",
+      "name": "Whisper Large V3 Turbo"
+    }
+  ]
+}

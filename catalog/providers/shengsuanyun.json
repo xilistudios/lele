@@ -1,0 +1,7 @@
+{
+  "id": "shengsuanyun",
+  "name": "ShengsuanYun",
+  "type": "openai",
+  "api_base": "https://router.shengsuanyun.com/api/v1",
+  "models": []
+}

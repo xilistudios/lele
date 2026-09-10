@@ -129,7 +129,15 @@
     "queueClear": "Clear queue",
     "queueFull": "The queue is full (10 messages). Wait for the agent to finish.",
     "deviceMenu": "Device menu",
-    "removeAttachment": "Remove attachment"
+    "removeAttachment": "Remove attachment",
+    "attachFiles": "Attach files",
+    "uploadFailed": "Failed to upload attachment",
+    "isTyping": "{{name}} is typing...",
+    "scrollToBottom": "Scroll to bottom",
+    "failedToSend": "Failed to send",
+    "retry": "Retry",
+    "archivedFromContext": "Archived from context",
+    "download": "Download"
   },
   "connection": {
     "connected": "Connected",
@@ -159,7 +167,8 @@
     "authFailed": "Could not authenticate",
     "sendFailed": "Could not send message",
     "messageRequired": "Message cannot be empty",
-    "deleteSessionFailed": "Could not delete session"
+    "deleteSessionFailed": "Could not delete session",
+    "network": "Can't reach the Lele backend. Check that it's running, then try again."
   },
   "settings": {
     "agentPage": {
@@ -745,6 +754,10 @@
       "actions": "Actions",
       "revoke": "Revoke",
       "confirmRevoke": "Are you sure you want to revoke this device's authorization? It will be disconnected immediately.",
+      "confirmRevokeTitle": "Revoke device?",
+      "revokeFailed": "Failed to revoke client",
+      "pinFailed": "Failed to generate PIN",
+      "fetchFailed": "Failed to fetch native clients",
       "pairDeviceModalTitle": "Pair New Device",
       "pairDeviceInstruction": "Enter a name for the device you want to pair. This will generate a PIN code to use on the new device.",
       "deviceNameLabel": "Device Name",
@@ -792,7 +805,9 @@
       "refresh": "Refresh",
       "empty": "No log entries found for this date.",
       "showing": "Showing {{returned}} of {{total}} lines"
-    }
+    },
+    "languageInstall": "install",
+    "languageLoading": "Loading languages…"
   },
   "common": {
     "loading": "Loading...",
@@ -816,9 +831,18 @@
     "yes": "Yes",
     "no": "No",
     "close": "Close",
+    "dismiss": "Dismiss",
     "back": "Back",
     "copied": "Copied",
-    "noData": "No data"
+    "noData": "No data",
+    "retry": "Retry",
+    "search": "Search"
+  },
+  "desktop": {
+    "disconnected": "Backend disconnected",
+    "disconnectedMessage": "The Lele gateway stopped responding.",
+    "restart": "Restart backend",
+    "restarting": "Restarting…"
   },
   "groups": {
     "title": "Group Chat",
@@ -924,11 +948,30 @@
     "command": "Command",
     "agent": "Agent",
     "viewOutput": "View Output",
-    "hideOutput": "Hide Output"
+    "hideOutput": "Hide Output",
+    "loadError": "Could not load background processes",
+    "stopError": "Could not stop the process"
+  },
+  "agentFiles": {
+    "loadingFiles": "Loading files...",
+    "backToAgents": "Back to Agents",
+    "contextFiles": "Context Files",
+    "discard": "Discard",
+    "saveCurrentFile": "Save Current File",
+    "unsavedChanges": "You have unsaved changes",
+    "files": "Files",
+    "fileContentPlaceholder": "File content...",
+    "chars": "{{count}} chars",
+    "lines": "{{count}} lines",
+    "loadFilesError": "Failed to load files",
+    "loadFileError": "Failed to load file",
+    "saveError": "Failed to save"
   },
   "skills": {
     "title": "Skills",
     "installed": "installed",
+    "installedCount_one": "{{count}} skill installed",
+    "installedCount_other": "{{count}} skills installed",
     "noSkills": "No skills installed",
     "noSkillsDesc": "Install skills to extend your agent's capabilities",
     "installSkill": "Install Skill",

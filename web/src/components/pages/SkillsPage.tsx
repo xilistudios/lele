@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useAuthContext } from '../../contexts/AuthContext'
 import { useSkills } from '../../hooks/useSkills'
+import { Button } from '../atoms'
 import { InstallSkillModal } from '../organisms/InstallSkillModal'
 import { Sidebar } from '../organisms/Sidebar'
 import { SkillsList } from '../organisms/SkillsList'
-import { Button } from '../atoms'
 
 export function SkillsPage() {
   const { t } = useTranslation()
@@ -134,8 +134,7 @@ export function SkillsPage() {
 
           {!isLoading && skills.length > 0 && (
             <p className="mb-4 text-xs text-text-tertiary">
-              {skills.length} {skills.length === 1 ? 'skill' : 'skills'}{' '}
-              {t('skills.installed', 'installed')}
+              {t('skills.installedCount', { count: skills.length })}
             </p>
           )}
 

@@ -19,11 +19,14 @@ func (m *Model) handleWindowSizeMsg(msg tea.WindowSizeMsg, cmds []tea.Cmd) (tea.
 	m.thinkingRenderedLines = nil
 	m.streamRenderedJoined = ""
 	m.thinkingRenderedJoined = ""
+	m.streamRenderCacheWidth = 0
+	m.thinkingRenderCacheWidth = 0
 	m.renderedBaseValid = false
 	m.renderedBaseKey = ""
 	m.msgRenderCacheLines = nil // width changed — all rendered output is stale
 	m.cachedRenderer = nil
 	m.cachedRendererWidth = 0
+	m.cachedRendererStyle = ""
 
 	m.updateViewport()
 

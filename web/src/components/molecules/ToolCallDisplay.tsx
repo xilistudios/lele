@@ -460,63 +460,77 @@ export function ToolCallDisplay({
 
   return (
     <div className="group">
-      {/* Header — same style as thinking block */}
+      {/* Header — same style as thinking block. Expand and subagent nav are
+          sibling controls so no <button> is nested inside another. */}
       <div
         className={`rounded-lg border border-border bg-background-secondary/50 overflow-hidden transition-colors ${
           expanded ? '' : 'hover:bg-background-secondary'
         }`}
       >
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
-          aria-expanded={expanded}
-          onClick={onToggleExpand}
-        >
-          {/* Tool icon */}
-          <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
+        <div className="flex w-full items-center gap-2 px-3 py-1.5">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            aria-expanded={expanded}
+            onClick={onToggleExpand}
+          >
+            {/* Tool icon */}
+            <div className={`flex-shrink-0 rounded-md p-1 ${iconConfig.color}`}>
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                aria-hidden="true"
+              >
+                {iconConfig.icon
+                  .split(' M')
+                  .map((path, i) =>
+                    i === 0 ? <path key={path} d={path} /> : <path key={`M${path}`} d={`M${path}`} />,
+                  )}
+              </svg>
+            </div>
+
+            {/* Label */}
+            <span className="text-sm text-text-secondary">{label}</span>
+
+            {/* Summary: command for exec, path for files, etc. */}
+            {argsSummary && (
+              <span className="min-w-0 truncate text-xs text-text-tertiary font-mono">
+                {argsSummary}
+              </span>
+            )}
+
+            {/* Error badge only */}
+            {toolStatus === 'error' && (
+              <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-state-error-light text-state-error border border-state-error/30">
+                {t('toolCalls.error')}
+              </span>
+            )}
+
+            {/* Chevron */}
             <svg
-              className="h-4 w-4"
+              className={`h-3 w-3 flex-shrink-0 text-text-tertiary transition-transform ml-auto ${
+                expanded ? 'rotate-90' : ''
+              }`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.5"
+              strokeWidth="2"
               aria-hidden="true"
             >
-              {iconConfig.icon
-                .split(' M')
-                .map((path, i) =>
-                  i === 0 ? <path key={path} d={path} /> : <path key={`M${path}`} d={`M${path}`} />,
-                )}
+              <polyline points="9 18 15 12 9 6" />
             </svg>
-          </div>
+          </button>
 
-          {/* Label */}
-          <span className="text-sm text-text-secondary">{label}</span>
-
-          {/* Summary: command for exec, path for files, etc. */}
-          {argsSummary && (
-            <span className="min-w-0 truncate text-xs text-text-tertiary font-mono">
-              {argsSummary}
-            </span>
-          )}
-
-          {/* Error badge only */}
-          {toolStatus === 'error' && (
-            <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-state-error-light text-state-error border border-state-error/30">
-              {t('toolCalls.error')}
-            </span>
-          )}
-
-          {/* Subagent nav */}
+          {/* Subagent nav — sibling of the expand control, never nested */}
           {subagentSessionKey && toolStatus !== 'executing' && onNavigateToSession && (
             <button
               type="button"
               aria-label={t('toolCalls.openSubagent')}
-              className="ml-auto p-0.5 rounded-md hover:bg-background-secondary transition-colors cursor-pointer"
-              onClick={(e) => {
-                e.stopPropagation()
-                onNavigateToSession(subagentSessionKey)
-              }}
+              className="flex-shrink-0 p-0.5 rounded-md hover:bg-background-secondary transition-colors cursor-pointer"
+              onClick={() => onNavigateToSession(subagentSessionKey)}
             >
               <svg
                 className="h-3.5 w-3.5 text-text-tertiary hover:text-text-primary"
@@ -531,21 +545,7 @@ export function ToolCallDisplay({
               </svg>
             </button>
           )}
-
-          {/* Chevron */}
-          <svg
-            className={`h-3 w-3 text-text-tertiary transition-transform ml-auto ${
-              expanded ? 'rotate-90' : ''
-            }`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </button>
+        </div>
 
         {/* Expanded: result only for non-file ops */}
         {expanded && showResult && (

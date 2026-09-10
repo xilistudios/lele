@@ -602,10 +602,12 @@ func parseAnthropicSSEStream(ctx context.Context, body io.Reader, onChunk func(c
 			}
 			if bs.blockType == "tool_use" {
 				argsJSON := bs.inputJSON.String()
+				arguments, truncated := common.DecodeToolCallArgumentsTruncated(json.RawMessage(argsJSON), bs.name)
 				toolCalls = append(toolCalls, ToolCall{
-					ID:        bs.id,
-					Name:      bs.name,
-					Arguments: common.DecodeToolCallArguments(json.RawMessage(argsJSON), bs.name),
+					ID:                 bs.id,
+					Name:               bs.name,
+					Arguments:          arguments,
+					ArgumentsTruncated: truncated,
 					Function: &FunctionCall{
 						Name:      bs.name,
 						Arguments: argsJSON,

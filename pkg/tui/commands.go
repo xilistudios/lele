@@ -61,6 +61,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 	case "/agents":
 		m.resetModal(ModalAgent)
 		m.modalItems = m.agentLoop.GetProvidable().ListAvailableAgentIDs()
+		if len(m.modalItems) == 0 {
+			m.modalItems = append(m.modalItems, i18n.T("tui.noneConfigured"))
+		}
 		return nil
 
 	case "/models":
@@ -84,6 +87,9 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 					m.modalItems = append(m.modalItems, fmt.Sprintf("%s:%s", pName, mAlias))
 				}
 			}
+		}
+		if len(m.modalItems) == 0 {
+			m.modalItems = append(m.modalItems, i18n.T("tui.noneConfigured"))
 		}
 		// Pre-select the current session's model so the cursor lands on it.
 		// GetSessionModel returns the resolved provider:modelID value, while
@@ -127,12 +133,7 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 
 	case "/lang":
 		m.resetModal(ModalLang)
-		// Show language names with codes
-		m.modalItems = []string{
-			"Español (es)",
-			"English (en)",
-			"Português (pt)",
-		}
+		m.modalItems, m.modalLangCodes = buildLanguageModalItems(m.cfg.Language)
 		return nil
 
 	case "/subagents":

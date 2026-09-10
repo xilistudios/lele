@@ -4,6 +4,7 @@ import { useAppLogicContext } from '../../contexts/AppLogicContext'
 import { useBackgroundExecStream } from '../../hooks/useBackgroundExecStream'
 import { useBackgroundExecs } from '../../hooks/useBackgroundExecs'
 import type { BackgroundExecInfo } from '../../lib/types'
+import { ErrorBanner } from '../atoms/ErrorBanner'
 import { Sidebar } from '../organisms/Sidebar'
 
 function formatElapsed(ms: number): string {
@@ -158,7 +159,7 @@ export function BackgroundExecsPage() {
   const { t } = useTranslation()
   const { sidebarOpen, mobileSidebarOpen, onCloseMobileSidebar, onOpenMobileSidebar } =
     useAppLogicContext()
-  const { processes, loading, refresh, stopProcess } = useBackgroundExecs()
+  const { processes, loading, error, refresh, stopProcess } = useBackgroundExecs()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const handleToggle = useCallback((id: string) => {
@@ -229,47 +230,52 @@ export function BackgroundExecsPage() {
         </header>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {loading && processes.length === 0 && (
-            <div className="flex items-center justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
-            </div>
-          )}
+        <div className="flex-1 overflow-y-auto">
+          {error && <ErrorBanner message={error} />}
 
-          {!loading && processes.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <svg
-                className="mb-4 h-12 w-12 text-text-tertiary/40"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              <p className="text-sm text-text-tertiary">
-                {t('backgroundExecs.empty', 'No background processes')}
-              </p>
-            </div>
-          )}
+          <div className="p-6">
+            {loading && processes.length === 0 && !error && (
+              <div className="flex items-center justify-center py-20">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+              </div>
+            )}
 
-          {processes.length > 0 && (
-            <div className="space-y-2">
-              {processes.map((proc) => (
-                <ProcessCard
-                  key={proc.id}
-                  process={proc}
-                  expanded={expandedId === proc.id}
-                  onToggle={() => handleToggle(proc.id)}
-                  onStop={() => handleStop(proc.id)}
-                />
-              ))}
-            </div>
-          )}
+            {/* A failed fetch is an error, not an empty-but-successful list. */}
+            {!loading && !error && processes.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <svg
+                  className="mb-4 h-12 w-12 text-text-tertiary/40"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                <p className="text-sm text-text-tertiary">
+                  {t('backgroundExecs.empty', 'No background processes')}
+                </p>
+              </div>
+            )}
+
+            {processes.length > 0 && (
+              <div className="space-y-2">
+                {processes.map((proc) => (
+                  <ProcessCard
+                    key={proc.id}
+                    process={proc}
+                    expanded={expandedId === proc.id}
+                    onToggle={() => handleToggle(proc.id)}
+                    onStop={() => handleStop(proc.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </main>
     </div>

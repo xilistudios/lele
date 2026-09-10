@@ -158,111 +158,7 @@ func (m *Model) View() string {
 
 		// Render modal overlay on welcome screen if active
 		if m.modalMode != ModalNone {
-			if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
-				return m.renderBgExecOutput()
-			}
-			if m.modalMode == ModalCron && m.cronDetailMode {
-				return m.renderCronDetail()
-			}
-			if m.modalMode == ModalSecrets && m.secretsDetailMode {
-				return m.renderSecretDetail()
-			}
-			var modalTitle string
-			switch m.modalMode {
-			case ModalAgent:
-				modalTitle = i18n.T("tui.selectAgent")
-			case ModalModel:
-				modalTitle = i18n.T("tui.selectModel")
-			case ModalSessions:
-				modalTitle = i18n.T("tui.selectChat")
-			case ModalSubagents:
-				modalTitle = i18n.T("tui.selectSubagent")
-			case ModalThink:
-				modalTitle = i18n.T("tui.selectThinkLevel")
-			case ModalLang:
-				modalTitle = i18n.T("tui.selectLanguage")
-			case ModalBackgroundExecs:
-				modalTitle = i18n.T("tui.backgroundProcesses")
-			case ModalCron:
-				modalTitle = i18n.T("tui.cronJobs")
-			case ModalSecrets:
-				modalTitle = m.secretsHeader()
-			case ModalProviders:
-				modalTitle = i18n.T("tui.selectProvider")
-			case ModalProviderDetail:
-				modalTitle = i18n.T("tui.providerDetail")
-			case ModalAddProvider:
-				modalTitle = i18n.T("tui.addProvider")
-			case ModalAddModel:
-				modalTitle = i18n.T("tui.addModel")
-			case ModalAddSecret:
-				modalTitle = i18n.T("tui.secrets")
-			case ModalSkills:
-				modalTitle = i18n.T("tui.skills")
-			case ModalSkillInstall:
-				modalTitle = i18n.T("tui.installSkill")
-			case ModalSkillPicker:
-				modalTitle = i18n.T("tui.selectSkills")
-			case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
-				ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
-				modalTitle = i18n.T("tui.settings.title")
-				if m.modalMode == ModalSettingsAgents {
-					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents")
-				} else if m.modalMode == ModalSettingsAgentEdit {
-					agentLabel := i18n.T("tui.settings.agentDefaults")
-					if m.settingsAgentID != "" {
-						agentLabel = m.settingsAgentID
-					}
-					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents") + " › " + agentLabel
-				} else if m.modalMode == ModalSettingsSystem {
-					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system")
-				} else if m.modalMode == ModalSettingsSystemEdit {
-					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system") + " › " + m.systemSettingsTitle()
-				} else if m.modalMode == ModalSettingsTUI {
-					modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.interface")
-				}
-			}
-
-			if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
-				return m.renderFormModal(modalTitle, m.formStepNames())
-			}
-			if m.modalMode == ModalSecrets {
-				return m.renderSecretsList(modalTitle)
-			}
-			if m.modalMode == ModalSkillInstall {
-				return m.renderFormModal(modalTitle, []string{"GitHub Repository"})
-			}
-			if m.modalMode == ModalSkillPicker {
-				return m.renderSkillPicker(modalTitle)
-			}
-			if m.modalMode == ModalSettingsTUI {
-				return m.renderTUISettings(modalTitle)
-			}
-			if m.modalMode == ModalSettingsAgents {
-				return m.renderModal(modalTitle)
-			}
-			if m.modalMode == ModalSettingsAgentEdit {
-				if m.subagentPickerActive {
-					return m.renderSubagentPicker(modalTitle)
-				}
-				if m.settingsSelectorActive {
-					return m.renderSettingsSelector(modalTitle)
-				}
-				if m.settingsEditField != "" {
-					return m.renderAgentEditInput()
-				}
-				return m.renderModal(modalTitle)
-			}
-			if m.modalMode == ModalSettingsSystemEdit {
-				if m.settingsSelectorActive {
-					return m.renderSettingsSelector(modalTitle)
-				}
-				if m.settingsEditField != "" {
-					return m.renderSystemSettingsEdit(modalTitle)
-				}
-				return m.renderModal(modalTitle)
-			}
-			return m.renderModal(modalTitle)
+			return m.renderActiveModal()
 		}
 
 		// Center the entire welcome content block in the terminal
@@ -510,10 +406,13 @@ func (m *Model) View() string {
 		}
 		rightBuilder.WriteString(SidebarValue.Render(wsPath) + "\n")
 		branch := m.gitBranch
-		if ansi.StringWidth(branch) > contentWidth-1 {
-			branch = truncateRightCells(branch, contentWidth-1)
+		if branch != "" {
+			if ansi.StringWidth(branch) > contentWidth-1 {
+				branch = truncateRightCells(branch, contentWidth-1)
+			}
+			rightBuilder.WriteString(SidebarValue.Render(branch) + "\n")
 		}
-		rightBuilder.WriteString(SidebarValue.Render(branch) + "\n\n")
+		rightBuilder.WriteString("\n")
 	}
 
 	if contentHeight >= 14 {
@@ -542,69 +441,72 @@ func (m *Model) View() string {
 		availableLines := contentHeight - currentSidebarHeight - 1 // -1 for Subagents header
 
 		if availableLines > 0 {
-			rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
-			currentY := currentSidebarHeight + 1
-
+			// When only one line is free, show a compact "+N more" summary
+			// instead of a header with zero rows.
 			maxItems := len(subagents)
 			hasMore := false
 			if maxItems > availableLines {
-				maxItems = availableLines - 1
-				hasMore = true
+				if availableLines <= 1 {
+					rightBuilder.WriteString(CommentColorStyle.Render(
+						fmt.Sprintf(" %s: +%d", i18n.T("tui.sidebar.subagents"), len(subagents))) + "\n")
+					availableLines = 0
+				} else {
+					maxItems = availableLines - 1
+					hasMore = true
+				}
 			}
 			if maxItems < 0 {
 				maxItems = 0
 			}
 
-			for i := 0; i < maxItems; i++ {
-				sa := subagents[i]
-				label := sa.Label
-				if label == "" {
-					label = sa.TaskID
-				}
+			if availableLines > 0 {
+				rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
+				currentY := currentSidebarHeight + 1
 
-				// The printed line has a layout of " [statusDot] [label] ([status])\n"
-				// Truncate label so line NEVER wraps across multiple rows.
-				maxLabelWidth := contentWidth - (6 + len(sa.Status))
-				if maxLabelWidth < 4 {
-					maxLabelWidth = 4
-				}
-				r := []rune(label)
-				if len(r) > maxLabelWidth {
-					if maxLabelWidth < 3 {
-						label = string(r[:maxLabelWidth])
-					} else {
-						label = string(r[:maxLabelWidth-3]) + "..."
+				for i := 0; i < maxItems; i++ {
+					sa := subagents[i]
+					label := sa.Label
+					if label == "" {
+						label = sa.TaskID
 					}
+
+					// The printed line has a layout of " [statusDot] [label] ([status])\n"
+					// Truncate label so line NEVER wraps across multiple rows.
+					maxLabelWidth := contentWidth - (6 + len(sa.Status))
+					if maxLabelWidth < 4 {
+						maxLabelWidth = 4
+					}
+					label = truncateRightCells(label, maxLabelWidth)
+
+					var statusDot string
+					switch sa.Status {
+					case "running", "needs_context", "not_done":
+						statusDot = StatusRunning.Render("●")
+					case "completed":
+						statusDot = StatusCompleted.Render("●")
+					case "failed", "cancelled":
+						statusDot = StatusFailed.Render("●")
+					default:
+						statusDot = "○"
+					}
+
+					lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
+					rightBuilder.WriteString(lineStr)
+
+					// Track this subagent item's position for click handling
+					m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
+						yStart: currentY,
+						yEnd:   currentY + 1,
+						key:    sa.SessionKey,
+					})
+					currentY++
 				}
 
-				var statusDot string
-				switch sa.Status {
-				case "running", "needs_context", "not_done":
-					statusDot = StatusRunning.Render("●")
-				case "completed":
-					statusDot = StatusCompleted.Render("●")
-				case "failed", "cancelled":
-					statusDot = StatusFailed.Render("●")
-				default:
-					statusDot = "○"
+				if hasMore {
+					remainingCount := len(subagents) - maxItems
+					moreStr := fmt.Sprintf(" +%d more", remainingCount)
+					rightBuilder.WriteString(CommentColorStyle.Render(moreStr) + "\n")
 				}
-
-				lineStr := fmt.Sprintf(" %s %s (%s)\n", statusDot, label, sa.Status)
-				rightBuilder.WriteString(lineStr)
-
-				// Track this subagent item's position for click handling
-				m.subagentClickTargets = append(m.subagentClickTargets, subagentClickTarget{
-					yStart: currentY,
-					yEnd:   currentY + 1,
-					key:    sa.SessionKey,
-				})
-				currentY++
-			}
-
-			if hasMore {
-				remainingCount := len(subagents) - maxItems
-				moreStr := fmt.Sprintf(" +%d more", remainingCount)
-				rightBuilder.WriteString(CommentColorStyle.Render(moreStr) + "\n")
 			}
 		}
 	}
@@ -614,99 +516,7 @@ func (m *Model) View() string {
 	mainLayout := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
 
 	if m.modalMode != ModalNone {
-		if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
-			return m.renderBgExecOutput()
-		}
-		if m.modalMode == ModalCron && m.cronDetailMode {
-			return m.renderCronDetail()
-		}
-		if m.modalMode == ModalSecrets && m.secretsDetailMode {
-			return m.renderSecretDetail()
-		}
-		var modalTitle string
-		switch m.modalMode {
-		case ModalAgent:
-			modalTitle = i18n.T("tui.selectAgent")
-		case ModalModel:
-			modalTitle = i18n.T("tui.selectModel")
-		case ModalSessions:
-			modalTitle = i18n.T("tui.selectChat")
-		case ModalSubagents:
-			modalTitle = i18n.T("tui.selectSubagent")
-		case ModalThink:
-			modalTitle = i18n.T("tui.selectThinkLevel")
-		case ModalLang:
-			modalTitle = i18n.T("tui.selectLanguage")
-		case ModalBackgroundExecs:
-			modalTitle = i18n.T("tui.backgroundProcesses")
-		case ModalCron:
-			modalTitle = i18n.T("tui.cronJobs")
-		case ModalSecrets:
-			modalTitle = m.secretsHeader()
-		case ModalProviders:
-			modalTitle = i18n.T("tui.selectProvider")
-		case ModalProviderDetail:
-			modalTitle = i18n.T("tui.providerDetail")
-		case ModalAddProvider:
-			modalTitle = i18n.T("tui.addProvider")
-		case ModalAddModel:
-			modalTitle = i18n.T("tui.addModel")
-		case ModalAddSecret:
-			modalTitle = i18n.T("tui.secrets")
-		case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
-			ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
-			modalTitle = i18n.T("tui.settings.title")
-			if m.modalMode == ModalSettingsAgents {
-				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents")
-			} else if m.modalMode == ModalSettingsAgentEdit {
-				agentLabel := i18n.T("tui.settings.agentDefaults")
-				if m.settingsAgentID != "" {
-					agentLabel = m.settingsAgentID
-				}
-				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.agents") + " › " + agentLabel
-			} else if m.modalMode == ModalSettingsSystem {
-				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system")
-			} else if m.modalMode == ModalSettingsSystemEdit {
-				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.system") + " › " + m.systemSettingsTitle()
-			} else if m.modalMode == ModalSettingsTUI {
-				modalTitle = i18n.T("tui.settings.title") + " › " + i18n.T("tui.settings.interface")
-			}
-		}
-
-		if m.modalMode == ModalAddProvider || m.modalMode == ModalAddModel || m.modalMode == ModalAddSecret {
-			return m.renderFormModal(modalTitle, m.formStepNames())
-		}
-		if m.modalMode == ModalSecrets {
-			return m.renderSecretsList(modalTitle)
-		}
-		if m.modalMode == ModalSettingsTUI {
-			return m.renderTUISettings(modalTitle)
-		}
-		if m.modalMode == ModalSettingsAgents {
-			return m.renderModal(modalTitle)
-		}
-		if m.modalMode == ModalSettingsAgentEdit {
-			if m.subagentPickerActive {
-				return m.renderSubagentPicker(modalTitle)
-			}
-			if m.settingsSelectorActive {
-				return m.renderSettingsSelector(modalTitle)
-			}
-			if m.settingsEditField != "" {
-				return m.renderAgentEditInput()
-			}
-			return m.renderModal(modalTitle)
-		}
-		if m.modalMode == ModalSettingsSystemEdit {
-			if m.settingsSelectorActive {
-				return m.renderSettingsSelector(modalTitle)
-			}
-			if m.settingsEditField != "" {
-				return m.renderSystemSettingsEdit(modalTitle)
-			}
-			return m.renderModal(modalTitle)
-		}
-		return m.renderModal(modalTitle)
+		return m.renderActiveModal()
 	}
 
 	return m.paintFrame(mainLayout)
@@ -834,6 +644,13 @@ func (m *Model) renderObLanguage(width int) string {
 		"Español",
 		"Português",
 	}
+	// Include any downloaded packs (rare during first-run, but harmless).
+	for _, c := range i18n.InstalledLanguages() {
+		if c == "en" || c == "es" || c == "pt" {
+			continue
+		}
+		langs = append(langs, i18n.DisplayName(c)+" ("+c+")")
+	}
 	var listSb strings.Builder
 	for i, lang := range langs {
 		if i == m.modalSelectedIdx {
@@ -910,7 +727,10 @@ func (m *Model) renderObProviderPicker(width int) string {
 			label = i18n.T("tui.onboard.skipForNow")
 		}
 
-		line := fmt.Sprintf("> %s", label)
+		line := "  " + label
+		if i == m.modalSelectedIdx {
+			line = "> " + label
+		}
 		if hint != "" {
 			line += "   " + CommentColorStyle.Render(hint)
 		}
@@ -1060,6 +880,11 @@ func (m *Model) maxModalVisible() int {
 // renderModal renders a modal overlay with scroll support for long lists.
 func (m *Model) renderModal(modalTitle string) string {
 	maxVisible := m.maxModalVisible()
+	// When the list overflows the frame, reserve one row for the scroll
+	// indicator so the last visible item is not clipped out.
+	if len(m.modalItems) > maxVisible && maxVisible > 1 {
+		maxVisible--
+	}
 
 	// Clamp scroll offset so selected item is always visible
 	if m.modalSelectedIdx < m.modalScrollOffset {
@@ -1120,6 +945,14 @@ func (m *Model) renderModal(modalTitle string) string {
 	// Theme picker: show navigation hint at the bottom
 	if m.themePickerActive {
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.settings.themePickerHint")) + "\n")
+	}
+
+	// Skills action feedback (install/toggle/delete result)
+	if m.modalMode == ModalSkills {
+		if m.skillsFeedback != "" {
+			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.skillsFeedback) + "\n")
+		}
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.skillsListHints")) + "\n")
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())
@@ -1220,7 +1053,7 @@ func (m *Model) renderAgentEditInput() string {
 			"agentName":                   "Name",
 			"agentDescription":            "Description",
 			"agentWorkspace":              "Workspace",
-			"agentModel":                  "Model",
+			"agentModel":                  i18n.T("tui.model"),
 			"agentTemperature":            "Temperature",
 			"agentSubagentsMaxConcurrent": "Subagents MaxConcurrent",
 			"newAgentID":                  "Agent ID",
@@ -1388,6 +1221,11 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 		sb.WriteString(InputBarContainer.Width(44).Render(m.textInputView()) + "\n\n")
 	}
 
+	// Catalog model suggestions (filter-as-you-type) on the model-name step.
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(renderCatalogSuggestions(m.addModelCatalogLabels, m.addModelCatalogIdx, m.maxModalVisible()))
+	}
+
 	// Contextual step hint (optional fields)
 	if m.modalMode == ModalAddProvider && !m.providerSavedInFlow && !m.providerTypePicker && !m.connectSuccess {
 		switch m.formStepIndex {
@@ -1403,7 +1241,9 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	}
 
 	// Hints
-	if isReviewStep {
+	if m.addModelCatalogActive && m.isModelNameFormStep() && !isReviewStep {
+		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.catalogPickerHint")))
+	} else if isReviewStep {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectReviewHint")))
 	} else if m.providerSavedInFlow {
 		sb.WriteString(HelpStyle.Render("  " + i18n.T("tui.connectModelStepsHint")))
@@ -1415,17 +1255,59 @@ func (m *Model) renderFormModalContent(title string, steps []string) string {
 	return modalView
 }
 
+// renderCatalogSuggestions paints the filterable catalog model list shown
+// under the form's text input on the model-name step.
+func renderCatalogSuggestions(labels []string, idx, maxVisible int) string {
+	if len(labels) == 0 {
+		return CommentColorStyle.Render("  "+i18n.T("tui.catalogNoMatches")) + "\n\n"
+	}
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	// Cap the suggestion list so the form stays readable.
+	if maxVisible > 8 {
+		maxVisible = 8
+	}
+	start := 0
+	if idx >= maxVisible {
+		start = idx - maxVisible + 1
+	}
+	end := start + maxVisible
+	if end > len(labels) {
+		end = len(labels)
+	}
+	var sb strings.Builder
+	sb.WriteString(SidebarHeader.Render("  "+i18n.T("tui.catalogSuggestions")) + "\n")
+	for i := start; i < end; i++ {
+		if i == idx {
+			sb.WriteString(ModalItemActive.Render("  › "+labels[i]) + "\n")
+		} else {
+			sb.WriteString(ModalItemInactive.Render("    "+labels[i]) + "\n")
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 // formStepNames returns the step names for the current form modal mode.
 func (m *Model) formStepNames() []string {
 	switch m.modalMode {
 	case ModalAddProvider:
-		return []string{
+		steps := []string{
 			"Provider name", "Provider type", "API Key", "API Base URL",
 			"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)",
 			i18n.T("tui.connectReview"),
 		}
+		if m.addModelCatalogThink != "" && len(steps) > 5 {
+			steps[5] = "Model name (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return steps
 	case ModalAddModel:
-		return []string{"Model alias", "Model name", "Context window", "Max tokens", "Vision (yes/no)"}
+		nameLabel := "Model name"
+		if m.addModelCatalogThink != "" {
+			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
+		}
+		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)"}
 	case ModalAddSecret:
 		return []string{
 			i18n.T("tui.secretName"),
@@ -1577,8 +1459,125 @@ func (m *Model) renderSkillPicker(modalTitle string) string {
 	}
 
 	// Hints
-	modalSb.WriteString("\n" + CommentColorStyle.Render("  [Space] Toggle  [Enter] Install  [Esc] Back") + "\n")
+	modalSb.WriteString("\n" + CommentColorStyle.Render("  "+i18n.T("tui.skillPickerHints")) + "\n")
 
 	modalView := ModalContainer.Render(modalSb.String())
 	return m.paintFrame(modalView)
+}
+
+// modalTitleFor returns the localized title for a modal mode. Shared by both
+// View paths (welcome and split-column) so titles cannot drift.
+func (m *Model) modalTitleFor(mode modalType) string {
+	switch mode {
+	case ModalAgent:
+		return i18n.T("tui.selectAgent")
+	case ModalModel:
+		return i18n.T("tui.selectModel")
+	case ModalSessions:
+		return i18n.T("tui.selectChat")
+	case ModalSubagents:
+		return i18n.T("tui.selectSubagent")
+	case ModalThink:
+		return i18n.T("tui.selectThinkLevel")
+	case ModalLang:
+		return i18n.T("tui.selectLanguage")
+	case ModalLangRemote:
+		return i18n.T("tui.languages.downloadMore")
+	case ModalBackgroundExecs:
+		return i18n.T("tui.backgroundProcesses")
+	case ModalCron:
+		return i18n.T("tui.cronJobs")
+	case ModalSecrets:
+		return m.secretsHeader()
+	case ModalProviders:
+		return i18n.T("tui.selectProvider")
+	case ModalProviderDetail:
+		return i18n.T("tui.providerDetail")
+	case ModalAddProvider:
+		return i18n.T("tui.addProvider")
+	case ModalAddModel:
+		return i18n.T("tui.addModel")
+	case ModalAddSecret:
+		return i18n.T("tui.addSecret")
+	case ModalSkills:
+		return i18n.T("tui.skills")
+	case ModalSkillInstall:
+		return i18n.T("tui.installSkill")
+	case ModalSkillPicker:
+		return i18n.T("tui.selectSkills")
+	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
+		ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
+		title := i18n.T("tui.settings.title")
+		switch mode {
+		case ModalSettingsAgents:
+			title += " › " + i18n.T("tui.settings.agents")
+		case ModalSettingsAgentEdit:
+			agentLabel := i18n.T("tui.settings.agentDefaults")
+			if m.settingsAgentID != "" {
+				agentLabel = m.settingsAgentID
+			}
+			title += " › " + i18n.T("tui.settings.agents") + " › " + agentLabel
+		case ModalSettingsSystem:
+			title += " › " + i18n.T("tui.settings.system")
+		case ModalSettingsSystemEdit:
+			title += " › " + i18n.T("tui.settings.system") + " › " + m.systemSettingsTitle()
+		case ModalSettingsTUI:
+			title += " › " + i18n.T("tui.settings.interface")
+		}
+		return title
+	}
+	return ""
+}
+
+// renderActiveModal renders the currently open modal. Both View paths
+// (welcome and split-column) must use this single dispatcher so every
+// modalType has a title and a specialized renderer.
+func (m *Model) renderActiveModal() string {
+	// Detail overlays take precedence over their parent lists.
+	if m.modalMode == ModalBackgroundExecs && m.bgExecViewMode {
+		return m.renderBgExecOutput()
+	}
+	if m.modalMode == ModalCron && m.cronDetailMode {
+		return m.renderCronDetail()
+	}
+	if m.modalMode == ModalSecrets && m.secretsDetailMode {
+		return m.renderSecretDetail()
+	}
+
+	title := m.modalTitleFor(m.modalMode)
+
+	switch m.modalMode {
+	case ModalAddProvider, ModalAddModel, ModalAddSecret:
+		return m.renderFormModal(title, m.formStepNames())
+	case ModalSecrets:
+		return m.renderSecretsList(title)
+	case ModalSkillInstall:
+		return m.renderFormModal(title, []string{i18n.T("tui.skillRepoPlaceholder")})
+	case ModalSkillPicker:
+		return m.renderSkillPicker(title)
+	case ModalSettingsTUI:
+		return m.renderTUISettings(title)
+	case ModalSettingsAgents:
+		return m.renderModal(title)
+	case ModalSettingsAgentEdit:
+		if m.subagentPickerActive {
+			return m.renderSubagentPicker(title)
+		}
+		if m.settingsSelectorActive {
+			return m.renderSettingsSelector(title)
+		}
+		if m.settingsEditField != "" {
+			return m.renderAgentEditInput()
+		}
+		return m.renderModal(title)
+	case ModalSettingsSystemEdit:
+		if m.settingsSelectorActive {
+			return m.renderSettingsSelector(title)
+		}
+		if m.settingsEditField != "" {
+			return m.renderSystemSettingsEdit(title)
+		}
+		return m.renderModal(title)
+	}
+	return m.renderModal(title)
 }

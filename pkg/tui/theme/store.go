@@ -21,18 +21,20 @@ func DefaultPath() string {
 }
 
 // Load reads the TUI config file at path. If the file does not exist it
-// returns "dracula", nil, nil, nil. If the file is malformed it returns
-// "dracula", nil, nil, err so the caller can log it without crashing. On
-// success it returns the theme name (defaulting to "dracula" if empty),
-// the custom themes map (nil if empty), and the installed community theme
-// names (nil if empty).
+// returns "dracula", nil, nil, nil. If the file is malformed or cannot be
+// read it returns "dracula", nil, nil, err so the caller can log it without
+// crashing. On success it returns the theme name (defaulting to "dracula"
+// if empty), the custom themes map (nil if empty), and the installed
+// community theme names (nil if empty).
 func Load(path string) (name string, custom map[string]Theme, installed []string, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "dracula", nil, nil, nil
 		}
-		return "dracula", nil, nil, nil
+		// Permission / I/O failures must surface — silently resetting to
+		// Dracula would drop the user's saved theme without a log line.
+		return "dracula", nil, nil, err
 	}
 
 	var cfg tuiConfigFile

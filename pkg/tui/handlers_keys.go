@@ -23,7 +23,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 	case "esc":
 		if m.isSessionProcessing() || m.processing {
 			now := time.Now()
-			if now.Sub(m.escLastPress) < 1*time.Second {
+			if now.Sub(m.escLastPress) < escHintTimeout {
 				// Double press detected - cancel the agent
 				m.escPressCount = 0
 				m.escHint = false
@@ -94,14 +94,14 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		return m, nil, true
+		return m, tea.Batch(cmds...), true
 
 	case "ctrl+a":
 		cmd := m.executeCommand("/agents")
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		return m, nil, true
+		return m, tea.Batch(cmds...), true
 
 	case "ctrl+t":
 		// Toggle mouse capture as fallback for terminals without Shift bypass.
@@ -116,17 +116,27 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		return m, nil, true
+		return m, tea.Batch(cmds...), true
 
 	case "ctrl+,":
 		cmd := m.executeCommand("/settings")
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		return m, nil, true
+		return m, tea.Batch(cmds...), true
 
 	case "ctrl+y":
-		m.copyLastAssistantMessage()
+		copied := m.copyLastAssistantMessage()
+		// Consume the key so it never reaches the textarea, and show
+		// brief feedback (same pattern as mouse-selection copy).
+		m.selectionFeedback = copied
+		m.selectionFeedbackAt = time.Now()
+		if !copied {
+			// Still consume; the status line would otherwise show "Copied!"
+			// incorrectly. Leave feedback off when there was nothing to copy.
+			m.selectionFeedback = false
+		}
+		return m, nil, true
 
 	case queueRemoveKey:
 		// Undo the last queued message of the current session. Only acts
@@ -169,6 +179,11 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg, cmds []tea.Cmd) (*Model, tea.Cmd
 		}
 		return m, tea.Batch(cmds...), true
 	case "home":
+		// Expand the lazy render window all the way to the start of history
+		// before jumping, so Home lands on the first message rather than the
+		// "↑ N earlier messages" banner.
+		for m.maybeExpandRenderWindow() {
+		}
 		m.viewport.GotoTop()
 		return m, nil, true
 	case "end":

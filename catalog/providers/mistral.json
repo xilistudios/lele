@@ -1,0 +1,223 @@
+{
+  "id": "mistral",
+  "name": "Mistral",
+  "type": "openai",
+  "api_base": "https://api.mistral.ai/v1",
+  "models": [
+    {
+      "id": "mistral-large-2512",
+      "name": "Mistral Large 3",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-large-latest",
+      "name": "Mistral Large (latest)",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-large-2411",
+      "name": "Mistral Large 2.1",
+      "context_window": 131072,
+      "max_output": 16384,
+      "tool_call": true
+    },
+    {
+      "id": "codestral-latest",
+      "name": "Codestral (latest)",
+      "context_window": 256000,
+      "max_output": 4096,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-medium-2604",
+      "name": "Mistral Medium 3.5",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-medium-latest",
+      "name": "Mistral Medium (latest)",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-small-2603",
+      "name": "Mistral Small 4",
+      "context_window": 256000,
+      "max_output": 256000,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-small-latest",
+      "name": "Mistral Small (latest)",
+      "context_window": 256000,
+      "max_output": 256000,
+      "vision": true,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "magistral-medium-latest",
+      "name": "Magistral Medium (latest)",
+      "context_window": 128000,
+      "max_output": 16384,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "magistral-small",
+      "name": "Magistral Small",
+      "context_window": 128000,
+      "max_output": 128000,
+      "thinking_levels": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "zai-glm-5-2",
+      "name": "GLM-5.2",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-medium-2505",
+      "name": "Mistral Medium 3",
+      "context_window": 131072,
+      "max_output": 131072,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-medium-2508",
+      "name": "Mistral Medium 3.1",
+      "context_window": 262144,
+      "max_output": 262144,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-small-2506",
+      "name": "Mistral Small 3.2",
+      "context_window": 128000,
+      "max_output": 16384,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "pixtral-12b",
+      "name": "Pixtral 12B",
+      "context_window": 128000,
+      "max_output": 128000,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "pixtral-large-latest",
+      "name": "Pixtral Large (latest)",
+      "context_window": 128000,
+      "max_output": 128000,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "voxtral-small-latest",
+      "name": "Voxtral Small (latest)",
+      "context_window": 32000,
+      "max_output": 32000,
+      "vision": true,
+      "tool_call": true
+    },
+    {
+      "id": "ministral-3b-latest",
+      "name": "Ministral 3B (latest)",
+      "context_window": 128000,
+      "max_output": 128000,
+      "tool_call": true
+    },
+    {
+      "id": "ministral-8b-latest",
+      "name": "Ministral 8B (latest)",
+      "context_window": 128000,
+      "max_output": 128000,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-nemo",
+      "name": "Mistral Nemo",
+      "context_window": 128000,
+      "max_output": 128000,
+      "tool_call": true
+    },
+    {
+      "id": "open-mistral-7b",
+      "name": "Mistral 7B",
+      "context_window": 8000,
+      "max_output": 8000,
+      "tool_call": true
+    },
+    {
+      "id": "open-mixtral-8x22b",
+      "name": "Mixtral 8x22B",
+      "context_window": 64000,
+      "max_output": 64000,
+      "tool_call": true
+    },
+    {
+      "id": "open-mixtral-8x7b",
+      "name": "Mixtral 8x7B",
+      "context_window": 32000,
+      "max_output": 32000,
+      "tool_call": true
+    },
+    {
+      "id": "mistral-embed",
+      "name": "Mistral Embed",
+      "context_window": 8000,
+      "max_output": 3072
+    },
+    {
+      "id": "voxtral-mini-latest",
+      "name": "Voxtral Mini (latest)"
+    }
+  ]
+}
