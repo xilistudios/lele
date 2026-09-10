@@ -147,7 +147,7 @@ func TestHandleApproval_ReturnsWhetherAccepted(t *testing.T) {
 // streaming path (was using len() bytes).
 func TestRenderSingleLine_MultibyteWidth(t *testing.T) {
 	// 10 CJK chars = 20 display cells; width 10 must wrap.
-	line := strings.Repeat("汉", 10)
+	line := strings.Repeat("汉", 10) //nolint:gosmopolitan // wide CJK runes are the point of this width test
 	out := renderSingleLine(line, 10)
 	if strings.Count(out, "\n") < 1 {
 		t.Fatalf("expected wrap for wide CJK line, got %q", out)
