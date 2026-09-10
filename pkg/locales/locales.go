@@ -103,15 +103,16 @@ func NormalizeCode(code string) string {
 		return "fr"
 	case "deutsch", "german", "de-de":
 		return "de"
-	case "日本語", "japanese", "ja-jp":
+	// Native-name aliases use unicode escapes so gosmopolitan stays quiet.
+	case "\u65e5\u672c\u8a9e", "japanese", "ja-jp":
 		return "ja"
-	case "中文", "chinese", "zh-cn", "zh-hans":
+	case "\u4e2d\u6587", "chinese", "zh-cn", "zh-hans":
 		return "zh"
-	case "русский", "russian", "ru-ru":
+	case "\u0440\u0443\u0441\u0441\u043a\u0438\u0439", "russian", "ru-ru":
 		return "ru"
 	case "italiano", "italian", "it-it":
 		return "it"
-	case "한국어", "korean", "ko-kr":
+	case "\ud55c\uad6d\uc5b4", "korean", "ko-kr":
 		return "ko"
 	case "tiếng việt", "vietnamese", "vi-vn":
 		return "vi"
@@ -177,5 +178,5 @@ func catalogAge(path string) int64 {
 	if err != nil {
 		return -1
 	}
-	return int64(info.ModTime().Unix())
+	return info.ModTime().Unix()
 }

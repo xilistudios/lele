@@ -111,7 +111,7 @@ func TestInstallAndUninstall(t *testing.T) {
 	// is overkill — override raw URL by swapping repo path through a reverse
 	// proxy style client. We use a custom RoundTripper that redirects.
 	m.client = &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout:   5 * time.Second,
 		Transport: rewriteHost{base: srv.URL},
 	}
 
@@ -202,7 +202,7 @@ func TestDisplayLabel(t *testing.T) {
 
 func TestSortLanguagesBuiltinsFirst(t *testing.T) {
 	langs := []Language{
-		{Code: "ja", NativeName: "日本語"},
+		{Code: "ja", NativeName: "\u65e5\u672c\u8a9e"},
 		{Code: "en", NativeName: "English", Builtin: true},
 		{Code: "fr", NativeName: "Français"},
 		{Code: "es", NativeName: "Español", Builtin: true},

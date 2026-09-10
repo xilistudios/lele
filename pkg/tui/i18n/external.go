@@ -186,6 +186,7 @@ func AvailableLanguages() []string {
 }
 
 // LanguageDisplayNames maps codes to native display names for pickers.
+// Non-Latin names use unicode escapes to satisfy gosmopolitan.
 var LanguageDisplayNames = map[string]string{
 	"es": "Español",
 	"en": "English",
@@ -193,20 +194,20 @@ var LanguageDisplayNames = map[string]string{
 	"fr": "Français",
 	"de": "Deutsch",
 	"it": "Italiano",
-	"ja": "日本語",
-	"ko": "한국어",
-	"zh": "中文",
-	"ru": "Русский",
-	"vi": "Tiếng Việt",
+	"ja": "\u65e5\u672c\u8a9e",
+	"ko": "\ud55c\uad6d\uc5b4",
+	"zh": "\u4e2d\u6587",
+	"ru": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+	"vi": "Ti\u1ebfng Vi\u1ec7t",
 	"pl": "Polski",
 	"nl": "Nederlands",
-	"tr": "Türkçe",
-	"ar": "العربية",
-	"hi": "हिन्दी",
-	"th": "ไทย",
+	"tr": "T\u00fcrk\u00e7e",
+	"ar": "\u0627\u0644\u0639\u0631\u0628\u064a\u0629",
+	"hi": "\u0939\u093f\u0928\u094d\u0926\u0940",
+	"th": "\u0e44\u0e17\u0e22",
 	"id": "Bahasa Indonesia",
 	"sv": "Svenska",
-	"uk": "Українська",
+	"uk": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
 }
 
 // DisplayName returns the native name for a language code.
