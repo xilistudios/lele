@@ -1,12 +1,15 @@
 <div align="center">
   <img src="assets/logo.png" alt="Lele" width="320">
+  <img src="assets/tui.png" alt="TUI" width="650">
 
   <h1>Lele</h1>
 
-  <p>Assistant personnel IA léger et efficace en Go.</p>
-
+  <p>Assistant personnel IA léger en Go — binaire unique, empreinte réduite, TUI rapide.</p>
   <p>
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+    <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
+    <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
+    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -15,131 +18,108 @@
 
 ---
 
-Lele est un projet indépendant axé sur la fourniture d'un assistant IA pratique avec une empreinte réduite, un démarrage rapide et un modèle de déploiement simple.
+Lele est un assistant IA centré sur l'espace de travail, conçu pour les hôtes à longue durée de vie : chat CLI et TUI, passerelle multi-canal, interface web, API client native, skills, cron et sous-agents — sans runtime JS ni pile TUI multi-processus.
 
-Aujourd'hui, le projet va bien au-delà d'un simple bot CLI minimal. Il inclut un runtime d'agent configurable, une passerelle multi-canal, une interface web, une API client native, des tâches planifiées, des sous-agents et un modèle d'automatisation centré sur l'espace de travail.
-
-## Pourquoi Lele
-
-- Implémentation légère en Go avec une empreinte opérationnelle réduite
-- Assez efficace pour fonctionner confortablement sur des machines et cartes Linux modestes
-- Un seul projet pour le CLI, les canaux de discussion, l'interface web et les intégrations clients locales
-- Routage configurable des fournisseurs avec prise en charge des backends directs et compatibles OpenAI
-- Conception orientée espace de travail avec compétences, mémoire, tâches planifiées et contrôles bac à sable
-
-## Fonctionnalités Actuelles
-
-### Runtime d'Agent
-
-- Discussion CLI avec `lele agent`
-- Boucle d'agent avec utilisation d'outils et limites d'itération configurables
-- Pièces jointes dans les flux natifs/web
-- Persistance des sessions et sessions éphémères optionnelles
-- Agents nommés, liaisons et mécanismes de secours pour les modèles
-
-### Interfaces
-
-- Utilisation terminal via le CLI
-- Mode passerelle pour les canaux de discussion
-- Interface web intégrée
-- Canal client natif avec API REST + WebSocket et appairage par PIN
-
-### Automatisation
-
-- Tâches planifiées avec `lele cron`
-- Tâches périodiques basées sur le heartbeat via `HEARTBEAT.md`
-- Sous-agents asynchrones pour le travail délégué
-- Système de compétences pour des workflows réutilisables
-
-### Sécurité et Opérations
-
-- Prise en charge de la restriction à l'espace de travail
-- Motifs de refus de commandes dangereuses pour les outils exec
-- Flux d'approbation pour les actions sensibles
-- Journaux, commandes d'état et gestion de la configuration
-
-## Statut du Projet
-
-Lele est un projet autonome en évolution active.
-
-Le code actuel prend déjà en charge :
-
-- des flux de passerelle de type production
-- un parcours client web/natif
-- un routage multi-fournisseur configurable
-- plusieurs canaux de messagerie
-- des compétences, sous-agents et automatisation planifiée
-
-Le principal écart de documentation était que l'ancien README décrivait encore une identité de fork antérieur et ne correspondait pas à l'ensemble de fonctionnalités actuel. Ce README reflète le projet tel qu'il existe aujourd'hui.
-
-## Démarrage Rapide
-
-### Installation depuis les Sources
+## Démarrage rapide
 
 ```bash
-git clone https://github.com/xilistudios/lele.git
-cd lele
-make deps
-make build
+# Linux / macOS / BSD
+curl -fsSL https://raw.githubusercontent.com/xilistudios/lele/main/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/xilistudios/lele/main/install.ps1 | iex
 ```
-
-Le binaire est écrit dans `build/lele`.
-
-### Configuration Initiale
-
 ```bash
+# Depuis les sources
+git clone https://github.com/xilistudios/lele.git && cd lele
+make deps && make build && make install
+```
+```
+# Configuration initiale
 lele onboard
+# Interface agent CLI
+lele agent -m "Que peux-tu faire ?"
+# TUI
+lele tui
 ```
 
-`onboard` crée la configuration de base, les modèles d'espace de travail, et peut optionnellement activer l'interface web et générer un PIN d'appairage pour le flux client natif/web.
+Les installateurs vérifient le SHA256 et installent par défaut dans `~/.local/bin`.
 
-### Utilisation CLI Minimale
+## Benchmarks
+
+Mesuré sur Apple M1 / macOS arm64. Sessions TUI au repos sous PTY, sans appels de modèle. Le démarrage est la moyenne de 3 exécutions de `--version`. Le RSS est la mémoire de pointe de l'arbre de processus ~6 s après le premier rendu.
+
+| Outil | Runtime | Taille d'installation | Démarrage | RSS TUI au repos | Processus |
+| --- | --- | --- | --- | --- | --- |
+| **lele** | Go + Bubble Tea | **57 Mo** binaire unique | **~25 ms** | **~42 Mo** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 Mo binaire | ~13 ms | ~170–187 Mo | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 Mo binaire | ~233 ms | ~173 Mo | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 Mo binaire | ~284 ms | ~1,0 Go pic | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 Go d'arbre | ~236 ms | ~374 Mo | 3–4 |
+
+Chemin de rendu (benches Go dans le dépôt, image 200×50) : `View()` ≈ 3,4 ms · `paintFrame` ≈ 0,5 ms.
+
+L'empreinte terminal reste discrète : alt-screen Bubble Tea classique + souris + collage entre crochets, sans spam de capacités ni OSC produit.
+
+**Pourquoi c'est important :** un binaire statique unique, ~42 Mo au repos, premier rendu en moins de 100 ms — dimensionné pour les passerelles et les hôtes multi-sessions.
 
 ```bash
-lele agent -m "Que peux-tu faire ?"
+time lele --version
+go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
 ```
 
-## Interface Web et Flux Client Natif
+## Fonctionnalités
 
-Lele inclut désormais une interface web locale ainsi qu'un canal client natif.
+**Runtime d'agent**
+- Boucle d'agent avec outils et limite d'itérations
+- Agents nommés, secours de modèles, `thinking_level` par agent (surcharge via `/think`)
+- Persistance des sessions (SQLite) et sessions éphémères optionnelles
+- Pièces jointes dans les flux natifs/web
 
-Flux typique :
+**Interfaces**
+- CLI (`lele agent`) et TUI Bubble Tea complète (`lele tui`)
+- Interface web intégrée + client REST/WebSocket natif avec appariement par PIN
+- Passerelle pour canaux de chat (Telegram, Discord, Slack, WhatsApp, Feishu, Line, QQ, DingTalk, …)
 
-1. Exécutez `lele onboard`
-2. Activez l'interface web lorsque vous y êtes invité
-3. Générez un PIN d'appairage
-4. Démarrez les services avec `lele gateway`
-5. Ouvrez l'application web dans votre navigateur et appairez avec le PIN
+**Automatisation**
+- Jobs planifiés (`lele cron`) et tâches heartbeat via `HEARTBEAT.md`
+- Skills et sous-agents asynchrones
+- Chat de groupe multi-agents (MoA / round-robin / modérateur / pipeline) — voir `docs/moa-group-chat.md`
 
-Le canal natif expose des points d'accès REST et WebSocket pour les clients de bureau et les intégrations locales.
+**Sécurité**
+- Restriction à l'espace de travail, motifs de refus exec, flux d'approbation
+- Authentification par jeton pour clients natifs, limites d'upload et TTL
 
-Consultez `docs/client-api.md` pour l'API complète.
+## Captures d'écran
+
+### TUI
+
+
+![Chat TUI Lele en cours](assets/tui-chat.png)
+
+```bash
+lele tui              # nouvelle session
+lele tui -s <id>      # reprendre une session
+```
+
+Chat en streaming, visualisation d'outils, markdown, barre latérale des sessions, stats de contexte. Thèmes : `dracula` (par défaut), `nord`, `catppuccin`, `gruvbox`, `tokyo-night`, `solarized-light` — à changer dans **Settings → Interface**, stockés dans `~/.lele/tui.json`. Langue via `LELE_LANG` ou `/lang`.
+
+### Interface web
+
+![Interface web Lele](assets/webui.png)
+
+![Chat interface web Lele en cours](assets/webui-chat.png)
+
+1. `lele onboard` — activer l'interface web, obtenir un PIN d'appariement  
+2. `lele gateway` — sert `/`, `/api/v1/*`, WebSocket sur le port `18790`  
+3. Ouvrir le navigateur et appairer avec le PIN  
+
+API client complète : `docs/client-api.md`.
+
 
 ## Configuration
 
-Fichier de configuration principal :
-
-```text
-~/.lele/config.json
-```
-
-Exemple de modèle de configuration :
-
-```text
-config/config.example.json
-```
-
-Domaines clés que vous pouvez configurer :
-
-- `agents.defaults` : espace de travail, fournisseur, modèle, limites de jetons, limites d'outils
-- `session` : comportement de session éphémère et liens d'identité
-- `channels` : passerelle et intégrations de messagerie
-- `providers` : fournisseurs directs et backends nommés compatibles OpenAI
-- `tools` : recherche web, paramètres de sécurité exec
-- `heartbeat` : exécution de tâches périodiques
-- `gateway`, `logs`, `devices`
-
-### Exemple Minimal
+La configuration se trouve dans `~/.lele/config.json` (modèle : `config/config.example.json`).
 
 ```json
 {
@@ -161,175 +141,35 @@ Domaines clés que vous pouvez configurer :
 }
 ```
 
-## Fournisseurs
+Sections principales : `agents.defaults`, `session`, `channels`, `providers`, `tools`, `heartbeat`, `gateway`, `logs`, `devices`.
 
-Lele prend en charge à la fois des fournisseurs intégrés et des définitions de fournisseurs nommés.
+**Fournisseurs :** `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `nvidia`, `ollama`, `moonshot`, `deepseek`, `github_copilot`, plus des backends compatibles OpenAI nommés (`model`, `context_window`, `vision`, `reasoning`, …).
 
-Les familles de fournisseurs intégrés actuellement représentées dans la configuration/runtime incluent :
+**Espace de travail** (`~/.lele/workspace/`) : `sessions/`, `memory/`, `state/`, `cron/`, `skills/`, `AGENT.md`, `HEARTBEAT.md`, `IDENTITY.md`, `SOUL.md`, `USER.md`.
 
-- `anthropic`
-- `openai`
-- `openrouter`
-- `groq`
-- `zhipu`
-- `gemini`
-- `vllm`
-- `nvidia`
-- `ollama`
-- `moonshot`
-- `deepseek`
-- `github_copilot`
-
-Le projet prend également en charge les entrées de fournisseurs nommés compatibles OpenAI avec des paramètres par modèle tels que :
-
-- `model`
-- `context_window`
-- `max_tokens`
-- `temperature`
-- `vision`
-- `reasoning`
-
-## Canaux
-
-La passerelle inclut actuellement la configuration pour :
-
-- `telegram`
-- `discord`
-- `whatsapp`
-- `feishu`
-- `slack`
-- `line`
-- `onebot`
-- `qq`
-- `dingtalk`
-- `maixcam`
-- `native`
-- `web`
-
-Certains canaux sont de simples intégrations basées sur des jetons, tandis que d'autres nécessitent une configuration webhook ou pont.
-
-## Structure de l'Espace de Travail
-
-Espace de travail par défaut :
-
-```text
-~/.lele/workspace/
-```
-
-Contenu typique :
-
-```text
-~/.lele/workspace/
-├── sessions/
-├── memory/
-├── state/
-├── cron/
-├── skills/
-├── AGENT.md
-├── HEARTBEAT.md
-├── IDENTITY.md
-├── SOUL.md
-└── USER.md
-```
-
-Cette structure centrée sur l'espace de travail fait partie de ce qui rend Lele pratique et efficace : l'état, les invites, les compétences et l'automatisation vivent à un endroit prévisible.
-
-## Planification, Compétences et Sous-Agents
-
-### Tâches Planifiées
-
-Utilisez `lele cron` pour créer des tâches ponctuelles ou récurrentes.
-
-Exemples :
-
-```bash
-lele cron list
-lele cron add --name reminder --message "Vérifier les sauvegardes" --every "2h"
-```
-
-### Heartbeat
-
-Lele peut lire périodiquement `HEARTBEAT.md` depuis l'espace de travail et exécuter des tâches automatiquement.
-
-### Compétences (Skills)
-
-Les compétences intégrées et personnalisées peuvent être gérées avec :
-
-```bash
-lele skills list
-lele skills search
-lele skills install <skill>
-```
-
-### Sous-Agents
-
-Lele prend en charge le travail délégué asynchrone via des sous-agents. Cela est utile pour les tâches de longue durée ou parallélisables.
-
-Consultez `docs/SKILL_SUBAGENTS.md` pour plus de détails.
-
-## Modèle de Sécurité
-
-Lele peut restreindre l'accès aux fichiers et aux commandes de l'agent à l'espace de travail configuré.
-
-Les contrôles clés incluent :
-
-- `restrict_to_workspace`
-- motifs de refus pour exec
-- flux d'approbation pour les actions sensibles
-- authentification par jeton pour les clients natifs
-- limites de téléchargement et TTL pour les fichiers natifs
-
-Consultez `docs/tools_configuration.md` et `docs/client-api.md` pour les détails opérationnels.
-
-## Référence CLI
+## CLI
 
 | Commande | Description |
 | --- | --- |
-| `lele onboard` | Initialiser la config et l'espace de travail |
-| `lele agent` | Démarrer une session agent interactive |
-| `lele agent -m "..."` | Exécuter une invite ponctuelle |
-| `lele gateway` | Démarrer la passerelle de messagerie |
-| `lele auth login` | Authentifier les fournisseurs pris en charge |
-| `lele status` | Afficher le statut du runtime |
-| `lele cron list` | Lister les tâches planifiées |
-| `lele cron add ...` | Ajouter une tâche planifiée |
-| `lele skills list` | Lister les compétences installées |
-| `lele client pin` | Générer un PIN d'appairage |
-| `lele client list` | Lister les clients natifs appairés |
-| `lele version` | Afficher les informations de version |
-
-## Documentation Supplémentaire
-
-- `docs/agents-models-providers.md`
-- `docs/architecture.md`
-- `docs/channel-setup.md`
-- `docs/cli-reference.md`
-- `docs/config-reference.md`
-- `docs/client-api.md`
-- `docs/deployment.md`
-- `docs/examples.md`
-- `docs/installation-and-onboarding.md`
-- `docs/logging-and-observability.md`
-- `docs/model-routing.md`
-- `docs/security-and-sandbox.md`
-- `docs/session-and-workspace.md`
-- `docs/skills-authoring.md`
-- `docs/tools_configuration.md`
-- `docs/troubleshooting.md`
-- `docs/web-ui.md`
-- `docs/SKILL_SUBAGENTS.md`
-- `docs/SYSTEM_SPAWN_IMPLEMENTATION.md`
+| `lele onboard` | Initialiser config et espace de travail |
+| `lele agent` / `lele agent -m "..."` | Agent interactif ou one-shot |
+| `lele tui` / `lele tui -s <session>` | Interface terminal |
+| `lele gateway` | Passerelle de messagerie + interface web |
+| `lele auth login` | Authentifier les fournisseurs |
+| `lele status` | État du runtime |
+| `lele cron list` / `lele cron add ...` | Jobs planifiés |
+| `lele skills list` | Skills installés |
+| `lele client pin` / `lele client list` | Appariement de clients natifs |
+| `lele version` | Informations de version |
 
 ## Développement
 
-Commandes utiles :
+Nécessite Go 1.25+, [Bun](https://bun.sh/) (interface web) et Make.
 
 ```bash
-make build
-make test
-make fmt
-make vet
-make check
+make deps web-build build   # binaire + web
+make test fmt vet           # vérifications
+make build-all              # cross-compilation
 ```
 
 ## Licence
