@@ -612,14 +612,57 @@ export type ModelGroup = {
 
 export type ProviderModelInfo = {
   id: string
-  object: string
-  created: number
-  owned_by: string
+  object?: string
+  created?: number
+  owned_by?: string
+  context_window?: number
+  max_output?: number
+  vision?: boolean
+  thinking_levels?: string[]
+  reasoning?: boolean
 }
 
 export type ProviderModelsResponse = {
   provider: string
+  source?: string
   models: ProviderModelInfo[]
+}
+
+export type CatalogModel = {
+  id: string
+  name?: string
+  context_window?: number
+  max_output?: number
+  vision?: boolean
+  thinking_levels?: string[]
+  reasoning?: boolean
+  tool_call?: boolean
+}
+
+export type CatalogProvider = {
+  id: string
+  name?: string
+  type?: string
+  api_base?: string
+  model_count?: number
+}
+
+export type CatalogModelsResponse = {
+  provider: string
+  query?: string
+  models: CatalogModel[]
+}
+
+export type CatalogProvidersResponse = {
+  providers: CatalogProvider[]
+}
+
+export type CatalogPrefetchResponse = {
+  ok?: boolean
+  providers?: number
+  models?: number
+  fetched_at?: string
+  message?: string
 }
 
 export type SessionNameResponse = {

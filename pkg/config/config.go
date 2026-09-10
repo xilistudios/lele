@@ -1012,12 +1012,12 @@ func normalizeProviderKey(provider string) string {
 	switch p {
 	case "z.ai", "z-ai":
 		return "zai"
-	case "opencode-zen":
+	case "opencode-zen", "zen":
 		return "opencode"
 	case "qwen":
 		return "qwen-portal"
-	case "kimi-code":
-		return "kimi-coding"
+	case "kimi-code", "kimi-coding", "kimi-for-coding":
+		return "kimi_for_coding"
 	case "gpt":
 		return "openai"
 	case "claude":
@@ -1026,6 +1026,36 @@ func normalizeProviderKey(provider string) string {
 		return "zhipu"
 	case "google":
 		return "gemini"
+	case "grok", "x.ai", "x-ai":
+		return "xai"
+	case "nous-portal", "nousresearch":
+		return "nous"
+	case "lm-studio":
+		return "lmstudio"
+	case "step":
+		return "stepfun"
+	case "ai-gateway", "aigateway":
+		return "vercel"
+	case "hf":
+		return "huggingface"
+	case "novita-ai":
+		return "novita"
+	case "mimo":
+		return "xiaomi"
+	case "tokenhub", "tencent":
+		return "tencent_tokenhub"
+	case "gmi-cloud":
+		return "gmi"
+	case "togetherai":
+		return "together"
+	case "fireworks-ai":
+		return "fireworks"
+	case "ollama-cloud":
+		return "ollama_cloud"
+	case "amazon-bedrock", "aws":
+		return "bedrock"
+	case "azure-foundry":
+		return "azure_foundry"
 	}
 	return p
 }

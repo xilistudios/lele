@@ -143,7 +143,7 @@ Config lives at `~/.lele/config.json` (template: `config/config.example.json`).
 
 Main sections: `agents.defaults`, `session`, `channels`, `providers`, `tools`, `heartbeat`, `gateway`, `logs`, `devices`.
 
-**Providers:** `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `nvidia`, `ollama`, `moonshot`, `deepseek`, `github_copilot`, plus named OpenAI-compatible backends (`model`, `context_window`, `vision`, `reasoning`, …).
+**Providers:** `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `nvidia`, `ollama`, `moonshot`, `deepseek`, `github_copilot`, plus hermes-agent ports (`xai`, `nous`, `lmstudio`, `minimax`, `vercel`, `opencode`, `huggingface`, `novita`, `xiaomi`, …) and named OpenAI-compatible backends (`model`, `context_window`, `vision`, `reasoning`, …). A curated model catalog (`pkg/catalog`) with context/vision/thinking metadata prefetches from models.dev and powers WebUI/TUI autocomplete when adding models.
 
 **Workspace** (`~/.lele/workspace/`): `sessions/`, `memory/`, `state/`, `cron/`, `skills/`, `AGENT.md`, `HEARTBEAT.md`, `IDENTITY.md`, `SOUL.md`, `USER.md`.
 

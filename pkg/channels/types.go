@@ -490,6 +490,7 @@ type ModelOption struct {
 
 type ProviderModelsResponse struct {
 	Provider string              `json:"provider"`
+	Source   string              `json:"source,omitempty"` // "live" or "catalog"
 	Models   []ProviderModelInfo `json:"models"`
 }
 
@@ -498,6 +499,15 @@ type ProviderModelInfo struct {
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
+
+	// Optional catalog metadata (models.dev / embedded catalog).
+	Name           string   `json:"name,omitempty"`
+	ContextWindow  int      `json:"context_window,omitempty"`
+	MaxOutput      int      `json:"max_output,omitempty"`
+	Vision         bool     `json:"vision,omitempty"`
+	ThinkingLevels []string `json:"thinking_levels,omitempty"`
+	Reasoning      bool     `json:"reasoning,omitempty"`
+	ToolCall       bool     `json:"tool_call,omitempty"`
 }
 
 type ToolInfo struct {

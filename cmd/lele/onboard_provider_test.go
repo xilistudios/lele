@@ -7,8 +7,9 @@ import (
 // TestProviderRegistry verifies the provider registry count
 func TestProviderRegistry(t *testing.T) {
 	registry := providerRegistry()
-	if len(registry) != 16 {
-		t.Errorf("Expected 16 providers, got %d", len(registry))
+	// 15 original + 21 optional catalog-backed providers + custom
+	if len(registry) != 37 {
+		t.Errorf("Expected 37 providers, got %d", len(registry))
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/cron"
 	"github.com/xilistudios/lele/pkg/keyring"
@@ -261,11 +262,30 @@ func (n *NativeChannel) Start(ctx context.Context) error {
 
 	n.startTime = time.Now()
 	go n.runUploadCleanup(ctx)
+	startCatalogPrefetch()
 
 	n.running = true
 	n.base.setRunning(true)
 
 	return nil
+}
+
+// catalogPrefetchOnce guards process-wide models.dev prefetch so a channel
+// that is started twice (or recreated) does not double-fetch.
+var catalogPrefetchOnce sync.Once
+
+// startCatalogPrefetch warms the models.dev catalog in the background.
+// Disk cache is applied first so an offline start still has the last snapshot.
+// Fully async so Start does not block on disk or network I/O.
+func startCatalogPrefetch() {
+	catalogPrefetchOnce.Do(func() {
+		go func() {
+			_ = catalog.LoadDiskCache("")
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			_ = catalog.Prefetch(ctx, catalog.PrefetchOptions{})
+		}()
+	})
 }
 
 func (n *NativeChannel) Stop(ctx context.Context) error {
@@ -463,6 +483,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/tools", withAuth(n.handleTools))
 	mux.HandleFunc("GET /api/v1/models", withAuth(n.handleModels))
 	mux.HandleFunc("GET /api/v1/providers/{name}/models", withAuth(n.handleProviderModels))
+
+	// Model catalog (embedded + models.dev prefetch)
+	mux.HandleFunc("GET /api/v1/catalog/providers", withAuth(n.handleCatalogProviders))
+	mux.HandleFunc("GET /api/v1/catalog/models", withAuth(n.handleCatalogModels))
+	mux.HandleFunc("POST /api/v1/catalog/prefetch", withAuth(applyBodyLimit(n.handleCatalogPrefetch)))
+
 	mux.HandleFunc("GET /api/v1/skills", withAuth(n.handleSkills))
 	mux.HandleFunc("POST /api/v1/skills", withAuth(applyBodyLimit(n.handleSkillInstall)))
 	mux.HandleFunc("GET /api/v1/skills/available", withAuth(n.handleSkillsAvailable))

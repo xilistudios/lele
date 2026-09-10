@@ -21,6 +21,9 @@ import type {
   BackgroundExecOutputResponse,
   BackgroundExecStopResponse,
   BackgroundExecsResponse,
+  CatalogModelsResponse,
+  CatalogPrefetchResponse,
+  CatalogProvidersResponse,
   ChannelsResponse,
   ChatCommandsResponse,
   ChatSessionsResponse,
@@ -743,6 +746,12 @@ export const createApiClient = (baseUrl: string) => {
       request<ProviderModelsResponse>(endpoints.providers.models(providerName), {
         method: 'GET',
       }),
+    catalogModels: (provider?: string) =>
+      request<CatalogModelsResponse>(endpoints.catalog.models(provider), { method: 'GET' }),
+    catalogProviders: () =>
+      request<CatalogProvidersResponse>(endpoints.catalog.providers, { method: 'GET' }),
+    catalogPrefetch: () =>
+      request<CatalogPrefetchResponse>(endpoints.catalog.prefetch, { method: 'POST' }),
     backgroundExecs: {
       list: (includeCompleted?: boolean) =>
         request<BackgroundExecsResponse>(

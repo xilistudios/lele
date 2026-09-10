@@ -448,6 +448,13 @@ func TestDefaultAPIBaseByTypePublic(t *testing.T) {
 		{"deepseek", "https://api.deepseek.com/v1"},
 		{"ollama", "http://localhost:11434/v1"},
 		{"unknown", ""},
+		// Catalog-backed providers
+		{"xai", "https://api.x.ai/v1"},
+		{"nous", "https://inference-api.nousresearch.com/v1"},
+		{"vercel", "https://ai-gateway.vercel.sh/v1"},
+		{"huggingface", "https://router.huggingface.co/v1"},
+		{"minimax", "https://api.minimax.io/anthropic/v1"},
+		{"kimi_for_coding", "https://api.kimi.com/coding/v1"},
 	}
 
 	for _, tt := range tests {

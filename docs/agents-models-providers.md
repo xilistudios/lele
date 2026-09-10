@@ -249,9 +249,22 @@ This is useful when different channels, accounts, guilds, or peers should use di
 
 Lele treats provider configuration as a named map under `providers`.
 
-Built-in providers such as `openai`, `anthropic`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `ollama`, `moonshot`, `deepseek`, and `github_copilot` are all represented there.
+Built-in providers such as `openai`, `anthropic`, `openrouter`, `groq`, `zhipu`, `gemini`, `vllm`, `ollama`, `moonshot`, `deepseek`, and `github_copilot` are all represented there, along with catalog-backed providers ported from hermes-agent: `xai`, `nous`, `lmstudio`, `stepfun`, `minimax`, `vercel`, `opencode`, `huggingface`, `novita`, `xiaomi`, `tencent_tokenhub`, `arcee`, `gmi`, `cerebras`, `together`, `fireworks`, `mistral`, `siliconflow`, `perplexity`, `ollama_cloud`, and `kimi_for_coding`.
 
 The runtime also supports additional named provider entries beyond the built-ins.
+
+### Model catalog and prefetch
+
+`pkg/catalog` embeds a curated snapshot of models per provider with `context_window`, `max_output`, `vision`, and `thinking_levels`. On gateway start the catalog loads any disk cache (`~/.lele/cache/models_dev.json`) and asynchronously prefetches [models.dev](https://models.dev).
+
+HTTP API:
+
+- `GET /api/v1/catalog/providers`
+- `GET /api/v1/catalog/models?provider=<id>&q=<query>`
+- `POST /api/v1/catalog/prefetch`
+- `GET /api/v1/providers/{name}/models` — live `/v1/models` when credentials exist, enriched with catalog metadata, with offline catalog fallback
+
+When adding a model to `providers.*.models` in the WebUI settings or TUI `/add-model`, suggestions come from this catalog and prefill context window, max tokens, vision, and reasoning defaults.
 
 ### Common Provider Fields
 

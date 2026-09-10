@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 )
 
@@ -362,22 +363,44 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		providerType = providerName
 	}
 
+	// Catalog lookup keys: type first (aliases normalize), then instance name.
+	catalogKeys := []string{providerType, providerName}
+	catalogModels := lookupCatalogModels(catalogKeys)
+
 	if apiBase == "" {
 		apiBase = defaultAPIBaseByTypePublic(providerType)
 	}
-	if apiBase == "" {
-		writeError(w, http.StatusBadRequest, "provider has no api_base configured", "no_api_base")
-		return
-	}
 
-	if apiKey == "" {
+	// Offline autocomplete: no usable live credentials, but catalog knows models.
+	if apiKey == "" || apiBase == "" {
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
+		if apiBase == "" {
+			writeError(w, http.StatusBadRequest, "provider has no api_base configured", "no_api_base")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "provider has no api_key configured", "no_api_key")
 		return
 	}
 
 	// SSRF guard: validate the provider URL before making any outbound request.
-	// Block requests to private/internal IPs and enforce HTTPS.
+	// Block requests to private/internal IPs and enforce HTTPS. Catalog fallback
+	// is not subject to this guard (it never opens a network connection).
 	if !isAllowedProviderURL(apiBase) {
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
 		writeError(w, http.StatusBadRequest, "provider api_base is not allowed: must be a public HTTPS URL", "url_not_allowed")
 		return
 	}
@@ -393,12 +416,29 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		// Live fetch failed; fall back to catalog for offline autocomplete.
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch models: %v", err), "upstream_error")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		writeError(w, resp.StatusCode, fmt.Sprintf("upstream returned %d: %s", resp.StatusCode, string(body)), "upstream_error")
 		return
@@ -406,6 +446,14 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 	if err != nil {
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to read response", "read_error")
 		return
 	}
@@ -419,24 +467,49 @@ func (n *NativeChannel) handleProviderModels(w http.ResponseWriter, r *http.Requ
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		if len(catalogModels) > 0 {
+			writeJSON(w, http.StatusOK, ProviderModelsResponse{
+				Provider: providerName,
+				Source:   "catalog",
+				Models:   catalogModelsToInfos(catalogModels),
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to parse models response", "parse_error")
 		return
 	}
 
 	models := make([]ProviderModelInfo, 0, len(modelsResp.Data))
 	for _, m := range modelsResp.Data {
-		models = append(models, ProviderModelInfo{
+		info := ProviderModelInfo{
 			ID:      m.ID,
 			Object:  m.Object,
 			Created: m.Created,
 			OwnedBy: m.OwnedBy,
-		})
+		}
+		enrichProviderModelInfo(&info, catalogKeys...)
+		models = append(models, info)
 	}
 
 	writeJSON(w, http.StatusOK, ProviderModelsResponse{
 		Provider: providerName,
+		Source:   "live",
 		Models:   models,
 	})
+}
+
+// lookupCatalogModels returns the first non-empty catalog model list for the
+// given provider keys (type, then instance name).
+func lookupCatalogModels(keys []string) []catalog.Model {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if models := catalog.ModelsForProvider(key); len(models) > 0 {
+			return models
+		}
+	}
+	return nil
 }
 
 // isAllowedProviderURL validates that a provider API base URL is safe to connect to.
@@ -586,37 +659,8 @@ func (n *NativeChannel) cfgSnapshot() *config.Config {
 	return cfg
 }
 
+// defaultAPIBaseByTypePublic returns the public default API base for a
+// provider type. Backed by the catalog (single source of truth).
 func defaultAPIBaseByTypePublic(providerType string) string {
-	switch providerType {
-	case "groq":
-		return "https://api.groq.com/openai/v1"
-	case "openai", "gpt":
-		return "https://api.openai.com/v1"
-	case "openrouter":
-		return "https://openrouter.ai/api/v1"
-	case "nanogpt":
-		return "https://nano-gpt.com/api/v1"
-	case "chutes":
-		return "https://llm.chutes.ai/v1"
-	case "alibaba", "alibaba_coding_plan":
-		return "https://coding-intl.dashscope.aliyuncs.com/v1"
-	case "zhipu":
-		return "https://open.bigmodel.cn/api/paas/v4"
-	case "gemini", "google":
-		return "https://generativelanguage.googleapis.com/v1beta"
-	case "shengsuanyun":
-		return "https://router.shengsuanyun.com/api/v1"
-	case "nvidia":
-		return "https://integrate.api.nvidia.com/v1"
-	case "moonshot":
-		return "https://api.moonshot.cn/v1"
-	case "ollama":
-		return "http://localhost:11434/v1"
-	case "deepseek":
-		return "https://api.deepseek.com/v1"
-	case "vllm":
-		return ""
-	default:
-		return ""
-	}
+	return catalog.DefaultAPIBaseByType(providerType)
 }

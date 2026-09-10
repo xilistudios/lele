@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
@@ -130,6 +131,10 @@ func (m *Model) deleteProvider(name string) error {
 }
 
 // addModelToProvider adds a model alias to a provider's Models map.
+// When the model is known to pkg/catalog and context_window / max_tokens were
+// left empty (zero), the values are filled from catalog.DefaultsFor. Models
+// that advertise thinking levels get a default Reasoning.Effort so reasoning
+// works out of the box.
 func (m *Model) addModelToProvider(providerName, alias, modelName string, contextWindow, maxTokens int, vision bool) error {
 	if m.cfg == nil || m.cfg.Providers == nil || m.cfg.Providers.Named == nil {
 		return fmt.Errorf("no providers configured")
@@ -150,11 +155,28 @@ func (m *Model) addModelToProvider(providerName, alias, modelName string, contex
 		return fmt.Errorf("model alias cannot be empty")
 	}
 
+	var reasoning *config.ReasoningConfig
+	if catKey := m.catalogProviderKey(key); catKey != "" {
+		if d, ok := catalog.DefaultsFor(catKey, modelName); ok {
+			if contextWindow == 0 {
+				contextWindow = d.ContextWindow
+			}
+			if maxTokens == 0 {
+				maxTokens = d.MaxTokens
+			}
+			if len(d.ThinkingLevels) > 0 || d.Reasoning {
+				effort := defaultThinkingEffort(d.ThinkingLevels)
+				reasoning = &config.ReasoningConfig{Effort: &effort}
+			}
+		}
+	}
+
 	provider.Models[aliasKey] = config.ProviderModelConfig{
 		Model:         modelName,
 		ContextWindow: contextWindow,
 		MaxTokens:     maxTokens,
 		Vision:        vision,
+		Reasoning:     reasoning,
 	}
 	m.cfg.Providers.Named[key] = provider
 
