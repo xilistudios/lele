@@ -33,42 +33,84 @@ const harnessRefreshTTL = 30 * time.Second
 // process working directory (the fourth, highest-precedence discovery level).
 var harnessCommandsDir = filepath.Join(".lele", "commands")
 
-// harnessManager returns the loop's command manager, (re)building it when the
-// parts of the configuration it depends on changed. The manager is lazy on
-// purpose: building it touches the filesystem (four load levels), so it should
-// not run for every process — but it must follow config hot-reloads, hence the
-// fingerprint instead of a sync.Once.
+// harnessEntry is one cached command manager plus the config fingerprint it was
+// built from. Entries live in AgentLoop.harnessMgrs keyed by the absolute,
+// cleaned workspace they were built for, so every agent sees the commands of
+// ITS workspace: the workspace level of ManagerConfig is the only discovery
+// level that differs between agents, and it is also the level that decides
+// where @file references and !`cmd` execute.
+type harnessEntry struct {
+	mgr *harness.Manager
+	fp  string // fingerprint of this entry (harnessFingerprint fed with the entry's workspace)
+}
+
+// harnessManager returns the command manager of the agents.defaults workspace.
+// It is the ""-workspace shorthand of harnessManagerFor and the source behind
+// HarnessCommands(); callers that know which agent will handle the message must
+// use harnessManagerFor with that agent's workspace instead.
 func (al *AgentLoop) harnessManager() *harness.Manager {
+	return al.harnessManagerFor("")
+}
+
+// harnessManagerFor returns the command manager for one workspace, (re)building
+// it when the parts of the configuration it depends on changed. workspace == ""
+// selects the agents.defaults workspace (cfg.WorkspacePath), which keeps the
+// historical behaviour for callers without an agent context.
+//
+// Managers are lazy on purpose: building one touches the filesystem (four load
+// levels), so it should not run for every process — but they must follow config
+// hot-reloads, hence the per-entry fingerprint instead of a sync.Once. Because
+// the fingerprint is recomputed on every access, a global config change (the
+// harness permission defaults or the config.json command map) invalidates ALL
+// entries lazily: each one is rebuilt the next time it is accessed, and an
+// entry nobody touches is never rebuilt at all.
+//
+// The map is bounded by the number of distinct workspaces in the config (one
+// per agent, plus the defaults), so entries are never evicted.
+func (al *AgentLoop) harnessManagerFor(workspace string) *harness.Manager {
 	cfg := al.cfg()
 
 	leleDir := config.GetLeleDir()
-	workspace := cfg.WorkspacePath()
 	dir := harnessCommandsDir
 	if wd, err := os.Getwd(); err == nil {
 		dir = filepath.Join(wd, harnessCommandsDir)
 	}
 	defs := harnessCommandDefsFromConfig(cfg.Commands)
 
-	fp := harnessFingerprint(cfg.Harness.AllowShell, cfg.Harness.AllowAbsoluteFiles, defs, workspace, leleDir, dir)
+	// The map key is the workspace the manager is built for, normalised so the
+	// same directory reached by two spellings ("/x/", "/x") shares one entry.
+	key := al.harnessWorkspaceKey(workspace)
+
+	fp := harnessFingerprint(cfg.Harness.AllowShell, cfg.Harness.AllowAbsoluteFiles, defs, key, leleDir, dir)
 
 	al.harnessMu.Lock()
-	defer al.harnessMu.Unlock()
-	if al.harnessMgr == nil || al.harnessCfgFP != fp {
-		mgr := harness.NewManager(harness.ManagerConfig{
-			LeleDir:                   leleDir,
-			Workspace:                 workspace,
-			Dir:                       dir,
-			Commands:                  defs,
-			AllowShellDefault:         cfg.Harness.AllowShell,
-			AllowAbsoluteFilesDefault: cfg.Harness.AllowAbsoluteFiles,
-		})
-		al.harnessMgr = mgr
-		al.harnessCfgFP = fp
+	if al.harnessMgrs == nil {
+		al.harnessMgrs = make(map[string]*harnessEntry)
 	}
-	// File-backed levels (global/workspace/.lele commands) are re-scanned at most
-	// once per TTL; EnsureFresh is a no-op while the last load is recent.
-	al.harnessMgr.EnsureFresh(harnessRefreshTTL)
-	return al.harnessMgr
+	entry := al.harnessMgrs[key]
+	if entry == nil || entry.fp != fp {
+		entry = &harnessEntry{
+			fp: fp,
+			mgr: harness.NewManager(harness.ManagerConfig{
+				LeleDir:                   leleDir,
+				Workspace:                 key,
+				Dir:                       dir,
+				Commands:                  defs,
+				AllowShellDefault:         cfg.Harness.AllowShell,
+				AllowAbsoluteFilesDefault: cfg.Harness.AllowAbsoluteFiles,
+			}),
+		}
+		al.harnessMgrs[key] = entry
+	}
+	mgr := entry.mgr
+	al.harnessMu.Unlock()
+
+	// File-backed levels (global/workspace/.lele commands) are re-scanned at
+	// most once per TTL; EnsureFresh is a no-op while the last load is recent.
+	// It runs outside harnessMu on purpose: Manager is internally synchronised,
+	// so a slow disk rescan for one workspace must not block access to another.
+	mgr.EnsureFresh(harnessRefreshTTL)
+	return mgr
 }
 
 // harnessFingerprint builds the change detector for the manager: it covers every
@@ -100,11 +142,54 @@ func triState(p *bool) string {
 	return "false"
 }
 
-// HarnessCommands returns the currently available custom commands (all four
-// discovery levels merged, precedence applied), sorted by name. It refreshes
-// the file-backed levels when they are older than harnessRefreshTTL.
+// harnessWorkspaceKey maps a caller-supplied workspace to the key its manager is
+// cached under: "" selects the agents.defaults workspace and every path is
+// cleaned, so two spellings of the same directory share one entry. Callers that
+// must reach the same cache entry from outside harnessManagerFor (invalidation)
+// have to go through here rather than re-implementing the rule.
+func (al *AgentLoop) harnessWorkspaceKey(workspace string) string {
+	key := workspace
+	if key == "" {
+		key = al.cfg().WorkspacePath()
+	}
+	return filepath.Clean(key)
+}
+
+// InvalidateHarnessWorkspace forces the cached manager of one workspace to be
+// rebuilt on next access, bypassing both the config fingerprint and the file
+// rescan TTL. It is the hook for writers that change <workspace>/commands/*.md
+// behind the manager's back (the REST command endpoints): without it a client
+// could POST a command and still get the stale registry for up to
+// harnessRefreshTTL. An unknown workspace is a no-op — nothing was cached, so
+// nothing can be stale.
+func (al *AgentLoop) InvalidateHarnessWorkspace(workspace string) {
+	key := al.harnessWorkspaceKey(workspace)
+	al.harnessMu.Lock()
+	delete(al.harnessMgrs, key)
+	al.harnessMu.Unlock()
+}
+
+// HarnessCommands returns the custom commands of the agents.defaults workspace
+// (all four discovery levels merged, precedence applied), sorted by name. It
+// refreshes the file-backed levels when they are older than
+// harnessRefreshTTL.
+//
+// The signature is load-bearing: pkg/channels (customCommandProvider) and
+// pkg/tui (harnessCommandSource) discover this method through structural
+// interface assertions, so renaming it or changing its shape would fail
+// silently — the palette would just stop showing custom commands. Per-agent
+// lookup goes through HarnessCommandsFor instead.
 func (al *AgentLoop) HarnessCommands() []*harness.Command {
-	return al.harnessManager().Registry().All()
+	return al.HarnessCommandsFor("")
+}
+
+// HarnessCommandsFor returns the custom commands visible to an agent whose
+// resolved workspace is `workspace` ("" = the defaults workspace, identical to
+// HarnessCommands()). Each workspace gets its own cached manager, so the
+// <workspace>/commands level — and with it the agent's own commands — is never
+// confused with another agent's.
+func (al *AgentLoop) HarnessCommandsFor(workspace string) []*harness.Command {
+	return al.harnessManagerFor(workspace).Registry().All()
 }
 
 // HarnessCommands delegates to the owning loop.
@@ -116,8 +201,12 @@ func (al *AgentLoop) HarnessCommands() []*harness.Command {
 // Without this delegation the assertion would silently fail in the real binary
 // and the WebUI palette would never show harness commands, even though the TUI
 // (which holds *AgentLoop directly) does.
+//
+// The "" workspace is deliberate: this is the palette of the whole gateway, not
+// of one agent's turn. Per-agent command lookup stays inside pkg/agent, where
+// the routed agent's workspace is known.
 func (ap *agentProvidableImpl) HarnessCommands() []*harness.Command {
-	return ap.al.HarnessCommands()
+	return ap.al.HarnessCommandsFor("")
 }
 
 // harnessCommandDefsFromConfig converts the config.json command map into the
@@ -145,10 +234,12 @@ func harnessCommandDefsFromConfig(m map[string]config.CommandDefinition) map[str
 // It runs *after* the built-in command dispatcher declined, so built-ins always
 // win on name collisions (the harness registry is never consulted for them).
 //
-// workDir is the directory used for @file references and !`cmd` execution; the
-// caller passes the default agent workspace because per-agent routing happens
-// later in processMessage. Agents that override the workspace are a rare
-// exception and only affect where relative template references resolve.
+// workDir is the resolved workspace of the agent that will handle this message
+// (routing and the session's agent override are computed before this call in
+// processMessage). It selects BOTH the command manager — so the
+// <workDir>/commands discovery level, and therefore the commands an agent can
+// actually invoke, are its own and never another agent's — and the directory
+// @file references and !`cmd` execute in.
 //
 // It returns true when msg.Content was rewritten. On any miss or expansion
 // error the message is left untouched and dispatched to the LLM as plain text.
@@ -174,7 +265,7 @@ func (mp *messageProcessorImpl) applyHarnessCommand(_ context.Context, msg *bus.
 	}
 
 	al := mp.al
-	mgr := al.harnessManager()
+	mgr := al.harnessManagerFor(workDir)
 	cmd, ok := mgr.Registry().Get(name)
 	if !ok {
 		return false

@@ -59,13 +59,17 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 		return response, nil
 	}
 
-	// Built-in commands declined: try user-defined (harness) slash commands.
-	// When one matches, msg.Content is rewritten with the expanded prompt and
-	// msg.Metadata carries harness_agent / harness_model for this turn only.
-	// The default agent workspace is used for @file and !`cmd` resolution
-	// because routing into a specific agent happens below.
-	mp.applyHarnessCommand(ctx, &msg, mp.al.cfg().WorkspacePath())
-
+	// Resolve WHO handles this message before expanding any custom command:
+	// an agent's commands live in ITS workspace (<ws>/commands/*.md), so the
+	// lookup and the @file / !`cmd` resolution must run with the effective
+	// agent's workspace, not the defaults one.
+	//
+	// This ordering is safe because routing needs nothing from msg.Content:
+	// ResolveRoute only consumes Channel, account_id, the peer/parent-peer
+	// metadata, guild_id and team_id (see routing.RouteInput), none of which
+	// command expansion touches — expansion rewrites Content and the harness_*
+	// metadata keys only.
+	//
 	// Route to determine agent and session key
 	route := mp.al.registry.ResolveRoute(routing.RouteInput{
 		Channel:    msg.Channel,
@@ -88,12 +92,27 @@ func (mp *messageProcessorImpl) processMessage(ctx context.Context, msg bus.Inbo
 	}
 	sessionKey = mp.al.ResolveSessionKey(sessionKey)
 
-	// Check if a session-specific agent is set (e.g., via /agent command)
-	if sessionAgentID := mp.al.getSessionAgent(sessionKey); sessionAgentID != "" {
+	// Check if a session-specific agent is pinned (e.g. via /agent). Only a real
+	// pin may override the route: getSessionAgent falls back to the default
+	// agent ID, so using it here would make every unpinned session resolve to
+	// the default agent and silently disable bindings.
+	if sessionAgentID, pinned := mp.al.sessionAgentOverride(sessionKey); pinned {
 		if sessionAgent, ok := mp.al.registry.GetAgent(sessionAgentID); ok {
 			agent = sessionAgent
 		}
 	}
+
+	// Built-in commands declined: try user-defined (harness) slash commands.
+	// When one matches, msg.Content is rewritten with the expanded prompt and
+	// msg.Metadata carries harness_agent / harness_model for this turn only.
+	// The agent resolved above (route → session override) owns the workspace
+	// used both to find the command and to resolve its @file / !`cmd`
+	// references.
+	agentWorkspace := ""
+	if agent != nil {
+		agentWorkspace = agent.Workspace
+	}
+	mp.applyHarnessCommand(ctx, &msg, agentWorkspace)
 
 	// A custom command can pin an agent and/or a model for the turn. The
 	// harness agent wins over the session-selected agent (the user asked for it

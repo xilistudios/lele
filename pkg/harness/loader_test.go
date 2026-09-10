@@ -30,16 +30,21 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-func TestLoadMarkdownFile(t *testing.T) {
-	dir := t.TempDir()
+// loadCase is one entry of the fixture table shared by TestLoadMarkdownFile
+// and TestParseCommandMarkdownMatchesLoadMarkdownFile (T-B1): the same bytes
+// must produce the same command (or the same error) through both entry points.
+type loadCase struct {
+	name    string
+	file    string
+	content string
+	wantErr bool
+	wantCmd *Command // zero fields are compared too
+}
 
-	tests := []struct {
-		name    string
-		file    string
-		content string
-		wantErr bool
-		wantCmd *Command // zero fields are compared too
-	}{
+// markdownLoadCases returns a FRESH copy of the table on every call, so each
+// test may mutate wantCmd (setting Path) without leaking into the other.
+func markdownLoadCases() []loadCase {
+	return []loadCase{
 		{
 			name:    "full frontmatter",
 			file:    "Test.MD",
@@ -148,6 +153,11 @@ func TestLoadMarkdownFile(t *testing.T) {
 			wantErr: true,
 		},
 	}
+}
+
+func TestLoadMarkdownFile(t *testing.T) {
+	dir := t.TempDir()
+	tests := markdownLoadCases()
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,5 +250,74 @@ func TestParseFrontmatterUnknownAndComments(t *testing.T) {
 	}
 	if def.Description != "d" || def.Agent != "" || def.Model != "" || def.AllowShell {
 		t.Errorf("unexpected def %+v", def)
+	}
+}
+
+// T-B1: ParseCommandMarkdown over the same bytes must behave IDENTICALLY to
+// LoadMarkdownFile over disk — same fields, same errors. Runs the shared
+// fixture table through both entry points and diffs the results.
+func TestParseCommandMarkdownMatchesLoadMarkdownFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range markdownLoadCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeFile(t, dir, tc.file, tc.content)
+			stem := strings.TrimSuffix(tc.file, filepath.Ext(tc.file))
+
+			disk, diskErr := LoadMarkdownFile(path, SourceGlobal)
+			mem, memErr := ParseCommandMarkdown(stem, path, []byte(tc.content))
+
+			// Error parity: both must fail, with the same message (path is
+			// the only context either one gets).
+			if (diskErr != nil) != (memErr != nil) {
+				t.Fatalf("error mismatch: disk=%v mem=%v", diskErr, memErr)
+			}
+			if tc.wantErr {
+				if diskErr == nil {
+					t.Fatal("expected error, got none")
+				}
+				if !strings.Contains(memErr.Error(), path) {
+					t.Errorf("mem error should mention the file: %v", memErr)
+				}
+				if diskErr.Error() != memErr.Error() {
+					t.Errorf("error texts differ:\n disk: %v\n  mem: %v", diskErr, memErr)
+				}
+				return
+			}
+			if diskErr != nil {
+				t.Fatalf("LoadMarkdownFile: %v", diskErr)
+			}
+			// ParseCommandMarkdown leaves Source unset; tag it so the
+			// comparison covers every other field exactly.
+			mem.Source = SourceGlobal
+			if !reflect.DeepEqual(mem, disk) {
+				t.Errorf("got %+v, want %+v", *mem, *disk)
+			}
+		})
+	}
+}
+
+// ParseCommandMarkdown validates the stem it is given (lowercasing it first),
+// so names that could escape the namespace are rejected even when no file
+// exists on disk.
+func TestParseCommandMarkdownInvalidName(t *testing.T) {
+	for _, bad := range []string{"", ".", "..", "a/b", `a\b`} {
+		_, err := ParseCommandMarkdown(bad, "/virtual/dir/"+bad+".md", []byte("body"))
+		if err == nil {
+			t.Errorf("ParseCommandMarkdown(name=%q) = nil error, want rejection", bad)
+		}
+	}
+	// Mixed case is accepted and lowercased, like the disk path does.
+	cmd, err := ParseCommandMarkdown("Foo.Bar", "/virtual/Foo.Bar.md", []byte("body"))
+	if err != nil {
+		t.Fatalf("valid stem rejected: %v", err)
+	}
+	if cmd.Name != "foo.bar" {
+		t.Errorf("Name = %q, want foo.bar", cmd.Name)
+	}
+	if cmd.Source != "" {
+		t.Errorf("Source = %q, want empty (caller tags it)", cmd.Source)
+	}
+	if cmd.Path != "/virtual/Foo.Bar.md" {
+		t.Errorf("Path = %q, want the given path verbatim", cmd.Path)
 	}
 }

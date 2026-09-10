@@ -640,3 +640,604 @@ func TestHarnessFingerprintTriStateByValue(t *testing.T) {
 		t.Error("same value through different pointers must fingerprint the same")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Per-workspace manager cache (harnessManagerFor / HarnessCommandsFor)
+// ──────────────────────────────────────────────────────────────────────────────
+
+// writeHarnessCommandFile creates <workspace>/commands/<name>.md with the given
+// frontmatter block (may be empty) and template body.
+func writeHarnessCommandFile(t *testing.T, workspace, name, frontmatter, template string) {
+	t.Helper()
+	dir := filepath.Join(workspace, "commands")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir commands dir: %v", err)
+	}
+	content := template
+	if frontmatter != "" {
+		content = "---\n" + frontmatter + "\n---\n" + template + "\n"
+	}
+	path := filepath.Join(dir, name+".md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// commandNamesOf maps a command slice to its names for readable assertions.
+func commandNamesOf(cmds []*harness.Command) map[string]bool {
+	out := make(map[string]bool, len(cmds))
+	for _, c := range cmds {
+		out[c.Name] = true
+	}
+	return out
+}
+
+// TestHarnessManagerFor_PerWorkspaceManagers pins the core of the per-agent
+// commands fix: one cached manager per workspace, each seeing the commands of
+// ITS workspace, while the defaults workspace keeps exactly the view
+// HarnessCommands() has always had.
+func TestHarnessManagerFor_PerWorkspaceManagers(t *testing.T) {
+	al, defaultsWs := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"shared": {Description: "from config", Template: "config body"},
+	})
+
+	wsA := t.TempDir()
+	wsB := t.TempDir()
+	writeHarnessCommandFile(t, wsA, "a-only", "description: A", "body A")
+	writeHarnessCommandFile(t, wsB, "b-only", "description: B", "body B")
+	// Same name in two workspaces: each manager must report ITS OWN file, which
+	// a shared manager could never do.
+	writeHarnessCommandFile(t, wsA, "clash", "description: from A", "A body")
+	writeHarnessCommandFile(t, wsB, "clash", "description: from B", "B body")
+
+	// "" is the defaults workspace, and so is the defaults workspace spelled
+	// out: one entry, one manager.
+	def := al.harnessManagerFor("")
+	if def != al.harnessManager() {
+		t.Error(`harnessManagerFor("") and harnessManager() returned different managers`)
+	}
+	if got, want := al.harnessManagerFor(defaultsWs), def; got != want {
+		t.Errorf("defaults workspace resolved to a second manager (%p vs %p)", got, want)
+	}
+	// Trailing separators must not fork an entry either.
+	if got, want := al.harnessManagerFor(wsA+string(filepath.Separator)), al.harnessManagerFor(wsA); got != want {
+		t.Errorf("trailing separator forked the entry for %s", wsA)
+	}
+
+	mgrA := al.harnessManagerFor(wsA)
+	mgrB := al.harnessManagerFor(wsB)
+	if mgrA == mgrB || mgrA == def || mgrB == def {
+		t.Fatalf("workspaces share a manager: def=%p A=%p B=%p", def, mgrA, mgrB)
+	}
+	// Repeated access reuses the cached manager (no rebuild per message).
+	if al.harnessManagerFor(wsA) != mgrA {
+		t.Error("manager for workspace A rebuilt without a config change")
+	}
+
+	// Registry contents per workspace.
+	namesA := commandNamesOf(mgrA.Registry().All())
+	namesB := commandNamesOf(mgrB.Registry().All())
+	for _, tc := range []struct {
+		label  string
+		names  map[string]bool
+		want   []string
+		unwant []string
+	}{
+		{"A", namesA, []string{"a-only", "clash", "shared"}, []string{"b-only"}},
+		{"B", namesB, []string{"b-only", "clash", "shared"}, []string{"a-only"}},
+		{"defaults", commandNamesOf(def.Registry().All()), []string{"shared"}, []string{"a-only", "b-only", "clash"}},
+	} {
+		for _, n := range tc.want {
+			if !tc.names[n] {
+				t.Errorf("workspace %s: command %q missing", tc.label, n)
+			}
+		}
+		for _, n := range tc.unwant {
+			if tc.names[n] {
+				t.Errorf("workspace %s: command %q leaked from another workspace", tc.label, n)
+			}
+		}
+	}
+
+	// The clash must resolve to each workspace's own template.
+	cmdA, _ := mgrA.Registry().Get("clash")
+	cmdB, _ := mgrB.Registry().Get("clash")
+	if cmdA.Template != "A body" {
+		t.Errorf("workspace A clash template = %q, want %q", cmdA.Template, "A body")
+	}
+	if cmdB.Template != "B body" {
+		t.Errorf("workspace B clash template = %q, want %q", cmdB.Template, "B body")
+	}
+
+	// HarnessCommands() must be exactly HarnessCommandsFor("") — the palette
+	// channels and the TUI keep seeing the defaults view, unchanged.
+	defaults := al.HarnessCommands()
+	for _, ws := range []string{wsA, wsB} {
+		if got := commandNamesOf(al.HarnessCommandsFor(ws)); !got["clash"] {
+			t.Errorf("HarnessCommandsFor(%s) lost the workspace command", ws)
+		}
+	}
+	if names := commandNamesOf(defaults); names["a-only"] || names["b-only"] {
+		t.Errorf("HarnessCommands() now leaks agent workspaces: %v", names)
+	}
+	if len(defaults) != len(al.HarnessCommandsFor("")) {
+		t.Error("HarnessCommands() and HarnessCommandsFor(\"\") disagree")
+	}
+}
+
+// TestHarnessManagerFor_RebuildsEntryOnHarnessFlagChange pins the hot-reload
+// half of the per-entry fingerprint: flipping a harness permission default must
+// replace every cached manager that depends on it, so no agent keeps running
+// with the OLD permissions after a config reload.
+func TestHarnessManagerFor_RebuildsEntryOnHarnessFlagChange(t *testing.T) {
+	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"sh": {Description: "d", Template: "run !`echo hi`"},
+	})
+	ws := t.TempDir()
+	writeHarnessCommandFile(t, ws, "local", "description: local", "local body")
+
+	defBefore := al.harnessManager()
+	mgrBefore := al.harnessManagerFor(ws)
+	if mgrBefore.AllowShell(mustHarnessCommand(t, mgrBefore, "sh")) {
+		t.Fatal("test setup: shell must start disabled")
+	}
+
+	cfg := al.cfg()
+	cfg.Harness.AllowShell = true
+	al.cfgPtr.Store(cfg)
+
+	defAfter := al.harnessManager()
+	mgrAfter := al.harnessManagerFor(ws)
+	if defAfter == defBefore {
+		t.Error("defaults manager not rebuilt after AllowShell change")
+	}
+	if mgrAfter == mgrBefore {
+		t.Error("workspace manager not rebuilt after AllowShell change: it would keep the old permissions")
+	}
+	if !mgrAfter.AllowShell(mustHarnessCommand(t, mgrAfter, "sh")) {
+		t.Error("rebuilt workspace manager still reports shell disabled")
+	}
+	if !defAfter.AllowShell(mustHarnessCommand(t, defAfter, "sh")) {
+		t.Error("rebuilt defaults manager still reports shell disabled")
+	}
+	// The other workspace's commands survive the rebuild.
+	if _, ok := mgrAfter.Registry().Get("local"); !ok {
+		t.Error("workspace command lost after rebuild")
+	}
+	// And the entry is cached again: no rebuild without a further change.
+	if al.harnessManagerFor(ws) != mgrAfter {
+		t.Error("manager rebuilt twice for one config change")
+	}
+
+}
+
+// mustHarnessCommand fetches a command from a manager's registry or fails.
+func mustHarnessCommand(t *testing.T, mgr *harness.Manager, name string) *harness.Command {
+	t.Helper()
+	cmd, ok := mgr.Registry().Get(name)
+	if !ok {
+		t.Fatalf("command %q missing from manager", name)
+	}
+	return cmd
+}
+
+// TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily documents the
+// intended laziness of the map: after a global config change, EVERY entry is
+// rebuilt the next time it is touched (each computes its own fingerprint), and
+// an entry nobody touches is never rebuilt.
+func TestHarnessManagerFor_GlobalConfigChangeRebuildsAllEntriesLazily(t *testing.T) {
+	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"one": {Template: "first"},
+	})
+	wsA, wsB := t.TempDir(), t.TempDir()
+
+	mgrADef := al.harnessManagerFor(wsA)
+	mgrBDef := al.harnessManagerFor(wsB)
+
+	cfg := al.cfg()
+	cfg.Commands["two"] = config.CommandDefinition{Template: "second"}
+	al.cfgPtr.Store(cfg)
+
+	mgrANew := al.harnessManagerFor(wsA)
+	if mgrANew == mgrADef {
+		t.Fatal("workspace A entry not rebuilt after the config command map changed")
+	}
+	if _, ok := mgrANew.Registry().Get("two"); !ok {
+		t.Fatal("new config command missing from rebuilt workspace A manager")
+	}
+	// B was untouched while the config changed; accessing it now must still see
+	// the new config, because its own fingerprint changed too.
+	mgrBNew := al.harnessManagerFor(wsB)
+	if mgrBNew == mgrBDef {
+		t.Fatal("workspace B entry not rebuilt on first access after a global config change")
+	}
+	if _, ok := mgrBNew.Registry().Get("two"); !ok {
+		t.Error("workspace B manager kept a stale config command map")
+	}
+}
+
+// TestHarnessManagerFor_ConcurrentPerWorkspaceAccess hammers harnessManagerFor
+// from several goroutines across several workspaces while the config changes
+// underneath, guarding the map and its entries under harnessMu. Run under -race
+// in CI.
+func TestHarnessManagerFor_ConcurrentPerWorkspaceAccess(t *testing.T) {
+	al, _ := newHarnessTestLoop(t, map[string]config.CommandDefinition{
+		"base": {Template: "b"},
+	})
+	workspaces := []string{"", t.TempDir(), t.TempDir(), t.TempDir()}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				mgr := al.harnessManagerFor(workspaces[i%len(workspaces)])
+				if mgr == nil || mgr.Registry() == nil {
+					t.Errorf("harnessManagerFor returned nil manager/registry for %q", workspaces[i%len(workspaces)])
+					return
+				}
+			}
+		}(i)
+	}
+	for n := 1; n <= 20; n++ {
+		cfg := al.cfg()
+		next := make(map[string]config.CommandDefinition, len(cfg.Commands)+1)
+		for k, v := range cfg.Commands {
+			next[k] = v
+		}
+		next[fmt.Sprintf("cmd%d", n)] = config.CommandDefinition{Template: "t"}
+		cfg.Commands = next
+		al.cfgPtr.Store(cfg)
+	}
+	close(stop)
+	wg.Wait()
+
+	for _, ws := range workspaces {
+		if !commandNamesOf(al.HarnessCommandsFor(ws))["base"] {
+			t.Errorf("base command lost in workspace %q", ws)
+		}
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// T-B4: regression for the per-agent commands bug.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// perWorkspaceHarnessLoop builds a loop with two agents living in two distinct
+// workspaces, each carrying its own commands/ folder and its own notes.txt.
+// "main" owns the defaults workspace; "coder" is reached either by a guild
+// binding (discord/g1) or by a session agent override. The mock provider
+// records what the LLM actually saw, which is the only way to observe the
+// content processMessage expanded.
+func perWorkspaceHarnessLoop(t *testing.T) (*AgentLoop, *llmRunnerMockLLMProvider, string, string) {
+	t.Helper()
+
+	tmpDir, err := os.MkdirTemp("", "harness-per-ws-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Setenv("LELE_CONFIG_DIR", tmpDir)
+
+	defaultsWs := filepath.Join(tmpDir, "ws-main")
+	coderWs := filepath.Join(tmpDir, "ws-coder")
+	for _, ws := range []string{defaultsWs, coderWs} {
+		if err := os.MkdirAll(ws, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", ws, err)
+		}
+	}
+	// The SAME command name exists in both workspaces with a different template,
+	// and the SAME relative @file reference resolves to different content in
+	// each — so a wrong-workspace expansion cannot pass by accident.
+	writeHarnessCommandFile(t, defaultsWs, "peek", "description: from main", "main sees @notes.txt")
+	writeHarnessCommandFile(t, coderWs, "peek", "description: from coder", "coder sees @notes.txt")
+	if err := os.WriteFile(filepath.Join(defaultsWs, "notes.txt"), []byte("MAIN-NOTE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coderWs, "notes.txt"), []byte("CODER-NOTE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         defaultsWs,
+				Model:             "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: defaultsWs},
+				{ID: "coder", Workspace: coderWs},
+			},
+		},
+		Bindings: []config.AgentBinding{
+			{AgentID: "coder", Match: config.BindingMatch{Channel: "discord", GuildID: "g1"}},
+		},
+	}
+
+	al := NewAgentLoop(cfg, bus.NewMessageBus())
+
+	provider := &llmRunnerMockLLMProvider{
+		response:    &providers.LLMResponse{Content: "ok", ToolCalls: []providers.ToolCall{}},
+		callHistory: []providers.Message{},
+	}
+	// Both agents need the mock: the routed one answers, the other must never be
+	// reached with the real (keyless) provider.
+	for _, id := range []string{"main", "coder"} {
+		agent, ok := al.registry.GetAgent(id)
+		if !ok || agent == nil {
+			t.Fatalf("agent %q missing from registry", id)
+		}
+		agent.Provider = provider
+		agent.Candidates = nil
+	}
+
+	return al, provider, defaultsWs, coderWs
+}
+
+// lastUserMessage returns the content of the last user message the provider saw.
+func lastUserMessage(t *testing.T, p *llmRunnerMockLLMProvider) string {
+	t.Helper()
+	if p.callCount == 0 {
+		t.Fatal("provider never called")
+	}
+	var last string
+	for _, m := range p.callHistory {
+		if m.Role == "user" {
+			last = m.Content
+		}
+	}
+	if last == "" {
+		t.Fatal("provider saw no user message")
+	}
+	return last
+}
+
+// TestProcessMessage_HarnessCommandUsesRoutedAgentWorkspace is the regression
+// test for the bug this change fixes: a custom command defined in the ROUTED
+// agent's workspace must be found there and expanded with that workspace as the
+// working directory. Before the fix, applyHarnessCommand ran before routing with
+// the agents.defaults workspace, so an agent with its own workspace could never
+// see or run its own commands.
+func TestProcessMessage_HarnessCommandUsesRoutedAgentWorkspace(t *testing.T) {
+	al, provider, _, coderWs := perWorkspaceHarnessLoop(t)
+
+	msg := bus.InboundMessage{
+		Channel:    "discord",
+		SenderID:   "u1",
+		ChatID:     "c1",
+		SessionKey: "tb4-routed",
+		Content:    "/peek",
+		Metadata:   map[string]string{"guild_id": "g1", "peer_kind": "channel", "peer_id": "chan-1"},
+	}
+	if _, err := al.messageProcessor.processMessage(context.Background(), msg); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+
+	got := lastUserMessage(t, provider)
+	if got != "coder sees CODER-NOTE" {
+		t.Errorf("expanded prompt = %q, want %q (coder's own command and file)", got, "coder sees CODER-NOTE")
+	}
+	if strings.Contains(got, "MAIN-NOTE") || strings.Contains(got, "main sees") {
+		t.Errorf("expansion leaked the defaults workspace: %q", got)
+	}
+	// The command really came from the workspace level of the routed agent.
+	if _, ok := al.harnessManagerFor(coderWs).Registry().Get("peek"); !ok {
+		t.Error("coder workspace has no peek command — test setup broken")
+	}
+}
+
+// TestProcessMessage_HarnessCommandUsesSessionAgentWorkspace pins the second
+// half of the effective-agent resolution: the session's agent override (set by
+// /agent) wins over the route, so it is also the workspace the command is looked
+// up in. Here the channel routes to "main" but the session is pinned to "coder".
+func TestProcessMessage_HarnessCommandUsesSessionAgentWorkspace(t *testing.T) {
+	al, provider, _, _ := perWorkspaceHarnessLoop(t)
+
+	sessionKey := "tb4-session-agent"
+	al.setSessionAgent(sessionKey, "coder")
+
+	msg := bus.InboundMessage{
+		Channel:    "cli",
+		SenderID:   "u1",
+		ChatID:     "c1",
+		SessionKey: sessionKey,
+		Content:    "/peek",
+		Metadata:   map[string]string{},
+	}
+	if _, err := al.messageProcessor.processMessage(context.Background(), msg); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+
+	if got := lastUserMessage(t, provider); got != "coder sees CODER-NOTE" {
+		t.Errorf("expanded prompt = %q, want the session agent's command", got)
+	}
+}
+
+// TestProcessMessage_HarnessCommandFallsBackToDefaultsWorkspace pins the other
+// side: with no binding and no session override, the routed agent IS the defaults
+// agent, so its workspace keeps being used — the historical behaviour.
+func TestProcessMessage_HarnessCommandFallsBackToDefaultsWorkspace(t *testing.T) {
+	al, provider, _, _ := perWorkspaceHarnessLoop(t)
+
+	msg := bus.InboundMessage{
+		Channel:    "cli",
+		SenderID:   "u1",
+		ChatID:     "c1",
+		SessionKey: "tb4-default",
+		Content:    "/peek",
+		Metadata:   map[string]string{},
+	}
+	if _, err := al.messageProcessor.processMessage(context.Background(), msg); err != nil {
+		t.Fatalf("processMessage: %v", err)
+	}
+
+	if got := lastUserMessage(t, provider); got != "main sees MAIN-NOTE" {
+		t.Errorf("expanded prompt = %q, want the defaults workspace command", got)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// sessionAgentOverride: the raw "is this session pinned?" lookup
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestSessionAgentOverride_DistinguishesPinFromDefault pins the root cause of
+// the per-agent commands bug: getSessionAgent falls back to the default agent,
+// so it cannot tell "no pin" from "pinned to the default agent". The override
+// getter must, otherwise any route resolved from a binding is silently replaced
+// by the default agent downstream.
+func TestSessionAgentOverride_DistinguishesPinFromDefault(t *testing.T) {
+	al, _, _, _ := perWorkspaceHarnessLoop(t)
+
+	if id, pinned := al.sessionAgentOverride("no-such-session"); pinned {
+		t.Errorf("unpinned session reported a pin to %q", id)
+	}
+
+	// A pin to the default agent is still a pin — the two getters must differ
+	// exactly here, and the routed path must be able to tell them apart.
+	al.setSessionAgent("sess-a", "main")
+	id, pinned := al.sessionAgentOverride("sess-a")
+	if !pinned || id != "main" {
+		t.Errorf("sessionAgentOverride() = (%q,%v), want (\"main\",true)", id, pinned)
+	}
+
+	// ResolveSessionKey must be honoured: the pin lives on the active key the
+	// base alias points at.
+	al.setSessionAgent("sess-active", "coder")
+	al.setSessionAlias("sess-base", "sess-active")
+	if id, pinned := al.sessionAgentOverride("sess-base"); !pinned || id != "coder" {
+		t.Errorf("override through alias = (%q,%v), want (\"coder\",true)", id, pinned)
+	}
+
+	// Deleting the pin returns the session to "no opinion", which is what lets
+	// routing win again.
+	al.deleteDurableSessionAgent("sess-a")
+	if _, pinned := al.sessionAgentOverride("sess-a"); pinned {
+		t.Error("pin survived deletion")
+	}
+}
+
+// TestProcessMessage_HarnessCommandSurvivesNewCommand closes the loop between
+// the two halves of the fix. /new rotates the session key and re-pins the agent
+// it resolved, so if the command dispatcher still let the default-agent fallback
+// of getSessionAgent win, /new on a bound channel would pin the WRONG agent on
+// the fresh key and every later turn — including this one — would expand the
+// defaults workspace again. The pin path and the expansion path must agree on
+// who owns the session.
+func TestProcessMessage_HarnessCommandSurvivesNewCommand(t *testing.T) {
+	al, provider, _, _ := perWorkspaceHarnessLoop(t)
+
+	base := "tb4-new"
+	newMsg := func(content string) bus.InboundMessage {
+		return bus.InboundMessage{
+			Channel:    "discord",
+			SenderID:   "u1",
+			ChatID:     "c1",
+			SessionKey: base,
+			Content:    content,
+			Metadata:   map[string]string{"guild_id": "g1", "peer_kind": "channel", "peer_id": "chan-1"},
+		}
+	}
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), newMsg("/new")); err != nil {
+		t.Fatalf("/new: %v", err)
+	}
+	// /new must have rotated the session and pinned the routed agent.
+	if id, pinned := al.sessionAgentOverride(al.ResolveSessionKey(base)); !pinned || id != "coder" {
+		t.Fatalf("after /new, session pin = (%q,%v), want (\"coder\",true)", id, pinned)
+	}
+
+	if _, err := al.messageProcessor.processMessage(context.Background(), newMsg("/peek")); err != nil {
+		t.Fatalf("/peek: %v", err)
+	}
+	if got := lastUserMessage(t, provider); got != "coder sees CODER-NOTE" {
+		t.Errorf("expanded prompt after /new = %q, want the routed agent's command", got)
+	}
+}
+
+// TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk covers the hook the REST
+// command endpoints use after writing <workspace>/commands/*.md: a file created
+// behind the manager's back must be visible on the next read, not after the
+// 30 s rescan TTL.
+func TestInvalidateHarnessWorkspace_ForcesRebuildFromDisk(t *testing.T) {
+	al, _, defaultsWs, coderWs := perWorkspaceHarnessLoop(t)
+
+	// Warm both caches, then add a command to each workspace without touching
+	// the managers.
+	before := len(al.HarnessCommandsFor(coderWs))
+	writeHarnessCommandFile(t, coderWs, "fresh", "description: written after warm-up", "do the thing")
+	writeHarnessCommandFile(t, defaultsWs, "fresh-defaults", "description: defaults too", "do the other thing")
+	if n := len(al.HarnessCommandsFor(coderWs)); n != before {
+		t.Fatalf("cache is not fresh-respecting: got %d commands, want %d", n, before)
+	}
+
+	al.InvalidateHarnessWorkspace(coderWs)
+	al.InvalidateHarnessWorkspace(defaultsWs)
+
+	cmds := al.HarnessCommandsFor(coderWs)
+	if len(cmds) != before+1 {
+		t.Fatalf("after invalidation got %d commands, want %d", len(cmds), before+1)
+	}
+	if _, ok := al.harnessManagerFor(coderWs).Registry().Get("fresh"); !ok {
+		t.Error("newly written workspace command missing after invalidation")
+	}
+	if _, ok := al.harnessManagerFor("").Registry().Get("fresh-defaults"); !ok {
+		t.Error("newly written defaults command missing after invalidation")
+	}
+	// The defaults entry must have been rebuilt too, and its commands are still
+	// only its own.
+	if _, ok := al.harnessManagerFor("").Registry().Get("fresh"); ok {
+		t.Error("invalidation leaked coder's command into the defaults manager")
+	}
+
+	// Unknown / unpinned workspaces are no-ops, and "" resolves through the
+	// same key rule as the cache itself.
+	al.InvalidateHarnessWorkspace(filepath.Join(coderWs, "..", "nowhere"))
+	al.InvalidateHarnessWorkspace("")
+	if _, ok := al.harnessManagerFor("").Registry().Get("fresh-defaults"); !ok {
+		t.Error("InvalidateHarnessWorkspace(\"\") dropped a still-valid entry")
+	}
+}
+
+// TestSetSessionAgent_CanPinDefaultAgent covers the corollary of the pin/route
+// split: now that routing is honoured, "/agent main" is the only way to pull a
+// bound session back to the default agent, so it must actually store a pin.
+// SetSessionAgent's "already there" early return compared against
+// GetSessionAgent, which answers "main" for any unpinned session, so the pin was
+// silently dropped and the binding kept winning.
+func TestSetSessionAgent_CanPinDefaultAgent(t *testing.T) {
+	al, _, _, _ := perWorkspaceHarnessLoop(t)
+
+	sessionKey := "tb-pin-default"
+	if _, pinned := al.sessionAgentOverride(sessionKey); pinned {
+		t.Fatal("session starts pinned — test setup broken")
+	}
+	// The legacy getter already answers "main": that is exactly the confusion
+	// this guards against.
+	if got := al.getSessionAgent(sessionKey); got != "main" {
+		t.Fatalf("getSessionAgent() = %q, want the default fallback", got)
+	}
+
+	al.providable.SetSessionAgent(sessionKey, "main")
+
+	id, pinned := al.sessionAgentOverride(sessionKey)
+	if !pinned || id != "main" {
+		t.Errorf("after SetSessionAgent(\"main\"): override = (%q,%v), want (\"main\",true)", id, pinned)
+	}
+
+	// A redundant re-pin of an already-pinned session still short-circuits, so
+	// the history migration and the model reset below it do not run twice.
+	al.providable.SetSessionModel(sessionKey, "some-model")
+	al.providable.SetSessionAgent(sessionKey, "main")
+	if _, hasModel := al.sessionModels.Load(al.ResolveSessionKey(sessionKey)); !hasModel {
+		t.Error("re-pinning the same agent cleared the session model (early return lost)")
+	}
+}

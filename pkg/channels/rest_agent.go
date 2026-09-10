@@ -169,7 +169,26 @@ func (n *NativeChannel) resolveAgentWorkspace(agentID string) (string, error) {
 		return "", fmt.Errorf("agent not found: %s", agentID)
 	}
 
-	workspace := info.Workspace
+	absWorkspace, err := agentWorkspaceDir(info.Workspace)
+	if err != nil {
+		return "", err
+	}
+
+	// Initialize workspace if needed
+	if err := lelectx.InitializeWorkspace(absWorkspace); err != nil {
+		return "", fmt.Errorf("failed to initialize workspace: %w", err)
+	}
+
+	return absWorkspace, nil
+}
+
+// agentWorkspaceDir turns the raw workspace of an agent config into the absolute
+// path the agent works in: empty means the shared default, "~" is expanded, and
+// the result must stay inside the allowed roots. Split out of
+// resolveAgentWorkspace so read-only callers (listing, counting the agents that
+// share a workspace) can resolve the path WITHOUT creating the folder.
+func agentWorkspaceDir(raw string) (string, error) {
+	workspace := raw
 	if workspace == "" {
 		workspace = filepath.Join(config.GetLeleDir(), "workspace")
 	} else {
@@ -183,12 +202,6 @@ func (n *NativeChannel) resolveAgentWorkspace(agentID string) (string, error) {
 	if !isAllowedWorkspacePath(absWorkspace) {
 		return "", fmt.Errorf("workspace path is outside allowed directories")
 	}
-
-	// Initialize workspace if needed
-	if err := lelectx.InitializeWorkspace(absWorkspace); err != nil {
-		return "", fmt.Errorf("failed to initialize workspace: %w", err)
-	}
-
 	return absWorkspace, nil
 }
 

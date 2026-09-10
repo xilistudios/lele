@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -79,11 +80,55 @@ func (m *Manager) Reload() error {
 
 // reloadLocked performs the load; m.mu must be held.
 func (m *Manager) reloadLocked() error {
-	var errs []error
-	cmds := make([]*Command, 0, 16)
+	levels, errs := m.loadLevelsLocked()
 
-	// 1. config.json map (lowest precedence).
-	for name, def := range m.cfg.Commands {
+	// Flatten in precedence order (config -> global -> workspace -> directory);
+	// Registry.Replace keeps last-write-wins, so later levels overwrite earlier
+	// ones with the same name.
+	var cmds []*Command
+	for _, src := range levelOrder {
+		cmds = append(cmds, levels[src]...)
+	}
+
+	m.reg.Replace(cmds)
+	m.lastLoad = time.Now()
+
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+// levelOrder lists the discovery sources from lowest to highest precedence.
+// It is the single definition of the flattening order used by reloadLocked.
+var levelOrder = []Source{SourceConfig, SourceGlobal, SourceWorkspace, SourceDirectory}
+
+// loadLevelsLocked returns the commands of each discovery level WITHOUT
+// applying precedence. reloadLocked flattens it (config→global→workspace→
+// directory, last-write-wins) exactly as before; Levels exposes it for the UI
+// so shadowed files can be surfaced. m.mu must be held (write lock from
+// reloadLocked; a read lock is enough for Levels since it only reads m.cfg and
+// hits the disk). Per-level errors are returned alongside the levels that did
+// load; a disabled level (empty path) maps to an empty slice, never an error.
+func (m *Manager) loadLevelsLocked() (map[Source][]*Command, []error) {
+	levels := map[Source][]*Command{
+		SourceConfig:    {},
+		SourceGlobal:    {},
+		SourceWorkspace: {},
+		SourceDirectory: {},
+	}
+	var errs []error
+
+	// 1. config.json map (lowest precedence), sorted by key so the level is
+	// deterministic for the UI (the merge result never depended on it, since
+	// config keys are unique in the map).
+	names := make([]string, 0, len(m.cfg.Commands))
+	for name := range m.cfg.Commands {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		def := m.cfg.Commands[name]
 		stem := strings.ToLower(strings.TrimSpace(name))
 		if stem == "" {
 			slog.Warn("harness: skipping command with empty name")
@@ -93,13 +138,13 @@ func (m *Manager) reloadLocked() error {
 			slog.Warn("harness: skipping command with empty template", "name", stem)
 			continue
 		}
-		cmds = append(cmds, def.ToCommand(stem, SourceConfig, ""))
+		levels[SourceConfig] = append(levels[SourceConfig], def.ToCommand(stem, SourceConfig, ""))
 	}
 
-	// 2..4. file levels, ordered so later ones overwrite earlier ones. The
-	// global and workspace roots point at a "commands" subdirectory; the
-	// directory level is already the full path.
-	appendLevel := func(root string, source Source) {
+	// 2..4. file levels, ordered so later ones overwrite earlier ones when
+	// flattened. The global and workspace roots point at a "commands"
+	// subdirectory; the directory level is already the full path.
+	loadLevel := func(root string, source Source) {
 		if root == "" {
 			return
 		}
@@ -113,20 +158,26 @@ func (m *Manager) reloadLocked() error {
 			errs = append(errs, err)
 			return
 		}
-		cmds = append(cmds, found...)
+		// append (even with a nil found) keeps the level a non-nil empty slice.
+		levels[source] = append(levels[source], found...)
 	}
-	appendLevel(m.cfg.LeleDir, SourceGlobal)
-	appendLevel(m.cfg.Workspace, SourceWorkspace)
-	appendLevel(m.cfg.Dir, SourceDirectory)
+	loadLevel(m.cfg.LeleDir, SourceGlobal)
+	loadLevel(m.cfg.Workspace, SourceWorkspace)
+	loadLevel(m.cfg.Dir, SourceDirectory)
 
-	// Registry.Replace keeps last-write-wins, matching the precedence order.
-	m.reg.Replace(cmds)
-	m.lastLoad = time.Now()
+	return levels, errs
+}
 
-	if len(errs) == 0 {
-		return nil
-	}
-	return errors.Join(errs...)
+// Levels returns the commands of each discovery level without merging, so a UI
+// can show origins and shadowing. Errors encountered per level are returned;
+// levels that loaded are still included. A disabled level (empty path) maps to
+// an empty slice, never an error. Results are loaded on demand from disk and
+// never cached on the manager, so the registry and lastLoad are untouched.
+func (m *Manager) Levels() (map[Source][]*Command, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	levels, errs := m.loadLevelsLocked()
+	return levels, errors.Join(errs...)
 }
 
 // EnsureFresh reloads when the last load is older than ttl. ttl <= 0 forces a
