@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
     <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
     <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
-    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
+    <img src="https://img.shields.io/badge/render-~3.4%20ms%20%40%20200%C3%9750-success" alt="Render time">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -47,26 +47,26 @@ lele tui
 
 ## 基准测试
 
-在 Apple M1 / macOS arm64 上测量。空闲 TUI 会话（PTY 下，无模型调用）。启动时间为 3 次 `--version` 的平均值。RSS 为首帧绘制后约 6 秒的进程树峰值内存。
+在 Apple M1 / macOS arm64 上测量。空闲 TUI 会话（PTY 下，无模型调用）。**Render** 为绘制一整帧的墙钟时间（lele：仓库内 `View()` bench 200×50；其余：从进程启动到首次完整 TUI 绘制的时间——init + 首帧）。RSS 为首帧绘制后约 6 秒的进程树峰值内存。
 
-| 工具 | 运行时 | 安装体积 | 启动 | 空闲 TUI RSS | 进程数 |
+| 工具 | 运行时 | 安装体积 | Render | 空闲 TUI RSS | 进程数 |
 | --- | --- | --- | --- | --- | --- |
-| **lele** | Go + Bubble Tea | **57 MB** 单二进制 | **~25 ms** | **~42 MB** | **1** |
-| Claude Code 2.1.267 | Bun-compiled TS | 191 MB 二进制 | ~13 ms | ~170–187 MB | 1 |
-| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB 二进制 | ~233 ms | ~173 MB | 1 |
-| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB 二进制 | ~284 ms | ~1.0 GB 峰值 | 1 |
-| Hermes 0.14.0 | Python + Ink | ~1 GB 目录树 | ~236 ms | ~374 MB | 3–4 |
+| **lele** | Go + Bubble Tea | **57 MB** 单二进制 | **≈ 3.4 ms/frame** (200×50 `View()`) | **~42 MB** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 MB 二进制 | ~400 ms 至首帧 | 170–187 MB | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB 二进制 | ~350 ms 至首帧 | ~173 MB | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB 二进制 | ~950 ms 至首帧 | ~1.0 GB 峰值 | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 GB 目录树 | ~1.3 s 至首帧 | ~374 MB | 3–4 |
 
-渲染路径（仓库内 Go benches，200×50 帧）：`View()` ≈ 3.4 ms · `paintFrame` ≈ 0.5 ms。
+### 与其他工具的资源差异
 
-终端指纹保持安静：经典 Bubble Tea alt-screen + 鼠标 + 括号粘贴，无能力探测风暴或产品 OSC。
+同一机器、同一空闲 TUI 会话。相对 lele（~42 MB RSS、~57 MB 二进制、**~60 ms** 首次 TUI 绘制）的大致倍率：
 
-**为何重要：** 单一静态二进制、约 42 MB 空闲内存、首帧亚 100 ms——面向网关主机与多会话环境的体量。
-
-```bash
-time lele --version
-go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
-```
+| vs | 内存 | 磁盘 / 安装 | 首次渲染 | 备注 |
+| --- | --- | --- | --- | --- |
+| Claude Code | **~4× 更少** | **~3× 更小** | **~7× 更快** | 42 vs ~180 MB · 60 ms vs ~400 ms |
+| pi | **~4× 更少** | ~相当 | **~6× 更快** | 42 vs ~173 MB · 60 ms vs ~350 ms |
+| OpenCode | **~25× 更少** | **~2× 更小** | **~16× 更快** | 42 vs ~1 GB · 60 ms vs ~950 ms |
+| Hermes | **~9× 更少** | **~17× 更小** | **~22× 更快** | 42 vs ~374 MB · 60 ms vs ~1.3 s |
 
 ## 功能特性
 

@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
     <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
     <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
-    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
+    <img src="https://img.shields.io/badge/render-~3.4%20ms%20%40%20200%C3%9750-success" alt="Render time">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -47,26 +47,26 @@ Script cài đặt xác minh SHA256 và mặc định cài vào `~/.local/bin`.
 
 ## Benchmark
 
-Đo trên Apple M1 / macOS arm64. Phiên TUI idle dưới PTY, không gọi model. Startup là trung bình 3 lần chạy `--version`. RSS là bộ nhớ đỉnh của process tree ~6s sau frame đầu tiên.
+Đo trên Apple M1 / macOS arm64. Phiên TUI idle dưới PTY, không gọi model. **Render** là thời gian tường để vẽ một frame đầy đủ (lele: bench `View()` trong repo tại 200×50; khác: thời gian từ process start đến lần render TUI hoàn chỉnh đầu tiên — init + frame đầu). RSS là bộ nhớ đỉnh của process tree ~6s sau lần render đó.
 
-| Công cụ | Runtime | Dung lượng cài | Startup | RSS TUI idle | Processes |
+| Công cụ | Runtime | Dung lượng cài | Render | RSS TUI idle | Processes |
 | --- | --- | --- | --- | --- | --- |
-| **lele** | Go + Bubble Tea | **57 MB** một binary | **~25 ms** | **~42 MB** | **1** |
-| Claude Code 2.1.267 | Bun-compiled TS | 191 MB binary | ~13 ms | ~170–187 MB | 1 |
-| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB binary | ~233 ms | ~173 MB | 1 |
-| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB binary | ~284 ms | ~1.0 GB đỉnh | 1 |
-| Hermes 0.14.0 | Python + Ink | ~1 GB tree | ~236 ms | ~374 MB | 3–4 |
+| **lele** | Go + Bubble Tea | **57 MB** một binary | **≈ 3.4 ms/frame** (200×50 `View()`) | **~42 MB** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 MB binary | ~400 ms đến frame đầu tiên | 170–187 MB | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB binary | ~350 ms đến frame đầu tiên | ~173 MB | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB binary | ~950 ms đến frame đầu tiên | ~1.0 GB đỉnh | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 GB tree | ~1.3 s đến frame đầu tiên | ~374 MB | 3–4 |
 
-Đường render (Go benches trong repo, frame 200×50): `View()` ≈ 3.4 ms · `paintFrame` ≈ 0.5 ms.
+### Chênh lệch tài nguyên so với các tool khác
 
-Fingerprint terminal im lặng: alt-screen Bubble Tea cổ điển + mouse + bracketed paste, không spam capability hay OSC sản phẩm.
+Cùng máy, cùng phiên TUI idle. Hệ số nhân xấp xỉ so với lele (~42 MB RSS, ~57 MB binary, **~60 ms** đến lần render TUI đầu tiên):
 
-**Vì sao quan trọng:** một binary tĩnh, ~42 MB khi idle, frame đầu dưới 100 ms — vừa cho host gateway và multi-session.
-
-```bash
-time lele --version
-go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
-```
+| vs | Bộ nhớ | Ổ đĩa / cài đặt | Render đầu tiên | Ghi chú |
+| --- | --- | --- | --- | --- |
+| Claude Code | **~4× ít hơn** | **~3× nhỏ hơn** | **~7× nhanh hơn** | 42 vs ~180 MB · 60 ms vs ~400 ms |
+| pi | **~4× ít hơn** | ~tương đương | **~6× nhanh hơn** | 42 vs ~173 MB · 60 ms vs ~350 ms |
+| OpenCode | **~25× ít hơn** | **~2× nhỏ hơn** | **~16× nhanh hơn** | 42 vs ~1 GB · 60 ms vs ~950 ms |
+| Hermes | **~9× ít hơn** | **~17× nhỏ hơn** | **~22× nhanh hơn** | 42 vs ~374 MB · 60 ms vs ~1.3 s |
 
 ## Tính năng
 
