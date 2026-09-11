@@ -276,21 +276,7 @@ func (sm *SessionManager) SetFolder(key string, folder string) error {
 	// Keep the lightweight metadata in sync so read-only listing paths
 	// (GetFolder on non-resident sessions) observe the new value without a
 	// full load.
-	if meta, ok := sm.sessionMeta[key]; ok {
-		meta.Folder = folder
-		meta.Name = session.Name
-		meta.Mode = session.Mode
-		meta.Updated = session.Updated
-	} else {
-		sm.sessionMeta[key] = &sessionMetadata{
-			Key:     session.Key,
-			Name:    session.Name,
-			Mode:    session.Mode,
-			Folder:  session.Folder,
-			Created: session.Created,
-			Updated: session.Updated,
-		}
-	}
+	sm.syncSessionMetaLocked(session)
 
 	// Persist immediately
 	return sm.saveMetaOnlyUnlocked(key)
@@ -336,14 +322,7 @@ func (sm *SessionManager) SetMode(key string, mode string) error {
 	sm.touchSession(key)
 
 	// Update metadata
-	sm.sessionMeta[key] = &sessionMetadata{
-		Key:     session.Key,
-		Name:    session.Name,
-		Mode:    session.Mode,
-		Folder:  session.Folder,
-		Created: session.Created,
-		Updated: session.Updated,
-	}
+	sm.syncSessionMetaLocked(session)
 
 	return sm.saveMetaOnlyUnlocked(key)
 }

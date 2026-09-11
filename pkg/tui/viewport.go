@@ -372,7 +372,7 @@ func (m *Model) buildRenderedHistoryLines(history []providers.Message) []string 
 	// older messages) on scroll-up. A value of -1 means uninitialized (falls
 	// back to the default window); 0 means all messages are rendered.
 	startIdx := m.renderStartIdx
-	if startIdx < 0 || startIdx > totalMsgs {
+	if startIdx < 0 || startIdx >= totalMsgs {
 		startIdx = m.defaultRenderStartIdx(totalMsgs)
 		m.renderStartIdx = startIdx
 	}

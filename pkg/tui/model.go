@@ -242,7 +242,11 @@ func (m *Model) reloadSessions() {
 		if sessionMode != m.currentMode.String() {
 			continue
 		}
-		if len(s.Messages) > 0 || msgCounts[s.Key] > 0 || s.Key == m.currentKey {
+		// A cold (Lru/TTL-evicted) session has nil Messages; visibility then
+		// depends on the SQLite message count. Keep the current key and any
+		// session that still has a name so idle eviction cannot make a chat
+		// vanish from the list just because the count query missed.
+		if len(s.Messages) > 0 || msgCounts[s.Key] > 0 || s.Key == m.currentKey || s.Name != "" {
 			m.visibleSessions = append(m.visibleSessions, s)
 		}
 	}
