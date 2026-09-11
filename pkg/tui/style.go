@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -197,14 +196,15 @@ func rebuildStyles(t theme.Theme) {
 
 	SidebarTitle = lipgloss.NewStyle().
 		Foreground(Foreground).
-		Bold(true).
-		MarginBottom(1)
+		Bold(true)
 
+	// SidebarHeader intentionally has no MarginTop: view.go already emits an
+	// explicit blank line between sections. A margin here stacked with that
+	// newline produced two blank rows and made the panel taller than the
+	// height budget (content then jumped when a section was clipped).
 	SidebarHeader = lipgloss.NewStyle().
 		Foreground(CommentColor).
-		Bold(true).
-		MarginTop(1).
-		MarginBottom(0)
+		Bold(true)
 
 	SidebarValue = lipgloss.NewStyle().
 		Foreground(Foreground).
@@ -426,10 +426,32 @@ func rebuildStyles(t theme.Theme) {
 	SelectionStyle = lipgloss.NewStyle().Background(SelectionBg)
 }
 
+// sidebarLabelWidth is the display-cell column width for sidebar metric
+// labels. It must fit the longest locale string ("Ventana de contexto" /
+// es = 19 cells) so every value starts on the same column and no single
+// row is longer than its peers (which used to wrap on narrow sidebars and
+// push Workspace/Estado down).
+const sidebarLabelWidth = 19
+
 func SidebarLabelValue(label, value string) string {
-	labelPart := SidebarLabel.Render(fmt.Sprintf("%-18s", label))
+	if w := lipgloss.Width(label); w > sidebarLabelWidth {
+		label = truncateRightCells(label, sidebarLabelWidth)
+	} else if pad := sidebarLabelWidth - w; pad > 0 {
+		label += strings.Repeat(" ", pad)
+	}
+	labelPart := SidebarLabel.Render(label)
 	valuePart := SidebarValue.Render(value)
 	return labelPart + valuePart
+}
+
+// clampSidebarRow keeps a sidebar row within contentWidth display cells.
+// Without this, a long label or a wide token count wraps inside the
+// RightSidebar and shifts every section below it by one line.
+func clampSidebarRow(row string, contentWidth int) string {
+	if contentWidth > 0 && lipgloss.Width(row) > contentWidth {
+		return truncateRightCells(row, contentWidth)
+	}
+	return row
 }
 
 // paintFrame renders a full-screen frame: the content is placed (centered)

@@ -37,6 +37,24 @@ func (m *Model) glamourStyleName() string {
 	return "dark"
 }
 
+// clampMarkdownWidth truncates every rendered line to at most width display
+// cells. glamour's WithWordWrap does NOT cut unbreakable tokens (filesystem
+// paths, URLs, hashes) — a single line can come back 10+ cells over the wrap
+// budget. That overflow paints over the sidebar border on scroll (Terminal.app
+// shows it as a short Accent-colored bar).
+func clampMarkdownWidth(rendered string, width int) string {
+	if width <= 0 || rendered == "" {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = closeOpenSGR(ansi.Truncate(line, width, ""))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // renderMarkdown renders markdown content for terminal display.
 // Uses glamour for full markdown rendering with fallback to simple header rendering.
 func (m *Model) renderMarkdown(content string, width int) string {
@@ -45,7 +63,7 @@ func (m *Model) renderMarkdown(content string, width int) string {
 	if renderer != nil {
 		rendered, err := renderer.Render(content)
 		if err == nil {
-			return strings.TrimSuffix(rendered, "\n")
+			return clampMarkdownWidth(strings.TrimSuffix(rendered, "\n"), width)
 		}
 	}
 
@@ -190,13 +208,13 @@ func renderSingleLine(line string, width int) string {
 
 	if strings.HasPrefix(trimmed, "# ") {
 		text := strings.TrimPrefix(trimmed, "# ")
-		return headerStyle.Render(text) + "\n"
+		return clampMarkdownWidth(headerStyle.Render(text), width) + "\n"
 	} else if strings.HasPrefix(trimmed, "## ") {
 		text := strings.TrimPrefix(trimmed, "## ")
-		return headerStyle.Render(text) + "\n"
+		return clampMarkdownWidth(headerStyle.Render(text), width) + "\n"
 	} else if strings.HasPrefix(trimmed, "### ") {
 		text := strings.TrimPrefix(trimmed, "### ")
-		return headerStyle.Render(text) + "\n"
+		return clampMarkdownWidth(headerStyle.Render(text), width) + "\n"
 	}
 
 	if width > 0 && ansi.StringWidth(line) > width {

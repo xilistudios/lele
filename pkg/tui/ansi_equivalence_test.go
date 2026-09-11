@@ -401,7 +401,8 @@ func TestCachedHistoryLinesAreMerged(t *testing.T) {
 // re-emitted by reapplyBackground and AppContainer — stages PR-1 deliberately
 // does not touch — so the final-frame floor with merged content is ~780. We
 // assert both: the viewport content (what PR-1 controls) ≤ 300 SGR, and the
-// final frame ≤ 900 SGR (regression guard vs the 7,461 baseline).
+// final frame ≤ 1000 SGR (regression guard vs the 7,461 baseline). The
+// chat/sidebar gutter adds one background run per row (~50 at 50 lines).
 func TestMergedFrameSizeRegression(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -425,8 +426,8 @@ func TestMergedFrameSizeRegression(t *testing.T) {
 	if innerSGR > 300 {
 		t.Errorf("merged content SGR regression: viewport content has %d SGR > 300 budget", innerSGR)
 	}
-	if sgr > 900 {
-		t.Errorf("SGR regression: final frame has %d SGR > 900 budget (baseline was 7,461)", sgr)
+	if sgr > 1000 {
+		t.Errorf("SGR regression: final frame has %d SGR > 1000 budget (baseline was 7,461)", sgr)
 	}
 }
 

@@ -76,3 +76,41 @@ func truncateGoalLabel(label string, remaining int) string {
 	}
 	return truncateRightCells(label, budget)
 }
+
+// padRightCells pads s with spaces to exactly cells display columns.
+func padRightCells(s string, cells int) string {
+	w := ansi.StringWidth(s)
+	if w >= cells {
+		return s
+	}
+	return s + strings.Repeat(" ", cells-w)
+}
+
+// clampPaneLine forces a pane row to exactly cells display columns: truncate
+// if too wide, pad with spaces if too short.
+//
+// Why this exists: macOS Terminal.app leaves stale cells (the sidebar border
+// turning into a short cyan bar) when the chat viewport scrolls and a row
+// with a wide/VS16 emoji replaces a plain row. lipgloss.Width/MaxWidth alone
+// does not guarantee every cell is overwritten; explicit padding does.
+func clampPaneLine(line string, cells int) string {
+	if cells <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(line) > cells {
+		return closeOpenSGR(ansi.Truncate(line, cells, ""))
+	}
+	return padRightCells(line, cells)
+}
+
+// clampPaneLines applies clampPaneLine to every row of a rendered pane.
+func clampPaneLines(pane string, cells int) string {
+	if pane == "" || cells <= 0 {
+		return pane
+	}
+	lines := strings.Split(pane, "\n")
+	for i, line := range lines {
+		lines[i] = clampPaneLine(line, cells)
+	}
+	return strings.Join(lines, "\n")
+}
