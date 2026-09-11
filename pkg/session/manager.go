@@ -85,6 +85,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 		}
 		session.Name = generateSessionName(name)
 		session.bumpEpoch()
+		sm.syncSessionMetaLocked(session)
 	}
 
 	// New user message starts a new turn — clear the streamed content flag
@@ -105,6 +106,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 			*lastMsg = msg
 			session.Updated = time.Now()
 			session.markModified(len(session.Messages) - 1) // in-place update, not a new append
+			sm.syncSessionMetaLocked(session)
 			return
 		}
 	}
@@ -113,6 +115,7 @@ func (sm *SessionManager) AddFullMessage(sessionKey string, msg providers.Messag
 	session.Updated = time.Now()
 	session.msgsAppended++
 	session.bumpEpoch()
+	sm.syncSessionMetaLocked(session)
 }
 
 func (sm *SessionManager) GetHistory(key string) []providers.Message {
@@ -295,6 +298,38 @@ func (sm *SessionManager) SetHistory(key string, history []providers.Message) {
 	sm.touchSession(key)
 }
 
+// syncSessionMetaLocked keeps the lightweight listing index in step with a
+// resident session. ListSessions (TUI /sessions, WebUI sidebar) builds
+// metadata-only Session shells for non-resident keys from sessionMeta. Name is
+// set by AddFullMessage and Updated moves on every mutation — neither used to
+// touch sessionMeta, so after an idle LRU/TTL eviction the shell lost the
+// chat's name and sorted as if it had never been used. That made chats look
+// missing from the TUI while SQLite still held every message.
+// Caller must hold sm.mu (write).
+func (sm *SessionManager) syncSessionMetaLocked(session *Session) {
+	if session == nil || session.Key == "" {
+		return
+	}
+	if meta, ok := sm.sessionMeta[session.Key]; ok {
+		meta.Name = session.Name
+		meta.Mode = session.Mode
+		meta.Folder = session.Folder
+		meta.SubagentStatus = session.SubagentStatus
+		meta.Created = session.Created
+		meta.Updated = session.Updated
+		return
+	}
+	sm.sessionMeta[session.Key] = &sessionMetadata{
+		Key:            session.Key,
+		Name:           session.Name,
+		Mode:           session.Mode,
+		Folder:         session.Folder,
+		SubagentStatus: session.SubagentStatus,
+		Created:        session.Created,
+		Updated:        session.Updated,
+	}
+}
+
 // getOrCreateUnlocked returns or creates a session (caller must hold mu).
 // Uses lazy loading to load sessions from disk on demand.
 //
@@ -321,12 +356,7 @@ func (sm *SessionManager) getOrCreateUnlocked(key string) *Session {
 			}
 			sm.evictIfNeeded()
 			sm.sessions[key] = session
-			sm.sessionMeta[key] = &sessionMetadata{
-				Key:     key,
-				Mode:    session.Mode,
-				Created: session.Created,
-				Updated: session.Updated,
-			}
+			sm.syncSessionMetaLocked(session)
 		}
 	}
 	sm.touchSession(key)

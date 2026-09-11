@@ -488,6 +488,9 @@ func (sm *SessionManager) saveUnlocked(key string) error {
 	if !ok {
 		return nil
 	}
+	// Keep the listing index in step with whatever we are about to persist,
+	// so an idle eviction that lands mid-save still leaves a usable shell.
+	sm.syncSessionMetaLocked(session)
 
 	// Full rewrite needed: new session (never persisted)
 	if session.lastPersistedSeq == -1 {

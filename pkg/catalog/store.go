@@ -26,13 +26,37 @@ type IndexEntry struct {
 }
 
 var (
-	indexMu  sync.RWMutex
-	memIndex *Index
-	loadOnce sync.Once
+	indexMu          sync.RWMutex
+	memIndex         *Index
+	loadOnce         sync.Once
+	cacheDirOverride string
 )
+
+// SetCacheDir overrides the default catalog cache directory for testing.
+// Call ResetCacheDir in t.Cleanup to restore default behaviour.
+func SetCacheDir(dir string) {
+	indexMu.Lock()
+	cacheDirOverride = dir
+	indexMu.Unlock()
+}
+
+// ResetCacheDir clears the test cache directory override.
+func ResetCacheDir() {
+	indexMu.Lock()
+	cacheDirOverride = ""
+	indexMu.Unlock()
+}
 
 // CacheDir returns the lele catalog cache directory (~/.lele/cache/catalog).
 func CacheDir() string {
+	indexMu.RLock()
+	if cacheDirOverride != "" {
+		d := cacheDirOverride
+		indexMu.RUnlock()
+		return d
+	}
+	indexMu.RUnlock()
+
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return filepath.Join(os.TempDir(), "lele-cache", "catalog")

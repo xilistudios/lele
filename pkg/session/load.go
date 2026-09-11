@@ -197,6 +197,9 @@ func (sm *SessionManager) loadFromSQLite(key string) (*Session, bool) {
 
 	sm.sessions[key] = session
 	sm.accessTimes[key] = time.Now()
+	// Cold load restores Name/Mode/Updated from SQLite; keep the listing
+	// index in step so a later idle eviction cannot resurrect an empty shell.
+	sm.syncSessionMetaLocked(session)
 	return session, true
 }
 

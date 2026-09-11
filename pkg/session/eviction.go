@@ -55,10 +55,11 @@ func (sm *SessionManager) evictIfNeeded() {
 		cutoff := time.Now().Add(-sm.evictionTTL)
 		for key, lastAccess := range sm.accessTimes {
 			if lastAccess.Before(cutoff) {
-				if _, ok := sm.sessions[key]; ok {
+				if session, ok := sm.sessions[key]; ok {
 					if !sm.saveForEviction(key) {
 						continue
 					}
+					sm.syncSessionMetaLocked(session)
 				}
 				delete(sm.sessions, key)
 				delete(sm.accessTimes, key)
@@ -94,9 +95,14 @@ func (sm *SessionManager) evictIfNeeded() {
 	toEvict := len(sm.sessions) - sm.maxInMemory
 	for i := 0; i < toEvict && i < len(accesses); i++ {
 		key := accesses[i].key
+		session, ok := sm.sessions[key]
+		if !ok {
+			continue
+		}
 		if !sm.saveForEviction(key) {
 			continue
 		}
+		sm.syncSessionMetaLocked(session)
 		delete(sm.sessions, key)
 		delete(sm.accessTimes, key)
 		logger.InfoCF("session", "LRU evicted session", map[string]interface{}{
@@ -119,10 +125,13 @@ func (sm *SessionManager) CleanupIdleSessions() int {
 		cutoff := time.Now().Add(-sm.evictionTTL)
 		for key, lastAccess := range sm.accessTimes {
 			if lastAccess.Before(cutoff) {
-				if _, ok := sm.sessions[key]; ok {
+				if session, ok := sm.sessions[key]; ok {
 					if !sm.saveForEviction(key) {
 						continue
 					}
+					// Listing index must outlive the resident copy: TUI/WebUI
+					// read Name/Updated from sessionMeta for non-resident keys.
+					sm.syncSessionMetaLocked(session)
 				}
 				delete(sm.sessions, key)
 				delete(sm.accessTimes, key)
@@ -254,6 +263,7 @@ func (sm *SessionManager) EvictExcludedMessages(key string) int {
 	session.firstInMemorySeq += evictUpTo
 	session.evictedTotal += evictUpTo
 	session.bumpEpoch()
+	sm.syncSessionMetaLocked(session)
 	// Persist the new eviction boundary to SQLite so a cold restart restores
 	// firstInMemorySeq and does not re-inflate evicted rows into RAM. The
 	// boundary is stored in session metadata (FirstInMemorySeq); subsequent
@@ -333,13 +343,14 @@ func (sm *SessionManager) EvictSession(key string) bool {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	_, ok := sm.sessions[key]
+	session, ok := sm.sessions[key]
 	if ok {
 		// Save before evicting to ensure latest state is persisted.
 		// saveForEviction re-checks that the session wasn't touched while
 		// the save's disk I/O was in flight (the lock is released during it);
 		// if it was, we keep the in-memory copy to avoid losing data.
 		if sm.saveForEviction(key) {
+			sm.syncSessionMetaLocked(session)
 			delete(sm.sessions, key)
 			delete(sm.accessTimes, key)
 			logger.InfoCF("session", "Session evicted from memory", map[string]interface{}{

@@ -206,3 +206,23 @@ func TestSearchModels(t *testing.T) {
 		t.Fatalf("hits: %+v", hits)
 	}
 }
+
+func TestSetCacheDir_OverrideAndReset(t *testing.T) {
+	original := CacheDir()
+
+	dir := filepath.Join(t.TempDir(), "custom-catalog")
+	SetCacheDir(dir)
+	t.Cleanup(ResetCacheDir)
+
+	if got := CacheDir(); got != dir {
+		t.Fatalf("CacheDir() after SetCacheDir = %q, want %q", got, dir)
+	}
+
+	ResetCacheDir()
+	if got := CacheDir(); got == dir {
+		t.Fatalf("CacheDir() after ResetCacheDir still = %q, should revert", got)
+	}
+	if got := CacheDir(); got != original {
+		t.Fatalf("CacheDir() after ResetCacheDir = %q, want %q (original)", got, original)
+	}
+}
