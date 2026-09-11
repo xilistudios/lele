@@ -207,7 +207,6 @@ func TestSearchModels(t *testing.T) {
 	}
 }
 
-
 func TestSetCacheDir_OverrideAndReset(t *testing.T) {
 	original := CacheDir()
 

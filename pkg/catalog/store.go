@@ -26,9 +26,9 @@ type IndexEntry struct {
 }
 
 var (
-	indexMu         sync.RWMutex
-	memIndex        *Index
-	loadOnce        sync.Once
+	indexMu          sync.RWMutex
+	memIndex         *Index
+	loadOnce         sync.Once
 	cacheDirOverride string
 )
 
