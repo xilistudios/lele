@@ -26,6 +26,7 @@ func TestRegisterAndNewStrategy(t *testing.T) {
 	RegisterStrategy(name, func() Strategy {
 		return &testStrategy{name: name}
 	})
+	t.Cleanup(func() { UnregisterStrategy(name) })
 
 	s, err := NewStrategy(name)
 	if err != nil {
@@ -61,6 +62,7 @@ func TestRegisterStrategy_PanicsOnDuplicate(t *testing.T) {
 	RegisterStrategy(name, func() Strategy {
 		return &testStrategy{name: name}
 	})
+	t.Cleanup(func() { UnregisterStrategy(name) })
 
 	defer func() {
 		r := recover()
