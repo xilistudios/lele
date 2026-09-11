@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,9 @@ import (
 // and autocomplete tests do not require network or an embedded catalog.
 func seedCatalogForTest(t *testing.T) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	cacheDir := filepath.Join(t.TempDir(), ".lele", "cache", "catalog")
+	catalog.SetCacheDir(cacheDir)
+	t.Cleanup(catalog.ResetCacheDir)
 	catalog.ResetLive()
 	if err := catalog.SeedProvider(catalog.Provider{
 		ID: "openai", Name: "OpenAI", Type: "openai",
