@@ -50,10 +50,13 @@ func (m *Model) handleMouseMsg(msg tea.MouseMsg, cmds []tea.Cmd) (tea.Model, tea
 	if m.modalMode == ModalNone && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		// Check if click is in the right sidebar area
 		leftWidth := int(float64(m.width) * leftColumnRatio)
-		rightWidth := m.width - leftWidth - 3
-		sidebarStartX := leftWidth + 1 // +1 for separator
+		rightWidth := m.width - leftWidth - chatSidebarGutter - 3
+		if rightWidth < 1 {
+			rightWidth = 1
+		}
+		sidebarStartX := leftWidth + chatSidebarGutter // gutter, then border
 
-		if msg.X >= sidebarStartX && msg.X < sidebarStartX+rightWidth {
+		if msg.X >= sidebarStartX && msg.X < sidebarStartX+rightWidth+1 {
 			// Check if click matches any subagent click target Y-coordinate in the sidebar text
 			for _, target := range m.subagentClickTargets {
 				if msg.Y >= target.yStart && msg.Y < target.yEnd {

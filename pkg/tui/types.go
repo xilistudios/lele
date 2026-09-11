@@ -48,7 +48,11 @@ func (m chatMode) String() string {
 // leftColumnRatio is the fraction of the terminal width used by the left
 // (chat) column. The right sidebar takes the remaining space. Shared by
 // view.go (layout) and handlers.go (mouse hit-testing) so they stay in sync.
+// chatSidebarGutter is a blank band between the panes: macOS Terminal.app
+// often measures VS16 emoji one cell off from ansi.StringWidth, and without
+// a gutter that paints over the sidebar border on scroll.
 const leftColumnRatio = 0.72
+const chatSidebarGutter = 2
 
 // groupTurn represents a single turn in a group chat (Mixture of Agents).
 type groupTurn struct {

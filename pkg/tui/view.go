@@ -168,8 +168,13 @@ func (m *Model) View() string {
 	// --------------------------------------------------------------------------
 	// SPLIT COLUMN CONVERSATIONAL LAYOUT
 	// --------------------------------------------------------------------------
+	// leftWidth + gutter + rightWidth + border + Place side margins = m.width.
+	// The gutter keeps emoji-width disagreement off the sidebar border.
 	leftWidth := int(float64(m.width) * leftColumnRatio)
-	rightWidth := m.width - leftWidth - 3
+	rightWidth := m.width - leftWidth - chatSidebarGutter - 3
+	if rightWidth < 1 {
+		rightWidth = 1
+	}
 	contentHeight := m.height
 
 	agentID := m.agentLoop.GetProvidable().GetSessionAgent(m.currentKey)
@@ -383,16 +388,22 @@ func (m *Model) View() string {
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.context")) + "\n")
 
-	// Current context usage (history + system prompt) — cached above
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)) + "\n")
-	rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.contextWindow"), formatNumber(contextWindow)) + "\n")
+	// Current context usage (history + system prompt) — cached above.
+	// Each metric row is clamped to contentWidth so a long label (es
+	// "Ventana de contexto") or a wide token count never wraps; wrapping
+	// one row used to push the rest of the sidebar down.
+	writeSidebarRow := func(row string) {
+		rightBuilder.WriteString(clampSidebarRow(row, contentWidth) + "\n")
+	}
+	writeSidebarRow(SidebarLabelValue(i18n.T("tui.currentContext"), formatNumber(currentTokens)))
+	writeSidebarRow(SidebarLabelValue(i18n.T("tui.contextWindow"), formatNumber(contextWindow)))
 
 	// On medium/large heights, show detailed cumulative token counts
 	if contentHeight >= 20 {
-		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)) + "\n")
-		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)) + "\n")
-		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)) + "\n")
-		rightBuilder.WriteString(SidebarLabelValue(i18n.T("tui.compactions"), fmt.Sprintf("%d", m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey))) + "\n")
+		writeSidebarRow(SidebarLabelValue(i18n.T("tui.inputSent"), formatNumber(cumInput)))
+		writeSidebarRow(SidebarLabelValue(i18n.T("tui.outputReceived"), formatNumber(cumOutput)))
+		writeSidebarRow(SidebarLabelValue(i18n.T("tui.totalSent"), formatNumber(cumInput+cumOutput)))
+		writeSidebarRow(SidebarLabelValue(i18n.T("tui.compactions"), fmt.Sprintf("%d", m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey))))
 	}
 	rightBuilder.WriteString("\n")
 
@@ -417,7 +428,11 @@ func (m *Model) View() string {
 
 	if contentHeight >= 14 {
 		rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.status")) + "\n")
-		rightBuilder.WriteString(SidebarValue.Render(SidebarConnectedDot.Render("●")+" Lele "+agent.GatewayVersion()) + "\n\n")
+		// Adjacent runs, not nested Render: an inner SGR reset would cancel
+		// the outer foreground and leave "Lele <ver>" on the terminal default.
+		versionLine := " " + SidebarConnectedDot.Render("●") +
+			lipgloss.NewStyle().Foreground(Foreground).Render(" Lele "+agent.GatewayVersion())
+		rightBuilder.WriteString(clampSidebarRow(versionLine, contentWidth) + "\n\n")
 	}
 
 	// Get session subagents
@@ -513,7 +528,24 @@ func (m *Model) View() string {
 
 	rightPane := RightSidebar.Width(rightWidth).Height(contentHeight).MaxHeight(contentHeight).Render(rightBuilder.String())
 
-	mainLayout := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+	// Clamp both panes to a fixed display width before joining. A single
+	// row with a wide/VS16 emoji can measure 1–2 cells off; on scroll that
+	// misaligned row paints over the sidebar border (Terminal.app shows it
+	// as a short cyan bar). Explicit per-row padding overwrites every cell.
+	leftPane = clampPaneLines(leftPane, leftWidth)
+	rightPane = clampPaneLines(rightPane, rightWidth+1) // +1 left border
+
+	// Blank gutter between chat and sidebar. Painted with the app background
+	// so a 1–2 cell width disagreement (Terminal.app + VS16 emoji) lands here
+	// instead of overwriting the border character.
+	gutterPane := lipgloss.NewStyle().
+		Width(chatSidebarGutter).
+		Height(contentHeight).
+		MaxHeight(contentHeight).
+		Background(BgColor).
+		Render("")
+
+	mainLayout := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, gutterPane, rightPane)
 
 	if m.modalMode != ModalNone {
 		return m.renderActiveModal()
