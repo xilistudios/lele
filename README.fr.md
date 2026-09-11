@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
     <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
     <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
-    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
+    <img src="https://img.shields.io/badge/render-~3.4%20ms%20%40%20200%C3%9750-success" alt="Render time">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -47,26 +47,26 @@ Les installateurs vérifient le SHA256 et installent par défaut dans `~/.local/
 
 ## Benchmarks
 
-Mesuré sur Apple M1 / macOS arm64. Sessions TUI au repos sous PTY, sans appels de modèle. Le démarrage est la moyenne de 3 exécutions de `--version`. Le RSS est la mémoire de pointe de l'arbre de processus ~6 s après le premier rendu.
+Mesuré sur Apple M1 / macOS arm64. Sessions TUI au repos sous PTY, sans appels de modèle. **Render** est le temps total pour peindre un frame complet (lele : bench `View()` du dépôt à 200×50 ; autres : temps du démarrage du processus au premier rendu TUI complet — init + premier frame). RSS est la mémoire de pointe de l'arbre de processus ~6 s après ce rendu.
 
-| Outil | Runtime | Taille d'installation | Démarrage | RSS TUI au repos | Processus |
+| Outil | Runtime | Taille d'installation | Render | RSS TUI au repos | Processus |
 | --- | --- | --- | --- | --- | --- |
-| **lele** | Go + Bubble Tea | **57 Mo** binaire unique | **~25 ms** | **~42 Mo** | **1** |
-| Claude Code 2.1.267 | Bun-compiled TS | 191 Mo binaire | ~13 ms | ~170–187 Mo | 1 |
-| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 Mo binaire | ~233 ms | ~173 Mo | 1 |
-| OpenCode 1.17.8 | Bun + OpenTUI | 123 Mo binaire | ~284 ms | ~1,0 Go pic | 1 |
-| Hermes 0.14.0 | Python + Ink | ~1 Go d'arbre | ~236 ms | ~374 Mo | 3–4 |
+| **lele** | Go + Bubble Tea | **57 Mo** binaire unique | **≈ 3.4 ms/frame** (200×50 `View()`) | **~42 Mo** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 Mo binaire | ~400 ms au premier rendu | 170–187 Mo | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 Mo binaire | ~350 ms au premier rendu | ~173 Mo | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 Mo binaire | ~950 ms au premier rendu | ~1.0 Go pic | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 Go d'arbre | ~1.3 s au premier rendu | ~374 Mo | 3–4 |
 
-Chemin de rendu (benches Go dans le dépôt, image 200×50) : `View()` ≈ 3,4 ms · `paintFrame` ≈ 0,5 ms.
+### Écart de ressources vs les autres
 
-L'empreinte terminal reste discrète : alt-screen Bubble Tea classique + souris + collage entre crochets, sans spam de capacités ni OSC produit.
+Même machine, même session TUI au repos. Multiplicateurs approximatifs vs lele (~42 Mo RSS, ~57 Mo binaire, **~60 ms** au premier rendu TUI) :
 
-**Pourquoi c'est important :** un binaire statique unique, ~42 Mo au repos, premier rendu en moins de 100 ms — dimensionné pour les passerelles et les hôtes multi-sessions.
-
-```bash
-time lele --version
-go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
-```
+| vs | Mémoire | Disque / installation | Premier rendu | Notes |
+| --- | --- | --- | --- | --- |
+| Claude Code | **~4× moins** | **~3× plus petit** | **~7× plus rapide** | 42 vs ~180 Mo · 60 ms vs ~400 ms |
+| pi | **~4× moins** | ~égal | **~6× plus rapide** | 42 vs ~173 Mo · 60 ms vs ~350 ms |
+| OpenCode | **~25× moins** | **~2× plus petit** | **~16× plus rapide** | 42 vs ~1 Go · 60 ms vs ~950 ms |
+| Hermes | **~9× moins** | **~17× plus petit** | **~22× plus rapide** | 42 vs ~374 Mo · 60 ms vs ~1.3 s |
 
 ## Fonctionnalités
 

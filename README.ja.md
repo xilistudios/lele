@@ -9,7 +9,7 @@
     <img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
     <img src="https://img.shields.io/badge/binary-~57%20MB-blue" alt="Binary size">
     <img src="https://img.shields.io/badge/TUI%20RSS-~42%20MB-success" alt="TUI RSS">
-    <img src="https://img.shields.io/badge/startup-~25%20ms-success" alt="Startup">
+    <img src="https://img.shields.io/badge/render-~3.4%20ms%20%40%20200%C3%9750-success" alt="Render time">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   </p>
 
@@ -47,26 +47,26 @@ lele tui
 
 ## ベンチマーク
 
-Apple M1 / macOS arm64で計測。アイドルTUIセッション（PTY下、モデル呼び出しなし）。起動は `--version` 3回の平均。RSSは初回描画後約6秒のプロセストリーのピークメモリ。
+Apple M1 / macOS arm64で計測。アイドルTUIセッション（PTY下、モデル呼び出しなし）。**Render** は1フレーム全体を描画するまでの壁時計時間（lele：リポジトリ内の `View()` bench 200×50、その他：プロセス起動から最初の完全なTUI描画まで — init + 最初のフレーム）。RSSはその描画後約6秒のプロセストリーのピークメモリ。
 
-| ツール | ランタイム | インストールサイズ | 起動 | アイドルTUI RSS | プロセス数 |
+| ツール | ランタイム | インストールサイズ | Render | アイドルTUI RSS | プロセス数 |
 | --- | --- | --- | --- | --- | --- |
-| **lele** | Go + Bubble Tea | **57 MB** 単一バイナリ | **~25 ms** | **~42 MB** | **1** |
-| Claude Code 2.1.267 | Bun-compiled TS | 191 MB バイナリ | ~13 ms | ~170–187 MB | 1 |
-| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB バイナリ | ~233 ms | ~173 MB | 1 |
-| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB バイナリ | ~284 ms | ~1.0 GB ピーク | 1 |
-| Hermes 0.14.0 | Python + Ink | ~1 GB ツリー | ~236 ms | ~374 MB | 3–4 |
+| **lele** | Go + Bubble Tea | **57 MB** 単一バイナリ | **≈ 3.4 ms/frame** (200×50 `View()`) | **~42 MB** | **1** |
+| Claude Code 2.1.267 | Bun-compiled TS | 191 MB バイナリ | ~400 ms 初回描画まで | 170–187 MB | 1 |
+| pi 0.85.1 | Bun-compiled TS + pi-tui | 71 MB バイナリ | ~350 ms 初回描画まで | ~173 MB | 1 |
+| OpenCode 1.17.8 | Bun + OpenTUI | 123 MB バイナリ | ~950 ms 初回描画まで | ~1.0 GB ピーク | 1 |
+| Hermes 0.14.0 | Python + Ink | ~1 GB ツリー | ~1.3 s 初回描画まで | ~374 MB | 3–4 |
 
-レンダリングパス（リポジトリ内Go benches、200×50フレーム）：`View()` ≈ 3.4 ms · `paintFrame` ≈ 0.5 ms。
+### 他ツールとのリソース差
 
-ターミナル指紋は静か：クラシックなBubble Tea alt-screen + マウス + ブラケットペースト。能力スパムや製品OSCはありません。
+同一マシン、同一アイドルTUIセッション。lele（~42 MB RSS、~57 MB バイナリ、**~60 ms** 初回TUI描画）に対する概算倍率：
 
-**なぜ重要か：** 静的単一バイナリ、アイドル約42 MB、初フレーム100 ms未満。ゲートウェイ用ホストとマルチセッション環境向けのスケールです。
-
-```bash
-time lele --version
-go test ./pkg/tui/ -bench='PaintFrame|View' -benchmem -count=1 -benchtime=50x
-```
+| vs | メモリ | ディスク / インストール | 初回レンダー | 備考 |
+| --- | --- | --- | --- | --- |
+| Claude Code | **~4× 少ない** | **~3× 小さい** | **~7× 高速** | 42 vs ~180 MB · 60 ms vs ~400 ms |
+| pi | **~4× 少ない** | ~同等 | **~6× 高速** | 42 vs ~173 MB · 60 ms vs ~350 ms |
+| OpenCode | **~25× 少ない** | **~2× 小さい** | **~16× 高速** | 42 vs ~1 GB · 60 ms vs ~950 ms |
+| Hermes | **~9× 少ない** | **~17× 小さい** | **~22× 高速** | 42 vs ~374 MB · 60 ms vs ~1.3 s |
 
 ## 機能
 
