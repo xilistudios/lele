@@ -80,9 +80,11 @@ func assertGroupFinalized(t *testing.T, dir, groupID string) *GroupState {
 	return st
 }
 
-// drainGroup releases a group parked by stepExecutor and waits for its terminal
-// flush to reach dir. Tests that start a live group against a t.TempDir() must
-// call it (deferred) so the async save cannot race the directory cleanup.
+// drainGroup releases a group parked by stepExecutor, waits for its terminal
+// flush to reach dir, and then waits for the runGroup goroutine to fully exit
+// (including deferred saveStateBestEffort). Tests that start a live group
+// against a t.TempDir() MUST call it (deferred) so neither the async save nor
+// the goroutine itself can race the directory cleanup (#282).
 func drainGroup(t *testing.T, exec *stepExecutor, dir, groupID string) {
 	t.Helper()
 	releaseStep(exec)
@@ -126,6 +128,10 @@ func TestRegression_LoadHistoricalRestoresFinishedGroups(t *testing.T) {
 	if finalized.Status != StatusDone {
 		t.Fatalf("persisted status = %q, want %q", finalized.Status, StatusDone)
 	}
+	// Wait for the runGroup goroutine to fully exit — including the deferred
+	// saveStateBestEffort that runs AFTER done is closed. Without this,
+	// t.TempDir() cleanup can race the deferred write and produce ENOTEMPTY (#282).
+	writer.DrainRunGoroutine(groupID)
 
 	// The restart: a fresh manager over the same storeDir.
 	// Poll LoadHistorical: ListGroups can briefly race the deferred save on

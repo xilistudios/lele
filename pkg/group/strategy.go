@@ -37,6 +37,15 @@ func RegisterStrategy(name string, f StrategyFactory) {
 	strategyRegistry[name] = f
 }
 
+// UnregisterStrategy removes a strategy from the registry. It is a no-op if
+// the name was never registered. Intended for tests that need to clean up
+// after themselves when running with -count>1 or in parallel.
+func UnregisterStrategy(name string) {
+	strategyMu.Lock()
+	defer strategyMu.Unlock()
+	delete(strategyRegistry, name)
+}
+
 // NewStrategy creates a new Strategy instance by looking up the factory registered
 // under the given name. Returns an error if no strategy is registered with that name.
 func NewStrategy(name string) (Strategy, error) {

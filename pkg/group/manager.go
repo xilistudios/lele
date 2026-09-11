@@ -59,6 +59,12 @@ type managedGroup struct {
 	// finalizeOnce guards the single terminal signal pair (group.status +
 	// group.complete) and the close of done, so no exit path can emit twice.
 	finalizeOnce sync.Once
+
+	// runWg tracks the runGroup goroutine so tests (and cleanup paths) can
+	// wait for it to fully exit — including deferred saves that run after
+	// done is closed. Without this, t.TempDir() cleanup can race the
+	// deferred saveStateBestEffort and produce ENOTEMPTY (#282).
+	runWg sync.WaitGroup
 }
 
 // GroupManager manages the lifecycle of active group conversations.
@@ -434,7 +440,11 @@ func (gm *GroupManager) Start(
 	// never disagree about whether persistence is configured.
 	gm.saveStateBestEffort(mg)
 
-	go gm.runGroup(gctx, mg)
+	mg.runWg.Add(1)
+	go func() {
+		defer mg.runWg.Done()
+		gm.runGroup(gctx, mg)
+	}()
 
 	return groupID, nil
 }
@@ -500,6 +510,21 @@ func (gm *GroupManager) Stop(groupID string) bool {
 
 	mg.cancel()
 	return true
+}
+
+// DrainRunGoroutine blocks until the runGroup goroutine for groupID has fully
+// exited — including any deferred saveStateBestEffort calls that execute after
+// done is closed. Tests that use t.TempDir() MUST call this (or drainGroup)
+// before returning to prevent ENOTEMPTY races between the deferred write and
+// the temp-directory cleanup (#282).
+func (gm *GroupManager) DrainRunGoroutine(groupID string) {
+	gm.mu.Lock()
+	mg, ok := gm.groups[groupID]
+	gm.mu.Unlock()
+	if !ok {
+		return
+	}
+	mg.runWg.Wait()
 }
 
 // Status returns an immutable snapshot of the GroupState and true if the
