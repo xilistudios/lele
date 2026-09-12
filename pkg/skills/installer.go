@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -62,9 +61,9 @@ func (si *SkillInstaller) InstallFromGitHub(ctx context.Context, repo string) er
 		return fmt.Errorf("failed to fetch skill: HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimitedBody(resp)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return fmt.Errorf("failed to read skill: %w", err)
 	}
 
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
@@ -123,9 +122,9 @@ func (si *SkillInstaller) ListAvailableSkills(ctx context.Context) ([]AvailableS
 		return nil, fmt.Errorf("failed to fetch skills list: HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimitedBody(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("failed to read skills list: %w", err)
 	}
 
 	var skills []AvailableSkill
