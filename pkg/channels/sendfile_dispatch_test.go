@@ -115,7 +115,10 @@ func TestDispatchStagesAttachmentAndServesIt(t *testing.T) {
 	}
 }
 
-func TestDispatchInsideLeleDirNotCopied(t *testing.T) {
+func TestDispatchInsideLeleDirCopiedToStaging(t *testing.T) {
+	// FIX-1: files under leleDir but outside the staging directory ARE now
+	// copied to staging so the public endpoint can serve them (invariant:
+	// "public == staging").
 	ts := newStagingTestServer(t)
 
 	uploadDir := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads")
@@ -152,13 +155,18 @@ func TestDispatchInsideLeleDirNotCopied(t *testing.T) {
 	if len(payload.Attachments) != 1 {
 		t.Fatalf("attachments = %v, want 1", payload.Attachments)
 	}
-	// Already under leleDir → the original path must be served as-is (no copy).
-	if got := payload.Attachments[0]["path"]; got != src {
-		t.Errorf("path = %v, want unchanged %q", got, src)
+	// After FIX-1: the path must have been rewritten to the staging dir.
+	got := payload.Attachments[0]["path"]
+	if got == src {
+		t.Errorf("path = %v, expected staging copy (not the original)", got)
 	}
-	entries, err := os.ReadDir(filepath.Join(ts.channel.cfg.LeleDir, "tmp", "attachments"))
-	if err == nil && len(entries) > 0 {
-		t.Errorf("no staging copies expected, found %d", len(entries))
+	stagingDir := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "attachments")
+	if !strings.HasPrefix(got.(string), stagingDir) {
+		t.Errorf("path = %v, expected prefix %q", got, stagingDir)
+	}
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil || len(entries) == 0 {
+		t.Errorf("expected staging copies, found %d entries (err=%v)", len(entries), err)
 	}
 }
 

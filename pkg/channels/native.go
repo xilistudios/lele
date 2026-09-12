@@ -407,8 +407,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 		return withBodyLimit(h).ServeHTTP
 	}
 
-	// Public auth endpoints
-	mux.HandleFunc("GET /api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
+	// Public auth endpoints — /auth/pin is behind withAuth so that only an
+	// already-authenticated principal (e.g. the WebUI settings page) can
+	// generate a PIN.  This restores the out-of-band property of the pairing
+	// protocol: the PIN authenticates whoever redeems it because the issuer
+	// was already verified.  /auth/pair remains public (the new device has no
+	// token yet).
+	mux.HandleFunc("GET /api/v1/auth/pin", withAuth(n.handleGetPIN))
 	mux.HandleFunc("POST /api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
@@ -531,9 +536,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/secrets/{name}", withAuth(n.handleSecretGet))
 	mux.HandleFunc("DELETE /api/v1/secrets/{name}", withAuth(n.handleSecretDelete))
 
-	// Files
+	// Files — the public endpoint only serves files from the staging directory
+	// (<leleDir>/tmp/attachments/) without auth, for WebUI <img src>/links.
+	// The secure endpoint allows authenticated access to the broader leleDir.
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
+	mux.HandleFunc("GET /api/v1/files/view-secure", withAuth(n.handleFileViewSecure))
 
 	// Filesystem browsing (folder picker for the WebUI)
 	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))

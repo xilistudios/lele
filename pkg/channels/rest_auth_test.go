@@ -14,6 +14,8 @@ func TestHandleGetPIN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
+	// FIX-2: /auth/pin is behind withAuth — must send Authorization header.
+	req.Header.Set("Authorization", "Bearer "+ts.token)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Do() error = %v", err)
@@ -39,13 +41,18 @@ func TestHandleGetPIN(t *testing.T) {
 func TestHandlePairAndRefresh(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// 1. Get a PIN
+	// 1. Get a PIN (requires authentication after FIX-2)
 	pinReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin?device_name=test-device", nil)
+	pinReq.Header.Set("Authorization", "Bearer "+ts.token)
 	pinResp, err := http.DefaultClient.Do(pinReq)
 	if err != nil {
 		t.Fatalf("PIN request error = %v", err)
 	}
 	defer pinResp.Body.Close()
+
+	if pinResp.StatusCode != http.StatusOK {
+		t.Fatalf("PIN status = %d, want %d", pinResp.StatusCode, http.StatusOK)
+	}
 
 	var pinPayload AuthPINResponse
 	if err := json.NewDecoder(pinResp.Body).Decode(&pinPayload); err != nil {
@@ -101,6 +108,59 @@ func TestHandlePairAndRefresh(t *testing.T) {
 	}
 }
 
+func TestHandlePairWithoutDeviceName_WhenPINIssuedWithoutOne(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	// Generate PIN via auth manager directly (without device_name).
+	pending, err := ts.channel.auth.GeneratePIN("")
+	if err != nil {
+		t.Fatalf("GeneratePIN() error = %v", err)
+	}
+
+	// Pair without device_name — must be rejected.
+	body := mustMarshal(AuthPairRequest{PIN: pending.PIN, DeviceName: ""})
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(body)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+
+	var apiErr APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if apiErr.Code != "pair_error" {
+		t.Fatalf("error code = %q, want pair_error", apiErr.Code)
+	}
+}
+
+func TestHandlePairWithDeviceName_WhenPINIssuedWithoutOne(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	pending, err := ts.channel.auth.GeneratePIN("")
+	if err != nil {
+		t.Fatalf("GeneratePIN() error = %v", err)
+	}
+
+	// Pair WITH device_name — should succeed.
+	body := mustMarshal(AuthPairRequest{PIN: pending.PIN, DeviceName: "CLI-Device"})
+	req, _ := http.NewRequest(http.MethodPost, ts.server.URL+"/api/v1/auth/pair", strings.NewReader(string(body)))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Request error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+}
+
 func TestHandlePairInvalidPIN(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -125,6 +185,26 @@ func TestHandlePairInvalidPIN(t *testing.T) {
 	}
 }
 
+func TestHandleGetPIN_UnauthenticatedReturns401(t *testing.T) {
+	ts := newNativeTestServer(t)
+
+	// FIX-2: /auth/pin must be behind withAuth.
+	req, err := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	// No Authorization header.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
 func TestHandleRefreshInvalidToken(t *testing.T) {
 	ts := newNativeTestServer(t)
 
@@ -144,13 +224,18 @@ func TestHandleRefreshInvalidToken(t *testing.T) {
 func TestHandleListAndRemoveClients(t *testing.T) {
 	ts := newNativeTestServer(t)
 
-	// 1. Get a PIN
+	// 1. Get a PIN (requires authentication after FIX-2)
 	pinReq, _ := http.NewRequest(http.MethodGet, ts.server.URL+"/api/v1/auth/pin?device_name=test-device", nil)
+	pinReq.Header.Set("Authorization", "Bearer "+ts.token)
 	pinResp, err := http.DefaultClient.Do(pinReq)
 	if err != nil {
 		t.Fatalf("PIN request error = %v", err)
 	}
 	defer pinResp.Body.Close()
+
+	if pinResp.StatusCode != http.StatusOK {
+		t.Fatalf("PIN status = %d, want %d", pinResp.StatusCode, http.StatusOK)
+	}
 
 	var pinPayload AuthPINResponse
 	if err := json.NewDecoder(pinResp.Body).Decode(&pinPayload); err != nil {
