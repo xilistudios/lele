@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -433,6 +435,36 @@ func BuildOriginSessionKey(channel, chatID string) string {
 	}
 }
 
+// safeGoroutine launches a subagent goroutine with panic recovery that ensures
+// the task always reaches a terminal state and SignalDone is called, preventing
+// hung waiters.  The pattern mirrors pkg/group/runner.go:44 and :182.
+//
+// Deferred order is critical: SignalDone is registered first so it runs LAST
+// (LIFO), guaranteeing it executes whether fn panics or returns normally.
+// The recover defer runs first on unwind, marking the task as failed and
+// persisting the terminal status so the parent can observe the panic.
+func (sm *SubagentManager) safeGoroutine(task *SubagentTask, fn func()) {
+	go func() {
+		// Registered FIRST → runs LAST: SignalDone always fires.
+		defer task.SignalDone()
+		// Registered SECOND → runs FIRST on panic: marks failed + reports.
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				log.Printf("subagent %s: panic in goroutine: %v\n%s", task.ID, r, stack)
+				sm.mu.Lock()
+				task.Status = SubagentStatusFailed
+				task.Summary = fmt.Sprintf("Subagent panic: %v", r)
+				task.Result = fmt.Sprintf("Subagent panic: %v\n%s", r, stack)
+				task.Updated = time.Now().UnixMilli()
+				sm.mu.Unlock()
+				sm.reportTerminalStatus(task)
+			}
+		}()
+		fn()
+	}()
+}
+
 // SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
 // which additionally supports a per-task model override.
 func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
@@ -510,9 +542,7 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 
 	if initialStatus == SubagentStatusPending {
 		// Start a lightweight goroutine that polls until dependencies are met
-		go func() {
-			defer subagentTask.SignalDone()
-
+		sm.safeGoroutine(subagentTask, func() {
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
 
@@ -549,12 +579,11 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 					sm.mu.Unlock()
 				}
 			}
-		}()
+		})
 	} else {
-		go func() {
+		sm.safeGoroutine(subagentTask, func() {
 			sm.runTask(taskCtx, subagentTask, callback)
-			subagentTask.SignalDone()
-		}()
+		})
 	}
 
 	if label != "" {
@@ -605,10 +634,9 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
 
-	go func() {
+	sm.safeGoroutine(task, func() {
 		sm.runTask(taskCtx, task, callback)
-		task.SignalDone()
-	}()
+	})
 
 	return fmt.Sprintf("Continuing subagent task %s with new guidance.", taskID), nil
 }
