@@ -28,7 +28,6 @@ type ExecTool struct {
 	restrictToWorkspace bool
 	approvalMode        bool                                  // Activa modo aprobación
 	approvalCallback    func(cmd string) (bool, error)        // Callback para solicitar aprobación
-	bypassGuard         bool                                  // Bypass all safety guards when command is approved
 	channel             string                                // Channel for feedback messages
 	chatID              string                                // ChatID for feedback messages
 	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
@@ -294,8 +293,11 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Check safety guards unless bypass is enabled (for approved commands)
-	if !t.bypassGuard {
+	// Check safety guards unless bypass is enabled for THIS specific command
+	// in THIS context. The bypass is scoped to the approved command string
+	// (case/whitespace-normalized comparison) so that a stale or racing flag
+	// can never authorize a different command. See WithBypassGuard in base.go.
+	if !BypassGuardFor(ctx, command) {
 		guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
 		if guardMsg != "" {
 			// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
@@ -659,9 +661,11 @@ func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) 
 	t.approvalCallback = callback
 }
 
-// SetBypassGuard activa/desactiva el bypass de seguridad para comandos aprobados
-func (t *ExecTool) SetBypassGuard(enabled bool) {
-	t.bypassGuard = enabled
+// Deprecated: SetBypassGuard was removed in favour of per-call context-based
+// bypass (WithBypassGuard / BypassGuardFor). This stub exists only to satisfy
+// the mock in llm_runner_test.go until it is migrated; it is a no-op.
+func (t *ExecTool) SetBypassGuard(_ bool) {
+	// Intentional no-op. Callers must use WithBypassGuard on the context instead.
 }
 
 // SetBackgroundManager sets the background process manager for long-running commands.
