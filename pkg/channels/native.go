@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,22 @@ type WSClient struct {
 	maxPendingMsgs int
 	reconnectTimer *time.Timer
 	mu             sync.Mutex
+
+	// done is closed to signal wsWriteLoop and wsReadLoop to exit.  Each
+	// goroutine captures the channel ONCE at entry (local variable) so that
+	// a subsequent reconnect can replace it without the old loop picking up
+	// the new channel.  Guarded by mu: created in newWSClient, replaced in
+	// reconnectWSClient, closed in markWSClientReconnecting / removeWSClient / Stop.
+	//
+	// Lock ordering (MUST be respected everywhere):
+	//   NativeChannel.mu  →  WSClient.mu
+	// No code path may acquire NativeChannel.mu while holding WSClient.mu.
+	done chan struct{}
+
+	// activeWriteLoops tracks the number of live wsWriteLoop goroutines
+	// for this client.  Monotonically transitions to 0 once the loop exits.
+	// Exposed for tests and diagnostics; not a concurrency control.
+	activeWriteLoops atomic.Int64
 }
 
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
@@ -309,6 +326,8 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 			client.reconnectTimer = nil
 		}
 		client.reconnecting = false
+		closeDoneChan(client.done)
+		client.done = make(chan struct{})
 		client.mu.Unlock()
 		close(client.SendChan)
 		if client.Conn != nil {
@@ -939,6 +958,17 @@ func (n *NativeChannel) addWSClient(client *WSClient) {
 	n.wsClients[client.ID] = client
 }
 
+// closeDoneChan safely closes a channel, handling nil and already-closed
+// channels. Uses recover because Go has no try-close idiom. Called under
+// client.mu where noted; close() itself does not acquire any lock.
+func closeDoneChan(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	defer func() { recover() }()
+	close(ch)
+}
+
 // removeWSClient permanently removes and cleans up a WebSocket client.
 // It cancels any pending reconnect timer and frees all resources.
 func (n *NativeChannel) removeWSClient(clientID string) {
@@ -952,6 +982,8 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 		}
 		client.reconnecting = false
 		client.closed = true
+		closeDoneChan(client.done)
+		client.done = make(chan struct{})
 		client.mu.Unlock()
 		close(client.SendChan)
 		if client.Conn != nil {
@@ -975,7 +1007,13 @@ func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 		client.pendingMsgs = nil
 		client.maxPendingMsgs = wsMaxPendingMsgs
 	}
-	// Close the old connection — the write loop goroutine is already dead.
+	// Signal stale wsWriteLoop/wsReadLoop to exit, then create a fresh done
+	// channel for the next connection. The old loops captured the old channel
+	// at entry, so they see the close; the new loop will capture the new one.
+	closeDoneChan(client.done)
+	client.done = make(chan struct{})
+
+	// Close the old connection — signal the write loop to exit.
 	// Leave Conn alone if a newer connection is already attached.
 	oldConn := client.Conn
 	if oldConn != nil && client.reconnecting {
@@ -1035,6 +1073,13 @@ func (n *NativeChannel) reconnectWSClient(client *WSClient, conn *websocket.Conn
 		client.reconnectTimer = nil
 	}
 
+	// Signal the old write/read loops to exit via a fresh done channel.
+	// The old loops captured the previous channel at entry, so they see the
+	// close and exit. New loops launched after this return will capture the
+	// fresh channel.
+	closeDoneChan(client.done)
+	client.done = make(chan struct{})
+
 	// Drain any stale messages from the old SendChan
 	for {
 		select {
@@ -1054,7 +1099,6 @@ drained:
 	client.closed = false
 	client.pendingMsgs = nil
 
-	// Also add the new sessionKey to subscriptions if it changed
 	client.mu.Unlock()
 
 	logger.InfoCF("native", "WebSocket client reconnected", map[string]interface{}{
@@ -1082,8 +1126,14 @@ func (n *NativeChannel) hasLiveClientFor(sessionKey string) bool {
 
 	for _, client := range n.wsClients {
 		matches := sessionKeyMatches(client.SessionKey, sessionKey)
-		if !matches && client.Subscriptions != nil {
-			for subKey := range client.Subscriptions {
+		if !matches {
+			client.mu.Lock()
+			subs := make([]string, 0, len(client.Subscriptions))
+			for k := range client.Subscriptions {
+				subs = append(subs, k)
+			}
+			client.mu.Unlock()
+			for _, subKey := range subs {
 				if sessionKeyMatches(subKey, sessionKey) {
 					matches = true
 					break
@@ -1123,12 +1173,18 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 			targets = append(targets, client)
 			continue
 		}
-		if client.Subscriptions != nil {
-			for subKey := range client.Subscriptions {
-				if sessionKeyMatches(subKey, sessionKey) {
-					targets = append(targets, client)
-					goto nextClient
-				}
+		// Snapshot subscription keys under client.mu to avoid racing with
+		// concurrent writes (handleWSSubscribe, handleWebSocket reconnect).
+		client.mu.Lock()
+		subs := make([]string, 0, len(client.Subscriptions))
+		for k := range client.Subscriptions {
+			subs = append(subs, k)
+		}
+		client.mu.Unlock()
+		for _, subKey := range subs {
+			if sessionKeyMatches(subKey, sessionKey) {
+				targets = append(targets, client)
+				goto nextClient
 			}
 		}
 		if n.agentLoop != nil && client.SessionKey != "" {
