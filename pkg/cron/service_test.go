@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -156,5 +157,205 @@ func TestExecuteJobByID_PanicThenNormalJobSucceeds(t *testing.T) {
 	}
 	if got.State.LastStatus != "ok" {
 		t.Errorf("normal LastStatus = %q, want %q", got.State.LastStatus, "ok")
+	}
+}
+
+// TestRunLoop_PanicInTickKeepsScheduling is the regression test for CRN-01.
+//
+// A panic inside checkJobs (the scheduler tick) used to kill the runLoop
+// goroutine silently — permanently stopping all job scheduling — and, because
+// checkJobs unlocked cs.mu manually mid-function, it also left the mutex
+// held forever, deadlocking every subsequent cron API call.
+//
+// Now the tick runs under a recover (logged, scheduling continues) and the
+// locked section uses defer-unlock, so after a panicking tick the service
+// must still schedule jobs and still respond to API calls.
+func TestRunLoop_PanicInTickKeepsScheduling(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	var handlerCalls int32
+	cs := NewCronService(storePath, func(job *CronJob) (string, error) {
+		atomic.AddInt32(&handlerCalls, 1)
+		return "ok", nil
+	})
+
+	// One normal due job.
+	job, err := cs.AddJob(
+		"healthy",
+		CronSchedule{Kind: "every", EveryMS: int64Ptr(60_000)},
+		"hello", false, "cli", "direct",
+	)
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer cs.Stop()
+
+	// Snapshot the store, then sabotage it so the NEXT tick panics
+	// mid-collection: a nil store makes the range over cs.store.Jobs
+	// dereference a nil pointer.
+	cs.mu.Lock()
+	saved := cs.store
+	cs.store = nil
+	cs.mu.Unlock()
+
+	// Give the scheduler one tick with the sabotaged store: the tick panics,
+	// but the recover must keep runLoop alive.
+	time.Sleep(1500 * time.Millisecond)
+
+	// Restore the store and make the healthy job due.
+	cs.mu.Lock()
+	cs.store = saved
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	// The runLoop must still be ticking: the due job gets executed within a
+	// couple of scheduler ticks.
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&handlerCalls) > 0 {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&handlerCalls) == 0 {
+		t.Fatal("runLoop died after a panicking tick — scheduling stopped permanently")
+	}
+}
+
+// TestCollectDueJobs_PanicDoesNotPoisonMutex verifies that a panic inside the
+// locked section of collectDueJobs releases cs.mu (defer-unlock), so later
+// API calls do not deadlock. Under the old manually-unlocked checkJobs, this
+// panic left the mutex held forever.
+func TestCollectDueJobs_PanicDoesNotPoisonMutex(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cs := NewCronService(tmpDir+"/jobs.json", nil)
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer cs.Stop()
+
+	// Sabotage: nil store panics inside the locked section.
+	cs.mu.Lock()
+	cs.store = nil
+	cs.mu.Unlock()
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected collectDueJobs to panic with nil store")
+			}
+		}()
+		cs.collectDueJobs()
+	}()
+
+	// The mutex must NOT be poisoned: these calls would hang forever under
+	// the old code. Use a timeout so the test fails instead of hanging.
+	done := make(chan struct{})
+	go func() {
+		cs.mu.Lock()
+		cs.mu.Unlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cs.mu still locked after panic in collectDueJobs — deadlock")
+	}
+}
+
+// TestCheckJobs_SkipsExecutingJob is a behavioral guard for the scheduling
+// loop: a job already marked executing must not be collected twice by the
+// 1-second ticker while its handler is still running.
+func TestCheckJobs_SkipsExecutingJob(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	release := make(chan struct{})
+	var handlerCalls int32
+	cs := NewCronService(tmpDir+"/jobs.json", func(job *CronJob) (string, error) {
+		atomic.AddInt32(&handlerCalls, 1)
+		<-release
+		return "ok", nil
+	})
+
+	job, err := cs.AddJob(
+		"slow",
+		CronSchedule{Kind: "every", EveryMS: int64Ptr(60_000)},
+		"hello", false, "cli", "direct",
+	)
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	// checkJobs is a no-op unless the service is running.
+	cs.mu.Lock()
+	cs.running = true
+	cs.stopChan = make(chan struct{})
+	cs.mu.Unlock()
+	defer func() {
+		cs.mu.Lock()
+		cs.running = false
+		cs.mu.Unlock()
+	}()
+
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	cs.checkJobs() // spawns executeJobByID goroutine; NextRunAtMS reset to nil
+
+	// Wait until the handler is inside the blocking section.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && atomic.LoadInt32(&handlerCalls) == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&handlerCalls) == 0 {
+		t.Fatal("handler never started")
+	}
+
+	// Make the job due again and re-tick: since the previous execution is
+	// still running (we hold it open via release), this tick must skip it.
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+	cs.checkJobs()
+
+	// Give the second execution goroutine a moment to (wrongly) start.
+	time.Sleep(300 * time.Millisecond)
+	if got := atomic.LoadInt32(&handlerCalls); got != 1 {
+		t.Fatalf("handler invoked %d times after skip tick, want 1 (executing guard failed)", got)
+	}
+	close(release)
+
+	// The executing slot must be clean after the first execution finishes.
+	cleanupDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(cleanupDeadline) {
+		if _, busy := cs.executing.Load(job.ID); !busy {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if _, busy := cs.executing.Load(job.ID); busy {
+		t.Error("executing slot not cleaned up after job finished")
 	}
 }
