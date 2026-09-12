@@ -51,6 +51,25 @@ func writeStagingFile(t *testing.T, ts *nativeTestServer, name, content string) 
 	return path
 }
 
+// uploadDir returns the upload directory path for the given test server.
+func uploadDir(ts *nativeTestServer) string {
+	return filepath.Join(ts.channel.cfg.LeleDir, "tmp", "uploads")
+}
+
+// writeUploadFile creates a file under the uploads directory and returns its path.
+func writeUploadFile(t *testing.T, ts *nativeTestServer, name, content string) string {
+	t.Helper()
+	dir := uploadDir(ts)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // --- stageAttachment unit tests ---
 
 func TestStageAttachment_CopiesOutsideFileUnderLeleDir(t *testing.T) {
@@ -553,5 +572,142 @@ func TestIsDeniedViewPath(t *testing.T) {
 		if isDeniedViewPath(p) {
 			t.Errorf("expected isDeniedViewPath(%q) = false", p)
 		}
+	}
+}
+
+// --- FIXA-2: uploads dir must be publicly viewable ---
+
+// TestFileView_RegressionUploadsDirServed verifies that files under
+// <leleDir>/tmp/uploads (the second staging dir used by handleFileUpload)
+// are servable by the public GET /api/v1/files/view endpoint.
+//
+// This test FAILS (403) on code before the fixa-2 patch because the jail
+// only allowed <leleDir>/tmp/attachments.
+func TestFileView_RegressionUploadsDirServed(t *testing.T) {
+	ts := newStagingTestServer(t)
+	// Simulate a file as it would exist after handleFileUpload: under
+	// tmp/uploads with a uuid-prefixed name.
+	path := writeUploadFile(t, ts, "abcd1234_photo.png", "image-bytes")
+
+	resp, body := getView(t, ts, url.Values{"path": {path}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("uploads dir file rejected: status = %d, want 200; body = %s", resp.StatusCode, body)
+	}
+	if body != "image-bytes" {
+		t.Errorf("body = %q, want image-bytes", body)
+	}
+}
+
+// TestFileView_UploadsDirDeniedSensitiveFiles verifies that the defence-in-depth
+// denylist (keyring.key, config.json, *.db, etc.) still applies to files
+// under the uploads directory — the broader jail must not bypass denylist.
+// Filenames in the uploads dir carry a uuid prefix (e.g. abcd_keyring.key),
+// but the denylist checks the base name, so files that still end with a
+// denied suffix must be rejected.
+func TestFileView_UploadsDirDeniedSensitiveFiles(t *testing.T) {
+	ts := newStagingTestServer(t)
+
+	denied := []string{
+		"keyring.key",
+		"keyring.enc",
+		"config.json",
+		"native_clients.json",
+		"data.db",
+		"data.db-wal",
+		"data.db-shm",
+		"server.key",
+		"cert.pem",
+		"config.yaml",
+		"config.toml",
+	}
+
+	for _, name := range denied {
+		// Write directly to the uploads dir with the exact denied name
+		// (no uuid prefix) to test that the denylist fires.
+		dir := uploadDir(ts)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("secret-data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		resp, _ := getView(t, ts, url.Values{"path": {path}})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("denied file %s in uploads served: status = %d, want 403", name, resp.StatusCode)
+		}
+		os.Remove(path)
+	}
+}
+
+// TestFileView_RejectsPathOutsideBothStagingRoots verifies that paths under
+// leleDir but outside both tmp/attachments and tmp/uploads are rejected.
+func TestFileView_RejectsPathOutsideBothStagingRoots(t *testing.T) {
+	ts := newStagingTestServer(t)
+	// Directly under leleDir
+	secret := filepath.Join(ts.channel.cfg.LeleDir, "config.json")
+	if err := os.WriteFile(secret, []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := getView(t, ts, url.Values{"path": {secret}})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("config.json under leleDir: status = %d, want 403", resp.StatusCode)
+	}
+
+	// Under tmp/ but in a different subdir
+	other := filepath.Join(ts.channel.cfg.LeleDir, "tmp", "otro", "x.png")
+	if err := os.MkdirAll(filepath.Dir(other), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(other, []byte("img"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ = getView(t, ts, url.Values{"path": {other}})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("tmp/otro/x.png: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestFileView_RejectsUploadsSiblingPrefixEscape verifies that a directory
+// with a name like "tmp/uploads_evil" is not accepted under the uploads jail.
+func TestFileView_RejectsUploadsSiblingPrefixEscape(t *testing.T) {
+	ts := newStagingTestServer(t)
+	leleDir := ts.channel.cfg.LeleDir
+	evilDir := filepath.Join(leleDir, "tmp", "uploads_evil")
+	if err := os.MkdirAll(evilDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	evil := filepath.Join(evilDir, "payload.png")
+	if err := os.WriteFile(evil, []byte("evil"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, _ := getView(t, ts, url.Values{"path": {evil}})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("uploads_evil sibling prefix: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestFileView_UploadsSymlinkEscape verifies that a symlink inside
+// tmp/uploads pointing outside both staging roots is rejected.
+func TestFileView_UploadsSymlinkEscape(t *testing.T) {
+	ts := newStagingTestServer(t)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("leaked"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dir := uploadDir(ts)
+	os.MkdirAll(dir, 0755)
+	link := filepath.Join(dir, "sneaky.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	resp, body := getView(t, ts, url.Values{"path": {link}})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("symlink escape via uploads: status = %d, want 403 (%s)", resp.StatusCode, body)
+	}
+	if strings.Contains(body, "leaked") {
+		t.Errorf("symlink target content leaked: %q", body)
 	}
 }

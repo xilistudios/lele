@@ -21,7 +21,14 @@ func (n *NativeChannel) handleFileUpload(w http.ResponseWriter, r *http.Request)
 	clientID := getClientID(r)
 
 	maxSize := n.cfg.MaxUploadSizeMB * 1024 * 1024
+	// MaxBytesReader caps the total bytes read from the body. The argument
+	// to ParseMultipartForm only limits the in-memory buffer; without
+	// MaxBytesReader the rest is silently spooled to disk, allowing unbounded
+	// disk consumption from a single request.
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize)
 	if err := r.ParseMultipartForm(maxSize); err != nil {
+		// MaxBytesReader returns "http: request body too large" when the
+		// limit is exceeded. Map it to 413 with a stable error code.
 		if err.Error() == "http: request body too large" {
 			writeError(w, http.StatusRequestEntityTooLarge,
 				"file too large (max "+strconv.FormatInt(n.cfg.MaxUploadSizeMB, 10)+"MB)",
@@ -156,6 +163,32 @@ func detectMimeType(path string) string {
 	return http.DetectContentType(buffer[:n])
 }
 
+// publicStagingDirs son los directorios bajo leleDir cuyos archivos pueden
+// servirse sin autenticación en /api/v1/files/view. Son staging de material
+// que el USUARIO subió o eligió compartir, y que la WebUI previsualiza con
+// <img src> (imposible mandar Authorization header ahí).
+//
+//	tmp/attachments ← stageAttachment() (send_file)
+//	tmp/uploads     ← handleFileUpload() (subida desde el composer)
+func publicStagingDirs(leleDir string) []string {
+	return []string{
+		filepath.Join(leleDir, "tmp", "attachments"),
+		filepath.Join(leleDir, "tmp", "uploads"),
+	}
+}
+
+// isUnderAnyPublicStagingDir reports whether absPath is inside any of the
+// public staging directories. Both the exact directory match and child
+// containment are accepted.
+func isUnderAnyPublicStagingDir(absPath string, leleDir string) bool {
+	for _, dir := range publicStagingDirs(leleDir) {
+		if isUnderDir(absPath, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // attachmentStagingDir returns the directory under leleDir where outbound
 // attachments that live outside the lele dir are copied so they can be served
 // by /api/v1/files/view (which only allows paths inside leleDir).
@@ -228,17 +261,18 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 	}
 
 	// Already servable by the public endpoint — no-op (idempotent). Only
-	// files under the staging directory (<leleDir>/tmp/attachments/) can be
-	// served by the public GET /api/v1/files/view; files elsewhere under
-	// leleDir (e.g. workspaces, uploads) require the authenticated
-	// /api/v1/files/view-secure endpoint. By copying everything else to
-	// staging we keep the invariant simple: "public == staging".
+	// files under one of the public staging directories
+	// (<leleDir>/tmp/attachments/ or <leleDir>/tmp/uploads/) can be served
+	// by the public GET /api/v1/files/view; files elsewhere under leleDir
+	// (e.g. workspaces) require the authenticated /api/v1/files/view-secure
+	// endpoint. By copying everything else to staging we keep the invariant
+	// simple: "public == one of the staging dirs".
 	//
-	// NOTE: this means files already under leleDir (but outside staging)
-	// are now COPIED into staging rather than left in place.  The cost is
-	// extra disk (one copy per send_file that references a workspace path),
-	// but the security surface is cleaner — there is exactly one directory
-	// that is publicly accessible.
+	// NOTE: this means files already under leleDir (but outside the staging
+	// dirs) are now COPIED into attachments staging rather than left in
+	// place.  The cost is extra disk (one copy per send_file that references
+	// a workspace path), but the security surface is cleaner — there are
+	// exactly two directories that are publicly accessible.
 	stagingAbs := attachmentStagingDir(leleDirAbs)
 	if isUnderDir(realPath, stagingAbs) {
 		return nil
@@ -449,13 +483,13 @@ func (n *NativeChannel) serveFileView(w http.ResponseWriter, r *http.Request, ab
 	http.ServeFile(w, r, realPath)
 }
 
-// handleFileView serves files from the public staging directory
-// (<leleDir>/tmp/attachments/). This is the UNAUTHENTICATED endpoint used by
-// the WebUI for <img src> and download links that cannot carry an Authorization
-// header.
+// handleFileView serves files from the public staging directories
+// (<leleDir>/tmp/attachments/ and <leleDir>/tmp/uploads/). This is the
+// UNAUTHENTICATED endpoint used by the WebUI for <img src> and download
+// links that cannot carry an Authorization header.
 //
 // Security layers:
-//  1. Path must resolve inside the staging directory (not the broader leleDir).
+//  1. Path must resolve inside one of the public staging directories (not the broader leleDir).
 //  2. Symlinks are resolved and re-validated (no escape via symlink).
 //  3. Sensitive filenames are denied even within staging (defence in depth).
 func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
@@ -471,10 +505,9 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Public endpoint: only serve files under the staging directory.
+	// Public endpoint: only serve files under the public staging directories.
 	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
-	stagingDir := attachmentStagingDir(leleDirAbs)
-	if stagingDir == "" || !isUnderDir(absPath, stagingDir) {
+	if leleDirAbs == "" || !isUnderAnyPublicStagingDir(absPath, leleDirAbs) {
 		// Log attempted access to a non-staging path under leleDir so we
 		// can detect legitimate consumers we may have broken.
 		if leleDirAbs != "" && isUnderDir(absPath, leleDirAbs) {
@@ -489,7 +522,7 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
 		realPath = resolved
 	}
-	if !isUnderDir(realPath, stagingDir) {
+	if !isUnderAnyPublicStagingDir(realPath, leleDirAbs) {
 		writeError(w, http.StatusForbidden, "access denied", "access_denied")
 		return
 	}
