@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -208,6 +209,24 @@ func (cs *CronService) checkJobs() {
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
+	// Recover from panics in the handler so a single bad job can't crash
+	// the process (CHT-01). Placed first so it runs LAST in defer LIFO
+	// order, after cs.executing.Delete(jobID) releases the slot.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[cron] PANIC in job %s: %v\n%s", jobID, r, debug.Stack())
+			cs.mu.Lock()
+			for i := range cs.store.Jobs {
+				if cs.store.Jobs[i].ID == jobID {
+					cs.store.Jobs[i].State.LastStatus = "error"
+					cs.store.Jobs[i].State.LastError = fmt.Sprintf("panic: %v", r)
+					break
+				}
+			}
+			cs.mu.Unlock()
+		}
+	}()
+
 	// Mark job as executing so checkJobs won't collect it again while
 	// we're waiting on a long-running handler (e.g. spawn subagent).
 	cs.executing.Store(jobID, true)
@@ -232,8 +251,17 @@ func (cs *CronService) executeJobByID(jobID string) {
 	}
 
 	var err error
+	var panicked bool
 	if cs.onJob != nil {
-		_, err = cs.onJob(callbackJob)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					panicked = true
+					err = fmt.Errorf("panic: %v", r)
+				}
+			}()
+			_, err = cs.onJob(callbackJob)
+		}()
 	}
 
 	// Now acquire lock to update state
@@ -255,7 +283,10 @@ func (cs *CronService) executeJobByID(jobID string) {
 	job.State.LastRunAtMS = &startTime
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
-	if err != nil {
+	if panicked {
+		job.State.LastStatus = "error"
+		job.State.LastError = err.Error()
+	} else if err != nil {
 		job.State.LastStatus = "error"
 		job.State.LastError = err.Error()
 	} else {
