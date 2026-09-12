@@ -739,6 +739,58 @@ func (gm *GroupManager) StopAll() int {
 	return len(toStop)
 }
 
+// DrainAllRunGoroutines blocks until every tracked group's runGroup goroutine
+// has fully exited — including deferred saveStateBestEffort calls that execute
+// after done is closed. Callers MUST StopAll (or otherwise cancel every group's
+// context) before calling this; otherwise it blocks forever on a group that
+// never observes cancellation.
+//
+// The implementation copies the managedGroup pointers under gm.mu and then
+// waits on each mg.runWg OUTSIDE the lock — the same collect-under-lock,
+// act-outside-lock pattern that StopAll and CleanupTerminalTasks use to avoid
+// lock-ordering hazards.
+//
+// If a group's runGroup goroutine does not exit within the provided grace
+// duration (or grace <= 0 for unbounded), the function returns false. The
+// caller is responsible for logging a warning and deciding how to proceed
+// (typically closing the DB store anyway and accepting that the terminal state
+// of those groups may be lost).
+func (gm *GroupManager) DrainAllRunGoroutines(grace time.Duration) bool {
+	gm.mu.Lock()
+	// Copy every tracked group — not just running ones — because a group that
+	// just entered finalize but has not yet returned from saveStateBestEffort
+	// is terminal but still in-flight on runWg.
+	groups := make([]*managedGroup, 0, len(gm.groups))
+	for _, mg := range gm.groups {
+		groups = append(groups, mg)
+	}
+	gm.mu.Unlock()
+
+	if len(groups) == 0 {
+		return true
+	}
+
+	done := make(chan struct{})
+	go func() {
+		for _, mg := range groups {
+			mg.runWg.Wait()
+		}
+		close(done)
+	}()
+
+	if grace <= 0 {
+		<-done
+		return true
+	}
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(grace):
+		return false
+	}
+}
+
 // StopByOrigin cancels every running group whose origin chat matches
 // chatID. When channel is non-empty it must also match the group's origin
 // channel; an empty channel matches any. Returns the number of groups stopped.

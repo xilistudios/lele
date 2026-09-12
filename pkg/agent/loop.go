@@ -1189,6 +1189,20 @@ func (al *AgentLoop) StopWithin(grace time.Duration) error {
 			al.wg.Wait()
 		}
 
+		// Drain group run goroutines before closing the store (CORE-04).
+		// Without this, runGroup's deferred saveStateBestEffort executes
+		// against a closed DB and the terminal group state is silently lost.
+		// Reuses the same grace budget as the turn drain above.
+		if al.groupManager != nil {
+			drained := al.groupManager.DrainAllRunGoroutines(grace)
+			if !drained {
+				abandoned = true
+				logger.WarnCF("agent", "Group run drain timed out; abandoning in-flight group runs — terminal state may be lost",
+					map[string]interface{}{"grace": grace.String()})
+				return
+			}
+		}
+
 		if al.dbStore != nil {
 			if err := al.dbStore.Close(); err != nil {
 				logger.ErrorC("store", fmt.Sprintf("Failed to close SQLite store: %v", err))
