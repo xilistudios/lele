@@ -298,6 +298,19 @@ func (am *AuthManager) cleanupExpired() {
 	}
 }
 
+// GeneratePIN creates a new 6-digit PIN for device pairing. The PIN expires
+// after the configured PinExpiryMinutes (default 5). Only up to MaxPendingPINs
+// (10) concurrent pending PINs are allowed.
+//
+// Security: this method MUST be called from an authenticated context (e.g.
+// the WebUI settings page behind withAuth). Exposing it to unauthenticated
+// callers defeats the out-of-band property of the PIN — the issuer's identity
+// is what makes the PIN meaningful as a pairing credential.
+//
+// The deviceName parameter is optional but recommended: when provided, it is
+// stored with the pending PIN so PairWithPIN can verify the redeeming device
+// matches. When empty, PairWithPIN will require the caller to supply one at
+// redemption time.
 func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
@@ -375,6 +388,14 @@ func (am *AuthManager) PairWithPIN(pin, deviceName string) (*ClientInfo, string,
 
 	if pending.DeviceName != "" && deviceName != "" && pending.DeviceName != deviceName {
 		return nil, "", "", fmt.Errorf("device name mismatch")
+	}
+
+	// If the PIN was issued without a device_name (e.g. CLI flow), require
+	// the caller to supply one. This prevents pairing without any device
+	// identification — an empty device_name on both sides would bypass the
+	// name check entirely, which was the CRITICAL-3 bypass vector.
+	if pending.DeviceName == "" && strings.TrimSpace(deviceName) == "" {
+		return nil, "", "", fmt.Errorf("device_name is required")
 	}
 
 	am.cleanupExpired()

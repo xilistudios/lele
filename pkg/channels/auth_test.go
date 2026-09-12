@@ -893,3 +893,180 @@ func TestRegisterDesktopClient_RefreshWorks(t *testing.T) {
 		t.Error("expected rotated token to be valid")
 	}
 }
+
+// FIX-2: PairWithPIN must reject pairing when both the PIN's DeviceName and
+// the caller's deviceName are empty. This closes the bypass where an attacker
+// could pair without any device identification.
+func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Generate PIN without a device name (e.g. CLI flow).
+	pending, err := auth.GeneratePIN("")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pairing without providing a device name must fail.
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "")
+	if err == nil {
+		t.Fatal("expected error when pairing without device_name and PIN issued without one")
+	}
+	if err.Error() != "device_name is required" {
+		t.Fatalf("error = %q, want 'device_name is required'", err.Error())
+	}
+
+	// Pairing WITH a device name should succeed.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "My Device")
+	if err != nil {
+		t.Fatalf("pairing with device_name should succeed: %v", err)
+	}
+	if client == nil || token == "" {
+		t.Fatal("expected valid client and token")
+	}
+	if client.DeviceName != "My Device" {
+		t.Errorf("client.DeviceName = %q, want 'My Device'", client.DeviceName)
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with the same name
+// should still work (existing behaviour preserved).
+func TestAuthManager_PairWithPIN_DeviceNameMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with matching device name.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "Server-Device")
+	if err != nil {
+		t.Fatalf("pairing with matching device_name: %v", err)
+	}
+	if client == nil || token == "" {
+		t.Fatal("expected valid client and token")
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with mismatched name
+// should fail (existing behaviour preserved).
+func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with mismatched device name.
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "Evil-Device")
+	if err == nil {
+		t.Fatal("expected error for device name mismatch")
+	}
+	if err.Error() != "device name mismatch" {
+		t.Fatalf("error = %q, want 'device name mismatch'", err.Error())
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with empty device name
+// should use the PIN's device name (existing behaviour: the finalDeviceName
+// falls back to pending.DeviceName).
+func TestAuthManager_PairWithPIN_EmptyCallerWithPINDeviceName(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with empty device name — should use the PIN's device name.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "")
+	if err != nil {
+		t.Fatalf("pairing with empty device_name should succeed when PIN has one: %v", err)
+	}
+	if client.DeviceName != "Server-Device" {
+		t.Errorf("client.DeviceName = %q, want 'Server-Device'", client.DeviceName)
+	}
+	_ = token
+}
+
+// PairWithPIN must reject expired and nonexistent PINs (existing tests
+// consolidated here for completeness).
+func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Nonexistent PIN.
+	_, _, _, err = auth.PairWithPIN("999999", "Test")
+	if err == nil {
+		t.Fatal("expected error for nonexistent PIN")
+	}
+
+	// Expired PIN: generate one and force its expiry to the past, then save
+	// to disk so that PairWithPIN's internal loadStore picks up the change.
+	pending, err := auth.GeneratePIN("Test")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+	// Force expiry to the past and persist.
+	auth.mu.Lock()
+	if p, ok := auth.store.PendingPINs[pending.PIN]; ok {
+		p.Expires = time.Now().Add(-1 * time.Minute)
+	}
+	auth.saveStoreUnlocked()
+	auth.mu.Unlock()
+
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "Test")
+	if err == nil {
+		t.Fatal("expected error for expired PIN")
+	}
+}

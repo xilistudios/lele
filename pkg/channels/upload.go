@@ -3,6 +3,7 @@ package channels
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -226,8 +227,20 @@ func stageAttachment(a *bus.FileAttachment, leleDir string) error {
 		realPath = resolved
 	}
 
-	// Already servable — no-op (idempotent).
-	if isUnderDir(realPath, leleDirAbs) {
+	// Already servable by the public endpoint — no-op (idempotent). Only
+	// files under the staging directory (<leleDir>/tmp/attachments/) can be
+	// served by the public GET /api/v1/files/view; files elsewhere under
+	// leleDir (e.g. workspaces, uploads) require the authenticated
+	// /api/v1/files/view-secure endpoint. By copying everything else to
+	// staging we keep the invariant simple: "public == staging".
+	//
+	// NOTE: this means files already under leleDir (but outside staging)
+	// are now COPIED into staging rather than left in place.  The cost is
+	// extra disk (one copy per send_file that references a workspace path),
+	// but the security surface is cleaner — there is exactly one directory
+	// that is publicly accessible.
+	stagingAbs := attachmentStagingDir(leleDirAbs)
+	if isUnderDir(realPath, stagingAbs) {
 		return nil
 	}
 
@@ -358,46 +371,49 @@ func contentDispositionFilename(name string) string {
 	}, name)
 }
 
-func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
-		writeError(w, http.StatusBadRequest, "missing path parameter", "path_missing")
-		return
-	}
+// deniedViewNames is an explicit list of sensitive filenames that must never be
+// served by the file view endpoint, even if they end up inside the staging
+// directory. This is defence in depth — a future containment regression cannot
+// re-expose these files.
+var deniedViewNames = map[string]bool{
+	"keyring.key":         true,
+	"keyring.enc":         true,
+	"config.json":         true,
+	"native_clients.json": true,
+}
 
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
-		return
+// isDeniedViewPath reports whether absPath points to a sensitive file that
+// must never be served. The check is filename-based (no path traversal
+// bypass) and covers:
+//   - keyring material (*keyring.key, *keyring.enc)
+//   - config files (config.json, config.*)
+//   - database files (*.db, *.db-wal, *.db-shm)
+//   - TLS key material (*.key, *.pem)
+//   - client metadata (native_clients.json)
+func isDeniedViewPath(absPath string) bool {
+	base := filepath.Base(absPath)
+	if deniedViewNames[base] {
+		return true
 	}
+	// Wildcard patterns: config.* (e.g. config.yaml, config.toml)
+	if strings.HasPrefix(base, "config.") {
+		return true
+	}
+	// Database files
+	if strings.HasSuffix(base, ".db") || strings.HasSuffix(base, ".db-wal") || strings.HasSuffix(base, ".db-shm") {
+		return true
+	}
+	// TLS key material
+	if strings.HasSuffix(base, ".key") || strings.HasSuffix(base, ".pem") {
+		return true
+	}
+	return false
+}
 
-	// Security: only allow files inside leleDir (~/.lele)
-	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
-	if leleDirAbs == "" || !strings.HasPrefix(absPath, leleDirAbs) {
-		writeError(w, http.StatusForbidden, "access denied", "access_denied")
-		return
-	}
-
-	// filepath.Abs already cleans the path, but a prefix check alone is not a
-	// containment check ("/home/x/.leleevil" passes HasPrefix("/home/x/.lele")).
-	// Require the path to be the dir itself or strictly inside it.
-	if !isUnderDir(absPath, leleDirAbs) {
-		writeError(w, http.StatusForbidden, "access denied", "access_denied")
-		return
-	}
-
-	// A symlink placed inside leleDir could point outside it; resolve the
-	// real target and re-run the containment check so /files/view can never
-	// serve a file that is not physically under leleDir.
-	realPath := absPath
-	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
-		realPath = resolved
-	}
-	if !isUnderDir(realPath, leleDirAbs) {
-		writeError(w, http.StatusForbidden, "access denied", "access_denied")
-		return
-	}
-
+// serveFileView is the shared core for both the public and authenticated file
+// view endpoints. It assumes the path has already been validated against the
+// appropriate root directory.
+func (n *NativeChannel) serveFileView(w http.ResponseWriter, r *http.Request, absPath, realPath string) {
 	info, err := os.Stat(realPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -415,9 +431,6 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	mimeType := detectMimeType(realPath)
 
 	w.Header().Set("Content-Type", mimeType)
-	// ?download=1 turns the view into a forced download. ?name=<override>
-	// optionally replaces the filename shown by the browser — it is used ONLY
-	// as the display filename (sanitized), never for path resolution.
 	download := r.URL.Query().Get("download") == "1"
 	filename := filepath.Base(absPath)
 	if override := r.URL.Query().Get("name"); override != "" {
@@ -434,4 +447,104 @@ func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	http.ServeFile(w, r, realPath)
+}
+
+// handleFileView serves files from the public staging directory
+// (<leleDir>/tmp/attachments/). This is the UNAUTHENTICATED endpoint used by
+// the WebUI for <img src> and download links that cannot carry an Authorization
+// header.
+//
+// Security layers:
+//  1. Path must resolve inside the staging directory (not the broader leleDir).
+//  2. Symlinks are resolved and re-validated (no escape via symlink).
+//  3. Sensitive filenames are denied even within staging (defence in depth).
+func (n *NativeChannel) handleFileView(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "missing path parameter", "path_missing")
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
+		return
+	}
+
+	// Public endpoint: only serve files under the staging directory.
+	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
+	stagingDir := attachmentStagingDir(leleDirAbs)
+	if stagingDir == "" || !isUnderDir(absPath, stagingDir) {
+		// Log attempted access to a non-staging path under leleDir so we
+		// can detect legitimate consumers we may have broken.
+		if leleDirAbs != "" && isUnderDir(absPath, leleDirAbs) {
+			log.Printf("WARNING: public files/view denied non-staging path under leleDir: %s", absPath)
+		}
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	// Symlink escape check
+	realPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		realPath = resolved
+	}
+	if !isUnderDir(realPath, stagingDir) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	// Defence in depth: deny sensitive filenames even within staging.
+	if isDeniedViewPath(absPath) || isDeniedViewPath(realPath) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	n.serveFileView(w, r, absPath, realPath)
+}
+
+// handleFileViewSecure serves files from the broader leleDir (~/.lele). This
+// is the AUTHENTICATED endpoint that preserves the original wide-access
+// behaviour for clients that can send an Authorization header (desktop, CLI).
+//
+// Security layers:
+//  1. Endpoint is behind withAuth (set up by RegisterRoutes).
+//  2. Path must resolve inside leleDir (symlink-safe).
+//  3. Sensitive filenames are denied (defence in depth).
+func (n *NativeChannel) handleFileViewSecure(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "missing path parameter", "path_missing")
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path", "path_invalid")
+		return
+	}
+
+	leleDirAbs, _ := filepath.Abs(n.cfg.LeleDir)
+	if leleDirAbs == "" || !isUnderDir(absPath, leleDirAbs) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	// Symlink escape check
+	realPath := absPath
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		realPath = resolved
+	}
+	if !isUnderDir(realPath, leleDirAbs) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	// Defence in depth: deny sensitive filenames.
+	if isDeniedViewPath(absPath) || isDeniedViewPath(realPath) {
+		writeError(w, http.StatusForbidden, "access denied", "access_denied")
+		return
+	}
+
+	n.serveFileView(w, r, absPath, realPath)
 }
