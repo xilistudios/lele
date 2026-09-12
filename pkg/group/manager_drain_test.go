@@ -16,8 +16,8 @@ import (
 // proceeds through explicit synchronization.
 type contentionExecutor struct {
 	gm      *GroupManager // if non-nil, Status() is called after release to contend for gm.mu
-	entered chan struct{}  // closed when the executor begins
-	release chan struct{}  // closed by the test to let the executor proceed
+	entered chan struct{} // closed when the executor begins
+	release chan struct{} // closed by the test to let the executor proceed
 }
 
 func (e *contentionExecutor) execute(_ context.Context, req TurnRequest) (string, int, error) {

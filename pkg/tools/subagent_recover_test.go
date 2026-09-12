@@ -26,18 +26,19 @@ func (p *panicProvider) Chat(_ context.Context, _ []providers.Message, _ []provi
 	panic("boom")
 }
 
-func (p *panicProvider) GetDefaultModel() string  { return "test-model" }
-func (p *panicProvider) SupportsTools() bool      { return false }
-func (p *panicProvider) GetContextWindow() int     { return 4096 }
+func (p *panicProvider) GetDefaultModel() string { return "test-model" }
+func (p *panicProvider) SupportsTools() bool     { return false }
+func (p *panicProvider) GetContextWindow() int   { return 4096 }
 
 // TestSubagentPanicRecovery_SignalsDoneAndMarksFailed verifies AGT-05 core
 // invariants:
-//   (a) the test process survives the panic (if it didn't, the test runner
-//       itself would die),
-//   (b) SignalDone() fires — the test waits on the done channel with a
-//       timeout; if it hangs, the test fails by timeout,
-//   (c) the task's terminal status is "failed" and the panic text ("boom")
-//       appears in the result.
+//
+//	(a) the test process survives the panic (if it didn't, the test runner
+//	    itself would die),
+//	(b) SignalDone() fires — the test waits on the done channel with a
+//	    timeout; if it hangs, the test fails by timeout,
+//	(c) the task's terminal status is "failed" and the panic text ("boom")
+//	    appears in the result.
 func TestSubagentPanicRecovery_SignalsDoneAndMarksFailed(t *testing.T) {
 	manager := NewSubagentManager(&panicProvider{}, "test-model", t.TempDir(), nil, 10)
 
@@ -133,8 +134,8 @@ func TestSubagentPanicRecovery_SlotFreedForNextTask(t *testing.T) {
 
 	// --- Task 2: uses a normal provider, should complete ---
 	normalProvider := &flakySubagentProvider{
-		failAt:  0, // never fail
-		final:   "STATUS: completed\nSUMMARY: Done\nDETAILS:\nAll good",
+		failAt: 0, // never fail
+		final:  "STATUS: completed\nSUMMARY: Done\nDETAILS:\nAll good",
 	}
 	// Swap the provider on the manager.
 	manager.mu.Lock()

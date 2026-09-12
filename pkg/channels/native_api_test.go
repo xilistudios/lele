@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/security"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/skills"
 )
@@ -562,7 +563,7 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
 	// Routes already have auth middleware applied via withAuth wrapper
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -649,7 +650,7 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
 	// Routes already have auth middleware applied via withAuth wrapper
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -707,36 +708,11 @@ func TestNativeChannelAuthStatusInvalidTokenReturnsValidFalse(t *testing.T) {
 	}
 }
 
-func TestNativeChannelConfigPreflightAllowsPutFromSameHost(t *testing.T) {
-	ts := newNativeTestServer(t)
-	ts.channel.cfg.Host = "192.168.0.171"
-
-	req, err := http.NewRequest(http.MethodOptions, ts.server.URL+"/api/v1/config", nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	req.Header.Set("Origin", "http://192.168.0.171:3005")
-	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://192.168.0.171:3005" {
-		t.Fatalf("allow origin = %q, want %q", got, "http://192.168.0.171:3005")
-	}
-
-	allowMethods := resp.Header.Get("Access-Control-Allow-Methods")
-	if !strings.Contains(allowMethods, http.MethodPut) {
-		t.Fatalf("allow methods = %q, expected to contain %q", allowMethods, http.MethodPut)
-	}
-}
+// TestNativeChannelConfigPreflightAllowsPutFromSameHost was removed (WEB-M13):
+// it exercised NativeChannel.corsMiddleware, which production never wired —
+// native routes mount on the server mux whose live CORS policy (pkg/server)
+// was already re-verified by the audit. A green here validated headers that
+// never ship.
 
 func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	ts := newNativeTestServer(t)

@@ -13,6 +13,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/security"
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
@@ -74,7 +75,7 @@ func newCatalogTestServer(t *testing.T, named map[string]config.NamedProviderCon
 
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 	t.Cleanup(server.Close)
 
 	pending, err := auth.GeneratePIN("Test Desktop")

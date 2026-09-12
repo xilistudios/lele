@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/security"
 )
 
 // TestGroupEventsBridge verifies that group.status, group.turn, and
@@ -48,7 +49,7 @@ func TestGroupEventsBridge(t *testing.T) {
 	// Set up HTTP test server with WebSocket support.
 	mux := http.NewServeMux()
 	native.RegisterRoutes(mux)
-	handler := native.corsMiddleware(native.securityHeadersMiddleware(mux))
+	handler := security.Middleware()(mux)
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
