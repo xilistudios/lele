@@ -41,6 +41,7 @@ type HeartbeatService struct {
 	enabled   bool
 	mu        sync.RWMutex
 	stopChan  chan struct{}
+	done      chan struct{} // closed when the runLoop goroutine exits
 }
 
 // NewHeartbeatService creates a new heartbeat service
@@ -76,36 +77,55 @@ func (hs *HeartbeatService) SetHandler(handler HeartbeatHandler) {
 	hs.handler = handler
 }
 
+// startLocked begins the heartbeat loop if enabled and not already running.
+// Caller MUST hold hs.mu.
+func (hs *HeartbeatService) startLocked() {
+	if hs.stopChan != nil {
+		return
+	}
+	if !hs.enabled {
+		return
+	}
+	hs.stopChan = make(chan struct{})
+	hs.done = make(chan struct{})
+	// Capture channels under lock so the goroutine doesn't race on hs.stopChan
+	// with a concurrent Stop() that nils the field before the goroutine evaluates it.
+	stopChan := hs.stopChan
+	done := hs.done
+	go func() {
+		defer close(done)
+		hs.runLoop(stopChan)
+	}()
+}
+
 // Start begins the heartbeat service
 func (hs *HeartbeatService) Start() error {
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
 
-	if hs.stopChan != nil {
-		return nil
-	}
-
-	if !hs.enabled {
-		return nil
-	}
-
-	hs.stopChan = make(chan struct{})
-	go hs.runLoop(hs.stopChan)
-
+	hs.startLocked()
 	return nil
 }
 
-// Stop gracefully stops the heartbeat service
+// Stop gracefully stops the heartbeat service and waits for the loop
+// goroutine to exit, ensuring no log writes occur after Stop returns.
 func (hs *HeartbeatService) Stop() {
 	hs.mu.Lock()
-	defer hs.mu.Unlock()
 
 	if hs.stopChan == nil {
+		hs.mu.Unlock()
 		return
 	}
 
 	close(hs.stopChan)
+	done := hs.done
 	hs.stopChan = nil
+	hs.done = nil
+	hs.mu.Unlock()
+
+	// Wait outside the lock so the goroutine can finish (it may be in
+	// executeHeartbeat which takes RLock).
+	<-done
 }
 
 func (hs *HeartbeatService) UpdateConfig(intervalMinutes int, enabled bool) {
@@ -119,9 +139,15 @@ func (hs *HeartbeatService) UpdateConfig(intervalMinutes int, enabled bool) {
 	}
 	hs.interval = time.Duration(intervalMinutes) * time.Minute
 	hs.enabled = enabled
+	// Start the loop if we just became enabled and it's not running.
+	if enabled && hs.stopChan == nil {
+		hs.startLocked()
+	}
+	// Stop the loop if we just became disabled and it's running.
 	if hs.stopChan != nil && !enabled {
 		close(hs.stopChan)
 		hs.stopChan = nil
+		hs.done = nil
 	}
 }
 
