@@ -754,6 +754,14 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	// that can deadlock with the reverse path (session cancel -> SubagentManager.mu),
 	// permanently blocking all subsequent spawns.
 	var toEvict []string
+	// Cancels of evicted tasks, invoked after sm.mu is released (AGT-02):
+	// a terminal task's entry in sm.cancels pins the CancelFunc and its
+	// whole context tree alive. runTask's defer normally removes it, but a
+	// lingering entry can outlive the task map entry (eviction racing the
+	// goroutine's deferred cleanup, or a terminal task registered without a
+	// runner goroutine). Sweep it here so CleanupTerminalTasks is the single
+	// authority for reaping terminal tasks.
+	var toCancel []context.CancelFunc
 	for taskID, task := range sm.tasks {
 		if !isSubagentTerminalStatus(task.Status) {
 			continue
@@ -762,11 +770,21 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 		if now-task.Updated > thresholdMs {
 			toEvict = append(toEvict, task.OriginSessionKey+":"+taskID)
 			delete(sm.tasks, taskID)
+			if cancel, ok := sm.cancels[taskID]; ok && cancel != nil {
+				delete(sm.cancels, taskID)
+				toCancel = append(toCancel, cancel)
+			}
 			removed++
 		}
 	}
 	evictCallback := sm.sessionEvictCallback
 	sm.mu.Unlock()
+
+	// Release the evicted tasks' context resources outside the lock. The
+	// tasks are terminal, so cancelling is pure resource reclamation.
+	for _, cancel := range toCancel {
+		cancel()
+	}
 
 	// Evict sessions outside the lock.
 	if evictCallback != nil {

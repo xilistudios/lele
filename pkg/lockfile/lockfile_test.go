@@ -184,3 +184,65 @@ func trimSpace(b []byte) []byte {
 	}
 	return b[start:end]
 }
+
+// TestAcquire_LivePIDWithoutHolder_Takeover verifies the new flock-first
+// semantics: a PID file naming a live process is no longer sufficient to
+// refuse acquisition, because the kernel lock — not the file — decides
+// ownership. A holder that crashed while leaving its PID behind (flock is
+// auto-released on process exit) must not wedge the lock forever.
+//
+// Windows keeps the conservative PID-only guard, so this test is Unix-only.
+func TestAcquire_LivePIDWithoutHolder_Takeover(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses the conservative PID-file guard, not flock")
+	}
+	path := filepath.Join(t.TempDir(), "gateway.lock")
+
+	// Simulate a crashed holder: a live PID (ours) in the file, but no
+	// process actually holding the flock.
+	writePIDFile(t, path, strconv.Itoa(os.Getpid())+"\n")
+
+	l, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire over live PID with no flock holder: %v", err)
+	}
+	defer l.Release()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if got, err := strconv.Atoi(string(trimSpace(data))); err != nil || got != os.Getpid() {
+		t.Errorf("PID after takeover = %d (err %v), want %d", got, err, os.Getpid())
+	}
+}
+
+// TestAcquire_AfterRelease verifies that Release fully relinquishes the lock
+// (explicit unlock plus close), so a subsequent Acquire on the same path
+// succeeds. This guards against regressions where the kernel lock or the
+// open handle would be left behind.
+func TestAcquire_AfterRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.lock")
+
+	l1, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	if err := l1.Release(); err != nil {
+		t.Fatalf("first Release: %v", err)
+	}
+
+	l2, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("second Acquire after Release: %v", err)
+	}
+	defer l2.Release()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if got, err := strconv.Atoi(string(trimSpace(data))); err != nil || got != os.Getpid() {
+		t.Errorf("PID after reacquire = %d (err %v), want %d", got, err, os.Getpid())
+	}
+}

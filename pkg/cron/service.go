@@ -153,17 +153,45 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 		case <-stopChan:
 			return
 		case <-ticker.C:
-			cs.checkJobs()
+			// Recover from panics in the scheduling tick (CRN-01): without
+			// this guard a single panic would kill the runLoop goroutine
+			// silently, permanently stopping all job scheduling, while the
+			// half-ticked state (mutex, next-run resets) would poison every
+			// later call. Log and keep ticking.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[cron] PANIC in scheduler tick: %v\n%s", r, debug.Stack())
+					}
+				}()
+				cs.checkJobs()
+			}()
 		}
 	}
 }
 
 func (cs *CronService) checkJobs() {
+	dueJobIDs := cs.collectDueJobs()
+
+	// Execute jobs outside lock. Run each in its own goroutine so a slow job
+	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
+	// and delay every other due job.
+	for _, jobID := range dueJobIDs {
+		go cs.executeJobByID(jobID)
+	}
+}
+
+// collectDueJobs holds the scheduler lock while collecting due jobs and
+// resetting their next-run timestamps. The unlock is deferred (CRN-01) so a
+// panic inside the locked section releases cs.mu instead of poisoning it —
+// with a plain mid-function Unlock, a panic would leave the mutex held
+// forever and deadlock every subsequent cron API call.
+func (cs *CronService) collectDueJobs() []string {
 	cs.mu.Lock()
+	defer cs.mu.Unlock()
 
 	if !cs.running {
-		cs.mu.Unlock()
-		return
+		return nil
 	}
 
 	now := time.Now().UnixMilli()
@@ -198,14 +226,7 @@ func (cs *CronService) checkJobs() {
 		log.Printf("[cron] failed to save store: %v", err)
 	}
 
-	cs.mu.Unlock()
-
-	// Execute jobs outside lock. Run each in its own goroutine so a slow job
-	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
-	// and delay every other due job.
-	for _, jobID := range dueJobIDs {
-		go cs.executeJobByID(jobID)
-	}
+	return dueJobIDs
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
