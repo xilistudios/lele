@@ -448,6 +448,18 @@ func (m *Model) setCurrentChatKey(newKey string) {
 		}
 	}
 	m.currentKey = newKey
+	// TUI-H2: the streaming overlay (currentStream/currentThinking) is
+	// session-scoped presentation state. Every other session boundary clears
+	// it (publishUserMessage, /compact, message.complete cleanup), but this
+	// choke point did not — so frames buffered for the outgoing session kept
+	// painting into the viewport of the session that came on screen (most
+	// visibly after /new, which leaves the buffer populated while the welcome
+	// view is replaced). Reset it here so no switch can inherit stale frames,
+	// and drop the assistant-message id as well: the next turn on this session
+	// may legitimately reuse it, and the append sites only reset the buffer
+	// when the id *changes*.
+	m.resetStreamState()
+	m.currentAssistantMsgID = ""
 }
 
 // queueApprovalForCurrentChat surfaces an approval.request that belongs to the
