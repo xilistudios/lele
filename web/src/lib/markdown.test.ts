@@ -206,3 +206,94 @@ describe('isDiffStatLine / isFileDiffRow', () => {
     expect(isFileDiffRow('solo texto')).toBe(false)
   })
 })
+
+describe('link scheme allowlist (WEB-M12)', () => {
+  // Helper: extract href from the first link token in parsed output
+  const linkHref = (text: string): string | undefined => {
+    const parts = parseInlineMarkdown(text)
+    const link = parts.find((p) => p.token?.type === 'link')
+    return link?.token?.href
+  }
+
+  describe('blocked schemes → href must be undefined', () => {
+    test('javascript: basic', () => {
+      // parens truncate at first ')' — known parser limitation, not in scope
+      expect(linkHref('[x](javascript:alert)')).toBeUndefined()
+    })
+
+    test('javascript: with backtick (tagged template, no parens)', () => {
+      expect(linkHref('[x](javascript:alert`x`)')).toBeUndefined()
+    })
+
+    test('JaVaScRiPt: mixed case', () => {
+      expect(linkHref('[x](JaVaScRiPt:alert)')).toBeUndefined()
+    })
+
+    test('data:text/html base64', () => {
+      expect(
+        linkHref('[x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)'),
+      ).toBeUndefined()
+    })
+
+    test('vbscript:', () => {
+      expect(linkHref('[x](vbscript:MsgBox)')).toBeUndefined()
+    })
+
+    test('file:///etc/passwd', () => {
+      expect(linkHref('[x](file:///etc/passwd)')).toBeUndefined()
+    })
+
+    test('javascript with control char in URL', () => {
+      // \x01 is a control char inside the URL
+      expect(linkHref('[x](javascript\x01:alert)')).toBeUndefined()
+    })
+
+    test('javascript: with leading space', () => {
+      expect(linkHref('[x]( javascript:alert)')).toBeUndefined()
+    })
+
+    test('javascript: with tab', () => {
+      expect(linkHref('[x](\tjavascript:alert)')).toBeUndefined()
+    })
+
+    test('javascript: with embedded newline', () => {
+      expect(linkHref('[x](java\nscript:alert)')).toBeUndefined()
+    })
+  })
+
+  describe('allowed schemes → href must be the URL', () => {
+    test('https:', () => {
+      expect(linkHref('[x](https://example.com)')).toBe('https://example.com')
+    })
+
+    test('http:', () => {
+      expect(linkHref('[x](http://example.com)')).toBe('http://example.com')
+    })
+
+    test('mailto:', () => {
+      expect(linkHref('[x](mailto:a@b.c)')).toBe('mailto:a@b.c')
+    })
+
+    test('tel:', () => {
+      expect(linkHref('[x](tel:+1234567890)')).toBe('tel:+1234567890')
+    })
+
+    test('hash anchor', () => {
+      expect(linkHref('[x](#anchor)')).toBe('#anchor')
+    })
+
+    test('relative path', () => {
+      expect(linkHref('[x](/relative/path)')).toBe('/relative/path')
+    })
+  })
+
+  describe('link text is preserved even when href is blocked', () => {
+    test('text content of javascript: link is still shown', () => {
+      const parts = parseInlineMarkdown('[Click me](javascript:alert)')
+      const link = parts.find((p) => p.token?.type === 'link')
+      expect(link).toBeDefined()
+      expect(link!.text).toBe('Click me')
+      expect(link!.token?.href).toBeUndefined()
+    })
+  })
+})
