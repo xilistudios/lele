@@ -5,12 +5,37 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 )
+
+// conversationAliasSuffix matches the conversation-rotation suffix the agent
+// loop appends on /new and /agent (`base:chat:N`). Approval session checks must
+// tolerate it: the approval stores the RESOLVED key while clients keep using
+// the BASE key, and both refer to the same conversation. Mirrors the frontend's
+// stripConversationAlias (web/src/hooks/event-handlers/helpers.ts).
+var conversationAliasSuffix = regexp.MustCompile(`:chat:\d+$`)
+
+// approvalSessionMatches reports whether a caller session key is allowed to
+// resolve an approval created under approvalKey. Empty keys mean a legacy/local
+// caller and always match. Base and aliased conversation keys (`base` vs
+// `base:chat:N`) are considered the same session, mirroring the frontend's
+// sessionKeysLooselyMatch.
+func approvalSessionMatches(approvalKey, callerKey string) bool {
+	if approvalKey == "" || callerKey == "" {
+		return true
+	}
+	if approvalKey == callerKey {
+		return true
+	}
+	a := conversationAliasSuffix.ReplaceAllString(approvalKey, "")
+	b := conversationAliasSuffix.ReplaceAllString(callerKey, "")
+	return a == b
+}
 
 // ApprovalManager gestiona comandos pendientes de aprobación
 type ApprovalManager struct {
@@ -101,14 +126,39 @@ func (am *ApprovalManager) GetApproval(approvalID string) *PendingApproval {
 	return am.pending[approvalID]
 }
 
-// HandleApproval procesa la respuesta del usuario (approve/reject)
+// HandleApproval procesa la respuesta del usuario (approve/reject) sin
+// verificación de sesión. Legado: solo para llamadores de confianza local
+// (p.ej. la TUI monousuario) o tests. Las superficies de red DEBEN usar
+// HandleApprovalForSession.
 // Returns the approval that was handled and any error
 func (am *ApprovalManager) HandleApproval(approvalID string, approved bool) (*PendingApproval, error) {
+	return am.HandleApprovalForSession(approvalID, approved, "")
+}
+
+// HandleApprovalForSession procesa la respuesta del usuario verificando que la
+// sesión que responde coincida con la sesión que originó la aprobación.
+//
+// callerSessionKey es la sesión autenticada del llamador (p.ej. client.SessionKey
+// en WebSocket, la sesión ya validada por validateSessionOwnership en REST, o
+// "telegram:<chatID>" para callbacks de Telegram). Un callerSessionKey vacío se
+// tolera como llamador legado/confiable-local, pero los puntos de entrada de red
+// SIEMPRE deben pasar una clave no vacía: resolver una aprobación de otra sesión
+// permitiría a un cliente autenticado aprobar ejecuciones que nunca vio,
+// saltándose los patrones de denegación (TUI-H2).
+//
+// En caso de discrepancia de sesión NO se elimina la aprobación (sigue
+// pendiente para el dueño legítimo) y se devuelve error.
+// Returns the approval that was handled and any error
+func (am *ApprovalManager) HandleApprovalForSession(approvalID string, approved bool, callerSessionKey string) (*PendingApproval, error) {
 	am.mu.Lock()
 	approval, ok := am.pending[approvalID]
 	if !ok {
 		am.mu.Unlock()
 		return nil, fmt.Errorf("approval not found: %s", approvalID)
+	}
+	if !approvalSessionMatches(approval.SessionKey, callerSessionKey) {
+		am.mu.Unlock()
+		return nil, fmt.Errorf("approval session mismatch")
 	}
 	delete(am.pending, approvalID)
 	am.mu.Unlock()

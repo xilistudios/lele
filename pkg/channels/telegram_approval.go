@@ -48,13 +48,29 @@ func (c *TelegramChannel) handleApprovalCallback(ctx context.Context, query tele
 		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Unknown action"))
 	}
 
-	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApproval", map[string]interface{}{
-		"approval_id": approvalID,
-		"approved":    approved,
+	// Resolve the caller session key ("telegram:<chatID>") BEFORE handling so
+	// the approval can be rejected when it belongs to another chat. Approval
+	// IDs are broadcast/visible and must not be resolvable cross-chat (TUI-H2).
+	if query.Message == nil {
+		return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("Approval request not available"))
+	}
+	callerSessionKey := fmt.Sprintf("telegram:%d", query.Message.GetChat().ID)
+
+	logger.DebugCF("telegram", "handleApprovalCallback calling HandleApprovalForSession", map[string]interface{}{
+		"approval_id":        approvalID,
+		"approved":           approved,
+		"caller_session_key": callerSessionKey,
 	})
 
-	approval, err := c.approvalManager.HandleApproval(approvalID, approved)
+	approval, err := c.approvalManager.HandleApprovalForSession(approvalID, approved, callerSessionKey)
 	if err != nil {
+		if strings.Contains(err.Error(), "approval session mismatch") {
+			logger.WarnCF("telegram", "Approval session mismatch rejected", map[string]interface{}{
+				"approval_id":        approvalID,
+				"caller_session_key": callerSessionKey,
+			})
+			return c.bot.AnswerCallbackQuery(ctx, tu.CallbackQuery(query.ID).WithText("⚠️ Esta aprobación pertenece a otro chat"))
+		}
 		logger.WarnCF("telegram", "Failed to handle approval", map[string]interface{}{
 			"error":       err.Error(),
 			"approval_id": approvalID,

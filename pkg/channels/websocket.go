@@ -385,9 +385,21 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 
 	command := ""
 	if n.approvalManager != nil {
-		// HandleApproval atomically finds, removes and returns the approval
-		handledApproval, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
+		// HandleApprovalForSession atomically verifies that the approving
+		// client's session owns the approval, then finds, removes and returns
+		// it. Resolving by ID alone would let any authenticated client approve
+		// another session's pending exec (TUI-H2).
+		handledApproval, err := n.approvalManager.HandleApprovalForSession(payload.RequestID, payload.Approved, client.SessionKey)
 		if err != nil {
+			if strings.Contains(err.Error(), "approval session mismatch") {
+				logger.WarnCF("native", "Approval session mismatch rejected", map[string]interface{}{
+					"client_id":  client.ID,
+					"session":    client.SessionKey,
+					"request_id": payload.RequestID,
+				})
+				n.sendError(client, "approval_forbidden", "approval belongs to a different session")
+				return
+			}
 			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
 				"error":      err.Error(),
 				"request_id": payload.RequestID,

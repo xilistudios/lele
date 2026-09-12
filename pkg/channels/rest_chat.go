@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/xilistudios/lele/pkg/bus"
+	"github.com/xilistudios/lele/pkg/logger"
 	"github.com/xilistudios/lele/pkg/providers"
 	"github.com/xilistudios/lele/pkg/routing"
 )
@@ -770,9 +771,22 @@ func (n *NativeChannel) handleChatApprove(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// HandleApproval atomically finds, removes and returns the approval
-	handledApproval, err := n.approvalManager.HandleApproval(req.RequestID, req.Approved)
+	// HandleApprovalForSession atomically verifies that the validated session
+	// owns the approval, then finds, removes and returns it. Resolving by ID
+	// alone would let any authenticated client approve another session's
+	// pending exec (TUI-H2). sessionKey was already validated above via
+	// validateSessionOwnership.
+	handledApproval, err := n.approvalManager.HandleApprovalForSession(req.RequestID, req.Approved, sessionKey)
 	if err != nil {
+		if strings.Contains(err.Error(), "approval session mismatch") {
+			logger.WarnCF("native", "Approval session mismatch rejected", map[string]interface{}{
+				"client_id":  clientID,
+				"session":    sessionKey,
+				"request_id": req.RequestID,
+			})
+			writeError(w, http.StatusForbidden, "approval belongs to a different session", "approval_forbidden")
+			return
+		}
 		writeError(w, http.StatusNotFound, err.Error(), "approval_not_found")
 		return
 	}
