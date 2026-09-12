@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/security"
 )
 
 type mockChannel struct {
@@ -334,7 +335,7 @@ func TestWebSocketRapidMessagesUnderLoad(t *testing.T) {
 
 	mux := http.NewServeMux()
 	native.RegisterRoutes(mux)
-	handler := native.corsMiddleware(native.securityHeadersMiddleware(native.authMiddleware(mux)))
+	handler := security.Middleware()(native.authMiddleware(mux))
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
