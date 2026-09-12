@@ -1,3 +1,17 @@
+/**
+ * Schemes que pueden acabar en un `href`. Cualquier otra cosa (javascript:, data:,
+ * vbscript:, file:) se descarta y el enlace se renderiza como texto sin destino.
+ * Sin allowlist, el parser es el punto donde cualquier consumidor puede fallar.
+ */
+const SAFE_LINK_SCHEME = /^(?:https?:|mailto:|tel:|#|\/)/i
+
+/**
+ * Rechaza URLs que contengan whitespace o caracteres de control (\x00-\x1f).
+ * Los navegadores pueden recortar estos caracteres antes de resolver el scheme,
+ * lo que permite eludir la allowlist (p.ej. " javascript:alert").
+ */
+const URL_CONTROL_OR_WS = /[\s\x00-\x1f]/
+
 export type ContentBlock = {
   type: 'text' | 'tool' | 'code' | 'diff'
   content: string
@@ -97,12 +111,16 @@ export function parseInlineMarkdown(text: string): Array<{ text: string; token?:
     } else {
       const linkMatch = token.match(/^\[([^\]]+)\]\(([^\)]+)\)$/)
       if (linkMatch) {
+        const rawHref = linkMatch[2]
+        const hasControlOrWs = URL_CONTROL_OR_WS.test(rawHref)
+        const safeHref =
+          !hasControlOrWs && SAFE_LINK_SCHEME.test(rawHref) ? rawHref : undefined
         result.push({
           text: linkMatch[1],
           token: {
             type: 'link',
             content: linkMatch[1],
-            href: linkMatch[2],
+            href: safeHref,
             index,
             length: token.length,
           },

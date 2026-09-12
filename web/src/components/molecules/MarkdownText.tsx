@@ -27,7 +27,7 @@ function InlineToken({ text, token }: { text: string; token?: { type: string; hr
         <a
           href={token.href ?? '#'}
           target="_blank"
-          rel="noreferrer"
+          rel="noreferrer noopener"
           className="text-interaction-primary underline decoration-border underline-offset-2 hover:text-interaction-hover hover:decoration-interaction-hover"
         >
           {text}
