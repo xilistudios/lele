@@ -2,8 +2,9 @@ package channels
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -40,9 +41,16 @@ func NewApprovalManager() *ApprovalManager {
 	}
 }
 
-// generateID genera un ID único para la aprobación
+// generateID produces a cryptographically random approval ID (128 bits, hex).
+// The approval ID is a capability token — possessing it authorises a response —
+// so it must not be guessable. crypto/rand is used throughout; there is no
+// fallback to math/rand.
 func generateID() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(10000))
+	b := make([]byte, 16) // 128 bits
+	if _, err := rand.Read(b); err != nil {
+		panic("approval: crypto/rand.Read failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 // CreateApproval crea una nueva solicitud de aprobación
