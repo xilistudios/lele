@@ -390,3 +390,79 @@ func TestMessageBus_SetNilSpoolerKeepsOldPath(t *testing.T) {
 		t.Errorf("SpoolID = %d with a nil spooler, want 0", got.SpoolID)
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Closed-channel consumer tests (CORE-05)
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestConsumeInbound_ReturnsFalseAfterClose(t *testing.T) {
+	mb := NewMessageBus()
+	mb.Close()
+
+	_, ok := mb.ConsumeInbound(context.Background())
+	if ok {
+		t.Error("ConsumeInbound returned ok=true after Close(); want false")
+	}
+}
+
+func TestSubscribeOutbound_ReturnsFalseAfterClose(t *testing.T) {
+	mb := NewMessageBus()
+	mb.Close()
+
+	_, ok := mb.SubscribeOutbound(context.Background())
+	if ok {
+		t.Error("SubscribeOutbound returned ok=true after Close(); want false")
+	}
+}
+
+func TestConsumeInbound_LoopTerminatesAfterClose(t *testing.T) {
+	mb := NewMessageBus()
+
+	// Pre-fill the queue so the consumer has messages to read before
+	// observing the closed state.
+	for i := 0; i < 10; i++ {
+		mb.PublishInbound(InboundMessage{Channel: "test", Content: "msg"})
+	}
+	mb.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	count := 0
+	for {
+		_, ok := mb.ConsumeInbound(ctx)
+		if !ok {
+			break
+		}
+		count++
+		if count > 200 {
+			t.Fatalf("consumer loop did not terminate after 200 iterations (likely busy-spinning on closed channel)")
+		}
+	}
+	// The loop terminated — that's the assertion. A pre-fix bus would
+	// busy-spin forever and hit the 200-iteration cap.
+}
+
+func TestSubscribeOutbound_LoopTerminatesAfterClose(t *testing.T) {
+	mb := NewMessageBus()
+
+	for i := 0; i < 10; i++ {
+		mb.PublishOutbound(OutboundMessage{Channel: "test", Content: "msg"})
+	}
+	mb.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	count := 0
+	for {
+		_, ok := mb.SubscribeOutbound(ctx)
+		if !ok {
+			break
+		}
+		count++
+		if count > 200 {
+			t.Fatalf("consumer loop did not terminate after 200 iterations (likely busy-spinning on closed channel)")
+		}
+	}
+}
