@@ -581,6 +581,17 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 // a false green. isOriginAllowed stays: it is live for the WebSocket
 // CheckOrigin path below.
 
+// isOriginAllowed decides whether a cross-origin WebSocket handshake may be
+// upgraded. checkOrigin already accepts same-origin requests (Origin.Host ==
+// r.Host) before calling this, so this function only ever sees genuinely
+// cross-origin traffic.
+//
+// GW-M6: the previous implementation returned true for ANY http/https origin
+// whenever cfg.Host was "0.0.0.0" — the default bind address — turning the
+// check into a no-op for every default install, and used HasPrefix on
+// "http://localhost", which also matched http://localhost.evil.com. Origins
+// are now parsed and compared by exact hostname. Extra origins (e.g. a dev
+// server on another port) must be listed explicitly in channels.native.cors_origins.
 func (n *NativeChannel) isOriginAllowed(origin string) bool {
 	for _, allowedOrigin := range n.cfg.CORSOrigins {
 		if origin == allowedOrigin {
@@ -588,25 +599,38 @@ func (n *NativeChannel) isOriginAllowed(origin string) bool {
 		}
 	}
 
-	if parsedOrigin, err := url.Parse(origin); err == nil {
-		originHost := parsedOrigin.Hostname()
-		serverHost := n.cfg.Host
-		if serverHost == "" {
-			serverHost = "127.0.0.1"
-		}
-
-		if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
-			if originHost == serverHost || serverHost == "0.0.0.0" {
-				return true
-			}
-		}
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
 	}
 
-	if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost") {
+	// Tauri desktop: exact, well-known origins only. A HasPrefix on "tauri://"
+	// would accept any scheme-relative variant.
+	switch origin {
+	case "tauri://localhost", "https://tauri.localhost":
 		return true
 	}
 
-	return false
+	if parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https" {
+		return false
+	}
+	originHost := parsedOrigin.Hostname()
+
+	// Loopback names are always fine: the gateway is a local-first service and
+	// a browser page on localhost can only be served by something the user ran.
+	// Compared by equality, so "localhost.evil.com" no longer matches.
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+
+	// The configured bind host is only meaningful as an allowlist entry when it
+	// is a concrete address. "0.0.0.0"/"::"/"" are bind wildcards, never a host
+	// a browser would put in Origin, so they must NOT imply "allow everything".
+	serverHost := n.cfg.Host
+	if serverHost == "" || serverHost == "0.0.0.0" || serverHost == "::" || serverHost == "*" {
+		return false
+	}
+	return originHost == serverHost
 }
 
 func (n *NativeChannel) checkOrigin(r *http.Request) bool {
