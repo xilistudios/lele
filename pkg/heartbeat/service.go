@@ -160,7 +160,11 @@ func (hs *HeartbeatService) IsRunning() bool {
 
 // runLoop runs the heartbeat ticker
 func (hs *HeartbeatService) runLoop(stopChan chan struct{}) {
-	ticker := time.NewTicker(hs.interval)
+	// Snapshot the initial interval under lock to avoid a data race (CORE-03).
+	hs.mu.RLock()
+	curInterval := hs.interval
+	hs.mu.RUnlock()
+	ticker := time.NewTicker(curInterval)
 	defer ticker.Stop()
 
 	// Run first heartbeat after initial delay (cancellable)
@@ -177,6 +181,14 @@ func (hs *HeartbeatService) runLoop(stopChan chan struct{}) {
 			return
 		case <-ticker.C:
 			hs.executeHeartbeat()
+			// Re-read the interval; if hot-reload changed it, reset the ticker (CORE-02).
+			hs.mu.RLock()
+			newInterval := hs.interval
+			hs.mu.RUnlock()
+			if newInterval != curInterval {
+				curInterval = newInterval
+				ticker.Reset(curInterval)
+			}
 		}
 	}
 }
