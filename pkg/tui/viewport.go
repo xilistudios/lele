@@ -135,7 +135,8 @@ func (m *Model) updateViewport() {
 		m.pendingUserMessage != "" ||
 		m.pendingApprovalID != "" || m.approvalResult != "" ||
 		m.activeGroupID != "" ||
-		m.compactFeedback != ""
+		m.compactFeedback != "" ||
+		len(m.subagentProgress) > 0
 
 	if !hasOverlay && !m.selecting {
 		// Nothing ephemeral to show — ensure overlay is cleared.
@@ -232,6 +233,15 @@ func (m *Model) updateViewport() {
 			overlaySb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(m.currentToolAction) + "\n")
 		}
 		overlaySb.WriteString("\n")
+	}
+
+	// Show per-task progress of running subagents (TUI-M4): latest action of
+	// each subagent spawned by the current parent session. Rendered under the
+	// streaming overlay, and also on its own when the parent has nothing
+	// streaming (e.g. the turn is waiting on wait_for_subagent) so progress
+	// stays visible for the whole duration of the subagent work.
+	if progressBlock := m.renderSubagentProgress(); progressBlock != "" {
+		overlaySb.WriteString(progressBlock + "\n")
 	}
 
 	// Show pending command approval prompt
