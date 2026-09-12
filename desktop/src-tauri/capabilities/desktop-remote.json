@@ -9,7 +9,6 @@
   "permissions": [
     "core:default",
     "core:event:default",
-    "allow-get-session",
     "allow-backend-status",
     "allow-restart-backend",
     "allow-open-data-dir",
