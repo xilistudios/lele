@@ -60,10 +60,133 @@ func TestAuthManager_GeneratePIN_MaxPending(t *testing.T) {
 		}
 	}
 
-	// The 11th should be rejected.
-	_, err = auth.GeneratePIN("Device")
-	if err == nil {
-		t.Error("expected error when exceeding max pending PINs")
+	// GW-M8: the 11th no longer fails — the oldest pending PIN is evicted
+	// (FIFO) so a new pairing always succeeds.
+	auth.mu.Lock()
+	countBefore := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if countBefore != 10 {
+		t.Fatalf("expected 10 pending PINs before the extra request, got %d", countBefore)
+	}
+
+	if _, err := auth.GeneratePIN("Device"); err != nil {
+		t.Fatalf("expected PIN mint to succeed via oldest-entry eviction, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	countAfter := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if countAfter != 10 {
+		t.Errorf("pending PINs should stay bounded at %d after eviction, got %d", 10, countAfter)
+	}
+}
+
+// TestAuthManager_GeneratePIN_PurgesExpiredFirst verifies that on GeneratePIN
+// expired PINs are removed before the cap is applied, so abandoned requests
+// cannot starve new pairings (GW-M8).
+func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Fill the store to the cap, then backdate every entry so all are
+	// expired (as if the expiry window had elapsed with nobody redeeming).
+	for i := 0; i < 10; i++ {
+		if _, err := auth.GeneratePIN("Device"); err != nil {
+			t.Fatalf("failed to generate PIN %d: %v", i, err)
+		}
+	}
+
+	auth.mu.Lock()
+	now := time.Now()
+	for _, pending := range auth.store.PendingPINs {
+		pending.Expires = now.Add(-time.Minute)
+	}
+	auth.mu.Unlock()
+
+	// The next mint must succeed via lazy expiry purge — and the resulting
+	// pending count must be 1 (only the fresh PIN survives).
+	pending, err := auth.GeneratePIN("FreshDevice")
+	if err != nil {
+		t.Fatalf("expected mint to succeed after purging expired PINs, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	count := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if count != 1 {
+		t.Errorf("expected expired PINs to be purged, leaving 1 pending PIN, got %d", count)
+	}
+	if pending.DeviceName != "FreshDevice" {
+		t.Errorf("expected fresh PIN for 'FreshDevice', got '%s'", pending.DeviceName)
+	}
+}
+
+// TestAuthManager_GeneratePIN_EvictsOldestNotNewest verifies that when the
+// cap is hit with all entries still unexpired, the entry with the oldest
+// Created timestamp is the one evicted (FIFO), keeping newer legitimate
+// pairings intact (GW-M8).
+func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// First PIN is explicitly the oldest (backdated, still unexpired).
+	first, err := auth.GeneratePIN("OldestDevice")
+	if err != nil {
+		t.Fatalf("failed to generate first PIN: %v", err)
+	}
+	auth.mu.Lock()
+	auth.store.PendingPINs[first.PIN].Created = time.Now().Add(-4 * time.Minute)
+	auth.mu.Unlock()
+
+	// Fill the remaining slots with newer entries.
+	for i := 0; i < 9; i++ {
+		if _, err := auth.GeneratePIN("NewerDevice"); err != nil {
+			t.Fatalf("failed to generate PIN %d: %v", i, err)
+		}
+	}
+
+	auth.mu.Lock()
+	_, oldestStillThere := auth.store.PendingPINs[first.PIN]
+	auth.mu.Unlock()
+	if !oldestStillThere {
+		t.Fatal("setup error: oldest PIN vanished before eviction could be observed")
+	}
+
+	// One more mint: the oldest unexpired entry must be evicted to make room.
+	extra, err := auth.GeneratePIN("LatestDevice")
+	if err != nil {
+		t.Fatalf("expected mint to succeed via eviction, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	_, evicted := auth.store.PendingPINs[first.PIN]
+	count := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+
+	if evicted {
+		t.Error("oldest pending PIN should have been evicted")
+	}
+	if count != 10 {
+		t.Errorf("pending count should stay at cap 10, got %d", count)
+	}
+	if extra.DeviceName != "LatestDevice" {
+		t.Errorf("new PIN should be present, got device '%s'", extra.DeviceName)
 	}
 }
 

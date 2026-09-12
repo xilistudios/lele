@@ -298,9 +298,23 @@ func (am *AuthManager) cleanupExpired() {
 	}
 }
 
+// maxPendingPINs caps how many pairing PINs can be pending simultaneously.
+//
+// The cap exists to bound memory and pairing-slot exhaustion, not to enforce
+// a request rate limit: /auth/pin sits behind withAuth, so only authenticated
+// callers (e.g. the WebUI settings page) can mint PINs. Because of that, the
+// cap is enforced with purge-then-evict semantics: expired PINs are removed
+// first, and if the store is still full the OLDEST pending PIN is evicted
+// (FIFO) rather than failing the new pairing request. A stale-but-unexpired
+// PIN holds a slot for its entire expiry window otherwise, so plain rejection
+// lets ~10 abandoned requests block all legitimate pairings for up to
+// PinExpiryMinutes (GW-M8).
+const maxPendingPINs = 10
+
 // GeneratePIN creates a new 6-digit PIN for device pairing. The PIN expires
-// after the configured PinExpiryMinutes (default 5). Only up to MaxPendingPINs
-// (10) concurrent pending PINs are allowed.
+// after the configured PinExpiryMinutes (default 5). Only up to maxPendingPINs
+// concurrent pending PINs are allowed: expired PINs are purged first, and if
+// the cap is still reached the oldest pending PIN is evicted to make room.
 //
 // Security: this method MUST be called from an authenticated context (e.g.
 // the WebUI settings page behind withAuth). Exposing it to unauthenticated
@@ -317,8 +331,26 @@ func (am *AuthManager) GeneratePIN(deviceName string) (*PendingPIN, error) {
 
 	am.cleanupExpired()
 
-	if len(am.store.PendingPINs) >= 10 {
-		return nil, fmt.Errorf("too many pending PIN requests")
+	// Purge-then-evict: cleanupExpired already removed expired PINs, but
+	// non-expired entries can still fill every slot (e.g. abandoned pairing
+	// requests). Evict the oldest one so a new pairing always succeeds
+	// instead of being blocked until the stale entries expire (GW-M8).
+	if len(am.store.PendingPINs) >= maxPendingPINs {
+		oldestPIN := ""
+		var oldest *PendingPIN
+		for pin, pending := range am.store.PendingPINs {
+			if oldest == nil || pending.Created.Before(oldest.Created) {
+				oldestPIN = pin
+				oldest = pending
+			}
+		}
+		if oldest != nil {
+			delete(am.store.PendingPINs, oldestPIN)
+			logger.WarnCF("native", "Pending PIN cap reached, evicted oldest pending PIN", map[string]interface{}{
+				"evicted_device": oldest.DeviceName,
+				"age_seconds":    time.Since(oldest.Created).Round(time.Second).String(),
+			})
+		}
 	}
 
 	pin := generatePIN()
