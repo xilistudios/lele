@@ -316,7 +316,7 @@ func (si *SkillInstaller) InstallMultiple(ctx context.Context, repo string, skil
 			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := readLimitedBody(resp)
 		if err != nil {
 			continue
 		}
