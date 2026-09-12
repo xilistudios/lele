@@ -21,7 +21,14 @@ func (n *NativeChannel) handleFileUpload(w http.ResponseWriter, r *http.Request)
 	clientID := getClientID(r)
 
 	maxSize := n.cfg.MaxUploadSizeMB * 1024 * 1024
+	// MaxBytesReader caps the total bytes read from the body. The argument
+	// to ParseMultipartForm only limits the in-memory buffer; without
+	// MaxBytesReader the rest is silently spooled to disk, allowing unbounded
+	// disk consumption from a single request.
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize)
 	if err := r.ParseMultipartForm(maxSize); err != nil {
+		// MaxBytesReader returns "http: request body too large" when the
+		// limit is exceeded. Map it to 413 with a stable error code.
 		if err.Error() == "http: request body too large" {
 			writeError(w, http.StatusRequestEntityTooLarge,
 				"file too large (max "+strconv.FormatInt(n.cfg.MaxUploadSizeMB, 10)+"MB)",
