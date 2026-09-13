@@ -19,7 +19,6 @@ export default {
           tertiary: a('--color-surface-tertiary'),
           hover: a('--color-surface-hover'),
           muted: a('--color-surface-muted'),
-          card: a('--color-surface-primary'),
           selected: 'var(--color-surface-selected)',
         },
         accent: {

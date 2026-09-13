@@ -26,7 +26,7 @@ function getRoleBadgeClass(role: string): string {
     case 'critic':
       return 'bg-state-error/15 text-state-error'
     default:
-      return 'bg-surface-card text-text-tertiary'
+      return 'bg-bg-tertiary text-text-tertiary'
   }
 }
 
@@ -49,7 +49,7 @@ function LayerSection({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-between w-full px-3 py-2 bg-surface-hover text-left hover:bg-surface-card transition-colors"
+        className="flex items-center justify-between w-full px-3 py-2 bg-surface-hover text-left hover:bg-bg-elevated transition-colors"
       >
         <span className="text-xs font-medium text-text-secondary">
           {t('groups.layer', { number: layer + 1 })}
@@ -123,7 +123,7 @@ function GroupDetail({ group }: { group: GroupInfo }) {
             {participantList.map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-surface-card text-text-secondary border border-border"
+                className="inline-flex items-center px-2 py-0.5 rounded-sm bg-bg-tertiary border border-border text-xs"
               >
                 {name}
               </span>
@@ -184,7 +184,7 @@ function GroupStatusBadge({ status }: { status: string }) {
         ? 'bg-state-success/15 text-state-success'
         : status === 'error'
           ? 'bg-state-error/15 text-state-error'
-          : 'bg-surface-card text-text-tertiary'
+          : 'bg-bg-tertiary text-text-tertiary'
 
   return (
     <span

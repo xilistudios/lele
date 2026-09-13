@@ -16,7 +16,7 @@ import type { SkillSource } from './types'
 export const SOURCE_COLORS: Record<string, string> = {
   workspace: 'bg-state-info-light text-state-info border-state-info/30',
   global: 'bg-state-success-light text-state-success border-state-success/30',
-  builtin: 'bg-surface-muted text-text-tertiary border-border/50',
+  builtin: 'bg-surface-muted text-text-tertiary border-border-light',
 }
 
 /** Display label per skill source. Kept as-is: proper nouns of the loader. */
@@ -27,7 +27,7 @@ export const SOURCE_LABELS: Record<string, string> = {
 }
 
 /** Neutral fallback for a source the frontend does not know yet. */
-export const SOURCE_FALLBACK = 'bg-surface-muted text-text-tertiary border-border/50'
+export const SOURCE_FALLBACK = 'bg-surface-muted text-text-tertiary border-border-light'
 
 /** Badge classes for a source; unknown sources fall back to the neutral style. */
 export function sourceBadgeClasses(source?: SkillSource | string): string {

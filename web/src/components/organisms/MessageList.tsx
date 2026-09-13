@@ -397,14 +397,14 @@ export function MessageList() {
                       <button
                         type="button"
                         onClick={() => onApprove(true)}
-                        className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success-light/80"
+                        className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success/15"
                       >
                         {t('approval.approve')}
                       </button>
                       <button
                         type="button"
                         onClick={() => onApprove(false)}
-                        className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error-light/80"
+                        className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error/15"
                       >
                         {t('approval.reject')}
                       </button>
@@ -417,8 +417,8 @@ export function MessageList() {
                   <div
                     className={`rounded-lg border p-4 ${
                       approvalResult.approved
-                        ? 'border-state-success bg-state-success-light/10'
-                        : 'border-state-error bg-state-error-light/10'
+                        ? 'border-state-success bg-state-success/10'
+                        : 'border-state-error bg-state-error/10'
                     }`}
                   >
                     <div className="flex items-center gap-2">

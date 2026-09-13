@@ -517,7 +517,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
             <div
               key={name}
               data-testid={`skills-orphan-${name}`}
-              className="flex items-center gap-2.5 rounded-lg border border-state-warning/40 bg-state-warning-light/30 p-3.5"
+              className="flex items-center gap-2.5 rounded-lg border border-state-warning/40 bg-state-warning/10 p-3.5"
             >
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
