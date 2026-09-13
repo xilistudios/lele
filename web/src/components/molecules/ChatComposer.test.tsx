@@ -3,11 +3,11 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import '../../test/i18n'
 
 // Mutable mock returns — tests swap these before each render.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let mockAppCtxReturn: any = {}
-let mockAuthCtxReturn: any = {}
-let mockChatPageCtxReturn: any = {}
-let mockSlashCommandsReturn: any = { commands: [], loading: false, error: null }
+type MockCtx = Record<string, unknown>
+let mockAppCtxReturn: MockCtx = {}
+let mockAuthCtxReturn: MockCtx = {}
+let mockChatPageCtxReturn: MockCtx = {}
+let mockSlashCommandsReturn: MockCtx = { commands: [], loading: false, error: null }
 
 mock.module('../../contexts/AppLogicContext', () => ({
   useAppLogicContext: () => mockAppCtxReturn,
@@ -26,6 +26,13 @@ mock.module('../../hooks/useSlashCommands', () => ({
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { ChatComposer } from './ChatComposer'
 
+/** Find the composer textarea; throws instead of non-null asserting. */
+function getTextarea(container: HTMLElement): HTMLTextAreaElement {
+  const el = container.querySelector('textarea')
+  if (!el) throw new Error('textarea not found')
+  return el
+}
+
 /** Create a deferred promise the test can resolve/reject manually. */
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -37,7 +44,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function baseAppCtx(onSend: (...args: unknown[]) => unknown) {
+function baseAppCtx(onSend: (...args: unknown[]) => unknown): MockCtx {
   return {
     onSend,
     onCancel: () => {},
@@ -63,14 +70,14 @@ function baseAppCtx(onSend: (...args: unknown[]) => unknown) {
   }
 }
 
-function baseAuthCtx() {
+function baseAuthCtx(): MockCtx {
   return {
     apiUrl: 'http://localhost:18793',
     api: { chatCommands: () => Promise.resolve({ commands: [] }) },
   }
 }
 
-function baseChatPageCtx() {
+function baseChatPageCtx(): MockCtx {
   return {
     canCancel: false,
     hasConversation: false,
@@ -98,7 +105,7 @@ describe('ChatComposer — double-submit guard', () => {
     mockAppCtxReturn = baseAppCtx(onSend)
 
     const { container } = render(<ChatComposer />)
-    const textarea = container.querySelector('textarea')!
+    const textarea = getTextarea(container)
 
     // Type a message
     fireEvent.change(textarea, { target: { value: 'hello' } })
@@ -136,7 +143,7 @@ describe('ChatComposer — double-submit guard', () => {
     mockAppCtxReturn = baseAppCtx(onSend)
 
     const { container } = render(<ChatComposer />)
-    const textarea = container.querySelector('textarea')!
+    const textarea = getTextarea(container)
 
     // First submit with "hello"
     fireEvent.change(textarea, { target: { value: 'hello' } })
@@ -171,7 +178,7 @@ describe('ChatComposer — double-submit guard', () => {
     mockAppCtxReturn = baseAppCtx(onSend)
 
     const { container } = render(<ChatComposer />)
-    const textarea = container.querySelector('textarea')!
+    const textarea = getTextarea(container)
 
     fireEvent.change(textarea, { target: { value: 'hello' } })
 
@@ -198,7 +205,7 @@ describe('ChatComposer — double-submit guard', () => {
     mockAppCtxReturn = baseAppCtx(onSend)
 
     const { container } = render(<ChatComposer />)
-    const textarea = container.querySelector('textarea')!
+    const textarea = getTextarea(container)
 
     // Enter with no content — no call, no blocking
     fireEvent.keyDown(textarea, { key: 'Enter' })
