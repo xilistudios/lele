@@ -108,6 +108,20 @@ jobs:
       - name: Build web app
         run: cd web && bun run build
 
+      - name: Web unit tests
+        run: cd web && bun run test
+
+      - name: Check ghost classes (F0)
+        run: cd web && bun scripts/check-ghost-classes.mjs
+
+      - name: Check no double-slash alpha (F0)
+        run: cd web && bun scripts/check-double-slash.mjs
+
+      - name: Web lint (biome)
+        continue-on-error: true
+        run: cd web && bunx biome check src/
+        # TODO: remove continue-on-error when PR6 (T6.x) cleans the remaining rule diagnostics
+
       - name: Copy web dist for embed
         run: rm -rf cmd/lele/web && mkdir -p cmd/lele/web && cp -R web/dist cmd/lele/web/dist
 

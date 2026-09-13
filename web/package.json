@@ -13,7 +13,8 @@
     "lint:fix": "biome check --apply src/",
     "format": "biome format src/",
     "format:fix": "biome format --write src/",
-    "check": "biome check --apply src/ && tsc --noEmit"
+    "check": "biome check --apply src/ && tsc --noEmit",
+    "lint:design": "node scripts/check-ghost-classes.mjs && node scripts/check-double-slash.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.3",
