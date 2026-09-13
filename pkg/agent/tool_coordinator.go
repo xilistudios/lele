@@ -33,7 +33,10 @@ type toolCoordinator interface {
 	// its subagents, its group runs and its background processes. It returns
 	// the counts of each so callers can report what was cancelled.
 	cancelSessionTree(sessionKey string) (subagents, groups, procs int)
-	cancelAll() int
+	// cancelRemovedSubagents stops the running work of agents that left the
+	// config and drops their managers. It is the reload path's replacement for
+	// the old blanket cancelAll, which killed every subagent in the process.
+	cancelRemovedSubagents(liveAgentIDs []string) int
 	cancelSession(sessionKey string)
 	markSessionSubagentsDelivered(sessionKey string)
 	listRunningSubagentTasks() []*tools.SubagentTask
@@ -122,6 +125,8 @@ func (tc *toolCoordinatorImpl) updateToolContexts(agent *AgentInstance, channel,
 }
 
 // stopAllSubagents stops all running subagents and returns the count of stopped tasks.
+// It is for process shutdown only: a config reload must not use it (see
+// cancelRemovedSubagents).
 func (tc *toolCoordinatorImpl) stopAllSubagents() int {
 	totalStopped := 0
 	for _, manager := range tc.subagents {
@@ -215,13 +220,46 @@ func (tc *toolCoordinatorImpl) cancelSessionTree(sessionKey string) (subagents, 
 	return subagents, groups, procs
 }
 
-// cancelAll cancels all running subagent tasks and clears the subagent map.
-// Returns the count of cancelled tasks. Unlike stopAllSubagents, this also
-// removes all subagent references so the map can be safely replaced.
-func (tc *toolCoordinatorImpl) cancelAll() int {
-	count := tc.stopAllSubagents()
-	tc.subagents = make(map[string]*tools.SubagentManager)
-	return count
+// cancelRemovedSubagents cancels the running work that belongs to agents which
+// are no longer in the config, and drops their managers. It replaces the old
+// blanket cancelAll on the reload path: a config reload used to kill every
+// subagent, group run and background process in the process — including those
+// of agents whose configuration had not changed — which is what users observed
+// as subagents being cancelled "spontaneously". Live agents keep their running
+// tasks untouched; recreated agents keep them too, because
+// registerSharedToolsForAgent now re-uses their manager.
+//
+// For each removed agent it stops: its subagent tasks, every running group it
+// participates in (such a group has lost a speaker and can never finish
+// correctly), and its background processes (their owning toolset is gone).
+// Returns the number of subagent tasks stopped.
+func (tc *toolCoordinatorImpl) cancelRemovedSubagents(liveAgentIDs []string) int {
+	live := make(map[string]bool, len(liveAgentIDs))
+	for _, id := range liveAgentIDs {
+		live[id] = true
+	}
+
+	stopped := 0
+	for agentID, manager := range tc.subagents {
+		if live[agentID] {
+			continue
+		}
+		if manager != nil {
+			stopped += manager.StopAll()
+		}
+		// A running group that counted this agent among its speakers can never
+		// run as configured again (the registry can no longer resolve it), so
+		// stop it instead of letting it degrade or error mid-run.
+		if tc.al != nil && tc.al.groupManager != nil {
+			tc.al.groupManager.StopByAgent(agentID)
+		}
+		if bgm := tc.bgManagers[agentID]; bgm != nil {
+			bgm.StopAll()
+		}
+		delete(tc.subagents, agentID)
+		delete(tc.bgManagers, agentID)
+	}
+	return stopped
 }
 
 // cancelSession cancels any active processing for a specific session
@@ -544,9 +582,16 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 	})
 	agent.Tools.Register(sendFileTool)
 
-	// Shell/Exec tool with approval support and background process management
-	bgManager := tools.NewBackgroundProcessManager()
-	bgManagers[agentID] = bgManager
+	// Shell/Exec tool with approval support and background process management.
+	// The manager is re-used across config reloads (issue: spontaneous
+	// subagent cancellation): processes a subagent backgrounded keep a live
+	// home after their owner agent is recreated, so they stay visible and
+	// stoppable instead of being orphaned by a fresh manager.
+	bgManager, reusedBg := bgManagers[agentID]
+	if !reusedBg || bgManager == nil {
+		bgManager = tools.NewBackgroundProcessManager()
+		bgManagers[agentID] = bgManager
+	}
 
 	execTool := tools.NewExecToolWithConfig(agent.Workspace, cfg.Agents.Defaults.RestrictToWorkspace, cfg)
 	execTool.SetBackgroundManager(bgManager)
@@ -605,7 +650,20 @@ func registerSharedToolsForAgent(agent *AgentInstance, cfg *config.Config, msgBu
 		subagentMaxIter = agent.MaxIterations
 	}
 
-	subagentManager := tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
+	// Re-use the agent's existing manager when there is one (reload of a
+	// recreated agent) instead of building a fresh one. The manager owns the
+	// running tasks; replacing it would leave them without a home, so their
+	// results, cancellation and status persistence would all be lost — and a
+	// config reload that touched nothing about this agent would still kill
+	// them. New tasks and settings below are applied to the same manager, and
+	// SetDefaults refreshes the values the constructor would have taken.
+	subagentManager, reusedManager := subagents[agentID]
+	if !reusedManager || subagentManager == nil {
+		subagentManager = tools.NewSubagentManager(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, msgBus, subagentMaxIter)
+		subagents[agentID] = subagentManager
+	} else {
+		subagentManager.SetDefaults(subagentDefaultProvider, subagentDefaultModel, agent.Workspace, subagentMaxIter)
+	}
 	// Issue #234: remember which agent owns this manager. Tasks that arrive
 	// without any identity (no explicit agent_id and no agent tool context at
 	// spawn time, e.g. legacy cron spawn jobs) are attributed to this agent at

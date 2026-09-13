@@ -154,18 +154,21 @@ func (al *AgentLoop) ReloadRegistry(cfg *config.Config) {
 		return
 	}
 
-	// Cancel all running subagents before reloading the tool coordinator.
-	// This prevents goroutine leaks from the old coordinator's subagent managers.
-	if al.toolCoordinator != nil {
-		al.toolCoordinator.cancelAll()
-	}
-
-	// Cancel all running groups before reloading to avoid goroutine leaks.
-	if al.groupManager != nil {
-		al.groupManager.StopAll()
-	}
-
 	al.registry.ReloadAgents(cfg)
+
+	// Stop the running work of agents that are gone from the new config.
+	// Agents that survive the reload — recreated or not — keep their running
+	// subagents: the tool registration below re-uses their existing managers.
+	// (The old code cancelled every subagent, group run and background process
+	// in the process on every reload, which surfaced as spontaneous
+	// cancellations.)
+	if al.toolCoordinator != nil {
+		stopped := al.toolCoordinator.cancelRemovedSubagents(al.registry.ListAgentIDs())
+		if stopped > 0 {
+			logger.InfoCF("agent", "Cancelled subagents of removed agents during config reload",
+				map[string]interface{}{"tasks_stopped": stopped})
+		}
+	}
 	// ReloadAgents may have created fresh ContextBuilders; re-attach the
 	// folder resolver so per-session folder context survives config reloads.
 	al.attachFolderResolver()

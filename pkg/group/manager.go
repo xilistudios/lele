@@ -767,6 +767,59 @@ func (gm *GroupManager) StopByOrigin(channel, chatID string) int {
 	return stopped
 }
 
+// StopByAgent cancels every running group in which the given agent takes
+// part, either as a participant or as the moderator/aggregator. It exists for
+// the config-reload path: when an agent leaves the registry its group runs
+// lose their speaker, so they must be stopped — while groups made of agents
+// that survived the reload keep running untouched.
+//
+// The moderator is included because a group whose aggregator disappears can
+// never produce its synthesis: MoA would silently degrade to the last
+// proposer's raw turn, which is not what the caller asked for.
+//
+// Returns the number of groups stopped.
+func (gm *GroupManager) StopByAgent(agentID string) int {
+	if agentID == "" {
+		return 0
+	}
+
+	gm.mu.Lock()
+	var toStop []string
+	for _, mg := range gm.groups {
+		if mg.state.Status != StatusRunning {
+			continue
+		}
+		if groupIncludesAgent(mg.state, agentID) {
+			toStop = append(toStop, mg.state.ID)
+		}
+	}
+	gm.mu.Unlock()
+
+	var stopped int
+	for _, id := range toStop {
+		if gm.Stop(id) {
+			stopped++
+		}
+	}
+	return stopped
+}
+
+// groupIncludesAgent reports whether agentID speaks in the group.
+func groupIncludesAgent(state *GroupState, agentID string) bool {
+	if state == nil {
+		return false
+	}
+	if state.Moderator == agentID {
+		return true
+	}
+	for _, p := range state.Participants {
+		if p.AgentID == agentID {
+			return true
+		}
+	}
+	return false
+}
+
 // publishGroupStatus publishes a group.status event.
 func (gm *GroupManager) publishGroupStatus(mg *managedGroup, status string, agentIDs []string) {
 	gm.publish(bus.OutboundMessage{
