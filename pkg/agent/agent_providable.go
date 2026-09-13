@@ -1007,26 +1007,49 @@ func (ap *agentProvidableImpl) ProcessHeartbeat(ctx context.Context, content, ch
 
 // ListAllSessions returns a summary of every persisted session across all
 // agents (including system sessions such as heartbeat and cron).
+//
+// It is the single-pass source for listing endpoints: every field comes from
+// the shared session manager's index, so callers never need per-session
+// getters. For sessions whose messages are not resident in memory, emptiness is
+// resolved for all of them with one batched store query instead of one COUNT
+// each.
 func (ap *agentProvidableImpl) ListAllSessions() []channels.SessionKindInfo {
 	sm := ap.al.SessionManager()
 	if sm == nil {
 		return []channels.SessionKindInfo{}
 	}
 
-	sessions := sm.ListSessions()
+	entries := sm.ListSessionIndex()
 
-	result := make([]channels.SessionKindInfo, 0, len(sessions))
-	for _, s := range sessions {
-		if s == nil {
-			continue
+	// One query covers every non-resident session.
+	needsStore := false
+	for _, e := range entries {
+		if !e.Resident {
+			needsStore = true
+			break
+		}
+	}
+	var withMessages map[string]bool
+	if needsStore {
+		withMessages = sm.SessionKeysWithMessages()
+	}
+
+	result := make([]channels.SessionKindInfo, 0, len(entries))
+	for _, e := range entries {
+		has := e.HasMessages
+		if !e.Resident && withMessages != nil {
+			has = withMessages[e.Key]
 		}
 		result = append(result, channels.SessionKindInfo{
-			Key:     s.Key,
-			Name:    s.Name,
-			Mode:    s.Mode,
-			Kind:    classifySessionKind(s.Key),
-			Created: s.Created,
-			Updated: s.Updated,
+			Key:         e.Key,
+			Name:        e.Name,
+			Mode:        e.Mode,
+			Kind:        classifySessionKind(e.Key),
+			Folder:      e.Folder,
+			Created:     e.Created,
+			Updated:     e.Updated,
+			Resident:    e.Resident,
+			HasMessages: has,
 		})
 	}
 	return result

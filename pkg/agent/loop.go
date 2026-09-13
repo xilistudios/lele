@@ -248,6 +248,11 @@ func (al *AgentLoop) attachFolderResolver() {
 	})
 }
 
+// subagentTaskIDPattern matches the task-ID segment of a subagent session key
+// ("<parent>:subagent-<N>"). Compiled once at package level: regexp.MatchString
+// compiles the expression on every call, and this sits in per-request paths.
+var subagentTaskIDPattern = regexp.MustCompile(`^subagent-\d+$`)
+
 // GetSubagentParentSessionKey returns the parent session key for a subagent session.
 func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 	var taskID string
@@ -278,7 +283,7 @@ func (al *AgentLoop) GetSubagentParentSessionKey(sessionKey string) string {
 
 	// Fallback: parse parent from session key structure {parent}:{taskID}
 	// Only use this fallback if taskID matches the expected subagent format
-	if matched, _ := regexp.MatchString(`^subagent-\d+$`, taskID); matched {
+	if subagentTaskIDPattern.MatchString(taskID) {
 		if idx := strings.LastIndex(sessionKey, ":"+taskID); idx > 0 {
 			parent := sessionKey[:idx]
 			logger.InfoCF("agent", "GetSubagentParentSessionKey: resolved from session key", map[string]interface{}{

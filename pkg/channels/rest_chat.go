@@ -505,11 +505,22 @@ func (n *NativeChannel) handleChatSessions(w http.ResponseWriter, r *http.Reques
 }
 
 // handleChatSessionsMeta returns lightweight session metadata WITHOUT loading
-// the full history for every session. This is the fast path used by the
-// WebUI sidebar: it avoids the N+1 query problem where handleChatSessions
-// called GetSessionHistory(sk) for each session key just to check for
-// messages. Uses HasMessages() which only checks in-memory lengths + a cold
-// SQLite count, never materializing history.
+// the full history for any session. This is the fast path used by the WebUI
+// sidebar.
+//
+// Cost model: the endpoint is paged (the client requests META_PAGE_SIZE rows at
+// a time) but the result set must be globally sorted and filtered, so the whole
+// inventory has to be considered on every request. That is fine as long as the
+// per-request work is one pass over a prebuilt index. It used to be ~8 calls per
+// session (HasMessages, GetSessionMode, GetName, GetCreated, GetUpdated,
+// GetSessionFolder, classify, plus a registry walk for subagent keys), each of
+// which took the session-manager lock, ran ensureLoaded and re-resolved the
+// owning agent — making limit=1 as expensive as limit=200 and the sidebar load
+// several seconds long on a 1k-session instance.
+//
+// Now: ListAllSessions() builds every field in one pass under one lock, and a
+// single batched store query answers "has messages?" for all non-resident
+// sessions at once.
 func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Request) {
 	clientID := getClientID(r)
 	_, ok := n.auth.GetClient(clientID)
@@ -523,80 +534,85 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 	kindFilter := r.URL.Query().Get("kind")
 	includeSystem := r.URL.Query().Get("include_system") == "true"
 
-	// Collect session keys from ALL native clients (unified view).
-	allClients := n.auth.ListClients()
-	sessionKeySet := make(map[string]bool)
-	for _, c := range allClients {
-		for _, sk := range c.SessionKeys {
-			sessionKeySet[sk] = true
-		}
+	if n.agentLoop == nil {
+		writeJSON(w, http.StatusOK, ChatSessionsResponse{Sessions: []ChatSession{}})
+		return
 	}
 
-	sessions := make([]ChatSession, 0, len(sessionKeySet))
-	for sk := range sessionKeySet {
-		// Lightweight existence check: never loads full history. A session
-		// that has no messages (user/assistant or evicted) is skipped.
-		hasMessages := n.agentLoop.HasMessages(sk)
-		if !hasMessages && n.agentLoop.GetEvictedMessageCount(sk) > 0 {
-			hasMessages = true
-		}
-		if !hasMessages {
-			continue
-		}
+	// One pass over the shared session manager builds the whole inventory.
+	index := n.agentLoop.ListAllSessions()
+	indexByKey := make(map[string]SessionKindInfo, len(index))
+	for _, info := range index {
+		indexByKey[info.Key] = info
+	}
 
-		sessionMode := n.agentLoop.GetSessionMode(sk)
-		kind := classifySessionKeyKind(sk)
+	sessions := make([]ChatSession, 0, len(index))
+	seen := make(map[string]bool, len(index))
 
-		if modeFilter != "" {
-			effectiveMode := sessionMode
-			if effectiveMode == "" {
-				effectiveMode = "agent"
-			}
-			if effectiveMode != modeFilter {
+	// Pass 1: sessions tracked by native clients (unified view across clients).
+	// These are the chats the user has actually opened from the WebUI, so they
+	// win over the merged inventory below and keep their HasMessages filter:
+	// a tracked-but-unused session must not show up.
+	for _, c := range n.auth.ListClients() {
+		for _, sk := range c.SessionKeys {
+			if seen[sk] {
 				continue
 			}
-		}
-		if kindFilter != "" && kind != kindFilter {
-			continue
-		}
+			seen[sk] = true
 
-		sessions = append(sessions, ChatSession{
-			Key:     sk,
-			Name:    n.agentLoop.GetName(sk),
-			Mode:    sessionMode,
-			Kind:    kind,
-			Folder:  n.agentLoop.GetSessionFolder(sk),
-			Created: n.agentLoop.GetCreated(sk),
-			Updated: n.agentLoop.GetUpdated(sk),
-		})
+			// Getters resolve aliases internally, so look the resolved key up
+			// in the index to stay equivalent to the per-session path.
+			resolved := n.agentLoop.ResolveSessionKey(sk)
+			info, known := indexByKey[resolved]
+			// Kind is derived from the key the client actually tracks, exactly
+			// as before: aliases normally classify the same, but keeping the
+			// original input removes any doubt.
+			kind := classifySessionKeyKind(sk)
+			if !known {
+				// Not in the persisted inventory (a key with message rows but
+				// no session row). Rare enough to afford the per-key path,
+				// which preserves the previous behaviour exactly.
+				if !n.agentLoop.HasMessages(resolved) {
+					continue
+				}
+				info = SessionKindInfo{
+					Name:        n.agentLoop.GetName(resolved),
+					Mode:        n.agentLoop.GetSessionMode(resolved),
+					Folder:      n.agentLoop.GetSessionFolder(resolved),
+					Created:     n.agentLoop.GetCreated(resolved),
+					Updated:     n.agentLoop.GetUpdated(resolved),
+					Kind:        kind,
+					HasMessages: true,
+				}
+			}
+			if !info.HasMessages {
+				continue
+			}
+			if !sessionPassesFilters(info.Mode, kind, modeFilter, kindFilter) {
+				continue
+			}
+			sessions = append(sessions, ChatSession{
+				Key:     sk,
+				Name:    info.Name,
+				Mode:    info.Mode,
+				Kind:    kind,
+				Folder:  info.Folder,
+				Created: info.Created,
+				Updated: info.Updated,
+			})
+		}
 	}
 
-	// Merge in every persisted session from the shared session manager
-	// (heartbeat, cron, subagents, etc.) so the session-history UI can see
-	// sessions that are not tracked by any native client. Duplicate keys are
-	// skipped (the tracked entry above wins). System sessions may have zero
-	// messages (heartbeat/cron runs) and are kept as-is.
-	mergeAllSessions := n.agentLoop != nil && (kindFilter != "" || includeSystem)
-	if mergeAllSessions {
-		allSessions := n.agentLoop.ListAllSessions()
-		seen := make(map[string]bool, len(sessions))
-		for _, s := range sessions {
-			seen[s.Key] = true
-		}
-		for _, info := range allSessions {
+	// Pass 2: merge in every persisted session (heartbeat, cron, subagents,
+	// chats from other channels) so the session-history UI can see sessions not
+	// tracked by any native client. System sessions may have zero messages and
+	// are kept as-is, matching the previous behaviour.
+	if kindFilter != "" || includeSystem {
+		for _, info := range index {
 			if seen[info.Key] {
 				continue
 			}
-			if modeFilter != "" {
-				effectiveMode := info.Mode
-				if effectiveMode == "" {
-					effectiveMode = "agent"
-				}
-				if effectiveMode != modeFilter {
-					continue
-				}
-			}
-			if kindFilter != "" && info.Kind != kindFilter {
+			if !sessionPassesFilters(info.Mode, info.Kind, modeFilter, kindFilter) {
 				continue
 			}
 			sessions = append(sessions, ChatSession{
@@ -604,6 +620,7 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 				Name:    info.Name,
 				Mode:    info.Mode,
 				Kind:    info.Kind,
+				Folder:  info.Folder,
 				Created: info.Created,
 				Updated: info.Updated,
 			})
@@ -629,6 +646,25 @@ func (n *NativeChannel) handleChatSessionsMeta(w http.ResponseWriter, r *http.Re
 		Total:    total,
 		HasMore:  end < total,
 	})
+}
+
+// sessionPassesFilters applies the optional mode/kind query filters. An empty
+// mode is normalised to "agent", matching every other mode comparison in the
+// codebase.
+func sessionPassesFilters(mode, kind, modeFilter, kindFilter string) bool {
+	if modeFilter != "" {
+		effectiveMode := mode
+		if effectiveMode == "" {
+			effectiveMode = "agent"
+		}
+		if effectiveMode != modeFilter {
+			return false
+		}
+	}
+	if kindFilter != "" && kind != kindFilter {
+		return false
+	}
+	return true
 }
 
 // Mirrors agent.classifySessionKind; both must stay in sync.
