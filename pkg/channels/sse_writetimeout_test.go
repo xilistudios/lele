@@ -62,7 +62,11 @@ func TestSSEBackgroundStreamSurvivesWriteTimeout(t *testing.T) {
 	}
 	srv := &http.Server{Handler: mux, WriteTimeout: 2 * time.Second, ReadTimeout: 5 * time.Second}
 	go srv.Serve(ln)
-	defer func() { ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel(); _ = srv.Shutdown(ctx) }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
 
 	reqCtx, reqCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer reqCancel()
