@@ -150,6 +150,10 @@ func (c *LINEChannel) webhookHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cap the body BEFORE reading: the signature is verified after the read,
+	// so an unauthenticated caller must not be able to force unbounded memory
+	// consumption. LINE webhook payloads are small JSON; 1MB is generous.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		logger.ErrorCF("line", "Failed to read request body", map[string]interface{}{
@@ -557,7 +561,9 @@ func (c *LINEChannel) callAPI(ctx context.Context, endpoint string, payload inte
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		// Error bodies are tiny JSON; bound the read against a hostile or
+		// misconfigured endpoint returning an unbounded response.
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("LINE API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
