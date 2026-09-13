@@ -429,7 +429,7 @@ func TestStop_GracePeriodExpiry(t *testing.T) {
 
 	started := make(chan struct{})
 	handler := func(job *CronJob) (string, error) {
-		close(started) // signal that the handler is running
+		close(started)               // signal that the handler is running
 		time.Sleep(30 * time.Second) // Way longer than the 10s grace period
 		return "ok", nil
 	}
