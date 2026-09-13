@@ -113,8 +113,7 @@ export function parseInlineMarkdown(text: string): Array<{ text: string; token?:
       if (linkMatch) {
         const rawHref = linkMatch[2]
         const hasControlOrWs = URL_CONTROL_OR_WS.test(rawHref)
-        const safeHref =
-          !hasControlOrWs && SAFE_LINK_SCHEME.test(rawHref) ? rawHref : undefined
+        const safeHref = !hasControlOrWs && SAFE_LINK_SCHEME.test(rawHref) ? rawHref : undefined
         result.push({
           text: linkMatch[1],
           token: {

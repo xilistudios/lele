@@ -152,11 +152,7 @@ const ChatListItem = memo(function ChatListItem({
           onKeyDown={(e) => e.stopPropagation()}
           role="presentation"
         >
-          <RenameForm
-            value={renameValue}
-            onChange={setRenameValue}
-            onSubmit={handleRenameSubmit}
-          />
+          <RenameForm value={renameValue} onChange={setRenameValue} onSubmit={handleRenameSubmit} />
         </div>
       ) : (
         <button type="button" className="min-w-0 flex-1 text-left" onClick={handleSelectClick}>

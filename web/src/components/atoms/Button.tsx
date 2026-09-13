@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { type ButtonHTMLAttributes, type ReactNode, forwardRef } from 'react'
 import { Spinner } from './Spinner'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -16,7 +16,8 @@ const baseClasses =
   'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-interaction-primary disabled:cursor-not-allowed disabled:opacity-40'
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-accent-primary text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-active',
+  primary:
+    'bg-accent-primary text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-active',
   secondary:
     'border border-border-light bg-surface-secondary text-text-primary hover:bg-surface-hover',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
@@ -36,7 +37,15 @@ const sizeClasses: Record<ButtonSize, string> = {
  * <Button variant="primary" size="md" loading={isSaving}>Save</Button>
  */
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
-  { variant = 'primary', size = 'md', loading = false, disabled, className = '', children, ...rest },
+  {
+    variant = 'primary',
+    size = 'md',
+    loading = false,
+    disabled,
+    className = '',
+    children,
+    ...rest
+  },
   ref,
 ) {
   const isDisabled = disabled || loading

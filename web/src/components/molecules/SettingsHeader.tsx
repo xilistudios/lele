@@ -23,9 +23,14 @@ export function SettingsHeader({ configPath, title, onOpenMobileSidebar }: Props
             <SidebarToggleIcon size={20} />
           </button>
         )}
-        <h1 className="text-base font-semibold text-text-primary md:text-xl">{title ?? t('chat.settings')}</h1>
+        <h1 className="text-base font-semibold text-text-primary md:text-xl">
+          {title ?? t('chat.settings')}
+        </h1>
         {configPath && (
-          <span className="hidden max-w-[40vw] truncate text-xs text-text-tertiary md:inline" title={configPath}>
+          <span
+            className="hidden max-w-[40vw] truncate text-xs text-text-tertiary md:inline"
+            title={configPath}
+          >
             {configPath}
           </span>
         )}

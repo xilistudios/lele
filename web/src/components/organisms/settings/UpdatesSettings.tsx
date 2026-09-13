@@ -217,9 +217,7 @@ export function UpdatesSettings() {
         )}
 
         {status === 'done' && (
-          <div className="text-sm text-state-success">
-            ✓ {t('settings.updates.completed')}
-          </div>
+          <div className="text-sm text-state-success">✓ {t('settings.updates.completed')}</div>
         )}
 
         {error && (

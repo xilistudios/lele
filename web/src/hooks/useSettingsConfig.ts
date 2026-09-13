@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError } from '../services/http/errors'
 import type { ConfigError, ConfigMetadata, EditableConfig } from '../lib/types'
 import type { ApiClient } from '../services/http/client'
+import { ApiError } from '../services/http/errors'
 
 export type SaveState = 'idle' | 'validating' | 'saving' | 'saved' | 'error'
 

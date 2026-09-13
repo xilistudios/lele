@@ -232,7 +232,10 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
   }
 
   return (
-    <div data-message-id={message.stableId ?? message.id} className={`py-3 ${animate ? 'animate-message-enter' : ''}`}>
+    <div
+      data-message-id={message.stableId ?? message.id}
+      className={`py-3 ${animate ? 'animate-message-enter' : ''}`}
+    >
       {message.excludeFromContext && (
         <div className="mb-1 flex items-center gap-1.5 text-[10px] text-text-tertiary opacity-60">
           <svg
