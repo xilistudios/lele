@@ -1545,16 +1545,6 @@ func (n *NativeChannel) handleBackgroundExecStop(w http.ResponseWriter, r *http.
 
 // handleBackgroundExecStream provides real-time SSE streaming of background process output.
 // GET /api/v1/background-exec/{id}/stream
-func sseGuardedWrite(w http.ResponseWriter, rc *http.ResponseController, data []byte) error {
-	if err := rc.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		if !errors.Is(err, http.ErrNotSupported) {
-			return err
-		}
-	}
-	_, err := w.Write(data)
-	return err
-}
-
 func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1600,7 +1590,7 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 		case <-ticker.C:
 			output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
 			if err != nil {
-				_ = sseGuardedWrite(w, rc, []byte("data: "+string(mustMarshal(map[string]interface{}{"error": err.Error()}))+"\n\n"))
+				_ = sseGuardedWrite(w, []byte("data: "+string(mustMarshal(map[string]interface{}{"error": err.Error()}))+"\n\n"))
 				flusher.Flush()
 				return
 			}
@@ -1612,7 +1602,7 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"status":     status,
 					"elapsed_ms": elapsedMs,
 				})
-				if err := sseGuardedWrite(w, rc, []byte("data: "+string(data)+"\n\n")); err != nil {
+				if err := sseGuardedWrite(w, []byte("data: "+string(data)+"\n\n")); err != nil {
 					return
 				}
 				flusher.Flush()
@@ -1626,7 +1616,7 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"elapsed_ms": elapsedMs,
 					"done":       true,
 				})
-				if err := sseGuardedWrite(w, rc, []byte("data: "+string(data)+"\n\n")); err != nil {
+				if err := sseGuardedWrite(w, []byte("data: "+string(data)+"\n\n")); err != nil {
 					return
 				}
 				flusher.Flush()
