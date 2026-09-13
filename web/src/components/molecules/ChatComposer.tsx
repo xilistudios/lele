@@ -66,6 +66,11 @@ export function ChatComposer() {
   const [queueFullHint, setQueueFullHint] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastTypingSentRef = useRef(0)
+  // In-flight send counter. A boolean would be reset by the first send's
+  // finally-block while a second overlapping send is still pending; a counter
+  // keeps the guard armed until ALL concurrent sends complete.
+  const inFlightRef = useRef(0)
+  const lastSubmittedContentRef = useRef('')
 
   // "/" slash-command palette. The palette only assists composing: accepting a
   // row inserts "<name> " into the draft and the command itself runs on the
@@ -110,19 +115,30 @@ export function ChatComposer() {
     e?.preventDefault()
     const content = draft.trim()
     if (!content && pendingAttachments.length === 0) return
+    // Guard against rapid double-submit of the same content (e.g., double-click).
+    // Different content is allowed through for queue operations while the agent
+    // is busy — the counter blocks same-content duplicates while ANY send is
+    // in flight, content comparison permits distinct messages.
+    if (inFlightRef.current > 0 && content === lastSubmittedContentRef.current) return
+    inFlightRef.current += 1
+    lastSubmittedContentRef.current = content
 
-    // While the agent is busy onSend enqueues instead of sending, and returns
-    // false when that session's queue is full — keep the draft so nothing is
-    // silently lost. Same contract applies when session/agent creation fails.
-    const accepted = await onSend(content, pendingAttachments)
-    if (accepted === false) {
-      setQueueFullHint(true)
-      return
-    }
-    setQueueFullHint(false)
-    setDraft('')
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
+    try {
+      // While the agent is busy onSend enqueues instead of sending, and returns
+      // false when that session's queue is full — keep the draft so nothing is
+      // silently lost. Same contract applies when session/agent creation fails.
+      const accepted = await onSend(content, pendingAttachments)
+      if (accepted === false) {
+        setQueueFullHint(true)
+        return
+      }
+      setQueueFullHint(false)
+      setDraft('')
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+      }
+    } finally {
+      inFlightRef.current -= 1
     }
   }
 
