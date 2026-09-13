@@ -45,6 +45,7 @@ const THEME_META_COLORS: Record<Theme, string> = {
 
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme)
+  document.documentElement.classList.toggle('dark', theme === 'dark')
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) {
     meta.setAttribute('content', THEME_META_COLORS[theme])

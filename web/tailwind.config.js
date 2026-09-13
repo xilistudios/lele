@@ -1,5 +1,5 @@
 export default {
-  darkMode: 'media',
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
