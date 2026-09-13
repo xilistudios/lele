@@ -115,3 +115,35 @@ func TestBuildCSPIPv6TailNotStrippedAsPort(t *testing.T) {
 		t.Errorf("expected port stripped for normal host:port, got: %s", csp)
 	}
 }
+
+// Review (post-review 1b): a Host header accepted by net/http can carry CSP
+// token separators (; ' ! $ % & ( ) * + = ~). None of them may leak into the
+// policy — otherwise "[::1]:80;frame-ancestors" would override the later
+// frame-ancestors 'none' (first directive wins) and re-open clickjacking.
+func TestBuildCSPHostWithSeparatorsCannotInjectDirectives(t *testing.T) {
+	for _, host := range []string{
+		"[::1]:80;frame-ancestors",
+		"[a.com]:x;frame-ancestors",
+		"a.com;frame-ancestors",
+		"example.com'base-uri",
+		"evil.com (=http://evil.com) frame-src",
+		"ex~ample.com",
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = host
+		csp := BuildCSP(r)
+		if strings.Contains(csp, "frame-ancestors;") || strings.Contains(csp, "frame-ancestors 'none'; frame-ancestors") {
+			t.Errorf("host %q produced duplicate/injected directive: %s", host, csp)
+		}
+		// The policy must always end with exactly one frame-ancestors 'none'
+		// and one base-uri 'self', and must contain the injected text nowhere.
+		for _, banned := range []string{";frame-ancestors", "'base-uri", "(=http", "ex~ample"} {
+			if strings.Contains(csp, banned) {
+				t.Errorf("host %q leaked %q into CSP: %s", host, banned, csp)
+			}
+		}
+		if n := strings.Count(csp, "frame-ancestors"); n != 1 {
+			t.Errorf("host %q: frame-ancestors appears %d times: %s", host, n, csp)
+		}
+	}
+}

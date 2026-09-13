@@ -50,9 +50,9 @@ func TestBroadcastAll_ClosesAbandonedSendChan(t *testing.T) {
 	}
 
 	// The done channel must be CLOSED so wsWriteLoop's select exits promptly.
-	client.mu.Lock()
+	// (doneClosed is self-synchronizing since the snapshot-under-lock fix —
+	// it takes client.mu internally, so do NOT hold client.mu here.)
 	doneClosed := client.doneClosed()
-	client.mu.Unlock()
 	if !doneClosed {
 		t.Fatalf("done channel was never closed: stale wsWriteLoop would hang for its write deadline")
 	}
@@ -89,9 +89,7 @@ func TestBroadcastToSession_ClosesAbandonedSendChan(t *testing.T) {
 		t.Fatalf("wedged client not removed by broadcastToSession cleanup")
 	}
 
-	wedged.mu.Lock()
-	doneClosed := wedged.doneClosed()
-	wedged.mu.Unlock()
+	doneClosed := wedged.doneClosed() // self-synchronizing: takes client.mu internally
 	if !doneClosed {
 		t.Fatalf("wedged client's done channel was never closed")
 	}
@@ -162,9 +160,7 @@ func TestStopClosesAllSendChans(t *testing.T) {
 	}
 
 	for _, c := range []*WSClient{c1, c2} {
-		c.mu.Lock()
-		doneClosed := c.doneClosed()
-		c.mu.Unlock()
+		doneClosed := c.doneClosed() // self-synchronizing: takes client.mu internally
 		if !doneClosed {
 			t.Fatalf("client %s done channel never closed after Stop", c.ID)
 		}

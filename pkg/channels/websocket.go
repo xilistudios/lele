@@ -156,7 +156,7 @@ func newWSClient(id string, conn *websocket.Conn, info *ClientInfo, sessionKey s
 // receive on a struct{} channel never blocks, and closeDoneChan is
 // recover-guarded against double close).
 func (c *WSClient) isDoneClosed() bool {
-	done := c.done
+	done := c.snapshotDone()
 	if done == nil {
 		return false
 	}
@@ -168,6 +168,17 @@ func (c *WSClient) isDoneClosed() bool {
 	}
 }
 
+// snapshotDone returns the client's current done channel under client.mu.
+// Every writer of client.done (reconnect, abandon, Stop) holds the lock, so
+// readers must take it too — reading the field without the lock races the
+// pointer word these paths replace (review post-fix follow-up: the same
+// contract QueueSend now follows).
+func (c *WSClient) snapshotDone() chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.done
+}
+
 func (n *NativeChannel) wsReadLoop(client *WSClient) {
 	defer func() {
 		n.markWSClientReconnecting(client)
@@ -176,8 +187,9 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 		})
 	}()
 
-	// Capture done once at entry (same contract as wsWriteLoop).
-	done := client.done
+	// Capture done once at entry (same contract as wsWriteLoop), under the
+	// lock: reconnect paths replace client.done while holding client.mu.
+	done := client.snapshotDone()
 
 	conn := client.Conn
 	conn.SetReadLimit(1024 * 1024)
@@ -242,7 +254,8 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 
 	// Capture the done channel once so a reconnect that replaces
 	// client.done does not make this stale loop follow the new one.
-	done := client.done
+	// The capture takes client.mu: all writers of client.done hold it.
+	done := client.snapshotDone()
 
 	pingTicker := time.NewTicker(wsPingInterval)
 	defer pingTicker.Stop()

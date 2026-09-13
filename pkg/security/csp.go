@@ -36,9 +36,14 @@ func BuildCSP(r *http.Request) string {
 				h = h[:i]
 			}
 		}
-		// Skip host tokens for unbracketed IPv6 hosts: browsers never send
-		// them (they use [::1]:port) and 'self' already covers same-origin.
-		if !strings.Contains(h, ":") || strings.HasPrefix(h, "[") {
+		// Fail-closed host validation: a Host header may legally contain
+		// characters (; ' ! $ % & ( ) * + = ~) that Go's httpguts accepts but
+		// that are CSP token separators — an unvalidated host could inject
+		// directives (e.g. "[::1]:80;frame-ancestors" overriding the later
+		// frame-ancestors 'none', per CSP first-directive-wins). Allow only
+		// the RFC 3986 reg-name / IPv4 / bracketed-IPv6 charset; anything
+		// else falls back to 'self' (same-origin still works for websockets).
+		if isSafeHostToken(h) && (!strings.Contains(h, ":") || strings.HasPrefix(h, "[")) {
 			hosts = append(hosts, "ws://"+h, "wss://"+h)
 		}
 	}
@@ -80,4 +85,25 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return s != ""
+}
+
+// isSafeHostToken allows only the characters that can legitimately appear in
+// a Host header after port-stripping: ASCII alphanumerics, dot, hyphen,
+// underscore, colon and square brackets (bracketed IPv6). Everything else —
+// notably CSP token separators like ';' ',' '=' '(' — disqualifies the host
+// from being echoed into the policy; 'self' still covers same-origin clients.
+func isSafeHostToken(h string) bool {
+	if h == "" {
+		return false
+	}
+	for i := 0; i < len(h); i++ {
+		c := h[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '-' || c == '_' || c == ':' || c == '[' || c == ']':
+		default:
+			return false
+		}
+	}
+	return true
 }
