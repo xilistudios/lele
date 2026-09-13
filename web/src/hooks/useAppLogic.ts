@@ -232,12 +232,18 @@ export function useAppLogic(
       // unhandled rejection (it would crash the app / pollute unrelated flows).
     })
 
+    // Guard against the session changing while the request is in flight: the
+    // response must only apply to the session that was current when it started.
+    const thinkingKey = sessionsHook.currentSessionKey
     api
-      .sessionThinking(sessionsHook.currentSessionKey)
+      .sessionThinking(thinkingKey)
       .then((res) => {
+        if (sessionsHook.currentSessionKeyRef.current !== thinkingKey) return
         setThinkLevel(res.level)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (sessionsHook.currentSessionKeyRef.current !== thinkingKey) return
+      })
 
     // Rehydrate the session folder the same way thinking level is rehydrated.
     // A 404 (session without folder yet) silently resolves to "no folder".
