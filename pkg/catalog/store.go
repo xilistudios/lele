@@ -182,6 +182,11 @@ func ResetLive() {
 	mu.Unlock()
 	indexMu.Lock()
 	memIndex = nil
+	// Ensure() gates on loadOnce; without re-arming it, every subsequent
+	// test that installs a fresh SetCacheDir TempDir finds a nil memIndex
+	// (Ensure is a no-op after the first fire) and sees an empty catalog —
+	// the source of the rest_catalog_test.go flakes under -count>1.
+	loadOnce = sync.Once{}
 	indexMu.Unlock()
 }
 
