@@ -359,3 +359,122 @@ func TestCheckJobs_SkipsExecutingJob(t *testing.T) {
 		t.Error("executing slot not cleaned up after job finished")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CHT-04: Stop() drains in-flight jobs with bounded grace period
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestStop_DrainsInFlightJob verifies that Stop() blocks until a short-running
+// in-flight job completes (within the grace period), so the caller can safely
+// close resources after Stop() returns.
+func TestStop_DrainsInFlightJob(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	started := make(chan struct{})
+	var completed atomic.Bool
+	handler := func(job *CronJob) (string, error) {
+		close(started) // signal that the handler is running
+		time.Sleep(800 * time.Millisecond)
+		completed.Store(true)
+		return "ok", nil
+	}
+
+	cs := NewCronService(storePath, handler)
+
+	job, err := cs.AddJob(
+		"fast",
+		CronSchedule{Kind: "every", EveryMS: int64Ptr(999_999_999_000)},
+		"hello", false, "cli", "direct",
+	)
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Make the job due.
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	// Wait until the handler actually starts (up to 3s for the scheduler tick).
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not start within 3s")
+	}
+
+	// Stop() must wait for the in-flight job to finish.
+	cs.Stop()
+
+	if !completed.Load() {
+		t.Error("job did not complete before Stop() returned — Stop did not drain in-flight jobs")
+	}
+}
+
+// TestStop_GracePeriodExpiry verifies that Stop() returns within a bounded
+// grace period (~10s) even when a job is slow, logging the timeout instead of
+// blocking forever.
+func TestStop_GracePeriodExpiry(t *testing.T) {
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "jobs.json")
+
+	started := make(chan struct{})
+	handler := func(job *CronJob) (string, error) {
+		close(started) // signal that the handler is running
+		time.Sleep(30 * time.Second) // Way longer than the 10s grace period
+		return "ok", nil
+	}
+
+	cs := NewCronService(storePath, handler)
+
+	job, err := cs.AddJob(
+		"slow",
+		CronSchedule{Kind: "every", EveryMS: int64Ptr(999_999_999_000)},
+		"hello", false, "cli", "direct",
+	)
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	if err := cs.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Make the job due.
+	cs.mu.Lock()
+	for i := range cs.store.Jobs {
+		if cs.store.Jobs[i].ID == job.ID {
+			past := time.Now().UnixMilli() - 1000
+			cs.store.Jobs[i].State.NextRunAtMS = &past
+		}
+	}
+	cs.mu.Unlock()
+
+	// Wait until handler starts.
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not start within 3s")
+	}
+
+	// Stop() must return within ~12s (10s grace + 2s slack), NOT block for 30s.
+	start := time.Now()
+	cs.Stop()
+	elapsed := time.Since(start)
+
+	if elapsed > 15*time.Second {
+		t.Errorf("Stop() took %v, expected < 15s (grace period should have expired)", elapsed)
+	}
+	if elapsed < 8*time.Second {
+		t.Errorf("Stop() took %v, expected >= 8s (grace period should have been waited)", elapsed)
+	}
+}

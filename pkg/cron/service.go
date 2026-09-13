@@ -92,6 +92,9 @@ type CronService struct {
 	// concurrent execution of the same job (e.g. a spawn cron that
 	// hasn't finished before the next tick fires).
 	executing sync.Map
+	// jobWg tracks in-flight job goroutines so Stop() can drain them
+	// with a bounded grace period (CHT-04).
+	jobWg sync.WaitGroup
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -131,9 +134,8 @@ func (cs *CronService) Start() error {
 
 func (cs *CronService) Stop() {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	if !cs.running {
+		cs.mu.Unlock()
 		return
 	}
 
@@ -141,6 +143,24 @@ func (cs *CronService) Stop() {
 	if cs.stopChan != nil {
 		close(cs.stopChan)
 		cs.stopChan = nil
+	}
+	cs.mu.Unlock()
+
+	// Wait for in-flight job goroutines to finish with a bounded grace
+	// period (CHT-04). This prevents callers from closing a DB/store
+	// while a job is still writing to it.
+	const gracePeriod = 10 * time.Second
+	done := make(chan struct{})
+	go func() {
+		cs.jobWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("[cron] all in-flight jobs drained on stop")
+	case <-time.After(gracePeriod):
+		log.Println("[cron] grace period expired on stop; some jobs may still be running")
 	}
 }
 
@@ -230,9 +250,15 @@ func (cs *CronService) collectDueJobs() []string {
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
+	// CHT-04: track this goroutine in the WaitGroup so Stop() can drain it.
+	cs.jobWg.Add(1)
+	// Decrement the WaitGroup as the very last defer (LIFO order) so Stop()
+	// only sees this job as done after all cleanup completes.
+	defer cs.jobWg.Done()
+
 	// Recover from panics in the handler so a single bad job can't crash
-	// the process (CHT-01). Placed first so it runs LAST in defer LIFO
-	// order, after cs.executing.Delete(jobID) releases the slot.
+	// the process (CHT-01). Placed second so it runs second-to-last in
+	// defer LIFO order, after cs.executing.Delete(jobID) releases the slot.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[cron] PANIC in job %s: %v\n%s", jobID, r, debug.Stack())

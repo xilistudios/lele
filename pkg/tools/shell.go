@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
@@ -524,15 +523,13 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output = "(no output)"
 	}
 
-	maxLen := 10000
-	if len(output) > maxLen {
-		cut := maxLen
-		// Back off to a UTF-8 rune boundary so we never split a multi-byte char.
-		for cut > 0 && !utf8.RuneStart(output[cut]) {
-			cut--
-		}
-		output = output[:cut] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-cut)
-	}
+	// AGT-04: cap output at 64KB total with head+tail preservation.
+	// The threadSafeBuffer already bounds memory at 1MB per stream;
+	// this caps the *returned* output that goes into the LLM context.
+	// head 48KB + tail 16KB = 64KB max (+ short marker).
+	const outputHeadBytes = 48 * 1024
+	const outputTailBytes = 16 * 1024
+	output = utils.TruncateOutput(output, outputHeadBytes, outputTailBytes)
 
 	// If feedback was sent and command completed, optionally send completion message
 	// (only if it took significant time)

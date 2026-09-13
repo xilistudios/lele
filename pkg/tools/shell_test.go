@@ -171,21 +171,44 @@ func TestShellTool_StderrCapture(t *testing.T) {
 	}
 }
 
-// TestShellTool_OutputTruncation verifies long output is truncated
+// TestShellTool_OutputTruncation verifies long output is truncated with
+// head+tail preservation at 64KB (AGT-04).
 func TestShellTool_OutputTruncation(t *testing.T) {
 	tool := NewExecTool("", false)
 
 	ctx := context.Background()
-	// Generate long output (>10000 chars)
+	// Generate ~1MB of output (well over 64KB cap).
+	// seq 1 60000 produces ~360KB; seq 1 200000 produces ~1.2MB.
 	args := map[string]interface{}{
-		"command": "python3 -c \"print('x' * 20000)\" || echo " + strings.Repeat("x", 20000),
+		"command": "seq 1 200000",
 	}
 
 	result := tool.Execute(ctx, args)
 
-	// Should have truncation message or be truncated
-	if len(result.ForLLM) > 15000 {
-		t.Errorf("Expected output to be truncated, got length: %d", len(result.ForLLM))
+	if result.IsError {
+		t.Fatalf("command failed: %s", result.ForLLM)
+	}
+
+	// Total output should be <= 64KB + marker overhead.
+	const maxOutput = 64*1024 + 200 // 200 bytes slack for the marker string
+	if len(result.ForLLM) > maxOutput {
+		t.Errorf("Expected output <= %d bytes, got %d", maxOutput, len(result.ForLLM))
+	}
+
+	// Must contain the truncation marker.
+	if !strings.Contains(result.ForLLM, "bytes truncated") {
+		t.Errorf("Expected truncation marker in output, got: %s", result.ForLLM[:200])
+	}
+
+	// Output must start with "1" (the real beginning).
+	if !strings.HasPrefix(result.ForLLM, "1") {
+		t.Errorf("Expected output to start with '1', got: %q", result.ForLLM[:50])
+	}
+
+	// Output must end with the real tail (last line of seq 1 200000 is "200000").
+	if !strings.Contains(result.ForLLM, "200000") {
+		t.Errorf("Expected output to contain '200000' (tail preservation), got last 200 bytes: %q",
+			result.ForLLM[len(result.ForLLM)-200:])
 	}
 }
 
@@ -195,25 +218,24 @@ func TestShellTool_TruncationKeepsValidUTF8(t *testing.T) {
 	tool := NewExecTool("", false)
 
 	ctx := context.Background()
-	// Emit >10000 bytes of multibyte UTF-8 ("café" = 5 bytes each). The cut at
-	// byte 10000 will likely land mid-rune; the fix must back off to a boundary.
+	// Emit >64KB bytes of multibyte UTF-8 ("café" = 5 bytes each).
+	// seq 1 20000 | xargs -I{} echo café produces ~100KB of multibyte text.
 	args := map[string]interface{}{
-		"command": "yes 'café' | head -c 20000",
+		"command": "seq 1 20000 | while read _; do echo café; done",
 	}
 
 	result := tool.Execute(ctx, args)
 
-	// Ensure truncation actually happened (as a sanity check of the harness).
-	if len(result.ForLLM) <= 10000 {
-		t.Errorf("Expected output to be truncated (>10000 bytes), got length: %d", len(result.ForLLM))
+	if result.IsError {
+		t.Fatalf("command failed: %s", result.ForLLM)
 	}
 
 	// ForLLM and ForUser should both be valid UTF-8 after truncation.
 	if !utf8.ValidString(result.ForLLM) {
-		t.Errorf("ForLLM output is not valid UTF-8 after truncation: %q", result.ForLLM)
+		t.Errorf("ForLLM output is not valid UTF-8 after truncation (len=%d)", len(result.ForLLM))
 	}
 	if !utf8.ValidString(result.ForUser) {
-		t.Errorf("ForUser output is not valid UTF-8 after truncation: %q", result.ForUser)
+		t.Errorf("ForUser output is not valid UTF-8 after truncation (len=%d)", len(result.ForUser))
 	}
 }
 
