@@ -1583,9 +1583,18 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	// GW-L9 review M2: pre-fix, the server WriteTimeout was an accidental
+	// backstop for this loop; now that the stream survives it, cap its
+	// wall-clock lifetime explicitly. 24h is generous enough for any
+	// legitimate background process (the loop normally exits via the done
+	// event or client disconnect long before this).
+	bgDeadline := time.After(24 * time.Hour)
+
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-bgDeadline:
 			return
 		case <-ticker.C:
 			output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, 0)

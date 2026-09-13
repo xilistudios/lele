@@ -110,6 +110,12 @@ func writeSSE(w http.ResponseWriter, event string, data interface{}) error {
 // deadline so a client that stops draining its socket still cannot pin the
 // handler forever. ErrNotSupported (ResponseWriter without deadline support,
 // e.g. test recorders) is tolerated.
+//
+// Caveat (review M1): small SSE frames are copied straight into the kernel
+// socket buffer and return immediately, so this guard only trips once the
+// buffer is full (stalled client + sustained traffic, tens of minutes).
+// The primary liveness backstops remain the request context and the
+// per-handler wall-clock deadlines (restStreamDeadline, bgStreamDeadline).
 func sseGuardedWrite(w http.ResponseWriter, data []byte) error {
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
