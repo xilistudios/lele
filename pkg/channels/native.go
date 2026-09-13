@@ -122,6 +122,10 @@ type WSClient struct {
 	SendChan      chan []byte
 	closed        bool
 
+	// doneClosed reports whether the done channel has been closed. nil-safe:
+	// a client built by tests without a done channel reports false.
+	doneClosed func() bool
+
 	// Reconnection support
 	reconnecting   bool
 	disconnectedAt time.Time
@@ -326,10 +330,10 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 			client.reconnectTimer = nil
 		}
 		client.reconnecting = false
+		// Permanently discarded (deleted below): close done without
+		// replacing it, matching abandonWSClientLocked.
 		closeDoneChan(client.done)
-		client.done = make(chan struct{})
 		client.mu.Unlock()
-		close(client.SendChan)
 		if client.Conn != nil {
 			client.Conn.Close()
 		}
@@ -976,21 +980,67 @@ func (n *NativeChannel) removeWSClient(clientID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if client, exists := n.wsClients[clientID]; exists {
-		client.mu.Lock()
-		if client.reconnectTimer != nil {
-			client.reconnectTimer.Stop()
-			client.reconnectTimer = nil
+		n.abandonWSClientLocked(client)
+	}
+}
+
+// abandonWSClientLocked fully tears down a client the channel has decided to
+// discard: an explicitly removed client, one whose reconnect window expired,
+// one Stop()ped at shutdown, or — the SURV-03 case — one whose SendChan is
+// wedged (QueueSend timed out / buffer full) and was flagged for cleanup by a
+// broadcast.
+//
+// Signal discipline (SURV-03): teardown signals via `done` and `closed`, and
+// deliberately does NOT close SendChan. Closing a channel while any goroutine
+// is still blocked sending on it panics ("send on closed channel"), and
+// QueueSend senders block in `select { case SendChan <- data }` after passing
+// the closed check — precisely the wedged-client case. Both consumers are
+// already covered without close(SendChan):
+//   - wsWriteLoop exits when the captured `done` closes (select case)
+//   - QueueSend returns immediately: closed-flag check at entry, or the
+//     `done` case if it is already parked on a full channel
+//
+// The abandoned SendChan (plus any buffered frames) becomes unreachable once
+// the last reference drops and is reclaimed by the GC.
+//
+// Exactly-once: the exists-check + delete in n.wsClients by each caller's
+// loop under n.mu serializes removal, so the teardown runs at most once per
+// client. Callers MUST hold n.mu (hence the Locked suffix); client.mu is
+// taken inside for the state fields, respecting the documented lock order
+// NativeChannel.mu → WSClient.mu.
+func (n *NativeChannel) abandonWSClientLocked(client *WSClient) {
+	client.mu.Lock()
+	client.closed = true
+	if client.reconnectTimer != nil {
+		client.reconnectTimer.Stop()
+		client.reconnectTimer = nil
+	}
+	client.reconnecting = false
+	// Close done WITHOUT replacing it: this client is permanently discarded,
+	// so no new loops will ever capture a fresh channel. Keeping the closed
+	// channel in place lets every late observer (loops that captured it at
+	// entry, doneClosed probes) see the exit signal. Paths where the client
+	// lives on (markWSClientReconnecting, reconnectWSClient) still replace it.
+	closeDoneChan(client.done)
+	client.mu.Unlock()
+
+	if client.Conn != nil {
+		client.Conn.Close()
+	}
+	delete(n.wsClients, client.ID)
+}
+
+// removeAbandonedClients tears down the clients flagged by a broadcast's
+// QueueSend failures. It re-checks membership under n.mu so a client already
+// removed by another path (read-loop error, reconnect expiry, Stop) is
+// skipped — that exists-check is what makes close-once safe.
+func (n *NativeChannel) removeAbandonedClients(ids []string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, id := range ids {
+		if client, exists := n.wsClients[id]; exists {
+			n.abandonWSClientLocked(client)
 		}
-		client.reconnecting = false
-		client.closed = true
-		closeDoneChan(client.done)
-		client.done = make(chan struct{})
-		client.mu.Unlock()
-		close(client.SendChan)
-		if client.Conn != nil {
-			client.Conn.Close()
-		}
-		delete(n.wsClients, clientID)
 	}
 }
 
@@ -1209,17 +1259,7 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	}
 
 	if len(cleanup) > 0 {
-		n.mu.Lock()
-		for _, id := range cleanup {
-			if client, exists := n.wsClients[id]; exists {
-				client.closed = true
-				if client.Conn != nil {
-					client.Conn.Close()
-				}
-				delete(n.wsClients, id)
-			}
-		}
-		n.mu.Unlock()
+		n.removeAbandonedClients(cleanup)
 	}
 
 	if found == 0 && event == "approval.request" {
@@ -1255,17 +1295,7 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 	}
 
 	if len(cleanup) > 0 {
-		n.mu.Lock()
-		for _, id := range cleanup {
-			if client, exists := n.wsClients[id]; exists {
-				client.closed = true
-				if client.Conn != nil {
-					client.Conn.Close()
-				}
-				delete(n.wsClients, id)
-			}
-		}
-		n.mu.Unlock()
+		n.removeAbandonedClients(cleanup)
 	}
 }
 
@@ -1381,9 +1411,14 @@ func (c *WSClient) QueueSend(data []byte) error {
 	}
 	c.mu.Unlock()
 
-	timer := time.NewTimer(5 * time.Second)
+	done := c.done // snapshot: removal closes the current done channel
+
+	timer := time.NewTimer(wsQueueSendTimeout)
 	defer timer.Stop()
 
+	// done is checked alongside the enqueue timeout: once the client has been
+	// removed (SURV-03 teardown), SendChan may already be closed and this call
+	// must return immediately instead of burning the whole timeout window.
 	select {
 	case c.SendChan <- data:
 		return nil
@@ -1397,6 +1432,16 @@ func (c *WSClient) QueueSend(data []byte) error {
 		}
 		c.mu.Unlock()
 		return fmt.Errorf("send timeout, client disconnected")
+	case <-done:
+		c.mu.Lock()
+		if !c.closed {
+			c.closed = true
+			if c.Conn != nil {
+				c.Conn.Close()
+			}
+		}
+		c.mu.Unlock()
+		return fmt.Errorf("client removed during send")
 	}
 }
 

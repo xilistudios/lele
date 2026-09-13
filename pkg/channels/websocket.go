@@ -30,6 +30,11 @@ const (
 	wsReadDeadline = 90 * time.Second
 )
 
+// wsQueueSendTimeout bounds how long QueueSend waits for buffer space before
+// declaring the client wedged and flagging it for cleanup. A var (not const)
+// so tests can shorten it; production reads the default 5s.
+var wsQueueSendTimeout = 5 * time.Second
+
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed", "method_invalid")
@@ -113,15 +118,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	// New connection: create a fresh WSClient.
 	clientID := uuid.New().String()
-	client := &WSClient{
-		ID:            clientID,
-		Conn:          conn,
-		ClientInfo:    clientInfo,
-		SessionKey:    sessionKey,
-		Subscriptions: map[string]bool{sessionKey: true},
-		SendChan:      make(chan []byte, wsSendChanSize),
-		done:          make(chan struct{}),
-	}
+	client := newWSClient(clientID, conn, clientInfo, sessionKey)
 
 	n.addWSClient(client)
 
@@ -135,6 +132,40 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	go n.wsWriteLoop(client)
 
 	n.sendWelcome(client)
+}
+
+// newWSClient builds a WSClient for a fresh connection. Extracted so tests
+// can construct clients with the exact production shape (done-closed probe
+// wired up) instead of hand-rolling struct literals.
+func newWSClient(id string, conn *websocket.Conn, info *ClientInfo, sessionKey string) *WSClient {
+	c := &WSClient{
+		ID:            id,
+		Conn:          conn,
+		ClientInfo:    info,
+		SessionKey:    sessionKey,
+		Subscriptions: map[string]bool{sessionKey: true},
+		SendChan:      make(chan []byte, wsSendChanSize),
+		done:          make(chan struct{}),
+	}
+	c.doneClosed = c.isDoneClosed
+	return c
+}
+
+// isDoneClosed is the doneClosed probe for clients created via newWSClient;
+// it reads a channel-closed signal without racing the close (a closed
+// receive on a struct{} channel never blocks, and closeDoneChan is
+// recover-guarded against double close).
+func (c *WSClient) isDoneClosed() bool {
+	done := c.done
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
 }
 
 func (n *NativeChannel) wsReadLoop(client *WSClient) {

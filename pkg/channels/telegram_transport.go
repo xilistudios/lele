@@ -422,7 +422,9 @@ func (c *TelegramChannel) sendFormattedText(ctx context.Context, chatID int64, m
 	}
 
 	_, err := c.bot.SendMessage(ctx, tgMsg)
-	return err
+	// Surface 429s as RateLimitError so the retry layer can honor the
+	// retry_after hint instead of blind backoff (SURV-07).
+	return TelegramRateLimitError(err)
 }
 
 // sendPlainTextFallback sends text without any formatting
@@ -463,7 +465,9 @@ func (c *TelegramChannel) sendPlainTextFallback(ctx context.Context, chatID int6
 	}
 
 	_, err := c.bot.SendMessage(ctx, tgMsg)
-	return err
+	// Surface 429s as RateLimitError so the retry layer can honor the
+	// retry_after hint instead of blind backoff (SURV-07).
+	return TelegramRateLimitError(err)
 }
 
 func (c *TelegramChannel) hasPlaceholder(chatID string) bool {

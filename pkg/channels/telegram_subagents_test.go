@@ -14,7 +14,7 @@ func TestTelegramHandleCommandWithSession_SubagentsPreservesArguments(t *testing
 	msgBus := bus.NewMessageBus()
 	channel := &TelegramChannel{
 		BaseChannel:  NewBaseChannel("telegram", nil, msgBus, nil),
-		processedIDs: make(map[string]struct{}),
+		processedIDs: make(map[string]int64),
 	}
 
 	message := &telego.Message{
