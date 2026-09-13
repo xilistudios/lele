@@ -478,3 +478,23 @@ func TestStop_GracePeriodExpiry(t *testing.T) {
 		t.Errorf("Stop() took %v, expected >= 8s (grace period should have been waited)", elapsed)
 	}
 }
+
+// CHT-02: ListJobs(true) must not hand out the live backing array — mutating
+// the returned slice must not corrupt the service's store.
+func TestListJobs_ReturnsCopyNotLiveSlice(t *testing.T) {
+	cs := NewCronService(filepath.Join(t.TempDir(), "jobs.json"), nil)
+	if _, err := cs.AddJob("j1", CronSchedule{Kind: "every", EveryMS: int64Ptr(60000)}, "hello", false, "cli", "direct"); err != nil {
+		t.Fatalf("AddJob: %v", err)
+	}
+	got := cs.ListJobs(true)
+	if len(got) != 1 {
+		t.Fatalf("want 1 job, got %d", len(got))
+	}
+	got[0].Name = "MUTATED-BY-CALLER"
+	got[0].Payload.Message = "rm -rf /"
+
+	again := cs.ListJobs(true)
+	if again[0].Name == "MUTATED-BY-CALLER" || again[0].Payload.Message == "rm -rf /" {
+		t.Fatalf("caller mutation leaked into store: %+v", again[0])
+	}
+}

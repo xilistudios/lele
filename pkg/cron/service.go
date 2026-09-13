@@ -691,7 +691,12 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	defer cs.mu.RUnlock()
 
 	if includeDisabled {
-		return cs.store.Jobs
+		// Return a copy: callers must never hold the live backing array
+		// (CHT-02) — AddJob appends and UpdateJob replaces elements under
+		// cs.mu, so handing out cs.store.Jobs directly is a data race.
+		out := make([]CronJob, len(cs.store.Jobs))
+		copy(out, cs.store.Jobs)
+		return out
 	}
 
 	var enabled []CronJob
