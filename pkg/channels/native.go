@@ -1395,6 +1395,7 @@ func (c *WSClient) Send(data []byte) error {
 
 func (c *WSClient) QueueSend(data []byte) error {
 	c.mu.Lock()
+	done := c.done // snapshot under the lock: removal/reconnect replaces this field (SURV-03 race)
 	if c.closed {
 		c.mu.Unlock()
 		return fmt.Errorf("client is closed")
@@ -1410,8 +1411,6 @@ func (c *WSClient) QueueSend(data []byte) error {
 		return nil
 	}
 	c.mu.Unlock()
-
-	done := c.done // snapshot: removal closes the current done channel
 
 	timer := time.NewTimer(wsQueueSendTimeout)
 	defer timer.Stop()

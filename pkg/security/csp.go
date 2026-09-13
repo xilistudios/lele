@@ -29,9 +29,18 @@ func BuildCSP(r *http.Request) string {
 	if r != nil && r.Host != "" {
 		h := r.Host
 		if i := strings.LastIndex(h, ":"); i > strings.LastIndex(h, "]") {
-			h = h[:i] // strip port; keep IPv6 bracket form intact
+			// Only strip when the suffix is a numeric port. A bare
+			// unbracketed IPv6 host (e.g. "::1") has no port to strip, and
+			// cutting it would emit a malformed ws://: token (review nit #2).
+			if port := h[i+1:]; port != "" && isAllDigits(port) {
+				h = h[:i]
+			}
 		}
-		hosts = append(hosts, "ws://"+h, "wss://"+h)
+		// Skip host tokens for unbracketed IPv6 hosts: browsers never send
+		// them (they use [::1]:port) and 'self' already covers same-origin.
+		if !strings.Contains(h, ":") || strings.HasPrefix(h, "[") {
+			hosts = append(hosts, "ws://"+h, "wss://"+h)
+		}
 	}
 	connect := "'self'"
 	if len(hosts) > 0 {
@@ -61,4 +70,14 @@ func Middleware() func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isAllDigits reports whether s is non-empty and contains only ASCII digits.
+func isAllDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }

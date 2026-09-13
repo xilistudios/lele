@@ -79,3 +79,39 @@ func TestMiddlewareSetsCanonicalHeaders(t *testing.T) {
 		t.Errorf("served CSP is not the canonical request-pinned policy: %q", csp)
 	}
 }
+
+// Review nit #2: a bare unbracketed IPv6 Host ("::1") must not produce a
+// malformed ws://: token — the host is skipped and 'self' covers same-origin.
+func TestBuildCSPBareIPv6HostNoMalformedToken(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Host = "::1"
+	csp := BuildCSP(r)
+	if strings.Contains(csp, "ws://:") {
+		t.Errorf("CSP contains malformed ws://: token: %s", csp)
+	}
+	if !strings.Contains(csp, "connect-src 'self'") {
+		t.Errorf("expected connect-src 'self' only, got: %s", csp)
+	}
+}
+
+// Bracketed IPv6 with port must keep the bracketed host and strip only the
+// numeric port.
+func TestBuildCSPBracketedIPv6PortStripped(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Host = "[::1]:8080"
+	csp := BuildCSP(r)
+	if !strings.Contains(csp, "ws://[::1] wss://[::1]") {
+		t.Errorf("expected bracketed IPv6 host without port, got: %s", csp)
+	}
+}
+
+// A non-numeric ":suffix" (bare IPv6 tail like "::1234") must NOT be treated
+// as a port — stripping it would drop the host or mangle it.
+func TestBuildCSPIPv6TailNotStrippedAsPort(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Host = "example.com:8080"
+	csp := BuildCSP(r)
+	if !strings.Contains(csp, "ws://example.com wss://example.com") {
+		t.Errorf("expected port stripped for normal host:port, got: %s", csp)
+	}
+}
