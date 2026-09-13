@@ -1,5 +1,5 @@
 import '../../test/setup'
-import { beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import '../../test/i18n'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
@@ -29,6 +29,17 @@ beforeAll(() => {
   }))
 
   ChatComposer = require('./ChatComposer').ChatComposer
+})
+
+afterAll(() => {
+  // Restore any mock() spies created in this file.
+  // NOTE: mock.restore() does NOT revert mock.module() in Bun — module mocks are
+  // process-wide and cannot be undone from within a file. The two mock.module()
+  // targets above (ChatPageContext, useSlashCommands) are therefore contained by
+  // running each test file in its own process via `bun test --isolate` (the
+  // canonical command, see BASELINE.md / CI). Do not rely on this call to stop a
+  // module-mock leak under a non-isolated run.
+  mock.restore()
 })
 
 /** Find the composer textarea; throws instead of non-null asserting. */
