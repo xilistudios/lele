@@ -238,6 +238,7 @@ func (sm *SessionManager) ListSessions() []*Session {
 				Key:     meta.Key,
 				Name:    meta.Name,
 				Mode:    meta.Mode,
+				Folder:  meta.Folder,
 				Created: meta.Created,
 				Updated: meta.Updated,
 				// Messages is nil — not loaded
@@ -442,4 +443,98 @@ func (sm *SessionManager) FindSubagentSessions(parentPrefix string) []SubagentSe
 	}
 
 	return results
+}
+
+// SessionIndexEntry is one row of the session index used by listing endpoints.
+// It carries every field the WebUI sidebar needs (name, mode, folder, kind
+// inputs, timestamps) plus whether the session has any messages, so a handler
+// can build a full response from a single pass over the manager instead of
+// calling one getter per session. Each getter previously took sm.mu, ran
+// ensureLoaded and walked the agent registry, which made the sidebar endpoint
+// O(N_total) per page.
+type SessionIndexEntry struct {
+	Key      string
+	Name     string
+	Mode     string
+	Folder   string
+	Created  time.Time
+	Updated  time.Time
+	Resident bool
+	// HasMessages mirrors SessionManager.HasMessages: user/assistant messages
+	// in memory, or evicted/persisted ones. For non-resident sessions it is
+	// only known once the caller consults the store, so it is left false here
+	// and Resident is set to false — callers resolve the cold ones with one
+	// batched query (see SessionKeysWithMessages).
+	HasMessages bool
+}
+
+// ListSessionIndex returns one lightweight entry per known session (resident
+// and metadata-only) in a single pass under one lock. It never loads message
+// bodies: resident sessions are counted from the in-memory slice, and
+// non-resident sessions come back with Resident=false so the caller can
+// resolve emptiness with one batched store query instead of N.
+func (sm *SessionManager) ListSessionIndex() []SessionIndexEntry {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	res := make([]SessionIndexEntry, 0, len(sm.sessions)+len(sm.sessionMeta))
+	seen := make(map[string]bool, len(sm.sessions)+len(sm.sessionMeta))
+
+	for key, session := range sm.sessions {
+		if session == nil {
+			continue
+		}
+		seen[key] = true
+		res = append(res, SessionIndexEntry{
+			Key:      key,
+			Name:     session.Name,
+			Mode:     session.Mode,
+			Folder:   session.Folder,
+			Created:  session.Created,
+			Updated:  session.Updated,
+			Resident: true,
+			// Same expression as HasMessages for resident sessions.
+			HasMessages: len(session.Messages) > 0 || session.evictedTotal > 0,
+		})
+	}
+
+	for key, meta := range sm.sessionMeta {
+		if seen[key] || meta == nil {
+			continue
+		}
+		res = append(res, SessionIndexEntry{
+			Key:      key,
+			Name:     meta.Name,
+			Mode:     meta.Mode,
+			Folder:   meta.Folder,
+			Created:  meta.Created,
+			Updated:  meta.Updated,
+			Resident: false,
+			// Unknown without the store; caller resolves it.
+		})
+	}
+
+	return res
+}
+
+// SessionKeysWithMessages returns the set of session keys that have at least
+// one persisted message row, in a single store query. It is the batched
+// alternative to calling HasMessages per non-resident session. Returns nil when
+// no store is configured (callers should then treat unknown as empty, matching
+// HasMessages).
+func (sm *SessionManager) SessionKeysWithMessages() map[string]bool {
+	sm.ensureLoaded()
+	sm.mu.RLock()
+	store := sm.store
+	sm.mu.RUnlock()
+
+	if store == nil {
+		return nil
+	}
+	keys, err := store.Sessions().SessionKeysWithMessages()
+	if err != nil {
+		return nil
+	}
+	return keys
 }

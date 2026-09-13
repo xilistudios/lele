@@ -653,6 +653,37 @@ func (r *SessionRepo) PruneExcluded(sessionKey string, keepCount int) (int, erro
 	return int(affected), nil
 }
 
+// SessionKeysWithMessages returns the set of persisted session keys that have
+// at least one message row, in a single query. Listing endpoints use it to
+// answer "does this session have messages?" for every non-resident session
+// without issuing one COUNT per session.
+//
+// Written as an EXISTS semi-join rather than DISTINCT over session_messages:
+// the probe stops at the first index hit (idx_messages_session) instead of
+// scanning every message row, which matters once history grows past ~100k rows.
+func (r *SessionRepo) SessionKeysWithMessages() (map[string]bool, error) {
+	rows, err := r.db.Query(`
+		SELECT s.key FROM sessions s
+		 WHERE EXISTS (SELECT 1 FROM session_messages m WHERE m.session_key = s.key)`)
+	if err != nil {
+		return nil, fmt.Errorf("session keys with messages: %w", err)
+	}
+	defer rows.Close()
+
+	keys := make(map[string]bool)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("session keys with messages scan: %w", err)
+		}
+		keys[key] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("session keys with messages rows: %w", err)
+	}
+	return keys, nil
+}
+
 // AllMessageCounts returns a map of session_key → message count for all
 // sessions in a single query. This avoids N+1 queries when listing sessions
 // for the WebUI sidebar/history.

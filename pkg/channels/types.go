@@ -281,8 +281,17 @@ type SessionKindInfo struct {
 	Name    string
 	Mode    string
 	Kind    string
+	Folder  string
 	Created time.Time
 	Updated time.Time
+	// Resident reports whether the session's messages are loaded in memory.
+	Resident bool
+	// HasMessages mirrors AgentProvidable.HasMessages: the session has at
+	// least one user/assistant message in memory or evicted/persisted. It is
+	// resolved for all sessions in one pass (one batched store query covers
+	// every non-resident session), so listing endpoints never call HasMessages
+	// per session.
+	HasMessages bool
 }
 
 type ChatSessionsResponse struct {

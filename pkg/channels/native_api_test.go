@@ -387,10 +387,12 @@ func (m *nativeTestAgentLoop) ListAllSessions() []SessionKindInfo {
 		}
 		seen[key] = true
 		result = append(result, SessionKindInfo{
-			Key:  key,
-			Name: m.sessionNames[key],
-			Mode: m.GetSessionMode(key),
-			Kind: classifySessionKeyKind(key),
+			Key:         key,
+			Name:        m.sessionNames[key],
+			Mode:        m.GetSessionMode(key),
+			Folder:      m.GetSessionFolder(key),
+			Kind:        classifySessionKeyKind(key),
+			HasMessages: m.HasMessages(key),
 		})
 	}
 	return result
