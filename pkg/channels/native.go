@@ -1545,6 +1545,16 @@ func (n *NativeChannel) handleBackgroundExecStop(w http.ResponseWriter, r *http.
 
 // handleBackgroundExecStream provides real-time SSE streaming of background process output.
 // GET /api/v1/background-exec/{id}/stream
+func sseGuardedWrite(w http.ResponseWriter, rc *http.ResponseController, data []byte) error {
+	if err := rc.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		if !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+	}
+	_, err := w.Write(data)
+	return err
+}
+
 func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -1571,6 +1581,15 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 	}
 
 	lastLen := 0
+
+	// GW-L9: clear the server-level WriteTimeout so the stream is not
+	// killed mid-body after 30s.  Each individual write still gets a
+	// per-write deadline via sseGuardedWrite.
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		logger.DebugCF("native", "bg exec stream: could not clear write deadline", map[string]interface{}{"error": err})
+	}
+
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -1581,7 +1600,7 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 		case <-ticker.C:
 			output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
 			if err != nil {
-				fmt.Fprintf(w, "data: %s\n\n", mustMarshal(map[string]interface{}{"error": err.Error()}))
+				_ = sseGuardedWrite(w, rc, []byte("data: "+string(mustMarshal(map[string]interface{}{"error": err.Error()}))+"\n\n"))
 				flusher.Flush()
 				return
 			}
@@ -1593,7 +1612,9 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"status":     status,
 					"elapsed_ms": elapsedMs,
 				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if err := sseGuardedWrite(w, rc, []byte("data: "+string(data)+"\n\n")); err != nil {
+					return
+				}
 				flusher.Flush()
 				lastLen = len(output)
 			}
@@ -1605,7 +1626,9 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"elapsed_ms": elapsedMs,
 					"done":       true,
 				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if err := sseGuardedWrite(w, rc, []byte("data: "+string(data)+"\n\n")); err != nil {
+					return
+				}
 				flusher.Flush()
 				return
 			}
