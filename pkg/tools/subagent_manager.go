@@ -856,9 +856,15 @@ func (sm *SubagentManager) StopAll() int {
 	stoppedCount := 0
 	cancelled := make([]*SubagentTask, 0, len(sm.cancels))
 	handled := make(map[string]struct{}, len(sm.cancels))
+	// Collect cancel funcs and invoke them AFTER releasing sm.mu (same
+	// hygiene as StopTask): cancel() unblocks waiter goroutines whose paths
+	// take sm.mu (runTask's ctx.Done branch, runTaskImpl's deferred cleanup),
+	// so calling it under the lock serializes every concurrent GetTask/
+	// ListTasks/SpawnWithOptions behind the whole fan-out.
+	pendingCancels := make([]context.CancelFunc, 0, len(sm.cancels))
 	for taskID, cancel := range sm.cancels {
 		if cancel != nil {
-			cancel()
+			pendingCancels = append(pendingCancels, cancel)
 			stoppedCount++
 		}
 		handled[taskID] = struct{}{}
@@ -891,6 +897,12 @@ func (sm *SubagentManager) StopAll() int {
 		stoppedCount++
 	}
 	sm.mu.Unlock()
+
+	// Cancel outside the lock (see comment above): unblocked subagent
+	// goroutines can now acquire sm.mu freely.
+	for _, cancel := range pendingCancels {
+		cancel()
+	}
 
 	// Persist the cancellations outside sm.mu (SessionManager I/O; see
 	// reportTerminalStatus for the lock-ordering rationale). Running tasks
