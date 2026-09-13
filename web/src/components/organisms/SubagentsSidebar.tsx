@@ -173,7 +173,7 @@ function getStatusColor(status: string): string {
     case 'not_done':
       return 'bg-state-warning/15 text-state-warning'
     default:
-      return 'bg-bg-tertiary text-text-tertiary'
+      return 'bg-background-tertiary text-text-tertiary'
   }
 }
 
