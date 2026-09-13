@@ -1,6 +1,9 @@
 import '../../test/setup'
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import '../../test/i18n'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import { AppLogicContext, type AppLogicContextValue } from '../../contexts/AppLogicContext'
+import { AuthContext, type AuthContextValue } from '../../contexts/AuthContext'
 
 // Mutable mock returns — tests swap these before each render.
 type MockCtx = Record<string, unknown>
@@ -9,22 +12,24 @@ let mockAuthCtxReturn: MockCtx = {}
 let mockChatPageCtxReturn: MockCtx = {}
 let mockSlashCommandsReturn: MockCtx = { commands: [], loading: false, error: null }
 
-mock.module('../../contexts/AppLogicContext', () => ({
-  useAppLogicContext: () => mockAppCtxReturn,
-}))
-mock.module('../../contexts/AuthContext', () => ({
-  useAuthContext: () => mockAuthCtxReturn,
-}))
-mock.module('../../contexts/ChatPageContext', () => ({
-  useChatPageContext: () => mockChatPageCtxReturn,
-}))
-mock.module('../../hooks/useSlashCommands', () => ({
-  useSlashCommands: () => mockSlashCommandsReturn,
-}))
+// Deferred import — resolved in beforeAll AFTER mock.module registration so the
+// component picks up the mocked ChatPageContext and useSlashCommands.
+let ChatComposer: typeof import('./ChatComposer').ChatComposer
 
-// Imports come AFTER mock.module so the mocks are in place.
-import { fireEvent, render, waitFor } from '@testing-library/react'
-import { ChatComposer } from './ChatComposer'
+beforeAll(() => {
+  // Only mock the two modules that are NOT imported by other test files.
+  // AppLogicContext and AuthContext are provided via real context Providers so
+  // that AgentEntityLayout.test.tsx (and any other file importing them) is
+  // never affected.
+  mock.module('../../contexts/ChatPageContext', () => ({
+    useChatPageContext: () => mockChatPageCtxReturn,
+  }))
+  mock.module('../../hooks/useSlashCommands', () => ({
+    useSlashCommands: () => mockSlashCommandsReturn,
+  }))
+
+  ChatComposer = require('./ChatComposer').ChatComposer
+})
 
 /** Find the composer textarea; throws instead of non-null asserting. */
 function getTextarea(container: HTMLElement): HTMLTextAreaElement {
@@ -88,6 +93,18 @@ function baseChatPageCtx(): MockCtx {
   }
 }
 
+/** Wrap ChatComposer in real context Providers so we avoid mock.module for
+ *  AppLogicContext and AuthContext (which are also imported by other test files). */
+function renderComposer() {
+  return render(
+    <AuthContext.Provider value={mockAuthCtxReturn as unknown as AuthContextValue}>
+      <AppLogicContext.Provider value={mockAppCtxReturn as unknown as AppLogicContextValue}>
+        <ChatComposer />
+      </AppLogicContext.Provider>
+    </AuthContext.Provider>,
+  )
+}
+
 describe('ChatComposer — double-submit guard', () => {
   beforeEach(() => {
     mockAuthCtxReturn = baseAuthCtx()
@@ -104,7 +121,7 @@ describe('ChatComposer — double-submit guard', () => {
     })
     mockAppCtxReturn = baseAppCtx(onSend)
 
-    const { container } = render(<ChatComposer />)
+    const { container } = renderComposer()
     const textarea = getTextarea(container)
 
     // Type a message
@@ -142,7 +159,7 @@ describe('ChatComposer — double-submit guard', () => {
     })
     mockAppCtxReturn = baseAppCtx(onSend)
 
-    const { container } = render(<ChatComposer />)
+    const { container } = renderComposer()
     const textarea = getTextarea(container)
 
     // First submit with "hello"
@@ -177,7 +194,7 @@ describe('ChatComposer — double-submit guard', () => {
     })
     mockAppCtxReturn = baseAppCtx(onSend)
 
-    const { container } = render(<ChatComposer />)
+    const { container } = renderComposer()
     const textarea = getTextarea(container)
 
     fireEvent.change(textarea, { target: { value: 'hello' } })
@@ -204,7 +221,7 @@ describe('ChatComposer — double-submit guard', () => {
     })
     mockAppCtxReturn = baseAppCtx(onSend)
 
-    const { container } = render(<ChatComposer />)
+    const { container } = renderComposer()
     const textarea = getTextarea(container)
 
     // Enter with no content — no call, no blocking
