@@ -113,6 +113,15 @@ export function useAppLogic(
       // disconnect window. The WS reconnected event includes in_progress
       // content, but completed messages are only available via HTTP.
       chatHistory.invalidateHistory()
+      // Force-finalize any streaming assistant messages for the current session.
+      // Without this, a message that completed while the WS was down (and
+      // processing never observed true→false) would keep its streaming spinner
+      // stuck until a manual session switch or page reload.  If the turn is
+      // actually still running the backend's subscribe.ack / restored
+      // in_progress_messages will re-create the streaming state.
+      messagesHook.setStreamingMessages((prev) =>
+        finalizeStreamingAssistantsForSession(prev, sessionsHook.currentSessionKey),
+      )
     }
     prevWsStatusRef.current = wsStatus
   }, [wsStatus, sessionsHook.refreshSessions, chatHistory.invalidateHistory])
