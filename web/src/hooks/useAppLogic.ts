@@ -102,6 +102,7 @@ export function useAppLogic(
   // This fixes the bug where the frontend thinks it's subscribed but the backend
   // has already cleaned up the client (e.g., after >30s disconnect).
   const prevWsStatusRef = useRef(wsStatus)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the reconnect actions use stable dispatchers/current-session reads that must not re-trigger the transition-guarded effect
   useEffect(() => {
     if (prevWsStatusRef.current !== 'connected' && wsStatus === 'connected') {
       subscribedSessionRef.current = null
