@@ -21,6 +21,12 @@ import (
 // and autocomplete tests do not require network or an embedded catalog.
 func seedCatalogForTest(t *testing.T) {
 	t.Helper()
+	// Offline mode: catalog reads never spawn background downloads. Without
+	// this, EnsureProviderAsync can fire from another test's ModelsForProvider
+	// call and write into THIS test's TempDir after it was seeded — t.TempDir
+	// cleanup then fails ("directory not empty") and results flicker between
+	// runs (the real mechanism behind issue #282's catalog flakes).
+	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	cacheDir := filepath.Join(t.TempDir(), ".lele", "cache", "catalog")
 	catalog.SetCacheDir(cacheDir)
 	t.Cleanup(catalog.ResetCacheDir)

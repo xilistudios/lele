@@ -694,6 +694,10 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 		// Return a copy: callers must never hold the live backing array
 		// (CHT-02) — AddJob appends and UpdateJob replaces elements under
 		// cs.mu, so handing out cs.store.Jobs directly is a data race.
+		// NOTE: shallow copy — pointer fields (Schedule.EveryMS/AtMS,
+		// State.*RunAtMS, Payload.Spawn) are still shared with the store.
+		// Readers must treat them as read-only and never mutate through the
+		// pointer (*job.State.NextRunAtMS = x would corrupt the store).
 		out := make([]CronJob, len(cs.store.Jobs))
 		copy(out, cs.store.Jobs)
 		return out

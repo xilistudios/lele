@@ -20,6 +20,9 @@ func newCatalogTestModel(t *testing.T) *Model {
 	t.Helper()
 	t.Setenv("LELE_CONFIG_DIR", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+	// Same as pkg/channels seedCatalogForTest: prevent background provider
+	// downloads from writing into test temp dirs (cleanup races).
+	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	catalog.ResetLive()
 	seedCatalogProviders(t)
 	cfg := &config.Config{
