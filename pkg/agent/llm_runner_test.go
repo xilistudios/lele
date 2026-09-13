@@ -315,7 +315,9 @@ func (m *llmRunnerMockToolCoordinator) cancelSessionTree(sessionKey string) (int
 	return 0, 0, 0
 }
 
-func (m *llmRunnerMockToolCoordinator) cancelAll() int { return 0 }
+func (m *llmRunnerMockToolCoordinator) cancelRemovedSubagents(liveAgentIDs []string) int {
+	return 0
+}
 
 func (m *llmRunnerMockToolCoordinator) cancelSession(sessionKey string) {}
 

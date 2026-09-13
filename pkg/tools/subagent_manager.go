@@ -82,6 +82,20 @@ func NewSubagentManager(provider providers.LLMProvider, defaultModel, workspace 
 	}
 }
 
+// SetDefaults replaces the provider, model, workspace and iteration budget that
+// NewSubagentManager receives. It exists for the config-reload path: a manager
+// whose owner agent was recreated is re-used (so its running tasks keep a live
+// home) but must pick up the agent's new defaults. Tasks that are already
+// running resolved their provider/model at start time and are unaffected.
+func (sm *SubagentManager) SetDefaults(provider providers.LLMProvider, defaultModel, workspace string, maxIterations int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.provider = provider
+	sm.defaultModel = defaultModel
+	sm.workspace = workspace
+	sm.maxIterations = maxIterations
+}
+
 // SetLLMOptions sets max tokens and temperature for subagent LLM calls.
 func (sm *SubagentManager) SetLLMOptions(maxTokens int, temperature float64) {
 	sm.mu.Lock()

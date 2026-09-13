@@ -1091,7 +1091,9 @@ func (m *commandHandlerSubagentCoordinatorStub) cancelSessionTree(sessionKey str
 	return 0, 0, 0
 }
 
-func (m *commandHandlerSubagentCoordinatorStub) cancelAll() int { return 0 }
+func (m *commandHandlerSubagentCoordinatorStub) cancelRemovedSubagents(liveAgentIDs []string) int {
+	return 0
+}
 
 func (m *commandHandlerSubagentCoordinatorStub) cancelSession(sessionKey string) {}
 
