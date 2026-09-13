@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -120,6 +121,14 @@ func (c *SlackChannel) Send(ctx context.Context, msg bus.OutboundMessage) error 
 
 	_, _, err := c.api.PostMessageContext(ctx, channelID, opts...)
 	if err != nil {
+		// Map 429s onto RateLimitError so the retry layer honors the
+		// Retry-After hint instead of blind backoff (SURV-07). slack-go
+		// returns *RateLimitedError when the response carries a parseable
+		// Retry-After header.
+		var rle *slack.RateLimitedError
+		if errors.As(err, &rle) {
+			return &RateLimitError{Channel: "slack", RetryAfter: rle.RetryAfter}
+		}
 		return fmt.Errorf("failed to send slack message: %w", err)
 	}
 

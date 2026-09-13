@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -17,8 +18,11 @@ import (
 
 const (
 	transcriptionTimeout = 30 * time.Second
-	sendTimeout          = 10 * time.Second
 )
+
+// discordSendTimeout bounds each Discord REST send. Var (not const) so tests
+// can shorten it; production reads the 10s default.
+var discordSendTimeout = 10 * time.Second
 
 type DiscordChannel struct {
 	*BaseChannel
@@ -116,25 +120,36 @@ func (c *DiscordChannel) Send(ctx context.Context, msg bus.OutboundMessage) erro
 }
 
 func (c *DiscordChannel) sendChunk(ctx context.Context, channelID, content string) error {
-	// 使用传入的 ctx 进行超时控制
-	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	// Bound the send with the caller's ctx plus the per-send timeout. The
+	// context flows INTO the discordgo request via WithContext, so a timeout
+	// cancels the in-flight HTTP call instead of abandoning it: the previous
+	// goroutine+select pattern left the goroutine blocked in the API call
+	// until Discord answered (potentially minutes), result discarded — a
+	// leak per timed-out send (SURV-05).
+	sendCtx, cancel := context.WithTimeout(ctx, discordSendTimeout)
 	defer cancel()
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := c.session.ChannelMessageSend(channelID, content)
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("failed to send discord message: %w", err)
+	_, err := c.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content: content,
+	}, discordgo.WithContext(sendCtx), discordgo.WithRetryOnRatelimit(false))
+	if err != nil {
+		// Map 429s onto RateLimitError so the retry layer honors the
+		// retry_after hint instead of blind backoff (SURV-07). With
+		// ShouldRetryOnRateLimit disabled, discordgo returns its
+		// RateLimitError (carrying RetryAfter) instead of sleeping
+		// internally — possibly for minutes — inside this call.
+		var rle *discordgo.RateLimitError
+		if errors.As(err, &rle) {
+			return &RateLimitError{Channel: "discord", RetryAfter: rle.RetryAfter}
 		}
-		return nil
-	case <-sendCtx.Done():
-		return fmt.Errorf("send message timeout: %w", sendCtx.Err())
+		// At-least-once semantics: the request may have reached Discord
+		// before the deadline fired, so the message may exist despite this
+		// error. Callers (the outbound spool) must NOT blindly retry —
+		// sendChunkWithRetry only retries transient errors and the durable
+		// spool forgets partial sends.
+		return fmt.Errorf("failed to send discord message: %w", err)
 	}
+	return nil
 }
 
 // appendContent 安全地追加内容到现有文本

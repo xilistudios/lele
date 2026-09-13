@@ -2,8 +2,12 @@ package channels
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/mymmrac/telego/telegoapi"
 
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/logger"
@@ -110,11 +114,61 @@ func sendOutboundMessage(ctx context.Context, channel Channel, msg bus.OutboundM
 	return sendDelivered, nil
 }
 
+// RateLimitError is returned by channel Send implementations when the remote
+// API answers 429 WITH an explicit retry-after hint. sendChunkWithRetry waits
+// that long (capped) before its next attempt instead of the default backoff —
+// retrying sooner would only burn attempts against a known window. Channels
+// whose SDK returns a wrapped native 429 (telego, discordgo, slack-go) map it
+// to this type at their boundary.
+type RateLimitError struct {
+	Channel    string
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("%s rate limited, retry after %s", e.Channel, e.RetryAfter)
+}
+
+// TelegramRateLimitError maps a telego API error carrying a 429 code (with
+// its retry_after in whole seconds) onto RateLimitError so sendChunkWithRetry
+// can honor the hint. Returns err unchanged when it is not a 429.
+func TelegramRateLimitError(err error) error {
+	var apiErr *telegoapi.Error
+	if !errors.As(err, &apiErr) || apiErr.ErrorCode != 429 {
+		return err
+	}
+	retryAfter := time.Duration(0)
+	if apiErr.Parameters != nil && apiErr.Parameters.RetryAfter > 0 {
+		retryAfter = time.Duration(apiErr.Parameters.RetryAfter) * time.Second
+	}
+	return &RateLimitError{Channel: "telegram", RetryAfter: retryAfter}
+}
+
+// maxRetryAfter caps any retry-after hint: an API asking for minutes of sleep
+// must not freeze an outbound worker for that long; the capped wait still
+// honors the hint better than the plain backoff.
+const maxRetryAfter = 60 * time.Second
+
+// retryWaitTime decides how long to wait before the given attempt (1-based:
+// the wait preceding attempt N). A RateLimitError with a positive hint wins
+// over the default linear backoff, capped at maxRetryAfter.
+func retryWaitTime(lastErr error, attempt int) time.Duration {
+	waitTime := time.Duration(attempt) * time.Second
+	var rle *RateLimitError
+	if errors.As(lastErr, &rle) && rle.RetryAfter > 0 {
+		waitTime = min(rle.RetryAfter, maxRetryAfter)
+	}
+	return waitTime
+}
+
 func sendChunkWithRetry(ctx context.Context, channel Channel, msg bus.OutboundMessage) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			waitTime := time.Duration(attempt) * time.Second
+			// An explicit retry-after hint (429 with Retry-After) replaces
+			// the default backoff, capped at maxRetryAfter. Still honored
+			// only if ctx allows the wait.
+			waitTime := retryWaitTime(lastErr, attempt)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

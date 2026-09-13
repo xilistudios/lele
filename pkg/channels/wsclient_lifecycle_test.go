@@ -38,6 +38,7 @@ type lifecycleFixture struct {
 	channel *NativeChannel
 	srv     *httptest.Server
 	wsURL   string
+	idSeq   int
 }
 
 // newLifecycleFixture creates a minimal NativeChannel with a real websocket
@@ -68,11 +69,22 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		wsClients: make(map[string]*WSClient),
 	}
 
+	// Stop() sweeps the rate limiters and flips base.running; give it real
+	// ones so the full shutdown path is exercised, not just client teardown.
+	ch.base = NewBaseChannel("native", nil, nil, nil)
+	ch.pinLimiter = newRateLimiter(10, time.Minute)
+	ch.pairLimiter = newRateLimiter(5, time.Minute)
+	ch.apiLimiter = newRateLimiter(120, time.Minute)
+	ch.wsMessageLimiter = newRateLimiter(120, time.Minute)
+
 	return &lifecycleFixture{channel: ch, srv: srv, wsURL: wsURL}
 }
 
 // newClient creates a WSClient with a real gorilla/websocket connection and
-// registers it with the fixture channel. Returns the client.
+// registers it with the fixture channel. Returns the client. Uses the
+// production constructor shape (newWSClient) so the done-closed probe is
+// wired, and derives a unique ID per client — the map is keyed by ID, so
+// same-session clients must not collide.
 func (f *lifecycleFixture) newClient(t *testing.T, sessionKey string) *WSClient {
 	t.Helper()
 
@@ -83,15 +95,13 @@ func (f *lifecycleFixture) newClient(t *testing.T, sessionKey string) *WSClient 
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	client := &WSClient{
-		ID:            fmt.Sprintf("lifecycle-%s", sessionKey),
-		Conn:          conn,
-		SessionKey:    sessionKey,
-		Subscriptions: map[string]bool{sessionKey: true},
-		SendChan:      make(chan []byte, 100),
-		done:          make(chan struct{}),
-		ClientInfo:    &ClientInfo{ClientID: "test-client"},
-	}
+	f.idSeq++
+	client := newWSClient(
+		fmt.Sprintf("lifecycle-%s-%d", sessionKey, f.idSeq),
+		conn,
+		&ClientInfo{ClientID: "test-client"},
+		sessionKey,
+	)
 	f.channel.addWSClient(client)
 	t.Cleanup(func() { f.channel.removeWSClient(client.ID) })
 
