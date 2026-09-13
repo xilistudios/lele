@@ -1571,17 +1571,35 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 	}
 
 	lastLen := 0
+
+	// GW-L9: clear the server-level WriteTimeout so the stream is not
+	// killed mid-body after 30s.  Each individual write still gets a
+	// per-write deadline via sseGuardedWrite.
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		logger.DebugCF("native", "bg exec stream: could not clear write deadline", map[string]interface{}{"error": err})
+	}
+
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+
+	// GW-L9 review M2: pre-fix, the server WriteTimeout was an accidental
+	// backstop for this loop; now that the stream survives it, cap its
+	// wall-clock lifetime explicitly. 24h is generous enough for any
+	// legitimate background process (the loop normally exits via the done
+	// event or client disconnect long before this).
+	bgDeadline := time.After(24 * time.Hour)
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-bgDeadline:
+			return
 		case <-ticker.C:
 			output, status, elapsedMs, err := n.agentLoop.GetBackgroundExecOutput(id, 0)
 			if err != nil {
-				fmt.Fprintf(w, "data: %s\n\n", mustMarshal(map[string]interface{}{"error": err.Error()}))
+				_ = sseGuardedWrite(w, []byte("data: "+string(mustMarshal(map[string]interface{}{"error": err.Error()}))+"\n\n"))
 				flusher.Flush()
 				return
 			}
@@ -1593,7 +1611,9 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"status":     status,
 					"elapsed_ms": elapsedMs,
 				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if err := sseGuardedWrite(w, []byte("data: "+string(data)+"\n\n")); err != nil {
+					return
+				}
 				flusher.Flush()
 				lastLen = len(output)
 			}
@@ -1605,7 +1625,9 @@ func (n *NativeChannel) handleBackgroundExecStream(w http.ResponseWriter, r *htt
 					"elapsed_ms": elapsedMs,
 					"done":       true,
 				})
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if err := sseGuardedWrite(w, []byte("data: "+string(data)+"\n\n")); err != nil {
+					return
+				}
 				flusher.Flush()
 				return
 			}

@@ -2,6 +2,7 @@ package channels
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -16,6 +17,13 @@ const (
 	// the agent to finish. If the agent hangs, the stream is closed with an error
 	// event instead of leaking a connection indefinitely.
 	restStreamDeadline = 5 * time.Minute
+
+	// sseWriteTimeout bounds a SINGLE SSE write (GW-L9). The server-level
+	// WriteTimeout (30s, cmd/lele/web.go) applies to the whole response and
+	// would kill streams longer than 30s mid-body; we clear it once at stream
+	// start and re-arm this per-write deadline instead, so a client that stops
+	// draining its socket cannot pin the handler forever.
+	sseWriteTimeout = 30 * time.Second
 )
 
 type restStreamEvent struct {
@@ -91,7 +99,29 @@ func writeSSE(w http.ResponseWriter, event string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload)
+	return sseGuardedWrite(w, []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", event, payload)))
+}
+
+// sseGuardedWrite re-arms a fresh per-write deadline before each SSE write
+// (GW-L9). The server-level WriteTimeout (30s, cmd/lele/web.go) applies to
+// the WHOLE response when not overridden, which kills long-lived streams
+// mid-body ("unexpected EOF" client-side). handleChatSendStream clears that
+// deadline once at stream start; every event then gets this bounded per-write
+// deadline so a client that stops draining its socket still cannot pin the
+// handler forever. ErrNotSupported (ResponseWriter without deadline support,
+// e.g. test recorders) is tolerated.
+//
+// Caveat (review M1): small SSE frames are copied straight into the kernel
+// socket buffer and return immediately, so this guard only trips once the
+// buffer is full (stalled client + sustained traffic, tens of minutes).
+// The primary liveness backstops remain the request context and the
+// per-handler wall-clock deadlines (restStreamDeadline, bgStreamDeadline).
+func sseGuardedWrite(w http.ResponseWriter, data []byte) error {
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	_, err := w.Write(data)
 	return err
 }
 
@@ -151,6 +181,14 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+
+	// GW-L9: the stream can legitimately outlive the server-level
+	// WriteTimeout (restStreamDeadline is 5 min), so clear it once here.
+	// Individual writes stay bounded by sseWriteTimeout via sseGuardedWrite.
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		logger.DebugCF("native", "chat stream: could not clear write deadline", map[string]interface{}{"error": err})
+	}
 
 	if err := writeSSE(w, "message.ack", ChatSendResponse{
 		MessageID:  messageID,
