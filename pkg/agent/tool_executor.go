@@ -208,12 +208,15 @@ func (te *toolExecutor) executeWithApproval(opts toolExecOptions, asyncCallback 
 	}
 
 	if approved {
-		// User approved - execute the command directly
+		// User approved - execute the command directly, passing the bypass
+		// through context so it is scoped to THIS invocation and THIS
+		// approved command string. Concurrent sessions see their own context
+		// and are never affected.
+		approvedCmd := toolResult.ApprovalRequired.Command
+		bypassCtx := tools.WithBypassGuard(opts.ctx, approvedCmd)
 		if execTool, ok := opts.agent.Tools.Get("exec"); ok {
 			if et, ok := execTool.(*tools.ExecTool); ok {
-				et.SetBypassGuard(true)
-				toolResult = et.Execute(opts.ctx, opts.tc.Arguments)
-				et.SetBypassGuard(false)
+				toolResult = et.Execute(bypassCtx, opts.tc.Arguments)
 			}
 		}
 		if toolResult == nil {

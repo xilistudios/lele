@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -91,6 +92,9 @@ type CronService struct {
 	// concurrent execution of the same job (e.g. a spawn cron that
 	// hasn't finished before the next tick fires).
 	executing sync.Map
+	// jobWg tracks in-flight job goroutines so Stop() can drain them
+	// with a bounded grace period (CHT-04).
+	jobWg sync.WaitGroup
 }
 
 func NewCronService(storePath string, onJob JobHandler) *CronService {
@@ -130,9 +134,8 @@ func (cs *CronService) Start() error {
 
 func (cs *CronService) Stop() {
 	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
 	if !cs.running {
+		cs.mu.Unlock()
 		return
 	}
 
@@ -140,6 +143,24 @@ func (cs *CronService) Stop() {
 	if cs.stopChan != nil {
 		close(cs.stopChan)
 		cs.stopChan = nil
+	}
+	cs.mu.Unlock()
+
+	// Wait for in-flight job goroutines to finish with a bounded grace
+	// period (CHT-04). This prevents callers from closing a DB/store
+	// while a job is still writing to it.
+	const gracePeriod = 10 * time.Second
+	done := make(chan struct{})
+	go func() {
+		cs.jobWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("[cron] all in-flight jobs drained on stop")
+	case <-time.After(gracePeriod):
+		log.Println("[cron] grace period expired on stop; some jobs may still be running")
 	}
 }
 
@@ -152,17 +173,45 @@ func (cs *CronService) runLoop(stopChan chan struct{}) {
 		case <-stopChan:
 			return
 		case <-ticker.C:
-			cs.checkJobs()
+			// Recover from panics in the scheduling tick (CRN-01): without
+			// this guard a single panic would kill the runLoop goroutine
+			// silently, permanently stopping all job scheduling, while the
+			// half-ticked state (mutex, next-run resets) would poison every
+			// later call. Log and keep ticking.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[cron] PANIC in scheduler tick: %v\n%s", r, debug.Stack())
+					}
+				}()
+				cs.checkJobs()
+			}()
 		}
 	}
 }
 
 func (cs *CronService) checkJobs() {
+	dueJobIDs := cs.collectDueJobs()
+
+	// Execute jobs outside lock. Run each in its own goroutine so a slow job
+	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
+	// and delay every other due job.
+	for _, jobID := range dueJobIDs {
+		go cs.executeJobByID(jobID)
+	}
+}
+
+// collectDueJobs holds the scheduler lock while collecting due jobs and
+// resetting their next-run timestamps. The unlock is deferred (CRN-01) so a
+// panic inside the locked section releases cs.mu instead of poisoning it —
+// with a plain mid-function Unlock, a panic would leave the mutex held
+// forever and deadlock every subsequent cron API call.
+func (cs *CronService) collectDueJobs() []string {
 	cs.mu.Lock()
+	defer cs.mu.Unlock()
 
 	if !cs.running {
-		cs.mu.Unlock()
-		return
+		return nil
 	}
 
 	now := time.Now().UnixMilli()
@@ -197,17 +246,34 @@ func (cs *CronService) checkJobs() {
 		log.Printf("[cron] failed to save store: %v", err)
 	}
 
-	cs.mu.Unlock()
-
-	// Execute jobs outside lock. Run each in its own goroutine so a slow job
-	// (e.g. a spawn branch waiting on a subagent) can't block the scheduler
-	// and delay every other due job.
-	for _, jobID := range dueJobIDs {
-		go cs.executeJobByID(jobID)
-	}
+	return dueJobIDs
 }
 
 func (cs *CronService) executeJobByID(jobID string) {
+	// CHT-04: track this goroutine in the WaitGroup so Stop() can drain it.
+	cs.jobWg.Add(1)
+	// Decrement the WaitGroup as the very last defer (LIFO order) so Stop()
+	// only sees this job as done after all cleanup completes.
+	defer cs.jobWg.Done()
+
+	// Recover from panics in the handler so a single bad job can't crash
+	// the process (CHT-01). Placed second so it runs second-to-last in
+	// defer LIFO order, after cs.executing.Delete(jobID) releases the slot.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[cron] PANIC in job %s: %v\n%s", jobID, r, debug.Stack())
+			cs.mu.Lock()
+			for i := range cs.store.Jobs {
+				if cs.store.Jobs[i].ID == jobID {
+					cs.store.Jobs[i].State.LastStatus = "error"
+					cs.store.Jobs[i].State.LastError = fmt.Sprintf("panic: %v", r)
+					break
+				}
+			}
+			cs.mu.Unlock()
+		}
+	}()
+
 	// Mark job as executing so checkJobs won't collect it again while
 	// we're waiting on a long-running handler (e.g. spawn subagent).
 	cs.executing.Store(jobID, true)
@@ -232,8 +298,17 @@ func (cs *CronService) executeJobByID(jobID string) {
 	}
 
 	var err error
+	var panicked bool
 	if cs.onJob != nil {
-		_, err = cs.onJob(callbackJob)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					panicked = true
+					err = fmt.Errorf("panic: %v", r)
+				}
+			}()
+			_, err = cs.onJob(callbackJob)
+		}()
 	}
 
 	// Now acquire lock to update state
@@ -255,7 +330,10 @@ func (cs *CronService) executeJobByID(jobID string) {
 	job.State.LastRunAtMS = &startTime
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
-	if err != nil {
+	if panicked {
+		job.State.LastStatus = "error"
+		job.State.LastError = err.Error()
+	} else if err != nil {
 		job.State.LastStatus = "error"
 		job.State.LastError = err.Error()
 	} else {
@@ -613,7 +691,16 @@ func (cs *CronService) ListJobs(includeDisabled bool) []CronJob {
 	defer cs.mu.RUnlock()
 
 	if includeDisabled {
-		return cs.store.Jobs
+		// Return a copy: callers must never hold the live backing array
+		// (CHT-02) — AddJob appends and UpdateJob replaces elements under
+		// cs.mu, so handing out cs.store.Jobs directly is a data race.
+		// NOTE: shallow copy — pointer fields (Schedule.EveryMS/AtMS,
+		// State.*RunAtMS, Payload.Spawn) are still shared with the store.
+		// Readers must treat them as read-only and never mutate through the
+		// pointer (*job.State.NextRunAtMS = x would corrupt the store).
+		out := make([]CronJob, len(cs.store.Jobs))
+		copy(out, cs.store.Jobs)
+		return out
 	}
 
 	var enabled []CronJob

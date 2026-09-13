@@ -54,6 +54,7 @@ func TestWSMessageAckCarriesResolvedSessionKey(t *testing.T) {
 		SessionKey: base,
 		ClientInfo: &ClientInfo{ClientID: ts.clientID},
 		SendChan:   make(chan []byte, 16),
+		done:       make(chan struct{}),
 	}
 
 	payload, err := json.Marshal(WSMessagePayload{Content: "hola", SessionKey: base})
@@ -123,6 +124,7 @@ func TestWSMessageAckWithoutAliasKeepsSessionKey(t *testing.T) {
 		SessionKey: base,
 		ClientInfo: &ClientInfo{ClientID: ts.clientID},
 		SendChan:   make(chan []byte, 16),
+		done:       make(chan struct{}),
 	}
 
 	payload, err := json.Marshal(WSMessagePayload{Content: "hola", SessionKey: base})

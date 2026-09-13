@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,11 @@ const (
 	// wsReadDeadline is the read deadline reset on pong/ping and message receipt.
 	wsReadDeadline = 90 * time.Second
 )
+
+// wsQueueSendTimeout bounds how long QueueSend waits for buffer space before
+// declaring the client wedged and flagging it for cleanup. A var (not const)
+// so tests can shorten it; production reads the default 5s.
+var wsQueueSendTimeout = 5 * time.Second
 
 func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -93,11 +99,13 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 		// If the session key changed, update it.
 		if sessionKey != existingClient.SessionKey {
+			existingClient.mu.Lock()
 			existingClient.SessionKey = sessionKey
 			if existingClient.Subscriptions == nil {
 				existingClient.Subscriptions = make(map[string]bool)
 			}
 			existingClient.Subscriptions[sessionKey] = true
+			existingClient.mu.Unlock()
 		}
 
 		go n.wsReadLoop(existingClient)
@@ -110,14 +118,7 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	// New connection: create a fresh WSClient.
 	clientID := uuid.New().String()
-	client := &WSClient{
-		ID:            clientID,
-		Conn:          conn,
-		ClientInfo:    clientInfo,
-		SessionKey:    sessionKey,
-		Subscriptions: map[string]bool{sessionKey: true},
-		SendChan:      make(chan []byte, wsSendChanSize),
-	}
+	client := newWSClient(clientID, conn, clientInfo, sessionKey)
 
 	n.addWSClient(client)
 
@@ -133,6 +134,51 @@ func (n *NativeChannel) handleWebSocket(w http.ResponseWriter, r *http.Request) 
 	n.sendWelcome(client)
 }
 
+// newWSClient builds a WSClient for a fresh connection. Extracted so tests
+// can construct clients with the exact production shape (done-closed probe
+// wired up) instead of hand-rolling struct literals.
+func newWSClient(id string, conn *websocket.Conn, info *ClientInfo, sessionKey string) *WSClient {
+	c := &WSClient{
+		ID:            id,
+		Conn:          conn,
+		ClientInfo:    info,
+		SessionKey:    sessionKey,
+		Subscriptions: map[string]bool{sessionKey: true},
+		SendChan:      make(chan []byte, wsSendChanSize),
+		done:          make(chan struct{}),
+	}
+	c.doneClosed = c.isDoneClosed
+	return c
+}
+
+// isDoneClosed is the doneClosed probe for clients created via newWSClient;
+// it reads a channel-closed signal without racing the close (a closed
+// receive on a struct{} channel never blocks, and closeDoneChan is
+// recover-guarded against double close).
+func (c *WSClient) isDoneClosed() bool {
+	done := c.snapshotDone()
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
+// snapshotDone returns the client's current done channel under client.mu.
+// Every writer of client.done (reconnect, abandon, Stop) holds the lock, so
+// readers must take it too — reading the field without the lock races the
+// pointer word these paths replace (review post-fix follow-up: the same
+// contract QueueSend now follows).
+func (c *WSClient) snapshotDone() chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.done
+}
+
 func (n *NativeChannel) wsReadLoop(client *WSClient) {
 	defer func() {
 		n.markWSClientReconnecting(client)
@@ -140,6 +186,10 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 			"client_id": client.ID,
 		})
 	}()
+
+	// Capture done once at entry (same contract as wsWriteLoop), under the
+	// lock: reconnect paths replace client.done while holding client.mu.
+	done := client.snapshotDone()
 
 	conn := client.Conn
 	conn.SetReadLimit(1024 * 1024)
@@ -155,14 +205,34 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(10*time.Second))
 	})
 
+	// doneCheck fires when the client is stopped/replaced. We race it against
+	// ReadMessage (which blocks on the network) via a helper goroutine so the
+	// loop exits promptly even if the underlying conn.Close races us.
+	doneFired := make(chan struct{})
+	closeDoneFired := sync.OnceFunc(func() { close(doneFired) })
+	go func() {
+		select {
+		case <-done:
+			conn.SetReadDeadline(time.Now()) // unblock ReadMessage
+			closeDoneFired()
+		case <-doneFired:
+		}
+	}()
+
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				logger.ErrorCF("native", "WebSocket read error", map[string]interface{}{
-					"error": err.Error(),
-				})
+			// If done fired, the error is expected — suppress the warning.
+			select {
+			case <-doneFired:
+			default:
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					logger.ErrorCF("native", "WebSocket read error", map[string]interface{}{
+						"error": err.Error(),
+					})
+				}
 			}
+			closeDoneFired() // signal helper goroutine to exit
 			return
 		}
 
@@ -179,6 +249,14 @@ func (n *NativeChannel) wsReadLoop(client *WSClient) {
 }
 
 func (n *NativeChannel) wsWriteLoop(client *WSClient) {
+	client.activeWriteLoops.Add(1)
+	defer client.activeWriteLoops.Add(-1)
+
+	// Capture the done channel once so a reconnect that replaces
+	// client.done does not make this stale loop follow the new one.
+	// The capture takes client.mu: all writers of client.done hold it.
+	done := client.snapshotDone()
+
 	pingTicker := time.NewTicker(wsPingInterval)
 	defer pingTicker.Stop()
 
@@ -187,6 +265,8 @@ func (n *NativeChannel) wsWriteLoop(client *WSClient) {
 		// (wsSendChanSize) absorbs bursts while the goroutine sleeps when idle,
 		// avoiding busy-wait. QueueSend handles overflow with a timeout.
 		select {
+		case <-done:
+			return
 		case data, ok := <-client.SendChan:
 			if !ok {
 				client.mu.Lock()
@@ -349,9 +429,21 @@ func (n *NativeChannel) handleWSApprove(client *WSClient, data json.RawMessage, 
 
 	command := ""
 	if n.approvalManager != nil {
-		// HandleApproval atomically finds, removes and returns the approval
-		handledApproval, err := n.approvalManager.HandleApproval(payload.RequestID, payload.Approved)
+		// HandleApprovalForSession atomically verifies that the approving
+		// client's session owns the approval, then finds, removes and returns
+		// it. Resolving by ID alone would let any authenticated client approve
+		// another session's pending exec (TUI-H2).
+		handledApproval, err := n.approvalManager.HandleApprovalForSession(payload.RequestID, payload.Approved, client.SessionKey)
 		if err != nil {
+			if strings.Contains(err.Error(), "approval session mismatch") {
+				logger.WarnCF("native", "Approval session mismatch rejected", map[string]interface{}{
+					"client_id":  client.ID,
+					"session":    client.SessionKey,
+					"request_id": payload.RequestID,
+				})
+				n.sendError(client, "approval_forbidden", "approval belongs to a different session")
+				return
+			}
 			logger.WarnCF("native", "Failed to handle approval", map[string]interface{}{
 				"error":      err.Error(),
 				"request_id": payload.RequestID,
@@ -414,12 +506,13 @@ func (n *NativeChannel) handleWSSubscribe(client *WSClient, data json.RawMessage
 		return
 	}
 
+	client.mu.Lock()
 	client.SessionKey = sessionKey
-
 	if client.Subscriptions == nil {
 		client.Subscriptions = make(map[string]bool)
 	}
 	client.Subscriptions[sessionKey] = true
+	client.mu.Unlock()
 
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
@@ -462,6 +555,7 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 		return
 	}
 
+	client.mu.Lock()
 	oldSessionKey := client.SessionKey
 
 	if payload.SessionKey != "" {
@@ -471,13 +565,16 @@ func (n *NativeChannel) handleWSUnsubscribe(client *WSClient, data json.RawMessa
 	if payload.SessionKey == "" || payload.SessionKey == client.SessionKey {
 		client.SessionKey = client.ClientInfo.ClientID
 	}
+	nSubs := len(client.Subscriptions)
+	newSessionKey := client.SessionKey
+	client.mu.Unlock()
 
 	logger.InfoCF("native", "Client unsubscribed from session", map[string]interface{}{
 		"client_id":       client.ID,
 		"old_session_key": oldSessionKey,
 		"payload_key":     payload.SessionKey,
-		"new_session_key": client.SessionKey,
-		"subscriptions":   len(client.Subscriptions),
+		"new_session_key": newSessionKey,
+		"subscriptions":   nSubs,
 	})
 
 	if err := client.Send(marshalWithID("unsubscribe.ack", map[string]string{"session_key": payload.SessionKey}, eventID)); err != nil {
@@ -645,6 +742,12 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 
 	groupsEnabled := n.cfgSnapshot().GroupsFeatureEnabled()
 
+	// Snapshot Subscriptions under lock: the marshal below reads the map,
+	// and Send acquires client.mu internally, so we must not hold it here.
+	client.mu.Lock()
+	subsSnapshot := client.Subscriptions
+	client.mu.Unlock()
+
 	if err := client.Send(mustMarshal(WSMessage{
 		Version: WSProtocolVersion,
 		Event:   "reconnected",
@@ -658,7 +761,7 @@ func (n *NativeChannel) sendReconnected(client *WSClient, buffered []json.RawMes
 			"processing":           processing,
 			"buffered_events":      len(buffered),
 			"disconnected_secs":    disconnectedSecs,
-			"subscriptions":        client.Subscriptions,
+			"subscriptions":        subsSnapshot,
 			"in_progress_messages": catchupMessages,
 			"groups":               groups,
 			"groups_enabled":       groupsEnabled,

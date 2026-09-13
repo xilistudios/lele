@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -447,6 +449,59 @@ func BuildOriginSessionKey(channel, chatID string) string {
 	}
 }
 
+// safeGoroutine launches a subagent goroutine with panic recovery that ensures
+// the task always reaches a terminal state and SignalDone is called, preventing
+// hung waiters.  The pattern mirrors pkg/group/runner.go:44 and :182.
+//
+// Deferred order is critical: SignalDone is registered first so it runs LAST
+// (LIFO), guaranteeing it executes whether fn panics or returns normally.
+// The recover defer runs first on unwind, marking the task as failed and
+// persisting the terminal status so the parent can observe the panic.
+func (sm *SubagentManager) safeGoroutine(task *SubagentTask, fn func()) {
+	go func() {
+		// Registered FIRST → runs LAST: SignalDone always fires.
+		defer task.SignalDone()
+		// Registered SECOND → runs FIRST on panic: marks failed + reports.
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				log.Printf("subagent %s: panic in goroutine: %v\n%s", task.ID, r, stack)
+				// Defense-in-depth: use TryLock so the recover can never
+				// deadlock the process, even if a caller violates the
+				// "never hold sm.mu across panicable code" invariant.
+				// A short retry loop handles the (unlikely) case where
+				// the lock is transiently held by stack-unwinding defers.
+				locked := false
+				for attempt := 0; attempt < 3; attempt++ {
+					if sm.mu.TryLock() {
+						locked = true
+						break
+					}
+					time.Sleep(500 * time.Millisecond)
+				}
+				if locked {
+					task.Status = SubagentStatusFailed
+					task.Summary = fmt.Sprintf("Subagent panic: %v", r)
+					task.Result = fmt.Sprintf("Subagent panic: %v\n%s", r, stack)
+					task.Updated = time.Now().UnixMilli()
+					sm.mu.Unlock()
+				} else {
+					// Last resort: write without the lock and log the hazard.
+					// This can only happen if a defer in the unwinding stack
+					// held sm.mu longer than expected — a bug in the caller.
+					log.Printf("subagent %s: WARNING — could not acquire sm.mu during recover; writing task state unsafely", task.ID)
+					task.Status = SubagentStatusFailed
+					task.Summary = fmt.Sprintf("Subagent panic: %v", r)
+					task.Result = fmt.Sprintf("Subagent panic: %v\n%s", r, stack)
+					task.Updated = time.Now().UnixMilli()
+				}
+				sm.reportTerminalStatus(task)
+			}
+		}()
+		fn()
+	}()
+}
+
 // SpawnWithOptions is like SpawnWithDeps but accepts a SpawnOptions struct,
 // which additionally supports a per-task model override.
 func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, agentID, originChannel, originChatID string, callback AsyncCallback, opts SpawnOptions) (string, error) {
@@ -523,27 +578,33 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 	sm.cancels[taskID] = cancel
 
 	if initialStatus == SubagentStatusPending {
-		// Start a lightweight goroutine that polls until dependencies are met
-		go func() {
-			defer subagentTask.SignalDone()
-
+		// Start a lightweight goroutine that polls until dependencies are met.
+		// Each critical section is wrapped in its own closure with
+		// defer sm.mu.Unlock() so the lock is ALWAYS released on unwind,
+		// even if checkDependencies or any mutation panics. Without this,
+		// a panic with sm.mu held would deadlock the safeGoroutine recover
+		// handler (which also needs sm.mu) — the exact R-1 bug.
+		sm.safeGoroutine(subagentTask, func() {
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
 
 			for {
 				select {
 				case <-taskCtx.Done():
-					// Task was cancelled while waiting for dependencies
-					sm.mu.Lock()
-					cancelledWhilePending := false
-					if subagentTask.Status == SubagentStatusPending {
-						subagentTask.Status = SubagentStatusCancelled
-						subagentTask.Summary = "Task cancelled while waiting for dependencies"
-						subagentTask.Result = "Task cancelled while waiting for dependencies"
-						subagentTask.Updated = time.Now().UnixMilli()
-						cancelledWhilePending = true
-					}
-					sm.mu.Unlock()
+					// Task was cancelled while waiting for dependencies.
+					// Wrap in closure so defer sm.mu.Unlock() fires even on panic.
+					cancelledWhilePending := func() bool {
+						sm.mu.Lock()
+						defer sm.mu.Unlock()
+						if subagentTask.Status == SubagentStatusPending {
+							subagentTask.Status = SubagentStatusCancelled
+							subagentTask.Summary = "Task cancelled while waiting for dependencies"
+							subagentTask.Result = "Task cancelled while waiting for dependencies"
+							subagentTask.Updated = time.Now().UnixMilli()
+							return true
+						}
+						return false
+					}()
 					if cancelledWhilePending {
 						// This task never runs, so nothing else persists its
 						// terminal status for it.
@@ -551,24 +612,32 @@ func (sm *SubagentManager) SpawnWithOptions(ctx context.Context, task, label, ag
 					}
 					return
 				case <-ticker.C:
-					sm.mu.Lock()
-					allMet := sm.checkDependencies(subagentTask)
+					// Wrap the dependency check and state transition in a
+					// closure with defer. sm.mu MUST be released before
+					// runTask (which does RLock inside resolveAgentConfig),
+					// and the defer guarantees release even on panic.
+					allMet := func() bool {
+						sm.mu.Lock()
+						defer sm.mu.Unlock()
+						return sm.checkDependencies(subagentTask)
+					}()
 					if allMet {
-						subagentTask.Status = SubagentStatusRunning
-						subagentTask.Updated = time.Now().UnixMilli()
-						sm.mu.Unlock()
+						func() {
+							sm.mu.Lock()
+							defer sm.mu.Unlock()
+							subagentTask.Status = SubagentStatusRunning
+							subagentTask.Updated = time.Now().UnixMilli()
+						}()
 						sm.runTask(taskCtx, subagentTask, callback)
 						return
 					}
-					sm.mu.Unlock()
 				}
 			}
-		}()
+		})
 	} else {
-		go func() {
+		sm.safeGoroutine(subagentTask, func() {
 			sm.runTask(taskCtx, subagentTask, callback)
-			subagentTask.SignalDone()
-		}()
+		})
 	}
 
 	if label != "" {
@@ -619,10 +688,9 @@ func (sm *SubagentManager) ContinueTask(ctx context.Context, taskID, guidance st
 	sm.cancels[taskID] = cancel
 	sm.mu.Unlock()
 
-	go func() {
+	sm.safeGoroutine(task, func() {
 		sm.runTask(taskCtx, task, callback)
-		task.SignalDone()
-	}()
+	})
 
 	return fmt.Sprintf("Continuing subagent task %s with new guidance.", taskID), nil
 }
@@ -700,6 +768,14 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 	// that can deadlock with the reverse path (session cancel -> SubagentManager.mu),
 	// permanently blocking all subsequent spawns.
 	var toEvict []string
+	// Cancels of evicted tasks, invoked after sm.mu is released (AGT-02):
+	// a terminal task's entry in sm.cancels pins the CancelFunc and its
+	// whole context tree alive. runTask's defer normally removes it, but a
+	// lingering entry can outlive the task map entry (eviction racing the
+	// goroutine's deferred cleanup, or a terminal task registered without a
+	// runner goroutine). Sweep it here so CleanupTerminalTasks is the single
+	// authority for reaping terminal tasks.
+	var toCancel []context.CancelFunc
 	for taskID, task := range sm.tasks {
 		if !isSubagentTerminalStatus(task.Status) {
 			continue
@@ -708,11 +784,21 @@ func (sm *SubagentManager) CleanupTerminalTasks() int {
 		if now-task.Updated > thresholdMs {
 			toEvict = append(toEvict, task.OriginSessionKey+":"+taskID)
 			delete(sm.tasks, taskID)
+			if cancel, ok := sm.cancels[taskID]; ok && cancel != nil {
+				delete(sm.cancels, taskID)
+				toCancel = append(toCancel, cancel)
+			}
 			removed++
 		}
 	}
 	evictCallback := sm.sessionEvictCallback
 	sm.mu.Unlock()
+
+	// Release the evicted tasks' context resources outside the lock. The
+	// tasks are terminal, so cancelling is pure resource reclamation.
+	for _, cancel := range toCancel {
+		cancel()
+	}
 
 	// Evict sessions outside the lock.
 	if evictCallback != nil {

@@ -9,6 +9,13 @@ const (
 	chatIDCtxKey     contextKey = "tool_chat_id"
 	agentIDCtxKey    contextKey = "tool_agent_id"
 	sessionKeyCtxKey contextKey = "tool_session_key"
+
+	// bypassGuardCtxKey marks a context whose exec call should skip safety
+	// guards **only for the specific command stored in approvedCommandCtxKey**.
+	// This replaces the old ExecTool.bypassGuard field which was shared,
+	// mutable state — a data-race and cross-session bypass hazard.
+	bypassGuardCtxKey     contextKey = "exec_bypass_guard"
+	approvedCommandCtxKey contextKey = "exec_approved_command"
 )
 
 // WithToolContext returns a context with channel and chatID stored as values.
@@ -40,6 +47,29 @@ func AgentToolContextFromCtx(ctx context.Context) (agentID, sessionKey string) {
 	aid, _ := ctx.Value(agentIDCtxKey).(string)
 	sk, _ := ctx.Value(sessionKeyCtxKey).(string)
 	return aid, sk
+}
+
+// WithBypassGuard returns a context that signals exec safety guards should be
+// skipped, but **only** when the command being executed is identical to
+// approvedCmd (after the same normalization the approval path uses). This
+// tightens the bypass to a single command instead of disabling guards for
+// every concurrent call through the shared ExecTool instance.
+func WithBypassGuard(ctx context.Context, approvedCmd string) context.Context {
+	ctx = context.WithValue(ctx, bypassGuardCtxKey, true)
+	ctx = context.WithValue(ctx, approvedCommandCtxKey, NormalizeWhitelistKey(approvedCmd))
+	return ctx
+}
+
+// BypassGuardFor returns true when the context carries a bypass flag AND the
+// supplied command matches the approved command (case/whitespace-normalized).
+// If either condition fails the caller must apply normal safety guards.
+func BypassGuardFor(ctx context.Context, command string) bool {
+	bypass, _ := ctx.Value(bypassGuardCtxKey).(bool)
+	if !bypass {
+		return false
+	}
+	approved, _ := ctx.Value(approvedCommandCtxKey).(string)
+	return approved != "" && NormalizeWhitelistKey(command) == approved
 }
 
 // Tool is the interface that all tools must implement.

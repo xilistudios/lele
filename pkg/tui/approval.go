@@ -21,6 +21,10 @@ func (m *Model) handleApproval(approved bool) bool {
 	am := m.agentLoop.GetApprovalManager()
 	var err error
 	if am != nil {
+		// Local single-user TUI: unscoped HandleApproval is intentional here —
+		// the TUI is a trusted local caller (no network boundary), so no
+		// session key check applies (trust boundary documented in
+		// ApprovalManager.HandleApprovalForSession).
 		_, err = am.HandleApproval(answeredID, approved)
 	}
 	if err != nil {

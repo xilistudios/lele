@@ -599,6 +599,7 @@ func TestNativeWSMessageStillPublishesWhenSpoolFails(t *testing.T) {
 		SessionKey: "native:spool-fail",
 		ClientInfo: &ClientInfo{ClientID: ts.clientID},
 		SendChan:   make(chan []byte, 16),
+		done:       make(chan struct{}),
 	}
 
 	body, err := json.Marshal(WSMessagePayload{Content: "still delivered", SessionKey: "native:spool-fail"})

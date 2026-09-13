@@ -21,6 +21,7 @@ import (
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/group"
 	"github.com/xilistudios/lele/pkg/providers"
+	"github.com/xilistudios/lele/pkg/security"
 	"github.com/xilistudios/lele/pkg/session"
 	"github.com/xilistudios/lele/pkg/skills"
 )
@@ -562,7 +563,7 @@ func newNativeTestServer(t *testing.T) *nativeTestServer {
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
 	// Routes already have auth middleware applied via withAuth wrapper
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -649,7 +650,7 @@ func newNativeTestServerWithConfigPath(t *testing.T, configPath string) *nativeT
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
 	// Routes already have auth middleware applied via withAuth wrapper
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 
 	t.Cleanup(func() {
 		server.Close()
@@ -707,36 +708,11 @@ func TestNativeChannelAuthStatusInvalidTokenReturnsValidFalse(t *testing.T) {
 	}
 }
 
-func TestNativeChannelConfigPreflightAllowsPutFromSameHost(t *testing.T) {
-	ts := newNativeTestServer(t)
-	ts.channel.cfg.Host = "192.168.0.171"
-
-	req, err := http.NewRequest(http.MethodOptions, ts.server.URL+"/api/v1/config", nil)
-	if err != nil {
-		t.Fatalf("NewRequest() error = %v", err)
-	}
-	req.Header.Set("Origin", "http://192.168.0.171:3005")
-	req.Header.Set("Access-Control-Request-Method", http.MethodPut)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("Do() error = %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
-	}
-
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://192.168.0.171:3005" {
-		t.Fatalf("allow origin = %q, want %q", got, "http://192.168.0.171:3005")
-	}
-
-	allowMethods := resp.Header.Get("Access-Control-Allow-Methods")
-	if !strings.Contains(allowMethods, http.MethodPut) {
-		t.Fatalf("allow methods = %q, expected to contain %q", allowMethods, http.MethodPut)
-	}
-}
+// TestNativeChannelConfigPreflightAllowsPutFromSameHost was removed (WEB-M13):
+// it exercised NativeChannel.corsMiddleware, which production never wired —
+// native routes mount on the server mux whose live CORS policy (pkg/server)
+// was already re-verified by the audit. A green here validated headers that
+// never ship.
 
 func TestNativeChannelChatHistoryReturnsPersistedMessages(t *testing.T) {
 	ts := newNativeTestServer(t)
@@ -2298,10 +2274,11 @@ func TestCheckOrigin(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		origin string
-		host   string
-		want   bool
+		name     string
+		origin   string
+		host     string
+		bindHost string // override channel.cfg.Host (empty: keep 127.0.0.1)
+		want     bool
 	}{
 		{
 			name:   "empty origin is allowed",
@@ -2333,6 +2310,52 @@ func TestCheckOrigin(t *testing.T) {
 			host:   "192.168.0.171:18790",
 			want:   true,
 		},
+		// GW-M6: the old code returned true for ANY origin when the configured
+		// bind host was the default wildcard.
+		{
+			name:     "wildcard bind host does not allow arbitrary origins",
+			origin:   "http://evil.example.com",
+			host:     "192.168.0.171:18790", // differs from Origin -> reaches isOriginAllowed
+			bindHost: "0.0.0.0",
+			want:     false,
+		},
+		{
+			name:   "localhost prefix bypass (localhost.evil.com) rejected",
+			origin: "http://localhost.evil.com",
+			host:   "127.0.0.1:18790",
+			want:   false,
+		},
+		{
+			name:   "127.0.0.1 prefix bypass rejected",
+			origin: "http://127.0.0.1.evil.com",
+			host:   "127.0.0.1:18790",
+			want:   false,
+		},
+		{
+			name:   "tauri prefix bypass rejected",
+			origin: "tauri://evil",
+			host:   "127.0.0.1:18790",
+			want:   false,
+		},
+		{
+			name:   "exact tauri origin allowed",
+			origin: "tauri://localhost",
+			host:   "127.0.0.1:18790",
+			want:   true,
+		},
+		{
+			name:   "localhost with port allowed (exact hostname)",
+			origin: "http://localhost:3005",
+			host:   "127.0.0.1:18790",
+			want:   true,
+		},
+		{
+			name:     "bind host with different port allowed (hostname match)",
+			origin:   "http://192.168.0.171:3005",
+			host:     "192.168.0.171:18790",
+			bindHost: "192.168.0.171",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2342,6 +2365,12 @@ func TestCheckOrigin(t *testing.T) {
 				channel.cfg.CORSOrigins = []string{"http://custom.example.com"}
 			} else {
 				channel.cfg.CORSOrigins = nil
+			}
+			// Bind host override: exercise the wildcard-bind path (GW-M6).
+			if tt.bindHost != "" {
+				channel.cfg.Host = tt.bindHost
+			} else {
+				channel.cfg.Host = "127.0.0.1"
 			}
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil)

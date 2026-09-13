@@ -2,11 +2,11 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -25,31 +25,39 @@ func shrinkHandoff(t *testing.T, timeout, poll time.Duration) {
 	})
 }
 
-// livePIDHolder writes a PID that is guaranteed to be alive into the lock file
-// and returns a stop function that kills it, mimicking the previous instance
-// finishing its shutdown and releasing the lock.
-func livePIDHolder(t *testing.T, path string) func() {
+// liveFlockHolder mimics a running gateway instance: it takes the real
+// kernel flock on the lock file (the authoritative guard since CHT-03 — a
+// bare PID file no longer blocks acquisition) and writes its PID. The
+// returned function releases the flock and closes the file, like a previous
+// instance finishing its shutdown.
+func liveFlockHolder(t *testing.T, path string) func() {
 	t.Helper()
 
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot spawn helper process: %v", err)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("open holder lock file: %v", err)
 	}
-	pid := cmd.Process.Pid
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
-		t.Fatalf("write lock file: %v", err)
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		t.Skipf("cannot take flock: %v", err)
+	}
+	if err := f.Truncate(0); err != nil {
+		f.Close()
+		t.Fatalf("truncate: %v", err)
+	}
+	if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
+		f.Close()
+		t.Fatalf("write pid: %v", err)
 	}
 
-	stopped := false
+	released := false
 	return func() {
-		if stopped {
+		if released {
 			return
 		}
-		stopped = true
-		_ = cmd.Process.Kill()
-		// Reap it, otherwise the PID stays alive as a zombie and the liveness
-		// check keeps reporting the holder as running.
-		_ = cmd.Wait()
+		released = true
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
 	}
 }
 
@@ -74,7 +82,7 @@ func TestAcquireInstanceLockSecondInstanceFailsFast(t *testing.T) {
 	t.Setenv(update.RestartChildEnvKey, "")
 	path := filepath.Join(t.TempDir(), "gateway.lock")
 
-	holder := livePIDHolder(t, path)
+	holder := liveFlockHolder(t, path)
 	t.Cleanup(holder)
 
 	started := time.Now()
@@ -96,7 +104,7 @@ func TestAcquireInstanceLockRestartChildWaitsForHandoff(t *testing.T) {
 	shrinkHandoff(t, 5*time.Second, 10*time.Millisecond)
 
 	path := filepath.Join(t.TempDir(), "gateway.lock")
-	holder := livePIDHolder(t, path)
+	holder := liveFlockHolder(t, path)
 
 	// Release the holder shortly after the child starts waiting.
 	go func() {
@@ -127,7 +135,7 @@ func TestAcquireInstanceLockRestartChildGivesUp(t *testing.T) {
 	shrinkHandoff(t, 200*time.Millisecond, 10*time.Millisecond)
 
 	path := filepath.Join(t.TempDir(), "gateway.lock")
-	holder := livePIDHolder(t, path)
+	holder := liveFlockHolder(t, path)
 	t.Cleanup(holder)
 
 	_, err := acquireInstanceLock(path)

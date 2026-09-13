@@ -73,7 +73,13 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 	if msg.msg.ChatID == m.currentKey {
 		switch msg.msg.Event {
 		case "subagent.result":
-			// The result is also queued as a system message for the parent.
+			// The task is finished: drop its real-time progress line so the
+			// overlay does not keep showing stale activity for a completed
+			// subagent (TUI-M4). The result itself is queued as a system
+			// message for the parent.
+			if taskID := msg.msg.Metadata["task_id"]; taskID != "" {
+				delete(m.subagentProgress, taskID)
+			}
 			// Keep loading active while that continuation waits for the session
 			// lock, even if the original turn has already completed.
 			if !m.processing {
@@ -258,18 +264,12 @@ func (m *Model) handleOutboundMsg(msg outboundMsg, cmds []tea.Cmd) (tea.Model, t
 					action = msg.msg.Metadata["tool"]
 				}
 				if action != "" {
-					if m.subagentProgress == nil {
-						m.subagentProgress = make(map[string]string)
-					}
-					m.subagentProgress[taskID] = action
+					m.recordSubagentProgress(taskID, action)
 					m.updateViewport()
 				}
 			case "message.stream":
 				// Subagent is streaming a final response — update progress label.
-				if m.subagentProgress == nil {
-					m.subagentProgress = make(map[string]string)
-				}
-				m.subagentProgress[taskID] = "finalizing…"
+				m.recordSubagentProgress(taskID, "finalizing…")
 				m.updateViewport()
 			}
 		}

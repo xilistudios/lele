@@ -13,6 +13,7 @@ import (
 	"github.com/xilistudios/lele/pkg/bus"
 	"github.com/xilistudios/lele/pkg/catalog"
 	"github.com/xilistudios/lele/pkg/config"
+	"github.com/xilistudios/lele/pkg/security"
 	"github.com/xilistudios/lele/pkg/skills"
 )
 
@@ -20,6 +21,12 @@ import (
 // and autocomplete tests do not require network or an embedded catalog.
 func seedCatalogForTest(t *testing.T) {
 	t.Helper()
+	// Offline mode: catalog reads never spawn background downloads. Without
+	// this, EnsureProviderAsync can fire from another test's ModelsForProvider
+	// call and write into THIS test's TempDir after it was seeded — t.TempDir
+	// cleanup then fails ("directory not empty") and results flicker between
+	// runs (the real mechanism behind issue #282's catalog flakes).
+	t.Setenv("LELE_CATALOG_OFFLINE", "1")
 	cacheDir := filepath.Join(t.TempDir(), ".lele", "cache", "catalog")
 	catalog.SetCacheDir(cacheDir)
 	t.Cleanup(catalog.ResetCacheDir)
@@ -74,7 +81,7 @@ func newCatalogTestServer(t *testing.T, named map[string]config.NamedProviderCon
 
 	mux := http.NewServeMux()
 	channel.RegisterRoutes(mux)
-	server := httptest.NewServer(channel.corsMiddleware(channel.securityHeadersMiddleware(mux)))
+	server := httptest.NewServer(security.Middleware()(mux))
 	t.Cleanup(server.Close)
 
 	pending, err := auth.GeneratePIN("Test Desktop")

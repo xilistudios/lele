@@ -13,6 +13,7 @@ import (
 
 	"github.com/xilistudios/lele/pkg/health"
 	"github.com/xilistudios/lele/pkg/logger"
+	"github.com/xilistudios/lele/pkg/security"
 )
 
 // Server centralizes all HTTP routing under one http.Server.
@@ -189,13 +190,13 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // --- Middleware ---
 
+// securityHeadersMiddleware applies the single canonical CSP (pkg/security).
+// WEB-M13: the policy is now request-aware — connect-src pins the websocket
+// endpoints to the serving host instead of the old `ws: wss:` wildcard that
+// allowed exfiltration to any host.
 func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'")
+		security.SecurityHeaders(w, r)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -25,6 +26,13 @@ import (
 // telegramOffsetKey is the KV store key used to persist the last
 // processed Telegram UpdateID.
 const telegramOffsetKey = "telegram:offset"
+
+// Dedup cache bounds (SURV-04): eviction triggers above Max and keeps the
+// newest Keep entries by insertion timestamp.
+const (
+	telegramProcessedMax  = 1000
+	telegramProcessedKeep = 500
+)
 
 type TelegramChannel struct {
 	*BaseChannel
@@ -48,8 +56,10 @@ type TelegramChannel struct {
 	updateIDMu     sync.Mutex
 	offsetFilePath string // Path to persist last UpdateID (fallback when kvRepo is nil)
 	kvRepo         *store.KVRepo
-	// Fallback deduplication using ChatID:MessageID
-	processedIDs map[string]struct{}
+	// Fallback deduplication using ChatID:MessageID. Values are insertion
+	// timestamps (UnixNano) so eviction can keep the newest entries instead
+	// of a random half (map iteration order is random in Go).
+	processedIDs map[string]int64
 	processedMu  sync.Mutex
 	// deleteHTTP optionally overrides the HTTP client used by deleteMessage
 	// (tests). When nil, http.DefaultClient is used. Assign before Start.
@@ -152,7 +162,7 @@ func NewTelegramChannel(cfg *config.Config, bus *bus.MessageBus, agentLoop Agent
 		approvalManager: approvalManager,
 		lastUpdateID:    lastUpdateID,
 		offsetFilePath:  offsetFilePath,
-		processedIDs:    make(map[string]struct{}),
+		processedIDs:    make(map[string]int64),
 	}
 
 	// Roll back user-visible side effects (typing indicator, "Thinking..."
@@ -569,8 +579,8 @@ func (c *TelegramChannel) clearAllPlaceholders(ctx context.Context) {
 	})
 }
 
-// isDuplicate checks if a message has already been processed
-// Returns true if the message is a duplicate
+// isDuplicate checks if a message has already been processed.
+// Returns true if the message is a duplicate.
 func (c *TelegramChannel) isDuplicate(messageID string) bool {
 	c.processedMu.Lock()
 	defer c.processedMu.Unlock()
@@ -583,23 +593,34 @@ func (c *TelegramChannel) isDuplicate(messageID string) bool {
 		return true
 	}
 
-	// Add to processed set
-	c.processedIDs[messageID] = struct{}{}
+	// Add to processed set, stamped with the insertion time.
+	c.processedIDs[messageID] = time.Now().UnixNano()
 
-	// Cleanup old entries if set grows too large (keep last 1000)
-	if len(c.processedIDs) > 1000 {
-		// Simple cleanup: create new map with recent entries
-		// In a production system, you might want a ring buffer or LRU cache
-		newMap := make(map[string]struct{})
-		count := 0
-		for k := range c.processedIDs {
-			if count >= 500 {
-				break
-			}
-			newMap[k] = struct{}{}
-			count++
+	// Evict when the set grows past telegramProcessedMax, keeping the
+	// telegramProcessedKeep newest entries by insertion time. Without the
+	// stamp this used to keep a RANDOM half (Go map iteration order), so the
+	// oldest keys were as likely to survive as the newest — duplicates could
+	// sneak back in right after every eviction.
+	if len(c.processedIDs) > telegramProcessedMax {
+		type entry struct {
+			key string
+			ts  int64
 		}
-		c.processedIDs = newMap
+		entries := make([]entry, 0, len(c.processedIDs))
+		for k, ts := range c.processedIDs {
+			entries = append(entries, entry{k, ts})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].ts != entries[j].ts {
+				return entries[i].ts > entries[j].ts // newest first
+			}
+			return entries[i].key < entries[j].key // deterministic tie-break
+		})
+		keep := make(map[string]int64, telegramProcessedKeep)
+		for _, e := range entries[:telegramProcessedKeep] {
+			keep[e.key] = e.ts
+		}
+		c.processedIDs = keep
 	}
 
 	return false

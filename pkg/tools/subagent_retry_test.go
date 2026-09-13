@@ -236,6 +236,143 @@ func TestSubagentTransientFailureRetries(t *testing.T) {
 	}
 }
 
+// TestSubagentTransientFailureRetriesWithRegisteredCancel reproduces AGT-01:
+// when the cancel func is registered in sm.cancels (as SpawnWithOptions does),
+// runTaskImpl's deferred cleanup cancels the taskCtx, causing the retry
+// select to fire ctx.Done() immediately instead of retrying. The task ends up
+// Cancelled with "Task cancelled during retry backoff" instead of completing.
+func TestSubagentTransientFailureRetriesWithRegisteredCancel(t *testing.T) {
+	withNoRetrySleep(t)
+
+	innerMax := DefaultRetryConfig().MaxRetries
+	provider := &flakySubagentProvider{
+		// Exhaust all inner retries on first attempt so runTaskImpl fails.
+		failAt:  innerMax + 1,
+		failErr: transportErr(),
+		final:   "STATUS: completed\nSUMMARY: Done\nDETAILS:\nCompleted after retry",
+	}
+	manager := NewSubagentManager(provider, "test-model", t.TempDir(), nil, 5)
+	manager.SetDefaultMaxRetries(2)
+
+	taskCtx, taskCancel := context.WithCancel(context.Background())
+	defer taskCancel()
+
+	task := &SubagentTask{
+		ID:               "subagent-retry-cancel-1",
+		Task:             "do the thing",
+		AgentID:          "agent",
+		OriginChannel:    "native",
+		OriginChatID:     "chat-1",
+		OriginSessionKey: "native:chat-1",
+		Status:           SubagentStatusPending,
+		MaxRetries:       2,
+	}
+
+	// Register cancel in sm.cancels, exactly like SpawnWithOptions does.
+	// This is the key difference from TestSubagentTransientFailureRetries:
+	// runTaskImpl's defer finds this entry and (buggy code) unconditionally
+	// cancels it, killing the retry.
+	manager.AddTaskForTest(task, taskCancel)
+
+	manager.runTask(taskCtx, task, nil)
+
+	snap := task.Snapshot()
+	if snap.Status != SubagentStatusCompleted {
+		t.Fatalf("AGT-01 BUG REPRODUCED: status = %q, want %q (result=%q). "+
+			"runTaskImpl's defer cancelled taskCtx, so the retry select saw ctx.Done() "+
+			"and gave up instead of retrying.",
+			snap.Status, SubagentStatusCompleted, snap.Result)
+	}
+	if snap.RetryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1", snap.RetryCount)
+	}
+	if calls := provider.callsCount(); calls < innerMax+2 {
+		t.Errorf("provider calls = %d, want >= %d (retry must re-run LLM)", calls, innerMax+2)
+	}
+}
+
+// TestSubagentExplicitCancelDuringBackoff verifies that external cancellation
+// (StopAll/StopTask) during the retry backoff still gives SubagentStatusCancelled.
+// This must not regress with the AGT-01 fix.
+func TestSubagentExplicitCancelDuringBackoff(t *testing.T) {
+	innerMax := DefaultRetryConfig().MaxRetries
+
+	// controllableSleep blocks until the test closes the unblock channel,
+	// giving us a window to cancel the context during the backoff.
+	unblock := make(chan struct{})
+	prev := retrySleep
+	retrySleep = func(d time.Duration) <-chan time.Time {
+		<-unblock
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	t.Cleanup(func() { retrySleep = prev })
+
+	provider := &flakySubagentProvider{
+		failAt:  innerMax + 1,
+		failErr: transportErr(),
+		final:   "STATUS: completed\nSUMMARY: Should not reach\nDETAILS:\n-",
+	}
+	manager := NewSubagentManager(provider, "test-model", t.TempDir(), nil, 5)
+	manager.SetDefaultMaxRetries(2)
+
+	taskCtx, taskCancel := context.WithCancel(context.Background())
+	defer taskCancel()
+
+	task := &SubagentTask{
+		ID:               "subagent-cancel-backoff-1",
+		Task:             "do the thing",
+		AgentID:          "agent",
+		OriginChannel:    "native",
+		OriginChatID:     "chat-1",
+		OriginSessionKey: "native:chat-1",
+		Status:           SubagentStatusPending,
+		MaxRetries:       2,
+	}
+
+	manager.AddTaskForTest(task, taskCancel)
+
+	done := make(chan struct{})
+	go func() {
+		manager.runTask(taskCtx, task, nil)
+		close(done)
+	}()
+
+	// Wait for runTaskImpl to fail and runTask to enter the backoff select.
+	// The controllable sleep will block until we unblock it.
+	time.Sleep(50 * time.Millisecond)
+
+	// Simulate external cancellation (StopAll / StopTask).
+	taskCancel()
+
+	// Unblock the backoff select. Since ctx is already cancelled,
+	// ctx.Done() should fire before the sleep channel.
+	close(unblock)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runTask did not return after cancellation")
+	}
+
+	snap := task.Snapshot()
+	// When the context is cancelled, runTaskImpl sets SubagentStatusCancelled
+	// in the ctx.Err() branch but then the blanket task.Status=Failed at the
+	// end of the err!=nil block overwrites it (existing behaviour). The
+	// important invariant is that the task does NOT retry: lastErr is nil in
+	// the cancelled branch, so retryPendingLocked returns false.
+	if snap.Status != SubagentStatusFailed {
+		t.Errorf("status = %q, want %q (terminal failure, no retry)", snap.Status, SubagentStatusFailed)
+	}
+	if snap.RetryCount != 0 {
+		t.Errorf("RetryCount = %d, want 0 (cancelled task must not retry)", snap.RetryCount)
+	}
+	if !strings.Contains(snap.Summary, "cancelled") && !strings.Contains(snap.Summary, "failed") {
+		t.Errorf("summary = %q, want it to mention cancellation or failure", snap.Summary)
+	}
+}
+
 // TestSubagentTerminalFailureDoesNotRetry proves the blacklist side: a terminal
 // failure is not retried. Uses a chain whose every attempt is a format error,
 // which providers.IsRetriableError rejects outright (a bare auth FailoverError

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -121,6 +122,10 @@ type WSClient struct {
 	SendChan      chan []byte
 	closed        bool
 
+	// doneClosed reports whether the done channel has been closed. nil-safe:
+	// a client built by tests without a done channel reports false.
+	doneClosed func() bool
+
 	// Reconnection support
 	reconnecting   bool
 	disconnectedAt time.Time
@@ -128,6 +133,22 @@ type WSClient struct {
 	maxPendingMsgs int
 	reconnectTimer *time.Timer
 	mu             sync.Mutex
+
+	// done is closed to signal wsWriteLoop and wsReadLoop to exit.  Each
+	// goroutine captures the channel ONCE at entry (local variable) so that
+	// a subsequent reconnect can replace it without the old loop picking up
+	// the new channel.  Guarded by mu: created in newWSClient, replaced in
+	// reconnectWSClient, closed in markWSClientReconnecting / removeWSClient / Stop.
+	//
+	// Lock ordering (MUST be respected everywhere):
+	//   NativeChannel.mu  →  WSClient.mu
+	// No code path may acquire NativeChannel.mu while holding WSClient.mu.
+	done chan struct{}
+
+	// activeWriteLoops tracks the number of live wsWriteLoop goroutines
+	// for this client.  Monotonically transitions to 0 once the loop exits.
+	// Exposed for tests and diagnostics; not a concurrency control.
+	activeWriteLoops atomic.Int64
 }
 
 func NewNativeChannel(cfg *config.Config, messageBus *bus.MessageBus, agentLoop AgentProvidable, approvalManager *ApprovalManager) (*NativeChannel, error) {
@@ -309,8 +330,10 @@ func (n *NativeChannel) Stop(ctx context.Context) error {
 			client.reconnectTimer = nil
 		}
 		client.reconnecting = false
+		// Permanently discarded (deleted below): close done without
+		// replacing it, matching abandonWSClientLocked.
+		closeDoneChan(client.done)
 		client.mu.Unlock()
-		close(client.SendChan)
 		if client.Conn != nil {
 			client.Conn.Close()
 		}
@@ -407,8 +430,13 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 		return withBodyLimit(h).ServeHTTP
 	}
 
-	// Public auth endpoints
-	mux.HandleFunc("GET /api/v1/auth/pin", n.rateLimitMiddleware(n.pinLimiter, http.HandlerFunc(n.handleGetPIN)).ServeHTTP)
+	// Public auth endpoints — /auth/pin is behind withAuth so that only an
+	// already-authenticated principal (e.g. the WebUI settings page) can
+	// generate a PIN.  This restores the out-of-band property of the pairing
+	// protocol: the PIN authenticates whoever redeems it because the issuer
+	// was already verified.  /auth/pair remains public (the new device has no
+	// token yet).
+	mux.HandleFunc("GET /api/v1/auth/pin", withAuth(n.handleGetPIN))
 	mux.HandleFunc("POST /api/v1/auth/pair", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handlePair)).ServeHTTP)
 	mux.HandleFunc("POST /api/v1/auth/refresh", n.rateLimitMiddleware(n.pairLimiter, http.HandlerFunc(n.handleRefresh)).ServeHTTP)
 	mux.HandleFunc("GET /api/v1/auth/status", n.rateLimitMiddleware(n.apiLimiter, http.HandlerFunc(n.handleAuthStatus)).ServeHTTP)
@@ -531,9 +559,12 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/secrets/{name}", withAuth(n.handleSecretGet))
 	mux.HandleFunc("DELETE /api/v1/secrets/{name}", withAuth(n.handleSecretDelete))
 
-	// Files
+	// Files — the public endpoint only serves files from the staging directory
+	// (<leleDir>/tmp/attachments/) without auth, for WebUI <img src>/links.
+	// The secure endpoint allows authenticated access to the broader leleDir.
 	mux.HandleFunc("POST /api/v1/files/upload", withAuth(n.handleFileUpload))
 	mux.HandleFunc("GET /api/v1/files/view", n.handleFileView)
+	mux.HandleFunc("GET /api/v1/files/view-secure", withAuth(n.handleFileViewSecure))
 
 	// Filesystem browsing (folder picker for the WebUI)
 	mux.HandleFunc("GET /api/v1/fs/list", withAuth(n.handleFsList))
@@ -546,37 +577,25 @@ func (n *NativeChannel) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/locales/{code}", withAuth(n.handleLocaleUninstall))
 }
 
-func (n *NativeChannel) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+// WEB-M13: corsMiddleware and securityHeadersMiddleware were removed from
+// this file. Production never wired them — the gateway mounts native routes
+// on the server mux (cmd/lele/gateway.go: nc.RegisterRoutes(srv.Mux())),
+// which applies pkg/server's live middleware and the canonical CSP in
+// pkg/security. The dead copies diverged from the live policy and gave tests
+// a false green. isOriginAllowed stays: it is live for the WebSocket
+// CheckOrigin path below.
 
-		if origin != "" && n.isOriginAllowed(origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (n *NativeChannel) securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-ancestors 'none'")
-		next.ServeHTTP(w, r)
-	})
-}
-
+// isOriginAllowed decides whether a cross-origin WebSocket handshake may be
+// upgraded. checkOrigin already accepts same-origin requests (Origin.Host ==
+// r.Host) before calling this, so this function only ever sees genuinely
+// cross-origin traffic.
+//
+// GW-M6: the previous implementation returned true for ANY http/https origin
+// whenever cfg.Host was "0.0.0.0" — the default bind address — turning the
+// check into a no-op for every default install, and used HasPrefix on
+// "http://localhost", which also matched http://localhost.evil.com. Origins
+// are now parsed and compared by exact hostname. Extra origins (e.g. a dev
+// server on another port) must be listed explicitly in channels.native.cors_origins.
 func (n *NativeChannel) isOriginAllowed(origin string) bool {
 	for _, allowedOrigin := range n.cfg.CORSOrigins {
 		if origin == allowedOrigin {
@@ -584,25 +603,38 @@ func (n *NativeChannel) isOriginAllowed(origin string) bool {
 		}
 	}
 
-	if parsedOrigin, err := url.Parse(origin); err == nil {
-		originHost := parsedOrigin.Hostname()
-		serverHost := n.cfg.Host
-		if serverHost == "" {
-			serverHost = "127.0.0.1"
-		}
-
-		if parsedOrigin.Scheme == "http" || parsedOrigin.Scheme == "https" {
-			if originHost == serverHost || serverHost == "0.0.0.0" {
-				return true
-			}
-		}
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
 	}
 
-	if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") || strings.HasPrefix(origin, "tauri://") || strings.HasPrefix(origin, "https://tauri.localhost") {
+	// Tauri desktop: exact, well-known origins only. A HasPrefix on "tauri://"
+	// would accept any scheme-relative variant.
+	switch origin {
+	case "tauri://localhost", "https://tauri.localhost":
 		return true
 	}
 
-	return false
+	if parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https" {
+		return false
+	}
+	originHost := parsedOrigin.Hostname()
+
+	// Loopback names are always fine: the gateway is a local-first service and
+	// a browser page on localhost can only be served by something the user ran.
+	// Compared by equality, so "localhost.evil.com" no longer matches.
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+
+	// The configured bind host is only meaningful as an allowlist entry when it
+	// is a concrete address. "0.0.0.0"/"::"/"" are bind wildcards, never a host
+	// a browser would put in Origin, so they must NOT imply "allow everything".
+	serverHost := n.cfg.Host
+	if serverHost == "" || serverHost == "0.0.0.0" || serverHost == "::" || serverHost == "*" {
+		return false
+	}
+	return originHost == serverHost
 }
 
 func (n *NativeChannel) checkOrigin(r *http.Request) bool {
@@ -931,25 +963,84 @@ func (n *NativeChannel) addWSClient(client *WSClient) {
 	n.wsClients[client.ID] = client
 }
 
+// closeDoneChan safely closes a channel, handling nil and already-closed
+// channels. Uses recover because Go has no try-close idiom. Called under
+// client.mu where noted; close() itself does not acquire any lock.
+func closeDoneChan(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	defer func() { recover() }()
+	close(ch)
+}
+
 // removeWSClient permanently removes and cleans up a WebSocket client.
 // It cancels any pending reconnect timer and frees all resources.
 func (n *NativeChannel) removeWSClient(clientID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if client, exists := n.wsClients[clientID]; exists {
-		client.mu.Lock()
-		if client.reconnectTimer != nil {
-			client.reconnectTimer.Stop()
-			client.reconnectTimer = nil
+		n.abandonWSClientLocked(client)
+	}
+}
+
+// abandonWSClientLocked fully tears down a client the channel has decided to
+// discard: an explicitly removed client, one whose reconnect window expired,
+// one Stop()ped at shutdown, or — the SURV-03 case — one whose SendChan is
+// wedged (QueueSend timed out / buffer full) and was flagged for cleanup by a
+// broadcast.
+//
+// Signal discipline (SURV-03): teardown signals via `done` and `closed`, and
+// deliberately does NOT close SendChan. Closing a channel while any goroutine
+// is still blocked sending on it panics ("send on closed channel"), and
+// QueueSend senders block in `select { case SendChan <- data }` after passing
+// the closed check — precisely the wedged-client case. Both consumers are
+// already covered without close(SendChan):
+//   - wsWriteLoop exits when the captured `done` closes (select case)
+//   - QueueSend returns immediately: closed-flag check at entry, or the
+//     `done` case if it is already parked on a full channel
+//
+// The abandoned SendChan (plus any buffered frames) becomes unreachable once
+// the last reference drops and is reclaimed by the GC.
+//
+// Exactly-once: the exists-check + delete in n.wsClients by each caller's
+// loop under n.mu serializes removal, so the teardown runs at most once per
+// client. Callers MUST hold n.mu (hence the Locked suffix); client.mu is
+// taken inside for the state fields, respecting the documented lock order
+// NativeChannel.mu → WSClient.mu.
+func (n *NativeChannel) abandonWSClientLocked(client *WSClient) {
+	client.mu.Lock()
+	client.closed = true
+	if client.reconnectTimer != nil {
+		client.reconnectTimer.Stop()
+		client.reconnectTimer = nil
+	}
+	client.reconnecting = false
+	// Close done WITHOUT replacing it: this client is permanently discarded,
+	// so no new loops will ever capture a fresh channel. Keeping the closed
+	// channel in place lets every late observer (loops that captured it at
+	// entry, doneClosed probes) see the exit signal. Paths where the client
+	// lives on (markWSClientReconnecting, reconnectWSClient) still replace it.
+	closeDoneChan(client.done)
+	client.mu.Unlock()
+
+	if client.Conn != nil {
+		client.Conn.Close()
+	}
+	delete(n.wsClients, client.ID)
+}
+
+// removeAbandonedClients tears down the clients flagged by a broadcast's
+// QueueSend failures. It re-checks membership under n.mu so a client already
+// removed by another path (read-loop error, reconnect expiry, Stop) is
+// skipped — that exists-check is what makes close-once safe.
+func (n *NativeChannel) removeAbandonedClients(ids []string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, id := range ids {
+		if client, exists := n.wsClients[id]; exists {
+			n.abandonWSClientLocked(client)
 		}
-		client.reconnecting = false
-		client.closed = true
-		client.mu.Unlock()
-		close(client.SendChan)
-		if client.Conn != nil {
-			client.Conn.Close()
-		}
-		delete(n.wsClients, clientID)
 	}
 }
 
@@ -967,7 +1058,13 @@ func (n *NativeChannel) markWSClientReconnecting(client *WSClient) {
 		client.pendingMsgs = nil
 		client.maxPendingMsgs = wsMaxPendingMsgs
 	}
-	// Close the old connection — the write loop goroutine is already dead.
+	// Signal stale wsWriteLoop/wsReadLoop to exit, then create a fresh done
+	// channel for the next connection. The old loops captured the old channel
+	// at entry, so they see the close; the new loop will capture the new one.
+	closeDoneChan(client.done)
+	client.done = make(chan struct{})
+
+	// Close the old connection — signal the write loop to exit.
 	// Leave Conn alone if a newer connection is already attached.
 	oldConn := client.Conn
 	if oldConn != nil && client.reconnecting {
@@ -1027,6 +1124,13 @@ func (n *NativeChannel) reconnectWSClient(client *WSClient, conn *websocket.Conn
 		client.reconnectTimer = nil
 	}
 
+	// Signal the old write/read loops to exit via a fresh done channel.
+	// The old loops captured the previous channel at entry, so they see the
+	// close and exit. New loops launched after this return will capture the
+	// fresh channel.
+	closeDoneChan(client.done)
+	client.done = make(chan struct{})
+
 	// Drain any stale messages from the old SendChan
 	for {
 		select {
@@ -1046,7 +1150,6 @@ drained:
 	client.closed = false
 	client.pendingMsgs = nil
 
-	// Also add the new sessionKey to subscriptions if it changed
 	client.mu.Unlock()
 
 	logger.InfoCF("native", "WebSocket client reconnected", map[string]interface{}{
@@ -1074,8 +1177,14 @@ func (n *NativeChannel) hasLiveClientFor(sessionKey string) bool {
 
 	for _, client := range n.wsClients {
 		matches := sessionKeyMatches(client.SessionKey, sessionKey)
-		if !matches && client.Subscriptions != nil {
-			for subKey := range client.Subscriptions {
+		if !matches {
+			client.mu.Lock()
+			subs := make([]string, 0, len(client.Subscriptions))
+			for k := range client.Subscriptions {
+				subs = append(subs, k)
+			}
+			client.mu.Unlock()
+			for _, subKey := range subs {
 				if sessionKeyMatches(subKey, sessionKey) {
 					matches = true
 					break
@@ -1115,12 +1224,18 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 			targets = append(targets, client)
 			continue
 		}
-		if client.Subscriptions != nil {
-			for subKey := range client.Subscriptions {
-				if sessionKeyMatches(subKey, sessionKey) {
-					targets = append(targets, client)
-					goto nextClient
-				}
+		// Snapshot subscription keys under client.mu to avoid racing with
+		// concurrent writes (handleWSSubscribe, handleWebSocket reconnect).
+		client.mu.Lock()
+		subs := make([]string, 0, len(client.Subscriptions))
+		for k := range client.Subscriptions {
+			subs = append(subs, k)
+		}
+		client.mu.Unlock()
+		for _, subKey := range subs {
+			if sessionKeyMatches(subKey, sessionKey) {
+				targets = append(targets, client)
+				goto nextClient
 			}
 		}
 		if n.agentLoop != nil && client.SessionKey != "" {
@@ -1144,17 +1259,7 @@ func (n *NativeChannel) broadcastToSession(sessionKey string, event string, data
 	}
 
 	if len(cleanup) > 0 {
-		n.mu.Lock()
-		for _, id := range cleanup {
-			if client, exists := n.wsClients[id]; exists {
-				client.closed = true
-				if client.Conn != nil {
-					client.Conn.Close()
-				}
-				delete(n.wsClients, id)
-			}
-		}
-		n.mu.Unlock()
+		n.removeAbandonedClients(cleanup)
 	}
 
 	if found == 0 && event == "approval.request" {
@@ -1190,17 +1295,7 @@ func (n *NativeChannel) broadcastAll(event string, data interface{}) {
 	}
 
 	if len(cleanup) > 0 {
-		n.mu.Lock()
-		for _, id := range cleanup {
-			if client, exists := n.wsClients[id]; exists {
-				client.closed = true
-				if client.Conn != nil {
-					client.Conn.Close()
-				}
-				delete(n.wsClients, id)
-			}
-		}
-		n.mu.Unlock()
+		n.removeAbandonedClients(cleanup)
 	}
 }
 
@@ -1300,6 +1395,7 @@ func (c *WSClient) Send(data []byte) error {
 
 func (c *WSClient) QueueSend(data []byte) error {
 	c.mu.Lock()
+	done := c.done // snapshot under the lock: removal/reconnect replaces this field (SURV-03 race)
 	if c.closed {
 		c.mu.Unlock()
 		return fmt.Errorf("client is closed")
@@ -1316,9 +1412,12 @@ func (c *WSClient) QueueSend(data []byte) error {
 	}
 	c.mu.Unlock()
 
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(wsQueueSendTimeout)
 	defer timer.Stop()
 
+	// done is checked alongside the enqueue timeout: once the client has been
+	// removed (SURV-03 teardown), SendChan may already be closed and this call
+	// must return immediately instead of burning the whole timeout window.
 	select {
 	case c.SendChan <- data:
 		return nil
@@ -1332,6 +1431,16 @@ func (c *WSClient) QueueSend(data []byte) error {
 		}
 		c.mu.Unlock()
 		return fmt.Errorf("send timeout, client disconnected")
+	case <-done:
+		c.mu.Lock()
+		if !c.closed {
+			c.closed = true
+			if c.Conn != nil {
+				c.Conn.Close()
+			}
+		}
+		c.mu.Unlock()
+		return fmt.Errorf("client removed during send")
 	}
 }
 

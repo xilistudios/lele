@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -448,6 +450,24 @@ func (m *Model) setCurrentChatKey(newKey string) {
 		}
 	}
 	m.currentKey = newKey
+	// TUI-H2: the streaming overlay (currentStream/currentThinking) is
+	// session-scoped presentation state. Every other session boundary clears
+	// it (publishUserMessage, /compact, message.complete cleanup), but this
+	// choke point did not — so frames buffered for the outgoing session kept
+	// painting into the viewport of the session that came on screen (most
+	// visibly after /new, which leaves the buffer populated while the welcome
+	// view is replaced). Reset it here so no switch can inherit stale frames,
+	// and drop the assistant-message id as well: the next turn on this session
+	// may legitimately reuse it, and the append sites only reset the buffer
+	// when the id *changes*.
+	m.resetStreamState()
+	m.currentAssistantMsgID = ""
+	// TUI-M4: subagent progress is presentation state of the session we are
+	// LEAVING — clear it on switch so the new session cannot inherit stale
+	// progress lines (fresh entries are re-recorded by its own subagent
+	// events). Deliberately separate from resetStreamState, which owns only
+	// the stream text buffers.
+	m.subagentProgress = make(map[string]string)
 }
 
 // queueApprovalForCurrentChat surfaces an approval.request that belongs to the
@@ -557,6 +577,94 @@ func (m *Model) currentSubagentTaskID(chatID string) string {
 		return chatID[len(nativePrefixed):]
 	}
 	return ""
+}
+
+// maxSubagentProgressLines caps how many subagent progress entries the
+// viewport overlay shows per frame; the remainder is summarized as "+N more".
+const maxSubagentProgressLines = 3
+
+// subagentProgressCap bounds the size of the subagentProgress map. Each entry
+// is tiny, but unauthenticated growth per parent turn would let the map leak
+// across long sessions, so old entries are evicted (FIFO by task ID suffix
+// number) once the cap is hit (TUI-M4).
+const subagentProgressCap = 16
+
+// recordSubagentProgress stores the latest action for a running subagent task
+// and keeps the map bounded. Written from subagent tool.executing /
+// message.stream events; read by renderSubagentProgress in the overlay.
+func (m *Model) recordSubagentProgress(taskID, action string) {
+	if m.subagentProgress == nil {
+		m.subagentProgress = make(map[string]string)
+	}
+	if _, exists := m.subagentProgress[taskID]; !exists && len(m.subagentProgress) >= subagentProgressCap {
+		oldest := m.oldestSubagentTaskID()
+		if oldest != "" {
+			delete(m.subagentProgress, oldest)
+		}
+	}
+	m.subagentProgress[taskID] = action
+}
+
+// oldestSubagentTaskID returns the task ID with the smallest "subagent-<n>"
+// suffix, i.e. the longest-running tracked task. Unparsable IDs sort last.
+func (m *Model) oldestSubagentTaskID() string {
+	oldest := ""
+	oldestNum := int64(-1)
+	for id := range m.subagentProgress {
+		num := int64(1<<62 - 1)
+		if suffix, ok := strings.CutPrefix(id, "subagent-"); ok {
+			if parsed, err := strconv.ParseInt(suffix, 10, 64); err == nil {
+				num = parsed
+			}
+		}
+		if oldest == "" || num < oldestNum {
+			oldest = id
+			oldestNum = num
+		}
+	}
+	return oldest
+}
+
+// renderSubagentProgress renders one line per running subagent task so the
+// parent viewport shows real-time subagent activity under the streaming
+// overlay (TUI-M4). Shows at most maxSubagentProgressLines entries, with the
+// rest summarized as "+N more".
+func (m *Model) renderSubagentProgress() string {
+	if len(m.subagentProgress) == 0 {
+		return ""
+	}
+
+	ids := make([]string, 0, len(m.subagentProgress))
+	for id := range m.subagentProgress {
+		ids = append(ids, id)
+	}
+	// Deterministic numeric order: subagent-1, subagent-2, …
+	sort.Slice(ids, func(i, j int) bool {
+		ni, ji := int64(1<<62-1), int64(1<<62-1)
+		if s, ok := strings.CutPrefix(ids[i], "subagent-"); ok {
+			if parsed, err := strconv.ParseInt(s, 10, 64); err == nil {
+				ni = parsed
+			}
+		}
+		if s, ok := strings.CutPrefix(ids[j], "subagent-"); ok {
+			if parsed, err := strconv.ParseInt(s, 10, 64); err == nil {
+				ji = parsed
+			}
+		}
+		return ni < ji
+	})
+
+	var sb strings.Builder
+	sb.WriteString(ToolCallLabel.Render("  ⏳ subagents") + "\n")
+	shown := min(len(ids), maxSubagentProgressLines)
+	for _, id := range ids[:shown] {
+		short := strings.TrimPrefix(id, "subagent-")
+		sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(short+" "+m.subagentProgress[id]) + "\n")
+	}
+	if extra := len(ids) - shown; extra > 0 {
+		sb.WriteString(ToolCallLabel.Render("  ") + ToolCallName.Render(fmt.Sprintf("+%d more", extra)) + "\n")
+	}
+	return sb.String()
 }
 
 // subagentsCacheTTL bounds how often the expensive GetSessionSubagents lookup

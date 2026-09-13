@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "farm",
-    "build": "farm build",
+    "build": "farm build && node scripts/externalize-inline-scripts.mjs",
     "preview": "farm preview",
     "test": "bun test",
     "test:watch": "bun test --watch",

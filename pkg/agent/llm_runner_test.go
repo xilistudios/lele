@@ -395,7 +395,6 @@ func (m *llmRunnerMockApprovalManager) SetTimeout(timeout time.Duration) {}
 // llmRunnerMockExecTool is a mock implementation of the exec tool for testing approval flow
 type llmRunnerMockExecTool struct {
 	approvalRequired bool
-	bypassGuard      bool
 }
 
 func (m *llmRunnerMockExecTool) Name() string { return "exec" }
@@ -412,21 +411,18 @@ func (m *llmRunnerMockExecTool) Parameters() map[string]interface{} {
 }
 
 func (m *llmRunnerMockExecTool) Execute(ctx context.Context, args map[string]interface{}) *tools.ToolResult {
-	if m.approvalRequired && !m.bypassGuard {
+	cmd, _ := args["command"].(string)
+	if m.approvalRequired && !tools.BypassGuardFor(ctx, cmd) {
 		return &tools.ToolResult{
 			ForLLM:  "",
 			IsError: false,
 			ApprovalRequired: &tools.ApprovalInfo{
-				Command: args["command"].(string),
+				Command: cmd,
 				Reason:  "Potentially dangerous command",
 			},
 		}
 	}
 	return tools.SilentResult("Command executed")
-}
-
-func (m *llmRunnerMockExecTool) SetBypassGuard(bypass bool) {
-	m.bypassGuard = bypass
 }
 
 // llmRunnerMockContextualTool is a mock tool that implements ContextualTool

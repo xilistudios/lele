@@ -239,6 +239,23 @@ func isTransientFailure(err error) bool {
 	return providers.IsRetriableError(err)
 }
 
+// retryPendingLocked reports whether the task will be retried by runTask after
+// the current runTaskImpl call returns. It must be called while holding sm.mu.
+//
+// The decision mirrors the condition in runTask's retry guard, but operates on
+// the state as runTaskImpl leaves it: lastErr is still set (runTask clears it
+// after this function returns), and Status reflects the outcome of this attempt.
+//
+// Only the "transient failure with retries remaining" case returns true; all
+// terminal outcomes (success, timeout, cancellation, exhausted retries,
+// non-transient failure) return false.
+func retryPendingLocked(task *SubagentTask) bool {
+	return task.Status == SubagentStatusFailed &&
+		task.MaxRetries > 0 &&
+		task.RetryCount < task.MaxRetries &&
+		isTransientFailure(task.lastErr)
+}
+
 // runTask is the public entry point for running a subagent task.
 // It wraps runTaskImpl with retry logic for transient failures.
 //
@@ -247,6 +264,23 @@ func isTransientFailure(err error) bool {
 // self-call kept each attempt's frame alive across the backoff sleep for no
 // benefit, and a loop makes the retry flow readable in one screen.
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
+	// Cleanup: when the retry loop exits (success, terminal failure, or
+	// exhausted retries), remove the cancel entry from sm.cancels and call
+	// it.  During retries, runTaskImpl's defer leaves the entry in place
+	// (see retryPendingLocked) so StopAll/StopTask can cancel the task
+	// during backoff.  This defer runs AFTER runTaskImpl's defer (LIFO
+	// order), so the entry is still present if a retry was in progress.
+	defer func() {
+		sm.mu.Lock()
+		if c, ok := sm.cancels[task.ID]; ok {
+			delete(sm.cancels, task.ID)
+			sm.mu.Unlock()
+			c()
+		} else {
+			sm.mu.Unlock()
+		}
+	}()
+
 	for {
 		sm.runTaskImpl(ctx, task, callback)
 
@@ -548,14 +582,24 @@ func (sm *SubagentManager) runTaskImpl(ctx context.Context, task *SubagentTask, 
 	sm.mu.Lock()
 	var result *ToolResult
 	defer func() {
-		var cancel context.CancelFunc
-		if c, ok := sm.cancels[task.ID]; ok {
-			cancel = c
-			delete(sm.cancels, task.ID)
-		}
-		sm.mu.Unlock()
-		if cancel != nil {
-			cancel()
+		// AGT-01 fix: do not cancel taskCtx when a retry is pending.
+		// runTask will re-enter runTaskImpl with the same ctx, so cancelling
+		// it here would cause the backoff select's ctx.Done() to fire
+		// immediately, turning every transient failure into "cancelled".
+		// When a retry IS pending, leave the cancel func in sm.cancels so
+		// StopAll/StopTask can still cancel the task during the backoff.
+		if !retryPendingLocked(task) {
+			var cancel context.CancelFunc
+			if c, ok := sm.cancels[task.ID]; ok {
+				cancel = c
+				delete(sm.cancels, task.ID)
+			}
+			sm.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		} else {
+			sm.mu.Unlock()
 		}
 		// Call callback if provided and result is set
 		if callback != nil && result != nil {

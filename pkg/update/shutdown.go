@@ -239,13 +239,12 @@ func runHook(h hook, timeout time.Duration) error {
 		logHookDone(h.name, started, err)
 		return err
 	case <-hookCtx.Done():
-		// The hook may have returned in the same instant the timer fired.
-		select {
-		case err := <-errCh:
-			logHookDone(h.name, started, err)
-			return err
-		default:
-		}
+		// The deadline fired before the hook's result arrived: report a
+		// timeout. Do NOT re-probe errCh — a hook that observes this same
+		// cancellation returns nil microseconds later, and racing to drain
+		// it would misclassify a cancelled hook as a clean success (the
+		// flake under load). errCh is buffered, so the hook goroutine never
+		// blocks on us reading.
 		err := fmt.Errorf("shutdown hook %q timed out after %s: %w", h.name, timeout, context.DeadlineExceeded)
 		logger.WarnCF("shutdown", "Shutdown hook timed out", map[string]interface{}{
 			"hook":    h.name,

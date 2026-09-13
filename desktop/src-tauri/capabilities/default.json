@@ -3,10 +3,5 @@
   "identifier": "default",
   "description": "Capabilities for the main Lele Desktop window",
   "windows": ["main", "splash"],
-  "permissions": [
-    "core:default",
-    "shell:allow-execute",
-    "shell:allow-open",
-    "opener:default"
-  ]
+  "permissions": ["core:default"]
 }

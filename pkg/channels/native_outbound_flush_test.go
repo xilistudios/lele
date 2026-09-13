@@ -99,6 +99,7 @@ func newLiveFakeClient(t *testing.T, ts *nativeTestServer, sessionKey string) *W
 		ClientInfo:    &ClientInfo{ClientID: ts.clientID, DeviceName: "test"},
 		Subscriptions: map[string]bool{sessionKey: true},
 		SendChan:      make(chan []byte, 64),
+		done:          make(chan struct{}),
 	}
 	ts.channel.addWSClient(client)
 	t.Cleanup(func() { ts.channel.removeWSClient(client.ID) })

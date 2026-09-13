@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
@@ -28,7 +27,6 @@ type ExecTool struct {
 	restrictToWorkspace bool
 	approvalMode        bool                                  // Activa modo aprobación
 	approvalCallback    func(cmd string) (bool, error)        // Callback para solicitar aprobación
-	bypassGuard         bool                                  // Bypass all safety guards when command is approved
 	channel             string                                // Channel for feedback messages
 	chatID              string                                // ChatID for feedback messages
 	feedbackCallback    func(channel, chatID, message string) // Callback to send feedback messages
@@ -55,6 +53,18 @@ func NormalizeWhitelistKey(command string) string {
 // secretPlaceholderInlineRegex matches {{SECRET:name}} placeholders anywhere in
 // a command string (not just whole-string, unlike the config resolver).
 var secretPlaceholderInlineRegex = regexp.MustCompile(`\{\{SECRET:([^}]+)\}\}`)
+
+// secretValueShellMeta matches characters that have special meaning in shell
+// syntax. If a keyring value contains any of these, inlining it into a shell
+// command would allow injection of arbitrary shell syntax (e.g. command
+// substitution, pipes, redirects). The fix rejects such values outright.
+//
+// Trade-off: values containing legitimate '$' in hashes (e.g. bcrypt "$2b$…")
+// are also rejected. This is acceptable because (a) such values should never be
+// inlined into shell commands — use env vars instead — and (b) blocking '$'
+// closes both $() and ${} vectors in a single check, in addition to the
+// explicit block below.
+var secretValueShellMeta = regexp.MustCompile("[`;$|&<>\n\r\\\\\"']")
 
 // SetContext implements ContextualTool interface
 func (t *ExecTool) SetContext(channel, chatID string) {
@@ -294,8 +304,11 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		}
 	}
 
-	// Check safety guards unless bypass is enabled (for approved commands)
-	if !t.bypassGuard {
+	// Check safety guards unless bypass is enabled for THIS specific command
+	// in THIS context. The bypass is scoped to the approved command string
+	// (case/whitespace-normalized comparison) so that a stale or racing flag
+	// can never authorize a different command. See WithBypassGuard in base.go.
+	if !BypassGuardFor(ctx, command) {
 		guardMsg, isBlockable := t.guardCommandWithStatus(command, cwd)
 		if guardMsg != "" {
 			// Si está en modo aprobación y el comando es bloqueable (requiere aprobación)
@@ -331,6 +344,38 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 	resolvedCommand, err := t.substituteSecrets(ctx, command)
 	if err != nil {
 		return ErrorResult(err.Error())
+	}
+
+	// ── Post-substitution safety re-guard (Layer B) ─────────────────────
+	// Defence-in-depth: the safety guard above checked the command with
+	// placeholders (e.g. "echo {{SECRET:x}}"), not the resolved form. If
+	// substituteSecrets' own metacharacter check (layer A) were ever
+	// relaxed or bypassed, a crafted secret value could introduce shell
+	// syntax that evades the deny patterns. Re-running the guard on the
+	// resolved command catches this. We skip when no substitution occurred
+	// (resolved == original) to avoid redundant work.
+	//
+	// IMPORTANT: we only re-guard when the ORIGINAL command (with
+	// placeholders) was clean — i.e. no deny patterns matched. If the
+	// original already matched deny patterns and was allowed via bypass
+	// (context-based approval), those dangerous patterns were explicitly
+	// authorized by the user who saw the full command template. Re-blocking
+	// them post-substitution would create a false positive for legitimate
+	// approved commands like "echo {{SECRET:token}}; rm -rf /path". The
+	// purpose of B is to catch NEW dangerous patterns introduced by the
+	// secret VALUE, not to re-evaluate patterns the user already approved.
+	//
+	// Layer A (metacharacter check in substituteSecrets) is the primary
+	// injection defense. Layer B catches what A misses (e.g. a value that
+	// contains behavioral patterns like "rm -rf" without metacharacters
+	// but inserted into a context that makes them executable).
+	if resolvedCommand != command {
+		if origMsg, _ := t.guardCommandWithStatus(command, cwd); origMsg == "" {
+			// Original was clean; check if the resolved command is now dangerous.
+			if guardMsg, _ := t.guardCommandWithStatus(resolvedCommand, cwd); guardMsg != "" {
+				return ErrorResult("post-substitution safety guard: " + guardMsg)
+			}
+		}
 	}
 	command = resolvedCommand
 
@@ -478,15 +523,13 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) *To
 		output = "(no output)"
 	}
 
-	maxLen := 10000
-	if len(output) > maxLen {
-		cut := maxLen
-		// Back off to a UTF-8 rune boundary so we never split a multi-byte char.
-		for cut > 0 && !utf8.RuneStart(output[cut]) {
-			cut--
-		}
-		output = output[:cut] + fmt.Sprintf("\n... (truncated, %d more chars)", len(output)-cut)
-	}
+	// AGT-04: cap output at 64KB total with head+tail preservation.
+	// The threadSafeBuffer already bounds memory at 1MB per stream;
+	// this caps the *returned* output that goes into the LLM context.
+	// head 48KB + tail 16KB = 64KB max (+ short marker).
+	const outputHeadBytes = 48 * 1024
+	const outputTailBytes = 16 * 1024
+	output = utils.TruncateOutput(output, outputHeadBytes, outputTailBytes)
 
 	// If feedback was sent and command completed, optionally send completion message
 	// (only if it took significant time)
@@ -625,6 +668,16 @@ func (t *ExecTool) substituteSecrets(ctx context.Context, command string) (strin
 			subErr = fmt.Errorf("failed to resolve secret %q: %w", name, err)
 			return match
 		}
+		// Layer A (primary injection defense): a secret value that contains
+		// shell metacharacters ($(), backticks, ;, |, quotes, newlines, ...)
+		// would introduce syntax the safety guard never saw, because the
+		// guard runs on the placeholder form BEFORE substitution. Reject the
+		// whole command instead of inlining an untrusted value. Legit secrets
+		// (alphanumeric, -_./:, base64/JWT/ghp_ prefixes) never match.
+		if secretValueShellMeta.MatchString(value) {
+			subErr = fmt.Errorf("secret %q contains shell metacharacters/substitution syntax and cannot be inlined into a command; store the value without shell syntax or pass it via env", name)
+			return match
+		}
 		return value
 	})
 	if subErr != nil {
@@ -659,9 +712,11 @@ func (t *ExecTool) SetApprovalCallback(callback func(cmd string) (bool, error)) 
 	t.approvalCallback = callback
 }
 
-// SetBypassGuard activa/desactiva el bypass de seguridad para comandos aprobados
-func (t *ExecTool) SetBypassGuard(enabled bool) {
-	t.bypassGuard = enabled
+// Deprecated: SetBypassGuard was removed in favour of per-call context-based
+// bypass (WithBypassGuard / BypassGuardFor). This stub exists only to satisfy
+// the mock in llm_runner_test.go until it is migrated; it is a no-op.
+func (t *ExecTool) SetBypassGuard(_ bool) {
+	// Intentional no-op. Callers must use WithBypassGuard on the context instead.
 }
 
 // SetBackgroundManager sets the background process manager for long-running commands.

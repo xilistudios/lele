@@ -9,21 +9,10 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Lele Client</title>
-    <script>
-      // Apply stored theme before first paint to prevent flash
-      (function() {
-        try {
-          var theme = localStorage.getItem('lele-theme');
-          if (theme === 'dark' || theme === 'light') {
-            document.documentElement.setAttribute('data-theme', theme);
-            return;
-          }
-        } catch(e) {}
-        // Fall back to system preference
-        var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-        document.documentElement.setAttribute('data-theme', prefersLight ? 'light' : 'dark');
-      })();
-    </script>
+    <!-- Theme init must run before first paint; it is an external script (not
+         inline) so the server CSP can forbid 'unsafe-inline' in script-src
+         (WEB-M13). Synchronous loading preserves the pre-paint timing. -->
+    <script src="/theme-init.js"></script>
   </head>
   <body class="bg-background-primary text-text-primary">
     <div id="root"></div>

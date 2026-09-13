@@ -60,10 +60,133 @@ func TestAuthManager_GeneratePIN_MaxPending(t *testing.T) {
 		}
 	}
 
-	// The 11th should be rejected.
-	_, err = auth.GeneratePIN("Device")
-	if err == nil {
-		t.Error("expected error when exceeding max pending PINs")
+	// GW-M8: the 11th no longer fails — the oldest pending PIN is evicted
+	// (FIFO) so a new pairing always succeeds.
+	auth.mu.Lock()
+	countBefore := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if countBefore != 10 {
+		t.Fatalf("expected 10 pending PINs before the extra request, got %d", countBefore)
+	}
+
+	if _, err := auth.GeneratePIN("Device"); err != nil {
+		t.Fatalf("expected PIN mint to succeed via oldest-entry eviction, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	countAfter := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if countAfter != 10 {
+		t.Errorf("pending PINs should stay bounded at %d after eviction, got %d", 10, countAfter)
+	}
+}
+
+// TestAuthManager_GeneratePIN_PurgesExpiredFirst verifies that on GeneratePIN
+// expired PINs are removed before the cap is applied, so abandoned requests
+// cannot starve new pairings (GW-M8).
+func TestAuthManager_GeneratePIN_PurgesExpiredFirst(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Fill the store to the cap, then backdate every entry so all are
+	// expired (as if the expiry window had elapsed with nobody redeeming).
+	for i := 0; i < 10; i++ {
+		if _, err := auth.GeneratePIN("Device"); err != nil {
+			t.Fatalf("failed to generate PIN %d: %v", i, err)
+		}
+	}
+
+	auth.mu.Lock()
+	now := time.Now()
+	for _, pending := range auth.store.PendingPINs {
+		pending.Expires = now.Add(-time.Minute)
+	}
+	auth.mu.Unlock()
+
+	// The next mint must succeed via lazy expiry purge — and the resulting
+	// pending count must be 1 (only the fresh PIN survives).
+	pending, err := auth.GeneratePIN("FreshDevice")
+	if err != nil {
+		t.Fatalf("expected mint to succeed after purging expired PINs, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	count := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+	if count != 1 {
+		t.Errorf("expected expired PINs to be purged, leaving 1 pending PIN, got %d", count)
+	}
+	if pending.DeviceName != "FreshDevice" {
+		t.Errorf("expected fresh PIN for 'FreshDevice', got '%s'", pending.DeviceName)
+	}
+}
+
+// TestAuthManager_GeneratePIN_EvictsOldestNotNewest verifies that when the
+// cap is hit with all entries still unexpired, the entry with the oldest
+// Created timestamp is the one evicted (FIFO), keeping newer legitimate
+// pairings intact (GW-M8).
+func TestAuthManager_GeneratePIN_EvictsOldestNotNewest(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// First PIN is explicitly the oldest (backdated, still unexpired).
+	first, err := auth.GeneratePIN("OldestDevice")
+	if err != nil {
+		t.Fatalf("failed to generate first PIN: %v", err)
+	}
+	auth.mu.Lock()
+	auth.store.PendingPINs[first.PIN].Created = time.Now().Add(-4 * time.Minute)
+	auth.mu.Unlock()
+
+	// Fill the remaining slots with newer entries.
+	for i := 0; i < 9; i++ {
+		if _, err := auth.GeneratePIN("NewerDevice"); err != nil {
+			t.Fatalf("failed to generate PIN %d: %v", i, err)
+		}
+	}
+
+	auth.mu.Lock()
+	_, oldestStillThere := auth.store.PendingPINs[first.PIN]
+	auth.mu.Unlock()
+	if !oldestStillThere {
+		t.Fatal("setup error: oldest PIN vanished before eviction could be observed")
+	}
+
+	// One more mint: the oldest unexpired entry must be evicted to make room.
+	extra, err := auth.GeneratePIN("LatestDevice")
+	if err != nil {
+		t.Fatalf("expected mint to succeed via eviction, got error: %v", err)
+	}
+
+	auth.mu.Lock()
+	_, evicted := auth.store.PendingPINs[first.PIN]
+	count := len(auth.store.PendingPINs)
+	auth.mu.Unlock()
+
+	if evicted {
+		t.Error("oldest pending PIN should have been evicted")
+	}
+	if count != 10 {
+		t.Errorf("pending count should stay at cap 10, got %d", count)
+	}
+	if extra.DeviceName != "LatestDevice" {
+		t.Errorf("new PIN should be present, got device '%s'", extra.DeviceName)
 	}
 }
 
@@ -891,5 +1014,182 @@ func TestRegisterDesktopClient_RefreshWorks(t *testing.T) {
 
 	if _, valid := auth.ValidateToken(newToken); !valid {
 		t.Error("expected rotated token to be valid")
+	}
+}
+
+// FIX-2: PairWithPIN must reject pairing when both the PIN's DeviceName and
+// the caller's deviceName are empty. This closes the bypass where an attacker
+// could pair without any device identification.
+func TestAuthManager_PairWithPIN_RequiresDeviceNameWhenPINIssuedWithoutOne(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Generate PIN without a device name (e.g. CLI flow).
+	pending, err := auth.GeneratePIN("")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pairing without providing a device name must fail.
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "")
+	if err == nil {
+		t.Fatal("expected error when pairing without device_name and PIN issued without one")
+	}
+	if err.Error() != "device_name is required" {
+		t.Fatalf("error = %q, want 'device_name is required'", err.Error())
+	}
+
+	// Pairing WITH a device name should succeed.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "My Device")
+	if err != nil {
+		t.Fatalf("pairing with device_name should succeed: %v", err)
+	}
+	if client == nil || token == "" {
+		t.Fatal("expected valid client and token")
+	}
+	if client.DeviceName != "My Device" {
+		t.Errorf("client.DeviceName = %q, want 'My Device'", client.DeviceName)
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with the same name
+// should still work (existing behaviour preserved).
+func TestAuthManager_PairWithPIN_DeviceNameMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with matching device name.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "Server-Device")
+	if err != nil {
+		t.Fatalf("pairing with matching device_name: %v", err)
+	}
+	if client == nil || token == "" {
+		t.Fatal("expected valid client and token")
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with mismatched name
+// should fail (existing behaviour preserved).
+func TestAuthManager_PairWithPIN_DeviceNameMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with mismatched device name.
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "Evil-Device")
+	if err == nil {
+		t.Fatal("expected error for device name mismatch")
+	}
+	if err.Error() != "device name mismatch" {
+		t.Fatalf("error = %q, want 'device name mismatch'", err.Error())
+	}
+}
+
+// When the PIN was issued WITH a device name, pairing with empty device name
+// should use the PIN's device name (existing behaviour: the finalDeviceName
+// falls back to pending.DeviceName).
+func TestAuthManager_PairWithPIN_EmptyCallerWithPINDeviceName(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	pending, err := auth.GeneratePIN("Server-Device")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+
+	// Pair with empty device name — should use the PIN's device name.
+	client, token, _, err := auth.PairWithPIN(pending.PIN, "")
+	if err != nil {
+		t.Fatalf("pairing with empty device_name should succeed when PIN has one: %v", err)
+	}
+	if client.DeviceName != "Server-Device" {
+		t.Errorf("client.DeviceName = %q, want 'Server-Device'", client.DeviceName)
+	}
+	_ = token
+}
+
+// PairWithPIN must reject expired and nonexistent PINs (existing tests
+// consolidated here for completeness).
+func TestAuthManager_PairWithPIN_InvalidAndExpiredPIN(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.NativeConfig{
+		PinExpiryMinutes: 5,
+		MaxClients:       5,
+		TokenExpiryDays:  30,
+	}
+
+	auth, err := NewAuthManager(cfg, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create auth manager: %v", err)
+	}
+
+	// Nonexistent PIN.
+	_, _, _, err = auth.PairWithPIN("999999", "Test")
+	if err == nil {
+		t.Fatal("expected error for nonexistent PIN")
+	}
+
+	// Expired PIN: generate one and force its expiry to the past, then save
+	// to disk so that PairWithPIN's internal loadStore picks up the change.
+	pending, err := auth.GeneratePIN("Test")
+	if err != nil {
+		t.Fatalf("GeneratePIN failed: %v", err)
+	}
+	// Force expiry to the past and persist.
+	auth.mu.Lock()
+	if p, ok := auth.store.PendingPINs[pending.PIN]; ok {
+		p.Expires = time.Now().Add(-1 * time.Minute)
+	}
+	auth.saveStoreUnlocked()
+	auth.mu.Unlock()
+
+	_, _, _, err = auth.PairWithPIN(pending.PIN, "Test")
+	if err == nil {
+		t.Fatal("expected error for expired PIN")
 	}
 }

@@ -3,26 +3,23 @@
 package lockfile
 
 import (
-	"errors"
 	"os"
 	"syscall"
 )
 
-// processAlive reports whether the process with the given PID currently exists.
+// lockExclusive takes an advisory kernel lock (flock) on the open file, in
+// non-blocking mode. It is the authoritative single-instance guard: the kernel
+// releases it automatically when the owning process (or the last fd referring
+// to the open file description) exits, so it can never go stale.
 //
-// It sends signal 0 (a no-op whose sole purpose is liveness probing) to the
-// process. A nil error means the process exists; syscall.EPERM also means the
-// process exists but is owned by another user; any other error (normally
-// syscall.ESRCH) means the process does not exist.
-func processAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = p.Signal(syscall.Signal(0))
-	if err == nil {
-		return true
-	}
-	// EPERM: process exists but we are not allowed to signal it.
-	return errors.Is(err, syscall.EPERM)
+// Returns an error (typically EWOULDBLOCK/EAGAIN) when another process — or
+// another open file description in the same process — already holds the lock.
+func lockExclusive(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+}
+
+// unlockFile releases a lock taken by lockExclusive. Closing the file also
+// releases it, so this is a best-effort explicit hand-back.
+func unlockFile(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }
