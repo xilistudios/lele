@@ -36,6 +36,7 @@ type EditableDocument struct {
 	Channels  EditableChannelsConfig  `json:"channels"`
 	Providers EditableProvidersConfig `json:"providers"`
 	Gateway   GatewayConfig           `json:"gateway"`
+	ACP       ACPConfig               `json:"acp,omitempty"`
 	Tools     EditableToolsConfig     `json:"tools"`
 	Heartbeat HeartbeatConfig         `json:"heartbeat"`
 	Devices   DevicesConfig           `json:"devices"`

@@ -312,6 +312,9 @@ func gatewayCmd() {
 		srv.RegisterWebUI(http.FS(distFS))
 	}
 
+	// Register ACP (Agent Communication Protocol) routes when enabled.
+	registerACP(srv.Mux(), cfg, agentLoop.GetProvidable())
+
 	// Register native channel API routes
 	if nativeCh, ok := channelManager.GetChannel("native"); ok {
 		if nc, ok := nativeCh.(*channels.NativeChannel); ok {

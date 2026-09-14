@@ -80,6 +80,7 @@ Same machine, same idle TUI session. Rough multipliers vs lele (~42 MB RSS, ~57 
 - CLI (`lele agent`) and full Bubble Tea TUI (`lele tui`)
 - Built-in web UI + native REST/WebSocket client with PIN pairing
 - Gateway for chat channels (Telegram, Discord, Slack, WhatsApp, Feishu, Line, QQ, DingTalk, …)
+- ACP (Agent Communication Protocol) REST server — see `docs/acp.md`
 
 **Automation**
 - Scheduled jobs (`lele cron`) and `HEARTBEAT.md` heartbeat tasks

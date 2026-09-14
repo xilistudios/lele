@@ -170,6 +170,7 @@ func (doc *EditableDocument) ToConfig() (*Config, error) {
 
 	// Copiar gateway
 	cfg.Gateway = doc.Gateway
+	cfg.ACP = doc.ACP
 
 	// Copiar tools
 	cfg.Tools.Web.Brave = BraveConfig{
@@ -462,6 +463,10 @@ func (doc *EditableDocument) toSerializable() map[string]interface{} {
 		"host": doc.Gateway.Host,
 		"port": doc.Gateway.Port,
 	}
+	result["acp"] = map[string]interface{}{
+		"enabled": doc.ACP.Enabled,
+		"token":   doc.ACP.Token,
+	}
 
 	// Tools
 	tools := map[string]interface{}{
@@ -611,6 +616,7 @@ func editableDocumentFromConfig(cfg *Config) *EditableDocument {
 		}
 	}
 	doc.Gateway = cfg.Gateway
+	doc.ACP = cfg.ACP
 	doc.Tools = EditableToolsConfig{
 		Web: EditableWebToolsConfig{
 			Brave:      EditableBraveConfig{Enabled: cfg.Tools.Web.Brave.Enabled, APIKey: literalOrEmptySecret(cfg.Tools.Web.Brave.APIKey), MaxResults: cfg.Tools.Web.Brave.MaxResults},

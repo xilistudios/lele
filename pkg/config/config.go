@@ -147,6 +147,7 @@ type Config struct {
 	Providers *ProvidersConfig `json:"providers,omitempty"`
 	Gateway   GatewayConfig    `json:"gateway"`
 	Server    ServerConfig     `json:"server,omitempty"`
+	ACP       ACPConfig        `json:"acp,omitempty"`
 	Tools     ToolsConfig      `json:"tools"`
 	Heartbeat HeartbeatConfig  `json:"heartbeat"`
 	Devices   DevicesConfig    `json:"devices"`
@@ -1075,6 +1076,15 @@ type GatewayConfig struct {
 	Port int    `json:"port" env:"LELE_GATEWAY_PORT"`
 }
 
+// ACPConfig exposes agents over the Agent Communication Protocol (ACP 0.2.0).
+// Routes are mounted on the unified server at /ping, /agents, /runs, ...
+type ACPConfig struct {
+	Enabled bool `json:"enabled" env:"LELE_ACP_ENABLED"`
+	// Token, when set, requires Authorization: Bearer <token> on every ACP
+	// endpoint. Empty means open access (recommended only on localhost).
+	Token string `json:"token,omitempty" env:"LELE_ACP_TOKEN"`
+}
+
 // ServerConfig is the unified server configuration (single host:port for all HTTP services).
 type ServerConfig struct {
 	Host string `json:"host" env:"LELE_SERVER_HOST"`
@@ -1303,6 +1313,10 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			Host: "",
 			Port: 0, // 0 means not set; falls back to Gateway/Native port
+		},
+		ACP: ACPConfig{
+			Enabled: false,
+			Token:   "",
 		},
 		Tools: ToolsConfig{
 			Web: WebToolsConfig{
