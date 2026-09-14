@@ -117,6 +117,12 @@ jobs:
       - name: Check no double-slash alpha (F0)
         run: cd web && bun scripts/check-double-slash.mjs
 
+      - name: Check WCAG contrast matrix (F1)
+        run: cd web && bun scripts/check-contrast.mjs --self-test
+
+      - name: Check token consumers (F1)
+        run: cd web && bun scripts/tokens-report.mjs
+
       - name: Web lint (biome)
         continue-on-error: true
         run: cd web && bunx biome check src/

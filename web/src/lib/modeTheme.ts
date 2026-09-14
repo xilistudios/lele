@@ -64,7 +64,12 @@ const THEMES: Record<ChatMode, ModeTheme> = {
     labelKey: 'mode.group',
     descKey: 'mode.groupDescription',
     Icon: GroupsIcon,
-    text: 'text-mode-group',
+    // §2.4 excepción group-claro (F1-review N1): los otros 3 roles de texto (chip,
+    // selectedItem, iconCircle) ya usaban text-primary en claro; .text quedó fuera y su
+    // único consumidor (MessageList status badge) pinta softBg/10 DENTRO de un contenedor
+    // softBg/10 → tinte doble = 3.91 ❌ bajo AA. Mismo tratamiento: tinta en claro,
+    // color en oscuro.
+    text: 'text-text-primary dark:text-mode-group',
     dot: 'bg-mode-group',
     softBg: 'bg-mode-group/10',
     border: 'border-mode-group/30',

@@ -21,7 +21,9 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary:
     'border border-border bg-background-tertiary text-text-primary hover:bg-surface-hover',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-  danger: 'bg-state-error text-text-on-accent hover:opacity-90',
+  // §5 spec: relleno destructivo = state-error-fill (blanco 4.95 D / 5.74 L).
+  // bg-state-error era ❌ 2.77 en oscuro (#F87171 es texto de error, no superficie).
+  danger: 'bg-state-error-fill text-text-on-accent hover:opacity-90',
 }
 
 const sizeClasses: Record<ButtonSize, string> = {

@@ -292,7 +292,7 @@ export function ChatComposer() {
                 key={attachment}
                 className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-lg border border-border bg-background-secondary p-2 transition-all hover:border-border shadow-sm pr-8"
               >
-                <div className="h-12 w-10 bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] text-accent-primary rounded-md flex flex-col items-center justify-center border border-[color-mix(in_srgb,var(--color-accent-primary)_15%,transparent)] flex-shrink-0 select-none">
+                <div className="h-12 w-10 bg-accent-primary/10 text-accent-primary rounded-md flex flex-col items-center justify-center border border-accent-primary/15 flex-shrink-0 select-none">
                   <svg
                     className="h-4 w-4 text-accent-primary mb-0.5"
                     fill="none"
@@ -332,7 +332,7 @@ export function ChatComposer() {
           })}
         </div>
       )}
-      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
+      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-accent-primary/40">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
         {/* Top toolbar: folder picker above the input, folder chip when set */}
         <div className="flex items-center gap-1 px-2 pt-1.5">
@@ -346,7 +346,7 @@ export function ChatComposer() {
           {sessionFolder && (
             <span
               title={sessionFolder}
-              className="flex max-w-[180px] items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--color-accent-primary)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] px-2 py-0.5 text-accent-primary"
+              className="flex max-w-[180px] items-center gap-1 rounded-full border border-accent-primary/30 bg-accent-primary/10 px-2 py-0.5 text-accent-primary"
             >
               <FolderIcon size={11} className="flex-shrink-0" />
               <span className="truncate text-2xs font-medium">
@@ -357,7 +357,7 @@ export function ChatComposer() {
                 onClick={onClearFolder}
                 title={t('chat.removeFolder')}
                 aria-label={t('chat.removeFolder')}
-                className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-[color-mix(in_srgb,var(--color-accent-primary)_25%,transparent)] transition-colors"
+                className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full hover:bg-accent-primary/25 transition-colors"
               >
                 <CloseIcon size={8} />
               </button>

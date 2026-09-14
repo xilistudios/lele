@@ -66,7 +66,7 @@ export function TemperatureSlider({
   // The native input is the only element, so the filled portion of the track
   // is painted with a gradient stop at the current percentage.
   const trackStyle: CSSProperties = {
-    background: `linear-gradient(to right, var(--color-focus) 0%, var(--color-focus) ${percent}%, var(--color-bg-tertiary) ${percent}%, var(--color-bg-tertiary) 100%)`,
+    background: `linear-gradient(to right, rgb(var(--color-focus)) 0%, rgb(var(--color-focus)) ${percent}%, rgb(var(--color-bg-tertiary)) ${percent}%, rgb(var(--color-bg-tertiary)) 100%)`,
   }
 
   const notSetLabel = t('settings.agentPage.tempNotSet', { defaultValue: 'Model default' })

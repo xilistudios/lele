@@ -274,7 +274,24 @@ function buildMatrix() {
   rows.push({ fg: 'mode-chat', bgs: ['L1', 'chat-tint10-L1'], min: 4.5 })
   rows.push({ fg: 'mode-agent', bgs: ['L1', 'agent-tint10-L1', 'agent-tint14-L1'], min: 4.5 })
   // group: chip/selectedItem usan texto de color solo en oscuro; claro usa text-primary
-  rows.push({ fg: 'mode-group', bgs: ['L1', 'group-tint10-L1', 'group-tint14-L1'], min: 4.5, only: ['dark'] })
+  // N1 fix: L1 plano se verifica en AMBOS temas (claro 5.178 ✅). Antes estaba empaquetado
+  // con los tintes bajo only:['dark'] y la celda L1 del claro nunca se medía.
+  rows.push({ fg: 'mode-group', bgs: ['L1'], min: 4.5 })
+  rows.push({ fg: 'mode-group', bgs: ['group-tint10-L1', 'group-tint14-L1'], min: 4.5, only: ['dark'] })
+  // N1: MessageList pinta el badge de estado (softBg/10 + texto) DENTRO de la card de
+  // grupo, que ya pinta softBg/10 → tinte doble. Peor caso real; sin esta fila el gate
+  // daba verde con 3.91 ❌ en claro.
+  rows.push({
+    fg: 'mode-group',
+    bgs: ['group-tint10-on-group-tint10-L1'],
+    min: 4.5,
+    only: ['dark'], // oscuro: color de identidad sobre tinte doble (4.92 ✅)
+  })
+  rows.push({
+    fg: 'text-primary',
+    bgs: ['group-tint10-on-group-tint10-L1', 'group-tint10-on-group-tint14-L1'],
+    min: 4.5, // claro: excepción §2.4 sobre tinte doble (12.78 ✅)
+  })
   // chat selectedItem: color solo en oscuro (claro 4.498 → text-primary)
   rows.push({ fg: 'mode-chat', bgs: ['chat-tint14-L1'], min: 4.5, only: ['dark'] })
   // excepciones claras (texto primary sobre tinte de modo)
@@ -463,7 +480,21 @@ function main() {
         if (!bg[bgLabel]) {
           // §2.4 synthetic: "<mode>-tint<alpha>-<level>" = mode color at alpha over level bg
           const mt = bgLabel.match(/^(chat|agent|group)-tint(\d+)-(L[0-3])$/)
-          if (mt) {
+          // §2.4 synthetic (N1): "<mode>-tint<alpha>-on-<mode>-tint<alpha>-<level>" =
+          // tinte anidado dentro de tinte (MessageList: badge softBg/10 dentro de una
+          // card que ya pinta softBg/10). Sin esta forma el gate no veía el peor caso.
+          const mn = bgLabel.match(/^(chat|agent|group)-tint(\d+)-on-(chat|agent|group)-tint(\d+)-(L[0-3])$/)
+          if (mn) {
+            const outer = tokens.get(`mode-${mn[1]}`)
+            const inner = tokens.get(`mode-${mn[3]}`)
+            const levelTok = tokens.get(BG_TOKENS[mn[5]])
+            if (outer && inner && levelTok) {
+              const innerBg = blend({ ...inner, a: Number(mn[4]) / 100 }, levelTok)
+              bg[bgLabel] = blend({ ...outer, a: Number(mn[2]) / 100 }, innerBg)
+            } else {
+              bgMissing.push(`mode tint tokens for ${bgLabel}`)
+            }
+          } else if (mt) {
             const modeTok = tokens.get(`mode-${mt[1]}`)
             const levelTok = tokens.get(BG_TOKENS[mt[3]])
             if (modeTok && levelTok) {
