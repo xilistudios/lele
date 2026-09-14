@@ -242,7 +242,7 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
               type="button"
               onClick={handleBack}
               disabled={step === 1}
-              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200
+              className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-fast
                 bg-background-secondary text-text-secondary hover:bg-background-tertiary hover:text-text-primary
                 disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -266,8 +266,8 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 type="button"
                 onClick={handleNext}
                 disabled={step === 1 && !canProceedStep1}
-                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200
-                  bg-cta-primary text-text-on-accent hover:bg-cta-hover
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-fast
+                  bg-accent-primary text-text-on-accent hover:bg-accent-hover
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t('settings.addAgentModal.next')}{' '}
@@ -288,8 +288,8 @@ export function AddAgentModal({ isOpen, onClose }: Props) {
                 type="button"
                 onClick={handleAdd}
                 disabled={!canAdd || isSubmitting}
-                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200
-                  bg-cta-primary text-text-on-accent hover:bg-cta-hover
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-fast
+                  bg-accent-primary text-text-on-accent hover:bg-accent-hover
                   disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (

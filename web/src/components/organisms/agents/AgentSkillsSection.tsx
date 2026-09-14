@@ -180,7 +180,7 @@ function SkillCardActions({
     return (
       <span
         data-testid={`skill-remove-confirm-${name}`}
-        className="flex items-center gap-1.5 text-[11px]"
+        className="flex items-center gap-1.5 text-xs"
       >
         <span className="text-text-secondary">
           {t('settings.agentPage.skillsConfirmRemove', { defaultValue: 'Remove?' })}
@@ -362,7 +362,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
   // ---------- Catalog failed to load ----------
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background-secondary/50 px-4 py-8 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-surface-sunken px-4 py-8 text-center">
         <p className="text-sm text-text-secondary">
           {t('settings.agentPage.skillsLoadError', {
             defaultValue: 'Could not load the skills catalog.',
@@ -397,7 +397,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
               <PlusIcon size={14} />
               {t('settings.agentPage.skillsAdd', { defaultValue: 'Add skill' })}
             </Button>
-            <Link to="/skills" className="text-sm text-interaction-primary hover:underline">
+            <Link to="/skills" className="text-sm text-focus hover:underline">
               {t('settings.agentPage.goToSkills', { defaultValue: 'Go to Skills' })}
             </Link>
           </div>
@@ -427,7 +427,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
       ) : (
         <div
           data-testid="skills-banner"
-          className="mb-4 flex items-start gap-2.5 rounded-lg border border-state-info/30 bg-state-info-light px-4 py-3 text-xs"
+          className="mb-4 flex items-start gap-2.5 rounded-lg border border-state-info/30 bg-state-info/10 px-4 py-3 text-xs"
         >
           <InfoIcon className="mt-px flex-none text-state-info" />
           <span className="text-text-secondary">
@@ -453,7 +453,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
             onKeyDown={(event) => event.key === 'Escape' && setQuery('')}
             placeholder={t('settings.agentPage.skillsSearch', { defaultValue: 'Search skills' })}
             aria-label={t('settings.agentPage.skillsSearch', { defaultValue: 'Search skills' })}
-            className="h-9 w-full rounded-md border border-border-strong bg-surface-tertiary pl-9 pr-8 text-sm text-text-primary placeholder:text-text-muted transition-colors duration-fast hover:border-border-light focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20"
+            className="h-9 w-full rounded-md border border-border-strong bg-background-secondary pl-9 pr-8 text-sm text-text-primary placeholder:text-text-muted transition-colors duration-fast hover:border-border focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20"
           />
           {query && (
             <button
@@ -504,7 +504,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
         <p
           data-testid="skills-action-error"
           role="alert"
-          className="mb-3 rounded-lg border border-state-error/40 bg-state-error-light px-3 py-2 text-xs text-state-error"
+          className="mb-3 rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
         >
           {skills.error}
         </p>
@@ -619,7 +619,7 @@ export function AgentSkillsSection({ agent, index, agentId }: Props) {
 
       {/* In-panel counterpart of the tab dot (§5.3). */}
       {sectionDirty && (
-        <p data-testid="skills-dirty-hint" className="mt-3 text-[11px] text-text-tertiary">
+        <p data-testid="skills-dirty-hint" className="mt-3 text-xs text-text-tertiary">
           {t('settings.agentPage.sectionHasChanges', {
             defaultValue: 'Unsaved changes in this section',
           })}

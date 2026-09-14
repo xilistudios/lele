@@ -7,17 +7,17 @@ export type ModeTheme = {
   labelKey: string
   descKey: string
   Icon: ComponentType<{ size?: number; className?: string }>
-  /** solid text color, e.g. 'text-brand-turquesa' */
+  /** identity text color, e.g. 'text-mode-chat' (§2.4) */
   text: string
-  /** solid bg for dots/indicators, e.g. 'bg-brand-turquesa' */
+  /** bg for dots/indicators, e.g. 'bg-mode-chat' (§2.4) */
   dot: string
-  /** soft translucent bg, e.g. 'bg-brand-turquesa/10' */
+  /** soft translucent bg, e.g. 'bg-mode-chat/14' (§2.4) */
   softBg: string
-  /** translucent border, e.g. 'border-brand-turquesa/30' */
+  /** translucent border, e.g. 'border-mode-chat/30' (§2.4) */
   border: string
   /** full class string for the header mode chip */
   chip: string
-  /** full class string for an active mode tab */
+  /** active mode tab: tint+text+underline, never solid fill (§2.4/§5.7) */
   tabActive: string
   /** full class string for a selected session item in the sidebar */
   selectedItem: string
@@ -33,45 +33,54 @@ const THEMES: Record<ChatMode, ModeTheme> = {
     labelKey: 'mode.chat',
     descKey: 'mode.chatDescription',
     Icon: ChatBubbleIcon,
-    text: 'text-brand-turquesa',
-    dot: 'bg-brand-turquesa',
-    softBg: 'bg-brand-turquesa/10',
-    border: 'border-brand-turquesa/30',
-    chip: 'bg-brand-turquesa/10 border border-brand-turquesa/30 text-brand-turquesa',
-    tabActive: 'bg-brand-turquesa text-white shadow-sm',
-    selectedItem: 'bg-surface-selected text-brand-turquesa border border-brand-turquesa/30',
-    accentBar: 'bg-brand-turquesa/60',
-    iconCircle: 'bg-brand-turquesa/10 text-brand-turquesa',
+    text: 'text-mode-chat',
+    dot: 'bg-mode-chat',
+    softBg: 'bg-mode-chat/10',
+    border: 'border-mode-chat/30',
+    chip: 'bg-mode-chat/10 border border-mode-chat/30 text-mode-chat',
+    tabActive: 'text-mode-chat border-b-2 border-mode-chat',
+    // §2.4 excepción extendida (F1): chat claro sobre tinte/14 = 4.498 < 4.5 → texto primary en claro
+    selectedItem: 'bg-mode-chat/14 text-text-primary dark:text-mode-chat border border-mode-chat/40',
+    accentBar: 'bg-mode-chat/60',
+    iconCircle: 'bg-mode-chat/10 text-mode-chat',
   },
   agent: {
     id: 'agent',
     labelKey: 'mode.agent',
     descKey: 'mode.agentDescription',
     Icon: AgentsIcon,
-    text: 'text-brand-morado',
-    dot: 'bg-brand-morado',
-    softBg: 'bg-brand-morado/10',
-    border: 'border-brand-morado/30',
-    chip: 'bg-brand-morado/10 border border-brand-morado/30 text-brand-morado',
-    tabActive: 'bg-brand-morado text-white shadow-sm',
-    selectedItem: 'bg-surface-selected text-brand-morado border border-brand-morado/30',
-    accentBar: 'bg-brand-morado/60',
-    iconCircle: 'bg-brand-morado/10 text-brand-morado',
+    text: 'text-mode-agent',
+    dot: 'bg-mode-agent',
+    softBg: 'bg-mode-agent/10',
+    border: 'border-mode-agent/30',
+    chip: 'bg-mode-agent/10 border border-mode-agent/30 text-mode-agent',
+    tabActive: 'text-mode-agent border-b-2 border-mode-agent',
+    selectedItem: 'bg-mode-agent/14 text-mode-agent border border-mode-agent/40',
+    accentBar: 'bg-mode-agent/60',
+    iconCircle: 'bg-mode-agent/10 text-mode-agent',
   },
   group: {
     id: 'group',
     labelKey: 'mode.group',
     descKey: 'mode.groupDescription',
     Icon: GroupsIcon,
-    text: 'text-brand-naranja',
-    dot: 'bg-brand-naranja',
-    softBg: 'bg-brand-naranja/10',
-    border: 'border-brand-naranja/30',
-    chip: 'bg-brand-naranja/10 border border-brand-naranja/30 text-brand-naranja',
-    tabActive: 'bg-brand-naranja text-white shadow-sm',
-    selectedItem: 'bg-surface-selected text-brand-naranja border border-brand-naranja/30',
-    accentBar: 'bg-brand-naranja/60',
-    iconCircle: 'bg-brand-naranja/10 text-brand-naranja',
+    // §2.4 excepción group-claro (F1-review N1): los otros 3 roles de texto (chip,
+    // selectedItem, iconCircle) ya usaban text-primary en claro; .text quedó fuera y su
+    // único consumidor (MessageList status badge) pinta softBg/10 DENTRO de un contenedor
+    // softBg/10 → tinte doble = 3.91 ❌ bajo AA. Mismo tratamiento: tinta en claro,
+    // color en oscuro.
+    text: 'text-text-primary dark:text-mode-group',
+    dot: 'bg-mode-group',
+    softBg: 'bg-mode-group/10',
+    border: 'border-mode-group/30',
+    // §2.4 group-claro: 4.48 sobre tinte/10 → texto primary en claro, color en borde
+    chip: 'bg-mode-group/10 border border-mode-group/30 text-text-primary dark:text-mode-group',
+    tabActive: 'text-mode-group border-b-2 border-mode-group',
+    // §2.4 excepción group-claro: #C2410C sobre su tinte = 4.48 (<4.5) → el texto del
+    // item seleccionado usa text-primary en claro; el color queda en dot/borde.
+    selectedItem: 'bg-mode-group/14 text-text-primary dark:text-mode-group border border-mode-group/40',
+    accentBar: 'bg-mode-group/60',
+    iconCircle: 'bg-mode-group/10 text-text-primary dark:text-mode-group',
   },
 }
 

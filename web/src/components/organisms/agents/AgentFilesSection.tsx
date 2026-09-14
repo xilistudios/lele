@@ -72,7 +72,7 @@ export function AgentFilesSection({ agent, agentId }: Props) {
   // would swap a readable banner for a fake card (§5.1: no layout jumps).
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background-secondary/50 px-4 py-8 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-surface-sunken px-4 py-8 text-center">
         <p className="text-sm text-text-secondary">{t('settings.agentPage.filesLoadError')}</p>
         <Button variant="secondary" size="sm" data-testid="files-retry" onClick={() => refetch()}>
           {t('settings.agentPage.retry')}

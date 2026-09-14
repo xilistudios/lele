@@ -116,7 +116,8 @@ const classRe =
  * Handles: className="...", className={'...'}, className={`...`}
  * Also matches plain class="..." for HTML (index.html).
  */
-const attrRe = /(?:className|class)\s*=\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
+const attrRe =
+  /(?:className|class)\s*=\s*\{?\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
 
 /**
  * Extract all Tailwind color classes that appear inside a className/class
@@ -160,7 +161,7 @@ function scanFile(filePath) {
 function rgScan(web, pattern) {
   try {
     const out = execSync(
-      `grep -roPh '${pattern}' src --include='*.tsx' --include='*.ts'`,
+      `grep -roPh '${pattern}' src --include='*.tsx' --include='*.ts' --exclude='*.test.ts' --exclude='*.test.tsx'`,
       {
         cwd: web,
         encoding: 'utf8',
@@ -186,7 +187,7 @@ function fallbackScan(web) {
   if (!existsSync(srcDir)) {
     throw new Error(`src/ directory not found at ${srcDir}`)
   }
-  const files = execSync(`find src -name '*.tsx' -o -name '*.ts'`, {
+  const files = execSync(`find src \\( -name '*.tsx' -o -name '*.ts' \\) ! -name '*.test.ts*'`, {
     cwd: web,
     encoding: 'utf8',
   })
@@ -310,7 +311,7 @@ async function main() {
   }
 
   // Path (b): fs-based scan for className-context tracking
-  const srcFiles = execSync(`find src -name '*.tsx' -o -name '*.ts'`, {
+  const srcFiles = execSync(`find src \\( -name '*.tsx' -o -name '*.ts' \\) ! -name '*.test.ts*'`, {
     cwd: web,
     encoding: 'utf8',
   })
@@ -382,7 +383,7 @@ async function main() {
     try {
       const pattern = [...dead.keys()].map(escapeRegex).join('|')
       nFiles = execSync(
-        `grep -rlP '${pattern}' src --include='*.tsx' --include='*.ts' | wc -l`,
+        `grep -rlP '${pattern}' src --include='*.tsx' --include='*.ts' --exclude='*.test.ts' --exclude='*.test.tsx' | wc -l`,
         { cwd: web, encoding: 'utf8' },
       ).trim()
     } catch {

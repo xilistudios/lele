@@ -22,81 +22,59 @@
   --color-bg-secondary: 30 33 40;
   --color-bg-tertiary: 42 46 53;
   --color-bg-elevated: 58 63 70;
-  --color-bg-hover: 69 75 83;
 
   /* 30% - Surfaces/UI Elements */
-  --color-surface-primary: 58 63 70;
-  --color-surface-secondary: 42 46 53;
-  --color-surface-tertiary: 30 33 40;
-  --color-surface-hover: 69 75 83;
-  --color-surface-muted: 42 46 53;
-  --color-surface-selected: rgb(232 62 140 / 0.12);
+  --color-surface-hover: 52 57 64;
+  --color-surface-selected: 29 53 60;
+  --color-surface-sunken: 11 13 16;  /* #0B0D10 — spec §2.1 */
 
   /* 10% - Acentos Primarios */
-  --color-accent-primary: 232 62 140;
-  --color-accent-hover: 240 82 154;
-  --color-accent-active: 208 42 124;
-  --color-accent-muted: rgb(232 62 140 / 0.15);
+  --color-accent-primary: 200 31 116;
+  --color-accent-hover: 216 46 131;
+  --color-accent-active: 184 30 106;
   --color-accent-subtle: rgb(232 62 140 / 0.08);
+  --color-accent-tint: 54 36 52;        /* #362434 — fondo suave de identidad, equivale a accent/12 sobre L1 */
+  --color-accent-text: 240 106 168;     /* #F06AA8 — texto acento (spec §2.2) */
 
   /* Brand Colors */
   --color-brand-rosa: 232 62 140;
   --color-brand-morado: 157 78 221;
-  --color-brand-turquesa: 23 179 184;
   --color-brand-amarillo: 255 193 7;
   --color-brand-naranja: 255 107 53;
 
   /* Secondary Palette */
-  --color-secondary-verde: 123 201 67;
-  --color-secondary-azul: 45 108 223;
-  --color-secondary-rojo: 183 28 28;
-  --color-secondary-rosa-pastel: 255 182 213;
-  --color-secondary-aqua: 167 231 231;
 
   /* CTA Colors */
-  /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
-  --color-cta-primary: 232 62 140;
-  --color-cta-hover: 240 82 154;
-  --color-cta-active: 208 42 124;
-  --color-cta-secondary: 255 193 7;
-  --color-cta-secondary-hover: 255 210 51;
 
   /* Interaction Colors */
-  --color-interaction-primary: 23 179 184;
-  --color-interaction-hover: 31 201 206;
-  --color-interaction-active: 19 157 161;
+    --color-mode-chat: 34 211 238;  /* #22D3EE — spec §2.4 */
+  --color-mode-agent: 192 132 252;  /* #C084FC — spec §2.4 */
+  --color-mode-group: 255 138 92;  /* #FF8A5C — spec §2.4 */
+  --color-focus-hover: 31 201 206;
+  --color-focus: 23 179 184;            /* #17B3B8 — indicador de foco (no textual, ≥3:1) */
 
   /* Borders */
-  --color-border-default: rgb(59 65 72 / 0.16);
-  --color-border-light: rgb(59 65 72 / 0.4);
-  --color-border-strong: rgb(59 65 72 / 0.6);
-  --color-border-focus: 23 179 184;
+  --color-border-default: 44 49 58;
+  --color-border-strong: 130 137 147;
 
   /* Text Colors */
   --color-text-primary: 242 244 247;
-  --color-text-secondary: 176 182 189;
-  --color-text-tertiary: 156 163 175;
-  --color-text-muted: 107 114 128;
-  --color-text-on-surface: 242 244 247;
+  --color-text-secondary: 182 188 196;
+  --color-text-tertiary: 162 169 180;
+  --color-text-muted: 147 153 159;
   --color-text-on-accent: 255 255 255;
 
   /* State Colors */
   --color-state-success: 123 201 67;
-  --color-state-success-light: rgb(123 201 67 / 0.15);
   --color-state-warning: 255 193 7;
-  --color-state-warning-light: rgb(255 193 7 / 0.15);
-  --color-state-error: 239 83 80;
-  --color-state-error-light: rgb(239 83 80 / 0.15);
-  --color-state-info: 74 138 232;
-  --color-state-info-light: rgb(74 138 232 / 0.15);
+  --color-state-error: 248 113 113;
+  --color-state-error-fill: 209 52 46;  /* #D1342E — botón destructivo relleno, blanco sobre él = 4.95 */
+  --color-state-info: 96 165 250;
 
   /* Overlay */
   --color-overlay: rgb(15 17 21 / 0.75);
-  --color-overlay-light: rgb(15 17 21 / 0.5);
 
   /* Glass Effect */
-  --color-glass: rgb(15 17 21 / 0.85);
-  --color-glass-border: rgb(232 62 140 / 0.15);
 
   /* Spacing (4pt grid) */
   --spacing-1: 4px;
@@ -123,9 +101,9 @@
   --transition-slow: 300ms ease;
 
   /* Elevation — dark theme: very subtle black shadows */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.35);
+  --shadow-float: 0 8px 24px rgb(0 0 0 / 0.45);
 }
 
 /* System preference: light (when no data-theme is set) */
@@ -135,69 +113,45 @@
     --color-bg-secondary: 255 255 255;
     --color-bg-tertiary: 238 240 243;
     --color-bg-elevated: 228 230 234;
-    --color-bg-hover: 217 220 226;
 
-    --color-surface-primary: 228 230 234;
-    --color-surface-secondary: 217 220 226;
-    --color-surface-tertiary: 255 255 255;
-    --color-surface-hover: 217 220 226;
-    --color-surface-muted: 238 240 243;
-    --color-surface-selected: rgb(232 62 140 / 0.1);
+    --color-surface-hover: 232 235 239;
+    --color-surface-selected: 226 239 240;
+    --color-surface-sunken: 236 238 242;  /* #ECEEF2 — spec §2.1 */
 
-    --color-accent-primary: 232 62 140;
-    --color-accent-hover: 208 42 124;
-    --color-accent-active: 184 30 106;
-    --color-accent-muted: rgb(232 62 140 / 0.12);
+    --color-accent-primary: 200 31 116;
+    --color-accent-hover: 184 30 106;
+    --color-accent-active: 168 27 95;
     --color-accent-subtle: rgb(232 62 140 / 0.06);
+    --color-accent-tint: 253 236 244;      /* #FDECF4 */
+    --color-accent-text: 184 30 106;      /* #B81E6A — texto acento (spec §2.2) */
+      --color-mode-chat: 8 117 122;  /* #08757A — spec §2.4 */
+    --color-mode-agent: 124 58 237;  /* #7C3AED — spec §2.4 */
+    --color-mode-group: 194 65 12;  /* #C2410C — spec §2.4 */
+    --color-focus-hover: 23 179 184;
+    --color-focus: 10 124 128;             /* #0A7C80 */
 
-    --color-secondary-verde: 93 168 47;
-    --color-secondary-azul: 37 99 235;
-    --color-secondary-rojo: 220 38 38;
-    --color-secondary-rosa-pastel: 244 114 182;
-    --color-secondary-aqua: 109 213 213;
-
-    /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
-    --color-cta-primary: 232 62 140;
-    --color-cta-hover: 240 82 154;
-    --color-cta-active: 208 42 124;
-    --color-cta-secondary: 212 160 0;
-    --color-cta-secondary-hover: 230 184 0;
-
-    --color-interaction-primary: 15 157 161;
-    --color-interaction-hover: 23 179 184;
-    --color-interaction-active: 11 133 136;
-
-    --color-border-default: rgb(0 0 0 / 0.07);
-    --color-border-light: rgb(0 0 0 / 0.15);
-    --color-border-strong: rgb(0 0 0 / 0.25);
-    --color-border-focus: 23 179 184;
+    --color-border-default: 223 227 232;
+    --color-border-strong: 112 120 129;
 
     --color-text-primary: 26 29 35;
-    --color-text-secondary: 74 78 87;
-    --color-text-tertiary: 107 113 122;
-    --color-text-muted: 156 163 175;
-    --color-text-on-surface: 26 29 35;
+    --color-text-secondary: 71 75 82;
+    --color-text-tertiary: 95 101 110;
+    --color-text-muted: 102 108 117;
     --color-text-on-accent: 255 255 255;
 
-    --color-state-success: 22 163 74;
-    --color-state-success-light: rgb(22 163 74 / 0.12);
-    --color-state-warning: 202 138 4;
-    --color-state-warning-light: rgb(202 138 4 / 0.12);
-    --color-state-error: 220 38 38;
-    --color-state-error-light: rgb(220 38 38 / 0.12);
-    --color-state-info: 37 99 235;
-    --color-state-info-light: rgb(37 99 235 / 0.12);
+    --color-state-success: 22 101 52;
+    --color-state-warning: 138 83 0;
+    --color-state-error: 200 30 30;
+    --color-state-error-fill: 200 30 30;   /* #C81E1E */
+    --color-state-info: 29 78 216;
 
-    --color-overlay: rgb(0 0 0 / 0.4);
-    --color-overlay-light: rgb(0 0 0 / 0.2);
+    --color-overlay: rgb(15 17 21 / 0.55);
 
-    --color-glass: rgb(255 255 255 / 0.85);
-    --color-glass-border: rgb(232 62 140 / 0.12);
 
     /* Elevation — light theme: soft diffuse shadows */
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-    --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.06);
-    --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06);
+    --shadow-card: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+    --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.06);
+    --shadow-float: 0 12px 32px rgb(0 0 0 / 0.16), 0 4px 8px rgb(0 0 0 / 0.06);
   }
 }
 
@@ -209,76 +163,51 @@
   --color-bg-secondary: 255 255 255;
   --color-bg-tertiary: 238 240 243;
   --color-bg-elevated: 228 230 234;
-  --color-bg-hover: 217 220 226;
 
-  --color-surface-primary: 228 230 234;
-  --color-surface-secondary: 217 220 226;
-  --color-surface-tertiary: 255 255 255;
-  --color-surface-hover: 217 220 226;
-  --color-surface-muted: 238 240 243;
-  --color-surface-selected: rgb(232 62 140 / 0.1);
+  --color-surface-hover: 232 235 239;
+  --color-surface-selected: 226 239 240;
+  --color-surface-sunken: 236 238 242;  /* #ECEEF2 — spec §2.1 */
 
-  --color-accent-primary: 232 62 140;
-  --color-accent-hover: 208 42 124;
-  --color-accent-active: 184 30 106;
-  --color-accent-muted: rgb(232 62 140 / 0.12);
+  --color-accent-primary: 200 31 116;
+  --color-accent-hover: 184 30 106;
+  --color-accent-active: 168 27 95;
   --color-accent-subtle: rgb(232 62 140 / 0.06);
+  --color-accent-tint: 253 236 244;      /* #FDECF4 */
+  --color-accent-text: 184 30 106;      /* #B81E6A — texto acento (spec §2.2) */
 
   /* Brand - se mantienen */
   --color-brand-rosa: 232 62 140;
   --color-brand-morado: 157 78 221;
-  --color-brand-turquesa: 23 179 184;
   --color-brand-amarillo: 255 193 7;
   --color-brand-naranja: 255 107 53;
+    --color-mode-chat: 8 117 122;  /* #08757A — spec §2.4 */
+  --color-mode-agent: 124 58 237;  /* #7C3AED — spec §2.4 */
+  --color-mode-group: 194 65 12;  /* #C2410C — spec §2.4 */
+  --color-focus-hover: 23 179 184;
+  --color-focus: 10 124 128;             /* #0A7C80 */
 
-  --color-secondary-verde: 93 168 47;
-  --color-secondary-azul: 37 99 235;
-  --color-secondary-rojo: 220 38 38;
-  --color-secondary-rosa-pastel: 244 114 182;
-  --color-secondary-aqua: 109 213 213;
-
-  /* DEPRECATED: cta-* now maps to brand accent (pink). Use accent-* tokens in new code. */
-  --color-cta-primary: 232 62 140;
-  --color-cta-hover: 240 82 154;
-  --color-cta-active: 208 42 124;
-  --color-cta-secondary: 212 160 0;
-  --color-cta-secondary-hover: 230 184 0;
-
-  --color-interaction-primary: 15 157 161;
-  --color-interaction-hover: 23 179 184;
-  --color-interaction-active: 11 133 136;
-
-  --color-border-default: rgb(0 0 0 / 0.07);
-  --color-border-light: rgb(0 0 0 / 0.15);
-  --color-border-strong: rgb(0 0 0 / 0.25);
-  --color-border-focus: 23 179 184;
+  --color-border-default: 223 227 232;
+  --color-border-strong: 112 120 129;
 
   --color-text-primary: 26 29 35;
-  --color-text-secondary: 74 78 87;
-  --color-text-tertiary: 107 113 122;
-  --color-text-muted: 156 163 175;
-  --color-text-on-surface: 26 29 35;
+  --color-text-secondary: 71 75 82;
+  --color-text-tertiary: 95 101 110;
+  --color-text-muted: 102 108 117;
   --color-text-on-accent: 255 255 255;
 
-  --color-state-success: 22 163 74;
-  --color-state-success-light: rgb(22 163 74 / 0.12);
-  --color-state-warning: 202 138 4;
-  --color-state-warning-light: rgb(202 138 4 / 0.12);
-  --color-state-error: 220 38 38;
-  --color-state-error-light: rgb(220 38 38 / 0.12);
-  --color-state-info: 37 99 235;
-  --color-state-info-light: rgb(37 99 235 / 0.12);
+  --color-state-success: 22 101 52;
+  --color-state-warning: 138 83 0;
+  --color-state-error: 200 30 30;
+  --color-state-error-fill: 200 30 30;   /* #C81E1E */
+  --color-state-info: 29 78 216;
 
-  --color-overlay: rgb(0 0 0 / 0.4);
-  --color-overlay-light: rgb(0 0 0 / 0.2);
+  --color-overlay: rgb(15 17 21 / 0.55);
 
-  --color-glass: rgb(255 255 255 / 0.85);
-  --color-glass-border: rgb(232 62 140 / 0.12);
 
   /* Elevation — light theme: soft diffuse shadows */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-pop: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-float: 0 12px 32px rgba(0, 0, 0, 0.16), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.06);
+  --shadow-float: 0 12px 32px rgb(0 0 0 / 0.16), 0 4px 8px rgb(0 0 0 / 0.06);
 }
 
 html,
@@ -311,7 +240,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-light);
+  background: rgb(var(--color-border-default));
   border-radius: var(--radius-sm);
 }
 
@@ -328,7 +257,7 @@ pre,
 
 /* Focus states */
 :focus-visible {
-  outline: 2px solid rgb(var(--color-interaction-primary));
+  outline: 2px solid rgb(var(--color-focus));
   outline-offset: 2px;
 }
 
@@ -374,18 +303,6 @@ pre,
   }
   to {
     opacity: 1;
-  }
-}
-
-@keyframes messageGlowPulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(232, 62, 140, 0);
-  }
-  40% {
-    box-shadow: 0 0 12px 2px rgba(232, 62, 140, 0.15);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(232, 62, 140, 0);
   }
 }
 
@@ -447,17 +364,11 @@ pre,
   }
 
   .focus-ring:focus-visible {
-    outline: 2px solid rgb(var(--color-interaction-primary));
+    outline: 2px solid rgb(var(--color-focus));
     outline-offset: 2px;
     border-radius: var(--radius-md);
   }
 
-  .glass-effect {
-    background: var(--color-glass);
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    border: 1px solid var(--color-glass-border);
-  }
 
   .hover-highlight {
     transition: background-color 150ms ease, color 150ms ease;
@@ -465,7 +376,7 @@ pre,
   }
 
   .hover-highlight:hover {
-    background: rgba(23, 179, 184, 0.15);
+    background: rgb(var(--color-focus) / 0.15);
     color: rgb(var(--color-text-primary));
   }
 
@@ -476,51 +387,12 @@ pre,
 
   .group:hover .hover-highlight-group,
   .hover-highlight-group:hover {
-    background: rgba(23, 179, 184, 0.15);
+    background: rgb(var(--color-focus) / 0.15);
     color: rgb(var(--color-text-primary));
   }
 }
 
 @layer components {
-  .btn-base {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--spacing-2);
-    padding: var(--spacing-2) var(--spacing-4);
-    font-family: var(--font-sans);
-    font-size: 0.875rem;
-    font-weight: 500;
-    line-height: 1.25rem;
-    color: rgb(var(--color-text-on-surface));
-    background: rgb(var(--color-surface-primary));
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .btn-base:hover {
-    background: rgb(var(--color-surface-hover));
-    border-color: rgb(var(--color-interaction-primary));
-  }
-
-  .btn-base:active {
-    transform: scale(0.98);
-  }
-
-  .btn-base:focus-visible {
-    outline: 2px solid rgb(var(--color-interaction-primary));
-    outline-offset: 2px;
-  }
-
-  .btn-base:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-
   .input-base {
     width: 100%;
     padding: var(--spacing-3) var(--spacing-4);
@@ -529,7 +401,7 @@ pre,
     line-height: 1.25rem;
     color: rgb(var(--color-text-primary));
     background: rgb(var(--color-bg-tertiary));
-    border: 1px solid var(--color-border-default);
+    border: 1px solid rgb(var(--color-border-default));
     border-radius: var(--radius-lg);
     transition: all var(--transition-fast);
     -webkit-font-smoothing: antialiased;
@@ -540,13 +412,13 @@ pre,
   }
 
   .input-base:hover {
-    border-color: var(--color-border-light);
+    border-color: rgb(var(--color-border-default));
   }
 
   .input-base:focus {
     outline: none;
-    border-color: rgb(var(--color-interaction-primary));
-    box-shadow: 0 0 0 3px rgba(23, 179, 184, 0.15);
+    border-color: rgb(var(--color-focus));
+    box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.15);
   }
 
   .input-base:disabled {
@@ -555,18 +427,7 @@ pre,
     background: rgb(var(--color-bg-secondary));
   }
 
-  .card-base {
-    padding: var(--spacing-6);
-    background: rgb(var(--color-surface-muted));
-    border: 1px solid var(--color-border-default);
-    border-radius: var(--radius-xl);
-    transition: all var(--transition-normal);
-  }
 
-  .card-base:hover {
-    background: rgb(var(--color-surface-tertiary));
-    border-color: var(--color-border-light);
-  }
 
   /* --- Temperature slider (spec §9: the only new CSS of the agents feature) ---
    * Tailwind cannot target ::-webkit-slider-thumb / ::-moz-range-thumb without a
@@ -590,8 +451,8 @@ pre,
     width: 16px;
     border-radius: 9999px;
     background: rgb(var(--color-bg-primary));
-    border: 2px solid rgb(var(--color-interaction-primary));
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border: 2px solid rgb(var(--color-focus));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
     transition: transform 150ms ease, border-color 150ms ease;
   }
 
@@ -600,18 +461,18 @@ pre,
     width: 16px;
     border-radius: 9999px;
     background: rgb(var(--color-bg-primary));
-    border: 2px solid rgb(var(--color-interaction-primary));
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    border: 2px solid rgb(var(--color-focus));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
     transition: transform 150ms ease, border-color 150ms ease;
   }
 
   .lele-range:hover::-webkit-slider-thumb {
-    border-color: rgb(var(--color-interaction-hover));
+    border-color: rgb(var(--color-focus-hover));
     transform: scale(1.05);
   }
 
   .lele-range:hover::-moz-range-thumb {
-    border-color: rgb(var(--color-interaction-hover));
+    border-color: rgb(var(--color-focus-hover));
     transform: scale(1.05);
   }
 
@@ -625,9 +486,9 @@ pre,
 
   /* §10.1: the thumb is small, so it gets a ring on top of the global outline. */
   .lele-range:focus-visible {
-    outline: 2px solid rgb(var(--color-interaction-primary));
+    outline: 2px solid rgb(var(--color-focus));
     outline-offset: 2px;
-    box-shadow: 0 0 0 3px rgba(23, 179, 184, 0.3);
+    box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.3);
   }
 
   .lele-range:disabled {
@@ -722,11 +583,6 @@ pre,
   animation: step-enter 0.2s ease-out forwards;
 }
 
-/* Glow effect */
-.modal-glow {
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.1), 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px
-    rgba(59, 130, 246, 0.05);
-}
 
 /* Progress bar transition */
 .progress-bar {
@@ -789,12 +645,12 @@ pre,
 /* Overlay fade */
 .modal-backdrop-in {
   animation: modal-backdrop-in 0.2s ease-out forwards;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgb(0 0 0 / 0.2);
 }
 
 .modal-backdrop-out {
   animation: modal-backdrop-out 0.2s ease-in forwards;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgb(0 0 0 / 0.2);
 }
 /* --- Desktop (Tauri) mode --- */
 html.desktop {

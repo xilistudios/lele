@@ -89,11 +89,11 @@ export const ChatHeader = memo(function ChatHeader() {
             )}
             <h2 className="truncate text-sm font-medium text-text-primary">{currentTitle}</h2>
             <div className="flex items-center gap-2">
-              <p className="truncate text-[11px] text-text-tertiary">
+              <p className="truncate text-xs text-text-tertiary">
                 {currentAgent?.name ?? t('chat.default')}
               </p>
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${modeTheme.chip}`}
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium ${modeTheme.chip}`}
               >
                 <ModeIcon size={11} />
                 {t(modeTheme.labelKey)}

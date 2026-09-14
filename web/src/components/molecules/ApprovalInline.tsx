@@ -11,7 +11,7 @@ export function ApprovalInline({ request, onApprove, onReject }: Props) {
   const { t } = useTranslation()
   return (
     <div className="py-3 animate-in">
-      <div className="rounded-lg border border-state-warning/30 bg-state-warning-light px-4 py-3">
+      <div className="rounded-lg border border-state-warning/30 bg-state-warning/10 px-4 py-3">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-state-warning/20">
             <svg

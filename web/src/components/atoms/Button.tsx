@@ -13,15 +13,17 @@ type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 const baseClasses =
-  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-interaction-primary disabled:cursor-not-allowed disabled:opacity-40'
+  'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-40'
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
     'bg-accent-primary text-text-on-accent shadow-sm hover:bg-accent-hover active:bg-accent-active',
   secondary:
-    'border border-border-light bg-surface-secondary text-text-primary hover:bg-surface-hover',
+    'border border-border bg-background-tertiary text-text-primary hover:bg-surface-hover',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-  danger: 'bg-state-error text-text-on-accent hover:opacity-90',
+  // §5 spec: relleno destructivo = state-error-fill (blanco 4.95 D / 5.74 L).
+  // bg-state-error era ❌ 2.77 en oscuro (#F87171 es texto de error, no superficie).
+  danger: 'bg-state-error-fill text-text-on-accent hover:opacity-90',
 }
 
 const sizeClasses: Record<ButtonSize, string> = {

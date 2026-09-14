@@ -9,7 +9,7 @@ import { type MouseEvent, type ReactNode, useId } from 'react'
  * custom ARIA. Focus is shown on the card via `:focus-within`.
  *
  * - off: `border-border bg-background-secondary hover:border-border-strong`
- * - on:  `border-interaction-primary/40 bg-accent-subtle` + filled check
+ * - on:  `border-focus/40 bg-accent-subtle` + filled check
  * - size `sm` (p-3, 16px check) = tools · `md` (p-3.5, 18px check) = skills
  */
 
@@ -39,9 +39,9 @@ type Props = {
 }
 
 const CARD_BASE_CLS =
-  'relative flex cursor-pointer gap-2.5 rounded-lg border transition-colors duration-fast focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-interaction-primary'
+  'relative flex cursor-pointer gap-2.5 rounded-lg border transition-colors duration-fast focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-focus'
 
-const CARD_ON_CLS = 'border-interaction-primary/40 bg-accent-subtle'
+const CARD_ON_CLS = 'border-focus/40 bg-accent-subtle'
 const CARD_OFF_CLS = 'border-border bg-background-secondary hover:border-border-strong'
 const CARD_DISABLED_CLS = 'opacity-40 cursor-not-allowed'
 
@@ -57,7 +57,7 @@ const CHECK_SIZE_CLS: Record<'sm' | 'md', string> = {
 }
 
 const CHECK_BASE_CLS = 'flex flex-none items-center justify-center rounded-md border-2'
-const CHECK_ON_CLS = 'border-interaction-primary bg-interaction-primary text-text-on-accent'
+const CHECK_ON_CLS = 'border-focus bg-focus text-text-on-accent'
 const CHECK_OFF_CLS = 'border-border-strong bg-background-primary'
 
 /**
@@ -141,14 +141,14 @@ export function ToggleCard({
 
         {description ? (
           <span
-            className={`text-text-tertiary ${descriptionLines === 2 ? 'line-clamp-2 text-xs' : 'line-clamp-1 text-[11px]'}`}
+            className={`text-text-tertiary ${descriptionLines === 2 ? 'line-clamp-2 text-xs' : 'line-clamp-1 text-xs'}`}
           >
             {description}
           </span>
         ) : null}
 
         {warning ? (
-          <span id={warningId} className="text-[11px] text-state-warning">
+          <span id={warningId} className="text-xs text-state-warning">
             {warning}
           </span>
         ) : null}

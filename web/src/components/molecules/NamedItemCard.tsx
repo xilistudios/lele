@@ -13,7 +13,7 @@ type Props = {
 }
 
 const CARD_CLS =
-  'rounded-lg border border-border-strong bg-surface-secondary shadow-sm mt-4 first:mt-0 overflow-hidden'
+  'rounded-lg border border-border-strong bg-background-tertiary shadow-sm mt-4 first:mt-0 overflow-hidden'
 
 export function NamedItemCard({
   title,
@@ -27,7 +27,7 @@ export function NamedItemCard({
 
   return (
     <div className={CARD_CLS}>
-      <div className="px-5 py-4 flex items-center gap-3 border-b border-border-light">
+      <div className="px-5 py-4 flex items-center gap-3 border-b border-border">
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
@@ -35,7 +35,7 @@ export function NamedItemCard({
           aria-label={collapsed ? t('common.expand') : t('common.collapse')}
         >
           <ChevronLeftIcon
-            className={`transition-transform duration-150 ${collapsed ? 'rotate-90' : '-rotate-90'}`}
+            className={`transition-transform duration-fast ${collapsed ? 'rotate-90' : '-rotate-90'}`}
           />
         </button>
         <span className="font-medium text-sm text-text-primary flex-1 min-w-0">{title}</span>
@@ -60,7 +60,7 @@ export function NamedItemCard({
       </div>
 
       <div
-        className={`grid transition-all duration-200 ${collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+        className={`grid transition-all duration-fast ${collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
       >
         <div className="overflow-hidden">
           <div className="p-5 space-y-4">{children}</div>

@@ -102,7 +102,7 @@ export function NativeClientsSettings() {
             {error}
           </div>
         ) : clients.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border p-8 text-center text-sm text-text-secondary bg-background-secondary/30">
+          <div className="rounded-md border border-dashed border-border p-8 text-center text-sm text-text-secondary bg-surface-sunken">
             {t('settings.native.noClients')}
           </div>
         ) : (
@@ -197,7 +197,7 @@ export function NativeClientsSettings() {
                 <button
                   type="submit"
                   disabled={pinLoading || !deviceName.trim()}
-                  className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-accent-primary/90 disabled:opacity-50 transition-colors min-w-[80px]"
+                  className="rounded-md bg-accent-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-accent-primary/90 disabled:opacity-40 transition-colors min-w-[80px]"
                 >
                   {pinLoading ? <Spinner size="sm" /> : t('settings.native.generatePin')}
                 </button>
@@ -253,7 +253,7 @@ export function NativeClientsSettings() {
             <button
               type="button"
               onClick={confirmRemoveClient}
-              className="rounded-md bg-state-error px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-state-error/90 transition-colors"
+              className="rounded-md bg-state-error-fill px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-state-error-fill/90 transition-colors"
             >
               {t('settings.native.revoke')}
             </button>

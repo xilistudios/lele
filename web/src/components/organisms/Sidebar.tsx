@@ -161,7 +161,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden ${
+        className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 md:hidden ${
           mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
         onClick={onClose}
@@ -187,7 +187,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
           sidebar is static and the inner list scrolls as before. */}
       <aside
         className={`fixed inset-y-0 left-0 z-50 flex flex-col max-md:overflow-y-auto border-r border-border bg-background-secondary transition-all duration-300 ease-in-out md:relative md:translate-x-0 ${
-          mobileOpen ? 'glass-effect translate-x-0' : '-translate-x-full'
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
         } ${collapsed ? 'w-[60px]' : 'w-[280px]'}`}
       >
         <div
@@ -350,7 +350,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               popoverHeight={280}
             >
               <div className="pb-2 mb-2 border-b border-border">
-                <p className="text-[10px] text-text-secondary px-1 uppercase tracking-wider">
+                <p className="text-2xs text-text-secondary px-1 uppercase tracking-wider">
                   {t('chat.recentChats')}
                 </p>
               </div>
@@ -380,7 +380,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                 <button
                   type="button"
                   onClick={() => setRecentExpanded((v) => !v)}
-                  className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                  className="flex items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-accent-text hover:text-accent-text/80 transition-colors px-2 py-1"
                 >
                   <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
                   {!recentExpanded && (
@@ -394,7 +394,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
           ) : (
             <>
               <div className="flex shrink-0 items-center justify-between px-1 py-1">
-                <p className="text-[10px] uppercase tracking-wider text-text-tertiary">
+                <p className="text-2xs uppercase tracking-wider text-text-tertiary">
                   {t('chat.recent')}
                 </p>
               </div>
@@ -419,7 +419,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                     <button
                       type="button"
                       onClick={() => setRecentExpanded((v) => !v)}
-                      className="flex shrink-0 items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-brand-rosa hover:text-brand-rosa/80 transition-colors px-2 py-1"
+                      className="flex shrink-0 items-center justify-center gap-1 w-full mt-2 pt-2 border-t border-border text-xs text-accent-text hover:text-accent-text/80 transition-colors px-2 py-1"
                     >
                       <span>{recentExpanded ? t('chat.showLess') : t('chat.showMore')}</span>
                       {!recentExpanded && (
@@ -466,7 +466,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                     ariaLabel={item.label}
                     variant="nav"
                     className={`flex items-center justify-center h-10 w-10 ${
-                      isActiveRoute(item.path) ? 'text-brand-rosa bg-surface-selected' : ''
+                      isActiveRoute(item.path) ? 'text-accent-text bg-surface-selected' : ''
                     }`}
                   >
                     <item.icon size={16} />
@@ -490,7 +490,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
                   aria-label={item.label}
                   className={`flex items-center gap-2 w-full rounded-md px-2 py-1 text-sm transition-colors hover:bg-surface-hover ${
                     isActiveRoute(item.path)
-                      ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                      ? 'bg-surface-selected text-accent-text border border-brand-rosa/30'
                       : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
@@ -551,7 +551,7 @@ export function Sidebar({ collapsed: collapsedPref, mobileOpen, onClose }: Sideb
               <button
                 type="button"
                 aria-label={t('chat.logout')}
-                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-hover hover:text-red-400"
+                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-hover hover:text-state-error"
                 onClick={handleLogoutClick}
               >
                 <LogoutIcon />

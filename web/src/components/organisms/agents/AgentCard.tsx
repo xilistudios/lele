@@ -146,17 +146,17 @@ export function AgentCard({
 
             <span className="ml-2 inline-flex flex-none items-center gap-1.5">
               {agent.default && (
-                <span className="rounded-md bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium text-accent-primary">
+                <span className="rounded-md bg-accent-subtle px-1.5 py-0.5 text-2xs font-medium text-accent-primary">
                   {t('settings.defaultBadge')}
                 </span>
               )}
               {isModified && (
-                <span className="rounded-md bg-state-info-light px-1.5 py-0.5 text-[10px] font-medium text-state-info">
+                <span className="rounded-md bg-state-info/10 px-1.5 py-0.5 text-2xs font-medium text-state-info">
                   {t('settings.modifiedBadge')}
                 </span>
               )}
               {inherits && (
-                <span className="hidden rounded-md border border-border bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary sm:inline-flex">
+                <span className="hidden rounded-md border border-border bg-background-tertiary px-1.5 py-0.5 text-2xs font-medium text-text-tertiary sm:inline-flex">
                   {t('settings.agentPage.inheritsModel', { model: shortModelName(defaultsModel) })}
                 </span>
               )}
@@ -200,7 +200,7 @@ export function AgentCard({
       </div>
 
       {/* Divider + actions (or the inline remove confirmation) */}
-      <div className="relative z-10 mt-2.5 flex items-center gap-2 border-t border-border-light pt-2.5">
+      <div className="relative z-10 mt-2.5 flex items-center gap-2 border-t border-border pt-2.5">
         {confirmingRemove ? (
           <>
             {/* biome-ignore lint/a11y/useSemanticElements: <fieldset> fits form
@@ -213,7 +213,7 @@ export function AgentCard({
             >
               <span className="flex-1 truncate text-xs text-text-secondary">
                 {t('settings.agentPage.removeConfirm', { name: confirmName })}
-                <span className="ml-1.5 text-[10px] text-text-muted">
+                <span className="ml-1.5 text-2xs text-text-muted">
                   {t('settings.agentPage.removeConfirmDesc')}
                 </span>
               </span>

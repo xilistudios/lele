@@ -245,11 +245,11 @@ export function MessageList() {
                   {group.totalTokens} {t('groups.tokens')}
                 </span>
                 <span
-                  className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                  className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-2xs font-medium ${
                     group.status === 'done'
-                      ? 'bg-state-success-light text-state-success'
+                      ? 'bg-state-success/10 text-state-success'
                       : group.status === 'error'
-                        ? 'bg-state-error-light text-state-error'
+                        ? 'bg-state-error/10 text-state-error'
                         : group.status === 'stopped'
                           ? 'bg-surface-hover text-text-tertiary'
                           : `${groupTheme.softBg} ${groupTheme.text}`
@@ -266,10 +266,10 @@ export function MessageList() {
             <div key={`group-turn-${turn.groupID}-${turn.turnIndex}`} className="py-2">
               <div className="mb-1 flex items-center gap-2">
                 {speakingSpeaker === turn.speaker && (
-                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse" />
                 )}
                 <span className="text-sm font-semibold text-text-primary">{turn.label}</span>
-                <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-surface-hover text-text-tertiary">
+                <span className="rounded px-1.5 py-0.5 text-2xs font-medium bg-surface-hover text-text-tertiary">
                   {turn.role}
                 </span>
               </div>
@@ -321,7 +321,7 @@ export function MessageList() {
       return (
         <div className="flex h-full items-center justify-center">
           <div
-            className="h-6 w-6 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent"
+            className="h-6 w-6 animate-spin rounded-full border-2 border-focus border-t-transparent"
             role="status"
             aria-label={t('common.loading')}
           />
@@ -366,7 +366,7 @@ export function MessageList() {
             <>
               {isLoadingMore && (
                 <div className="flex justify-center py-2">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-focus border-t-transparent" />
                 </div>
               )}
               {!isLoadingMore && hasMore && (
@@ -397,14 +397,14 @@ export function MessageList() {
                       <button
                         type="button"
                         onClick={() => onApprove(true)}
-                        className="rounded-md bg-state-success-light px-3 py-1.5 text-xs text-state-success hover:bg-state-success/15"
+                        className="rounded-md bg-state-success/10 px-3 py-1.5 text-xs text-state-success hover:bg-state-success/15"
                       >
                         {t('approval.approve')}
                       </button>
                       <button
                         type="button"
                         onClick={() => onApprove(false)}
-                        className="rounded-md bg-state-error-light px-3 py-1.5 text-xs text-state-error hover:bg-state-error/15"
+                        className="rounded-md bg-state-error/10 px-3 py-1.5 text-xs text-state-error hover:bg-state-error/15"
                       >
                         {t('approval.reject')}
                       </button>
@@ -444,9 +444,9 @@ export function MessageList() {
               {/* Group execution loading indicator — shown when a group is actively running */}
               {hasActiveGroup && !messages.some((m) => m.streaming) && (
                 <div className="flex items-center gap-2 py-3 text-text-tertiary text-sm">
-                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse" />
-                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.2s]" />
-                  <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-pulse [animation-delay:0.4s]" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse [animation-delay:0.2s]" />
+                  <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-pulse [animation-delay:0.4s]" />
                   <span className="ml-1 text-xs">{t('groups.executing')}</span>
                 </div>
               )}

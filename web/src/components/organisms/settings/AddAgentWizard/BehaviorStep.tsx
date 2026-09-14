@@ -69,7 +69,7 @@ export function BehaviorStep({
         <div className="relative">
           <div className="h-2 rounded-full bg-gradient-to-r from-state-info via-state-success via-state-warning to-brand-morado" />
           <div
-            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-lg border-2 border-border transition-all duration-200 pointer-events-none"
+            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white shadow-lg border-2 border-border transition-all duration-fast pointer-events-none"
             style={{ left: `${(temperature / 2) * 100}%`, transform: 'translate(-50%, -50%)' }}
           />
         </div>

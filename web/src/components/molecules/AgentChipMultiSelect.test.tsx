@@ -86,7 +86,7 @@ describe('AgentChipMultiSelect', () => {
 
   test('on/off classes follow the spec', () => {
     const { chips } = setup({ value: ['coder'] })
-    expect(chips[0].className).toContain('border-interaction-primary/40')
+    expect(chips[0].className).toContain('border-focus/40')
     expect(chips[0].className).toContain('bg-accent-subtle')
     expect(chips[0].className).toContain('text-text-primary')
     expect(chips[1].className).toContain('border-border')

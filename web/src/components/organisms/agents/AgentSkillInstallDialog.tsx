@@ -113,7 +113,7 @@ export function AgentSkillInstallDialog({ agentId, workspacePath, isOpen, onClos
         <p
           data-testid="agent-skill-install-error"
           role="alert"
-          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-state-error/40 bg-state-error-light px-4 py-2 text-xs text-state-error"
+          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-state-error/40 bg-state-error/10 px-4 py-2 text-xs text-state-error"
         >
           {t('settings.agentPage.skillsInstallFailed', {
             defaultValue: 'Could not install the skill: {{message}}',

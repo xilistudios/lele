@@ -55,7 +55,7 @@ describe('ToggleCard', () => {
     expect(off.card.className).not.toContain('bg-accent-subtle')
 
     const on = setup({ checked: true })
-    expect(on.card.className).toContain('border-interaction-primary/40')
+    expect(on.card.className).toContain('border-focus/40')
     expect(on.card.className).toContain('bg-accent-subtle')
   })
 
@@ -67,7 +67,7 @@ describe('ToggleCard', () => {
 
     const on = setup({ checked: true })
     const onBox = on.card.querySelector('span[aria-hidden="true"]:last-child') as HTMLElement
-    expect(onBox.className).toContain('bg-interaction-primary')
+    expect(onBox.className).toContain('bg-focus')
     expect(onBox.querySelector('svg')).toBeTruthy()
   })
 
@@ -95,7 +95,7 @@ describe('ToggleCard', () => {
     const tool = setup({ description: 'desc', descriptionLines: 1 })
     const toolText = tool.card.querySelector('.line-clamp-1')
     expect(toolText?.textContent).toBe('desc')
-    expect(toolText?.className).toContain('text-[11px]')
+    expect(toolText?.className).toContain('text-xs')
 
     const skill = setup({ description: 'desc', descriptionLines: 2 })
     expect(skill.card.querySelector('.line-clamp-2')?.textContent).toBe('desc')
@@ -126,6 +126,6 @@ describe('ToggleCard', () => {
   test('focus is announced on the card via focus-within', () => {
     const { card } = setup()
     expect(card.className).toContain('focus-within:outline-2')
-    expect(card.className).toContain('focus-within:outline-interaction-primary')
+    expect(card.className).toContain('focus-within:outline-focus')
   })
 })

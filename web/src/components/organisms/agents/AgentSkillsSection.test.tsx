@@ -131,11 +131,11 @@ function inputFor(utils: ReturnType<typeof setup>, name: string): HTMLInputEleme
 
 describe('lib/skillSource (single source of truth)', () => {
   test('keeps the palette SkillsList shipped (byte-identical)', () => {
-    expect(SOURCE_COLORS.workspace).toBe('bg-state-info-light text-state-info border-state-info/30')
+    expect(SOURCE_COLORS.workspace).toBe('bg-state-info/10 text-state-info border-state-info/30')
     expect(SOURCE_COLORS.global).toBe(
-      'bg-state-success-light text-state-success border-state-success/30',
+      'bg-state-success/10 text-state-success border-state-success/30',
     )
-    expect(SOURCE_COLORS.builtin).toBe('bg-surface-muted text-text-tertiary border-border-light')
+    expect(SOURCE_COLORS.builtin).toBe('bg-background-tertiary text-text-tertiary border-border')
     expect(SOURCE_LABELS).toEqual({ workspace: 'Workspace', global: 'Global', builtin: 'Built-in' })
   })
 
@@ -153,7 +153,7 @@ describe('AgentSkillsSection — banner', () => {
     const banner = utils.byTestId('skills-banner') as HTMLElement
     expect(banner.textContent).toContain(tr('settings.agentPage.skillsAllBanner'))
     expect(banner.className).toContain('border-state-info/30')
-    expect(banner.className).toContain('bg-state-info-light')
+    expect(banner.className).toContain('bg-state-info/10')
   })
 
   test('empty array also shows the info banner ([] ≡ undefined)', async () => {
@@ -168,7 +168,7 @@ describe('AgentSkillsSection — banner', () => {
     expect(banner.textContent).toContain(tr('settings.agentPage.skillsCustomBanner', { count: 2 }))
     expect(banner.className).toContain('border-border')
     expect(banner.className).toContain('bg-background-tertiary')
-    expect(banner.className).not.toContain('bg-state-info-light')
+    expect(banner.className).not.toContain('bg-state-info/10')
   })
 })
 

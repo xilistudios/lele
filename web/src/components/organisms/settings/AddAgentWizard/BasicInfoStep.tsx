@@ -62,11 +62,11 @@ export function BasicInfoStep({
             placeholder="my-awesome-agent"
             className={`
               w-full rounded-lg border bg-background-primary pl-8 pr-10 py-2.5 text-sm text-text-primary
-              placeholder:text-text-tertiary focus:outline-none transition-all duration-200
+              placeholder:text-text-tertiary focus:outline-none transition-all duration-fast
               ${
                 isDuplicate
                   ? 'border-state-error/60 focus:border-state-error focus:ring-2 focus:ring-state-error/20'
-                  : 'border-border focus:border-interaction-primary focus:ring-2 focus:ring-interaction-primary/20'
+                  : 'border-border focus:border-focus focus:ring-2 focus:ring-focus/20'
               }
             `}
           />
@@ -120,7 +120,7 @@ export function BasicInfoStep({
           value={agentName}
           onChange={(e) => setAgentName(e.target.value)}
           placeholder="My Awesome Agent"
-          className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 transition-all duration-200"
+          className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 transition-all duration-fast"
         />
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentName')}</p>
       </div>
@@ -136,7 +136,7 @@ export function BasicInfoStep({
           onChange={(e) => setAgentDescription(e.target.value)}
           placeholder={t('settings.placeholders.agentDescription')}
           rows={3}
-          className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 transition-all duration-200 resize-y"
+          className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 transition-all duration-fast resize-y"
         />
         <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentDescription')}</p>
       </div>

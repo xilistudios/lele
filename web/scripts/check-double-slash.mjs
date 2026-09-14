@@ -16,24 +16,10 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-// The 14 alpha-fija vars whose CSS values already include alpha.
-// They must NOT be wrapped in rgb().
-const ALPHA_FIJA = new Set([
-  "color-surface-selected",
-  "color-accent-muted",
-  "color-accent-subtle",
-  "color-border-default",
-  "color-border-light",
-  "color-border-strong",
-  "color-state-success-light",
-  "color-state-warning-light",
-  "color-state-error-light",
-  "color-state-info-light",
-  "color-overlay",
-  "color-overlay-light",
-  "color-glass",
-  "color-glass-border",
-]);
+// Alpha-fija vars (§7.4): su valor CSS ya incluye alfa — NO van envueltas en rgb().
+// Actualizada tras F1c/F1e/F1f: border-*/surface-selected/state-*-light ahora son
+// tripletes (van en rgb()); glass eliminado (F1f). Solo quedan estos dos casos.
+const ALPHA_FIJA = new Set(["color-accent-subtle", "color-overlay"]);
 
 const ALPHAFIJA_PAT = new RegExp(
   "rgb(?:a)?\\(var\\(--(" +

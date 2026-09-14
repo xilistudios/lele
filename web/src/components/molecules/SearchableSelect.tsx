@@ -217,7 +217,7 @@ export function SearchableSelect({
     <div ref={rootRef} className="relative">
       <button
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-200 hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex min-w-0 items-center gap-1.5 sm:gap-2 rounded-md border border-border bg-background-primary px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-text-primary transition-all duration-fast hover:border-border hover:bg-background-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
         disabled={disabled}
         type="button"
         onClick={() => (isMounted ? close() : open())}
@@ -230,7 +230,7 @@ export function SearchableSelect({
         </span>
         <svg
           aria-hidden="true"
-          className={`h-3 w-3 sm:h-3.5 sm:w-3.5 flex-none transition-transform duration-200 ${isMounted ? 'rotate-180' : ''}`}
+          className={`h-3 w-3 sm:h-3.5 sm:w-3.5 flex-none transition-transform duration-fast ${isMounted ? 'rotate-180' : ''}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -242,10 +242,10 @@ export function SearchableSelect({
 
       {isMounted && isOpen ? (
         <div
-          className={`absolute ${isOpenUp ? 'bottom-full left-0 mb-2' : 'top-full left-0 mt-2'} z-[9999] w-[min(28rem,calc(100vw-4rem))] rounded-xl border border-border bg-background-secondary shadow-xl transition-all duration-200 ease-out`}
+          className={`absolute ${isOpenUp ? 'bottom-full left-0 mb-2' : 'top-full left-0 mt-2'} z-[9999] w-[min(28rem,calc(100vw-4rem))] rounded-xl border border-border bg-background-secondary shadow-xl transition-all duration-fast ease-out`}
         >
           <div className="border-b border-border p-3">
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-background-tertiary px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-border-focus">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background-tertiary px-3 py-2 text-sm text-text-secondary transition-colors focus-within:border-focus">
               <svg
                 aria-hidden="true"
                 className="h-4 w-4 flex-none text-text-tertiary"
@@ -274,7 +274,7 @@ export function SearchableSelect({
                 {filteredGroups.map((group) => (
                   <div key={group.label || 'default'} className="space-y-1">
                     {group.label ? (
-                      <p className="px-2 text-[10px] uppercase tracking-wider text-text-tertiary">
+                      <p className="px-2 text-2xs uppercase tracking-wider text-text-tertiary">
                         {group.label}
                       </p>
                     ) : null}
@@ -285,15 +285,15 @@ export function SearchableSelect({
                         return (
                           <button
                             key={option.value}
-                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-150 ${
+                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm transition-all duration-fast ${
                               active
-                                ? 'bg-surface-selected text-brand-rosa border border-brand-rosa/30'
+                                ? 'bg-surface-selected text-accent-text border border-brand-rosa/30'
                                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
                             }`}
                             type="button"
                             onClick={() => handleSelect(option.value)}
                           >
-                            <span className="truncate text-[11px] leading-relaxed">
+                            <span className="truncate text-xs leading-relaxed">
                               {option.label}
                             </span>
                             {active ? (

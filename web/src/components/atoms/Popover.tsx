@@ -120,7 +120,7 @@ export function Popover({
         </span>
       )}
       <div
-        className={`glass-effect absolute z-50 rounded-md shadow-lg p-2 transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`bg-background-secondary border border-border absolute z-50 rounded-md shadow-pop p-2 transition-all duration-fast ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
       >

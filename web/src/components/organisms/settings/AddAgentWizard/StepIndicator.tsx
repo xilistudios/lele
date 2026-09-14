@@ -20,7 +20,7 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
 
       {/* Progress line fill */}
       <div
-        className="absolute top-5 left-0 h-0.5 bg-gradient-to-r from-interaction-primary to-interaction-hover transition-all duration-300"
+        className="absolute top-5 left-0 h-0.5 bg-gradient-to-r from-focus to-focus-hover transition-all duration-300"
         style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
       />
 
@@ -41,9 +41,9 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
                   transition-all duration-300 shadow-sm
                   ${
                     isActive
-                      ? 'bg-interaction-primary text-text-on-accent shadow-interaction-primary/25 scale-110'
+                      ? 'bg-focus text-text-on-accent ring-2 ring-focus/25 scale-110'
                       : isCompleted
-                        ? 'bg-interaction-primary/20 text-interaction-primary border-2 border-interaction-primary hover:bg-interaction-primary/30'
+                        ? 'bg-focus/20 text-focus border-2 border-focus hover:bg-focus/30'
                         : 'bg-background-secondary text-text-tertiary border-2 border-border'
                   }
                   ${isClickable ? 'cursor-pointer' : 'cursor-default'}
@@ -67,8 +67,8 @@ export function StepIndicator({ steps, currentStep, onStepClick }: Props) {
               </button>
               <span
                 className={`
-                  text-xs font-medium transition-colors duration-200
-                  ${isActive ? 'text-interaction-primary' : isCompleted ? 'text-text-secondary' : 'text-text-tertiary'}
+                  text-xs font-medium transition-colors duration-fast
+                  ${isActive ? 'text-focus' : isCompleted ? 'text-text-secondary' : 'text-text-tertiary'}
                 `}
               >
                 {step.title}

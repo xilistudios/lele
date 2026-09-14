@@ -109,13 +109,13 @@ export function LogsViewer() {
           type="button"
           onClick={fetchLogs}
           disabled={loading}
-          className="rounded-md border border-border bg-background-secondary px-3 py-1.5 text-xs text-text-primary hover:bg-surface-hover disabled:opacity-50"
+          className="rounded-md border border-border bg-background-secondary px-3 py-1.5 text-xs text-text-primary hover:bg-surface-hover disabled:opacity-40"
         >
           {loading ? t('common.loading') : t('settings.logs.refresh')}
         </button>
 
         {meta && (
-          <span className="text-[10px] text-text-tertiary">
+          <span className="text-2xs text-text-tertiary">
             {t('settings.logs.showing', { returned: meta.returned_lines, total: meta.total_lines })}{' '}
             — {meta.file}
           </span>
@@ -124,7 +124,7 @@ export function LogsViewer() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-md border border-state-error bg-state-error-light px-3 py-2 text-xs text-state-error">
+        <div className="rounded-md border border-state-error bg-state-error/10 px-3 py-2 text-xs text-state-error">
           {error}
         </div>
       )}
@@ -133,7 +133,7 @@ export function LogsViewer() {
       <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
         <div
           ref={containerRef}
-          className="max-h-[600px] overflow-y-auto p-3 font-mono text-[11px] leading-5"
+          className="max-h-[600px] overflow-y-auto p-3 font-mono text-xs leading-5"
         >
           {entries.length === 0 && !loading && (
             <p className="text-text-tertiary">{t('settings.logs.empty')}</p>

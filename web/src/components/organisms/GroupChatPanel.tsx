@@ -54,7 +54,7 @@ function LayerSection({
         <span className="text-xs font-medium text-text-secondary">
           {t('groups.layer', { number: layer + 1 })}
         </span>
-        <span className="text-[10px] text-text-tertiary">{open ? '▾' : '▸'}</span>
+        <span className="text-2xs text-text-tertiary">{open ? '▾' : '▸'}</span>
       </button>
       {open && (
         <div className="divide-y divide-border">
@@ -77,7 +77,7 @@ function TurnItem({ turn }: { turn: GroupTurn }) {
       <div className="flex items-center gap-2 mb-1">
         <span className="text-xs font-medium text-text-primary">{turn.label}</span>
         <span
-          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${getRoleBadgeClass(turn.role)}`}
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium ${getRoleBadgeClass(turn.role)}`}
         >
           {t(`groups.role.${turn.role}`)}
         </span>
@@ -146,7 +146,7 @@ function GroupDetail({ group }: { group: GroupInfo }) {
       {group.synthesis && (
         <div className="border border-brand-rosa/30 rounded-md overflow-hidden">
           <div className="px-3 py-2 bg-brand-rosa/5">
-            <span className="text-xs font-medium text-brand-rosa">
+            <span className="text-xs font-medium text-accent-text">
               {t('groups.finalSynthesis')}
             </span>
           </div>
@@ -157,7 +157,7 @@ function GroupDetail({ group }: { group: GroupInfo }) {
       )}
 
       {/* Stats footer */}
-      <div className="flex items-center gap-3 text-[11px] text-text-tertiary pt-1">
+      <div className="flex items-center gap-3 text-xs text-text-tertiary pt-1">
         {group.strategy && (
           <span>
             {t('groups.strategy')}: {group.strategy}
@@ -188,7 +188,7 @@ function GroupStatusBadge({ status }: { status: string }) {
 
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${colorClass}`}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium ${colorClass}`}
     >
       {t(`groups.status.${status}`)}
     </span>
@@ -250,14 +250,14 @@ export const GroupChatPanel = memo(function GroupChatPanel({
       {/* Backdrop */}
       <button
         type="button"
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={handleClose}
         aria-label={t('common.close')}
       />
 
       {/* Panel */}
       <div
-        className={`glass-effect fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] border-l border-glass-border bg-background-primary shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-96 max-w-[90vw] border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -296,7 +296,7 @@ export const GroupChatPanel = memo(function GroupChatPanel({
                           <GroupStatusBadge status={group.status} />
                         </div>
                         {group.participants && (
-                          <p className="text-[11px] text-text-tertiary mt-0.5 truncate">
+                          <p className="text-xs text-text-tertiary mt-0.5 truncate">
                             {group.participants}
                           </p>
                         )}

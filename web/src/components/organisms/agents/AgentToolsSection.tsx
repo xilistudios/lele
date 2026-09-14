@@ -186,7 +186,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
           ]}
         />
         {isDirty && (
-          <span className="text-[11px] text-state-info" data-testid="tools-dirty">
+          <span className="text-xs text-state-info" data-testid="tools-dirty">
             {t('settings.agentPage.sectionHasChanges', {
               defaultValue: 'Unsaved changes in this section',
             })}
@@ -209,7 +209,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
       {spawnMissing && (
         <div
           data-testid="tools-spawn-warning"
-          className="flex flex-wrap items-start gap-2 rounded-lg border border-state-warning/40 bg-state-warning-light px-3 py-2 text-xs text-state-warning"
+          className="flex flex-wrap items-start gap-2 rounded-lg border border-state-warning/40 bg-state-warning/10 px-3 py-2 text-xs text-state-warning"
         >
           <span>
             {t('settings.agentPage.toolsSpawnWarning', {
@@ -220,7 +220,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
           <Link
             to={`/agents/${agentId}/subagents`}
             data-testid="tools-spawn-warning-link"
-            className="font-medium text-interaction-primary underline"
+            className="font-medium text-focus underline"
           >
             {t('settings.agentPage.tab.subagents', { defaultValue: 'Subagents' })}
           </Link>
@@ -240,7 +240,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
           <button
             type="button"
             onClick={() => void refetch()}
-            className="font-medium text-interaction-primary underline"
+            className="font-medium text-focus underline"
           >
             {t('settings.agentPage.retry', { defaultValue: 'Retry' })}
           </button>
@@ -269,7 +269,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
       {!isLoading && !isError && total === 0 && (
         <div
           data-testid="tools-empty"
-          className="rounded-lg border-2 border-dashed border-border bg-background-secondary/20 px-4 py-6 text-center text-xs text-text-secondary"
+          className="rounded-lg border-2 border-dashed border-border bg-surface-sunken px-4 py-6 text-center text-xs text-text-secondary"
         >
           {t('settings.agentPage.toolsEmpty', {
             defaultValue: 'The system tool catalog is empty.',
@@ -296,7 +296,7 @@ export function AgentToolsSection({ agent, index, agentId }: Props) {
                   aria-label={t('settings.agentPage.toolsSearch', {
                     defaultValue: 'Search tools',
                   })}
-                  className="h-9 w-full rounded-lg border border-border bg-background-secondary pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none"
+                  className="h-9 w-full rounded-lg border border-border bg-background-secondary pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none"
                 />
               </div>
               <span

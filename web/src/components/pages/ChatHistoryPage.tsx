@@ -190,7 +190,7 @@ export function ChatHistoryPage() {
               onClick={() => setActiveKind(kind)}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                 activeKind === kind
-                  ? 'border-interaction-primary/50 bg-interaction-primary/20 text-interaction-primary'
+                  ? 'border-focus/50 bg-focus/20 text-focus'
                   : 'border-border bg-background-secondary text-text-secondary hover:bg-surface-hover hover:text-text-primary'
               }`}
             >
@@ -203,7 +203,7 @@ export function ChatHistoryPage() {
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading && allSessions.length === 0 ? (
             <div className="flex h-64 items-center justify-center">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
             </div>
           ) : loadError && allSessions.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm text-state-warning">
@@ -223,7 +223,7 @@ export function ChatHistoryPage() {
           ) : (
             <div className="mx-auto max-w-4xl">
               {loadError && (
-                <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-2 text-xs text-state-error">
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-state-error/30 bg-state-error/10 px-4 py-2 text-xs text-state-error">
                   <span>{t('chat.loadError', { error: loadError })}</span>
                   <button
                     type="button"
@@ -251,11 +251,11 @@ export function ChatHistoryPage() {
                     type="button"
                     onClick={loadMore}
                     disabled={loadingMore}
-                    className="rounded-lg border border-border bg-background-secondary px-5 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+                    className="rounded-lg border border-border bg-background-secondary px-5 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
                   >
                     {loadingMore ? (
                       <span className="flex items-center gap-2">
-                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-focus border-t-transparent" />
                         {t('chat.loadingMore')}
                       </span>
                     ) : (

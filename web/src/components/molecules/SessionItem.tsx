@@ -67,7 +67,7 @@ export function SessionItem({
       className={`group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors cursor-pointer ${
         selected
           ? getModeTheme(mode).selectedItem
-          : 'text-text-secondary hover:bg-[color-mix(in_srgb,var(--color-surface-hover)_60%,transparent)] hover:text-text-primary'
+          : 'text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary'
       }`}
     >
       {isProcessing && (
@@ -95,9 +95,9 @@ export function SessionItem({
         aria-label={confirmingDelete ? t('chat.confirmDelete') : t('chat.deleteSession')}
         className={`ml-auto flex h-8 w-8 items-center justify-center rounded-md transition-all ${
           confirmingDelete
-            ? 'opacity-100 bg-state-error-light text-state-error'
+            ? 'opacity-100 bg-state-error/10 text-state-error'
             : // Always visible on touch (no hover); desktop keeps the hover reveal.
-              'text-text-tertiary opacity-100 hover:bg-state-error-light hover:text-state-error md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
+              'text-text-tertiary opacity-100 hover:bg-state-error/10 hover:text-state-error md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'
         }`}
       >
         <TrashIcon size={12} />

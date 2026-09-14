@@ -149,10 +149,10 @@ export function AgentFilesPage() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [hasAnyDirty])
 
-  const btnCls = 'rounded px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50'
-  const btnPrimary = `${btnCls} bg-cta-primary text-text-on-accent hover:bg-cta-hover`
-  const btnSecondary = `${btnCls} bg-surface-secondary text-text-secondary hover:bg-surface-hover`
-  const btnDanger = `${btnCls} bg-state-error-light text-state-error hover:bg-state-error/20`
+  const btnCls = 'rounded px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40'
+  const btnPrimary = `${btnCls} bg-accent-primary text-text-on-accent hover:bg-accent-hover`
+  const btnSecondary = `${btnCls} bg-background-tertiary text-text-secondary hover:bg-surface-hover`
+  const btnDanger = `${btnCls} bg-state-error/10 text-state-error hover:bg-state-error/20`
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-primary text-text-primary">
@@ -188,7 +188,7 @@ export function AgentFilesPage() {
           <div className="flex flex-1 overflow-hidden relative">
             {/* File Tabs Sidebar */}
             <div
-              className={`absolute inset-y-0 left-0 w-full md:relative md:w-48 flex-shrink-0 border-r border-border-light bg-background-tertiary overflow-y-auto transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-10 ${
+              className={`absolute inset-y-0 left-0 w-full md:relative md:w-48 flex-shrink-0 border-r border-border bg-background-tertiary overflow-y-auto transition-transform duration-300 ease-in-out md:transform-none md:translate-x-0 z-10 ${
                 showMobileFileList ? 'translate-x-0' : '-translate-x-full'
               }`}
             >
@@ -249,7 +249,7 @@ export function AgentFilesPage() {
               }`}
             >
               {/* Toolbar */}
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border-light bg-background-secondary">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-background-secondary">
                 <div className="flex items-center gap-3 min-w-0">
                   <button
                     type="button"
@@ -308,7 +308,7 @@ export function AgentFilesPage() {
               </div>
 
               {/* Status Bar */}
-              <div className="flex items-center justify-between px-4 py-1.5 border-t border-border-light bg-background-secondary text-xs text-text-tertiary">
+              <div className="flex items-center justify-between px-4 py-1.5 border-t border-border bg-background-secondary text-xs text-text-tertiary">
                 <span>{t('agentFiles.chars', { count: content.length })}</span>
                 <span>
                   {t('agentFiles.lines', {
@@ -322,7 +322,7 @@ export function AgentFilesPage() {
 
         {/* Global save bar if any file is dirty */}
         {hasAnyDirty && !loading && (
-          <div className="flex items-center justify-between px-4 py-2 border-t border-state-warning/30 bg-state-warning-light">
+          <div className="flex items-center justify-between px-4 py-2 border-t border-state-warning/30 bg-state-warning/10">
             <span className="text-xs text-state-warning">
               {t('agentFiles.unsavedChanges', 'You have unsaved changes')}
             </span>

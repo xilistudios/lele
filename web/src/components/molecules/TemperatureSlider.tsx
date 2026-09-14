@@ -66,7 +66,7 @@ export function TemperatureSlider({
   // The native input is the only element, so the filled portion of the track
   // is painted with a gradient stop at the current percentage.
   const trackStyle: CSSProperties = {
-    background: `linear-gradient(to right, var(--color-interaction-primary) 0%, var(--color-interaction-primary) ${percent}%, var(--color-bg-tertiary) ${percent}%, var(--color-bg-tertiary) 100%)`,
+    background: `linear-gradient(to right, rgb(var(--color-focus)) 0%, rgb(var(--color-focus)) ${percent}%, rgb(var(--color-bg-tertiary)) ${percent}%, rgb(var(--color-bg-tertiary)) 100%)`,
   }
 
   const notSetLabel = t('settings.agentPage.tempNotSet', { defaultValue: 'Model default' })
@@ -107,7 +107,7 @@ export function TemperatureSlider({
         />
 
         <div
-          className="mt-1 flex justify-between text-[10px] text-text-muted"
+          className="mt-1 flex justify-between text-2xs text-text-muted"
           data-testid={`${id}-ticks`}
         >
           <span>{min}</span>
@@ -115,7 +115,7 @@ export function TemperatureSlider({
           <span>{max}</span>
         </div>
 
-        <p id={helpId} className="mt-1.5 text-[11px] text-text-tertiary">
+        <p id={helpId} className="mt-1.5 text-xs text-text-tertiary">
           {help}
         </p>
       </div>

@@ -95,7 +95,7 @@ export function CanvasBlock({ content, language }: Props) {
     return (
       <div className="rounded-lg border border-border bg-background-primary overflow-hidden">
         <div className="flex items-center border-b border-border px-3 py-1.5">
-          <span className="rounded px-1.5 py-0.5 bg-surface-hover text-[10px] font-mono text-text-tertiary">
+          <span className="rounded px-1.5 py-0.5 bg-surface-hover text-2xs font-mono text-text-tertiary">
             {language}
           </span>
         </div>
@@ -111,14 +111,14 @@ export function CanvasBlock({ content, language }: Props) {
   return (
     <div className="rounded-lg border border-border bg-background-primary overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-        <span className="rounded px-1.5 py-0.5 bg-surface-hover text-[10px] font-mono text-text-tertiary">
+        <span className="rounded px-1.5 py-0.5 bg-surface-hover text-2xs font-mono text-text-tertiary">
           {language}
         </span>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setMode(mode === 'preview' ? 'code' : 'preview')}
-            className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-secondary"
+            className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-secondary"
             title={mode === 'preview' ? t('canvas.viewCode') : t('canvas.viewPreview')}
           >
             {mode === 'preview' ? <CodeIcon size={12} /> : <EyeIcon size={12} />}
@@ -127,7 +127,7 @@ export function CanvasBlock({ content, language }: Props) {
           <button
             type="button"
             onClick={handleCopy}
-            className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-secondary"
+            className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-surface-hover hover:text-text-secondary"
             title={t('canvas.copyCode')}
           >
             {copied ? <CheckIcon size={12} /> : <CopyIcon size={12} />}

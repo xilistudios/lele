@@ -2,16 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { render } from '@testing-library/react'
 import { AgentAvatar, agentIdHash, gradientForId } from './AgentAvatar'
 
-// The seven gradients of spec §3.6, in order.
-const GRADIENTS = [
-  'from-interaction-primary to-brand-morado',
-  'from-brand-morado to-brand-rosa',
-  'from-brand-turquesa to-secondary-azul',
-  'from-brand-naranja to-brand-rosa',
-  'from-secondary-verde to-brand-turquesa',
-  'from-brand-rosa to-brand-morado',
-  'from-secondary-azul to-brand-morado',
-]
+// Spec §2.6: all gradients collapsed to accent-tint + border.
+const AVATAR_BG = 'bg-accent-tint'
 
 function box(size: 'sm' | 'md' | 'xl') {
   const { container } = render(<AgentAvatar id="coder" size={size} />)
@@ -31,16 +23,16 @@ describe('agentIdHash / gradientForId', () => {
     }
   })
 
-  test('gradient is the palette entry at hash % 7', () => {
+  test('gradientForId always returns accent-tint (§2.6)', () => {
     for (const id of ['coder', 'lele', 'default', 'research']) {
-      expect(GRADIENTS).toContain(gradientForId(id))
-      expect(gradientForId(id)).toBe(GRADIENTS[agentIdHash(id) % GRADIENTS.length])
+      expect(gradientForId(id)).toBe(AVATAR_BG)
     }
   })
 
-  test('different ids can land on different gradients (no constant palette index)', () => {
-    const distinct = new Set(['br', 'ba', 'b', 'lele'].map((id) => gradientForId(id)))
-    expect(distinct.size).toBeGreaterThan(1)
+  test('hash is stable (deterministic for the same id)', () => {
+    expect(agentIdHash('coder')).toBe(agentIdHash('coder'))
+    expect(agentIdHash('lele')).toBe(agentIdHash('lele'))
+    expect(agentIdHash('coder')).not.toBe(agentIdHash('lele'))
   })
 })
 
@@ -62,7 +54,7 @@ describe('AgentAvatar', () => {
     const sm = box('sm')
     expect(sm.className).toContain('h-5')
     expect(sm.className).toContain('w-5')
-    expect(sm.className).toContain('text-[10px]')
+    expect(sm.className).toContain('text-2xs')
     expect(sm.className).toContain('rounded-md')
 
     const md = box('md')
@@ -72,6 +64,7 @@ describe('AgentAvatar', () => {
 
     const xl = box('xl')
     expect(xl.className).toContain('h-12')
+    expect(xl.className).toContain('w-12')
     expect(xl.className).toContain('text-lg')
     expect(xl.className).toContain('rounded-xl')
   })
@@ -81,10 +74,12 @@ describe('AgentAvatar', () => {
     expect((container.firstElementChild as HTMLElement).className).toContain('h-10')
   })
 
-  test('renders a gradient from tokens only, never a raw hex', () => {
+  test('uses accent-tint bg + border-border (§2.6), never a raw hex', () => {
     const el = box('md')
-    expect(el.className).toContain('bg-gradient-to-br')
-    expect(el.className).toMatch(/from-\S+ to-\S+/)
+    expect(el.className).toContain('bg-accent-tint')
+    expect(el.className).toContain('border-border')
+    expect(el.className).not.toMatch(/bg-gradient-to-br/)
+    expect(el.className).not.toMatch(/from-\S+ to-\S+/)
     expect(el.className).not.toMatch(/#[0-9a-f]{3,6}/i)
   })
 

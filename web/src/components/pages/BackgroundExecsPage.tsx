@@ -21,10 +21,10 @@ function formatElapsed(ms: number): string {
 
 function StatusBadge({ status }: { status: BackgroundExecInfo['status'] }) {
   const colors: Record<string, string> = {
-    running: 'bg-state-warning-light text-state-warning border-state-warning',
-    completed: 'bg-state-success-light text-state-success border-state-success',
-    stopped: 'bg-surface-muted text-text-tertiary border-border',
-    failed: 'bg-state-error-light text-state-error border-state-error',
+    running: 'bg-state-warning/10 text-state-warning border-state-warning',
+    completed: 'bg-state-success/10 text-state-success border-state-success',
+    stopped: 'bg-background-tertiary text-text-tertiary border-border',
+    failed: 'bg-state-error/10 text-state-error border-state-error',
   }
 
   return (
@@ -92,7 +92,7 @@ function ProcessCard({
     <div
       className={`rounded-xl border transition-colors ${
         expanded
-          ? 'border-interaction-primary/40 bg-background-secondary'
+          ? 'border-focus/40 bg-background-secondary'
           : 'border-border bg-background-secondary hover:bg-background-secondary'
       }`}
     >
@@ -125,7 +125,7 @@ function ProcessCard({
                 e.stopPropagation()
                 onStop()
               }}
-              className="rounded-lg border border-state-error bg-state-error-light px-3 py-1 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light"
+              className="rounded-lg border border-state-error bg-state-error/10 px-3 py-1 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10"
             >
               {t('backgroundExecs.stop', 'Stop')}
             </button>
@@ -211,7 +211,7 @@ export function BackgroundExecsPage() {
             type="button"
             onClick={refresh}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
           >
             <svg
               className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -236,7 +236,7 @@ export function BackgroundExecsPage() {
           <div className="p-6">
             {loading && processes.length === 0 && !error && (
               <div className="flex items-center justify-center py-20">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
               </div>
             )}
 

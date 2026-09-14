@@ -72,11 +72,11 @@ describe('CategoryGroup', () => {
     expect(panel.textContent).toContain('tool cards')
   })
 
-  test('uses the NamedItemCard grid trick: grid + transition-all duration-200', () => {
+  test('uses the NamedItemCard grid trick: grid + transition-all duration-fast', () => {
     const { panel } = setup()
     expect(panel.className).toContain('grid')
     expect(panel.className).toContain('transition-all')
-    expect(panel.className).toContain('duration-200')
+    expect(panel.className).toContain('duration-fast')
     expect((panel.firstElementChild as HTMLElement).className).toContain('overflow-hidden')
   })
 

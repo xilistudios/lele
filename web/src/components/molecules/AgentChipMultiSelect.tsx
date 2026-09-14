@@ -32,7 +32,7 @@ const WRAPPER_CLS = 'flex flex-wrap gap-1.5'
 
 const CHIP_BASE_CLS =
   'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-fast'
-const CHIP_ON_CLS = 'border-interaction-primary/40 bg-accent-subtle text-text-primary'
+const CHIP_ON_CLS = 'border-focus/40 bg-accent-subtle text-text-primary'
 const CHIP_OFF_CLS =
   'border-border bg-background-secondary text-text-tertiary hover:border-border-strong'
 const CHIP_DISABLED_CLS = 'opacity-40 cursor-not-allowed'
@@ -51,7 +51,7 @@ export function AgentChipMultiSelect({
   if (agents.length === 0) {
     return (
       <div
-        className="rounded-lg border-2 border-dashed border-border bg-background-secondary/20 px-4 py-6 text-center text-xs text-text-secondary"
+        className="rounded-lg border-2 border-dashed border-border bg-surface-sunken px-4 py-6 text-center text-xs text-text-secondary"
         data-testid={`${id}-empty`}
       >
         {empty ??

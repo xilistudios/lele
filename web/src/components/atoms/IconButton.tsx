@@ -7,7 +7,7 @@ const variantStyles: Record<string, string> = {
   'nav-full':
     'flex items-center gap-2 w-full rounded-md px-2 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary',
   danger:
-    'rounded p-1.5 text-text-tertiary transition-colors hover:text-[#FF7B7B] hover:bg-red-500/10',
+    'rounded p-1.5 text-text-tertiary transition-colors hover:text-state-error hover:bg-state-error/10',
   ghost:
     'rounded p-1.5 text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary',
 }

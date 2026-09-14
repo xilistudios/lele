@@ -81,7 +81,7 @@ export function GroupComposer() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border-light">
+      <div className="rounded-lg border border-border bg-background-secondary transition-colors focus-within:border-border">
         <div className={`h-0.5 w-full rounded-t-lg ${groupTheme.accentBar}`} />
 
         {/* Toggle between follow-up and new-group mode */}
@@ -92,7 +92,7 @@ export function GroupComposer() {
               onClick={() => setIsNewGroupMode(false)}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 !isNewGroupMode
-                  ? 'bg-brand-naranja/15 text-brand-naranja'
+                  ? 'bg-mode-group/14 text-text-primary dark:text-mode-group'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-hover'
               }`}
             >
@@ -103,7 +103,7 @@ export function GroupComposer() {
               onClick={() => setIsNewGroupMode(true)}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 isNewGroupMode
-                  ? 'bg-brand-naranja/15 text-brand-naranja'
+                  ? 'bg-mode-group/14 text-text-primary dark:text-mode-group'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-hover'
               }`}
             >
@@ -116,7 +116,7 @@ export function GroupComposer() {
         {showNewGroupForm && hasProfiles && (
           <div className="px-4 pt-3">
             <select
-              className="w-full rounded-md border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-border-light disabled:opacity-50"
+              className="w-full rounded-md border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-border disabled:opacity-40"
               value={selectedProfile}
               onChange={(e) => setSelectedProfile(e.target.value)}
             >
@@ -137,7 +137,7 @@ export function GroupComposer() {
         )}
 
         <textarea
-          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary disabled:opacity-50"
+          className="min-h-[44px] max-h-[200px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary disabled:opacity-40"
           placeholder={
             activeProcessing
               ? t('groups.taskPlaceholderWhileRunning')
@@ -164,8 +164,8 @@ export function GroupComposer() {
         />
         <div className="flex items-center justify-between px-3 pb-2 pt-1">
           {activeProcessing ? (
-            <div className="flex items-center gap-2 text-xs font-medium text-brand-naranja px-1">
-              <span className="inline-block h-2 w-2 rounded-full bg-brand-naranja animate-ping" />
+            <div className="flex items-center gap-2 text-xs font-medium text-mode-group px-1">
+              <span className="inline-block h-2 w-2 rounded-full bg-mode-group animate-ping" />
               <span>{t('groups.executing')}</span>
             </div>
           ) : (
@@ -177,7 +177,7 @@ export function GroupComposer() {
                 type="button"
                 onClick={onCancel}
                 aria-label={t('groups.cancel')}
-                className="flex h-7 items-center justify-center rounded-md border border-state-error/30 bg-state-error-light px-3 text-xs font-medium text-state-error transition-colors hover:bg-state-error hover:text-text-on-accent"
+                className="flex h-7 items-center justify-center rounded-md border border-state-error/30 bg-state-error/10 px-3 text-xs font-medium text-state-error transition-colors hover:bg-state-error-fill hover:text-text-on-accent"
               >
                 {t('groups.cancel')}
               </button>
@@ -186,7 +186,7 @@ export function GroupComposer() {
                 type="submit"
                 disabled={!canSubmit}
                 aria-label={showNewGroupForm ? t('groups.start') : t('groups.send')}
-                className="flex h-7 items-center justify-center rounded-md bg-cta-primary px-3 text-xs font-medium text-text-on-accent transition-colors hover:bg-cta-hover disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex h-7 items-center justify-center rounded-md bg-accent-primary px-3 text-xs font-medium text-text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {showNewGroupForm ? t('groups.start') : t('groups.send')}
               </button>

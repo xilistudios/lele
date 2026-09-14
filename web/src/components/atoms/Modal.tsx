@@ -97,7 +97,7 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Decorative backdrop: Escape (document listener) is the keyboard path to close. */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+        className="absolute inset-0 bg-overlay backdrop-blur-sm transition-opacity"
         onClick={onClose}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose()

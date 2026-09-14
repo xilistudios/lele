@@ -153,7 +153,7 @@ export type AddModelPayload = {
 }
 
 const INPUT_CLS =
-  'w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40'
+  'w-full rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary disabled:opacity-40'
 
 function formatContextWindow(n: number): string {
   if (n >= 1_000_000) {
@@ -353,7 +353,7 @@ export function ModelSearchInput({
                     key={m.id}
                     className={`flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs ${
                       i === selectedIndex
-                        ? 'bg-interaction-primary/20 text-text-primary'
+                        ? 'bg-focus/20 text-text-primary'
                         : 'text-text-primary hover:bg-background-tertiary'
                     }`}
                     onClick={() => handleSelect(m)}
@@ -365,7 +365,7 @@ export function ModelSearchInput({
                         <span className="ml-2 text-text-tertiary">({m.owned_by})</span>
                       )}
                     </span>
-                    <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-tertiary">
+                    <span className="flex shrink-0 items-center gap-1 text-2xs text-text-tertiary">
                       {typeof m.context_window === 'number' && m.context_window > 0 && (
                         <span className="rounded bg-background-tertiary px-1 py-0.5 font-mono">
                           {formatContextWindow(m.context_window)}

@@ -80,11 +80,11 @@ function EnabledToggle({
         e.stopPropagation()
         onToggle()
       }}
-      className="shrink-0 cursor-pointer rounded-full disabled:opacity-50"
+      className="shrink-0 cursor-pointer rounded-full disabled:opacity-40"
     >
       <span
         className={`flex h-5 w-9 items-center rounded-full transition-colors ${
-          job.enabled ? 'bg-state-success' : 'border border-border bg-surface-muted'
+          job.enabled ? 'bg-state-success' : 'border border-border bg-background-tertiary'
         }`}
       >
         <span
@@ -141,7 +141,7 @@ function JobCard({
     <div
       className={`rounded-xl border transition-colors ${
         expanded
-          ? 'border-interaction-primary/40 bg-background-secondary'
+          ? 'border-focus/40 bg-background-secondary'
           : 'border-border bg-background-secondary hover:bg-background-secondary'
       } ${job.enabled ? '' : 'opacity-70'}`}
     >
@@ -176,7 +176,7 @@ function JobCard({
             disabled={busy}
             title={t('cron.runNow', 'Run now')}
             aria-label={t('cron.runNow', 'Run now')}
-            className="inline-flex rounded-lg bg-state-success p-1.5 text-background-primary transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="inline-flex rounded-lg bg-state-success p-1.5 text-background-primary transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
               <title>{t('cron.runNow', 'Run now')}</title>
@@ -250,7 +250,7 @@ function JobCard({
             )}
           </div>
           {job.state.lastError && (
-            <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
+            <div className="rounded-lg border border-state-error bg-state-error/10 p-2 text-xs text-state-error">
               {job.state.lastError}
             </div>
           )}
@@ -260,7 +260,7 @@ function JobCard({
               type="button"
               onClick={onEdit}
               disabled={busy}
-              className="rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+              className="rounded-lg border border-border bg-background-secondary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
             >
               {t('common.edit', 'Edit')}
             </button>
@@ -273,7 +273,7 @@ function JobCard({
                   type="button"
                   onClick={onDelete}
                   disabled={busy}
-                  className="rounded-lg border border-state-error bg-state-error-light px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light disabled:opacity-50"
+                  className="rounded-lg border border-state-error bg-state-error/10 px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10 disabled:opacity-40"
                 >
                   {t('common.yes', 'Yes')}
                 </button>
@@ -289,7 +289,7 @@ function JobCard({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
-                className="rounded-lg border border-state-error bg-state-error-light px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light"
+                className="rounded-lg border border-state-error bg-state-error/10 px-3 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10"
               >
                 {t('common.delete', 'Delete')}
               </button>
@@ -484,7 +484,7 @@ function JobFormModal({
   }
 
   const inputCls =
-    'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-interaction-primary/50'
+    'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary outline-none focus:border-focus/50'
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const dialogRef = useRef<HTMLDialogElement>(null)
 
@@ -508,7 +508,7 @@ function JobFormModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4"
       onClick={onClose}
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose()
@@ -555,7 +555,7 @@ function JobFormModal({
                   onClick={() => setForm((f) => ({ ...f, actionType: kind }))}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     form.actionType === kind
-                      ? 'border-interaction-primary/50 bg-interaction-primary/20 text-interaction-primary'
+                      ? 'border-focus/50 bg-focus/20 text-focus'
                       : 'border-border bg-background-primary text-text-secondary hover:bg-surface-hover'
                   }`}
                 >
@@ -703,7 +703,7 @@ function JobFormModal({
                   onClick={() => setForm((f) => ({ ...f, scheduleKind: k }))}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     form.scheduleKind === k
-                      ? 'border-interaction-primary/50 bg-interaction-primary/20 text-interaction-primary'
+                      ? 'border-focus/50 bg-focus/20 text-focus'
                       : 'border-border bg-background-primary text-text-secondary hover:bg-surface-hover'
                   }`}
                 >
@@ -786,7 +786,7 @@ function JobFormModal({
           )}
 
           {error && (
-            <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
+            <div className="rounded-lg border border-state-error bg-state-error/10 p-2 text-xs text-state-error">
               {error}
             </div>
           )}
@@ -947,7 +947,7 @@ export function CronPage() {
               type="button"
               onClick={refresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
             >
               <svg
                 className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -971,7 +971,7 @@ export function CronPage() {
 
           {loading && jobs.length === 0 && (
             <div className="flex items-center justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
             </div>
           )}
 
