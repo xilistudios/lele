@@ -76,7 +76,7 @@ export function ConnectionIndicator({ status, apiUrl }: Props) {
       </span>
 
       <div
-        className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-secondary px-3 py-2 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`absolute z-50 w-[180px] rounded-lg border border-border bg-background-secondary px-3 py-2 shadow-lg transition-all duration-fast ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         role="menu"

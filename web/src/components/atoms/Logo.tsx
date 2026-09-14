@@ -1,23 +1,23 @@
 const LOGO_CONFIG = ['L', 'E', 'L', 'E'] as const
 
-const DROP_SHADOW = 'drop-shadow-[1px_1px_0_rgba(0,0,0,0.8)]'
-
+/**
+ * §5.13 — wordmark en text-primary + primera letra brand-rosa (glifo decorativo
+ * grande dentro de una palabra legible). Sin drop-shadow: la sombra
+ * rgba(0,0,0,.8) estaba prohibida (mismo hex duplicado que Icons.tsx).
+ */
 export function Logo({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
     return (
-      <span
-        className={`text-lg font-bold uppercase tracking-wider ${DROP_SHADOW}`}
-        style={{ color: '#E6D6EA' }}
-      >
+      <span className="text-lg font-semibold uppercase tracking-[0.02em] text-brand-rosa">
         L
       </span>
     )
   }
 
   return (
-    <span className="text-lg font-bold uppercase tracking-wider">
+    <span className="text-lg font-semibold uppercase tracking-[0.02em] text-text-primary">
       {LOGO_CONFIG.map((letter, index) => (
-        <span key={`${letter}-${index}`} className={DROP_SHADOW} style={{ color: '#E6D6EA' }}>
+        <span key={`${letter}-${index}`} className={index === 0 ? 'text-brand-rosa' : undefined}>
           {letter}
         </span>
       ))}

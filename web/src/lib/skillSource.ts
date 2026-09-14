@@ -14,9 +14,9 @@ import type { SkillSource } from './types'
 
 /** Badge classes per skill source (Tailwind tokens only, no new CSS). */
 export const SOURCE_COLORS: Record<string, string> = {
-  workspace: 'bg-state-info-light text-state-info border-state-info/30',
-  global: 'bg-state-success-light text-state-success border-state-success/30',
-  builtin: 'bg-surface-muted text-text-tertiary border-border-light',
+  workspace: 'bg-state-info/10 text-state-info border-state-info/30',
+  global: 'bg-state-success/10 text-state-success border-state-success/30',
+  builtin: 'bg-background-tertiary text-text-tertiary border-border',
 }
 
 /** Display label per skill source. Kept as-is: proper nouns of the loader. */
@@ -27,7 +27,7 @@ export const SOURCE_LABELS: Record<string, string> = {
 }
 
 /** Neutral fallback for a source the frontend does not know yet. */
-export const SOURCE_FALLBACK = 'bg-surface-muted text-text-tertiary border-border-light'
+export const SOURCE_FALLBACK = 'bg-background-tertiary text-text-tertiary border-border'
 
 /** Badge classes for a source; unknown sources fall back to the neutral style. */
 export function sourceBadgeClasses(source?: SkillSource | string): string {
@@ -44,5 +44,5 @@ export function sourceBadgeLabel(source?: SkillSource | string): string {
  * `organisms/SkillsList.tsx` renders (base chrome + per-source colors).
  */
 export function sourceBadgeClassNames(source?: SkillSource | string): string {
-  return `inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${sourceBadgeClasses(source)}`
+  return `inline-flex items-center rounded-md px-1.5 py-0.5 text-2xs font-medium border ${sourceBadgeClasses(source)}`
 }

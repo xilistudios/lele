@@ -12,16 +12,16 @@ type Props = {
 }
 
 const VARIANT_STYLES: Record<Variant, string> = {
-  default: 'bg-surface-muted text-text-tertiary border-border',
-  primary: 'bg-state-info-light text-state-info border-state-info',
-  success: 'bg-state-success-light text-state-success border-state-success',
-  warning: 'bg-state-warning-light text-state-warning border-state-warning',
-  error: 'bg-state-error-light text-state-error border-state-error',
-  info: 'bg-state-info-light text-state-info border-state-info',
+  default: 'bg-background-tertiary text-text-tertiary border-border',
+  primary: 'bg-state-info/10 text-state-info border-state-info',
+  success: 'bg-state-success/10 text-state-success border-state-success',
+  warning: 'bg-state-warning/10 text-state-warning border-state-warning',
+  error: 'bg-state-error/10 text-state-error border-state-error',
+  info: 'bg-state-info/10 text-state-info border-state-info',
 }
 
 const SIZE_STYLES: Record<Size, string> = {
-  sm: 'text-[10px] px-1.5 py-0.5 gap-1',
+  sm: 'text-2xs px-1.5 py-0.5 gap-1',
   md: 'text-xs px-2 py-0.5 gap-1.5',
 }
 

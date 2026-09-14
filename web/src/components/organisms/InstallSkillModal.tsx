@@ -88,12 +88,12 @@ function ScopePicker({
               title={option.hint}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-brand-rosa bg-brand-rosa/10 text-brand-rosa'
+                  ? 'border-brand-rosa bg-brand-rosa/10 text-accent-text'
                   : 'border-border text-text-secondary hover:border-brand-rosa/30 hover:text-text-primary'
               }`}
             >
               {option.label}
-              <span className="ml-1.5 font-mono text-[10px] text-text-tertiary">{option.hint}</span>
+              <span className="ml-1.5 font-mono text-2xs text-text-tertiary">{option.hint}</span>
             </button>
           )
         })}
@@ -216,7 +216,7 @@ export function InstallSkillModal({
                   type="checkbox"
                   checked={selectedSkills.has(skill.path)}
                   onChange={() => handleToggleSkill(skill.path)}
-                  className="mt-0.5 h-4 w-4 rounded border-border text-brand-rosa focus:ring-brand-rosa/30"
+                  className="mt-0.5 h-4 w-4 rounded border-border text-accent-text focus:ring-focus/30"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-text-primary">{skill.name}</div>
@@ -225,7 +225,7 @@ export function InstallSkillModal({
                       {skill.description}
                     </p>
                   )}
-                  <p className="mt-1 text-[10px] text-text-tertiary">{skill.path}</p>
+                  <p className="mt-1 text-2xs text-text-tertiary">{skill.path}</p>
                 </div>
               </label>
             ))}
@@ -278,7 +278,7 @@ export function InstallSkillModal({
             onClick={() => setActiveTab('browse')}
             className={`px-4 py-2 text-sm border-b-2 transition-colors ${
               activeTab === 'browse'
-                ? 'border-brand-rosa text-brand-rosa'
+                ? 'border-brand-rosa text-accent-text'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
@@ -289,7 +289,7 @@ export function InstallSkillModal({
             onClick={() => setActiveTab('url')}
             className={`px-4 py-2 text-sm border-b-2 transition-colors ${
               activeTab === 'url'
-                ? 'border-brand-rosa text-brand-rosa'
+                ? 'border-brand-rosa text-accent-text'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
@@ -317,7 +317,7 @@ export function InstallSkillModal({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('skills.searchSkills', 'Search skills...')}
-                className="w-full rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand-rosa/30 focus:border-brand-rosa/50"
+                className="w-full rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-focus/30 focus:border-brand-rosa/50"
               />
             </div>
 
@@ -357,7 +357,7 @@ export function InstallSkillModal({
                             {skill.tags.map((tag) => (
                               <span
                                 key={tag}
-                                className="inline-block rounded-full bg-background-tertiary px-2 py-0.5 text-[10px] text-text-tertiary"
+                                className="inline-block rounded-full bg-background-tertiary px-2 py-0.5 text-2xs text-text-tertiary"
                               >
                                 {tag}
                               </span>
@@ -369,7 +369,7 @@ export function InstallSkillModal({
                         type="button"
                         onClick={() => handleInstall(skill.repository)}
                         disabled={isInstalling}
-                        className="flex-shrink-0 rounded-lg bg-brand-rosa/10 px-3 py-1.5 text-xs font-medium text-brand-rosa hover:bg-brand-rosa/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="flex-shrink-0 rounded-lg bg-brand-rosa/10 px-3 py-1.5 text-xs font-medium text-accent-text hover:bg-accent-text/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         {isInstalling
                           ? t('skills.installing', 'Installing...')
@@ -399,7 +399,7 @@ export function InstallSkillModal({
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder="sipeed/lele-skills"
-                className="w-full rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-brand-rosa/30 focus:border-brand-rosa/50"
+                className="w-full rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-focus/30 focus:border-brand-rosa/50"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleScan()
                 }}

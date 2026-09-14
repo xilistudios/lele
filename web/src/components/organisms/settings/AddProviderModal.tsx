@@ -130,13 +130,13 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
   const canAdd = canProceedStep1 && canProceedStep2
 
   const SELECT_CLS =
-    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary focus:border-interaction-primary focus:outline-none transition-all duration-200 focus:ring-2 focus:ring-interaction-primary/20'
+    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary focus:border-focus focus:outline-none transition-all duration-fast focus:ring-2 focus:ring-focus/20'
   const INPUT_CLS =
-    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary placeholder-text-tertiary focus:border-interaction-primary focus:outline-none transition-all duration-200 focus:ring-2 focus:ring-interaction-primary/20'
+    'w-full rounded-lg border border-border bg-background-tertiary px-3.5 py-2.5 text-xs text-text-primary placeholder-text-tertiary focus:border-focus focus:outline-none transition-all duration-fast focus:ring-2 focus:ring-focus/20'
   const BTN_CLS =
-    'rounded-lg px-4 py-2.5 text-xs font-medium transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed'
-  const BTN_PRIMARY = `${BTN_CLS} bg-cta-primary text-text-on-accent hover:bg-cta-hover`
-  const BTN_SECONDARY = `${BTN_CLS} bg-surface-secondary text-text-secondary hover:bg-surface-hover`
+    'rounded-lg px-4 py-2.5 text-xs font-medium transition-all duration-fast active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed'
+  const BTN_PRIMARY = `${BTN_CLS} bg-accent-primary text-text-on-accent hover:bg-accent-hover`
+  const BTN_SECONDARY = `${BTN_CLS} bg-background-tertiary text-text-secondary hover:bg-surface-hover`
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={t('settings.addProviderModal.title')}>
@@ -145,7 +145,7 @@ export function AddProviderModal({ isOpen, onClose }: Props) {
           {[1, 2, 3].map((s) => (
             <div
               key={s}
-              className={`flex-1 h-1 rounded ${step >= s ? 'bg-interaction-primary' : 'bg-surface-tertiary'}`}
+              className={`flex-1 h-1 rounded ${step >= s ? 'bg-focus' : 'bg-background-secondary'}`}
             />
           ))}
         </div>

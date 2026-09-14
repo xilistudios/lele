@@ -140,7 +140,7 @@ function CommandRow({
       <td className="px-3 py-2 align-top">
         <span className="font-mono text-xs text-text-primary">/{command.name}</span>
         {shadowed && (
-          <span className="ml-2 whitespace-nowrap text-[10px] text-text-tertiary">
+          <span className="ml-2 whitespace-nowrap text-2xs text-text-tertiary">
             {t('settings.agentPage.commands.shadowedBy', { source: command.shadowed_by })}
           </span>
         )}
@@ -159,10 +159,10 @@ function CommandRow({
           {sourceBadgeLabel(command.source)}
         </Badge>
       </td>
-      <td className="px-3 py-2 align-top font-mono text-[11px] text-text-secondary">
+      <td className="px-3 py-2 align-top font-mono text-xs text-text-secondary">
         {command.agent || '—'}
       </td>
-      <td className="px-3 py-2 align-top font-mono text-[11px] text-text-secondary">
+      <td className="px-3 py-2 align-top font-mono text-xs text-text-secondary">
         {command.model || '—'}
       </td>
       <td className="px-3 py-2 align-top text-center">
@@ -187,14 +187,14 @@ function CommandRow({
                winner row is the only place to touch that name. */
             <span
               data-testid={`command-shadowed-${command.name}`}
-              className="text-[11px] text-text-tertiary"
+              className="text-xs text-text-tertiary"
             >
               {t('settings.agentPage.commands.shadowedNoActions')}
             </span>
           ) : confirming ? (
             <span
               data-testid={`command-remove-confirm-${command.name}`}
-              className="flex items-center gap-1.5 text-[11px]"
+              className="flex items-center gap-1.5 text-xs"
             >
               <span className="text-text-secondary">
                 {t('settings.agentPage.commands.confirmRemove')}
@@ -301,7 +301,7 @@ export function AgentCommandsSection({ agentId }: Props) {
   // skeleton while the query refetches.
   if (isError) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-background-secondary/50 px-4 py-8 text-center">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-surface-sunken px-4 py-8 text-center">
         <p className="text-sm text-text-secondary">{t('settings.agentPage.commands.loadError')}</p>
         <Button
           variant="secondary"
@@ -433,12 +433,12 @@ export function AgentCommandsSection({ agentId }: Props) {
         {response && response.shared_by > 1 && (
           <div
             data-testid="commands-shared-banner"
-            className="flex items-start gap-2.5 rounded-lg border border-state-info/30 bg-state-info-light px-4 py-3 text-xs"
+            className="flex items-start gap-2.5 rounded-lg border border-state-info/30 bg-state-info/10 px-4 py-3 text-xs"
           >
             <span className="text-text-secondary">
               {t('settings.agentPage.commands.sharedWorkspace', { count: response.shared_by })}
             </span>
-            <code className="select-all truncate font-mono text-[11px] text-text-tertiary">
+            <code className="select-all truncate font-mono text-xs text-text-tertiary">
               {response.workspace}
             </code>
           </div>
@@ -448,7 +448,7 @@ export function AgentCommandsSection({ agentId }: Props) {
           <p
             data-testid="commands-action-error"
             role="alert"
-            className="rounded-lg border border-state-error/40 bg-state-error-light px-3 py-2 text-xs text-state-error"
+            className="rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
           >
             {(actionError as Error).message}
           </p>
@@ -461,7 +461,7 @@ export function AgentCommandsSection({ agentId }: Props) {
           <p
             data-testid="commands-notice"
             aria-live="polite"
-            className="rounded-lg border border-state-success/40 bg-state-success-light px-3 py-2 text-xs text-state-success"
+            className="rounded-lg border border-state-success/40 bg-state-success/10 px-3 py-2 text-xs text-state-success"
           >
             {notice}
           </p>
@@ -471,7 +471,7 @@ export function AgentCommandsSection({ agentId }: Props) {
         <div className="overflow-x-auto" data-testid="commands-list">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-border text-[11px] uppercase tracking-wide text-text-tertiary">
+              <tr className="border-b border-border text-xs uppercase tracking-wide text-text-tertiary">
                 <th scope="col" className="px-3 py-2 font-medium">
                   {t('settings.agentPage.commands.colName')}
                 </th>
@@ -522,21 +522,21 @@ export function AgentCommandsSection({ agentId }: Props) {
               {t('settings.agentPage.commands.harnessTitle')}
             </p>
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-primary">
+              <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-xs text-text-primary">
                 harness.allow_shell
               </code>
               <span>
                 {response.harness.allow_shell ? t('common.enabled') : t('common.disabled')}
               </span>
               <span aria-hidden="true">·</span>
-              <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-primary">
+              <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-xs text-text-primary">
                 harness.allow_absolute_files
               </code>
               <span>
                 {response.harness.allow_absolute_files ? t('common.enabled') : t('common.disabled')}
               </span>
             </p>
-            <p className="mt-1 text-[11px] text-text-tertiary">
+            <p className="mt-1 text-xs text-text-tertiary">
               {t('settings.agentPage.commands.harnessHint')}
             </p>
           </div>
@@ -570,7 +570,7 @@ function BuiltinBlock({ builtin }: { builtin: AgentCommandsResponse['builtin'] }
       <ul className="mt-3 space-y-1.5">
         {builtin.map((command) => (
           <li key={command.name} className="flex flex-wrap items-baseline gap-2 text-xs">
-            <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-primary">
+            <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-xs text-text-primary">
               {command.usage || `/${command.name}`}
             </code>
             <span className="font-medium text-text-primary">{command.name}</span>

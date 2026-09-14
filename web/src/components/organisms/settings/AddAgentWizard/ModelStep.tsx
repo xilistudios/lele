@@ -93,7 +93,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
-              className="text-blue-400"
+              className="text-state-info"
             >
               <title>Primary model</title>
               <circle cx="12" cy="12" r="10" />
@@ -117,7 +117,7 @@ export function ModelStep({ primaryModel, setPrimaryModel, fallbacks, setFallbac
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
-              className="text-purple-400"
+              className="text-brand-morado"
             >
               <title>Fallback models</title>
               <path d="M12 2L2 7l10 5 10-5-10-5z" />

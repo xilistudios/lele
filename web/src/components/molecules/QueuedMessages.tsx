@@ -40,7 +40,7 @@ export function QueuedMessages() {
           onClick={() => clearQueue(currentSessionKey)}
           title={t('chat.queueClear')}
           aria-label={t('chat.queueClear')}
-          className="rounded px-1 py-0.5 text-[10px] text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary"
+          className="rounded px-1 py-0.5 text-2xs text-text-tertiary transition-colors hover:bg-background-tertiary hover:text-text-primary"
         >
           {t('chat.queueClear')}
         </button>
@@ -55,7 +55,7 @@ export function QueuedMessages() {
             {item.content}
           </span>
           {item.attachments.length > 0 && (
-            <span className="flex-shrink-0 text-[10px] text-text-tertiary">
+            <span className="flex-shrink-0 text-2xs text-text-tertiary">
               📎{item.attachments.length}
             </span>
           )}

@@ -32,7 +32,7 @@ const HEADER_CLS =
   'flex w-full items-center gap-2 rounded-md px-1 hover:bg-background-tertiary transition-colors'
 
 const TITLE_CLS = 'text-xs font-semibold uppercase tracking-wider text-text-tertiary'
-const COUNT_CLS = 'text-[11px] text-text-muted'
+const COUNT_CLS = 'text-xs text-text-muted'
 
 export function CategoryGroup({
   title,
@@ -63,7 +63,7 @@ export function CategoryGroup({
   const toggle = () => setCollapsed((previous) => !previous)
 
   return (
-    <section className="border-b border-border-light last:border-b-0">
+    <section className="border-b border-border last:border-b-0">
       <button
         type="button"
         aria-expanded={isExpanded}
@@ -87,7 +87,7 @@ export function CategoryGroup({
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className={`flex-none text-text-tertiary transition-transform duration-150 ${
+          className={`flex-none text-text-tertiary transition-transform duration-fast ${
             isExpanded ? 'rotate-90' : ''
           }`}
         >
@@ -97,7 +97,7 @@ export function CategoryGroup({
 
       <div
         id={panelId}
-        className={`grid transition-all duration-200 ${isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+        className={`grid transition-all duration-fast ${isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
       >
         <div className="overflow-hidden">
           <div className="pb-3 pt-1">{children}</div>

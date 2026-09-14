@@ -135,7 +135,7 @@ const ChatListItem = memo(function ChatListItem({
     <div
       className={`
         group flex items-center gap-2.5 rounded-lg px-3 py-2.5
-        transition-colors duration-150
+        transition-colors duration-fast
         ${
           isSelected
             ? 'bg-accent/10 text-accent'
@@ -167,7 +167,7 @@ const ChatListItem = memo(function ChatListItem({
               </p>
               <div className="flex items-center gap-2 text-xs text-text-tertiary">
                 {session.kind && session.kind !== 'chat' && (
-                  <span className="rounded-full border border-border bg-background-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                  <span className="rounded-full border border-border bg-background-secondary px-1.5 py-0.5 text-2xs font-medium uppercase tracking-wide text-text-secondary">
                     {t(`chat.kind.${session.kind}`)}
                   </span>
                 )}

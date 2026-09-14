@@ -126,10 +126,10 @@ function ServerError({ message }: { message: string }) {
     <p
       role="alert"
       data-testid="command-editor-error"
-      className="rounded-lg border border-state-error/40 bg-state-error-light px-3 py-2 text-xs text-state-error"
+      className="rounded-lg border border-state-error/40 bg-state-error/10 px-3 py-2 text-xs text-state-error"
     >
       {t('settings.agentPage.commands.editor.serverError')}
-      <span className="mt-0.5 block font-mono text-[11px] break-all">{message}</span>
+      <span className="mt-0.5 block font-mono text-xs break-all">{message}</span>
     </p>
   )
 }
@@ -273,7 +273,7 @@ export function AgentCommandEditorDialog({
           {readOnly && (
             <p
               data-testid="command-editor-readonly"
-              className="rounded-lg border border-state-warning/40 bg-state-warning-light px-3 py-2 text-xs text-text-secondary"
+              className="rounded-lg border border-state-warning/40 bg-state-warning/10 px-3 py-2 text-xs text-text-secondary"
             >
               {t('settings.agentPage.commands.editor.readOnlyHint', {
                 source: target.source ?? '',
@@ -307,7 +307,7 @@ export function AgentCommandEditorDialog({
                 placeholder="review"
                 spellCheck={false}
                 autoComplete="off"
-                className="w-full rounded-md border border-border-strong bg-surface-tertiary px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20"
+                className="w-full rounded-md border border-border-strong bg-background-secondary px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20"
               />
             </SettingsField>
           )}
@@ -325,7 +325,7 @@ export function AgentCommandEditorDialog({
               value={form.description}
               disabled={readOnly}
               onChange={(event) => setForm((p) => ({ ...p, description: event.target.value }))}
-              className="w-full rounded-md border border-border-strong bg-surface-tertiary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 disabled:opacity-40"
+              className="w-full rounded-md border border-border-strong bg-background-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 disabled:opacity-40"
             />
           </SettingsField>
 
@@ -344,7 +344,7 @@ export function AgentCommandEditorDialog({
               rows={8}
               spellCheck={false}
               onChange={(event) => setForm((p) => ({ ...p, template: event.target.value }))}
-              className="w-full resize-y rounded-md border border-border-strong bg-surface-tertiary px-3 py-2 font-mono text-xs leading-5 text-text-primary placeholder:text-text-muted focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 read-only:opacity-60"
+              className="w-full resize-y rounded-md border border-border-strong bg-background-secondary px-3 py-2 font-mono text-xs leading-5 text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 read-only:opacity-60"
             />
           </SettingsField>
 
@@ -364,14 +364,14 @@ export function AgentCommandEditorDialog({
                 ['!`cmd`', t('settings.agentPage.commands.editor.helpShell')],
               ].map(([token, meaning]) => (
                 <li key={token} className="flex items-baseline gap-2">
-                  <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-[11px] text-text-primary">
+                  <code className="rounded bg-background-tertiary px-1.5 py-0.5 font-mono text-xs text-text-primary">
                     {token}
                   </code>
                   <span>{meaning}</span>
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[11px] text-text-tertiary">
+            <p className="mt-2 text-xs text-text-tertiary">
               {t('settings.agentPage.commands.editor.helpUnknownKeys')}
             </p>
           </div>
@@ -389,7 +389,7 @@ export function AgentCommandEditorDialog({
                 value={form.agent}
                 disabled={readOnly}
                 onChange={(event) => setForm((p) => ({ ...p, agent: event.target.value }))}
-                className="w-full rounded-md border border-border-strong bg-surface-tertiary px-3 py-2 text-sm text-text-primary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 disabled:opacity-40"
+                className="w-full rounded-md border border-border-strong bg-background-secondary px-3 py-2 text-sm text-text-primary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 disabled:opacity-40"
               >
                 <option value="">{t('settings.agentPage.commands.editor.agentNone')}</option>
                 {agentOptions.map((id) => (
@@ -418,7 +418,7 @@ export function AgentCommandEditorDialog({
                 disabled={readOnly}
                 placeholder={t('settings.agentPage.commands.editor.modelPlaceholder')}
                 onChange={(event) => setForm((p) => ({ ...p, model: event.target.value }))}
-                className="w-full rounded-md border border-border-strong bg-surface-tertiary px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 disabled:opacity-40"
+                className="w-full rounded-md border border-border-strong bg-background-secondary px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 disabled:opacity-40"
               />
               {/* Suggestions, not a whitelist: free text must stay possible. */}
               <datalist id="command-model-options">
@@ -489,10 +489,10 @@ export function AgentCommandEditorDialog({
               <span className="text-xs font-medium text-text-secondary">
                 {t('settings.agentPage.commands.editor.destinationTitle')}
               </span>
-              <span className="truncate font-mono text-[11px] text-text-tertiary">
+              <span className="truncate font-mono text-xs text-text-tertiary">
                 {workspaceCommandsDir || t('settings.agentPage.commands.editor.destinationUnknown')}
               </span>
-              <span className="text-[11px] text-text-tertiary">
+              <span className="text-xs text-text-tertiary">
                 {t('settings.agentPage.commands.editor.destinationHint')}
               </span>
             </div>

@@ -263,7 +263,7 @@ export function ChatComposer() {
               return (
                 <div
                   key={attachment}
-                  className="relative group h-16 w-16 overflow-hidden rounded-lg border border-border bg-background-secondary transition-all hover:border-border-light shadow-sm"
+                  className="relative group h-16 w-16 overflow-hidden rounded-lg border border-border bg-background-secondary transition-all hover:border-border shadow-sm"
                 >
                   <img
                     src={url}
@@ -276,7 +276,7 @@ export function ChatComposer() {
                     onClick={() =>
                       onAttachmentsChange(pendingAttachments.filter((a) => a !== attachment))
                     }
-                    className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+                    className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-overlay text-text-on-accent hover:bg-overlay transition-colors"
                     title={t('chat.removeAttachment')}
                   >
                     <CloseIcon size={10} />
@@ -290,7 +290,7 @@ export function ChatComposer() {
             return (
               <div
                 key={attachment}
-                className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-lg border border-border bg-background-secondary p-2 transition-all hover:border-border-light shadow-sm pr-8"
+                className="relative group flex items-center h-16 max-w-[240px] min-w-[160px] gap-2 rounded-lg border border-border bg-background-secondary p-2 transition-all hover:border-border shadow-sm pr-8"
               >
                 <div className="h-12 w-10 bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] text-accent-primary rounded-md flex flex-col items-center justify-center border border-[color-mix(in_srgb,var(--color-accent-primary)_15%,transparent)] flex-shrink-0 select-none">
                   <svg
@@ -307,13 +307,13 @@ export function ChatComposer() {
                       d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
                     />
                   </svg>
-                  <span className="text-[8px] font-bold tracking-wider leading-none">
+                  <span className="text-2xs font-bold tracking-wider leading-none">
                     {ext.slice(0, 4)}
                   </span>
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="text-xs font-medium text-text-primary truncate">{filename}</span>
-                  <span className="text-[10px] text-text-tertiary leading-none mt-1">
+                  <span className="text-2xs text-text-tertiary leading-none mt-1">
                     {ext} File
                   </span>
                 </div>
@@ -332,7 +332,7 @@ export function ChatComposer() {
           })}
         </div>
       )}
-      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-150 focus-within:border-border-light focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
+      <div className="rounded-lg border border-border bg-background-secondary transition-all duration-fast focus-within:border-border focus-within:ring-1 focus-within:ring-[color-mix(in_srgb,var(--color-accent-primary)_40%,transparent)]">
         <div className={`h-0.5 w-full rounded-t-lg ${composerTheme.accentBar}`} />
         {/* Top toolbar: folder picker above the input, folder chip when set */}
         <div className="flex items-center gap-1 px-2 pt-1.5">
@@ -349,7 +349,7 @@ export function ChatComposer() {
               className="flex max-w-[180px] items-center gap-1 rounded-full border border-[color-mix(in_srgb,var(--color-accent-primary)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-accent-primary)_10%,transparent)] px-2 py-0.5 text-accent-primary"
             >
               <FolderIcon size={11} className="flex-shrink-0" />
-              <span className="truncate text-[10px] font-medium">
+              <span className="truncate text-2xs font-medium">
                 {sessionFolder.split('/').filter(Boolean).pop() || sessionFolder}
               </span>
               <button
@@ -440,7 +440,7 @@ export function ChatComposer() {
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
             className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
               canCancel
-                ? 'bg-state-error-light text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
+                ? 'bg-state-error/10 text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
                 : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
             }`}
             onClick={canCancel ? onCancel : undefined}

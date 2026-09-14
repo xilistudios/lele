@@ -333,14 +333,14 @@ export function AdvancedSettings() {
               onKeyDown={handleKeyDown}
               className={`h-[50vh] md:h-[500px] w-full rounded border p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary ${
                 jsonParseError
-                  ? 'border-state-error bg-state-error-light text-text-primary focus:border-state-error focus:ring-state-error'
-                  : 'border-border bg-background-primary text-text-primary focus:border-interaction-primary focus:ring-interaction-primary'
+                  ? 'border-state-error bg-state-error/10 text-text-primary focus:border-state-error focus:ring-state-error'
+                  : 'border-border bg-background-primary text-text-primary focus:border-focus focus:ring-focus'
               }`}
               spellCheck={false}
               placeholder={t('settings.jsonEditorPlaceholder')}
             />
             {jsonParseError && (
-              <div className="mt-2 rounded border border-state-error bg-state-error-light p-3">
+              <div className="mt-2 rounded border border-state-error bg-state-error/10 p-3">
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 shrink-0 text-sm">⚠️</span>
                   <div>

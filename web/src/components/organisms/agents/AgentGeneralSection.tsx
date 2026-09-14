@@ -158,7 +158,7 @@ export function AgentGeneralSection({ agent, index, agents }: Props) {
         />
         {/* Presentation only: the real expansion happens server-side. */}
         {agent.workspace?.includes('~') && (
-          <p data-testid="workspace-preview" className="mt-1 font-mono text-[11px] text-text-muted">
+          <p data-testid="workspace-preview" className="mt-1 font-mono text-xs text-text-muted">
             {expandHomeDisplay(agent.workspace)}
           </p>
         )}

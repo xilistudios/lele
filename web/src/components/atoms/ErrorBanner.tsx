@@ -24,7 +24,7 @@ export function ErrorBanner({ message, onDismiss }: Props) {
   return (
     <div
       role="alert"
-      className="mx-4 mt-3 flex items-start justify-between gap-3 rounded-lg border border-state-error/30 bg-state-error-light px-4 py-2.5 text-xs text-state-error md:mx-6"
+      className="mx-4 mt-3 flex items-start justify-between gap-3 rounded-lg border border-state-error/30 bg-state-error/10 px-4 py-2.5 text-xs text-state-error md:mx-6"
     >
       <span className="min-w-0 flex-1 break-words">{display}</span>
       <button

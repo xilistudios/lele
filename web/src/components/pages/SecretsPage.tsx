@@ -21,8 +21,8 @@ function BackendBadge({ backend }: { backend?: string }) {
   if (!backend) return null
   const isKeychain = /keychain|keyring|kwallet|gnome|secret/i.test(backend)
   const color = isKeychain
-    ? 'border-state-success bg-state-success-light text-state-success'
-    : 'border-state-warning bg-state-warning-light text-state-warning'
+    ? 'border-state-success bg-state-success/10 text-state-success'
+    : 'border-state-warning bg-state-warning/10 text-state-warning'
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}
@@ -102,14 +102,14 @@ function SecretCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm font-semibold text-text-primary">{secret.name}</span>
             {scope.length === 0 ? (
-              <span className="inline-flex items-center rounded-full border border-state-error bg-surface-muted px-2 py-0.5 text-xs text-text-tertiary">
+              <span className="inline-flex items-center rounded-full border border-state-error bg-background-tertiary px-2 py-0.5 text-xs text-text-tertiary">
                 {t('secrets.allAgents', 'all agents')}
               </span>
             ) : (
               scope.map((id) => (
                 <span
                   key={id}
-                  className="inline-flex items-center rounded-full border border-interaction-primary/30 bg-interaction-primary/15 px-2 py-0.5 text-xs text-interaction-primary"
+                  className="inline-flex items-center rounded-full border border-focus/30 bg-focus/15 px-2 py-0.5 text-xs text-focus"
                 >
                   {id}
                 </span>
@@ -163,7 +163,7 @@ function SecretCard({
             type="button"
             onClick={handleReveal}
             disabled={revealing || busy}
-            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
           >
             {revealing
               ? '…'
@@ -177,7 +177,7 @@ function SecretCard({
                 type="button"
                 onClick={() => onDelete(secret.name)}
                 disabled={busy}
-                className="rounded-lg bg-state-error px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="rounded-lg bg-state-error px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {t('common.confirm', 'Confirm')}
               </button>
@@ -195,7 +195,7 @@ function SecretCard({
               type="button"
               onClick={() => setConfirmDelete(true)}
               disabled={busy}
-              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error-light disabled:opacity-50"
+              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-state-error transition-colors hover:bg-state-error/10 disabled:opacity-40"
             >
               {t('secrets.delete', 'Delete')}
             </button>
@@ -265,7 +265,7 @@ function SecretFormModal({
 
   const labelCls = 'mb-1 block text-xs font-medium text-text-secondary'
   const inputCls =
-    'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none'
+    'w-full rounded-lg border border-border bg-background-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none'
 
   return (
     <Modal isOpen onClose={onClose} title={t('secrets.newSecret', 'New Secret')}>
@@ -347,7 +347,7 @@ function SecretFormModal({
         </div>
 
         {error && (
-          <div className="rounded-lg border border-state-error bg-state-error-light p-2 text-xs text-state-error">
+          <div className="rounded-lg border border-state-error bg-state-error/10 p-2 text-xs text-state-error">
             {error}
           </div>
         )}
@@ -396,7 +396,7 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
         </thead>
         <tbody>
           {records.map((r, i) => (
-            <tr key={`${r.timestamp}-${i}`} className="border-b border-border-light last:border-0">
+            <tr key={`${r.timestamp}-${i}`} className="border-b border-border last:border-0">
               <td className="px-3 py-2 font-mono text-text-primary">{r.secret_name}</td>
               <td className="px-3 py-2 text-text-secondary">{r.action}</td>
               <td className="px-3 py-2 text-text-secondary">{r.agent_id || '—'}</td>
@@ -478,7 +478,7 @@ export function SecretsPage() {
   const tabCls = (active: boolean) =>
     `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
       active
-        ? 'bg-interaction-primary text-text-on-accent'
+        ? 'bg-focus text-text-on-accent'
         : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
     }`
 
@@ -559,7 +559,7 @@ export function SecretsPage() {
               type="button"
               onClick={handleRefresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background-secondary px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary disabled:opacity-40"
             >
               <svg
                 className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
@@ -587,7 +587,7 @@ export function SecretsPage() {
             <>
               {loading && secrets.length === 0 && (
                 <div className="flex items-center justify-center py-20">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
                 </div>
               )}
 

@@ -184,7 +184,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
         data-message-id={message.stableId ?? message.id}
         className={`flex justify-end py-1 ${animate ? 'animate-message-enter' : ''}`}
       >
-        <div className="max-w-[70%] space-y-2 rounded-2xl bg-surface-secondary shadow-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
+        <div className="max-w-[70%] space-y-2 rounded-2xl bg-background-tertiary shadow-card px-4 py-2.5 text-sm text-text-primary whitespace-pre-wrap">
           {message.content ? <div>{message.content}</div> : null}
           {imageAttachments.length > 0 ? (
             <div className="flex flex-wrap gap-2">
@@ -237,7 +237,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
       className={`py-3 ${animate ? 'animate-message-enter' : ''}`}
     >
       {message.excludeFromContext && (
-        <div className="mb-1 flex items-center gap-1.5 text-[10px] text-text-tertiary opacity-60">
+        <div className="mb-1 flex items-center gap-1.5 text-2xs text-text-tertiary opacity-60">
           <svg
             width="10"
             height="10"
@@ -328,7 +328,7 @@ function MessageBubbleInner({ message, isLast, onNavigateToSession, apiUrl, onRe
                   className="w-full max-w-full rounded-lg border border-border bg-background-primary overflow-hidden"
                 >
                   {block.label && (
-                    <div className="px-4 py-1.5 text-[10px] text-text-tertiary font-mono">
+                    <div className="px-4 py-1.5 text-2xs text-text-tertiary font-mono">
                       {block.label}
                     </div>
                   )}

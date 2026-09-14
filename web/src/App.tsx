@@ -111,9 +111,9 @@ function AuthRoute() {
     // Show loading state during auto-auth
     return (
       <main className="flex min-h-screen items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-background-secondary p-6 shadow-2xl shadow-interaction-primary/10">
+        <div className="w-full max-w-md space-y-5 rounded-3xl border border-border bg-background-secondary p-6 shadow-card">
           <div className="flex items-center justify-center py-8">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
           </div>
           <p className="text-center text-text-secondary">{t('auth.connecting')}</p>
         </div>

@@ -3,39 +3,32 @@ import { useMemo } from 'react'
 /**
  * Agent avatar atom (spec §3.6 / §7.7).
  *
- * A decorative square with the agent's initial over a gradient picked
- * deterministically from a hash of the agent id: the same agent always looks
- * the same, and deleting or reordering another agent never repaints it.
- *
- * Every gradient is composed exclusively of existing `brand-*` / `secondary-*`
- * / `interaction-*` tokens — no new colors are introduced (§9).
+ * A decorative square with the agent's initial over a tinted background.
+ * Per spec §2.6, the old multi-gradient palette (brand/secondary) was
+ * replaced by a single `bg-accent-tint` — the avatar is decorative
+ * identity (§2.2), not semantic, so colour variation is not required.
  */
-
-const GRADIENTS = [
-  'from-interaction-primary to-brand-morado', // turquesa → morado
-  'from-brand-morado to-brand-rosa', // morado → rosa
-  'from-brand-turquesa to-secondary-azul', // turquesa → azul
-  'from-brand-naranja to-brand-rosa', // naranja → rosa
-  'from-secondary-verde to-brand-turquesa', // verde → turquesa
-  'from-brand-rosa to-brand-morado', // rosa → morado
-  'from-secondary-azul to-brand-morado', // azul → morado
-]
 
 /** Stable string hash (same algorithm the existing avatars use). */
 export function agentIdHash(id: string): number {
   return [...id].reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 7)
 }
 
-/** Gradient classes for an id (exported for tests / reuse in previews). */
-export function gradientForId(id: string): string {
-  return GRADIENTS[agentIdHash(id) % GRADIENTS.length]
+/**
+ * Background class for an agent avatar.
+ *
+ * Kept as a function for backward-compat with tests and previews that
+ * import it.  Every id now maps to the same accent-tint token.
+ */
+export function gradientForId(_id: string): string {
+  return 'bg-accent-tint'
 }
 
 type Size = 'sm' | 'md' | 'xl'
 
 /** px box + text size + radius per size (§7.7: 20 / 40 / 48). */
 const SIZE_CLASSES: Record<Size, string> = {
-  sm: 'h-5 w-5 text-[10px] rounded-md',
+  sm: 'h-5 w-5 text-2xs rounded-md',
   md: 'h-10 w-10 text-sm rounded-lg',
   xl: 'h-12 w-12 text-lg rounded-xl',
 }
@@ -50,13 +43,13 @@ type Props = {
 }
 
 export function AgentAvatar({ id, name, size = 'md', className = '' }: Props) {
-  const gradient = useMemo(() => gradientForId(id), [id])
+  const bg = useMemo(() => gradientForId(id), [id])
   const initial = (name?.trim() || id.trim()).charAt(0).toUpperCase()
 
   return (
     <span
       aria-hidden="true"
-      className={`flex flex-none items-center justify-center bg-gradient-to-br font-semibold text-text-on-accent ${SIZE_CLASSES[size]} ${gradient} ${className}`}
+      className={`flex flex-none items-center justify-center border border-border font-semibold text-text-on-accent ${SIZE_CLASSES[size]} ${bg} ${className}`}
     >
       {initial}
     </span>

@@ -55,10 +55,10 @@ export function SkillsStep({ skills, setSkills }: Props) {
                 type="button"
                 onClick={() => toggleSkill(skill.id)}
                 className={`
-                  flex items-start gap-3 p-3 rounded-lg border text-left transition-all duration-200
+                  flex items-start gap-3 p-3 rounded-lg border text-left transition-all duration-fast
                   ${
                     isSelected
-                      ? 'border-blue-500/60 bg-blue-500/10 ring-1 ring-blue-500/20'
+                      ? 'border-focus/60 bg-focus/10 ring-1 ring-focus/20'
                       : 'border-border bg-background-secondary/30 hover:bg-background-secondary'
                   }
                 `}
@@ -77,7 +77,7 @@ export function SkillsStep({ skills, setSkills }: Props) {
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="2.5"
-                        className="text-blue-400 flex-shrink-0"
+                        className="text-state-info flex-shrink-0"
                       >
                         <title>Selected</title>
                         <polyline points="20 6 9 17 4 12" />
@@ -113,7 +113,7 @@ export function SkillsStep({ skills, setSkills }: Props) {
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            className="text-blue-400"
+            className="text-state-info"
           >
             <title>Skills selected</title>
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />

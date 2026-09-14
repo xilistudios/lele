@@ -119,7 +119,7 @@ export function ContextIndicator() {
     <div ref={ref} className={`relative ${!isOpen ? 'group' : ''}`}>
       <IconButton
         onClick={() => setIsOpen(!isOpen)}
-        className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-150"
+        className="rounded p-1.5 text-text-tertiary hover:bg-surface-hover hover:text-text-secondary transition-colors duration-fast"
         aria-label={t('connection.context')}
       >
         {/* Circular progress ring — always visible */}
@@ -162,7 +162,7 @@ export function ContextIndicator() {
 
       {/* Popover with detailed info */}
       <div
-        className={`absolute z-50 w-[220px] rounded-lg border border-border bg-background-primary px-3 py-2.5 shadow-lg transition-all duration-150 ${verticalClass} ${horizontalClass} ${origin} ${
+        className={`absolute z-50 w-[220px] rounded-lg border border-border bg-background-primary px-3 py-2.5 shadow-lg transition-all duration-fast ${verticalClass} ${horizontalClass} ${origin} ${
           isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
         }`}
         role="menu"
@@ -191,7 +191,7 @@ export function ContextIndicator() {
               />
             </div>
 
-            <div className="space-y-1 text-[11px] text-text-tertiary font-mono">
+            <div className="space-y-1 text-xs text-text-tertiary font-mono">
               <div className="flex justify-between">
                 <span>{t('connection.currentContext')}</span>
                 <span>{formatTokens(context.total_tokens)}</span>

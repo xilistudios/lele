@@ -71,14 +71,14 @@ export function SubagentsSidebar({
       {/* Backdrop — fades in/out */}
       <button
         type="button"
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-40 bg-overlay transition-opacity duration-300 ease-out ${animate ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={onClose}
         aria-label={t('common.close')}
       />
 
       {/* Sidebar — slides in from right */}
       <div
-        className={`glass-effect fixed right-0 top-0 z-50 h-full w-80 max-w-[90vw] border-l border-glass-border bg-background-primary shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`bg-background-secondary fixed right-0 top-0 z-50 h-full w-80 max-w-[90vw] border-l border-border shadow-lg flex flex-col transition-transform duration-300 ease-out ${animate ? 'translate-x-0' : 'translate-x-full'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -125,7 +125,7 @@ export function SubagentsSidebar({
                             </p>
                           )}
                         </div>
-                        <p className="text-[11px] text-text-tertiary mt-0.5">
+                        <p className="text-xs text-text-tertiary mt-0.5">
                           {formatRelativeTime(subagent.created)}
                           {subagent.iterations > 0 && ` · ${subagent.iterations} iter`}
                         </p>
@@ -151,7 +151,7 @@ function StatusBadge({ status }: { status: string }) {
   const colorClass = getStatusColor(status)
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${colorClass}`}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium ${colorClass}`}
     >
       {status}
     </span>

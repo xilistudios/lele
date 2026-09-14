@@ -70,7 +70,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
       {skills.map((skill) => (
         <div
           key={skill.name}
-          className="group flex flex-col rounded-xl border border-border bg-background-secondary/50 p-4 hover:border-brand-rosa/30 transition-all duration-200"
+          className="group flex flex-col rounded-xl border border-border bg-background-secondary/50 p-4 hover:border-brand-rosa/30 transition-all duration-fast"
         >
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -84,7 +84,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="text-brand-rosa"
+                  className="text-accent-text"
                 >
                   <title>Skill icon</title>
                   <path d="M20.91 8.84 8.56 2.23a1.93 1.93 0 0 0-1.81 0L3.1 4.13a1.95 1.95 0 0 0-.97 1.68v4.8a2 2 0 0 0 .5 1.33l7.09 8.38a1 1 0 0 0 1.5.07l9.72-9.72a1 1 0 0 0-.03-1.83Z" />
@@ -100,7 +100,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                 <button
                   type="button"
                   onClick={() => onToggle(skill.name, !skill.enabled)}
-                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                     skill.enabled
                       ? 'text-state-success hover:bg-state-success/10'
                       : 'text-text-tertiary hover:bg-text-tertiary/10'
@@ -121,7 +121,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                       type="button"
                       onClick={() => handleConfirmRemove(skill.name)}
                       disabled={isRemoving === skill.name}
-                      className="rounded px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10 transition-colors"
+                      className="rounded px-2 py-1 text-xs font-medium text-state-error hover:bg-state-error/10 transition-colors"
                     >
                       {isRemoving === skill.name ? (
                         <div className="h-3 w-3 animate-spin rounded-full border border-state-error border-t-transparent" />
@@ -132,7 +132,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                     <button
                       type="button"
                       onClick={() => setConfirmRemove(null)}
-                      className="rounded px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+                      className="rounded px-2 py-1 text-xs text-text-tertiary hover:text-text-primary transition-colors"
                     >
                       {t('skills.removeConfirmNo', 'No')}
                     </button>
@@ -171,7 +171,7 @@ export function SkillsList({ skills, isLoading, isRemoving, onRemove, onToggle }
                 {sourceBadgeLabel(skill.source)}
               </span>
             )}
-            <span className="inline-flex items-center gap-1 text-[10px] text-text-tertiary">
+            <span className="inline-flex items-center gap-1 text-2xs text-text-tertiary">
               <span
                 className={`h-1.5 w-1.5 rounded-full ${skill.enabled ? 'bg-state-success' : 'bg-text-tertiary'}`}
               />

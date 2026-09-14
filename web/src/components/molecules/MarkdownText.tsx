@@ -28,7 +28,7 @@ function InlineToken({ text, token }: { text: string; token?: { type: string; hr
           href={token.href ?? '#'}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-interaction-primary underline decoration-border underline-offset-2 hover:text-interaction-hover hover:decoration-interaction-hover"
+          className="text-focus underline decoration-border underline-offset-2 hover:text-focus-hover hover:decoration-focus-hover"
         >
           {text}
         </a>
@@ -61,7 +61,7 @@ function MarkdownTable({
             {headers.map((header, i) => (
               <th
                 key={`header-${header}`}
-                className={`border border-border bg-surface-muted px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
+                className={`border border-border bg-background-tertiary px-3 py-2 text-sm font-semibold text-text-primary ${alignClass(alignments[i] ?? 'left')}`}
               >
                 <InlineMarkdown text={header} />
               </th>

@@ -66,7 +66,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           className={`rounded-md px-3 py-1.5 text-xs transition-all ${
             mode === 'literal'
               ? 'bg-accent-primary text-text-on-accent shadow-sm'
-              : 'bg-surface-muted text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+              : 'bg-background-tertiary text-text-secondary hover:bg-surface-hover hover:text-text-primary'
           }`}
         >
           {t('settings.literalValue')}
@@ -75,10 +75,10 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           type="button"
           onClick={() => handleModeChange('env')}
           disabled={disabled}
-          className={`rounded px-2 py-1 text-[11px] ${
+          className={`rounded px-2 py-1 text-xs ${
             mode === 'env'
               ? 'bg-accent-primary text-text-on-accent'
-              : 'bg-surface-muted text-text-secondary hover:bg-surface-hover'
+              : 'bg-background-tertiary text-text-secondary hover:bg-surface-hover'
           }`}
         >
           {t('settings.envVariable')}
@@ -87,10 +87,10 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
           type="button"
           onClick={() => handleModeChange('empty')}
           disabled={disabled}
-          className={`rounded px-2 py-1 text-[11px] ${
+          className={`rounded px-2 py-1 text-xs ${
             mode === 'empty'
               ? 'bg-accent-primary text-text-on-accent'
-              : 'bg-surface-muted text-text-secondary hover:bg-surface-hover'
+              : 'bg-background-tertiary text-text-secondary hover:bg-surface-hover'
           }`}
         >
           {t('settings.empty')}
@@ -106,7 +106,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
             onChange={(e) => handleLiteralChange(e.target.value)}
             disabled={disabled}
             placeholder={placeholder}
-            className="w-full rounded border border-border bg-background-primary px-3 py-2 pr-10 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary"
+            className="w-full rounded border border-border bg-background-primary px-3 py-2 pr-10 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary"
           />
           <button
             type="button"
@@ -157,7 +157,7 @@ export function SecretInput({ id, value, onChange, placeholder, disabled }: Prop
             onChange={(e) => handleEnvChange(e.target.value)}
             disabled={disabled}
             placeholder="ENV_VAR_NAME"
-            className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary focus:ring-offset-2 focus:ring-offset-background-primary font-mono"
+            className="flex-1 rounded border border-border bg-background-primary px-3 py-2 text-xs text-text-primary placeholder:text-text-tertiary focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus focus:ring-offset-2 focus:ring-offset-background-primary font-mono"
           />
         </div>
       )}

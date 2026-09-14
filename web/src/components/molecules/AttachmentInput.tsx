@@ -63,7 +63,7 @@ export function AttachmentInput({ onUpload, onAttach }: Props) {
       {error && (
         <p
           role="alert"
-          className="absolute left-0 top-full z-10 mt-1 whitespace-nowrap rounded-md border border-state-error/30 bg-state-error-light px-2 py-1 text-[10px] text-state-error shadow-sm"
+          className="absolute left-0 top-full z-10 mt-1 whitespace-nowrap rounded-md border border-state-error/30 bg-state-error/10 px-2 py-1 text-2xs text-state-error shadow-sm"
         >
           {error}
         </p>

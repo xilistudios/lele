@@ -11,13 +11,11 @@ export const BUTTON_VARIANTS = {
   primary: 'bg-accent-primary text-text-on-accent hover:bg-accent-hover',
   secondary:
     'border border-border bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
-  danger: 'bg-red-600 text-white hover:bg-red-500',
-  dangerText: 'text-state-error hover:bg-red-500/10 hover:text-red-400',
+  danger: 'bg-state-error-fill text-text-on-accent hover:bg-state-error',
+  dangerText: 'text-state-error hover:bg-state-error/10',
   ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text-primary',
   nav: 'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
   success: 'bg-state-success text-text-on-accent hover:bg-state-success/80',
-  brand: 'bg-brand-rosa text-white hover:bg-brand-rosa/90',
-  blue: 'bg-blue-600 text-white hover:bg-blue-500',
 } as const
 
 export const BUTTON_DISABLED = 'disabled:opacity-40 disabled:cursor-not-allowed'

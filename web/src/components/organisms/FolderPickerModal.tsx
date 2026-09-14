@@ -167,10 +167,10 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
                   type="button"
                   onClick={() => loadPath(root)}
                   title={root}
-                  className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                  className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors ${
                     listing?.path === root
                       ? 'border-accent-primary/50 bg-accent-primary/10 text-accent-primary'
-                      : 'border-border bg-background-secondary text-text-secondary hover:text-text-primary hover:border-border-light'
+                      : 'border-border bg-background-secondary text-text-secondary hover:text-text-primary hover:border-border'
                   }`}
                 >
                   {isHome ? <HomeIcon size={12} /> : <FolderIcon size={12} />}
@@ -227,7 +227,7 @@ export function FolderPickerModal({ open, onClose, onSelect, currentFolder }: Pr
             </ul>
           )}
           {!loading && !error && listing?.truncated && (
-            <p className="px-1 py-2 text-[11px] text-text-tertiary">
+            <p className="px-1 py-2 text-xs text-text-tertiary">
               {t('chat.folderTruncated', 'Too many folders — showing the first ones only')}
             </p>
           )}

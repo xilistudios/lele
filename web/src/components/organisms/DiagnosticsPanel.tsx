@@ -9,7 +9,7 @@ export function DiagnosticsPanel() {
     <section className="mx-4 mt-3 rounded-lg border border-border bg-background-primary p-4 text-xs text-text-secondary md:mx-6">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+          <p className="text-2xs uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.systemStatus')}
           </p>
           <p>{diagnostics.status?.status ?? '-'}</p>
@@ -17,7 +17,7 @@ export function DiagnosticsPanel() {
           <p>{diagnostics.status?.version ?? '-'}</p>
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+          <p className="text-2xs uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.agentInfo')}
           </p>
           <p>{diagnostics.agentInfo?.name ?? '-'}</p>
@@ -26,7 +26,7 @@ export function DiagnosticsPanel() {
           <p>{diagnostics.agentInfo?.status ?? '-'}</p>
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+          <p className="text-2xs uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.channels')}
           </p>
           {diagnostics.channels.map((channel) => (
@@ -36,7 +36,7 @@ export function DiagnosticsPanel() {
           ))}
         </div>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+          <p className="text-2xs uppercase tracking-[0.2em] text-text-tertiary">
             {t('chat.tools')}
           </p>
           {diagnostics.tools.map((tool) => (
@@ -47,10 +47,10 @@ export function DiagnosticsPanel() {
         </div>
       </div>
       <details className="mt-4 rounded border border-border bg-background-primary p-3">
-        <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] text-text-tertiary">
+        <summary className="cursor-pointer text-2xs uppercase tracking-[0.2em] text-text-tertiary">
           {t('chat.config')}
         </summary>
-        <pre className="mt-3 overflow-x-auto text-[11px] leading-5 text-text-secondary">
+        <pre className="mt-3 overflow-x-auto text-xs leading-5 text-text-secondary">
           {JSON.stringify(diagnostics.config?.config ?? {}, null, 2)}
         </pre>
       </details>

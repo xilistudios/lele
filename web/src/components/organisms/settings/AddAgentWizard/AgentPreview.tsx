@@ -38,7 +38,7 @@ export function AgentPreview({
 
   if (!hasContent) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-background-secondary/50 p-6 text-center">
+      <div className="rounded-lg border border-dashed border-border bg-surface-sunken p-6 text-center">
         <div className="text-3xl mb-3">👻</div>
         <p className="text-sm text-text-secondary">{t('settings.addAgentModal.previewEmpty')}</p>
         <p className="text-xs text-text-tertiary mt-1">
@@ -53,7 +53,7 @@ export function AgentPreview({
       {/* Header with avatar and name */}
       <div className="p-4 bg-gradient-to-br from-background-secondary to-background-tertiary border-b border-border">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-2xl shadow-lg">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-focus to-brand-morado flex items-center justify-center text-2xl shadow-lg">
             {avatar}
           </div>
           <div className="flex-1 min-w-0">
@@ -61,7 +61,7 @@ export function AgentPreview({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-text-secondary font-mono">@{agentId || '...'}</span>
               {isDefault && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-state-info-light text-state-info font-medium">
+                <span className="text-2xs px-2 py-0.5 rounded-full bg-state-info/10 text-state-info font-medium">
                   {t('settings.defaultBadge').toUpperCase()}
                 </span>
               )}
@@ -104,7 +104,7 @@ export function AgentPreview({
           <div className="flex items-center gap-2">
             <div className="w-16 h-1.5 rounded-full bg-border overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-interaction-primary to-brand-morado transition-all duration-300"
+                className="h-full bg-gradient-to-r from-focus to-brand-morado transition-all duration-300"
                 style={{ width: `${(temperature / 2) * 100}%` }}
               />
             </div>
@@ -129,19 +129,19 @@ export function AgentPreview({
         {/* Features badges */}
         <div className="flex flex-wrap gap-1.5 pt-1">
           {enableThinking && (
-            <span className="text-[10px] px-2 py-1 rounded-full bg-brand-morado/20 text-brand-morado">
+            <span className="text-2xs px-2 py-1 rounded-full bg-brand-morado/20 text-brand-morado">
               🧠 {t('settings.fields.agentThinking')}
             </span>
           )}
           {supportsImages && (
-            <span className="text-[10px] px-2 py-1 rounded-full bg-state-success-light text-state-success">
+            <span className="text-2xs px-2 py-1 rounded-full bg-state-success/10 text-state-success">
               📷 {t('settings.fields.agentSupportsImages')}
             </span>
           )}
           {skills.map((skill) => (
             <span
               key={skill}
-              className="text-[10px] px-2 py-1 rounded-full bg-surface-muted text-text-tertiary border border-border-light"
+              className="text-2xs px-2 py-1 rounded-full bg-background-tertiary text-text-tertiary border border-border"
             >
               {skill}
             </span>

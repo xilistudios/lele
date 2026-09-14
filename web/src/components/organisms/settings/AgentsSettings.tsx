@@ -54,7 +54,7 @@ export function AgentsSettings() {
           <button
             type="button"
             onClick={() => setShowWizard(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200 shadow-sm hover:shadow-md"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-accent-hover transition-all duration-fast shadow-sm hover:shadow-md"
           >
             <svg
               width="16"
@@ -74,8 +74,8 @@ export function AgentsSettings() {
 
         {/* Empty state */}
         {list.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-background-secondary/20">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-interaction-primary/20 to-brand-morado/20 flex items-center justify-center mb-4">
+          <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-border rounded-xl bg-surface-sunken">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-focus/20 to-brand-morado/20 flex items-center justify-center mb-4">
               {' '}
               <svg
                 width="32"
@@ -84,7 +84,7 @@ export function AgentsSettings() {
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.5"
-                className="text-interaction-primary"
+                className="text-focus"
               >
                 <title>Agent icon</title>
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -95,7 +95,7 @@ export function AgentsSettings() {
             <button
               type="button"
               onClick={() => setShowWizard(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-cta-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-cta-hover transition-all duration-200"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-accent-hover transition-all duration-fast"
             >
               {' '}
               <svg
@@ -147,7 +147,7 @@ export function AgentsSettings() {
                 title={
                   <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                     {/* Agent avatar */}
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-interaction-primary to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-focus to-brand-morado flex items-center justify-center text-xs text-text-on-accent font-medium flex-shrink-0">
                       {agent.name
                         ? agent.name.charAt(0).toUpperCase()
                         : agent.id.charAt(0).toUpperCase()}
@@ -159,12 +159,12 @@ export function AgentsSettings() {
                           {agent.id}
                         </span>
                         {agent.default && (
-                          <span className="rounded-full bg-accent-subtle text-accent-primary px-1.5 py-0.5 text-[9px] sm:text-xs font-medium flex-shrink-0">
+                          <span className="rounded-full bg-accent-subtle text-accent-primary px-1.5 py-0.5 text-2xs sm:text-xs font-medium flex-shrink-0">
                             {t('settings.defaultBadge')}
                           </span>
                         )}
                         {isModified && (
-                          <span className="rounded-full bg-state-info-light text-state-info px-1.5 py-0.5 text-[9px] sm:text-xs font-medium flex-shrink-0">
+                          <span className="rounded-full bg-state-info/10 text-state-info px-1.5 py-0.5 text-2xs sm:text-xs font-medium flex-shrink-0">
                             {t('settings.modifiedBadge')}
                           </span>
                         )}
@@ -208,7 +208,7 @@ export function AgentsSettings() {
                 removeLabel={t('settings.removeAgent')}
               >
                 {/* Section: General */}
-                <div className="pb-4 mb-5 border-b border-border-light">
+                <div className="pb-4 mb-5 border-b border-border">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.general')}
                   </div>
@@ -272,7 +272,7 @@ export function AgentsSettings() {
                 </div>
 
                 {/* Section: Model */}
-                <div className="pb-4 mb-5 border-b border-border-light">
+                <div className="pb-4 mb-5 border-b border-border">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.model')}
                   </div>
@@ -327,7 +327,7 @@ export function AgentsSettings() {
                 </div>
 
                 {/* Section: Behavior */}
-                <div className="pb-4 mb-5 border-b border-border-light">
+                <div className="pb-4 mb-5 border-b border-border">
                   <div className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-4">
                     {t('settings.sections.behavior')}
                   </div>

@@ -36,16 +36,16 @@ function AgentCardSkeleton() {
       aria-hidden="true"
     >
       <div className="flex gap-3">
-        <div className="h-10 w-10 flex-none rounded-full bg-surface-muted" />
+        <div className="h-10 w-10 flex-none rounded-full bg-background-tertiary" />
         <div className="min-w-0 flex-1 space-y-2">
-          <div className="h-3.5 w-1/3 rounded bg-surface-muted" />
-          <div className="h-3 w-1/2 rounded bg-surface-muted" />
+          <div className="h-3.5 w-1/3 rounded bg-background-tertiary" />
+          <div className="h-3 w-1/2 rounded bg-background-tertiary" />
         </div>
       </div>
-      <div className="mt-3 h-3 w-3/4 rounded bg-surface-muted" />
-      <div className="mt-3 flex gap-2 border-t border-border-light pt-3">
-        <div className="h-7 w-24 rounded-lg bg-surface-muted" />
-        <div className="ml-auto h-7 w-16 rounded-lg bg-surface-muted" />
+      <div className="mt-3 h-3 w-3/4 rounded bg-background-tertiary" />
+      <div className="mt-3 flex gap-2 border-t border-border pt-3">
+        <div className="h-7 w-24 rounded-lg bg-background-tertiary" />
+        <div className="ml-auto h-7 w-16 rounded-lg bg-background-tertiary" />
       </div>
     </div>
   )
@@ -116,7 +116,7 @@ export function AgentsListPage() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('settings.agentPage.searchPlaceholder')}
             aria-label={t('settings.agentPage.searchPlaceholder')}
-            className="h-9 w-full rounded-lg border border-border bg-background-secondary pl-9 pr-9 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none"
+            className="h-9 w-full rounded-lg border border-border bg-background-secondary pl-9 pr-9 text-sm text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none"
           />
           {query && (
             <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
@@ -152,7 +152,7 @@ export function AgentsListPage() {
         >
           <div
             aria-hidden="true"
-            className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface-muted text-text-tertiary"
+            className="flex h-12 w-12 items-center justify-center rounded-xl bg-background-tertiary text-text-tertiary"
           >
             <svg
               width="22"

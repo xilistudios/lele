@@ -29,7 +29,7 @@ export function TextInput({
       placeholder={placeholder}
       min={min}
       max={max}
-      className="w-full rounded-md border border-border-strong bg-surface-tertiary px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-150 hover:border-border-light focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 focus:ring-offset-0 disabled:opacity-40"
+      className="w-full rounded-md border border-border-strong bg-background-secondary px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-fast hover:border-border focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus/20 focus:ring-offset-0 disabled:opacity-40"
     />
   )
 }

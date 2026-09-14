@@ -221,7 +221,7 @@ export function UpdatesSettings() {
         )}
 
         {error && (
-          <div className="rounded-md border border-state-error bg-state-error-light p-3 text-xs text-state-error">
+          <div className="rounded-md border border-state-error bg-state-error/10 p-3 text-xs text-state-error">
             {error}
           </div>
         )}
@@ -232,7 +232,7 @@ export function UpdatesSettings() {
             type="button"
             onClick={handleCheck}
             disabled={isUpdating || status === 'checking'}
-            className="rounded-md border border-border bg-background-secondary px-3 py-2 text-xs font-medium text-text-primary hover:bg-background-tertiary transition-colors disabled:opacity-50"
+            className="rounded-md border border-border bg-background-secondary px-3 py-2 text-xs font-medium text-text-primary hover:bg-background-tertiary transition-colors disabled:opacity-40"
           >
             {t('settings.updates.checkForUpdates')}
           </button>
@@ -241,7 +241,7 @@ export function UpdatesSettings() {
               type="button"
               onClick={() => setRollbackConfirmOpen(true)}
               disabled={isUpdating}
-              className="rounded-md border border-border bg-background-secondary px-3 py-2 text-xs font-medium text-text-secondary hover:bg-background-tertiary transition-colors disabled:opacity-50"
+              className="rounded-md border border-border bg-background-secondary px-3 py-2 text-xs font-medium text-text-secondary hover:bg-background-tertiary transition-colors disabled:opacity-40"
             >
               {t('settings.updates.rollback')}
             </button>
@@ -251,7 +251,7 @@ export function UpdatesSettings() {
 
       {/* Confirmation modal */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.confirmTitle')}
@@ -281,7 +281,7 @@ export function UpdatesSettings() {
 
       {/* Rollback confirmation modal */}
       {rollbackConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay">
           <div className="w-full max-w-md rounded-lg border border-border bg-background-primary p-6 shadow-xl">
             <h3 className="mb-2 text-sm font-semibold text-text-primary">
               {t('settings.updates.rollbackConfirmTitle')}

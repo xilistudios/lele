@@ -116,7 +116,8 @@ const classRe =
  * Handles: className="...", className={'...'}, className={`...`}
  * Also matches plain class="..." for HTML (index.html).
  */
-const attrRe = /(?:className|class)\s*=\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
+const attrRe =
+  /(?:className|class)\s*=\s*\{?\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g
 
 /**
  * Extract all Tailwind color classes that appear inside a className/class

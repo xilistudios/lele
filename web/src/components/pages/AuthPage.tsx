@@ -25,7 +25,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
       <main className="flex min-h-screen items-center justify-center px-4 py-12">
         <div className="w-full max-w-md space-y-5 rounded-xl border border-border bg-background-primary p-6 shadow-xl">
           <div className="flex items-center justify-center py-8">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-focus border-t-transparent" />
           </div>
           <p className="text-center text-text-secondary">{t('auth.connecting')}</p>
         </div>
@@ -58,15 +58,15 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
         onSubmit={handleSubmit}
       >
         <div className="space-y-2">
-          <p className="text-sm uppercase tracking-wider text-brand-rosa">{t('auth.subtitle')}</p>
+          <p className="text-sm uppercase tracking-wider text-accent-text">{t('auth.subtitle')}</p>
           <h1 className="text-2xl font-semibold text-text-primary">{t('auth.title')}</h1>
         </div>
 
-        <div className="rounded-xl border border-border-light bg-background-secondary p-4">
+        <div className="rounded-xl border border-border bg-background-secondary p-4">
           <label className="block space-y-2">
             <span className="text-sm font-medium text-text-primary">{t('auth.apiUrlLabel')}</span>
             <input
-              className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
+              className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-focus"
               placeholder={t('auth.apiUrlPlaceholder')}
               value={apiInput}
               onChange={(event) => setApiInput(event.target.value)}
@@ -78,7 +78,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
         <label className="block space-y-2">
           <span className="text-sm text-text-secondary">{t('auth.pinLabel')}</span>
           <input
-            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
+            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-focus"
             inputMode="numeric"
             maxLength={6}
             placeholder={t('auth.pinPlaceholder')}
@@ -90,7 +90,7 @@ export function AuthPage({ apiUrl, error, initialPin = '', onSubmit }: Props) {
         <label className="block space-y-2">
           <span className="text-sm text-text-secondary">{t('auth.deviceNameLabel')}</span>
           <input
-            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-border-focus"
+            className="w-full rounded-lg border border-border bg-background-primary px-4 py-2.5 text-text-primary outline-none ring-0 placeholder:text-text-tertiary focus:border-focus"
             placeholder={t('auth.deviceNamePlaceholder')}
             value={deviceName}
             onChange={(event) => setDeviceName(event.target.value)}
