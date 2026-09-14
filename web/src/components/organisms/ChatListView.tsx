@@ -232,7 +232,7 @@ const ChatListItem = memo(function ChatListItem({
                 <button
                   type="button"
                   className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-background-secondary ${
-                    confirmingDelete ? 'text-state-error' : 'text-warning'
+                    confirmingDelete ? 'text-state-error' : 'text-state-warning'
                   }`}
                   onClick={handleDeleteClick}
                   onBlur={() => setConfirmingDelete(false)}

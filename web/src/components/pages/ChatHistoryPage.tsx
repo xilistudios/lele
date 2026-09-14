@@ -206,7 +206,7 @@ export function ChatHistoryPage() {
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-interaction-primary border-t-transparent" />
             </div>
           ) : loadError && allSessions.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm text-warning">
+            <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm text-state-warning">
               <span>{t('chat.loadError', { error: loadError })}</span>
               <button
                 type="button"
