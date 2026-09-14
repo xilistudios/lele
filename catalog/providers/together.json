@@ -107,6 +107,19 @@
       "tool_call": true
     },
     {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+      "name": "DeepSeek V4.1 Flash",
+      "context_window": 1048576,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "google/gemma-4-31B-it",
       "name": "Gemma 4 31B Instruct",
       "context_window": 262144,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-10T21:45:01Z",
+  "updated_at": "2026-09-14T13:27:51Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -241,7 +241,7 @@
       "type": "openai",
       "api_base": "https://ollama.com/v1",
       "file": "providers/ollama_cloud.json",
-      "model_count": 22
+      "model_count": 24
     },
     "openai": {
       "id": "openai",
@@ -329,7 +329,7 @@
       "type": "openai",
       "api_base": "https://api.together.xyz/v1",
       "file": "providers/together.json",
-      "model_count": 26
+      "model_count": 27
     },
     "vercel": {
       "id": "vercel",
