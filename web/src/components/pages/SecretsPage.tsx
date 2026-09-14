@@ -177,7 +177,7 @@ function SecretCard({
                 type="button"
                 onClick={() => onDelete(secret.name)}
                 disabled={busy}
-                className="rounded-lg bg-state-error px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="rounded-lg bg-state-error-fill px-2.5 py-1.5 text-xs font-medium text-text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {t('common.confirm', 'Confirm')}
               </button>

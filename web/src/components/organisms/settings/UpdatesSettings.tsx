@@ -300,7 +300,7 @@ export function UpdatesSettings() {
               <button
                 type="button"
                 onClick={handleRollback}
-                className="rounded-md bg-state-error px-3 py-2 text-xs font-semibold text-text-on-accent hover:opacity-90"
+                className="rounded-md bg-state-error-fill px-3 py-2 text-xs font-semibold text-text-on-accent hover:opacity-90"
               >
                 {t('settings.updates.rollback')}
               </button>

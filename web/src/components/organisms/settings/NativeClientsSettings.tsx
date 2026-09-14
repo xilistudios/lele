@@ -253,7 +253,7 @@ export function NativeClientsSettings() {
             <button
               type="button"
               onClick={confirmRemoveClient}
-              className="rounded-md bg-state-error px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-state-error/90 transition-colors"
+              className="rounded-md bg-state-error-fill px-4 py-2 text-sm font-medium text-text-on-accent hover:bg-state-error-fill/90 transition-colors"
             >
               {t('settings.native.revoke')}
             </button>
