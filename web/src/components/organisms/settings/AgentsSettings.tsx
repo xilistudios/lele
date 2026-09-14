@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSettings } from '../../../contexts/SettingsContext'
-import { getAgentModelPrimary, getErrorForPath, isDirtyPath } from '../../../hooks/useSettingsHelpers'
+import {
+  getAgentModelPrimary,
+  getErrorForPath,
+  isDirtyPath,
+} from '../../../hooks/useSettingsHelpers'
 import { thinkingLevelOptions } from '../../../lib/thinkingLevel'
 import {
   BooleanInput,
@@ -351,10 +355,7 @@ export function AgentsSettings() {
                     description={t('settings.descriptions.agentThinkingLevel')}
                     path={`agents.list.${index}.thinking_level`}
                     isDirty={isDirtyPath(dirtyPaths, `agents.list.${index}.thinking_level`)}
-                    error={getErrorForPath(
-                      validationErrors,
-                      `agents.list.${index}.thinking_level`,
-                    )}
+                    error={getErrorForPath(validationErrors, `agents.list.${index}.thinking_level`)}
                   >
                     <SelectInput
                       id={`agents.list.${index}.thinking_level`}

@@ -79,9 +79,7 @@ export function ChatPageProvider({ children }: { children: ReactNode }) {
   }, [modelState.available, currentAgent?.model, t])
 
   const groupedModels: GroupedModels = useMemo(() => {
-    const groups = (modelState.groups ?? []).filter(
-      (group) => (group.models?.length ?? 0) > 0,
-    )
+    const groups = (modelState.groups ?? []).filter((group) => (group.models?.length ?? 0) > 0)
     if (groups.length === 0) return undefined
 
     return groups.map((group) => ({

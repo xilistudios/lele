@@ -181,7 +181,7 @@ export function ContextIndicator() {
             </div>
 
             {/* Progress bar */}
-            <div className="h-1.5 w-full rounded-full bg-surface-card mb-2 overflow-hidden">
+            <div className="h-1.5 w-full rounded-full bg-background-elevated mb-2 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${ringColorClass.replace(
                   'stroke-',

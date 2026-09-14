@@ -487,7 +487,11 @@ export function ToolCallDisplay({
                 {iconConfig.icon
                   .split(' M')
                   .map((path, i) =>
-                    i === 0 ? <path key={path} d={path} /> : <path key={`M${path}`} d={`M${path}`} />,
+                    i === 0 ? (
+                      <path key={path} d={path} />
+                    ) : (
+                      <path key={`M${path}`} d={`M${path}`} />
+                    ),
                   )}
               </svg>
             </div>

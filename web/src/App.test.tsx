@@ -1442,7 +1442,9 @@ describe('Auto-pairing', () => {
     // must appear with the PIN pre-filled. Allow extra time under full-suite load.
     await waitFor(
       () => {
-        const pinInput = view.container.querySelector('input[inputmode="numeric"]') as HTMLInputElement
+        const pinInput = view.container.querySelector(
+          'input[inputmode="numeric"]',
+        ) as HTMLInputElement
         expect(pinInput?.value).toBe('654321')
       },
       { timeout: 4000 },

@@ -11,7 +11,9 @@ import type { MessageEventContext } from './types'
 
 /** Terminal group statuses — a group in one of these states must never be
  *  downgraded by a later event. 'started' is the only non-terminal status. */
-function isTerminalGroupStatus(status: GroupInfo['status'] | undefined): status is 'done' | 'error' | 'stopped' {
+function isTerminalGroupStatus(
+  status: GroupInfo['status'] | undefined,
+): status is 'done' | 'error' | 'stopped' {
   return status === 'done' || status === 'error' || status === 'stopped'
 }
 

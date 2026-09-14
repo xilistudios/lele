@@ -96,7 +96,9 @@ export function BehaviorStep({
           onChange={setThinkingLevel}
           options={thinkingLevelOptions(t)}
         />
-        <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentThinkingLevel')}</p>
+        <p className="text-xs text-text-tertiary">
+          {t('settings.descriptions.agentThinkingLevel')}
+        </p>
       </div>
 
       {/* Other numeric settings in a grid */}

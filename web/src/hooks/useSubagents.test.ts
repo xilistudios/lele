@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { type ReactNode, createElement } from 'react'
 import { AuthProvider } from '../contexts/AuthContext'
 import type { SubagentTaskInfo } from '../lib/types'
@@ -13,6 +13,10 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // Cleanup FIRST so useEffect cleanups (clearInterval, listener removal) run
+  // while the mock is still active, preventing leaked async fetches from
+  // contaminating later test files.
+  cleanup()
   globalThis.fetch = originalFetch
   localStorage.clear()
 })

@@ -17,11 +17,7 @@ export function Logo({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <span className="text-lg font-bold uppercase tracking-wider">
       {LOGO_CONFIG.map((letter, index) => (
-        <span
-          key={`${letter}-${index}`}
-          className={DROP_SHADOW}
-          style={{ color: '#E6D6EA' }}
-        >
+        <span key={`${letter}-${index}`} className={DROP_SHADOW} style={{ color: '#E6D6EA' }}>
           {letter}
         </span>
       ))}

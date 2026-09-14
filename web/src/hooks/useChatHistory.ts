@@ -2,12 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApiClient } from '../lib/api'
 import { toChatMessages } from '../lib/chatMessageBuilder'
-import type {
-  ChatMessage,
-  GroupInfo,
-  GroupSnapshot,
-  RawHistoryMessage,
-} from '../lib/types'
+import type { ChatMessage, GroupInfo, GroupSnapshot, RawHistoryMessage } from '../lib/types'
 import { sessionKeysLooselyMatch } from './event-handlers/helpers'
 import { snapshotToGroupInfo } from './messageEventHandlers'
 

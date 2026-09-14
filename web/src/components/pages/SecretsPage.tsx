@@ -396,7 +396,7 @@ function AuditLog({ records }: { records: SecretAuditRecord[] }) {
         </thead>
         <tbody>
           {records.map((r, i) => (
-            <tr key={`${r.timestamp}-${i}`} className="border-b border-border/50 last:border-0">
+            <tr key={`${r.timestamp}-${i}`} className="border-b border-border-light last:border-0">
               <td className="px-3 py-2 font-mono text-text-primary">{r.secret_name}</td>
               <td className="px-3 py-2 text-text-secondary">{r.action}</td>
               <td className="px-3 py-2 text-text-secondary">{r.agent_id || '—'}</td>

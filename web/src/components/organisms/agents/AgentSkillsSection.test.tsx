@@ -135,7 +135,7 @@ describe('lib/skillSource (single source of truth)', () => {
     expect(SOURCE_COLORS.global).toBe(
       'bg-state-success-light text-state-success border-state-success/30',
     )
-    expect(SOURCE_COLORS.builtin).toBe('bg-surface-muted text-text-tertiary border-border/50')
+    expect(SOURCE_COLORS.builtin).toBe('bg-surface-muted text-text-tertiary border-border-light')
     expect(SOURCE_LABELS).toEqual({ workspace: 'Workspace', global: 'Global', builtin: 'Built-in' })
   })
 
@@ -236,7 +236,7 @@ describe('AgentSkillsSection — orphans (§4.5.4)', () => {
     expect(block.className).toContain('space-y-2')
     const orphanCard = block.firstElementChild as HTMLElement
     expect(orphanCard.className).toContain('border-state-warning/40')
-    expect(orphanCard.className).toContain('bg-state-warning-light/30')
+    expect(orphanCard.className).toContain('bg-state-warning/10')
     // The grid still shows the installed ones, and the orphan block sits ABOVE it.
     expect(utils.container.querySelectorAll('[data-testid="skills-grid"] label')).toHaveLength(3)
     const grid = utils.byTestId('skills-grid') as HTMLElement

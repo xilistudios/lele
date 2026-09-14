@@ -138,9 +138,7 @@ export function BasicInfoStep({
           rows={3}
           className="w-full rounded-lg border border-border bg-background-primary px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-interaction-primary focus:outline-none focus:ring-2 focus:ring-interaction-primary/20 transition-all duration-200 resize-y"
         />
-        <p className="text-xs text-text-tertiary">
-          {t('settings.descriptions.agentDescription')}
-        </p>
+        <p className="text-xs text-text-tertiary">{t('settings.descriptions.agentDescription')}</p>
       </div>
 
       {/* Default checkbox */}

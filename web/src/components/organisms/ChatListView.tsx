@@ -152,11 +152,7 @@ const ChatListItem = memo(function ChatListItem({
           onKeyDown={(e) => e.stopPropagation()}
           role="presentation"
         >
-          <RenameForm
-            value={renameValue}
-            onChange={setRenameValue}
-            onSubmit={handleRenameSubmit}
-          />
+          <RenameForm value={renameValue} onChange={setRenameValue} onSubmit={handleRenameSubmit} />
         </div>
       ) : (
         <button type="button" className="min-w-0 flex-1 text-left" onClick={handleSelectClick}>
@@ -236,7 +232,7 @@ const ChatListItem = memo(function ChatListItem({
                 <button
                   type="button"
                   className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-background-secondary ${
-                    confirmingDelete ? 'text-state-error' : 'text-warning'
+                    confirmingDelete ? 'text-state-error' : 'text-state-warning'
                   }`}
                   onClick={handleDeleteClick}
                   onBlur={() => setConfirmingDelete(false)}

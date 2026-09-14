@@ -104,9 +104,7 @@ describe('parseApiError', () => {
   })
 
   test('crea ApiError con validation errors', () => {
-    const errors = [
-      { path: 'gateway.port', message: 'Port must be > 0', code: 'invalid' },
-    ]
+    const errors = [{ path: 'gateway.port', message: 'Port must be > 0', code: 'invalid' }]
     const error = new ApiError('Validation failed', 422, 'validation_error', errors)
     expect(error.message).toBe('Validation failed')
     expect(error.status).toBe(422)

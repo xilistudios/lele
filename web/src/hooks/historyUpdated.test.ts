@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
+import { toChatMessages } from '../lib/chatMessageBuilder'
 import type { ChatMessage } from '../lib/types'
 import { handleHistoryUpdated } from './event-handlers/streaming'
 import type { MessageEventContext } from './event-handlers/types'
 import { buildChatHistoryQueryKey } from './useChatHistory'
-import { toChatMessages } from '../lib/chatMessageBuilder'
 
 function msg(
   id: string,

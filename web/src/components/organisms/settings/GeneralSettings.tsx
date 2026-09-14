@@ -1,8 +1,8 @@
 import { useSettings } from '../../../contexts/SettingsContext'
 import { useTheme } from '../../../contexts/ThemeContext'
+import { useLanguageCatalog } from '../../../hooks/useLanguageCatalog'
 import { isDirtyPath } from '../../../hooks/useSettingsHelpers'
 import { getErrorForPath } from '../../../hooks/useSettingsHelpers'
-import { useLanguageCatalog } from '../../../hooks/useLanguageCatalog'
 import i18n from '../../../i18n'
 import { thinkingLevelOptions } from '../../../lib/thinkingLevel'
 import {
