@@ -177,7 +177,7 @@ export function GroupComposer() {
                 type="button"
                 onClick={onCancel}
                 aria-label={t('groups.cancel')}
-                className="flex h-7 items-center justify-center rounded-md border border-state-error/30 bg-state-error/10 px-3 text-xs font-medium text-state-error transition-colors hover:bg-state-error hover:text-text-on-accent"
+                className="flex h-7 items-center justify-center rounded-md border border-state-error/30 bg-state-error/10 px-3 text-xs font-medium text-state-error transition-colors hover:bg-state-error-fill hover:text-text-on-accent"
               >
                 {t('groups.cancel')}
               </button>

@@ -440,7 +440,7 @@ export function ChatComposer() {
             aria-label={canCancel ? t('chat.cancel') : t('chat.send')}
             className={`ml-auto flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md transition-colors ${
               canCancel
-                ? 'bg-state-error/10 text-state-error hover:bg-state-error hover:text-text-on-accent border border-state-error/30'
+                ? 'bg-state-error/10 text-state-error hover:bg-state-error-fill hover:text-text-on-accent border border-state-error/30'
                 : 'bg-accent-primary text-text-on-accent hover:bg-accent-hover'
             }`}
             onClick={canCancel ? onCancel : undefined}
