@@ -333,18 +333,18 @@ export function AdvancedSettings() {
               onKeyDown={handleKeyDown}
               className={`h-[50vh] md:h-[500px] w-full rounded border p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background-primary ${
                 jsonParseError
-                  ? 'border-error-primary bg-error-surface text-text-primary focus:border-error-primary focus:ring-error-primary'
+                  ? 'border-state-error bg-state-error-light text-text-primary focus:border-state-error focus:ring-state-error'
                   : 'border-border bg-background-primary text-text-primary focus:border-interaction-primary focus:ring-interaction-primary'
               }`}
               spellCheck={false}
               placeholder={t('settings.jsonEditorPlaceholder')}
             />
             {jsonParseError && (
-              <div className="mt-2 rounded border border-error-primary bg-error-surface p-3">
+              <div className="mt-2 rounded border border-state-error bg-state-error-light p-3">
                 <div className="flex items-start gap-2">
                   <span className="mt-0.5 shrink-0 text-sm">⚠️</span>
                   <div>
-                    <p className="text-xs font-medium text-error-primary">
+                    <p className="text-xs font-medium text-state-error">
                       {t('settings.jsonValidationError')}
                     </p>
                     <p className="mt-1 text-xs text-text-secondary font-mono whitespace-pre-wrap">
