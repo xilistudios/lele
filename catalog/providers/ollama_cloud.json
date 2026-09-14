@@ -109,6 +109,19 @@
       "tool_call": true
     },
     {
+      "id": "deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "context_window": 1048576,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "gemma4:31b",
       "name": "gemma4:31b",
       "context_window": 262144,
@@ -173,6 +186,17 @@
     {
       "id": "deepseek-v4-pro",
       "name": "deepseek-v4-pro",
+      "context_window": 1048576,
+      "max_output": 1048576,
+      "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "deepseek-v4-pro:0813",
+      "name": "DeepSeek V4 Pro 0813",
       "context_window": 1048576,
       "max_output": 1048576,
       "thinking_levels": [

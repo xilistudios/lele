@@ -279,6 +279,19 @@
       "tool_call": true
     },
     {
+      "id": "z-ai/glm-5.3-flash",
+      "name": "GLM-5.3-Flash",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-ai/deepseek-v4-flash",
       "name": "DeepSeek V4 Flash",
       "context_window": 1048576,
@@ -476,14 +489,6 @@
         "high"
       ],
       "reasoning": true,
-      "tool_call": true
-    },
-    {
-      "id": "google/gemma-3-12b-it",
-      "name": "Gemma 3 12B IT",
-      "context_window": 131072,
-      "max_output": 16384,
-      "vision": true,
       "tool_call": true
     }
   ]
