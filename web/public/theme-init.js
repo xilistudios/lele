@@ -3,14 +3,23 @@
 // (WEB-M13). Loaded synchronously in <head> exactly where the inline version
 // used to be, preserving the pre-paint timing contract.
 (function () {
+  // Resolve the effective theme, then apply BOTH data-theme (drives the CSS
+  // custom-property switch in index.css) and the `.dark` class (drives
+  // Tailwind's darkMode:'class' variants). Doing both pre-paint prevents a
+  // flash: without `.dark` here, any `dark:` utility would only appear after
+  // ThemeContext's post-paint useEffect runs.
+  function apply(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }
   try {
-    var theme = localStorage.getItem("lele-theme");
-    if (theme === "dark" || theme === "light") {
-      document.documentElement.setAttribute("data-theme", theme);
+    var stored = localStorage.getItem("lele-theme");
+    if (stored === "dark" || stored === "light") {
+      apply(stored);
       return;
     }
   } catch (e) {}
   // Fall back to system preference
   var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-  document.documentElement.setAttribute("data-theme", prefersLight ? "light" : "dark");
+  apply(prefersLight ? "light" : "dark");
 })();
