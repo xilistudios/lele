@@ -1161,3 +1161,39 @@ func TestWebFetchTool_Execute_BlocksLocalhostName(t *testing.T) {
 		t.Errorf("Expected 'access denied' error, got: %s", result.ForLLM)
 	}
 }
+
+// TestWebTool_WebFetch_ForLLMContainsContent is a regression guard: the
+// refactor to ToolResult once moved the extracted text to ForUser only, so
+// the LLM saw just "Fetched N bytes…" and could not answer questions about
+// page content. ForUser is a channel display card; it never reaches model
+// context. The extracted text MUST be inside ForLLM.
+func TestWebTool_WebFetch_ForLLMContainsContent(t *testing.T) {
+	const marker = "UNIQUE-PAGE-CONTENT-MARKER-42"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><head><title>Doc</title></head><body><p>" + marker + "</p></body></html>"))
+	}))
+	defer server.Close()
+
+	tool := NewWebFetchTool(50000)
+	tool.allowPrivate = true
+	result := tool.Execute(context.Background(), map[string]interface{}{"url": server.URL})
+
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, marker) {
+		t.Errorf("ForLLM must contain the extracted text, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForUser, marker) {
+		t.Errorf("ForUser must contain the extracted text, got: %s", result.ForUser)
+	}
+	// ForLLM must stay valid JSON (compact form of the same payload).
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(result.ForLLM), &m); err != nil {
+		t.Fatalf("ForLLM is not valid JSON: %v", err)
+	}
+	if txt, ok := m["text"].(string); !ok || !strings.Contains(txt, marker) {
+		t.Errorf("ForLLM JSON .text missing content: %v", m["text"])
+	}
+}

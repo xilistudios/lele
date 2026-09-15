@@ -593,8 +593,13 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 
 	resultJSON, _ := json.MarshalIndent(result, "", "  ")
 
+	// The LLM must receive the extracted text itself, not just a summary —
+	// ForUser is only published to messaging channels as a display card and
+	// never reaches the model context. Compact JSON saves tokens vs. ForUser.
+	forLLM, _ := json.Marshal(result)
+
 	return &ToolResult{
-		ForLLM:  fmt.Sprintf("Fetched %d bytes from %s (extractor: %s, truncated: %v)", len(text), urlStr, extractor, truncated),
+		ForLLM:  string(forLLM),
 		ForUser: string(resultJSON),
 	}
 }
