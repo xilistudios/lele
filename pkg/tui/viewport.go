@@ -136,7 +136,7 @@ func (m *Model) updateViewport() {
 		m.pendingApprovalID != "" || m.approvalResult != "" ||
 		m.activeGroupID != "" ||
 		m.compactFeedback != "" ||
-		len(m.subagentProgress) > 0
+		m.hasSubagentProgressOverlay()
 
 	if !hasOverlay && !m.selecting {
 		// Nothing ephemeral to show — ensure overlay is cleared.
@@ -239,7 +239,9 @@ func (m *Model) updateViewport() {
 	// each subagent spawned by the current parent session. Rendered under the
 	// streaming overlay, and also on its own when the parent has nothing
 	// streaming (e.g. the turn is waiting on wait_for_subagent) so progress
-	// stays visible for the whole duration of the subagent work.
+	// stays visible for the whole duration of the subagent work. Suppressed
+	// while the chat sidebar is visible, since the sidebar already lists
+	// subagent statuses and the inline block would be redundant.
 	if progressBlock := m.renderSubagentProgress(); progressBlock != "" {
 		overlaySb.WriteString(progressBlock + "\n")
 	}

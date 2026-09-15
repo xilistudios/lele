@@ -14,7 +14,8 @@ import (
 // session-switch lifecycle, completion-driven deletion, and the map cap.
 
 // setupSubagentProgressModel builds a model viewing a parent chat session,
-// sized so updateViewport produces a real frame.
+// sized so updateViewport produces a real frame. The sidebar is visible by
+// default (showWelcome=false, onboardingActive=false, modalMode=ModalNone).
 func setupSubagentProgressModel(t *testing.T) (*Model, string) {
 	t.Helper()
 	m := newTestModelWithDenyPatterns(t)
@@ -50,9 +51,17 @@ func publishAndDrain(t *testing.T, m *Model, ev bus.OutboundMessage) {
 	*m = *up.(*Model)
 }
 
+// overlayContent calls updateViewport and returns the joined overlay lines.
+func overlayContent(m *Model) string {
+	m.updateViewport()
+	return strings.Join(m.viewport.overlayLines, "\n")
+}
+
 func TestSubagentProgressRenderedInOverlay(t *testing.T) {
 	m, key := setupSubagentProgressModel(t)
 	m.processing = true
+	// Hide sidebar so the inline progress block renders.
+	m.showWelcome = true
 
 	publishAndDrain(t, m, bus.OutboundMessage{
 		Channel: "native",
@@ -72,13 +81,12 @@ func TestSubagentProgressRenderedInOverlay(t *testing.T) {
 		t.Errorf("progress action = %q, want the metadata action", got)
 	}
 
-	m.updateViewport()
-	view := m.View()
-	if !strings.Contains(view, "running go test ./pkg/tui/") {
-		t.Error("View() does not render the subagent progress action line")
+	overlay := overlayContent(m)
+	if !strings.Contains(overlay, "running go test ./pkg/tui/") {
+		t.Error("overlay does not render the subagent progress action line")
 	}
-	if !strings.Contains(view, "subagents") {
-		t.Error("View() does not render the subagent progress header")
+	if !strings.Contains(overlay, "subagents") {
+		t.Error("overlay does not render the subagent progress header")
 	}
 }
 
@@ -90,12 +98,12 @@ func TestSubagentProgressRenderedWithoutStreaming(t *testing.T) {
 	m.processing = false
 	m.currentStream = ""
 	m.currentToolAction = ""
+	// Hide sidebar so the inline progress block renders.
+	m.showWelcome = true
 
 	m.subagentProgress = map[string]string{"subagent-2": "scanning files"}
-	m.updateViewport()
-
-	view := m.View()
-	if !strings.Contains(view, "scanning files") {
+	overlay := overlayContent(m)
+	if !strings.Contains(overlay, "scanning files") {
 		t.Error("progress line must render even with no parent stream active")
 	}
 }
@@ -165,23 +173,66 @@ func TestSubagentProgressCappedAt16(t *testing.T) {
 
 func TestSubagentProgressShowsPlusNMore(t *testing.T) {
 	m, _ := setupSubagentProgressModel(t)
+	// Hide sidebar so the inline progress block renders.
+	m.showWelcome = true
 
 	for i := 1; i <= 5; i++ {
 		m.recordSubagentProgress("subagent-"+string(rune('0'+i)), "working")
 	}
 	m.processing = true
-	m.updateViewport()
-
-	view := m.View()
+	overlay := overlayContent(m)
 	for _, id := range []string{"1", "2", "3"} {
-		if !strings.Contains(view, id+" working") {
-			t.Errorf("View() should show subagent-%s line", id)
+		if !strings.Contains(overlay, id+" working") {
+			t.Errorf("overlay should show subagent-%s line", id)
 		}
 	}
-	if strings.Contains(view, "4 working") {
-		t.Error("View() should show at most 3 progress lines, saw subagent-4")
+	if strings.Contains(overlay, "4 working") {
+		t.Error("overlay should show at most 3 progress lines, saw subagent-4")
 	}
-	if !strings.Contains(view, "+2 more") {
-		t.Error("View() should summarize remaining entries as \"+2 more\"")
+	if !strings.Contains(overlay, "+2 more") {
+		t.Error("overlay should summarize remaining entries as \"+2 more\"")
+	}
+}
+
+// TestSubagentProgressHiddenWhenSidebarVisible verifies that the inline
+// "⏳ subagents" overlay block is NOT rendered when the chat sidebar is
+// visible (normal chat layout).
+func TestSubagentProgressHiddenWhenSidebarVisible(t *testing.T) {
+	m, _ := setupSubagentProgressModel(t)
+	// Sidebar is visible: showWelcome=false (default from setup), no modal.
+	if !m.isChatSidebarVisible() {
+		t.Fatal("precondition: sidebar should be visible in default setup")
+	}
+	m.subagentProgress = map[string]string{"subagent-1": "working"}
+
+	overlay := overlayContent(m)
+	if strings.Contains(overlay, "⏳ subagents") {
+		t.Error("overlay must NOT contain the subagent header when sidebar is visible")
+	}
+	if strings.Contains(overlay, "working") {
+		t.Error("overlay must NOT contain subagent progress text when sidebar is visible")
+	}
+}
+
+// TestSubagentProgressShownWhenSidebarHidden verifies that renderSubagentProgress
+// returns a non-empty string containing expected content when the sidebar is not
+// visible (e.g. welcome screen).
+func TestSubagentProgressShownWhenSidebarHidden(t *testing.T) {
+	m, _ := setupSubagentProgressModel(t)
+	m.showWelcome = true
+	if m.isChatSidebarVisible() {
+		t.Fatal("precondition: sidebar should be hidden when showWelcome=true")
+	}
+	m.subagentProgress = map[string]string{"subagent-1": "working"}
+
+	result := m.renderSubagentProgress()
+	if result == "" {
+		t.Fatal("renderSubagentProgress should return non-empty when sidebar is hidden")
+	}
+	if !strings.Contains(result, "subagents") {
+		t.Error("renderSubagentProgress should contain the subagent header")
+	}
+	if !strings.Contains(result, "1 working") {
+		t.Error("renderSubagentProgress should contain the task progress line")
 	}
 }

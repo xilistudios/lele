@@ -625,11 +625,28 @@ func (m *Model) oldestSubagentTaskID() string {
 	return oldest
 }
 
+// isChatSidebarVisible reports whether the right sidebar (which already lists
+// subagent statuses) is being rendered. The inline subagent progress overlay is
+// redundant while the sidebar is visible, so it is only shown on screens that
+// hide the sidebar: the welcome screen, the onboarding wizard, and active modals.
+func (m *Model) isChatSidebarVisible() bool {
+	return !m.showWelcome && !m.onboardingActive && m.modalMode == ModalNone
+}
+
+// hasSubagentProgressOverlay reports whether the inline subagent progress block
+// contributes overlay content (data present AND the sidebar not showing it).
+func (m *Model) hasSubagentProgressOverlay() bool {
+	return len(m.subagentProgress) > 0 && !m.isChatSidebarVisible()
+}
+
 // renderSubagentProgress renders one line per running subagent task so the
 // parent viewport shows real-time subagent activity under the streaming
 // overlay (TUI-M4). Shows at most maxSubagentProgressLines entries, with the
 // rest summarized as "+N more".
 func (m *Model) renderSubagentProgress() string {
+	if m.isChatSidebarVisible() {
+		return ""
+	}
 	if len(m.subagentProgress) == 0 {
 		return ""
 	}
