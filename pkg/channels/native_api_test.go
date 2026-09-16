@@ -57,6 +57,18 @@ type nativeTestAgentLoop struct {
 	// the outbound dispatch path (send_file staging/persistence).
 	attachFilesCalls []attachFilesCall
 	attachMu         sync.Mutex
+
+	// hintedAgents records HintSessionAgent calls so tests can prove the chat
+	// send paths route per-message agent_id through the advisory hint instead of
+	// the explicit-bind SetSessionAgent, which would reset the session model.
+	hintedAgents []hintCall
+	hintMu       sync.Mutex
+}
+
+// hintCall is one recorded HintSessionAgent invocation.
+type hintCall struct {
+	sessionKey string
+	agentID    string
 }
 
 func newNativeTestAgentLoop(cfg *config.Config) *nativeTestAgentLoop {
@@ -85,6 +97,32 @@ func (m *nativeTestAgentLoop) GetSessionAgent(sessionKey string) string {
 
 func (m *nativeTestAgentLoop) SetSessionAgent(sessionKey, agentID string) {
 	m.sessionAgents[sessionKey] = agentID
+}
+
+// HintSessionAgent mirrors the production contract closely enough for the
+// channel tests: restating the current agent is a no-op, a differing agent still
+// binds, and the session model is left untouched either way (production preserves
+// the user's model override across a hint).
+func (m *nativeTestAgentLoop) HintSessionAgent(sessionKey, agentID string) {
+	m.hintMu.Lock()
+	m.hintedAgents = append(m.hintedAgents, hintCall{sessionKey: sessionKey, agentID: agentID})
+	m.hintMu.Unlock()
+
+	if m.GetSessionAgent(sessionKey) == agentID {
+		return
+	}
+	m.sessionAgents[sessionKey] = agentID
+}
+
+// HintedAgents returns the (sessionKey, agentID) pairs received via
+// HintSessionAgent, so tests can prove the send paths use the hint rather than
+// the explicit-bind SetSessionAgent.
+func (m *nativeTestAgentLoop) HintedAgents() []hintCall {
+	m.hintMu.Lock()
+	defer m.hintMu.Unlock()
+	out := make([]hintCall, len(m.hintedAgents))
+	copy(out, m.hintedAgents)
+	return out
 }
 
 func (m *nativeTestAgentLoop) ListAvailableAgentIDs() []string {

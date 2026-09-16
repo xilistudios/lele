@@ -155,8 +155,10 @@ func (n *NativeChannel) handleChatSendStream(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Advisory agent_id for this send; see HintSessionAgent for why this is not
+	// SetSessionAgent.
 	if req.AgentID != "" {
-		n.agentLoop.SetSessionAgent(sessionKey, req.AgentID)
+		n.agentLoop.HintSessionAgent(sessionKey, req.AgentID)
 	}
 
 	messageID := uuid.New().String()

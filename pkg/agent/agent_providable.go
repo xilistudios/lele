@@ -44,7 +44,17 @@ func (ap *agentProvidableImpl) GetSessionAgent(sessionKey string) string {
 	return ap.al.getSessionAgent(sessionKey)
 }
 
-// SetSessionAgent sets the active agent for a specific session.
+// SetSessionAgent binds a session to an agent. This is the EXPLICIT switch
+// path: /agent, PUT /sessions/{key}/agent, the TUI picker and the Telegram
+// picker all call it, and all of them intend to re-bind.
+//
+// Per-message routing hints must NOT come through here — use
+// HintSessionAgent. The WebUI attaches `agent_id` to every websocket message
+// (useMessages.ts sends currentAgentId alongside each send), so routing it
+// through this method re-ran the bind on every turn. On an unpinned session the
+// guard below does not fire, the bind falls through, and the trailing
+// SetModel(key, "") clears the model the user picked in the dropdown — which is
+// why the selection reverted to the agent default after one message.
 func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
 	currentAgentID := ap.GetSessionAgent(sessionKey)
@@ -56,6 +66,51 @@ func (ap *agentProvidableImpl) SetSessionAgent(sessionKey, agentID string) {
 		return
 	}
 
+	ap.assignSessionAgent(resolvedKey, currentAgentID, agentID)
+}
+
+// HintSessionAgent applies the advisory `agent_id` that a chat client attaches
+// to a message — typically the agent currently rendered in the UI, restated on
+// every send so the backend agrees with what the user sees.
+//
+// A hint may bind, but it never carries intent to move the model selection, so
+// it differs from SetSessionAgent in two ways:
+//
+//   - When the session already resolves to that agent (pin, subagent binding or
+//     default fallback) it is a no-op. This is the common case for the WebUI,
+//     which re-sends the displayed agent with every message, and it means a hint
+//     never manufactures a pin on an unpinned session — routes keep winning.
+//   - When it does bind (a client switching agents purely via agent_id, or a
+//     session whose route changed underneath it) the model override survives, so
+//     a hint can never revert the user's dropdown selection. The bind itself,
+//     including the history migration, is identical to an explicit switch.
+func (ap *agentProvidableImpl) HintSessionAgent(sessionKey, agentID string) {
+	if agentID == "" {
+		return
+	}
+	// Already on this agent: an advisory restatement has nothing to do, and in
+	// particular must not touch the model override.
+	currentAgentID := ap.GetSessionAgent(sessionKey)
+	if currentAgentID == agentID {
+		return
+	}
+	resolvedKey := ap.al.ResolveSessionKey(sessionKey)
+	// Capture the override before the bind clears it: a bind drops the model
+	// (correct for an explicit switch, which must not leak the old agent's
+	// model), but a hint is not a switch.
+	override, hadOverride := ap.al.sessionModels.Load(resolvedKey)
+	ap.assignSessionAgent(resolvedKey, currentAgentID, agentID)
+	if hadOverride {
+		if model, isString := override.(string); isString && model != "" {
+			ap.SetSessionModel(resolvedKey, model)
+		}
+	}
+}
+
+// assignSessionAgent performs the shared bind: record the mapping, migrate
+// session history from the previous owner, and clear the session's model
+// override so the previous agent's model does not leak into the new one.
+func (ap *agentProvidableImpl) assignSessionAgent(resolvedKey, currentAgentID, agentID string) {
 	// Migrate session history from old agent to new agent
 	if currentAgentID != "" {
 		oldAgent, oldOk := ap.al.registry.GetAgent(currentAgentID)

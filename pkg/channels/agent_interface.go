@@ -14,7 +14,16 @@ import (
 // Esta interfaz es implementada por agent.AgentLoop para evitar ciclos de importación
 type AgentSessionManager interface {
 	GetSessionAgent(sessionKey string) string
+	// SetSessionAgent binds a session to an agent (explicit switch: /agent,
+	// PUT /sessions/{key}/agent, pickers). It resets the session model override
+	// when the agent changes, because the previous agent's model must not leak.
 	SetSessionAgent(sessionKey, agentID string)
+	// HintSessionAgent applies the advisory agent_id a chat client attaches to
+	// a message. Unlike SetSessionAgent it is a no-op when the session already
+	// resolves to that agent and never disturbs the session model override, so
+	// clients that restate the displayed agent on every send cannot revert a
+	// model the user picked. Send paths should use this.
+	HintSessionAgent(sessionKey, agentID string)
 	ListAvailableAgentIDs() []string
 	GetDefaultAgentID() string
 }
