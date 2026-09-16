@@ -383,8 +383,13 @@ func (n *NativeChannel) handleWSClientMessage(client *WSClient, data json.RawMes
 	}
 	n.auth.TrackSessionKey(client.ClientInfo.ClientID, sessionKey)
 
+	// `agent_id` here is the agent the client is currently displaying, restated
+	// on every message. Route it through HintSessionAgent, not SetSessionAgent:
+	// the latter treats every send as an explicit re-bind and clears the session
+	// model override, which silently reverted the model picked in the WebUI
+	// chat dropdown one message after it was chosen.
 	if payload.AgentID != "" {
-		n.agentLoop.SetSessionAgent(sessionKey, payload.AgentID)
+		n.agentLoop.HintSessionAgent(sessionKey, payload.AgentID)
 	}
 
 	messageID := uuid.New().String()
