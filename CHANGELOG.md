@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### TUI
+- Queued-message preview band — when the composer is parked behind a busy turn, a band above the process indicator shows the pending depth plus the *next* message to be sent (the FIFO head), dimmed and truncated to the pane width. The queue no longer shares the status line with the process state: that strip (count + `alt+delete`/`alt+enter` hints) is gone, so the loading indicator reads on its own line and the pending count is stated once, in the band. Reading order now matches chronology: waiting work above, running turn below. The band costs a line only while it has something to say — the viewport budget measures the rendered string, so an idle queue keeps the transcript its full height. Multi-line payloads collapse to a single sanitized line (control sequences stripped, tabs expanded, single-line, width-truncated).
+
 #### Session
 - Active turn resume (`session.resume_enabled`, default off) — when the gateway restarts mid-turn, the durable inbound replay now *resumes* the interrupted turn from a checkpoint instead of re-running it from scratch. Each in-flight inbound turn is checkpointed to the session-state KV (`sess:turn:<key>`: phase, iteration, agent, model, dedupe id); a replayed message whose dedupe id matches its checkpoint re-enters the loop with the user message already in history (no double-append, no duplicate work). Turns interrupted mid-tool-execution continue safely: pending tool calls are healed into "no recorded result" tool messages and the model decides whether to re-run them, instead of the executor blindly repeating side effects. Subagents that died with the process are snapshotted alongside the checkpoint and the model is warned on resume that their results are unavailable. Requires `session.durable_inbound` (the replay is the resume trigger).
 

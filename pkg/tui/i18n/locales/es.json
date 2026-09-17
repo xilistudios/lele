@@ -296,6 +296,7 @@
   "tui.onboard.tipConnect": "  /connect Agregar otro proveedor",
   "tui.onboard.pressEnterStart": "¡Presiona Enter para empezar a chatear!",
   "tui.queue.status": "⏳ %d en cola — Enter para añadir, /flushq cancela y envía, /clearq vaciar",
+  "tui.queue.row": "⏳ %d en cola · ",
   "tui.queue.removeHint": " · %s quita el último",
   "tui.queue.flushHint": " · %s cancela el turno y envía el siguiente",
   "tui.queue.full": "cola llena (%d) — mensaje no encolado",

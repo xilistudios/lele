@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect 別のプロバイダーを追加",
   "tui.onboard.pressEnterStart": "Enter を押してチャットを始めましょう！",
   "tui.queue.status": "⏳ %d 件キュー中 — Enter で追加、/flushq で今すぐ送信、/clearq で破棄",
+  "tui.queue.row": "⏳ %d 件キュー中 · ",
   "tui.queue.removeHint": " · %s で最後を削除",
   "tui.queue.full": "キューが満杯です（%d）— メッセージはキューされませんでした",
   "tui.queue.removed": "最後のキュー済みメッセージを削除しました",

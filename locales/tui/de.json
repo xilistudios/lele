@@ -286,6 +286,7 @@
   "tui.onboard.tipConnect": "  /connect Weiteren Provider hinzufügen",
   "tui.onboard.pressEnterStart": "Drücken Sie Enter, um zu chatten!",
   "tui.queue.status": "⏳ %d in Warteschlange — Enter zum Hinzufügen, /flushq jetzt senden, /clearq verwerfen",
+  "tui.queue.row": "⏳ %d in Warteschlange · ",
   "tui.queue.removeHint": " · %s entfernt die letzte",
   "tui.queue.full": "Warteschlange voll (%d) — Nachricht nicht eingereiht",
   "tui.queue.removed": "letzte Nachricht in der Warteschlange entfernt",

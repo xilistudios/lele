@@ -209,6 +209,13 @@ func (m *Model) renderChatLayout() string {
 	// ── Status line ──
 	statusLine := m.renderStatusLine(leftWidth)
 
+	// ── Queue row ──
+	// The pending-message band sits above the process indicator, between the
+	// transcript and the status line. It is resolved here because it both
+	// costs a line in the viewport budget and is rendered into the left
+	// column. Empty when the queue is idle, so the common case pays nothing.
+	queueRow := m.queueRowLine(leftWidth - 2)
+
 	// ── Autocomplete ──
 	var autocompleteView string
 	if m.showAutocomplete && len(m.autocompleteItems) > 0 {
@@ -221,6 +228,14 @@ func (m *Model) renderChatLayout() string {
 		statusLineRendered = lipgloss.NewStyle().Foreground(CommentColor).Render(statusLine)
 	} else {
 		statusLineRendered = StatusLineStyle.Render(statusLine)
+	}
+
+	// ── Queue row rendered ──
+	// Styled only when non-empty: lipgloss.Height("") is 1, so passing a bare
+	// empty string to the budget would silently reserve a phantom line.
+	var queueRowRendered string
+	if queueRow != "" {
+		queueRowRendered = QueueRowStyle.Render(queueRow)
 	}
 
 	// ── Input bar ──
@@ -283,18 +298,30 @@ func (m *Model) renderChatLayout() string {
 	)
 
 	// ── Viewport ──
+	// lipgloss.Height("") reports 1, so every optional band is measured from
+	// its own rendered string: a band that renders as "" passes 0 and costs no
+	// line, while a non-empty one reserves exactly what it draws.
+	autocompleteHeight := 0
+	if autocompleteView != "" {
+		autocompleteHeight = lipgloss.Height(autocompleteView)
+	}
+	queueRowHeight := 0
+	if queueRowRendered != "" {
+		queueRowHeight = lipgloss.Height(queueRowRendered)
+	}
 	m.viewport.Width = leftWidth - 2
 	m.viewport.Height = calculateViewportHeight(
 		contentHeight,
 		lipgloss.Height(statusLineRendered),
-		lipgloss.Height(autocompleteView),
+		queueRowHeight,
+		autocompleteHeight,
 		lipgloss.Height(inputBar),
 		lipgloss.Height(bottomBar),
 	)
 	m.updateViewport()
 
 	// ── Left Column (Chat Contents) ──
-	leftPane := m.renderLeftColumn(leftWidth, contentHeight, statusLineRendered, autocompleteView, inputBar, bottomBar)
+	leftPane := m.renderLeftColumn(leftWidth, contentHeight, statusLineRendered, queueRowRendered, autocompleteView, inputBar, bottomBar)
 
 	// ── Right Column (Sidebar Panel) ──
 	rightPane := m.renderRightColumn(rightWidth, contentWidth(rightWidth), contentHeight)
@@ -328,9 +355,10 @@ func contentWidth(rightWidth int) int {
 	return cw
 }
 
-// renderStatusLine builds the status line shown above the input bar. It
-// includes processing indicators, selection feedback, queue count, and
-// the goal badge.
+// renderStatusLine builds the process indicator shown above the input bar.
+// It owns the loading state (spinner, selection feedback, timing) and the goal
+// badge, and nothing else: the pending queue lives in its own band above this
+// line (see queueRowLine), so the two never compete for the same cells.
 func (m *Model) renderStatusLine(leftWidth int) string {
 	isProcessing := m.isSessionProcessing()
 
@@ -359,11 +387,6 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 		statusLine = fmt.Sprintf(i18n.T("tui.doneIn"), m.lastDuration.Seconds())
 	} else {
 		statusLine = i18n.T("tui.ready")
-	}
-
-	// Queue indicator
-	if qs := m.queueStatusLine((leftWidth - 2) - lipgloss.Width(statusLine)); qs != "" {
-		statusLine = fmt.Sprintf("%s · %s", statusLine, qs)
 	}
 
 	// Goal badge
@@ -398,8 +421,9 @@ func (m *Model) renderStatusLine(leftWidth int) string {
 }
 
 // renderLeftColumn assembles the left pane of the split-column layout:
-// viewport, status line, autocomplete, input bar, and bottom bar.
-func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendered, autocompleteView, inputBar, bottomBar string) string {
+// viewport, queue row, status line, autocomplete, input bar, and bottom bar.
+// queueRow may be empty, in which case it contributes no line at all.
+func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendered, queueRow, autocompleteView, inputBar, bottomBar string) string {
 	var leftBuilder strings.Builder
 
 	viewportContent := m.viewport.View()
@@ -407,6 +431,12 @@ func (m *Model) renderLeftColumn(leftWidth, contentHeight int, statusLineRendere
 		viewportContent = m.applySelectionHighlight(viewportContent)
 	}
 	leftBuilder.WriteString(ViewportStyle.Render(viewportContent) + "\n")
+	// The queue band sits *above* the process indicator: it describes work that
+	// is waiting (not yet started), while the line under it describes the turn
+	// that is running right now. Reading order then matches chronology.
+	if queueRow != "" {
+		leftBuilder.WriteString(queueRow + "\n")
+	}
 	leftBuilder.WriteString(statusLineRendered + "\n")
 	if autocompleteView != "" {
 		leftBuilder.WriteString(autocompleteView + "\n")

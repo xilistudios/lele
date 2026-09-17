@@ -3,8 +3,12 @@ package tui
 // calculateViewportHeight reserves every line rendered below the viewport.
 // Keeping this budget exact prevents the input and bottom bar from spilling
 // past the terminal height and being painted twice by the TUI renderer.
-func calculateViewportHeight(contentHeight, statusHeight, autocompleteHeight, inputHeight, bottomHeight int) int {
-	otherHeight := 1 + statusHeight + 1 + inputHeight + 1 + bottomHeight
+//
+// queueRowHeight is the queued-message band: callers must pass 0 when the
+// queue is idle. Passing lipgloss.Height("") (which is 1) would reserve a
+// phantom line and shrink the transcript for no visible reason.
+func calculateViewportHeight(contentHeight, statusHeight, queueRowHeight, autocompleteHeight, inputHeight, bottomHeight int) int {
+	otherHeight := 1 + statusHeight + 1 + queueRowHeight + inputHeight + 1 + bottomHeight
 	if autocompleteHeight > 0 {
 		otherHeight += autocompleteHeight
 	}

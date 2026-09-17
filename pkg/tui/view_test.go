@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 func TestCalculateViewportHeight(t *testing.T) {
@@ -14,6 +15,7 @@ func TestCalculateViewportHeight(t *testing.T) {
 		name          string
 		contentHeight int
 		statusHeight  int
+		queueRow      int
 		autocomplete  int
 		inputHeight   int
 		bottomHeight  int
@@ -37,6 +39,15 @@ func TestCalculateViewportHeight(t *testing.T) {
 			want:          9,
 		},
 		{
+			name:          "queue row consumes exactly one line",
+			contentHeight: 24,
+			statusHeight:  3,
+			queueRow:      1,
+			inputHeight:   3,
+			bottomHeight:  1,
+			want:          13,
+		},
+		{
 			name:          "small terminal keeps minimum viewport",
 			contentHeight: 8,
 			statusHeight:  3,
@@ -48,11 +59,118 @@ func TestCalculateViewportHeight(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := calculateViewportHeight(tt.contentHeight, tt.statusHeight, tt.autocomplete, tt.inputHeight, tt.bottomHeight)
+			got := calculateViewportHeight(tt.contentHeight, tt.statusHeight, tt.queueRow, tt.autocomplete, tt.inputHeight, tt.bottomHeight)
 			if got != tt.want {
 				t.Fatalf("calculateViewportHeight() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+// The queue preview band adds a line to the left column, so it is a new way
+// for the frame to overshoot the terminal height. This asserts the exact-height
+// invariant with a full queue, the autocomplete overlay, or both on screen.
+func TestView_HeightExactWithQueueAndAutocomplete(t *testing.T) {
+	m := newTestModel(t)
+
+	key := "tui:chat:view-height-queue"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+	m.sessionMgr.AddMessage(key, "user", "hi")
+	m.sessionMgr.AddMessage(key, "assistant", "hello there")
+	m.currentKey = key
+	m.showWelcome = false
+
+	states := []struct {
+		name             string
+		queue, autocompl bool
+	}{
+		{"plain", false, false},
+		{"queue", true, false},
+		{"autocomplete", false, true},
+		{"queue+autocomplete", true, true},
+	}
+
+	for _, st := range states {
+		t.Run(st.name, func(t *testing.T) {
+			m.messageQueue = map[string][]queuedMessage{}
+			m.showAutocomplete = false
+			m.autocompleteItems = nil
+
+			if st.queue {
+				m.enqueueMessage("a queued message that is long enough to be truncated at narrow widths")
+			}
+			if st.autocompl {
+				m.showAutocomplete = true
+				m.autocompleteItems = []commandInfo{
+					{name: "/help", description: "show help"},
+					{name: "/new", description: "start a new session"},
+				}
+			}
+
+			for _, size := range []struct{ w, h int }{
+				{80, 24}, {120, 30}, {100, 20}, {160, 40}, {70, 15},
+			} {
+				m.width, m.height = size.w, size.h
+				lines := strings.Split(m.View(), "\n")
+				if len(lines) != size.h {
+					t.Fatalf("%dx%d: m.View() returned %d lines, want exact %d", size.w, size.h, len(lines), size.h)
+				}
+			}
+		})
+	}
+}
+
+// Queue work is *waiting*, the status line is the turn *running now*: the band
+// belongs above the process indicator so the pane reads chronologically, and
+// the indicator must not carry queue text of its own (it used to, which put the
+// pending count next to the loading state and duplicated the band's depth).
+func TestQueueRowSitsAboveStatusLine(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	m := newTestModel(t)
+
+	key := "tui:chat:order-test"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+	m.sessionMgr.AddMessage(key, "user", "hi")
+	m.currentKey = key
+	m.showWelcome = false
+	m.width, m.height = 120, 30
+
+	// A live turn, so the loading indicator is rendered alongside the band.
+	m.processing = true
+	m.startTime = time.Now()
+
+	m.enqueueMessage("deferred message")
+
+	leftWidth := int(float64(m.width) * leftColumnRatio)
+	statusLine := m.renderStatusLine(leftWidth)
+	if strings.Contains(statusLine, "⏳") {
+		t.Fatalf("status line %q still carries the queue indicator", statusLine)
+	}
+	depthPrefix := strings.TrimSpace(fmt.Sprintf(i18n.T("tui.queue.row"), 1))
+	if strings.Contains(statusLine, depthPrefix) {
+		t.Fatalf("status line %q duplicates the queue depth from the band", statusLine)
+	}
+
+	lines := strings.Split(m.View(), "\n")
+	bandIdx, statusIdx := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "deferred message") {
+			bandIdx = i
+		}
+		if strings.Contains(line, i18n.T("tui.processing")) {
+			statusIdx = i
+		}
+	}
+	if bandIdx < 0 {
+		t.Fatalf("queue band not found in the frame:\n%s", m.View())
+	}
+	if statusIdx < 0 {
+		t.Fatalf("process indicator not found in the frame:\n%s", m.View())
+	}
+	if bandIdx > statusIdx {
+		t.Fatalf("queue band at line %d is below the process indicator at line %d", bandIdx, statusIdx)
 	}
 }
 

@@ -296,6 +296,7 @@
   "tui.onboard.tipConnect": "  /connect Add another provider",
   "tui.onboard.pressEnterStart": "Press Enter to start chatting!",
   "tui.queue.status": "⏳ %d queued — Enter to add, /flushq cancel+send, /clearq drop",
+  "tui.queue.row": "⏳ %d queued · ",
   "tui.queue.removeHint": " · %s removes last",
   "tui.queue.flushHint": " · %s cancels the turn and sends next",
   "tui.queue.full": "queue full (%d) — message not queued",

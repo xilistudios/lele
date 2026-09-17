@@ -285,36 +285,52 @@ const queueRemoveKey = "alt+delete"
 // is indistinguishable from enter on most terminals.
 const queueFlushKey = "alt+enter"
 
-// queueStatusLine returns the queue strip text, or "" when there is nothing to
-// show. The count is scoped to the session on screen, so switching sessions
-// cannot display a stale depth.
+// queueRowLine renders the band that sits between the transcript and the
+// process indicator: the depth of the current session's queue plus the oldest
+// pending message, so the user can see *what* is about to be sent without
+// opening anything. The depth is scoped to the session on screen, so switching
+// sessions cannot display a stale count.
 //
-// available is how many display cells the strip may occupy in the status line
-// (the rest is taken by the base status text and the goal badge). The
-// key hints are only appended when they fit: view.go clamps the whole line
-// by cells, and a hint cut in half is worse than no hint at all. The count
-// itself always stays — dropping it would hide pending messages.
-func (m *Model) queueStatusLine(available int) string {
-	if m.queueFeedback != "" {
-		return m.queueFeedback
+// This band is the only place the queue surfaces in the TUI — the status line
+// belongs to the process indicator — so the transient queue feedback ("queue
+// full", "removed last …") is rendered here as well, and it takes over the band
+// even when the queue is empty (e.g. after the last message was removed).
+//
+// It returns "" when there is nothing to say. An empty band costs zero lines:
+// calculateViewportHeight measures the rendered string, so an idle queue leaves
+// the transcript its full height.
+//
+// The preview is sanitized, collapsed to a single line and truncated to the
+// cells that remain after the prefix. A multi-line message must not wrap: the
+// viewport budget reserves exactly one line for this band, so an overflow would
+// push the input bar past the terminal height. The locale template carries the
+// separator itself, so the prefix is joined to the preview verbatim.
+func (m *Model) queueRowLine(available int) string {
+	if available < 1 {
+		return ""
 	}
+	// Feedback is time-sensitive (a rejected or removed message) and outranks
+	// the depth/preview pair, which comes back as soon as it clears.
+	if m.queueFeedback != "" {
+		return truncateRightCells(m.queueFeedback, available)
+	}
+
 	n := m.queueDepth()
 	if n == 0 {
 		return ""
 	}
-	status := fmt.Sprintf(i18n.T("tui.queue.status"), n)
-	removeHint := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
-	flushHint := fmt.Sprintf(i18n.T("tui.queue.flushHint"), queueFlushKey)
-	if lipgloss.Width(status)+lipgloss.Width(removeHint)+lipgloss.Width(flushHint) <= available {
-		return status + removeHint + flushHint
+
+	// The locale template already ends with the " · " separator (same
+	// convention as tui.queue.removeHint), so no separator is added here.
+	prefix := fmt.Sprintf(i18n.T("tui.queue.row"), n)
+	// Remaining cells for the preview after the prefix. When even the prefix
+	// alone does not fit, the depth still wins over the message text: the
+	// count is the load-bearing information.
+	budget := available - lipgloss.Width(prefix)
+	if budget < 1 {
+		return truncateRightCells(strings.TrimRight(prefix, " "), available)
 	}
-	// Prefer the remove hint when only one fits: the base status already names
-	// /flushq, so demoting the shorter older hint is the worse trade-off.
-	if lipgloss.Width(status)+lipgloss.Width(removeHint) <= available {
-		return status + removeHint
-	}
-	if lipgloss.Width(status)+lipgloss.Width(flushHint) <= available {
-		return status + flushHint
-	}
-	return status
+
+	preview := truncateRightCells(singleLine(sanitizeDisplayText(m.queuePreview())), budget)
+	return prefix + preview
 }

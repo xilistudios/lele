@@ -150,32 +150,117 @@ func TestQueueEnforceMaxDepth(t *testing.T) {
 	}
 }
 
-func TestQueueStatusLine(t *testing.T) {
+// The queue band is the queue's only surface in the TUI: it carries both the
+// depth/preview pair and the transient feedback that used to ride in the status
+// line, and it is silent when it has nothing to say.
+func TestQueueRowLineFeedback(t *testing.T) {
 	i18n.InitWithLanguage("en") // the host locale must not decide the assertions
 	m := newQueueTestModel()
-	if got := m.queueStatusLine(80); got != "" {
-		t.Fatalf("empty queue status = %q, want empty", got)
+	if got := m.queueRowLine(80); got != "" {
+		t.Fatalf("empty queue row = %q, want empty", got)
 	}
+
 	m.enqueueMessage("hello")
-	if got := m.queueStatusLine(80); !strings.Contains(got, "1") {
-		t.Fatalf("status line %q does not mention the pending count", got)
+	if got := m.queueRowLine(80); !strings.Contains(got, "1") || !strings.Contains(got, "hello") {
+		t.Fatalf("queue row = %q, want depth and preview", got)
 	}
-	// Both key hints ride along when there is room and are dropped when the
-	// budget is tight — the count itself must survive either way.
-	if got := m.queueStatusLine(200); !strings.Contains(got, queueRemoveKey) {
-		t.Fatalf("status line %q lacks the %s hint despite room", got, queueRemoveKey)
-	}
-	if got := m.queueStatusLine(200); !strings.Contains(got, queueFlushKey) {
-		t.Fatalf("status line %q lacks the %s hint despite room", got, queueFlushKey)
-	}
-	m.queueFeedback = ""
-	if got := m.queueStatusLine(20); !strings.Contains(got, "1") || strings.Contains(got, queueRemoveKey) {
-		t.Fatalf("tight-budget status line = %q, want count without hint", got)
-	}
-	// A feedback message (e.g. queue full) takes precedence over the count.
+
+	// Feedback (e.g. queue full) takes precedence over the depth/preview pair.
 	m.queueFeedback = "queue full"
-	if got := m.queueStatusLine(80); got != "queue full" {
-		t.Fatalf("status line = %q, want the feedback text", got)
+	if got := m.queueRowLine(80); got != "queue full" {
+		t.Fatalf("queue row = %q, want the feedback text", got)
+	}
+
+	// Feedback also has to show at depth 0 (e.g. right after the last queued
+	// message was removed), and it must respect the width budget.
+	m = newQueueTestModel()
+	m.queueFeedback = i18n.T("tui.queue.removed")
+	if got := m.queueRowLine(80); got != m.queueFeedback {
+		t.Fatalf("queue row = %q, want the removal feedback with an empty queue", got)
+	}
+	long := strings.Repeat("feedback ", 20)
+	m.queueFeedback = long
+	if got := m.queueRowLine(30); lipgloss.Width(got) > 30 {
+		t.Fatalf("feedback row = %q (%d cells), want <= 30", got, lipgloss.Width(got))
+	}
+
+	// Nothing fits: the band yields an empty line so it costs no row.
+	if got := m.queueRowLine(0); got != "" {
+		t.Fatalf("queue row at width 0 = %q, want empty", got)
+	}
+}
+
+// --- queue preview band -----------------------------------------------------
+
+// The band under the status line must say *what* is about to be sent, stay one
+// line tall no matter the payload, and disappear entirely when idle — the
+// viewport budget only reserves a line for it when it is non-empty.
+func TestQueueRowLine(t *testing.T) {
+	i18n.InitWithLanguage("en") // the host locale must not decide the assertions
+	m := newQueueTestModel()
+
+	if got := m.queueRowLine(80); got != "" {
+		t.Fatalf("idle queue row = %q, want empty", got)
+	}
+
+	m.enqueueMessage("deploy the staging build")
+	got := m.queueRowLine(80)
+	if !strings.Contains(got, "1") {
+		t.Fatalf("queue row %q does not mention the pending count", got)
+	}
+	if !strings.Contains(got, "deploy the staging build") {
+		t.Fatalf("queue row %q does not preview the oldest pending message", got)
+	}
+	// The locale template carries its own trailing separator; joining it with
+	// another one would render "· ·".
+	if strings.Contains(got, "· ·") {
+		t.Fatalf("queue row %q rendered a doubled separator", got)
+	}
+
+	// The preview must show the message that will be sent *first*, not the
+	// freshest one.
+	m.enqueueMessage("second message")
+	if got := m.queueRowLine(80); !strings.Contains(got, "deploy the staging build") || strings.Contains(got, "second message") {
+		t.Fatalf("queue row %q should preview the FIFO head", got)
+	}
+
+	// A multi-line payload must collapse: the band is budgeted exactly one
+	// line, so a newline here would push the composer off the screen.
+	m2 := newQueueTestModel()
+	m2.enqueueMessage("first line\nsecond line\twith tabs")
+	if got := m2.queueRowLine(80); strings.Contains(got, "\n") || !strings.Contains(got, "first line second line") {
+		t.Fatalf("queue row %q was not collapsed to a single line", got)
+	}
+
+	// Control sequences must never reach the terminal.
+	m3 := newQueueTestModel()
+	m3.enqueueMessage("\x1b[31mred\x1b[0m\x07bell")
+	if got := m3.queueRowLine(80); strings.Contains(got, "\x1b") || strings.Contains(got, "\x07") {
+		t.Fatalf("queue row %q leaked terminal control characters", got)
+	}
+}
+
+// Whatever the terminal width, the band occupies at most the cells it is
+// given, and it yields a whole line (empty string) rather than a sliver.
+func TestQueueRowLineRespectsWidthBudget(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	m := newQueueTestModel()
+	m.enqueueMessage(strings.Repeat("wide payload ", 20))
+
+	for _, avail := range []int{1, 2, 3, 5, 10, 40, 200} {
+		got := m.queueRowLine(avail)
+		if got == "" {
+			continue // legitimate: nothing meaningful fits
+		}
+		if w := lipgloss.Width(got); w > avail {
+			t.Errorf("queue row at avail=%d renders %d cells: %q", avail, w, got)
+		}
+		if strings.Contains(got, "\n") {
+			t.Errorf("queue row at avail=%d is multi-line: %q", avail, got)
+		}
+		if strings.HasSuffix(got, " ") {
+			t.Errorf("queue row at avail=%d has trailing whitespace: %q", avail, got)
+		}
 	}
 }
 
@@ -695,6 +780,7 @@ func TestQueueStringsAreLocalized(t *testing.T) {
 	keys := []string{
 		"tui.queue.full",
 		"tui.queue.status",
+		"tui.queue.row",
 		"tui.queue.removeHint",
 		"tui.queue.flushHint",
 		"tui.queue.removed",
@@ -712,8 +798,8 @@ func TestQueueStringsAreLocalized(t *testing.T) {
 		// leftovers of the original hardcoded English.
 		m := newQueueTestModel()
 		m.enqueueMessage("hello")
-		if got, want := m.queueStatusLine(200), fmt.Sprintf(i18n.T("tui.queue.status"), 1); !strings.HasPrefix(got, want) {
-			t.Errorf("[%s] status line = %q, want the localized template %q", lang, got, want)
+		if got, want := m.queueRowLine(200), fmt.Sprintf(i18n.T("tui.queue.row"), 1); !strings.HasPrefix(got, want) {
+			t.Errorf("[%s] queue row = %q, want the localized template %q", lang, got, want)
 		}
 		m.queueFeedback = ""
 		for i := 0; i < maxQueuedMessages; i++ {
@@ -926,37 +1012,4 @@ func TestQueueFlushKeybinding(t *testing.T) {
 	}
 	// Nothing new on the bus — only the earlier "keyed" publish.
 	expectNoInbound(t, m)
-}
-
-// The status-line hint prefers flush next, then remove last, dropping whichever
-// does not fit.
-func TestQueueStatusLineIncludesFlushHint(t *testing.T) {
-	i18n.InitWithLanguage("en")
-	m := newQueueTestModel()
-	m.enqueueMessage("hello")
-
-	status := fmt.Sprintf(i18n.T("tui.queue.status"), 1)
-	flush := fmt.Sprintf(i18n.T("tui.queue.flushHint"), queueFlushKey)
-	remove := fmt.Sprintf(i18n.T("tui.queue.removeHint"), queueRemoveKey)
-
-	wide := m.queueStatusLine(200)
-	if !strings.Contains(wide, flush) {
-		t.Fatalf("wide status = %q, want flush hint %q", wide, flush)
-	}
-	if !strings.Contains(wide, remove) {
-		t.Fatalf("wide status = %q, want remove hint %q", wide, remove)
-	}
-
-	// Room for the count + remove only: flush is dropped rather than clipped
-	// (the base status already names /flushq).
-	tight := m.queueStatusLine(lipgloss.Width(status) + lipgloss.Width(remove) + 1)
-	if !strings.HasPrefix(tight, status) {
-		t.Fatalf("tight status = %q, want prefix %q", tight, status)
-	}
-	if !strings.Contains(tight, remove) {
-		t.Fatalf("tight status = %q, want the remove hint to win over flush", tight)
-	}
-	if strings.Contains(tight, flush) {
-		t.Fatalf("tight status = %q, want flush dropped when it does not fit", tight)
-	}
 }
