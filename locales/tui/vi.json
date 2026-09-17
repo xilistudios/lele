@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect Thêm nhà cung cấp khác",
   "tui.onboard.pressEnterStart": "Nhấn Enter để bắt đầu trò chuyện!",
   "tui.queue.status": "⏳ %d đang chờ — Enter để thêm, /flushq gửi ngay, /clearq xóa",
+  "tui.queue.row": "⏳ %d đang chờ · ",
   "tui.queue.removeHint": " · %s xóa mục cuối",
   "tui.queue.full": "hàng đợi đầy (%d) — tin nhắn không được xếp hàng",
   "tui.queue.removed": "đã xóa tin nhắn chờ cuối cùng",

@@ -296,6 +296,7 @@
   "tui.onboard.tipConnect": "  /connect Adicionar outro provedor",
   "tui.onboard.pressEnterStart": "Pressione Enter para começar a conversar!",
   "tui.queue.status": "⏳ %d na fila — Enter para adicionar, /flushq cancela e envia, /clearq limpar",
+  "tui.queue.row": "⏳ %d na fila · ",
   "tui.queue.removeHint": " · %s remove o último",
   "tui.queue.flushHint": " · %s cancela o turno e envia o próximo",
   "tui.queue.full": "fila cheia (%d) — mensagem não enfileirada",

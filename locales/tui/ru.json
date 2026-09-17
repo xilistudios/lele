@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect Добавить другого провайдера",
   "tui.onboard.pressEnterStart": "Нажмите Enter, чтобы начать чат!",
   "tui.queue.status": "⏳ в очереди: %d — Enter добавить, /flushq отправить сейчас, /clearq очистить",
+  "tui.queue.row": "⏳ в очереди: %d · ",
   "tui.queue.removeHint": " · %s удаляет последнее",
   "tui.queue.full": "очередь заполнена (%d) — сообщение не поставлено в очередь",
   "tui.queue.removed": "последнее сообщение в очереди удалено",

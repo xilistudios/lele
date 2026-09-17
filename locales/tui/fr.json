@@ -286,6 +286,7 @@
   "tui.onboard.tipConnect": "  /connect Ajouter un autre fournisseur",
   "tui.onboard.pressEnterStart": "Appuyez sur Entrée pour commencer à discuter !",
   "tui.queue.status": "⏳ %d en file — Entrée pour ajouter, /flushq envoyer maintenant, /clearq vider",
+  "tui.queue.row": "⏳ %d en file · ",
   "tui.queue.removeHint": " · %s supprime le dernier",
   "tui.queue.full": "file pleine (%d) — message non mis en file",
   "tui.queue.removed": "dernier message en file supprimé",

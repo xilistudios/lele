@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect 添加其他提供商",
   "tui.onboard.pressEnterStart": "按 Enter 开始聊天！",
   "tui.queue.status": "⏳ %d 条排队 — Enter 添加，/flushq 立即发送，/clearq 丢弃",
+  "tui.queue.row": "⏳ %d 条排队 · ",
   "tui.queue.removeHint": " · %s 删除最后一条",
   "tui.queue.full": "队列已满（%d）— 消息未入队",
   "tui.queue.removed": "已删除最后一条排队消息",

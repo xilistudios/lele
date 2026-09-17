@@ -318,3 +318,36 @@ func (m *Model) queueStatusLine(available int) string {
 	}
 	return status
 }
+
+// queueRowLine renders the queued-message preview band that sits directly
+// above the composer: the depth of the current session's queue plus the oldest
+// pending message, so the user can see *what* is about to be sent without
+// opening anything. It returns "" when the queue is empty, and the band then
+// costs zero lines (calculateViewportHeight only reserves it when non-empty).
+//
+// The preview is sanitized, collapsed to a single line and truncated to the
+// cells that remain after the prefix. A multi-line message must not wrap: the
+// viewport budget reserves exactly one line for this band, so an overflow would
+// push the input bar past the terminal height. The locale template carries the
+// separator itself (like tui.queue.removeHint), so the prefix is joined to the
+// preview verbatim.
+func (m *Model) queueRowLine(available int) string {
+	n := m.queueDepth()
+	if n == 0 {
+		return ""
+	}
+
+	// The locale template already ends with the " · " separator (same
+	// convention as tui.queue.removeHint), so no separator is added here.
+	prefix := fmt.Sprintf(i18n.T("tui.queue.row"), n)
+	// Remaining cells for the preview after the prefix. When even the prefix
+	// alone does not fit, the depth still wins over the message text: the
+	// count is the load-bearing information.
+	budget := available - lipgloss.Width(prefix)
+	if budget < 1 {
+		return truncateRightCells(strings.TrimRight(prefix, " "), available)
+	}
+
+	preview := truncateRightCells(singleLine(sanitizeDisplayText(m.queuePreview())), budget)
+	return prefix + preview
+}

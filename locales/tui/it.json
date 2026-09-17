@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect Aggiungi un altro provider",
   "tui.onboard.pressEnterStart": "Premi Invio per iniziare la chat!",
   "tui.queue.status": "⏳ %d in coda — Enter per aggiungere, /flushq invia ora, /clearq scarta",
+  "tui.queue.row": "⏳ %d in coda · ",
   "tui.queue.removeHint": " · %s rimuove l'ultimo",
   "tui.queue.full": "coda piena (%d) — messaggio non accodato",
   "tui.queue.removed": "ultimo messaggio in coda rimosso",

@@ -60,6 +60,9 @@ var (
 	// StatusLineStyle is the active status / duration line.
 	StatusLineStyle lipgloss.Style
 
+	// QueueRowStyle is the queued-message preview band under the status line.
+	QueueRowStyle lipgloss.Style
+
 	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft lipgloss.Style
 
@@ -243,6 +246,12 @@ func rebuildStyles(t theme.Theme) {
 		Foreground(CommentColor).
 		MarginTop(1).
 		MarginBottom(1)
+
+	// QueueRowStyle is the queued-message preview band under the status line:
+	// the oldest pending message, dimmed so it reads as "not sent yet".
+	QueueRowStyle = lipgloss.NewStyle().
+		Foreground(CommentColor).
+		Italic(true)
 
 	// BottomBarLeft is the left side of the bottom bar.
 	BottomBarLeft = lipgloss.NewStyle().

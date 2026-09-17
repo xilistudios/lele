@@ -277,6 +277,7 @@
   "tui.onboard.tipConnect": "  /connect 다른 제공자 추가",
   "tui.onboard.pressEnterStart": "Enter를 눌러 대화를 시작하세요!",
   "tui.queue.status": "⏳ %d개 대기 중 — Enter로 추가, /flushq로 지금 전송, /clearq로 삭제",
+  "tui.queue.row": "⏳ %d개 대기 중 · ",
   "tui.queue.removeHint": " · %s 마지막 항목 제거",
   "tui.queue.full": "대기열 가득 참 (%d) — 메시지가 대기되지 않았습니다",
   "tui.queue.removed": "마지막 대기 메시지가 제거되었습니다",
