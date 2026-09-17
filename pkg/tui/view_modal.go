@@ -99,6 +99,12 @@ func (m *Model) renderActiveModal() string {
 	case ModalSettingsTUI:
 		return m.renderTUISettings(title)
 	case ModalSettingsAgents:
+		// The add-agent flow (settingsEditField == "newAgentID") and its
+		// validation errors render in the inline edit view; without this the
+		// text input is focused but never shown, so "Add Agent" appears dead.
+		if m.settingsEditField != "" {
+			return m.renderAgentEditInput()
+		}
 		return m.renderModal(title)
 	case ModalSettingsAgentEdit:
 		if m.subagentPickerActive {

@@ -886,3 +886,59 @@ func TestDefaultsSelectorConfirmThinkingLevelEndToEnd(t *testing.T) {
 		t.Fatalf("expected defaults off, got %v", d)
 	}
 }
+
+// TestAddAgentFlowRendersInput guards the rendering half of the add-agent
+// flow: after selecting "+ Add Agent" (which sets settingsEditField to
+// "newAgentID" while modalMode stays ModalSettingsAgents), the view must show
+// the Agent ID text input — not the plain list. Previously the renderer for
+// ModalSettingsAgents ignored settingsEditField, so the input was focused but
+// invisible and the whole flow looked dead (Enter/typing had no feedback).
+func TestAddAgentFlowRendersInput(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.resetModal(ModalSettingsAgents)
+	m.loadAgentsSettings()
+	m.width, m.height = 100, 30
+
+	// Enter on the "Add Agent" row starts the flow.
+	m.modalSelectedIdx = len(m.settingsAgentKeys) - 1
+	m.handleAgentsEnter()
+	if m.settingsEditField != "newAgentID" {
+		t.Fatalf("expected newAgentID edit field, got %q", m.settingsEditField)
+	}
+
+	// The rendered frame must contain the input prompt, not just the list.
+	frame := m.renderAgentEditInput()
+	if !strings.Contains(frame, "Agent ID") {
+		t.Fatalf("add-agent view must render the 'Agent ID' input prompt, got:\n%s", frame)
+	}
+
+	// View dispatch for ModalSettingsAgents must route to the edit input.
+	view := m.renderActiveModal()
+	if !strings.Contains(view, "Agent ID") {
+		t.Fatal("modal dispatch for ModalSettingsAgents + newAgentID must render the input prompt")
+	}
+	// And must NOT show the plain list (no "> + Add Agent" row while editing).
+	if strings.Contains(view, "+ Add Agent") {
+		t.Fatal("edit view must replace the list while the add-agent input is active")
+	}
+}
+
+// TestAddAgentFlowRendersErrors guards that validation errors during the
+// add-agent flow (empty ID / duplicate ID) are surfaced in the rendered view;
+// they were invisible while the flow rendered the plain list.
+func TestAddAgentFlowRendersErrors(t *testing.T) {
+	m := newAgentsTestModel(t)
+	m.resetModal(ModalSettingsAgents)
+	m.loadAgentsSettings()
+	m.width, m.height = 100, 30
+	m.settingsEditField = "newAgentID"
+
+	m.handleAgentSettingsInput("coder") // duplicate of an existing agent
+	if m.formError == "" {
+		t.Fatal("expected duplicate-id error to be set")
+	}
+	view := m.renderActiveModal()
+	if !strings.Contains(view, m.formError) {
+		t.Fatalf("modal dispatch must show the add-agent validation error %q", m.formError)
+	}
+}
