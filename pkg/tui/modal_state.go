@@ -1,5 +1,7 @@
 package tui
 
+import "time"
+
 // Modal lifecycle helpers: state reset and modal-kind classification.
 func (m *Model) resetModal(mode modalType) {
 	m.modalMode = mode
@@ -27,6 +29,8 @@ func (m *Model) resetModal(mode modalType) {
 	m.commandsFeedback = ""
 	m.commandsEditKey = ""
 	m.commandsEditScope = ""
+	m.commandsDeleteKey = ""
+	m.commandsDeleteArmed = time.Time{}
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""

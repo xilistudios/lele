@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -37,6 +38,11 @@ const (
 	commandTemplateStep = 6
 	commandFormSteps    = 7
 )
+
+// commandsDeleteConfirmWindow is how long the "press d again" confirmation
+// stays armed after the first press (mirrors the double-confirm pattern used
+// by force-send while busy).
+const commandsDeleteConfirmWindow = 5 * time.Second
 
 // commandReservedExts would double up once ".md" is appended by the writer
 // ("review.md" -> the command "review.md.md"); rejected, never normalised.
@@ -108,8 +114,14 @@ func serializeCommandMarkdown(description, agentName, model string, allowShell b
 // markdownFieldValue quotes a scalar that would otherwise break the simple
 // "key: value" grammar the harness parser understands.
 func markdownFieldValue(v string) string {
-	if strings.Contains(v, ": ") || strings.HasPrefix(v, " ") || strings.HasSuffix(v, " ") {
-		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+	// Newlines can never be represented (the parser reads one key: value per
+	// line), so they are flattened to spaces before the quoting decision.
+	v = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(v)
+	if strings.Contains(v, ": ") || strings.Contains(v, `"`) || strings.Contains(v, `\\`) ||
+		strings.HasPrefix(v, " ") || strings.HasSuffix(v, " ") {
+		v = strings.ReplaceAll(v, `\\`, `\\\\`)
+		v = strings.ReplaceAll(v, `"`, `\"`)
+		return `"` + v + `"`
 	}
 	return v
 }
@@ -224,6 +236,14 @@ func (m *Model) startCommandEdit(key string) {
 	row, mgr, ok := m.lookupCommandRow(key)
 	if !ok {
 		m.commandsFeedback = i18n.T("tui.commands.gone")
+		// The row vanished under the cursor: drop back to the list so the
+		// feedback line (only rendered there) is actually visible.
+		if m.modalMode == ModalCommandDetail {
+			m.commandsDetailMode = false
+			m.commandsDetailKey = ""
+			m.modalMode = ModalCommands
+			m.loadCommandsList()
+		}
 		return
 	}
 	if row.Source == string(harness.SourceDirectory) {
@@ -414,6 +434,13 @@ func (m *Model) saveCommandForm() tea.Cmd {
 	if err != nil {
 		return m.commandFormBackToName(err.Error())
 	}
+	// A body that opens with the frontmatter delimiter would sit right after
+	// the closing --- of the real block and confuse every future reader of
+	// the file, including strict YAML parsers.
+	if t := strings.TrimLeft(template, " \t\r\n"); strings.HasPrefix(t, "---") {
+		m.formError = i18n.T("tui.commands.templateStartsFrontmatter")
+		return nil
+	}
 	oldName := ""
 	if i := strings.IndexByte(m.commandsEditKey, ':'); i >= 0 {
 		oldName = m.commandsEditKey[i+1:]
@@ -558,7 +585,8 @@ func (m *Model) saveCommandFile(name, oldName, description, agentName, model str
 	// Rename: the old file must go, or the same name lingers as a stale
 	// definition at this level.
 	if m.commandsEditKey != "" && oldName != name {
-		if oldRow, _, ok := m.lookupCommandRow(m.commandsEditKey); ok && oldRow.Path != "" {
+		if oldRow, _, ok := m.lookupCommandRow(m.commandsEditKey); ok && oldRow.Path != "" &&
+			commandFileWithinScope(oldRow, m.commandsEditScope, dir) == nil {
 			_ = os.Remove(oldRow.Path)
 		}
 	}
@@ -584,6 +612,51 @@ func (m *Model) invalidateCommandScope(scope string) {
 }
 
 // --- delete ----------------------------------------------------------------
+
+// requestCommandDelete arms the double-confirm: the first "d" only shows the
+// warning line, the second one within commandsDeleteConfirmWindow actually
+// removes the definition. Deleting a command file is irreversible from the
+// TUI, so a stray keystroke must never do it.
+func (m *Model) requestCommandDelete(key string) tea.Cmd {
+	if m.commandsDeleteKey == key && time.Since(m.commandsDeleteArmed) < commandsDeleteConfirmWindow {
+		m.commandsDeleteKey = ""
+		return m.deleteCommandRow(key)
+	}
+	m.commandsDeleteKey = key
+	m.commandsDeleteArmed = time.Now()
+	m.commandsFeedback = i18n.T("tui.commands.confirmDelete")
+	return m.tickCmd()
+}
+
+// clearCommandDeleteConfirm disarms a pending delete. Called from every path
+// that moves the cursor or changes the view so an armed delete can never
+// follow its user to a different row.
+func (m *Model) clearCommandDeleteConfirm() {
+	m.commandsDeleteKey = ""
+	m.commandsDeleteArmed = time.Time{}
+}
+
+// commandFileWithinScope is the defense-in-depth gate in front of every
+// os.Remove of a command file: the path the loader discovered must be a
+// direct markdown child of the scope's own commands directory. Symlinks,
+// future loader changes or corrupt rows can then never aim a delete at an
+// arbitrary file.
+func commandFileWithinScope(row commandRow, scope string, dir string) error {
+	if row.Path == "" {
+		return fmt.Errorf("%s", i18n.T("tui.commands.noPath"))
+	}
+	if dir == "" {
+		return fmt.Errorf("%s", i18n.T("tui.commands.noWorkspace"))
+	}
+	expected := filepath.Join(dir, filepath.Base(row.Path))
+	if filepath.Clean(row.Path) != filepath.Clean(expected) {
+		return fmt.Errorf("%s", i18n.T("tui.commands.pathOutsideScope"))
+	}
+	if ext := strings.ToLower(filepath.Ext(row.Path)); ext != ".md" && ext != ".markdown" {
+		return fmt.Errorf("%s", i18n.T("tui.commands.pathOutsideScope"))
+	}
+	return nil
+}
 
 // deleteCommandRow removes one definition. The composite key identifies the
 // exact level, so deleting a shadowed workspace file never touches the config
@@ -613,6 +686,15 @@ func (m *Model) deleteCommandRow(key string) tea.Cmd {
 	default: // workspace / global
 		if row.Path == "" {
 			m.commandsFeedback = i18n.T("tui.commands.noPath")
+			return m.tickCmd()
+		}
+		dir, ok := m.commandScopeDir(row.Source)
+		if !ok {
+			m.commandsFeedback = i18n.T("tui.commands.noWorkspace")
+			return m.tickCmd()
+		}
+		if err := commandFileWithinScope(row, row.Source, dir); err != nil {
+			m.commandsFeedback = err.Error()
 			return m.tickCmd()
 		}
 		if err := os.Remove(row.Path); err != nil {
@@ -652,6 +734,7 @@ func (m *Model) exitCommandWizard() {
 	m.textInput.Placeholder = ""
 	m.templateInput.Blur()
 	m.templateInput.SetValue("")
+	m.clearCommandDeleteConfirm()
 }
 
 // boolYesNo / triStateYesNo are the wizard-side inverses of the detail view's

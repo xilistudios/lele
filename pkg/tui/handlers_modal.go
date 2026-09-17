@@ -176,6 +176,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.modalSelectedIdx < m.modalScrollOffset {
 				m.modalScrollOffset = m.modalSelectedIdx
 			}
+			m.clearCommandDeleteConfirm()
 		}
 		// Theme picker live preview: after navigation, preview the
 		// highlighted theme without persisting. Esc reverts.
@@ -190,6 +191,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		if isListModal(m.modalMode) && m.modalSelectedIdx < len(m.modalItems)-1 {
 			m.modalSelectedIdx++
+			m.clearCommandDeleteConfirm()
 			maxVisible := m.height - 8 // title + borders + padding
 			if maxVisible < 3 {
 				maxVisible = 3
@@ -887,6 +889,7 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else if m.modalMode == ModalCommands {
 					// Custom-command list: open the detail of the row under
 					// the cursor (shared with the "d"/write flow later).
+					m.clearCommandDeleteConfirm()
 					return m, m.handleCommandsEnter()
 				} else if m.modalMode == ModalCommandDetail {
 					// Detail view: ENTER and ESC both go back to the list.
@@ -1290,14 +1293,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Delete a custom command (list or detail view)
+		// Delete a custom command (list or detail view). Double-confirm: the
+		// first press arms, the second one within the window deletes.
 		if m.modalMode == ModalCommands {
 			if key := m.selectedCommandKey(); key != "" && key != commandsNewKey {
-				return m, m.deleteCommandRow(key)
+				return m, m.requestCommandDelete(key)
 			}
 		}
 		if m.modalMode == ModalCommandDetail {
-			return m, m.deleteCommandRow(m.commandsDetailKey)
+			return m, m.requestCommandDelete(m.commandsDetailKey)
 		}
 	case " ":
 		// Toggle checkbox in skill picker

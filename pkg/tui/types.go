@@ -287,14 +287,18 @@ type Model struct {
 	// maps modal items to composite "source:name" keys ("" for separators and
 	// for the empty-state row); commandsRows mirrors modalItems 1:1 so the
 	// detail view can recover the structured data of the selected row.
-	commandsModalKeys  []string       // composite "source:name" key per modal item
-	commandsRows       []commandRow   // structured row per modal item (parallel)
-	commandsDetailMode bool           // true while the detail view is open
-	commandsDetailKey  string         // composite key of the command in detail
-	commandsFeedback   string         // brief feedback line shown under the list
-	commandsEditKey    string         // composite key of the command being edited; "" when creating
-	commandsEditScope  string         // "config" | "workspace" | "global" (target of the write)
-	templateInput      textarea.Model // multi-line input for the /commands template step
+	commandsModalKeys  []string     // composite "source:name" key per modal item
+	commandsRows       []commandRow // structured row per modal item (parallel)
+	commandsDetailMode bool         // true while the detail view is open
+	commandsDetailKey  string       // composite key of the command in detail
+	commandsFeedback   string       // brief feedback line shown under the list
+	commandsEditKey    string       // composite key of the command being edited; "" when creating
+	commandsEditScope  string       // "config" | "workspace" | "global" (target of the write)
+	// Double-confirm delete state: the first "d" arms commandsDeleteKey, the
+	// second within commandsDeleteConfirmWindow executes it.
+	commandsDeleteKey   string         // composite key of the pending delete, "" when disarmed
+	commandsDeleteArmed time.Time      // when the pending delete was armed
+	templateInput       textarea.Model // multi-line input for the /commands template step
 
 	// Settings management state
 	settingsSection   string   // current section: "agents", "system", "tui"

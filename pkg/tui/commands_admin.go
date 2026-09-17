@@ -355,6 +355,9 @@ func (m *Model) renderCommandDetail() string {
 
 	sb.WriteString("\n")
 	sb.WriteString(CommentColorStyle.Render(i18n.T("tui.commands.detailHints")))
+	if m.commandsFeedback != "" {
+		sb.WriteString("\n" + lipgloss.NewStyle().Foreground(PrimaryColor).Render("  "+m.commandsFeedback) + "\n")
+	}
 
 	box := ModalContainer.Width(m.width - 10).Render(sb.String())
 	return m.paintFrame(box)
