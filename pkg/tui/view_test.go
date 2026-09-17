@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xilistudios/lele/pkg/channels"
+	"github.com/xilistudios/lele/pkg/tui/i18n"
 )
 
 func TestCalculateViewportHeight(t *testing.T) {
@@ -117,6 +118,59 @@ func TestView_HeightExactWithQueueAndAutocomplete(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Queue work is *waiting*, the status line is the turn *running now*: the band
+// belongs above the process indicator so the pane reads chronologically, and
+// the indicator must not carry queue text of its own (it used to, which put the
+// pending count next to the loading state and duplicated the band's depth).
+func TestQueueRowSitsAboveStatusLine(t *testing.T) {
+	i18n.InitWithLanguage("en")
+	m := newTestModel(t)
+
+	key := "tui:chat:order-test"
+	m.sessionMgr.GetOrCreate(key)
+	_ = m.sessionMgr.SetMode(key, "agent")
+	m.sessionMgr.AddMessage(key, "user", "hi")
+	m.currentKey = key
+	m.showWelcome = false
+	m.width, m.height = 120, 30
+
+	// A live turn, so the loading indicator is rendered alongside the band.
+	m.processing = true
+	m.startTime = time.Now()
+
+	m.enqueueMessage("deferred message")
+
+	leftWidth := int(float64(m.width) * leftColumnRatio)
+	statusLine := m.renderStatusLine(leftWidth)
+	if strings.Contains(statusLine, "⏳") {
+		t.Fatalf("status line %q still carries the queue indicator", statusLine)
+	}
+	depthPrefix := strings.TrimSpace(fmt.Sprintf(i18n.T("tui.queue.row"), 1))
+	if strings.Contains(statusLine, depthPrefix) {
+		t.Fatalf("status line %q duplicates the queue depth from the band", statusLine)
+	}
+
+	lines := strings.Split(m.View(), "\n")
+	bandIdx, statusIdx := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "deferred message") {
+			bandIdx = i
+		}
+		if strings.Contains(line, i18n.T("tui.processing")) {
+			statusIdx = i
+		}
+	}
+	if bandIdx < 0 {
+		t.Fatalf("queue band not found in the frame:\n%s", m.View())
+	}
+	if statusIdx < 0 {
+		t.Fatalf("process indicator not found in the frame:\n%s", m.View())
+	}
+	if bandIdx > statusIdx {
+		t.Fatalf("queue band at line %d is below the process indicator at line %d", bandIdx, statusIdx)
 	}
 }
 
