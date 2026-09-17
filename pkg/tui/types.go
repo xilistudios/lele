@@ -92,16 +92,16 @@ const (
 	ModalLangRemote // browse downloadable language packs from GitHub
 	ModalSubagents
 	ModalBackgroundExecs
-	ModalProviders      // list of providers
-	ModalProviderDetail // provider detail (edit/delete/add model)
-	ModalAddProvider    // form to add a new provider
-	ModalAddModel       // form to add a new model to a provider
-	ModalCron           // list of cron jobs
-	ModalSecrets        // list of keyring secrets
-	ModalAddSecret      // form to add a new secret
-	ModalSkills         // list of installed skills with actions
-	ModalSkillInstall   // form to enter GitHub repo URL for scanning
-	ModalSkillPicker    // multi-select which skills to install from scanned repo
+	ModalProviders          // list of providers
+	ModalProviderDetail     // provider detail (edit/delete/add model)
+	ModalAddProvider        // form to add a new provider
+	ModalAddModel           // form to add a new model to a provider
+	ModalCron               // list of cron jobs
+	ModalSecrets            // list of keyring secrets
+	ModalAddSecret          // form to add a new secret
+	ModalSkills             // list of installed skills with actions
+	ModalSkillInstall       // form to enter GitHub repo URL for scanning
+	ModalSkillPicker        // multi-select which skills to install from scanned repo
 	ModalCommands           // list of custom slash commands of the current agent
 	ModalCommandDetail      // read-only detail view of one command
 	ModalAddCommand         // wizard to create/edit a custom command
