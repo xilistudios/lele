@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/xilistudios/lele/pkg/tui/theme"
 )
@@ -162,6 +164,17 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd
 // skip list keeps custom TUI messages out of the textarea so they cannot
 // inject garbage runes.
 func (m *Model) finishUpdate(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	// The command wizard's template textarea must service its own blink:
+	// while a modal is open nothing else forwards non-key messages to any
+	// widget, so without this the cursor freezes and the blink chain dies
+	// the moment the wizard reaches the template step.
+	if m.modalMode == ModalAddCommand && m.formStepIndex == commandTemplateStep {
+		if _, ok := msg.(cursor.BlinkMsg); ok {
+			m.templateInput, _ = m.templateInput.Update(msg)
+			// textarea.Blink is func() tea.Msg — already a valid tea.Cmd.
+			return m, tea.Cmd(textarea.Blink)
+		}
+	}
 	if m.modalMode == ModalNone {
 		// Only forward message types the textarea knows how to handle.
 		// Custom TUI messages (outboundMsg, tickMsg, completeMsg, streamThrottleMsg, tea.MouseMsg) must be

@@ -301,6 +301,16 @@ func (m *Model) formStepNames() []string {
 			nameLabel += " (thinking: " + m.addModelCatalogThink + ")"
 		}
 		return []string{"Model alias", nameLabel, "Context window", "Max tokens", "Vision (yes/no)"}
+	case ModalAddCommand:
+		return []string{
+			i18n.T("tui.commands.fieldName"),
+			i18n.T("tui.commands.fieldDescription"),
+			i18n.T("tui.commands.fieldAgent"),
+			i18n.T("tui.commands.fieldModel"),
+			i18n.T("tui.commands.fieldAllowShell"),
+			i18n.T("tui.commands.fieldAllowAbsFiles"),
+			i18n.T("tui.commands.fieldTemplate"),
+		}
 	case ModalAddSecret:
 		return []string{
 			i18n.T("tui.secretName"),

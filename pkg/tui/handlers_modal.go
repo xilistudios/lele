@@ -636,6 +636,17 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.textInput.Placeholder = "Scope: agent IDs, comma-separated (empty = all)"
 			}
 			return m, nil
+		} else if m.modalMode == ModalAddCommand {
+			// Command wizard (create/edit): a form modal, so it is handled
+			// BEFORE the list fallthrough below — the wizard does not own
+			// modalItems and would otherwise be swallowed by them. On the
+			// template step plain ENTER means "finish" (alt+enter inserts a
+			// newline via the KeyMap); the single-line steps validate and
+			// advance.
+			if m.formStepIndex == commandTemplateStep {
+				return m, m.saveCommandForm()
+			}
+			return m, m.advanceCommandWizard(strings.TrimSpace(m.textInput.Value()))
 		} else if len(m.modalItems) > 0 {
 			// Defensive clamp: a list reload that shrank the modal (e.g.
 			// deleting the last cron job) can leave modalSelectedIdx past
@@ -873,6 +884,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else if m.modalMode == ModalSkillPicker {
 					// Install selected skills
 					return m, m.handleSkillPickerEnter()
+				} else if m.modalMode == ModalCommands {
+					// Custom-command list: open the detail of the row under
+					// the cursor (shared with the "d"/write flow later).
+					return m, m.handleCommandsEnter()
+				} else if m.modalMode == ModalCommandDetail {
+					// Detail view: ENTER and ESC both go back to the list.
+					m.exitCommandDetail()
+					return m, m.tickCmd()
 				} else if m.modalMode == ModalSettings {
 					// Top-level settings menu: navigate to sub-menu based on selection.
 					// Items correspond to: Agents / System / Interface.
@@ -1110,6 +1129,21 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modalScrollOffset = 0
 			return m, m.tickCmd()
 		}
+		if m.modalMode == ModalAddCommand {
+			// Wizard: discard the draft and go back to the list. The edited
+			// row (if any) is reselected so the user lands where they left off.
+			key := m.commandsEditKey
+			m.exitCommandWizard()
+			m.loadCommandsList()
+			m.reselectCommandRow(key)
+			return m, m.tickCmd()
+		}
+		if m.modalMode == ModalCommandDetail {
+			// Detail view: back to the command list (the list is reloaded so a
+			// file edited outside the TUI shows up immediately).
+			m.exitCommandDetail()
+			return m, m.tickCmd()
+		}
 		if m.modalMode == ModalSkillInstall {
 			// Go back to skills list
 			m.modalMode = ModalSkills
@@ -1162,6 +1196,20 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "e":
+		// Edit a custom command (list or detail view). Directory-level rows
+		// are refused inside startCommandEdit with a feedback line.
+		if m.modalMode == ModalCommands {
+			if key := m.selectedCommandKey(); key != "" && key != commandsNewKey {
+				m.startCommandEdit(key)
+				return m, m.tickCmd()
+			}
+		}
+		if m.modalMode == ModalCommandDetail {
+			key := m.commandsDetailKey
+			m.exitCommandDetail()
+			m.startCommandEdit(key)
+			return m, m.tickCmd()
+		}
 		// Toggle enable/disable for a cron job
 		if m.modalMode == ModalCron && m.cronService != nil {
 			jobID := m.selectedCronJobID()
@@ -1192,6 +1240,13 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Reveal/hide a secret value in the detail view
 		if m.modalMode == ModalSecrets && m.secretsDetailMode {
 			m.secretsReveal = !m.secretsReveal
+			return m, m.tickCmd()
+		}
+	case "n":
+		// Create a new custom command (list view only; the wizard has its
+		// own text input, where "n" is a regular character).
+		if m.modalMode == ModalCommands {
+			m.startCommandCreate()
 			return m, m.tickCmd()
 		}
 	case "a":
@@ -1235,6 +1290,15 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// Delete a custom command (list or detail view)
+		if m.modalMode == ModalCommands {
+			if key := m.selectedCommandKey(); key != "" && key != commandsNewKey {
+				return m, m.deleteCommandRow(key)
+			}
+		}
+		if m.modalMode == ModalCommandDetail {
+			return m, m.deleteCommandRow(m.commandsDetailKey)
+		}
 	case " ":
 		// Toggle checkbox in skill picker
 		if m.modalMode == ModalSkillPicker {
@@ -1245,6 +1309,14 @@ func (m *Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Forward keystrokes to textInput for form-based modals
 	// so users can type in the input fields.
 	if isFormModal(m.modalMode, m.settingsEditField != "") {
+		// The command wizard's template step is multi-line: keystrokes go to
+		// the textarea, not the single-line input. ENTER/ESC were already
+		// consumed by the switch above (enter saves, esc backs out).
+		if m.modalMode == ModalAddCommand && m.formStepIndex == commandTemplateStep {
+			var cmd tea.Cmd
+			m.templateInput, cmd = m.templateInput.Update(msg)
+			return m, cmd
+		}
 		// Audit M2: re-derive echo mode from modalMode+formStepIndex
 		// before forwarding — single choke point, self-heals across
 		// every step transition.

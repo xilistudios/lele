@@ -20,6 +20,13 @@ func (m *Model) resetModal(mode modalType) {
 	m.secretsDetailMode = false
 	m.secretsDetailName = ""
 	m.secretsReveal = false
+	m.commandsModalKeys = nil
+	m.commandsRows = nil
+	m.commandsDetailMode = false
+	m.commandsDetailKey = ""
+	m.commandsFeedback = ""
+	m.commandsEditKey = ""
+	m.commandsEditScope = ""
 	m.formStepIndex = 0
 	m.formValues = nil
 	m.formError = ""
@@ -59,7 +66,7 @@ func (m *Model) resetModal(mode modalType) {
 // treated as modal shortcuts.
 func isFormModal(mode modalType, editingField bool) bool {
 	switch mode {
-	case ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall:
+	case ModalAddProvider, ModalAddModel, ModalAddSecret, ModalSkillInstall, ModalAddCommand:
 		return true
 	case ModalSettingsAgents, ModalSettingsAgentEdit, ModalSettingsSystemEdit, ModalSettingsTUI:
 		return editingField

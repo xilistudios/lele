@@ -200,6 +200,14 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		m.loadSkillsList()
 		return nil
 
+	case "/commands":
+		m.resetModal(ModalCommands)
+		m.commandsModalKeys = nil
+		m.commandsRows = nil
+		m.commandsFeedback = ""
+		m.loadCommandsList()
+		return nil
+
 	case "/settings":
 		m.resetModal(ModalSettings)
 		m.modalItems = []string{

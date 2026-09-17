@@ -46,6 +46,16 @@ func (m *Model) modalTitleFor(mode modalType) string {
 		return i18n.T("tui.installSkill")
 	case ModalSkillPicker:
 		return i18n.T("tui.selectSkills")
+	case ModalCommands:
+		return i18n.T("tui.commands")
+	case ModalCommandDetail:
+		return i18n.T("tui.commands.detail")
+	case ModalAddCommand:
+		// One wizard serves both flows; the title says which.
+		if m.commandsEditKey != "" {
+			return i18n.T("tui.commands.edit")
+		}
+		return i18n.T("tui.commands.new")
 	case ModalSettings, ModalSettingsAgents, ModalSettingsAgentEdit,
 		ModalSettingsSystem, ModalSettingsSystemEdit, ModalSettingsTUI:
 		title := i18n.T("tui.settings.title")
@@ -96,6 +106,15 @@ func (m *Model) renderActiveModal() string {
 		return m.renderFormModal(title, []string{i18n.T("tui.skillRepoPlaceholder")})
 	case ModalSkillPicker:
 		return m.renderSkillPicker(title)
+	case ModalCommandDetail:
+		return m.renderCommandDetail()
+	case ModalAddCommand:
+		// The template step is multi-line and needs a textarea, which the
+		// generic single-line form renderer cannot offer.
+		if m.formStepIndex == commandTemplateStep {
+			return m.renderCommandTemplateStep(title)
+		}
+		return m.renderFormModal(title, m.formStepNames())
 	case ModalSettingsTUI:
 		return m.renderTUISettings(title)
 	case ModalSettingsAgents:
@@ -208,6 +227,14 @@ func (m *Model) renderModal(modalTitle string) string {
 			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.skillsFeedback) + "\n")
 		}
 		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.skillsListHints")) + "\n")
+	}
+
+	// Custom-command list: feedback line (reserved for the write flow) + hints.
+	if m.modalMode == ModalCommands {
+		if m.commandsFeedback != "" {
+			modalSb.WriteString("\n" + SuccessStyle.Render("  "+m.commandsFeedback) + "\n")
+		}
+		modalSb.WriteString("\n" + HelpStyle.Render("  "+i18n.T("tui.commands.listHints")) + "\n")
 	}
 
 	modalView := ModalContainer.Render(modalSb.String())

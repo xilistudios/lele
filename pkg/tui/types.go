@@ -92,16 +92,20 @@ const (
 	ModalLangRemote // browse downloadable language packs from GitHub
 	ModalSubagents
 	ModalBackgroundExecs
-	ModalProviders          // list of providers
-	ModalProviderDetail     // provider detail (edit/delete/add model)
-	ModalAddProvider        // form to add a new provider
-	ModalAddModel           // form to add a new model to a provider
-	ModalCron               // list of cron jobs
-	ModalSecrets            // list of keyring secrets
-	ModalAddSecret          // form to add a new secret
-	ModalSkills             // list of installed skills with actions
-	ModalSkillInstall       // form to enter GitHub repo URL for scanning
-	ModalSkillPicker        // multi-select which skills to install from scanned repo
+	ModalProviders      // list of providers
+	ModalProviderDetail // provider detail (edit/delete/add model)
+	ModalAddProvider    // form to add a new provider
+	ModalAddModel       // form to add a new model to a provider
+	ModalCron           // list of cron jobs
+	ModalSecrets        // list of keyring secrets
+	ModalAddSecret      // form to add a new secret
+	ModalSkills         // list of installed skills with actions
+	ModalSkillInstall   // form to enter GitHub repo URL for scanning
+	ModalSkillPicker    // multi-select which skills to install from scanned repo
+	// Custom (harness) slash-command administration.
+	ModalCommands           // list of custom slash commands of the current agent
+	ModalCommandDetail      // read-only detail view of one command
+	ModalAddCommand         // wizard to create/edit a custom command
 	ModalSettings           // top-level: Agents / System / Interface
 	ModalSettingsAgents     // agent list + defaults + add
 	ModalSettingsAgentEdit  // detail/edit for one agent (or defaults)
@@ -142,6 +146,7 @@ var allCommands = []commandInfo{
 	{name: "/connect", description: "Connect a new provider"},
 	{name: "/secrets", description: "Manage secrets (keyring)"},
 	{name: "/skills", description: "Manage agent skills"},
+	{name: "/commands", description: "Manage custom slash commands"},
 	{name: "/settings", description: "Open settings"},
 	{name: "/compact", description: "Compact conversation history"},
 	{name: "/goal", description: "Set a persistent goal (status/pause/resume/clear)"},
@@ -277,6 +282,19 @@ type Model struct {
 	skillsScanRepo    string                  // repo being scanned
 	skillsSelectedMap map[int]bool            // multi-select state for skill picker
 	skillsFeedback    string                  // brief feedback after install/remove/toggle
+
+	// Custom (harness) slash-command administration state. commandsModalKeys
+	// maps modal items to composite "source:name" keys ("" for separators and
+	// for the empty-state row); commandsRows mirrors modalItems 1:1 so the
+	// detail view can recover the structured data of the selected row.
+	commandsModalKeys  []string       // composite "source:name" key per modal item
+	commandsRows       []commandRow   // structured row per modal item (parallel)
+	commandsDetailMode bool           // true while the detail view is open
+	commandsDetailKey  string         // composite key of the command in detail
+	commandsFeedback   string         // brief feedback line shown under the list
+	commandsEditKey    string         // composite key of the command being edited; "" when creating
+	commandsEditScope  string         // "config" | "workspace" | "global" (target of the write)
+	templateInput      textarea.Model // multi-line input for the /commands template step
 
 	// Settings management state
 	settingsSection   string   // current section: "agents", "system", "tui"
