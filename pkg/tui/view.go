@@ -530,7 +530,12 @@ func (m *Model) renderSidebarSubagents(rightBuilder *strings.Builder, cw, conten
 	}
 
 	rightBuilder.WriteString(SidebarHeader.Render(i18n.T("tui.sidebar.subagents")) + "\n")
-	currentY := currentSidebarHeight + 1
+	// currentSidebarHeight is lipgloss.Height(prefix) == (rendered rows)+1
+	// because the prefix ends with a newline. The header fills that trailing
+	// slot (row index Height-1) and the first item starts at row index Height,
+	// so currentY must be currentSidebarHeight, not currentSidebarHeight+1.
+	// The previous +1 shifted every click target one row below its item row.
+	currentY := currentSidebarHeight
 
 	for i := 0; i < maxItems; i++ {
 		sa := subagents[i]
