@@ -136,6 +136,7 @@ func (m *Model) updateViewport() {
 		m.pendingApprovalID != "" || m.approvalResult != "" ||
 		m.activeGroupID != "" ||
 		m.compactFeedback != "" ||
+		m.statusFeedback != "" ||
 		m.hasSubagentProgressOverlay()
 
 	if !hasOverlay && !m.selecting {
@@ -267,6 +268,11 @@ func (m *Model) updateViewport() {
 	// Show compaction result feedback
 	if m.compactFeedback != "" {
 		overlaySb.WriteString(m.compactFeedback + "\n\n")
+	}
+
+	// Show /status report feedback
+	if m.statusFeedback != "" {
+		overlaySb.WriteString(m.statusFeedback + "\n\n")
 	}
 
 	// Check if viewport is at bottom BEFORE updating overlay.
