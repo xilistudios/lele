@@ -102,7 +102,6 @@ const (
 	ModalSkills         // list of installed skills with actions
 	ModalSkillInstall   // form to enter GitHub repo URL for scanning
 	ModalSkillPicker    // multi-select which skills to install from scanned repo
-	// Custom (harness) slash-command administration.
 	ModalCommands           // list of custom slash commands of the current agent
 	ModalCommandDetail      // read-only detail view of one command
 	ModalAddCommand         // wizard to create/edit a custom command
