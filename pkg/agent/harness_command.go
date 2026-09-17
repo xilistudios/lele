@@ -169,6 +169,15 @@ func (al *AgentLoop) InvalidateHarnessWorkspace(workspace string) {
 	al.harnessMu.Unlock()
 }
 
+// InvalidateAllHarnessWorkspaces drops every cached command manager so the
+// next access rebuilds them. Used after writes to the shared global level
+// (~/.lele/commands), which is merged into every agent's catalog.
+func (al *AgentLoop) InvalidateAllHarnessWorkspaces() {
+	al.harnessMu.Lock()
+	al.harnessMgrs = nil
+	al.harnessMu.Unlock()
+}
+
 // HarnessCommands returns the custom commands of the agents.defaults workspace
 // (all four discovery levels merged, precedence applied), sorted by name. It
 // refreshes the file-backed levels when they are older than
@@ -190,6 +199,16 @@ func (al *AgentLoop) HarnessCommands() []*harness.Command {
 // confused with another agent's.
 func (al *AgentLoop) HarnessCommandsFor(workspace string) []*harness.Command {
 	return al.harnessManagerFor(workspace).Registry().All()
+}
+
+// HarnessManagerFor returns the command Manager for one workspace ("" =
+// defaults). Exposed for the TUI admin panel, which needs Levels() and the
+// permission resolvers (AllowShell/AllowAbsoluteFiles) in addition to the
+// merged registry that HarnessCommandsFor offers. The returned manager is the
+// cached instance of the loop (not a fresh one), so the panel sees exactly what
+// the agent would run, including the refresh-TTL rescan behaviour.
+func (al *AgentLoop) HarnessManagerFor(workspace string) *harness.Manager {
+	return al.harnessManagerFor(workspace)
 }
 
 // HarnessCommands delegates to the owning loop.

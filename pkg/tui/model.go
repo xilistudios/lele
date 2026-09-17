@@ -107,6 +107,7 @@ func NewModel(cfg *config.Config, agentLoop *agent.AgentLoop, sessionMgr *sessio
 		viewport:               vp,
 		chatInput:              ta,
 		textInput:              ti,
+		templateInput:          newCommandTemplateInput(),
 		activePane:             ChatViewPane,
 		showWelcome:            true,
 		workspacePath:          workspacePath,
