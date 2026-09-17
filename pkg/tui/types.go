@@ -144,6 +144,7 @@ var allCommands = []commandInfo{
 	{name: "/skills", description: "Manage agent skills"},
 	{name: "/settings", description: "Open settings"},
 	{name: "/compact", description: "Compact conversation history"},
+	{name: "/status", description: "Show context usage and compactions"},
 	{name: "/goal", description: "Set a persistent goal (status/pause/resume/clear)"},
 	{name: "/quit", description: "Exit TUI"},
 }
@@ -531,6 +532,11 @@ type Model struct {
 	// compactFeedback holds the result of /compact to display in the viewport.
 	// Cleared when the user sends the next message.
 	compactFeedback string
+
+	// statusFeedback holds the /status report until the user sends the next
+	// message. It is surfaced in the viewport overlay so the context stats
+	// remain visible even when the sidebar is hidden.
+	statusFeedback string
 
 	// Pending command approval state — set when the agent requests approval
 	// for a potentially dangerous exec command. The user must approve (y) or

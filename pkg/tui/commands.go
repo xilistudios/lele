@@ -267,6 +267,19 @@ func (m *Model) executeCommand(cmd string) tea.Cmd {
 		}
 		return tea.Batch(compactCmd, m.tickCmd())
 
+	case "/status":
+		// If we're on the welcome screen with no session, create one now —
+		// the same behavior as /goal so the report renders instead of being
+		// invisible behind the welcome screen.
+		if m.currentKey == "" {
+			m.createNewChat()
+			m.showWelcome = false
+		}
+		m.compactFeedback = ""
+		m.statusFeedback = m.buildStatusReport()
+		m.updateViewport()
+		return nil
+
 	case "/goal":
 		// If we're on the welcome screen with no session, create one now —
 		// the same behavior as submitMessage and submitGroupStart.
@@ -385,4 +398,27 @@ func isGoalSetCommand(args []string) bool {
 		return false
 	}
 	return true
+}
+
+// buildStatusReport returns a multi-line context usage report for the current
+// session. It is rendered in the viewport overlay so the stats remain visible
+// even when the sidebar is hidden.
+func (m *Model) buildStatusReport() string {
+	current, window, cumInput, cumOutput := m.getTokenUsage()
+	compactions := m.agentLoop.GetProvidable().GetCompactionCount(m.currentKey)
+
+	var sb strings.Builder
+	sb.WriteString("🦞 " + i18n.T("tui.context") + "\n")
+	sb.WriteString(i18n.T("tui.currentContext") + ": " + formatNumber(current) + "\n")
+	sb.WriteString(i18n.T("tui.contextWindow") + ": " + formatNumber(window) + "\n")
+	if window > 0 {
+		pct := float64(current) / float64(window) * 100
+		sb.WriteString(fmt.Sprintf(i18n.T("tui.used"), pct) + "\n")
+	}
+	sb.WriteString(i18n.T("tui.inputSent") + ": " + formatNumber(cumInput) + "\n")
+	sb.WriteString(i18n.T("tui.outputReceived") + ": " + formatNumber(cumOutput) + "\n")
+	sb.WriteString(i18n.T("tui.totalSent") + ": " + formatNumber(cumInput+cumOutput) + "\n")
+	sb.WriteString(i18n.T("tui.compactions") + ": " + fmt.Sprintf("%d", compactions))
+
+	return sb.String()
 }

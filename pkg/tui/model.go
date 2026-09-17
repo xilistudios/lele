@@ -320,7 +320,7 @@ func (m *Model) reloadSessions() {
 // user-visible changed. This keeps idle CPU low even for very long sessions.
 func (m *Model) getViewportContentKey() string {
 	msgCount := m.getHistoryMessageCount()
-	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%d",
+	return fmt.Sprintf("%s|%d|%d|%d|%s|%s|%s|%s|%s|%v|%v|%v|%d",
 		m.currentKey,
 		m.viewport.Width,
 		msgCount,
@@ -332,6 +332,7 @@ func (m *Model) getViewportContentKey() string {
 		m.activeGroupID,
 		m.processing,
 		m.compactFeedback != "",
+		m.statusFeedback != "",
 		m.renderStartIdx,
 	)
 }
@@ -501,6 +502,7 @@ func (m *Model) clearStreamingState() {
 	m.streamThrottleActive = false
 	m.streamPendingUpdate = false
 	m.compactFeedback = ""
+	m.statusFeedback = ""
 
 	// Check if the current session (already set to the target) is actively
 	// being processed by the LLM before resetting the flag.

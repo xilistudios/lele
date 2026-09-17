@@ -115,6 +115,7 @@ func (m *Model) publishUserMessage(content string) tea.Cmd {
 	m.showWelcome = false
 
 	m.compactFeedback = ""
+	m.statusFeedback = ""
 	m.queueFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
@@ -318,6 +319,7 @@ func (m *Model) submitGroupStart(profileID, task string) tea.Cmd {
 	m.showWelcome = false
 	m.chatInput.SetValue("")
 	m.compactFeedback = ""
+	m.statusFeedback = ""
 	m.processing = true
 	m.startTime = time.Now()
 	m.elapsedTime = 0
