@@ -6,6 +6,7 @@ export type AvailableModelsState = {
   available: string[]
   groups: ModelGroup[]
   isLoading: boolean
+  isReloading: boolean
   error: string | null
 }
 
@@ -14,6 +15,7 @@ export function useAvailableModels(api: ApiClient | null) {
     available: [],
     groups: [],
     isLoading: true,
+    isReloading: false,
     error: null,
   })
   // Guards against out-of-order responses when `api` changes mid-flight.
@@ -25,7 +27,17 @@ export function useAvailableModels(api: ApiClient | null) {
     const generation = ++generationRef.current
 
     const loadModels = async () => {
-      setState((prev) => ({ ...prev, isLoading: true, error: null }))
+      // Distinguish first load (no data yet) from background refetch.
+      setState((prev) => {
+        const isFirstLoad = prev.available.length === 0 && prev.groups.length === 0
+        return {
+          ...prev,
+          isLoading: isFirstLoad,
+          isReloading: !isFirstLoad,
+          error: null,
+        }
+      })
+
       try {
         const result = await api.models('', null)
         if (generation !== generationRef.current) return
@@ -33,6 +45,7 @@ export function useAvailableModels(api: ApiClient | null) {
           available: result.models,
           groups: result.model_groups ?? [],
           isLoading: false,
+          isReloading: false,
           error: null,
         })
       } catch (err) {
@@ -40,6 +53,7 @@ export function useAvailableModels(api: ApiClient | null) {
         setState((prev) => ({
           ...prev,
           isLoading: false,
+          isReloading: false,
           error: err instanceof Error ? err.message : 'Failed to load models',
         }))
       }
