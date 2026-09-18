@@ -1,4 +1,13 @@
-import { type ReactNode, createContext, useCallback, useContext, useMemo, useState } from 'react'
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { bootstrapDesktopSession, createApiClient } from '../lib/api'
 import { getDesktopApiUrl } from '../lib/desktop'
 import { clearSession, loadApiUrl, loadSession, saveApiUrl, saveSession } from '../lib/storage'
@@ -33,6 +42,13 @@ export function AuthProvider({
   )
   const [isLoading, setIsLoading] = useState(false)
 
+  // Keep a mutable ref to the latest session so callbacks captured by the
+  // api memo can read it without becoming memo dependencies.
+  const sessionRef = useRef(session)
+  useEffect(() => {
+    sessionRef.current = session
+  }, [session])
+
   const setApiUrl = useCallback((nextApiUrl: string) => {
     setApiUrlState(nextApiUrl)
     saveApiUrl(nextApiUrl)
@@ -47,28 +63,40 @@ export function AuthProvider({
     }
   }, [])
 
+  // Stable api client: only recreated when apiUrl changes.
+  // Auth callbacks read from sessionRef to avoid depending on `session`.
+  const persistRef = useRef(persistSession)
+  useEffect(() => {
+    persistRef.current = persistSession
+  }, [persistSession])
+
   const api = useMemo(() => {
     const client = createApiClient(apiUrl)
 
-    // When a 401 + refresh failure occurs, clear the session so the
-    // user is redirected to the PIN screen by ProtectedRoute.
     client.setAuthFailureHandler(() => {
-      persistSession(null)
+      persistRef.current(null)
     })
 
+    return client
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl])
+
+  // Sync token separately so token changes don't recreate the client.
+  useEffect(() => {
     if (session?.token) {
-      client.setToken(session.token, session.refresh_token, (nextSession) => {
-        persistSession({
-          ...session,
+      api.setToken(session.token, session.refresh_token, (nextSession) => {
+        const prev = sessionRef.current
+        persistRef.current({
+          ...prev,
           ...nextSession,
-          client_id: session.client_id,
-          device_name: session.device_name,
+          client_id: prev?.client_id,
+          device_name: prev?.device_name,
         })
       })
+    } else {
+      api.clearToken()
     }
-
-    return client
-  }, [apiUrl, persistSession, session])
+  }, [api, session])
 
   const handleAuth = useCallback(
     async (input: { apiUrl: string; pin: string; deviceName: string }) => {
