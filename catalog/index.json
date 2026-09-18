@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-14T13:27:51Z",
+  "updated_at": "2026-09-18T14:54:09Z",
   "source": "models.dev",
   "providers": {
     "alibaba": {
@@ -25,7 +25,7 @@
       "type": "openai",
       "api_base": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
       "file": "providers/alibaba_token_plan.json",
-      "model_count": 25
+      "model_count": 27
     },
     "alibaba_token_plan_cn": {
       "id": "alibaba_token_plan_cn",
@@ -33,7 +33,7 @@
       "type": "openai",
       "api_base": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
       "file": "providers/alibaba_token_plan_cn.json",
-      "model_count": 25
+      "model_count": 27
     },
     "anthropic": {
       "id": "anthropic",
@@ -141,11 +141,11 @@
     },
     "kimi_for_coding": {
       "id": "kimi_for_coding",
-      "name": "Kimi For Coding",
+      "name": "kimi_for_coding",
       "type": "openai",
       "api_base": "https://api.kimi.com/coding/v1",
       "file": "providers/kimi_for_coding.json",
-      "model_count": 4
+      "model_count": 0
     },
     "lmstudio": {
       "id": "lmstudio",
@@ -353,7 +353,7 @@
       "type": "openai",
       "api_base": "https://api.x.ai/v1",
       "file": "providers/xai.json",
-      "model_count": 12
+      "model_count": 10
     },
     "xiaomi": {
       "id": "xiaomi",

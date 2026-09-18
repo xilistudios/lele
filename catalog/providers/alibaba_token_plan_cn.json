@@ -154,6 +154,19 @@
       "tool_call": true
     },
     {
+      "id": "deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "context_window": 1000000,
+      "max_output": 384000,
+      "vision": true,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "deepseek-v4-flash",
       "name": "DeepSeek V4 Flash",
       "context_window": 1000000,
@@ -229,6 +242,18 @@
       "context_window": 1000000,
       "max_output": 131072,
       "thinking_levels": [
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
+      "id": "glm-5.3",
+      "name": "GLM-5.3",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
         "high"
       ],
       "reasoning": true,
