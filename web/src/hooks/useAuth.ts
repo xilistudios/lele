@@ -57,8 +57,8 @@ export function useAuth(defaultApiUrl: string) {
         persistRef.current({
           ...prev,
           ...nextSession,
-          client_id: prev?.client_id,
-          device_name: prev?.device_name,
+          client_id: prev?.client_id ?? '',
+          device_name: prev?.device_name ?? '',
         })
       })
     } else {

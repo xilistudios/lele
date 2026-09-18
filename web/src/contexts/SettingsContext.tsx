@@ -36,7 +36,12 @@ type Props = {
 
 export function SettingsProvider({ children, settingsState, api }: Props) {
   const { t } = useTranslation()
-  const { available, groups, isLoading: isLoadingModels, isReloading: isReloadingModels } = useAvailableModels(api)
+  const {
+    available,
+    groups,
+    isLoading: isLoadingModels,
+    isReloading: isReloadingModels,
+  } = useAvailableModels(api)
 
   const modelOptions = useMemo(() => {
     return available.map((model: string) => ({ value: model, label: model }))

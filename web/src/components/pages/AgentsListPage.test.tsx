@@ -60,6 +60,7 @@ function makeState(overrides: Partial<SettingsConfigState> = {}): SettingsConfig
     save: async () => true,
     isDirty: false,
     isLoading: false,
+    isReloading: false,
     hasErrors: false,
     ...overrides,
   }

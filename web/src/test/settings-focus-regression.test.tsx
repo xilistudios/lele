@@ -18,7 +18,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
 import { ThemeProvider } from '../contexts/ThemeContext'
@@ -105,16 +104,59 @@ const CONFIG_RESPONSE = {
         max_upload_size_mb: 50,
         upload_ttl_hours: 24,
       },
-      telegram: { enabled: false, token: { mode: 'empty', has_env_var: false }, proxy: '', allow_from: [], verbose: 'off' },
+      telegram: {
+        enabled: false,
+        token: { mode: 'empty', has_env_var: false },
+        proxy: '',
+        allow_from: [],
+        verbose: 'off',
+      },
       discord: { enabled: false, token: { mode: 'empty', has_env_var: false }, allow_from: [] },
       whatsapp: { enabled: false, bridge_url: '', allow_from: [] },
-      feishu: { enabled: false, app_id: { mode: 'empty', has_env_var: false }, app_secret: { mode: 'empty', has_env_var: false }, encrypt_key: { mode: 'empty', has_env_var: false }, verification_token: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      slack: { enabled: false, bot_token: { mode: 'empty', has_env_var: false }, app_token: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      line: { enabled: false, channel_secret: { mode: 'empty', has_env_var: false }, channel_access_token: { mode: 'empty', has_env_var: false }, webhook_host: '', webhook_port: 0, webhook_path: '', allow_from: [] },
-      onebot: { enabled: false, ws_url: '', access_token: { mode: 'empty', has_env_var: false }, reconnect_interval: 5, group_trigger_prefix: [], allow_from: [] },
+      feishu: {
+        enabled: false,
+        app_id: { mode: 'empty', has_env_var: false },
+        app_secret: { mode: 'empty', has_env_var: false },
+        encrypt_key: { mode: 'empty', has_env_var: false },
+        verification_token: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      slack: {
+        enabled: false,
+        bot_token: { mode: 'empty', has_env_var: false },
+        app_token: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      line: {
+        enabled: false,
+        channel_secret: { mode: 'empty', has_env_var: false },
+        channel_access_token: { mode: 'empty', has_env_var: false },
+        webhook_host: '',
+        webhook_port: 0,
+        webhook_path: '',
+        allow_from: [],
+      },
+      onebot: {
+        enabled: false,
+        ws_url: '',
+        access_token: { mode: 'empty', has_env_var: false },
+        reconnect_interval: 5,
+        group_trigger_prefix: [],
+        allow_from: [],
+      },
       maixcam: { enabled: false, host: '', port: 0, allow_from: [] },
-      qq: { enabled: false, app_id: { mode: 'empty', has_env_var: false }, app_secret: { mode: 'empty', has_env_var: false }, allow_from: [] },
-      dingtalk: { enabled: false, client_id: { mode: 'empty', has_env_var: false }, client_secret: { mode: 'empty', has_env_var: false }, allow_from: [] },
+      qq: {
+        enabled: false,
+        app_id: { mode: 'empty', has_env_var: false },
+        app_secret: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
+      dingtalk: {
+        enabled: false,
+        client_id: { mode: 'empty', has_env_var: false },
+        client_secret: { mode: 'empty', has_env_var: false },
+        allow_from: [],
+      },
     },
     providers: { named: {} },
     gateway: { host: '127.0.0.1', port: 18793 },
@@ -122,7 +164,11 @@ const CONFIG_RESPONSE = {
       web: {
         brave: { enabled: false, api_key: { mode: 'empty', has_env_var: false }, max_results: 10 },
         duckduckgo: { enabled: false, max_results: 10 },
-        perplexity: { enabled: false, api_key: { mode: 'empty', has_env_var: false }, max_results: 10 },
+        perplexity: {
+          enabled: false,
+          api_key: { mode: 'empty', has_env_var: false },
+          max_results: 10,
+        },
       },
       cron: { exec_timeout_minutes: 0 },
       exec: { enable_deny_patterns: false, custom_deny_patterns: [] },
@@ -188,7 +234,7 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
     if (url.endsWith('/api/v1/auth/refresh')) {
       return Promise.resolve(
         jsonResponse({
-          token: 'refreshed-token-' + Date.now(),
+          token: `refreshed-token-${Date.now()}`,
           refresh_token: 'new-refresh-token',
           expires: '2026-12-02T00:00:00Z',
         }),
@@ -225,8 +271,20 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
     if (url.endsWith('/api/v1/agents')) {
       return Promise.resolve(jsonResponse(AGENTS_RESPONSE))
     }
-    if (url.match(/\/api\/v1\/agents\/[^/]+$/) && !url.includes('/status') && !url.includes('/skills')) {
-      return Promise.resolve(jsonResponse({ id: 'main', name: 'Main Agent', workspace: '~/.lele', model: 'gpt-4', default: true }))
+    if (
+      url.match(/\/api\/v1\/agents\/[^/]+$/) &&
+      !url.includes('/status') &&
+      !url.includes('/skills')
+    ) {
+      return Promise.resolve(
+        jsonResponse({
+          id: 'main',
+          name: 'Main Agent',
+          workspace: '~/.lele',
+          model: 'gpt-4',
+          default: true,
+        }),
+      )
     }
     if (url.includes('/api/v1/agents/') && url.endsWith('/status')) {
       return Promise.resolve(jsonResponse({ id: 'main', status: 'running', active_sessions: 1 }))
@@ -234,10 +292,14 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
 
     // Other endpoints
     if (url.endsWith('/api/v1/status')) {
-      return Promise.resolve(jsonResponse({ status: 'ok', uptime: '1h', agents: [], channels: [], version: 'dev' }))
+      return Promise.resolve(
+        jsonResponse({ status: 'ok', uptime: '1h', agents: [], channels: [], version: 'dev' }),
+      )
     }
     if (url.endsWith('/api/v1/channels')) {
-      return Promise.resolve(jsonResponse({ channels: [{ name: 'native', enabled: true, running: true }] }))
+      return Promise.resolve(
+        jsonResponse({ channels: [{ name: 'native', enabled: true, running: true }] }),
+      )
     }
     if (url.endsWith('/api/v1/tools')) {
       return Promise.resolve(jsonResponse({ tools: [] }))
@@ -246,7 +308,9 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
       return Promise.resolve(jsonResponse({ secrets: [] }))
     }
     if (url.includes('/api/v1/cron')) {
-      return Promise.resolve(jsonResponse({ jobs: [], status: { enabled: true, jobs: 0, next_run: null } }))
+      return Promise.resolve(
+        jsonResponse({ jobs: [], status: { enabled: true, jobs: 0, next_run: null } }),
+      )
     }
     if (url.includes('/api/v1/background-exec')) {
       return Promise.resolve(jsonResponse({ processes: [] }))
@@ -265,7 +329,12 @@ const createFetchMock = (options?: { slowConfig?: boolean; triggerModels401?: bo
     }
     if (url.includes('/api/v1/chat/sessions')) {
       return Promise.resolve(
-        jsonResponse({ sessions: [], session_key: 'native:client-1:1', model: 'gpt-4', models: ['gpt-4'] }),
+        jsonResponse({
+          sessions: [],
+          session_key: 'native:client-1:1',
+          model: 'gpt-4',
+          models: ['gpt-4'],
+        }),
       )
     }
 
@@ -332,7 +401,11 @@ describe('Settings focus regression — refetch must not unmount focused input',
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
 
     Object.defineProperty(window, 'innerWidth', { value: 1600, writable: true, configurable: true })
-    Object.defineProperty(window, 'innerHeight', { value: 1000, writable: true, configurable: true })
+    Object.defineProperty(window, 'innerHeight', {
+      value: 1000,
+      writable: true,
+      configurable: true,
+    })
     try {
       window.dispatchEvent(new window.Event('resize'))
     } catch {

@@ -136,6 +136,7 @@ export function makeState(
     save: async () => true,
     isDirty: false,
     isLoading: options.isLoading ?? false,
+    isReloading: false,
     hasErrors: false,
   }
   return state
