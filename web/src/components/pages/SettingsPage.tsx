@@ -83,7 +83,7 @@ export function SettingsPage() {
   }
 
   const renderTabContent = () => {
-    if (settingsState.isLoading) {
+    if (!settingsState.draftConfig) {
       return (
         <div className="flex h-64 items-center justify-center">
           <div className="text-sm text-text-secondary">{t('common.loading')}</div>

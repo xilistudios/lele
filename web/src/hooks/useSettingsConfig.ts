@@ -33,6 +33,7 @@ export type SettingsConfigState = {
   save: () => Promise<boolean>
   isDirty: boolean
   isLoading: boolean
+  isReloading: boolean
   hasErrors: boolean
 }
 
@@ -68,11 +69,26 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
   const [saveState, setSaveState] = useState<SaveState>('idle')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isReloading, setIsReloading] = useState(false)
 
-  // Load initial config
+  // Load initial config. Only show the full-page loader on the very first
+  // fetch (when draftConfig is still null). Subsequent refetches set
+  // isReloading instead so the already-rendered form is never unmounted.
   useEffect(() => {
     const loadConfig = async () => {
-      setIsLoading(true)
+      // Read draftConfig via a functional setter to avoid adding it to deps.
+      let isFirstLoad = true
+      setDraftConfig((current) => {
+        isFirstLoad = current !== null
+        return current // no mutation
+      })
+
+      if (!isFirstLoad) {
+        setIsReloading(true)
+      } else {
+        setIsLoading(true)
+      }
+
       try {
         const response = await apiClient.config()
         setRemoteConfig(response.config)
@@ -82,6 +98,7 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
         setSaveError(err instanceof Error ? err.message : 'Failed to load config')
       } finally {
         setIsLoading(false)
+        setIsReloading(false)
       }
     }
     loadConfig()
@@ -215,6 +232,7 @@ export function useSettingsConfig(apiClient: ApiClient): SettingsConfigState {
     save,
     isDirty,
     isLoading,
+    isReloading,
     hasErrors,
   }
 }
