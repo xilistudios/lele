@@ -22,7 +22,7 @@
       "id": "anthropic.claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6",
       "context_window": 1000000,
-      "max_output": 64000,
+      "max_output": 128000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -78,7 +78,7 @@
       "id": "eu.anthropic.claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (EU)",
       "context_window": 1000000,
-      "max_output": 64000,
+      "max_output": 128000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -106,7 +106,7 @@
       "id": "global.anthropic.claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (Global)",
       "context_window": 1000000,
-      "max_output": 64000,
+      "max_output": 128000,
       "vision": true,
       "thinking_levels": [
         "low",
@@ -204,7 +204,7 @@
       "id": "jp.anthropic.claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (JP)",
       "context_window": 1000000,
-      "max_output": 64000,
+      "max_output": 128000,
       "vision": true,
       "thinking_levels": [
         "low",

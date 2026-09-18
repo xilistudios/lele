@@ -102,18 +102,6 @@
       "vision": true
     },
     {
-      "id": "grok-imagine-image-2.0",
-      "name": "Grok Imagine Image 2.0",
-      "context_window": 64000,
-      "vision": true
-    },
-    {
-      "id": "grok-imagine-image-quality",
-      "name": "Grok Imagine Image Quality",
-      "context_window": 16000,
-      "vision": true
-    },
-    {
       "id": "grok-imagine-video",
       "name": "Grok Imagine Video",
       "context_window": 1024,

@@ -120,6 +120,18 @@
       "tool_call": true
     },
     {
+      "id": "zai-glm-5-3",
+      "name": "GLM-5.3",
+      "context_window": 1000000,
+      "max_output": 131072,
+      "thinking_levels": [
+        "low",
+        "high"
+      ],
+      "reasoning": true,
+      "tool_call": true
+    },
+    {
       "id": "mistral-medium-2505",
       "name": "Mistral Medium 3",
       "context_window": 131072,
@@ -214,10 +226,6 @@
       "name": "Mistral Embed",
       "context_window": 8000,
       "max_output": 3072
-    },
-    {
-      "id": "voxtral-mini-latest",
-      "name": "Voxtral Mini (latest)"
     }
   ]
 }
