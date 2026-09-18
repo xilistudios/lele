@@ -20,6 +20,7 @@ type SettingsContextValue = SettingsConfigState & {
   getOptionsForAgent: Option[]
   getGroupsForAgent: OptionGroup[]
   isLoadingModels: boolean
+  isReloadingModels: boolean
   isRestartRequired: (section: string) => boolean
   t: (key: string, options?: Record<string, unknown>) => string
   api: ApiClient
@@ -35,7 +36,12 @@ type Props = {
 
 export function SettingsProvider({ children, settingsState, api }: Props) {
   const { t } = useTranslation()
-  const { available, groups, isLoading: isLoadingModels } = useAvailableModels(api)
+  const {
+    available,
+    groups,
+    isLoading: isLoadingModels,
+    isReloading: isReloadingModels,
+  } = useAvailableModels(api)
 
   const modelOptions = useMemo(() => {
     return available.map((model: string) => ({ value: model, label: model }))
@@ -102,6 +108,7 @@ export function SettingsProvider({ children, settingsState, api }: Props) {
     getOptionsForAgent,
     getGroupsForAgent,
     isLoadingModels,
+    isReloadingModels,
     isRestartRequired,
     t,
     api,

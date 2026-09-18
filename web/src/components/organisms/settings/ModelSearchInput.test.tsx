@@ -77,6 +77,7 @@ function makeSettingsState(): SettingsConfigState {
     save: async () => true,
     isDirty: false,
     isLoading: false,
+    isReloading: false,
     hasErrors: false,
   }
 }
