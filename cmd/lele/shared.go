@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/xilistudios/lele/pkg/channels"
 	"github.com/xilistudios/lele/pkg/config"
 	"github.com/xilistudios/lele/pkg/keyring"
+	"github.com/xilistudios/lele/pkg/store"
 )
 
 //go:generate cp -r ../../workspace .
@@ -55,6 +58,31 @@ func registerKeyringResolver(cfg *config.Config) {
 	config.RegisterKeyringResolver(func(name string) (string, error) {
 		return svc.GetRaw(name)
 	})
+}
+
+// newClientAuthManager creates an AuthManager wired to the shared SQLite store
+// (via SetStore) when the database can be opened. When the DB is unavailable
+// (e.g. mips64 without cgo, corrupted path), it falls back to the JSON-backed
+// AuthManager with a warning, exactly preserving the pre-refactor behaviour of
+// client.go.
+//
+// The returned cleanup function must be called (deferred) before the caller
+// returns. It is always non-nil and safe to call even when the store was not
+// opened.
+func newClientAuthManager(cfg *config.Config, leleDir string) (*channels.AuthManager, func(), error) {
+	authMgr, err := channels.NewAuthManager(&cfg.Channels.Native, leleDir)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("creating auth manager: %w", err)
+	}
+
+	dbPath := filepath.Join(leleDir, "lele.db")
+	if s, dbErr := store.Open(dbPath); dbErr == nil {
+		authMgr.SetStore(s.NativeClients())
+		return authMgr, func() { s.Close() }, nil
+	} else {
+		log.Printf("client: opening %s failed (%v); falling back to auth.json, paired clients stored in the database will not be listed", dbPath, dbErr)
+		return authMgr, func() {}, nil
+	}
 }
 
 func copyDirectory(src, dst string) error {
